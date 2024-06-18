@@ -25,6 +25,8 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
@@ -34,12 +36,203 @@ pub struct RegionReplacementDriver {
     saga_request: Sender<sagas::SagaRequest>,
 }
 
+#[derive(Serialize, Deserialize, Default)]
+pub struct RegionReplacementDriverStatus {
+    drive_invoked_ok: Vec<String>,
+    finish_invoked_ok: Vec<String>,
+    errors: Vec<String>,
+}
+
 impl RegionReplacementDriver {
     pub fn new(
         datastore: Arc<DataStore>,
         saga_request: Sender<sagas::SagaRequest>,
     ) -> Self {
         RegionReplacementDriver { datastore, saga_request }
+    }
+
+    /// Drive running region replacements forward
+    pub async fn drive_running_replacements_forward(
+        &self,
+        opctx: &OpContext,
+        status: &mut RegionReplacementDriverStatus,
+    ) {
+        let log = &opctx.log;
+
+        let running_replacements =
+            match self.datastore.get_running_region_replacements(opctx).await {
+                Ok(requests) => requests,
+
+                Err(e) => {
+                    let s = format!(
+                        "query for running region replacement requests \
+                        failed: {e}"
+                    );
+
+                    error!(&log, "{s}");
+                    status.errors.push(s);
+
+                    return;
+                }
+            };
+
+        for request in running_replacements {
+            // If a successful finish notification was received, change the
+            // state here: don't drive requests forward where the replacement is
+            // done.
+
+            let has_matching_finish_notification = match self
+                .datastore
+                .request_has_matching_successful_finish_notification(
+                    opctx, &request,
+                )
+                .await
+            {
+                Ok(has_matching_finish_notification) => {
+                    has_matching_finish_notification
+                }
+
+                Err(e) => {
+                    let s = format!(
+                        "checking for a finish notification for {} failed: {e}",
+                        request.id
+                    );
+
+                    error!(&log, "{s}");
+                    status.errors.push(s);
+
+                    // Nexus may determine the request is `ReplacementDone` via
+                    // the drive saga polling an Upstairs, so return false here
+                    // to invoke that saga.
+                    false
+                }
+            };
+
+            if has_matching_finish_notification {
+                if let Err(e) = self
+                    .datastore
+                    .mark_region_replacement_as_done(opctx, request.id)
+                    .await
+                {
+                    let s = format!(
+                        "error marking {} as ReplacementDone: {e}",
+                        request.id
+                    );
+
+                    error!(&log, "{s}");
+                    status.errors.push(s);
+                }
+            } else {
+                // Otherwise attempt to drive the replacement's progress forward
+                // (or determine if it is complete).
+
+                let request_id = request.id;
+
+                let result = self
+                    .saga_request
+                    .send(sagas::SagaRequest::RegionReplacementDrive {
+                        params: sagas::region_replacement_drive::Params {
+                            serialized_authn:
+                                authn::saga::Serialized::for_opctx(opctx),
+                            request,
+                        },
+                    })
+                    .await;
+
+                match result {
+                    Ok(()) => {
+                        let s = format!("{request_id}: drive invoked ok");
+
+                        info!(&log, "{s}");
+                        status.drive_invoked_ok.push(s);
+                    }
+
+                    Err(e) => {
+                        let s = format!(
+                            "sending region replacement drive request for \
+                            {request_id} failed: {e}",
+                        );
+
+                        error!(&log, "{s}");
+                        status.errors.push(s);
+                    }
+                };
+            }
+        }
+    }
+
+    /// Complete region replacements that are done
+    pub async fn complete_done_replacements(
+        &self,
+        opctx: &OpContext,
+        status: &mut RegionReplacementDriverStatus,
+    ) {
+        let log = &opctx.log;
+
+        let done_replacements =
+            match self.datastore.get_done_region_replacements(opctx).await {
+                Ok(requests) => requests,
+
+                Err(e) => {
+                    let s = format!(
+                    "query for done region replacement requests failed: {e}"
+                );
+
+                    error!(&log, "{s}");
+                    status.errors.push(s);
+
+                    return;
+                }
+            };
+
+        for request in done_replacements {
+            let Some(old_region_volume_id) = request.old_region_volume_id
+            else {
+                // This state is illegal!
+                let s = format!(
+                    "request {} old region volume id is None!",
+                    request.id,
+                );
+
+                error!(&log, "{s}");
+                status.errors.push(s);
+
+                continue;
+            };
+
+            let request_id = request.id;
+
+            let result =
+                self.saga_request
+                    .send(sagas::SagaRequest::RegionReplacementFinish {
+                        params: sagas::region_replacement_finish::Params {
+                            serialized_authn:
+                                authn::saga::Serialized::for_opctx(opctx),
+                            region_volume_id: old_region_volume_id,
+                            request,
+                        },
+                    })
+                    .await;
+
+            match result {
+                Ok(()) => {
+                    let s = format!("{request_id}: finish invoked ok");
+
+                    info!(&log, "{s}");
+                    status.finish_invoked_ok.push(s);
+                }
+
+                Err(e) => {
+                    let s = format!(
+                        "sending region replacement finish request for \
+                        {request_id} failed: {e}"
+                    );
+
+                    error!(&log, "{s}");
+                    status.errors.push(s);
+                }
+            };
+        }
     }
 }
 
@@ -50,126 +243,16 @@ impl BackgroundTask for RegionReplacementDriver {
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
             let log = &opctx.log;
-            warn!(&log, "region replacement driver task started");
+            info!(&log, "region replacement driver task started");
 
-            let mut ok = 0;
-            let mut err = 0;
+            let mut status = RegionReplacementDriverStatus::default();
 
-            // Drive running region replacements forward
-            match self.datastore.get_running_region_replacements(opctx).await {
-                Ok(requests) => {
-                    for request in requests {
-                        // If a successful finish notification was received, change the
-                        // state here: don't drive requests forward where the replacement
-                        // is done.
+            self.drive_running_replacements_forward(opctx, &mut status).await;
+            self.complete_done_replacements(opctx, &mut status).await;
 
-                        let has_matching_finish_notification =
-                            match self.datastore.request_has_matching_successful_finish_notification(opctx, &request).await {
-                                Ok(has_matching_finish_notification) => has_matching_finish_notification,
+            info!(&log, "region replacement driver task done");
 
-                                Err(e) => {
-                                    error!(
-                                        &log,
-                                        "checking for a finish notification for {} failed: {e}",
-                                        request.id,
-                                    );
-
-                                    err += 1;
-
-                                    // Nexus may determine the request is
-                                    // `ReplacementDone` via the drive saga polling an
-                                    // Upstairs, so return false here to invoke that saga.
-                                    false
-                                }
-                            };
-
-                        if has_matching_finish_notification {
-                            if let Err(e) = self.datastore.mark_region_replacement_as_done(opctx, request.id).await {
-                                error!(
-                                    &log,
-                                    "error marking {} as ReplacementDone: {e}",
-                                    request.id,
-                                );
-
-                                err += 1;
-                            }
-                        } else {
-                            // Otherwise attempt to drive the replacement's progress
-                            // forward (or determine if it is complete).
-
-                            let result = self.saga_request.send(sagas::SagaRequest::RegionReplacementDrive {
-                                params: sagas::region_replacement_drive::Params {
-                                    serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-                                    request,
-                                },
-                            }).await;
-
-                            match result {
-                                Ok(()) => {
-                                    ok += 1;
-                                }
-
-                                Err(e) => {
-                                    error!(&log, "sending region replacement drive request failed: {e}");
-                                    err += 1;
-                                }
-                            };
-                        }
-                    }
-                }
-
-                Err(e) => {
-                    error!(&log, "query for running region replacement requests failed: {e}");
-                }
-            }
-
-            // Complete region replacements that are done
-            match self.datastore.get_done_region_replacements(opctx).await {
-                Ok(requests) => {
-                    for request in requests {
-                        let Some(old_region_volume_id) = request.old_region_volume_id else {
-                            // This state is illegal!
-                            error!(
-                                &log,
-                                "old region volume id is None!";
-                                "request" => ?request,
-                            );
-
-                            continue;
-                        };
-
-                        let result = self.saga_request.send(sagas::SagaRequest::RegionReplacementFinish {
-                            params: sagas::region_replacement_finish::Params {
-                                serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-                                region_volume_id: old_region_volume_id,
-                                request,
-                            },
-                        }).await;
-
-                        match result {
-                            Ok(()) => {
-                                ok += 1;
-                            }
-
-                            Err(e) => {
-                                error!(&log, "sending region replacement finish request failed: {e}");
-                                err += 1;
-                            }
-                        };
-                    }
-                }
-
-                Err(e) => {
-                    error!(&log, "query for done region replacement requests failed: {e}");
-                }
-            }
-
-            warn!(&log, "region replacement driver task done");
-
-            json!({
-                "region_replacement_driven_ok": ok,
-                "region_replacement_driven_err": err,
-            })
+            json!(status)
         }
         .boxed()
     }
@@ -216,13 +299,7 @@ mod test {
 
         // Noop test
         let result = task.activate(&opctx).await;
-        assert_eq!(
-            result,
-            json!({
-                "region_replacement_driven_ok": 0,
-                "region_replacement_driven_err": 0,
-            })
-        );
+        assert_eq!(result, json!(RegionReplacementDriverStatus::default()));
 
         // Add a region replacement request for a fake region, and change it to
         // state Running.
@@ -244,14 +321,10 @@ mod test {
 
         // Activate the task - it should pick that up and try to run the region
         // replacement drive saga
-        let result = task.activate(&opctx).await;
-        assert_eq!(
-            result,
-            json!({
-                "region_replacement_driven_ok": 1,
-                "region_replacement_driven_err": 0,
-            })
-        );
+        let result: RegionReplacementDriverStatus =
+            serde_json::from_value(task.activate(&opctx).await).unwrap();
+
+        assert_eq!(result.drive_invoked_ok.len(), 1);
 
         let request = saga_request_rx.try_recv().unwrap();
 
@@ -278,13 +351,7 @@ mod test {
 
         // Noop test
         let result = task.activate(&opctx).await;
-        assert_eq!(
-            result,
-            json!({
-                "region_replacement_driven_ok": 0,
-                "region_replacement_driven_err": 0,
-            })
-        );
+        assert_eq!(result, json!(RegionReplacementDriverStatus::default()));
 
         // Insert some region records
         let old_region = {
@@ -328,8 +395,9 @@ mod test {
                 .unwrap();
         }
 
-        // Add a region replacement request for that region, and change it to state
-        // ReplacementDone. Set the new_region_id to the region created above.
+        // Add a region replacement request for that region, and change it to
+        // state ReplacementDone. Set the new_region_id to the region created
+        // above.
         let request = {
             let mut request =
                 RegionReplacement::new(old_region.id(), old_region.volume_id());
@@ -346,14 +414,10 @@ mod test {
 
         // Activate the task - it should pick that up and try to run the region
         // replacement finish saga
-        let result = task.activate(&opctx).await;
-        assert_eq!(
-            result,
-            json!({
-                "region_replacement_driven_ok": 1,
-                "region_replacement_driven_err": 0,
-            })
-        );
+        let result: RegionReplacementDriverStatus =
+            serde_json::from_value(task.activate(&opctx).await).unwrap();
+
+        assert_eq!(result.finish_invoked_ok.len(), 1);
 
         let request = saga_request_rx.try_recv().unwrap();
 
@@ -380,13 +444,7 @@ mod test {
 
         // Noop test
         let result = task.activate(&opctx).await;
-        assert_eq!(
-            result,
-            json!({
-                "region_replacement_driven_ok": 0,
-                "region_replacement_driven_err": 0,
-            })
-        );
+        assert_eq!(result, json!(RegionReplacementDriverStatus::default()));
 
         // Insert some region records
         let old_region = {
@@ -430,8 +488,8 @@ mod test {
                 .unwrap();
         }
 
-        // Add a region replacement request for that region, and change it to state
-        // Running. Set the new_region_id to the region created above.
+        // Add a region replacement request for that region, and change it to
+        // state Running. Set the new_region_id to the region created above.
         let request = {
             let mut request =
                 RegionReplacement::new(old_region.id(), old_region.volume_id());
@@ -448,14 +506,10 @@ mod test {
 
         // Activate the task - it should pick that up and try to run the region
         // replacement drive saga
-        let result = task.activate(&opctx).await;
-        assert_eq!(
-            result,
-            json!({
-                "region_replacement_driven_ok": 1,
-                "region_replacement_driven_err": 0,
-            })
-        );
+        let result: RegionReplacementDriverStatus =
+            serde_json::from_value(task.activate(&opctx).await).unwrap();
+
+        assert_eq!(result.drive_invoked_ok.len(), 1);
 
         let saga_request = saga_request_rx.try_recv().unwrap();
 
@@ -464,8 +518,8 @@ mod test {
             sagas::SagaRequest::RegionReplacementDrive { .. }
         ));
 
-        // Now, pretend that an Upstairs sent a notification that it successfully finished
-        // a repair
+        // Now, pretend that an Upstairs sent a notification that it
+        // successfully finished a repair
 
         {
             datastore
@@ -497,15 +551,10 @@ mod test {
         // Activating the task now should
         // 1) switch the state to ReplacementDone
         // 2) start the finish saga
+        let result: RegionReplacementDriverStatus =
+            serde_json::from_value(task.activate(&opctx).await).unwrap();
 
-        let result = task.activate(&opctx).await;
-        assert_eq!(
-            result,
-            json!({
-                "region_replacement_driven_ok": 1,
-                "region_replacement_driven_err": 0,
-            })
-        );
+        assert_eq!(result.finish_invoked_ok.len(), 1);
 
         {
             let request_in_db = datastore
@@ -543,13 +592,7 @@ mod test {
 
         // Noop test
         let result = task.activate(&opctx).await;
-        assert_eq!(
-            result,
-            json!({
-                "region_replacement_driven_ok": 0,
-                "region_replacement_driven_err": 0,
-            })
-        );
+        assert_eq!(result, json!(RegionReplacementDriverStatus::default()));
 
         // Insert some region records
         let old_region = {
@@ -593,8 +636,8 @@ mod test {
                 .unwrap();
         }
 
-        // Add a region replacement request for that region, and change it to state
-        // Running. Set the new_region_id to the region created above.
+        // Add a region replacement request for that region, and change it to
+        // state Running. Set the new_region_id to the region created above.
         let request = {
             let mut request =
                 RegionReplacement::new(old_region.id(), old_region.volume_id());
@@ -610,14 +653,10 @@ mod test {
 
         // Activate the task - it should pick that up and try to run the region
         // replacement drive saga
-        let result = task.activate(&opctx).await;
-        assert_eq!(
-            result,
-            json!({
-                "region_replacement_driven_ok": 1,
-                "region_replacement_driven_err": 0,
-            })
-        );
+        let result: RegionReplacementDriverStatus =
+            serde_json::from_value(task.activate(&opctx).await).unwrap();
+
+        assert_eq!(result.drive_invoked_ok.len(), 1);
 
         let saga_request = saga_request_rx.try_recv().unwrap();
 
@@ -626,8 +665,8 @@ mod test {
             sagas::SagaRequest::RegionReplacementDrive { .. }
         ));
 
-        // Now, pretend that an Upstairs sent a notification that it failed to finish a
-        // repair
+        // Now, pretend that an Upstairs sent a notification that it failed to
+        // finish a repair
 
         {
             datastore
@@ -657,15 +696,10 @@ mod test {
         }
 
         // Activating the task now should start the drive saga
+        let result: RegionReplacementDriverStatus =
+            serde_json::from_value(task.activate(&opctx).await).unwrap();
 
-        let result = task.activate(&opctx).await;
-        assert_eq!(
-            result,
-            json!({
-                "region_replacement_driven_ok": 1,
-                "region_replacement_driven_err": 0,
-            })
-        );
+        assert_eq!(result.drive_invoked_ok.len(), 1);
 
         let saga_request = saga_request_rx.try_recv().unwrap();
 
