@@ -26,6 +26,8 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 approx.workspace = true
+rand = { workspace = true, features = ["std_rng"] }
+rand_distr.workspace = true
 rstest.workspace = true
 serde_json.workspace = true
 trybuild.workspace = true

@@ -378,19 +378,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami8_local ON CLUSTER ox
     min Int8,
     max Int8,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_histogrami8_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -407,19 +404,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami8 ON CLUSTER oximeter
     min Int8,
     max Int8,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogrami8_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -434,19 +428,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu8_local ON CLUSTER ox
     min UInt8,
     max UInt8,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_histogramu8_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -463,19 +454,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu8 ON CLUSTER oximeter
     min UInt8,
     max UInt8,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogramu8_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -490,19 +478,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami16_local ON CLUSTER o
     min Int16,
     max Int16,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_histogrami16_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -519,19 +504,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami16 ON CLUSTER oximete
     min Int16,
     max Int16,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogrami16_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -546,19 +528,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu16_local ON CLUSTER o
     min UInt16,
     max UInt16,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_histogramu16_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -575,19 +554,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu16 ON CLUSTER oximete
     min UInt16,
     max UInt16,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogramu16_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -602,19 +578,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami32_local ON CLUSTER o
     min Int32,
     max Int32,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_histogrami32_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -631,19 +604,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami32 ON CLUSTER oximete
     min Int32,
     max Int32,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogrami32_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -658,19 +628,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu32_local ON CLUSTER o
     min UInt32,
     max UInt32,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_histogramu32_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -687,19 +654,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu32 ON CLUSTER oximete
     min UInt32,
     max UInt32,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogramu32_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -714,19 +678,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami64_local ON CLUSTER o
     min Int64,
     max Int64,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_histogrami64_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -743,19 +704,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami64 ON CLUSTER oximete
     min Int64,
     max Int64,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogrami64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -770,19 +728,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu64_local ON CLUSTER o
     min UInt64,
     max UInt64,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_histogramu64_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -799,19 +754,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu64 ON CLUSTER oximete
     min UInt64,
     max UInt64,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogramu64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -826,19 +778,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf32_local ON CLUSTER o
     min Float32,
     max Float32,
     sum_of_samples Float64,
-    sum_of_squares Float64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_histogramf32_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -855,19 +804,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf32 ON CLUSTER oximete
     min Float32,
     max Float32,
     sum_of_samples Float64,
-    sum_of_squares Float64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogramf32_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -882,19 +828,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf64_local ON CLUSTER o
     min Float64,
     max Float64,
     sum_of_samples Float64,
-    sum_of_squares Float64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_histogramf64_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -911,19 +854,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf64 ON CLUSTER oximete
     min Float64,
     max Float64,
     sum_of_samples Float64,
-    sum_of_squares Float64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogramf64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 

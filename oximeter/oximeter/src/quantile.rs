@@ -1,26 +1,43 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Data structure for expressing quantile estimation.
+//! This is based on the P² heuristic algorithm for dynamic
+//! calculation of the median and other quantiles. The estimates
+//! are produced dynamically as the observations are generated.
+//! The observations are not stored; therefore, the algorithm has
+//! a very small and fixed storage requirement regardless of the
+//! number of observations.
+//!
+//! Read <https://www.cs.wustl.edu/~jain/papers/ftp/psqr.pdf> for more.
+
+// Copyright 2024 Oxide Computer Company
+
 use crate::traits::HistogramSupport;
-use num::traits::Float;
-use num::traits::ToPrimitive;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use std::cmp::min;
-use std::ops::Sub;
 use thiserror::Error;
 
-/// Errors related to constructing a `Quantile` instance or estimating the p-quantile.
-#[derive(Debug, Clone, Error, JsonSchema, Serialize, Deserialize)]
+const FILLED_MARKER_LEN: usize = 5;
+
+/// Errors related to constructing a `Quantile` instance or estimating the
+/// p-quantile.
+#[derive(
+    Debug, Clone, Error, JsonSchema, Serialize, Deserialize, PartialEq,
+)]
 #[serde(tag = "type", content = "content", rename_all = "snake_case")]
 pub enum QuantileError {
     /// The p value must be in the range [0, 1].
     #[error("The p value must be in the range [0, 1].")]
     InvalidPValue,
     /// Quantile estimation is not possible without samples.
-    #[error("Quantile estimation is not possible without samples.")]
-    EmptyQuantile,
+    #[error("Quantile estimation is not possible without any samples.")]
+    InsufficientSampleSize,
     /// A non-finite was encountered, either as a bin edge or a sample.
-    #[error("Samples must be finite values, found: {0:?}")]
-    NonFiniteValue(String),
+    #[error("Samples must be finite values, not Infinity or NaN.")]
+    NonFiniteValue,
 }
 
 /// Structure for estimating the p-quantile of a population.
@@ -30,269 +47,394 @@ pub enum QuantileError {
 ///
 /// The algorithm consists of maintaining five markers: the
 /// minimum, the p/2-, p-, and (1 + p)/2 quantiles, and the maximum.
-///
-/// Read <https://www.cs.wustl.edu/~jain/papers/ftp/psqr.pdf> for more.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Quantile {
+    /// The p value for the quantile.
+    p: f64,
     /// The heights of the markers.
-    #[serde(rename = "marker_heights")]
-    pub marker_hghts: [f64; 5],
+    marker_heights: [f64; FILLED_MARKER_LEN],
     /// The positions of the markers.
-    #[serde(rename = "marker_positions")]
-    pub marker_pos: [i64; 5],
+    ///
+    /// We track sample size in the 5th position, as useful observations won't
+    /// start until we've filled the heights at the 6th sample anyway
+    /// This does deviate from the paper, but it's a more useful representation
+    /// that works according to the paper's algorithm.
+    marker_positions: [u64; FILLED_MARKER_LEN],
     /// The desired marker positions.
-    #[serde(rename = "desired_marker_positions")]
-    pub desired_marker_pos: [f64; 5],
-    /// The increment for the desired marker positions.
-    #[serde(rename = "desired_marker_increments")]
-    pub desired_marker_incrs: [f64; 5],
+    desired_marker_positions: [f64; FILLED_MARKER_LEN],
 }
 
 impl Quantile {
     /// Create a new `Quantile` instance.
-    pub fn new(p: u64) -> Result<Self, QuantileError> {
-        let p = p as f64 / 100.;
+    ///
+    /// Returns a result containing the `Quantile` instance or an error.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`QuantileError::InvalidPValue`] if the p value is not in the
+    /// range [0, 1].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use oximeter::Quantile;
+    /// let q = Quantile::new(0.5).unwrap();
+    ///
+    /// assert_eq!(q.p(), 0.5);
+    /// assert_eq!(q.len(), 0);
+    /// ```
+    pub fn new(p: f64) -> Result<Self, QuantileError> {
         if p < 0. || p > 1. {
             return Err(QuantileError::InvalidPValue);
         }
 
         Ok(Self {
-            marker_hghts: [0.; 5],
-            marker_pos: [1, 2, 3, 4, 0],
-            desired_marker_pos: [1., 1. + 2. * p, 1. + 4. * p, 3. + 2. * p, 5.],
-            desired_marker_incrs: [0., p / 2., p, (1. + p) / 2., 1.],
+            p,
+            marker_heights: [0.; FILLED_MARKER_LEN],
+            // We start with a sample size of 0.
+            //marker_positions: [0, 1, 2, 3, 0],
+            marker_positions: [1, 2, 3, 4, 0],
+            // 1-indexed, which is like the paper, but
+            // used to keep track of the sample size without
+            // needing to do a separate count, use a Vec,
+            // or do any other kind of bookkeeping.
+            desired_marker_positions: [
+                1.,
+                1. + 2. * p,
+                1. + 4. * p,
+                3. + 2. * p,
+                5.,
+            ],
         })
     }
 
-    /// Create a new `Quantile` instance from the given marker heights and
-    /// positions.
-    pub fn from(
-        marker_hghts: [f64; 5],
-        marker_pos: [i64; 5],
-        desired_marker_pos: [f64; 5],
-        desired_marker_incrs: [f64; 5],
+    /// Create a new `Quantile` instance from the given a p-value, marker
+    /// heights and positions.
+    ///
+    /// # Examples
+    /// ```
+    /// use oximeter::Quantile;
+    /// let q = Quantile::from_parts(
+    ///    0.5,
+    ///    [0., 1., 2., 3., 4.],
+    ///    [1, 2, 3, 4, 5],
+    ///    [1., 3., 5., 7., 9.],
+    /// );
+    /// ```
+    pub fn from_parts(
+        p: f64,
+        marker_heights: [f64; FILLED_MARKER_LEN],
+        marker_positions: [u64; FILLED_MARKER_LEN],
+        desired_marker_positions: [f64; FILLED_MARKER_LEN],
     ) -> Self {
-        Self {
-            marker_hghts,
-            marker_pos,
-            desired_marker_pos,
-            desired_marker_incrs,
-        }
+        Self { p, marker_heights, marker_positions, desired_marker_positions }
     }
 
     /// Construct a `Quantile` instance for the 50th/median percentile.
     pub fn p50() -> Self {
-        Self::new(50).unwrap()
+        Self::new(0.5).unwrap()
     }
 
     /// Construct a `Quantile` instance for the 90th percentile.
     pub fn p90() -> Self {
-        Self::new(90).unwrap()
+        Self::new(0.9).unwrap()
     }
 
     /// Construct a `Quantile` instance for the 95th percentile.
     pub fn p95() -> Self {
-        Self::new(95).unwrap()
+        Self::new(0.95).unwrap()
     }
 
     /// Construct a `Quantile` instance for the 99th percentile.
     pub fn p99() -> Self {
-        Self::new(99).unwrap()
+        Self::new(0.99).unwrap()
     }
 
     /// Get the p value as a float.
-    fn _p(&self) -> f64 {
-        self.desired_marker_incrs[2]
-    }
-
-    /// Get the p value as an integer.
-    pub fn p(&self) -> u64 {
-        (self.desired_marker_incrs[2] * 100.0) as u64
-    }
-
-    /// Estimate the p-quantile of the population.
-    ///
-    /// Returns an error if the sample is empty.
-    pub fn estimate(&self) -> Result<f64, QuantileError> {
-        // Return NaN if the sample is empty.
-        if self.is_empty() {
-            return Err(QuantileError::EmptyQuantile);
-        }
-
-        // Return the middle marker height if the sample size is at least 5.
-        if self.len() >= 5 {
-            return Ok(self.marker_hghts[2]);
-        }
-
-        let mut heights: [f64; 4] = [
-            self.marker_hghts[0],
-            self.marker_hghts[1],
-            self.marker_hghts[2],
-            self.marker_hghts[3],
-        ];
-
-        let len = self.len() as usize;
-        float_ord::sort(&mut heights[..len]);
-
-        let desired_index = (len as f64) * self._p() - 1.;
-        let mut index = desired_index.ceil();
-        if desired_index == index && index >= 0. {
-            let index = index.round_ties_even() as usize;
-            if index < len - 1 {
-                // `marker_hghts[index]` and `marker_hghts[index + 1]` are
-                // equally valid estimates,  by convention we take their average.
-                return Ok(0.5 * self.marker_hghts[index]
-                    + 0.5 * self.marker_hghts[index + 1]);
-            }
-        }
-        index = index.max(0.);
-        let mut index = index.round_ties_even() as usize;
-        index = min(index, len - 1);
-        Ok(self.marker_hghts[index])
+    pub fn p(&self) -> f64 {
+        self.p
     }
 
     /// Return the sample size.
     pub fn len(&self) -> u64 {
-        self.marker_pos[4] as u64
+        self.marker_positions[4]
     }
 
-    /// Determine whether the sample is empty.
+    /// Determine if the number of samples in the population are empty.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
+    /// Return the marker heights.
+    pub fn marker_heights(&self) -> [f64; FILLED_MARKER_LEN] {
+        self.marker_heights
+    }
+
+    /// Return the marker positions.
+    pub fn marker_positions(&self) -> [u64; FILLED_MARKER_LEN] {
+        self.marker_positions
+    }
+
+    /// Return the desired marker positions.
+    pub fn desired_marker_positions(&self) -> [f64; FILLED_MARKER_LEN] {
+        self.desired_marker_positions
+    }
+
+    /// Estimate the p-quantile of the population.
+    ///
+    /// This is step B.4 in the P² algorithm.
+    ///
+    /// Returns a result containing the estimated p-quantile or an error.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`QuantileError::InsufficientSampleSize`] if the sample size
+    /// is empty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use oximeter::Quantile;
+    /// let mut q = Quantile::new(0.5).unwrap();
+    /// for o in 1..=100 {
+    ///    q.append(o).unwrap();
+    /// }
+    /// assert_eq!(q.estimate().unwrap(), 50.0);
+    /// ```
+    pub fn estimate(&self) -> Result<f64, QuantileError> {
+        if self.is_empty() {
+            return Err(QuantileError::InsufficientSampleSize);
+        }
+
+        if self.len() >= FILLED_MARKER_LEN as u64 {
+            return Ok(self.marker_heights[2]);
+        }
+
+        // Try to find an index in heights that is correlated with the p value
+        // when we have less than 5 samples, but more than 0.
+        let mut heights = self.marker_heights;
+        float_ord::sort(&mut heights);
+        let idx = (heights.len() as f64 - 1.) * self.p();
+        return Ok(heights[idx.round() as usize]);
+    }
+
     /// Append a value/observation to the population and adjust the heights.
+    ///
+    /// This comprises steps B.1, B.2, B.3 (adjust heights) in the P² algorithm,
+    /// including finding the cell k containing the input value and updating the
+    /// current and desired marker positions.
+    ///
+    /// Returns an empty result or an error.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`QuantileError::NonFiniteValue`] if the value is not finite
+    /// when casting to a float.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use oximeter::Quantile;
+    /// let mut q = Quantile::new(0.9).unwrap();
+    /// q.append(10).unwrap();
+    /// assert_eq!(q.len(), 1);
+    /// ```
     pub fn append<T>(&mut self, value: T) -> Result<(), QuantileError>
     where
         T: HistogramSupport,
     {
         if !value.is_finite() {
-            return Err(QuantileError::NonFiniteValue(format!("{:?}", value)));
+            return Err(QuantileError::NonFiniteValue);
         }
+        // We've already checked that the value is finite.
+        let value_f = value.to_f64().unwrap();
 
-        // we've already checked that the value is finite.
-        let value = value.to_f64().unwrap();
-
-        // n[4] is the sample size.
-        if self.marker_pos[4] < 5 {
-            self.marker_hghts[self.marker_pos[4] as usize] = value;
-            self.marker_pos[4] += 1;
-            if self.marker_pos[4] == 5 {
-                float_ord::sort(&mut self.marker_hghts);
+        // if !self.is_filled {
+        if self.len() < FILLED_MARKER_LEN as u64 {
+            self.marker_heights[self.len() as usize] = value_f;
+            self.marker_positions[4] += 1;
+            if self.len() == FILLED_MARKER_LEN as u64 {
+                float_ord::sort(&mut self.marker_heights);
+                self.adaptive_init();
             }
             return Ok(());
         }
 
-        // Find cell k.
-        let mut k: usize;
-        if value < self.marker_hghts[0] {
-            self.marker_hghts[0] = value;
-            k = 0;
-        } else {
-            k = 4;
-            for i in 1..5 {
-                if value < self.marker_hghts[i] {
-                    k = i;
-                    break;
-                }
+        // Find the cell k containing the new value.
+        let k = match self.find_cell(value_f) {
+            Some(4) => {
+                self.marker_heights[4] = value_f;
+                3
             }
-            if self.marker_hghts[4] < value {
-                self.marker_hghts[4] = value;
+            Some(i) => i,
+            None => {
+                self.marker_heights[0] = value_f;
+                0
             }
         };
 
-        // Increment all positions greater than k.
-        for i in k..5 {
-            self.marker_pos[i] += 1;
-        }
-        for i in 0..5 {
-            self.desired_marker_pos[i] += self.desired_marker_incrs[i];
+        // Handle rounding issues as described in
+        // <https://aakinshin.net/posts/p2-quantile-estimator-rounding-issue>.
+        let count = self.len() as f64;
+        self.desired_marker_positions[1] = count * (self.p() / 2.) + 1.;
+        self.desired_marker_positions[2] = count * self.p() + 1.;
+        self.desired_marker_positions[3] = count * ((1. + self.p()) / 2.) + 1.;
+        self.desired_marker_positions[4] = count + 1.;
+
+        for i in k + 1..FILLED_MARKER_LEN {
+            self.marker_positions[i] += 1;
         }
 
-        // Adjust height of markers.
-        for i in 1..4 {
-            // unwrap is safe because we know the exact marker positions as literals.
-            let d = self.desired_marker_pos[i]
-                - self.marker_pos[i].to_f64().unwrap();
-            if d >= 1. && self.marker_pos[i + 1] - self.marker_pos[i] > 1
-                || d <= -1. && self.marker_pos[i - 1] - self.marker_pos[i] < -1
-            {
-                let d = Float::signum(d);
-                let q_new = self.parabolic(i, d);
-                if self.marker_hghts[i - 1] < q_new
-                    && q_new < self.marker_hghts[i + 1]
-                {
-                    self.marker_hghts[i] = q_new;
-                } else {
-                    self.marker_hghts[i] = self.linear(i, d);
-                }
-                let delta = d.round_ties_even() as i64;
-                debug_assert_eq!(delta.abs(), 1);
-                self.marker_pos[i] += delta;
+        // Adjust height of markers adaptively to be more optimal for
+        // not just higher quantiles, but also lower ones.
+        //
+        // This is a deviation from the paper, taken from
+        // <https://aakinshin.net/posts/p2-quantile-estimator-adjusting-order>.
+        if self.p >= 0.5 {
+            for i in 1..4 {
+                self.adjust_heights(i)
+            }
+        } else {
+            for i in (1..4).rev() {
+                self.adjust_heights(i)
             }
         }
 
         Ok(())
     }
 
-    /// Subtract another `Quantile` instance from this one.
-    pub fn sub(&self, other: &Quantile) -> Quantile {
-        /// Nested function to subtract elements of two arrays and return the
-        /// result as an array.
-        fn sub_arrays<T>(arr1: &[T; 5], arr2: &[T; 5]) -> [T; 5]
-        where
-            T: Sub<Output = T> + Copy,
-        {
-            // Initialize with the first element of arr1 (or any default value).
-            let mut result = [arr1[0]; 5];
-            for i in 0..5 {
-                result[i] = arr1[i] - arr2[i];
+    /// Find the higher marker cell whose height is lower than the observation.
+    ///
+    /// Returns `None` if the value is less than the initial marker height.
+    fn find_cell(&mut self, value: f64) -> Option<usize> {
+        if value < self.marker_heights[0] {
+            None
+        } else {
+            let mut k = 0;
+            while k + 1 < FILLED_MARKER_LEN
+                && value >= self.marker_heights[k + 1]
+            {
+                k += 1;
             }
-            result
-        }
 
-        Quantile {
-            marker_hghts: sub_arrays(&self.marker_hghts, &other.marker_hghts),
-            marker_pos: sub_arrays(&self.marker_pos, &other.marker_pos),
-            desired_marker_pos: sub_arrays(
-                &self.desired_marker_pos,
-                &other.desired_marker_pos,
-            ),
-            desired_marker_incrs: sub_arrays(
-                &self.desired_marker_incrs,
-                &other.desired_marker_incrs,
-            ),
+            Some(k)
         }
+    }
+
+    /// Adjust the heights of the markers if necessary.
+    ///
+    /// Step B.3 in the P² algorithm. Should be used within a loop
+    /// after appending a value to the population.
+    fn adjust_heights(&mut self, i: usize) {
+        let d =
+            self.desired_marker_positions[i] - self.marker_positions[i] as f64;
+
+        if (d >= 1.
+            && self.marker_positions[i + 1] > self.marker_positions[i] + 1)
+            || (d <= -1.
+                && self.marker_positions[i - 1] < self.marker_positions[i])
+        {
+            let d_signum = d.signum();
+            let q_prime = self.parabolic(i, d_signum);
+            if self.marker_heights[i - 1] < q_prime
+                && q_prime < self.marker_heights[i + 1]
+            {
+                self.marker_heights[i] = q_prime;
+            } else {
+                let q_prime = self.linear(i, d_signum);
+                self.marker_heights[i] = q_prime;
+            }
+
+            // Update marker positions based on the sign of d.
+            if d_signum < 0. {
+                self.marker_positions[i] -= 1;
+            } else {
+                self.marker_positions[i] += 1;
+            }
+        }
+    }
+
+    /// An implementation to adaptively initialize the marker heights and
+    /// positions, particularly useful for extreme quantiles (e.g., 0.99)
+    /// when estimating on a small sample size.
+    ///
+    /// Read <https://aakinshin.net/posts/p2-quantile-estimator-initialization>
+    /// for more.
+    fn adaptive_init(&mut self) {
+        self.desired_marker_positions[1..FILLED_MARKER_LEN]
+            .copy_from_slice(&self.marker_heights[1..FILLED_MARKER_LEN]);
+
+        self.marker_positions[1] = (1. + 2. * self.p()).round() as u64;
+        self.marker_positions[2] = (1. + 4. * self.p()).round() as u64;
+        self.marker_positions[3] = (3. + 2. * self.p()).round() as u64;
+        self.marker_heights[1] = self.desired_marker_positions
+            [self.marker_positions[1] as usize - 1];
+        self.marker_heights[2] = self.desired_marker_positions
+            [self.marker_positions[2] as usize - 1];
+        self.marker_heights[3] = self.desired_marker_positions
+            [self.marker_positions[3] as usize - 1];
     }
 
     /// Parabolic prediction for marker height.
-    fn parabolic(&self, i: usize, d: f64) -> f64 {
-        let term1 =
-            d / (self.marker_pos[i + 1] - self.marker_pos[i - 1]) as f64;
-        let term2 = ((self.marker_pos[i] - self.marker_pos[i - 1]) as f64 + d)
-            * (self.marker_hghts[i + 1] - self.marker_hghts[i])
-            / (self.marker_pos[i + 1] - self.marker_pos[i]) as f64;
-        let term3 = ((self.marker_pos[i + 1] - self.marker_pos[i]) as f64 - d)
-            * (self.marker_hghts[i] - self.marker_hghts[i - 1])
-            / (self.marker_pos[i] - self.marker_pos[i - 1]) as f64;
+    fn parabolic(&self, i: usize, d_signum: f64) -> f64 {
+        let pos_diff1 = (self.marker_positions[i + 1] as i64
+            - self.marker_positions[i - 1] as i64)
+            as f64;
 
-        self.marker_hghts[i] + term1 * (term2 + term3)
+        let pos_diff2 = (self.marker_positions[i + 1] as i64
+            - self.marker_positions[i] as i64) as f64;
+
+        let pos_diff3 = (self.marker_positions[i] as i64
+            - self.marker_positions[i - 1] as i64)
+            as f64;
+
+        let term1 = d_signum / pos_diff1;
+        let term2 = ((self.marker_positions[i] - self.marker_positions[i - 1])
+            as f64
+            + d_signum)
+            * (self.marker_heights[i + 1] - self.marker_heights[i])
+            / pos_diff2;
+        let term3 = ((self.marker_positions[i + 1] - self.marker_positions[i])
+            as f64
+            - d_signum)
+            * (self.marker_heights[i] - self.marker_heights[i - 1])
+            / pos_diff3;
+
+        self.marker_heights[i] + term1 * (term2 + term3)
     }
 
     /// Linear prediction for marker height.
-    fn linear(&self, i: usize, d: f64) -> f64 {
-        let index = if d < 0. { i - 1 } else { i + 1 };
-        self.marker_hghts[i]
-            + d * (self.marker_hghts[index] - self.marker_hghts[i])
-                / (self.marker_pos[index] - self.marker_pos[i]) as f64
+    fn linear(&self, i: usize, d_signum: f64) -> f64 {
+        let idx = if d_signum < 0. { i - 1 } else { i + 1 };
+        self.marker_heights[i]
+            + d_signum * (self.marker_heights[idx] - self.marker_heights[i])
+                / (self.marker_positions[idx] as i64
+                    - self.marker_positions[i] as i64) as f64
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oximeter::test_util::assert_almost_eq;
+    use approx::assert_relative_eq;
+    use rand::{Rng, SeedableRng};
+    use rand_distr::{Distribution, Normal};
 
+    fn test_quantile_impl(
+        p: f64,
+        observations: u64,
+        assert_on: Option<f64>,
+    ) -> Quantile {
+        let mut q = Quantile::new(p).unwrap();
+        for o in 1..=observations {
+            q.append(o).unwrap();
+        }
+        assert_eq!(q.p(), p);
+        assert_eq!(q.estimate().unwrap(), assert_on.unwrap_or(p * 100.));
+        q
+    }
+
+    /// Example observations from the P² paper.
     #[test]
     fn test_float_observations() {
         let observations = [
@@ -303,91 +445,124 @@ mod tests {
         for &o in observations.iter() {
             q.append(o).unwrap();
         }
-        assert_eq!(q.marker_pos, [1, 6, 10, 16, 20]);
-        assert_eq!(q.desired_marker_pos, [1., 5.75, 10.50, 15.25, 20.0]);
-        assert_eq!(q.len(), 20);
-        assert_eq!(q.p(), 50);
-        assert_almost_eq!(q.estimate().unwrap(), 4.2462394088036435, 2e-15);
+        assert_eq!(q.marker_positions, [1, 6, 10, 16, 20]);
+        assert_eq!(q.desired_marker_positions, [1., 5.75, 10.50, 15.25, 20.0]);
+        assert_eq!(q.p(), 0.5);
+        assert_relative_eq!(q.estimate().unwrap(), 4.2462394088036435,);
+    }
+
+    #[test]
+    fn test_rounding() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let mut estimator = Quantile::new(0.6).unwrap();
+
+        for _ in 0..100 {
+            let x: f64 = rng.gen();
+            estimator.append(x).unwrap();
+        }
+
+        assert_relative_eq!(
+            estimator.estimate().unwrap(),
+            0.552428024067269,
+            epsilon = f64::EPSILON
+        );
     }
 
     #[test]
     fn test_integer_observations() {
         let observations = 1..=100;
-        let mut q = Quantile::new(30).unwrap();
+        let mut q = Quantile::new(0.3).unwrap();
         for o in observations {
             q.append(o).unwrap();
         }
-
-        assert_eq!(q.marker_pos, [1, 15, 30, 65, 100]);
+        assert_eq!(q.marker_positions, [1, 15, 30, 65, 100]);
         assert_eq!(
-            q.desired_marker_pos,
-            [
-                1.0,
-                15.850000000000026,
-                30.70000000000005,
-                65.34999999999992,
-                100.0
-            ]
+            q.desired_marker_positions,
+            [1.0, 15.85, 30.7, 65.35000000000001, 100.0]
         );
-        assert_eq!(q.len(), 100);
-        assert_eq!(q.p(), 30);
+
+        assert_eq!(q.p(), 0.3);
         assert_eq!(q.estimate().unwrap(), 30.0);
     }
 
     #[test]
-    fn test_p50() {
-        let observations = 1..=100;
-        let mut q = Quantile::p50();
-        for o in observations {
-            q.append(o).unwrap();
-        }
-        assert_eq!(q.p(), 50);
-        assert_eq!(q.estimate().unwrap(), 50.0);
-    }
-
-    #[test]
-    fn test_p90() {
-        let observations = 1..=100;
-        let mut q = Quantile::p90();
-        for o in observations {
-            q.append(o).unwrap();
-        }
-        assert_eq!(q.p(), 90);
-        assert_eq!(q.estimate().unwrap(), 90.0);
-    }
-
-    #[test]
-    fn test_p95() {
-        let observations = 1..=100;
-        let mut q = Quantile::p95();
-        for o in observations {
-            q.append(o).unwrap();
-        }
-        assert_eq!(q.p(), 95);
-        assert_eq!(q.estimate().unwrap(), 95.0);
-    }
-
-    #[test]
-    fn test_p99() {
-        let observations = 1..=100;
-        let mut q = Quantile::p99();
-        for o in observations {
-            q.append(o).unwrap();
-        }
-        assert_eq!(q.p(), 99);
-        assert_eq!(q.estimate().unwrap(), 97.0);
-    }
-
-    #[test]
-    fn test_empty_sample() {
+    fn test_empty_observations() {
         let q = Quantile::p50();
-        assert!(q.is_empty());
-        assert!(q.estimate().is_err());
+        assert_eq!(
+            q.estimate().err().unwrap(),
+            QuantileError::InsufficientSampleSize
+        );
+    }
+
+    #[test]
+    fn test_non_filled_observations() {
+        let mut q = Quantile::p99();
+        let observations = [-10., 0., 1., 10.];
+        for &o in observations.iter() {
+            q.append(o).unwrap();
+        }
+        assert_eq!(q.estimate().unwrap(), 10.);
+    }
+
+    #[test]
+    fn test_default_percentiles() {
+        test_quantile_impl(0.5, 100, None);
+        test_quantile_impl(0.9, 100, None);
+        test_quantile_impl(0.95, 100, None);
+        test_quantile_impl(0.99, 100, Some(97.));
     }
 
     #[test]
     fn test_invalid_p_value() {
-        assert!(Quantile::new(101).is_err());
-        assert!(Quantile::new(u64::MAX).is_err());
+        assert_eq!(
+            Quantile::new(1.01).err().unwrap(),
+            QuantileError::InvalidPValue
+        );
+        assert_eq!(
+            Quantile::new(f64::MAX).err().unwrap(),
+            QuantileError::InvalidPValue
+        );
+    }
+
+    #[test]
+    fn test_find_cells() {
+        let mut q = test_quantile_impl(0.5, 5, Some(3.));
+        assert_eq!(q.find_cell(0.), None);
+        assert_eq!(q.find_cell(7.), Some(4));
+        assert_eq!(q.find_cell(4.), Some(3));
+        assert_eq!(q.find_cell(3.5), Some(2));
+    }
+
+    /// Emulates baseline test in a basic Python implementation of the P²
+    /// algorithm:
+    /// <https://github.com/rfrenoy/psquare/blob/master/tests/test_psquare.py#L47>.
+    #[test]
+    fn test_against_baseline_normal_distribution() {
+        let mu = 500.;
+        let sigma = 100.;
+        let size = 1000;
+        let p = 0.9;
+
+        let normal = Normal::new(mu, sigma);
+        let mut observations = (0..size)
+            .map(|_| normal.unwrap().sample(&mut rand::thread_rng()))
+            .collect::<Vec<f64>>();
+        float_ord::sort(&mut observations);
+        let idx = ((f64::from(size) - 1.) * p) as usize;
+
+        let base_p_est = observations[idx];
+
+        let mut q = Quantile::new(p).unwrap();
+        for o in observations.iter() {
+            q.append(*o).unwrap();
+        }
+        let p_est = q.estimate().unwrap();
+
+        println!("Base: {}, Est: {}", base_p_est, p_est);
+        assert!(
+            (base_p_est - p_est).abs() < 10.0,
+            "Difference {} is not less than 10",
+            (base_p_est - p_est).abs()
+        );
     }
 }

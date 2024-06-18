@@ -109,8 +109,10 @@ pub enum HistogramError {
     NonmonotonicBins,
 
     /// A non-finite was encountered, either as a bin edge or a sample.
-    #[error("Bin edges and samples must be finite values, found: {0:?}")]
-    NonFiniteValue(String),
+    #[error(
+        "Bin edges and samples must be finite values, not Infinity or NaN"
+    )]
+    NonFiniteValue,
 
     /// Error returned when two neighboring bins are not adjoining (there's space between them)
     #[error("Neigboring bins {left} and {right} are not adjoining")]
@@ -293,6 +295,10 @@ pub struct Bin<T> {
     pub count: u64,
 }
 
+/// Internal, creation-specific newtype wrapper around Vec<Bin<T>> to implement
+/// conversion(s).
+struct Bins<T>(Vec<Bin<T>>);
+
 /// Histogram metric
 ///
 /// A histogram maintains the count of any number of samples, over a set of bins. Bins are
@@ -370,8 +376,11 @@ where
     max: T,
     /// The sum of all samples in the histogram.
     sum_of_samples: T::Width,
-    /// The sum of the squares of all samples in the histogram.
-    sum_of_squares: T::Width,
+    /// M2 for Welford's algorithm for variance calculation.
+    ///
+    /// Read more on Welford's algorithm at
+    /// <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm>
+    squared_mean: f64,
     /// p50 Quantile
     p50: Quantile,
     /// p95 Quantile
@@ -401,39 +410,29 @@ macro_rules! impl_int_sample {
                         self.max = <$type>::min_value();
                     }
 
+                    // For squared mean (M2) calculation, before we update the
+                    // count.
+                    let value_f = value as f64;
+                    let current_mean = self.mean();
+
                     let index = self
                         .bins
                         .binary_search_by(|bin| bin.range.cmp(&value).reverse())
                         .unwrap(); // The `ensure_finite` call above catches values that don't end up in a bin
                     self.bins[index].count += 1;
                     self.n_samples += 1;
+                    self.min = self.min.min(value);
+                    self.max = self.max.max(value);
+                    self.sum_of_samples = self.sum_of_samples.saturating_add(value as i64);
 
-                    if value < self.min {
-                        self.min = value;
-                    }
-                    if value > self.max {
-                        self.max = value;
-                    }
-
-                    // Ensure that the sum of samples and sum of squares don't overflow
-                    let on_unwrap = || {
-                        if value < <$type>::zero() {
-                            i64::MIN
-                        } else {
-                            i64::MAX
-                        }
-                    };
-
-                    self.sum_of_samples = self.sum_of_samples.checked_add(value as i64).unwrap_or_else(on_unwrap);
-                    self.sum_of_squares = self
-                        .sum_of_squares
-                        .checked_add((value as i64).checked_mul(value as i64).unwrap_or_else(on_unwrap))
-                        .unwrap_or_else(on_unwrap);
+                    let delta = value_f - current_mean;
+                    let updated_mean = current_mean + delta / (self.n_samples as f64);
+                    let delta2 = value_f - updated_mean;
+                    self.squared_mean += (delta * delta2);
 
                     self.p50.append(value)?;
                     self.p90.append(value)?;
                     self.p99.append(value)?;
-
                     Ok(())
                 }
             }
@@ -455,6 +454,11 @@ macro_rules! impl_float_sample {
                         self.max = <$type as num::Bounded>::min_value();
                     }
 
+                    // For squared mean (M2) calculation, before we update the
+                    // count.
+                    let value_f = value as f64;
+                    let current_mean = self.mean();
+
                     let index = self
                         .bins
                         .binary_search_by(|bin| bin.range.cmp(&value).reverse())
@@ -469,8 +473,12 @@ macro_rules! impl_float_sample {
                         self.max = value;
                     }
 
-                    self.sum_of_samples += value as f64;
-                    self.sum_of_squares += (value as f64) * value as f64;
+                    self.sum_of_samples += value_f;
+
+                    let delta = value_f - current_mean;
+                    let updated_mean = current_mean + delta / (self.n_samples as f64);
+                    let delta2 = value_f - updated_mean;
+                    self.squared_mean += (delta * delta2);
 
                     self.p50.append(value)?;
                     self.p90.append(value)?;
@@ -588,7 +596,7 @@ where
             min: T::zero(),
             max: T::zero(),
             sum_of_samples: T::Width::zero(),
-            sum_of_squares: T::Width::zero(),
+            squared_mean: 0.0,
             p50: Quantile::p50(),
             p90: Quantile::p90(),
             p99: Quantile::p99(),
@@ -597,54 +605,19 @@ where
 
     /// Construct a new histogram from left bin edges.
     ///
-    /// The left edges of the bins must be specified as a non-empty, monotonically increasing
-    /// slice. An `Err` is returned if either constraint is violated.
+    /// The left edges of the bins must be specified as a non-empty,
+    /// monotonically increasing slice. An `Err` is returned if either
+    /// constraint is violated.
     pub fn new(left_edges: &[T]) -> Result<Self, HistogramError> {
-        let mut items = left_edges.iter();
-        let mut bins = Vec::with_capacity(left_edges.len() + 1);
-        let mut current = *items.next().ok_or(HistogramError::EmptyBins)?;
-        ensure_finite(current)?;
-        let min = <T as Bounded>::min_value();
-        if current > min {
-            // Bin greater than the minimum was specified, insert a new one from `MIN..current`.
-            bins.push(Bin { range: BinRange::range(min, current), count: 0 });
-        } else if current == min {
-            // An edge *at* the minimum was specified. Consume it, and insert a bin from
-            // `MIN..next`, if one exists. If one does not, or if this is the last item, the
-            // following loop will not be entered.
-            let next =
-                items.next().cloned().unwrap_or_else(<T as Bounded>::max_value);
-            bins.push(Bin { range: BinRange::range(min, next), count: 0 });
-            current = next;
-        }
-        for &next in items {
-            if current < next {
-                ensure_finite(next)?;
-                bins.push(Bin {
-                    range: BinRange::range(current, next),
-                    count: 0,
-                });
-                current = next;
-            } else if current >= next {
-                return Err(HistogramError::NonmonotonicBins);
-            } else {
-                return Err(HistogramError::NonFiniteValue(format!(
-                    "{:?}",
-                    current
-                )));
-            }
-        }
-        if current < <T as Bounded>::max_value() {
-            bins.push(Bin { range: BinRange::from(current), count: 0 });
-        }
+        let bins = Bins::try_from(left_edges)?;
         Ok(Self {
             start_time: Utc::now(),
-            bins,
+            bins: bins.0,
             n_samples: 0,
             min: T::zero(),
             max: T::zero(),
             sum_of_samples: T::Width::zero(),
-            sum_of_squares: T::Width::zero(),
+            squared_mean: 0.0,
             p50: Quantile::p50(),
             p90: Quantile::p90(),
             p99: Quantile::p99(),
@@ -652,16 +625,16 @@ where
     }
 
     /// Construct a new histogram with the given struct information, including
-    /// bins and and counts.
+    /// bins, counts, and quantiles.
     #[allow(clippy::too_many_arguments)]
-    pub fn with(
+    pub fn from_parts(
         start_time: DateTime<Utc>,
         bins: Vec<T>,
         counts: Vec<u64>,
         min: T,
         max: T,
         sum_of_samples: T::Width,
-        sum_of_squares: T::Width,
+        squared_mean: f64,
         p50: Quantile,
         p90: Quantile,
         p99: Quantile,
@@ -673,21 +646,21 @@ where
             });
         }
 
-        let mut hist = Self::new(&bins)?;
+        let mut bins = Bins::try_from(bins.as_slice())?.0;
         let mut n_samples = 0;
-        for (bin, count) in hist.bins.iter_mut().zip(counts.into_iter()) {
+        for (bin, count) in bins.iter_mut().zip(counts.into_iter()) {
             bin.count = count;
             n_samples += count;
         }
 
         Ok(Self {
             start_time,
-            bins: hist.bins,
+            bins,
             n_samples,
             min,
             max,
             sum_of_samples,
-            sum_of_squares,
+            squared_mean,
             p50,
             p90,
             p99,
@@ -733,56 +706,75 @@ where
         self.max
     }
 
-    /// Return the mean of all inputs/samples in the histogram.
-    pub fn mean(&self) -> Option<f64> {
-        if self.n_samples() > 0 {
-            self.sum_of_samples
-                .to_f64()
-                .map(|sum| sum / (self.n_samples() as f64))
-        } else {
-            None
-        }
-    }
-
     /// Return the sum of all inputs to the histogram.
     pub fn sum_of_samples(&self) -> T::Width {
         self.sum_of_samples
     }
 
-    /// Return the sum of the squares of all inputs to the histogram.
-    pub fn sum_of_squares(&self) -> T::Width {
-        self.sum_of_squares
+    /// Return the squared mean (M2) of all inputs to the histogram.
+    pub fn squared_mean(&self) -> f64 {
+        self.squared_mean
     }
 
-    /// Return the standard deviation for inputs to the histogram.
-    pub fn std_dev(&self) -> Option<f64> {
-        if self.n_samples() > 1 {
-            self.mean().and_then(|mean| {
-                let sum_of_squares = self.sum_of_squares.to_f64()?;
-                let sum_of_samples = self.sum_of_samples.to_f64()?;
-
-                let variance = (sum_of_squares - (sum_of_samples * mean))
-                    / (self.n_samples() as f64);
-                Some(variance.sqrt())
-            })
+    /// Return the mean of all inputs/samples in the histogram.
+    pub fn mean(&self) -> f64 {
+        if self.n_samples() > 0 {
+            self.sum_of_samples
+                .to_f64()
+                .map(|sum| sum / (self.n_samples() as f64))
+                .unwrap()
         } else {
-            None
+            0.
         }
     }
 
-    /// Return the sample standard deviation for inputs to the histogram.
-    pub fn sample_std_dev(&self) -> Option<f64> {
-        if self.n_samples() > 1 {
-            self.mean().and_then(|mean| {
-                let sum_of_squares = self.sum_of_squares.to_f64()?;
-                let sum_of_samples = self.sum_of_samples.to_f64()?;
+    /// Return the variance for inputs to the histogram based on the Welford's
+    /// algorithm, using the squared mean (M2).
+    ///
+    /// Returns `None` if there are fewer than two samples.
+    pub fn variance(&self) -> Option<f64> {
+        (self.n_samples() > 1)
+            .then(|| self.squared_mean / (self.n_samples() as f64))
+    }
 
-                let variance = (sum_of_squares - (sum_of_samples * mean))
-                    / (self.n_samples() as f64 - 1.0);
-                Some(variance.sqrt())
-            })
-        } else {
-            None
+    /// Return the sample variance for inputs to the histogram based on the
+    /// Welford's algorithm, using the squared mean (M2).
+    ///
+    /// Returns `None` if there are fewer than two samples.
+    pub fn sample_variance(&self) -> Option<f64> {
+        (self.n_samples() > 1)
+            .then(|| self.squared_mean / ((self.n_samples() - 1) as f64))
+    }
+
+    /// Return the standard deviation for inputs to the histogram.
+    ///
+    /// This is a biased (as a consequence of Jensen’s inequality), estimate of
+    /// the population deviation that returns the standard deviation of the
+    /// samples seen by the histogram.
+    ///
+    /// Returns `None` if the variance is `None`, i.e., if there are fewer than
+    /// two samples.
+    pub fn std_dev(&self) -> Option<f64> {
+        match self.variance() {
+            Some(variance) => Some(variance.sqrt()),
+            None => None,
+        }
+    }
+
+    /// Return the "corrected" sample standard deviation for inputs to the
+    /// histogram.
+    ///
+    /// This is an unbiased estimate of the population deviation, applying
+    /// Bessel's correction, which corrects the bias in the estimation of the
+    /// population variance, and some, but not all of the bias in the estimation
+    /// of the population standard deviation.
+    ///
+    /// Returns `None` if the variance is `None`, i.e., if there are fewer than
+    /// two samples.
+    pub fn sample_std_dev(&self) -> Option<f64> {
+        match self.sample_variance() {
+            Some(variance) => Some(variance.sqrt()),
+            None => None,
         }
     }
 
@@ -796,28 +788,29 @@ where
         self.bins.get(index)
     }
 
-    /// Return the start time for this histogram
+    /// Return the start time for this histogram.
     pub fn start_time(&self) -> DateTime<Utc> {
         self.start_time
     }
 
+    /// Set the start time for this histogram.
     pub fn set_start_time(&mut self, start_time: DateTime<Utc>) {
         self.start_time = start_time;
     }
 
     /// Return the p50 quantile for the histogram.
-    pub fn p50q(&self) -> &Quantile {
-        &self.p50
+    pub fn p50q(&self) -> Quantile {
+        self.p50
     }
 
     /// Return the p90 quantile for the histogram.
-    pub fn p90q(&self) -> &Quantile {
-        &self.p90
+    pub fn p90q(&self) -> Quantile {
+        self.p90
     }
 
     /// Return the p99 quantile for the histogram.
-    pub fn p99q(&self) -> &Quantile {
-        &self.p99
+    pub fn p99q(&self) -> Quantile {
+        self.p99
     }
 
     /// Return the p50 estimate for the histogram.
@@ -833,6 +826,52 @@ where
     /// Return the p99 estimate for the histogram.
     pub fn p99(&self) -> Result<f64, QuantileError> {
         self.p99.estimate()
+    }
+}
+
+impl<T> TryFrom<&[T]> for Bins<T>
+where
+    T: HistogramSupport,
+{
+    type Error = HistogramError;
+
+    fn try_from(left_edges: &[T]) -> Result<Self, Self::Error> {
+        let mut items = left_edges.iter();
+        let mut bins: Vec<Bin<T>> = Vec::with_capacity(left_edges.len() + 1);
+        let mut current: T = *items.next().ok_or(HistogramError::EmptyBins)?;
+        ensure_finite(current)?;
+        let min: T = <T as Bounded>::min_value();
+        if current > min {
+            // Bin greater than the minimum was specified, insert a new one from `MIN..current`.
+            bins.push(Bin { range: BinRange::range(min, current), count: 0 });
+        } else if current == min {
+            // An edge *at* the minimum was specified. Consume it, and insert a bin from
+            // `MIN..next`, if one exists. If one does not, or if this is the last item, the
+            // following loop will not be entered.
+            let next: T =
+                items.next().cloned().unwrap_or_else(<T as Bounded>::max_value);
+            bins.push(Bin { range: BinRange::range(min, next), count: 0 });
+            current = next;
+        }
+        for &next in items {
+            if current < next {
+                ensure_finite(next)?;
+                bins.push(Bin {
+                    range: BinRange::range(current, next),
+                    count: 0,
+                });
+                current = next;
+            } else if current >= next {
+                return Err(HistogramError::NonmonotonicBins);
+            } else {
+                return Err(HistogramError::NonFiniteValue);
+            }
+        }
+        if current < <T as Bounded>::max_value() {
+            bins.push(Bin { range: BinRange::from(current), count: 0 });
+        }
+
+        Ok(Bins(bins))
     }
 }
 
@@ -1137,7 +1176,7 @@ where
     if value.is_finite() {
         Ok(())
     } else {
-        Err(HistogramError::NonFiniteValue(format!("{:?}", value)))
+        Err(HistogramError::NonFiniteValue)
     }
 }
 
@@ -1219,6 +1258,12 @@ mod tests {
                 .sum::<f64>()
                 / count as f64)
                 .sqrt();
+            let current_sample_std_dev = (samples[..=i]
+                .iter()
+                .map(|x| (*x as f64 - current_mean).powi(2))
+                .sum::<f64>()
+                / (count - 1) as f64)
+                .sqrt();
             assert_eq!(
                 hist.n_samples(),
                 count,
@@ -1228,13 +1273,13 @@ mod tests {
 
             if count > 0 {
                 assert_eq!(
-                    hist.mean().unwrap(),
+                    hist.mean(),
                     current_mean,
                     "Histogram should have a mean of {}",
                     current_mean
                 );
             } else {
-                assert!(hist.mean().is_none());
+                assert!(hist.mean().is_zero());
             }
 
             if count > 1 {
@@ -1244,8 +1289,15 @@ mod tests {
                     "Histogram should have a sample standard deviation of {}",
                     current_std_dev
                 );
+                assert_eq!(
+                    hist.sample_std_dev().unwrap(),
+                    current_sample_std_dev,
+                    "Histogram should have a sample standard deviation of {}",
+                    current_sample_std_dev
+                );
             } else {
                 assert!(hist.std_dev().is_none());
+                assert!(hist.sample_std_dev().is_none());
             }
         }
 
@@ -1274,10 +1326,10 @@ mod tests {
         assert_eq!(p50, 1.0, "P50 should be 1.0, but found {}", p50);
 
         let p90 = hist.p90().unwrap();
-        assert_eq!(p90, 1.0, "P90 should be 1.0, but found {}", p90);
+        assert_eq!(p90, 100.0, "P90 should be 100.0, but found {}", p90);
 
         let p99 = hist.p99().unwrap();
-        assert_eq!(p99, 1.0, "P99 should be 1.0, but found {}", p99);
+        assert_eq!(p99, 100.0, "P99 should be 100.0, but found {}", p99);
     }
 
     #[test]
@@ -1311,17 +1363,17 @@ mod tests {
         assert_eq!(counts, &[0, 1, 1, 0], "Paired-array counts are incorrect");
         assert_eq!(hist.n_samples(), 2);
 
-        let rebuilt = Histogram::with(
+        let rebuilt = Histogram::from_parts(
             hist.start_time(),
             bins,
             counts,
             hist.min(),
             hist.max(),
             hist.sum_of_samples(),
-            hist.sum_of_squares(),
-            hist.p50.clone(),
-            hist.p90.clone(),
-            hist.p99.clone(),
+            hist.squared_mean(),
+            hist.p50,
+            hist.p90,
+            hist.p99,
         )
         .unwrap();
         assert_eq!(

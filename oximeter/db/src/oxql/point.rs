@@ -1531,10 +1531,10 @@ pub struct Distribution<T: DistributionSupport> {
     min: Option<T>,
     max: Option<T>,
     sum_of_samples: T,
-    sum_of_squares: T,
-    p50: Quantile,
-    p90: Quantile,
-    p99: Quantile,
+    squared_mean: f64,
+    p50: Option<Quantile>,
+    p90: Option<Quantile>,
+    p99: Option<Quantile>,
 }
 
 impl<T> fmt::Display for Distribution<T>
@@ -1550,17 +1550,33 @@ where
             .collect::<Vec<_>>()
             .join(", ");
 
+        let p50_estimate = self
+            .p50
+            .as_ref()
+            .map(|q| q.estimate().unwrap_or_default())
+            .unwrap_or_default();
+        let p90_estimate = self
+            .p90
+            .as_ref()
+            .map(|q| q.estimate().unwrap_or_default())
+            .unwrap_or_default();
+        let p99_estimate = self
+            .p99
+            .as_ref()
+            .map(|q| q.estimate().unwrap_or_default())
+            .unwrap_or_default();
+
         write!(
             f,
             "{}, min: {}, max: {}, mean: {}, std_dev: {}, p50: {}, p90: {}, p99: {}",
             elems,
             self.min.unwrap_or_default(),
             self.max.unwrap_or_default(),
-            self.mean().unwrap_or_default(),
+            self.mean(),
             self.std_dev().unwrap_or_default(),
-            self.p50.estimate().unwrap_or_default(),
-            self.p90.estimate().unwrap_or_default(),
-            self.p99.estimate().unwrap_or_default()
+            p50_estimate,
+            p90_estimate,
+            p99_estimate
         )
     }
 }
@@ -1589,16 +1605,10 @@ where
             .collect::<Option<_>>()
             .context("Underflow subtracting distributions values")?;
 
-        // Subtract sum_of_samples and sum_of_squares directly.
+        // Subtract sum_of_samples and squared_mean directly.
         // We allow underflow here.
         let sum_of_samples = self.sum_of_samples - rhs.sum_of_samples;
-        let sum_of_squares = self.sum_of_squares - rhs.sum_of_squares;
-
-        // Subtract quantiles directly.
-        // We allow underflow here.
-        let p50 = self.p50.sub(&rhs.p50);
-        let p90 = self.p50.sub(&rhs.p90);
-        let p99 = self.p50.sub(&rhs.p99);
+        let squared_mean = self.squared_mean - rhs.squared_mean;
 
         Ok(Self {
             bins: self.bins.clone(),
@@ -1606,10 +1616,10 @@ where
             min: None,
             max: None,
             sum_of_samples,
-            sum_of_squares,
-            p50,
-            p90,
-            p99,
+            squared_mean,
+            p50: None,
+            p90: None,
+            p99: None,
         })
     }
 
@@ -1639,46 +1649,66 @@ where
     }
 
     /// Return the mean of the distribution.
-    pub fn mean(&self) -> Option<f64> {
-        let n_samples = self.n_samples();
-        if n_samples > 0 {
-            self.sum_of_samples.to_f64().map(|sum| sum / (n_samples as f64))
+    pub fn mean(&self) -> f64 {
+        if self.n_samples() > 0 {
+            // We can unwrap here because we know n_samples() > 0,
+            // so the sum_of_samples should convert to f64 without issue.
+            self.sum_of_samples
+                .to_f64()
+                .map(|sum| sum / (self.n_samples() as f64))
+                .unwrap()
         } else {
-            None
+            0.
         }
     }
 
-    /// Return the sample mean of the distribution.
+    /// Return the variance for inputs to the histogram based on the Welford's
+    /// algorithm, using the squared mean (M2).
+    ///
+    /// Returns `None` if there are fewer than two samples.
+    pub fn variance(&self) -> Option<f64> {
+        (self.n_samples() > 1)
+            .then(|| self.squared_mean / (self.n_samples() as f64))
+    }
+
+    /// Return the sample variance for inputs to the histogram based on the
+    /// Welford's algorithm, using the squared mean (M2).
+    ///
+    /// Returns `None` if there are fewer than two samples.
+    pub fn sample_variance(&self) -> Option<f64> {
+        (self.n_samples() > 1)
+            .then(|| self.squared_mean / ((self.n_samples() - 1) as f64))
+    }
+
+    /// Return the standard deviation for inputs to the histogram.
+    ///
+    /// This is a biased (as a consequence of Jensen’s inequality), estimate of
+    /// the population deviation that returns the standard deviation of the
+    /// samples seen by the histogram.
+    ///
+    /// Returns `None` if the variance is `None`, i.e., if there are fewer than
+    /// two samples.
     pub fn std_dev(&self) -> Option<f64> {
-        let n_samples = self.n_samples();
-        if n_samples > 1 {
-            self.mean().and_then(|mean| {
-                let sum_of_squares = self.sum_of_squares.to_f64()?;
-                let sum_of_samples = self.sum_of_samples.to_f64()?;
-
-                let variance = (sum_of_squares - (sum_of_samples * mean))
-                    / (n_samples as f64);
-                Some(variance.sqrt())
-            })
-        } else {
-            None
+        match self.variance() {
+            Some(variance) => Some(variance.sqrt()),
+            None => None,
         }
     }
 
-    /// Return the sample standard deviation of the distribution.
+    /// Return the "corrected" sample standard deviation for inputs to the
+    /// histogram.
+    ///
+    /// This is an unbiased estimate of the population deviation, applying
+    /// Bessel's correction, which corrects the bias in the estimation of the
+    /// population variance, and some, but not all of the bias in the estimation
+    /// of the population standard deviation.
+    ///
+    /// Returns `None` if the variance is `None`, i.e., if there are fewer than
+    /// two samples.
     pub fn sample_std_dev(&self) -> Option<f64> {
-        let n_samples = self.n_samples();
-        if n_samples > 1 {
-            self.mean().and_then(|mean| {
-                let sum_of_squares = self.sum_of_squares.to_f64()?;
-                let sum_of_samples = self.sum_of_samples.to_f64()?;
-
-                let variance = (sum_of_squares - (sum_of_samples * mean))
-                    / (n_samples as f64 - 1.0);
-                Some(variance.sqrt())
-            })
-        } else {
-            None
+        match self.sample_variance() {
+            Some(variance) => Some(variance.sqrt()),
+            None => None,
         }
     }
 
@@ -1699,10 +1729,10 @@ macro_rules! i64_dist_from {
                     min: Some(hist.min() as i64),
                     max: Some(hist.max() as i64),
                     sum_of_samples: hist.sum_of_samples(),
-                    sum_of_squares: hist.sum_of_squares(),
-                    p50: hist.p50q().clone(),
-                    p90: hist.p90q().clone(),
-                    p99: hist.p99q().clone(),
+                    squared_mean: hist.squared_mean(),
+                    p50: Some(hist.p50q()),
+                    p90: Some(hist.p90q()),
+                    p99: Some(hist.p99q()),
                 }
             }
         }
@@ -1740,10 +1770,10 @@ impl TryFrom<&oximeter::histogram::Histogram<u64>> for Distribution<i64> {
             min: Some(hist.min() as i64),
             max: Some(hist.max() as i64),
             sum_of_samples: hist.sum_of_samples(),
-            sum_of_squares: hist.sum_of_squares(),
-            p50: hist.p50q().clone(),
-            p90: hist.p90q().clone(),
-            p99: hist.p99q().clone(),
+            squared_mean: hist.squared_mean(),
+            p50: Some(hist.p50q()),
+            p90: Some(hist.p90q()),
+            p99: Some(hist.p99q()),
         })
     }
 }
@@ -1768,10 +1798,10 @@ macro_rules! f64_dist_from {
                     min: Some(hist.min() as f64),
                     max: Some(hist.max() as f64),
                     sum_of_samples: hist.sum_of_samples() as f64,
-                    sum_of_squares: hist.sum_of_squares() as f64,
-                    p50: hist.p50q().clone(),
-                    p90: hist.p90q().clone(),
-                    p99: hist.p99q().clone(),
+                    squared_mean: hist.squared_mean(),
+                    p50: Some(hist.p50q()),
+                    p90: Some(hist.p90q()),
+                    p99: Some(hist.p99q()),
                 }
             }
         }
@@ -1914,12 +1944,12 @@ mod tests {
         assert_eq!(diff.n_samples(), 1);
         assert!(diff.min().is_none());
         assert!(diff.max().is_none());
-        assert_eq!(diff.mean().unwrap(), 14.0);
+        assert_eq!(diff.mean(), 14.0);
         assert!(diff.std_dev().is_none());
         assert!(diff.sample_std_dev().is_none());
-        assert_eq!(diff.p50.estimate().unwrap(), 4.0);
-        assert_eq!(diff.p90.estimate().unwrap(), 4.0);
-        assert_eq!(diff.p99.estimate().unwrap(), 4.0);
+        assert!(diff.p50.is_none());
+        assert!(diff.p90.is_none());
+        assert!(diff.p99.is_none());
     }
 
     fn timestamps(n: usize) -> Vec<DateTime<Utc>> {
@@ -2153,10 +2183,10 @@ mod tests {
                         min: Some(0),
                         max: Some(2),
                         sum_of_samples: 0,
-                        sum_of_squares: 0,
-                        p50: Quantile::p50(),
-                        p90: Quantile::p90(),
-                        p99: Quantile::p99(),
+                        squared_mean: 0.0,
+                        p50: Some(Quantile::p50()),
+                        p90: Some(Quantile::p90()),
+                        p99: Some(Quantile::p99()),
                     },
                 )]),
                 metric_type: MetricType::Gauge,
@@ -2200,10 +2230,10 @@ mod tests {
                         min: Some(0.0),
                         max: Some(2.0),
                         sum_of_samples: 0.0,
-                        sum_of_squares: 0.0,
-                        p50: Quantile::p50(),
-                        p90: Quantile::p90(),
-                        p99: Quantile::p99(),
+                        squared_mean: 0.0,
+                        p50: Some(Quantile::p50()),
+                        p90: Some(Quantile::p90()),
+                        p99: Some(Quantile::p99()),
                     },
                 )]),
                 metric_type: MetricType::Gauge,

@@ -239,19 +239,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami8
     min Int8,
     max Int8,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -268,19 +265,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu8
     min UInt8,
     max UInt8,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -297,19 +291,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami16
     min Int16,
     max Int16,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -326,19 +317,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu16
     min UInt16,
     max UInt16,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -355,19 +343,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami32
     min Int32,
     max Int32,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -384,19 +369,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu32
     min UInt32,
     max UInt32,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -413,19 +395,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami64
     min Int64,
     max Int64,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -442,19 +421,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu64
     min UInt64,
     max UInt64,
     sum_of_samples Int64,
-    sum_of_squares Int64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -471,19 +447,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf32
     min Float32,
     max Float32,
     sum_of_samples Float64,
-    sum_of_squares Float64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -500,19 +473,16 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf64
     min Float64,
     max Float64,
     sum_of_samples Float64,
-    sum_of_squares Float64,
+    squared_mean Float64,
     p50_marker_heights Array(Float64),
-    p50_marker_positions Array(Int64),
+    p50_marker_positions Array(UInt64),
     p50_desired_marker_positions Array(Float64),
-    p50_desired_marker_increments Array(Float64),
     p90_marker_heights Array(Float64),
-    p90_marker_positions Array(Int64),
+    p90_marker_positions Array(UInt64),
     p90_desired_marker_positions Array(Float64),
-    p90_desired_marker_increments Array(Float64),
     p99_marker_heights Array(Float64),
-    p99_marker_positions Array(Int64),
-    p99_desired_marker_positions Array(Float64),
-    p99_desired_marker_increments Array(Float64)
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)

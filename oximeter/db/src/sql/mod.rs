@@ -624,19 +624,16 @@ impl RestrictedQuery {
                 "min",
                 "max",
                 "sum_of_samples",
-                "sum_of_squares",
+                "squared_mean",
                 "p50_marker_heights",
                 "p50_marker_positions",
                 "p50_desired_marker_positions",
-                "p50_desired_marker_increments",
                 "p90_marker_heights",
                 "p90_marker_positions",
                 "p90_desired_marker_positions",
-                "p90_desired_marker_increments",
                 "p99_marker_heights",
                 "p99_marker_positions",
                 "p99_desired_marker_positions",
-                "p99_desired_marker_increments",
             ]
         } else if datum_type.is_cumulative() {
             &["start_time", "timestamp", "datum"]

@@ -12338,19 +12338,34 @@
             "format": "double"
           },
           "p50": {
-            "$ref": "#/components/schemas/Quantile"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
           },
           "p90": {
-            "$ref": "#/components/schemas/Quantile"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
           },
           "p99": {
-            "$ref": "#/components/schemas/Quantile"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
           },
-          "sum_of_samples": {
+          "squared_mean": {
             "type": "number",
             "format": "double"
           },
-          "sum_of_squares": {
+          "sum_of_samples": {
             "type": "number",
             "format": "double"
           }
@@ -12358,11 +12373,8 @@
         "required": [
           "bins",
           "counts",
-          "p50",
-          "p90",
-          "p99",
-          "sum_of_samples",
-          "sum_of_squares"
+          "squared_mean",
+          "sum_of_samples"
         ]
       },
       "Distributionint64": {
@@ -12395,19 +12407,34 @@
             "format": "int64"
           },
           "p50": {
-            "$ref": "#/components/schemas/Quantile"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
           },
           "p90": {
-            "$ref": "#/components/schemas/Quantile"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
           },
           "p99": {
-            "$ref": "#/components/schemas/Quantile"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "type": "number",
+            "format": "double"
           },
           "sum_of_samples": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "sum_of_squares": {
             "type": "integer",
             "format": "int64"
           }
@@ -12415,11 +12442,8 @@
         "required": [
           "bins",
           "counts",
-          "p50",
-          "p90",
-          "p99",
-          "sum_of_samples",
-          "sum_of_squares"
+          "squared_mean",
+          "sum_of_samples"
         ]
       },
       "EphemeralIpCreate": {
@@ -13222,6 +13246,11 @@
               }
             ]
           },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead more on Welford's algorithm at <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm>",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
             "description": "The start time of the histogram.",
             "type": "string",
@@ -13229,11 +13258,6 @@
           },
           "sum_of_samples": {
             "description": "The sum of all samples in the histogram.",
-            "type": "number",
-            "format": "double"
-          },
-          "sum_of_squares": {
-            "description": "The sum of the squares of all samples in the histogram.",
             "type": "number",
             "format": "double"
           }
@@ -13246,9 +13270,9 @@
           "p50",
           "p90",
           "p99",
+          "squared_mean",
           "start_time",
-          "sum_of_samples",
-          "sum_of_squares"
+          "sum_of_samples"
         ]
       },
       "Histogramfloat": {
@@ -13302,6 +13326,11 @@
               }
             ]
           },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead more on Welford's algorithm at <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm>",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
             "description": "The start time of the histogram.",
             "type": "string",
@@ -13309,11 +13338,6 @@
           },
           "sum_of_samples": {
             "description": "The sum of all samples in the histogram.",
-            "type": "number",
-            "format": "double"
-          },
-          "sum_of_squares": {
-            "description": "The sum of the squares of all samples in the histogram.",
             "type": "number",
             "format": "double"
           }
@@ -13326,9 +13350,9 @@
           "p50",
           "p90",
           "p99",
+          "squared_mean",
           "start_time",
-          "sum_of_samples",
-          "sum_of_squares"
+          "sum_of_samples"
         ]
       },
       "Histogramint16": {
@@ -13382,6 +13406,11 @@
               }
             ]
           },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead more on Welford's algorithm at <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm>",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
             "description": "The start time of the histogram.",
             "type": "string",
@@ -13389,11 +13418,6 @@
           },
           "sum_of_samples": {
             "description": "The sum of all samples in the histogram.",
-            "type": "integer",
-            "format": "int64"
-          },
-          "sum_of_squares": {
-            "description": "The sum of the squares of all samples in the histogram.",
             "type": "integer",
             "format": "int64"
           }
@@ -13406,9 +13430,9 @@
           "p50",
           "p90",
           "p99",
+          "squared_mean",
           "start_time",
-          "sum_of_samples",
-          "sum_of_squares"
+          "sum_of_samples"
         ]
       },
       "Histogramint32": {
@@ -13462,6 +13486,11 @@
               }
             ]
           },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead more on Welford's algorithm at <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm>",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
             "description": "The start time of the histogram.",
             "type": "string",
@@ -13469,11 +13498,6 @@
           },
           "sum_of_samples": {
             "description": "The sum of all samples in the histogram.",
-            "type": "integer",
-            "format": "int64"
-          },
-          "sum_of_squares": {
-            "description": "The sum of the squares of all samples in the histogram.",
             "type": "integer",
             "format": "int64"
           }
@@ -13486,9 +13510,9 @@
           "p50",
           "p90",
           "p99",
+          "squared_mean",
           "start_time",
-          "sum_of_samples",
-          "sum_of_squares"
+          "sum_of_samples"
         ]
       },
       "Histogramint64": {
@@ -13542,6 +13566,11 @@
               }
             ]
           },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead more on Welford's algorithm at <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm>",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
             "description": "The start time of the histogram.",
             "type": "string",
@@ -13549,11 +13578,6 @@
           },
           "sum_of_samples": {
             "description": "The sum of all samples in the histogram.",
-            "type": "integer",
-            "format": "int64"
-          },
-          "sum_of_squares": {
-            "description": "The sum of the squares of all samples in the histogram.",
             "type": "integer",
             "format": "int64"
           }
@@ -13566,9 +13590,9 @@
           "p50",
           "p90",
           "p99",
+          "squared_mean",
           "start_time",
-          "sum_of_samples",
-          "sum_of_squares"
+          "sum_of_samples"
         ]
       },
       "Histogramint8": {
@@ -13622,6 +13646,11 @@
               }
             ]
           },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead more on Welford's algorithm at <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm>",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
             "description": "The start time of the histogram.",
             "type": "string",
@@ -13629,11 +13658,6 @@
           },
           "sum_of_samples": {
             "description": "The sum of all samples in the histogram.",
-            "type": "integer",
-            "format": "int64"
-          },
-          "sum_of_squares": {
-            "description": "The sum of the squares of all samples in the histogram.",
             "type": "integer",
             "format": "int64"
           }
@@ -13646,9 +13670,9 @@
           "p50",
           "p90",
           "p99",
+          "squared_mean",
           "start_time",
-          "sum_of_samples",
-          "sum_of_squares"
+          "sum_of_samples"
         ]
       },
       "Histogramuint16": {
@@ -13704,6 +13728,11 @@
               }
             ]
           },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead more on Welford's algorithm at <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm>",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
             "description": "The start time of the histogram.",
             "type": "string",
@@ -13711,11 +13740,6 @@
           },
           "sum_of_samples": {
             "description": "The sum of all samples in the histogram.",
-            "type": "integer",
-            "format": "int64"
-          },
-          "sum_of_squares": {
-            "description": "The sum of the squares of all samples in the histogram.",
             "type": "integer",
             "format": "int64"
           }
@@ -13728,9 +13752,9 @@
           "p50",
           "p90",
           "p99",
+          "squared_mean",
           "start_time",
-          "sum_of_samples",
-          "sum_of_squares"
+          "sum_of_samples"
         ]
       },
       "Histogramuint32": {
@@ -13786,6 +13810,11 @@
               }
             ]
           },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead more on Welford's algorithm at <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm>",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
             "description": "The start time of the histogram.",
             "type": "string",
@@ -13793,11 +13822,6 @@
           },
           "sum_of_samples": {
             "description": "The sum of all samples in the histogram.",
-            "type": "integer",
-            "format": "int64"
-          },
-          "sum_of_squares": {
-            "description": "The sum of the squares of all samples in the histogram.",
             "type": "integer",
             "format": "int64"
           }
@@ -13810,9 +13834,9 @@
           "p50",
           "p90",
           "p99",
+          "squared_mean",
           "start_time",
-          "sum_of_samples",
-          "sum_of_squares"
+          "sum_of_samples"
         ]
       },
       "Histogramuint64": {
@@ -13868,6 +13892,11 @@
               }
             ]
           },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead more on Welford's algorithm at <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm>",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
             "description": "The start time of the histogram.",
             "type": "string",
@@ -13875,11 +13904,6 @@
           },
           "sum_of_samples": {
             "description": "The sum of all samples in the histogram.",
-            "type": "integer",
-            "format": "int64"
-          },
-          "sum_of_squares": {
-            "description": "The sum of the squares of all samples in the histogram.",
             "type": "integer",
             "format": "int64"
           }
@@ -13892,9 +13916,9 @@
           "p50",
           "p90",
           "p99",
+          "squared_mean",
           "start_time",
-          "sum_of_samples",
-          "sum_of_squares"
+          "sum_of_samples"
         ]
       },
       "Histogramuint8": {
@@ -13950,6 +13974,11 @@
               }
             ]
           },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead more on Welford's algorithm at <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm>",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
             "description": "The start time of the histogram.",
             "type": "string",
@@ -13957,11 +13986,6 @@
           },
           "sum_of_samples": {
             "description": "The sum of all samples in the histogram.",
-            "type": "integer",
-            "format": "int64"
-          },
-          "sum_of_squares": {
-            "description": "The sum of the squares of all samples in the histogram.",
             "type": "integer",
             "format": "int64"
           }
@@ -13974,9 +13998,9 @@
           "p50",
           "p90",
           "p99",
+          "squared_mean",
           "start_time",
-          "sum_of_samples",
-          "sum_of_squares"
+          "sum_of_samples"
         ]
       },
       "Hostname": {
@@ -16369,19 +16393,9 @@
         }
       },
       "Quantile": {
-        "description": "Structure for estimating the p-quantile of a population.\n\nThis is based on the P² algorithm for estimating quantiles using constant space.\n\nThe algorithm consists of maintaining five markers: the minimum, the p/2-, p-, and (1 + p)/2 quantiles, and the maximum.\n\nRead <https://www.cs.wustl.edu/~jain/papers/ftp/psqr.pdf> for more.",
+        "description": "Structure for estimating the p-quantile of a population.\n\nThis is based on the P² algorithm for estimating quantiles using constant space.\n\nThe algorithm consists of maintaining five markers: the minimum, the p/2-, p-, and (1 + p)/2 quantiles, and the maximum.",
         "type": "object",
         "properties": {
-          "desired_marker_increments": {
-            "description": "The increment for the desired marker positions.",
-            "type": "array",
-            "items": {
-              "type": "number",
-              "format": "double"
-            },
-            "minItems": 5,
-            "maxItems": 5
-          },
           "desired_marker_positions": {
             "description": "The desired marker positions.",
             "type": "array",
@@ -16403,21 +16417,27 @@
             "maxItems": 5
           },
           "marker_positions": {
-            "description": "The positions of the markers.",
+            "description": "The positions of the markers.\n\nWe track sample size in the 5th position, as useful observations won't start until we've filled the heights at the 6th sample anyway This does deviate from the paper, but it's a more useful representation that works according to the paper's algorithm.",
             "type": "array",
             "items": {
               "type": "integer",
-              "format": "int64"
+              "format": "uint64",
+              "minimum": 0
             },
             "minItems": 5,
             "maxItems": 5
+          },
+          "p": {
+            "description": "The p value for the quantile.",
+            "type": "number",
+            "format": "double"
           }
         },
         "required": [
-          "desired_marker_increments",
           "desired_marker_positions",
           "marker_heights",
-          "marker_positions"
+          "marker_positions",
+          "p"
         ]
       },
       "Rack": {

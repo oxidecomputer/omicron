@@ -185,7 +185,7 @@ pub(crate) fn prepare_columns(
         cols.push(special_idents::SUM_OF_SAMPLES.into());
         types.push(special_idents::UINT64.into());
 
-        cols.push(special_idents::SUM_OF_SQUARES.into());
+        cols.push(special_idents::SQUARED_MEAN.into());
         types.push(special_idents::UINT64.into());
 
         for quantile in ["P50", "P90", "P99"].iter() {
@@ -194,8 +194,6 @@ pub(crate) fn prepare_columns(
             cols.push(format!("{}_MARKER_POSITIONS", quantile));
             types.push(special_idents::ARRAYINT64.into());
             cols.push(format!("{}_DESIRED_MARKER_POSITIONS", quantile));
-            types.push(special_idents::ARRAYFLOAT64.into());
-            cols.push(format!("{}_DESIRED_MARKER_INCREMENTS", quantile));
             types.push(special_idents::ARRAYFLOAT64.into());
         }
     } else if schema.datum_type.is_cumulative() {

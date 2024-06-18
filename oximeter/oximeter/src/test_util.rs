@@ -113,29 +113,6 @@ pub fn generate_test_samples(
     samples
 }
 
-/// Assert that two numbers are almost equal to each other.
-///
-/// On panic, this macro will print the values of the expressions with their
-/// debug representations.
-#[macro_export]
-macro_rules! assert_almost_eq {
-    ($a:expr, $b:expr, $prec:expr) => {
-        let diff = ($a - $b).abs();
-        assert!(
-            diff <= $prec,
-            "assertion failed: `abs(left - right) = {:.1e} < {:e}`, \
-                    (left: `{}`, right: `{}`)",
-            diff,
-            $prec,
-            $a,
-            $b
-        );
-    };
-}
-
-/// Assert that two numbers are almost equal to each other.
-pub use assert_almost_eq;
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -43,28 +43,22 @@ pub mod special_idents {
     pub const MIN: &str = "min";
     pub const MAX: &str = "max";
     pub const SUM_OF_SAMPLES: &str = "sum_of_samples";
-    pub const SUM_OF_SQUARES: &str = "sum_of_squares";
+    pub const SQUARED_MEAN: &str = "squared_mean";
     pub const P50_MARKER_HEIGHTS: &str = gen_marker!("50", "marker_heights");
     pub const P50_MARKER_POSITIONS: &str =
         gen_marker!("50", "marker_positions");
     pub const P50_DESIRED_MARKER_POSITIONS: &str =
         gen_marker!("50", "desired_marker_positions");
-    pub const P50_DESIRED_MARKER_INCREMENTS: &str =
-        gen_marker!("50", "desired_marker_increments");
     pub const P90_MARKER_HEIGHTS: &str = gen_marker!("90", "marker_heights");
     pub const P90_MARKER_POSITIONS: &str =
         gen_marker!("90", "marker_positions");
     pub const P90_DESIRED_MARKER_POSITIONS: &str =
         gen_marker!("90", "desired_marker_positions");
-    pub const P90_DESIRED_MARKER_INCREMENTS: &str =
-        gen_marker!("90", "desired_marker_increments");
     pub const P99_MARKER_HEIGHTS: &str = gen_marker!("99", "marker_heights");
     pub const P99_MARKER_POSITIONS: &str =
         gen_marker!("99", "marker_positions");
     pub const P99_DESIRED_MARKER_POSITIONS: &str =
         gen_marker!("99", "desired_marker_positions");
-    pub const P99_DESIRED_MARKER_INCREMENTS: &str =
-        gen_marker!("99", "desired_marker_increments");
     pub const DATETIME64: &str = "DateTime64";
     pub const ARRAYU64: &str = "Array[u64]";
     pub const ARRAYFLOAT64: &str = "Array[f64]";

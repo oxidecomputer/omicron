@@ -449,64 +449,60 @@ declare_cumulative_measurement_row! { CumulativeF32MeasurementRow, f32, "cumulat
 declare_cumulative_measurement_row! { CumulativeF64MeasurementRow, f64, "cumulativef64" }
 
 /// A representation of all quantiles for a histogram.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
 struct AllQuantiles {
     p50_marker_heights: [f64; 5],
-    p50_marker_positions: [i64; 5],
+    p50_marker_positions: [u64; 5],
     p50_desired_marker_positions: [f64; 5],
-    p50_desired_marker_increments: [f64; 5],
 
     p90_marker_heights: [f64; 5],
-    p90_marker_positions: [i64; 5],
+    p90_marker_positions: [u64; 5],
     p90_desired_marker_positions: [f64; 5],
-    p90_desired_marker_increments: [f64; 5],
 
     p99_marker_heights: [f64; 5],
-    p99_marker_positions: [i64; 5],
+    p99_marker_positions: [u64; 5],
     p99_desired_marker_positions: [f64; 5],
-    p99_desired_marker_increments: [f64; 5],
 }
 
 impl AllQuantiles {
     /// Create a flat `AllQuantiles` struct from the given quantiles.
-    fn flatten(p50: Quantile, p90: Quantile, p99: Quantile) -> Self {
+    fn flatten(q50: Quantile, q90: Quantile, q99: Quantile) -> Self {
         Self {
-            p50_marker_heights: p50.marker_hghts,
-            p50_marker_positions: p50.marker_pos,
-            p50_desired_marker_positions: p50.desired_marker_pos,
-            p50_desired_marker_increments: p50.desired_marker_incrs,
-            p90_marker_heights: p90.marker_hghts,
-            p90_marker_positions: p90.marker_pos,
-            p90_desired_marker_positions: p90.desired_marker_pos,
-            p90_desired_marker_increments: p90.desired_marker_incrs,
-            p99_marker_heights: p99.marker_hghts,
-            p99_marker_positions: p99.marker_pos,
-            p99_desired_marker_positions: p99.desired_marker_pos,
-            p99_desired_marker_increments: p99.desired_marker_incrs,
+            p50_marker_heights: q50.marker_heights(),
+            p50_marker_positions: q50.marker_positions(),
+            p50_desired_marker_positions: q50.desired_marker_positions(),
+
+            p90_marker_heights: q90.marker_heights(),
+            p90_marker_positions: q90.marker_positions(),
+            p90_desired_marker_positions: q90.desired_marker_positions(),
+
+            p99_marker_heights: q99.marker_heights(),
+            p99_marker_positions: q99.marker_positions(),
+            p99_desired_marker_positions: q99.desired_marker_positions(),
         }
     }
 
     /// Split the quantiles into separate `Quantile` structs in order of P.
     fn split(&self) -> (Quantile, Quantile, Quantile) {
         (
-            Quantile {
-                marker_hghts: self.p50_marker_heights,
-                marker_pos: self.p50_marker_positions,
-                desired_marker_pos: self.p50_desired_marker_positions,
-                desired_marker_incrs: self.p50_desired_marker_increments,
-            },
-            Quantile {
-                marker_hghts: self.p90_marker_heights,
-                marker_pos: self.p90_marker_positions,
-                desired_marker_pos: self.p90_desired_marker_positions,
-                desired_marker_incrs: self.p90_desired_marker_increments,
-            },
-            Quantile {
-                marker_hghts: self.p99_marker_heights,
-                marker_pos: self.p99_marker_positions,
-                desired_marker_pos: self.p99_desired_marker_positions,
-                desired_marker_incrs: self.p99_desired_marker_increments,
-            },
+            Quantile::from_parts(
+                0.5,
+                self.p50_marker_heights,
+                self.p50_marker_positions,
+                self.p50_desired_marker_positions,
+            ),
+            Quantile::from_parts(
+                0.9,
+                self.p90_marker_heights,
+                self.p90_marker_positions,
+                self.p90_desired_marker_positions,
+            ),
+            Quantile::from_parts(
+                0.99,
+                self.p99_marker_heights,
+                self.p99_marker_positions,
+                self.p99_desired_marker_positions,
+            ),
         )
     }
 }
@@ -526,7 +522,7 @@ where
     pub min: T,
     pub max: T,
     pub sum_of_samples: T::Width,
-    pub sum_of_squares: T::Width,
+    pub squared_mean: f64,
     #[serde(flatten)]
     pub quantiles: AllQuantiles,
 }
@@ -556,7 +552,7 @@ where
             min: T::zero(),
             max: T::zero(),
             sum_of_samples: T::Width::zero(),
-            sum_of_squares: T::Width::zero(),
+            squared_mean: 0.0,
             quantiles: AllQuantiles::flatten(p50, p90, p99),
         }
     }
@@ -574,11 +570,11 @@ where
             min: hist.min(),
             max: hist.max(),
             sum_of_samples: hist.sum_of_samples(),
-            sum_of_squares: hist.sum_of_squares(),
+            squared_mean: hist.squared_mean(),
             quantiles: AllQuantiles::flatten(
-                hist.p50q().clone(),
-                hist.p90q().clone(),
-                hist.p99q().clone(),
+                hist.p50q(),
+                hist.p90q(),
+                hist.p99q(),
             ),
         }
     }
@@ -1370,7 +1366,7 @@ where
     min: T,
     max: T,
     sum_of_samples: T::Width,
-    sum_of_squares: T::Width,
+    squared_mean: f64,
     #[serde(flatten)]
     quantiles: AllQuantiles,
 }
@@ -1433,14 +1429,14 @@ where
             }
 
             let (p50, p90, p99) = sample.quantiles.split();
-            let hist = Histogram::with(
+            let hist = Histogram::from_parts(
                 sample.start_time,
                 sample.bins,
                 sample.counts,
                 sample.min,
                 sample.max,
                 sample.sum_of_samples,
-                sample.sum_of_squares,
+                sample.squared_mean,
                 p50,
                 p90,
                 p99,
@@ -1963,12 +1959,12 @@ mod tests {
         assert_eq!(dbhist.min, hist.min());
         assert_eq!(dbhist.max, hist.max());
         assert_eq!(dbhist.sum_of_samples, hist.sum_of_samples());
-        assert_eq!(dbhist.sum_of_squares, hist.sum_of_squares());
+        assert_eq!(dbhist.squared_mean, hist.squared_mean());
 
         let (p50, p90, p99) = dbhist.quantiles.split();
-        assert_eq!(&p50, hist.p50q());
-        assert_eq!(&p90, hist.p90q());
-        assert_eq!(&p99, hist.p99q());
+        assert_eq!(p50, hist.p50q());
+        assert_eq!(p90, hist.p90q());
+        assert_eq!(p99, hist.p99q());
     }
 
     #[test]
@@ -2020,14 +2016,14 @@ mod tests {
         let (unpacked_p50, unpacked_p90, unpacked_p99) =
             unpacked.datum.quantiles.split();
 
-        let unpacked_hist = Histogram::with(
+        let unpacked_hist = Histogram::from_parts(
             unpacked.start_time,
             unpacked.datum.bins,
             unpacked.datum.counts,
             unpacked.datum.min,
             unpacked.datum.max,
             unpacked.datum.sum_of_samples,
-            unpacked.datum.sum_of_squares,
+            unpacked.datum.squared_mean,
             unpacked_p50,
             unpacked_p90,
             unpacked_p99,
@@ -2146,19 +2142,16 @@ mod tests {
             "min": 0,
             "max": 1,
             "sum_of_samples": 2,
-            "sum_of_squares": 2,
+            "squared_mean": 2.0,
             "p50_marker_heights": [0.0, 0.0, 0.0, 0.0, 1.0],
-            "p50_marker_positions": [1, 2, 3, 4, 0],
+            "p50_marker_positions": [1, 2, 3, 4, 2],
             "p50_desired_marker_positions": [1.0, 3.0, 5.0, 5.0, 5.0],
-            "p50_desired_marker_increments": [0.0, 0.5, 1.0, 1.0, 1.0],
             "p90_marker_heights": [0.0, 0.0, 0.0, 0.0, 1.0],
-            "p90_marker_positions": [1, 2, 3, 4, 0],
+            "p90_marker_positions": [1, 2, 3, 4, 2],
             "p90_desired_marker_positions": [1.0, 3.0, 5.0, 5.0, 5.0],
-            "p90_desired_marker_increments": [0.0, 0.5, 1.0, 1.0, 1.0],
             "p99_marker_heights": [0.0, 0.0, 0.0, 0.0, 1.0],
-            "p99_marker_positions": [1, 2, 3, 4, 0],
-            "p99_desired_marker_positions": [1.0, 3.0, 5.0, 5.0, 5.0],
-            "p99_desired_marker_increments": [0.0, 0.5, 1.0, 1.0, 1.0]
+            "p99_marker_positions": [1, 2, 3, 4, 2],
+            "p99_desired_marker_positions": [1.0, 3.0, 5.0, 5.0, 5.0]
         }"#;
         let (key, measurement) =
             parse_measurement_from_row(line, DatumType::HistogramI64);
@@ -2173,34 +2166,34 @@ mod tests {
         assert_eq!(hist.min(), 0);
         assert_eq!(hist.max(), 1);
         assert_eq!(hist.sum_of_samples(), 2);
-        assert_eq!(hist.sum_of_squares(), 2);
+        assert_eq!(hist.squared_mean(), 2.);
         assert_eq!(
             hist.p50q(),
-            &Quantile {
-                marker_hghts: [0.0, 0.0, 0.0, 0.0, 1.0],
-                marker_pos: [1, 2, 3, 4, 0],
-                desired_marker_pos: [1.0, 3.0, 5.0, 5.0, 5.0],
-                desired_marker_incrs: [0.0, 0.5, 1.0, 1.0, 1.0],
-            }
+            Quantile::from_parts(
+                0.5,
+                [0.0, 0.0, 0.0, 0.0, 1.0],
+                [1, 2, 3, 4, 2],
+                [1.0, 3.0, 5.0, 5.0, 5.0],
+            )
         );
         assert_eq!(
             hist.p90q(),
-            &Quantile {
-                marker_hghts: [0.0, 0.0, 0.0, 0.0, 1.0],
-                marker_pos: [1, 2, 3, 4, 0],
-                desired_marker_pos: [1.0, 3.0, 5.0, 5.0, 5.0],
-                desired_marker_incrs: [0.0, 0.5, 1.0, 1.0, 1.0],
-            }
+            Quantile::from_parts(
+                0.9,
+                [0.0, 0.0, 0.0, 0.0, 1.0],
+                [1, 2, 3, 4, 2],
+                [1.0, 3.0, 5.0, 5.0, 5.0],
+            )
         );
 
         assert_eq!(
             hist.p99q(),
-            &Quantile {
-                marker_hghts: [0.0, 0.0, 0.0, 0.0, 1.0],
-                marker_pos: [1, 2, 3, 4, 0],
-                desired_marker_pos: [1.0, 3.0, 5.0, 5.0, 5.0],
-                desired_marker_incrs: [0.0, 0.5, 1.0, 1.0, 1.0],
-            }
+            Quantile::from_parts(
+                0.99,
+                [0.0, 0.0, 0.0, 0.0, 1.0],
+                [1, 2, 3, 4, 2],
+                [1.0, 3.0, 5.0, 5.0, 5.0],
+            )
         );
     }
 
