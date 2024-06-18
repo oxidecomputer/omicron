@@ -4807,6 +4807,7 @@ dependencies = [
  "term",
  "thiserror",
  "tokio",
+ "url",
  "usdt",
  "uuid",
 ]

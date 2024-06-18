@@ -13,6 +13,7 @@ use diesel::PgConnection;
 use diesel_dtrace::DTraceConnection;
 use qorb::backend::{self, Backend, Error};
 use slog::Logger;
+use url::Url;
 
 pub type DbConnection = DTraceConnection<PgConnection>;
 
@@ -22,14 +23,15 @@ pub const DISALLOW_FULL_TABLE_SCAN_SQL: &str =
 /// A [backend::Connector] which provides access to [PgConnection].
 pub(crate) struct DieselPgConnector {
     log: Logger,
-    prefix: String,
-    suffix: String,
+    user: String,
+    db: String,
+    args: Vec<(String, String)>,
 }
 
 pub(crate) struct DieselPgConnectorArgs<'a> {
     pub(crate) user: &'a str,
     pub(crate) db: &'a str,
-    pub(crate) args: Option<&'a str>,
+    pub(crate) args: Vec<(&'a str, &'a str)>,
 }
 
 impl DieselPgConnector {
@@ -47,20 +49,29 @@ impl DieselPgConnector {
         let DieselPgConnectorArgs { user, db, args } = args;
         Self {
             log: log.clone(),
-            prefix: format!("postgresql://{user}@"),
-            suffix: format!(
-                "/{db}{}",
-                args.map(|args| format!("?{args}")).unwrap_or("".to_string())
-            ),
+            user: user.to_string(),
+            db: db.to_string(),
+            args: args
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
         }
     }
 
-    fn to_url(&self, address: std::net::SocketAddr) -> String {
-        format!(
-            "{prefix}{address}{suffix}",
-            prefix = self.prefix,
-            suffix = self.suffix,
-        )
+    fn to_url(
+        &self,
+        address: std::net::SocketAddr,
+    ) -> Result<String, anyhow::Error> {
+        let user = &self.user;
+        let db = &self.db;
+        let mut url =
+            Url::parse(&format!("postgresql://{user}@{address}/{db}"))?;
+
+        for (k, v) in &self.args {
+            url.query_pairs_mut().append_pair(k, v);
+        }
+
+        Ok(url.as_str().to_string())
     }
 }
 
@@ -72,7 +83,7 @@ impl backend::Connector for DieselPgConnector {
         &self,
         backend: &Backend,
     ) -> Result<Self::Connection, Error> {
-        let url = self.to_url(backend.address);
+        let url = self.to_url(backend.address).map_err(Error::Other)?;
 
         let conn = tokio::task::spawn_blocking(move || {
             let pg_conn = DbConnection::establish(&url)

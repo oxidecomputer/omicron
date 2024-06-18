@@ -46,8 +46,9 @@ strum.workspace = true
 swrite.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
-uuid.workspace = true
+url.workspace = true
 usdt.workspace = true
+uuid.workspace = true
 
 db-macros.workspace = true
 nexus-auth.workspace = true

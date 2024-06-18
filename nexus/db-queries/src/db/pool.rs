@@ -83,7 +83,7 @@ fn make_postgres_connector(
     // - Creating async_bb8_diesel connections that also wrap DTraceConnections.
     let user = "root";
     let db = "omicron";
-    let args = Some("sslmode=disable");
+    let args = vec![("sslmode", "disable")];
     Arc::new(DieselPgConnector::new(
         log,
         DieselPgConnectorArgs { user, db, args },
@@ -125,9 +125,11 @@ impl Pool {
     }
 
     /// Creates a new qorb-backed connection pool which returns an error
-    /// if claims are not quickly available.
+    /// if claims are not available within one millisecond.
     ///
-    /// This is intended for test-only usage.
+    /// This is intended for test-only usage, in particular for tests where
+    /// claim requests should rapidly return errors when a backend has been
+    /// intentionally disabled.
     #[cfg(any(test, feature = "testing"))]
     pub fn new_single_host_failfast(
         log: &Logger,
