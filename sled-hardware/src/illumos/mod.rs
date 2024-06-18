@@ -66,10 +66,16 @@ enum Error {
     NvmeHandleInit(#[from] libnvme::NvmeInitError),
 
     #[error("libnvme error: {0}")]
-    NvmeError(#[from] libnvme::NvmeError),
+    Nvme(#[from] libnvme::NvmeError),
+
+    #[error("libnvme controller error: {0}")]
+    NvmeController(#[from] libnvme::controller::NvmeControllerError),
 
     #[error("Unable to grab NVMe Controller lock")]
     NvmeControllerLocked,
+
+    #[error("Failed to get NVMe Controller's firmware log page: {0}")]
+    FirmwareLogPage(#[from] libnvme::firmware::FirmwareLogPageError),
 }
 
 const GIMLET_ROOT_NODE_NAME: &str = "Oxide,Gimlet";
@@ -557,10 +563,7 @@ fn poll_blkdev_node(
         firmware_log_page.active_slot,
         firmware_log_page.next_active_slot,
         firmware_log_page.slot1_is_read_only,
-        firmware_log_page
-            .slot_iter()
-            .map(|s| s.map(String::to_string))
-            .collect(),
+        firmware_log_page.slot_iter().map(|s| s.map(str::to_string)).collect(),
     );
 
     let disk = UnparsedDisk::new(
