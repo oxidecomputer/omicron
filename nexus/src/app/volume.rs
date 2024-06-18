@@ -113,7 +113,7 @@ impl super::Nexus {
                 .await?;
 
             // If the live repair or reconciliation was successfully completed,
-            // check if the repaired downstairs is part of a a region
+            // check if the repaired downstairs is part of a region
             // replacement request.
 
             if !repair_finish_info.aborted {
