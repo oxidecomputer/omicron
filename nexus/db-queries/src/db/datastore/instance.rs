@@ -700,7 +700,7 @@ impl DataStore {
 
         let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
         self.instance_ssh_keys_delete(opctx, instance_id).await?;
-        self.migration_mark_deleted_by_instance(opctx, instance_id).await?;
+        self.instance_mark_migrations_deleted(opctx, instance_id).await?;
 
         Ok(())
     }

@@ -45,15 +45,15 @@ impl DataStore {
     }
 
     /// List all migrations associated with the provided instance ID.
-    pub async fn migration_list_by_instance(
+    pub async fn instance_list_migrations(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
+        instance_id: InstanceUuid,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Migration> {
         paginated(dsl::migration, dsl::id, pagparams)
+            .filter(dsl::instance_id.eq(instance_id.into_untyped_uuid()))
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::instance_id.eq(authz_instance.id()))
             .select(Migration::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -63,7 +63,7 @@ impl DataStore {
     /// Mark *all* migrations for the provided instance as deleted.
     ///
     /// This should be called when deleting an instance.
-    pub(crate) async fn migration_mark_deleted_by_instance(
+    pub(crate) async fn instance_mark_migrations_deleted(
         &self,
         opctx: &OpContext,
         instance_id: InstanceUuid,
@@ -240,9 +240,9 @@ mod tests {
             insert_migration(&datastore, &opctx, instance_id).await;
 
         let list = datastore
-            .migration_list_by_instance(
+            .instance_list_migrations(
                 &opctx,
-                &authz_instance,
+                instance_id,
                 &DataPageParams::max_page(),
             )
             .await
@@ -253,9 +253,9 @@ mod tests {
             insert_migration(&datastore, &opctx, instance_id).await;
 
         let list = datastore
-            .migration_list_by_instance(
+            .instance_list_migrations(
                 &opctx,
-                &authz_instance,
+                instance_id,
                 &DataPageParams::max_page(),
             )
             .await
@@ -270,9 +270,9 @@ mod tests {
             .await
             .expect("must delete migration");
         let list = datastore
-            .migration_list_by_instance(
+            .instance_list_migrations(
                 &opctx,
-                &authz_instance,
+                instance_id,
                 &DataPageParams::max_page(),
             )
             .await
@@ -280,7 +280,7 @@ mod tests {
         assert_all_migrations_found(&[&migration1, &migration2], &list[..]);
 
         let deleted = datastore
-            .migration_mark_deleted_by_instance(&opctx, instance_id)
+            .instance_mark_migrations_deleted(&opctx, instance_id)
             .await
             .expect("must delete remaining migrations");
         assert_eq!(
@@ -289,9 +289,9 @@ mod tests {
         );
 
         let list = datastore
-            .migration_list_by_instance(
+            .instance_list_migrations(
                 &opctx,
-                &authz_instance,
+                instance_id,
                 &DataPageParams::max_page(),
             )
             .await
@@ -299,7 +299,7 @@ mod tests {
         assert!(list.is_empty(), "all migrations must be deleted");
 
         let deleted = datastore
-            .migration_mark_deleted_by_instance(&opctx, instance_id)
+            .instance_mark_migrations_deleted(&opctx, instance_id)
             .await
             .expect("must delete remaining migrations");
         assert_eq!(
