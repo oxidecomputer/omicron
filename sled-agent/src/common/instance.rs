@@ -114,7 +114,7 @@ impl ObservedPropolisState {
     /// runtime state and an instance state monitor response received from
     /// Propolis.
     pub fn new(
-        migration: Option<&MigrationRuntimeState>,
+        instance_runtime: &InstanceRuntimeState,
         propolis_state: &InstanceStateMonitorResponse,
     ) -> Self {
         // If there's no migration currently registered with this sled, report
@@ -122,7 +122,14 @@ impl ObservedPropolisState {
         // even if Propolis has some migration data to share. (This case arises
         // when Propolis returns state from a previous migration that sled agent
         // has already retired.)
-        let Some(migration) = migration else {
+        //
+        // N.B. This needs to be read from the instance runtime state and not
+        //      the migration runtime state to ensure that, once a migration in
+        //      completes, the "completed" observation is reported to
+        //      `InstanceStates::apply_propolis_observation` exactly once.
+        //      Otherwise that routine will try to apply the "inbound migration
+        //      complete" instance state transition twice.
+        let Some(migration_id) = instance_runtime.migration_id else {
             return Self {
                 vmm_state: PropolisInstanceState(propolis_state.state),
                 migration_status: ObservedMigrationStatus::NoMigration,
@@ -136,12 +143,8 @@ impl ObservedPropolisState {
             &propolis_state.migration.migration_in,
             &propolis_state.migration.migration_out,
         ) {
-            (Some(inbound), _) if inbound.id == migration.migration_id => {
-                inbound
-            }
-            (_, Some(outbound)) if outbound.id == migration.migration_id => {
-                outbound
-            }
+            (Some(inbound), _) if inbound.id == migration_id => inbound,
+            (_, Some(outbound)) if outbound.id == migration_id => outbound,
             _ => {
                 // Sled agent believes this instance should be migrating, but
                 // Propolis isn't reporting a matching migration yet, so assume

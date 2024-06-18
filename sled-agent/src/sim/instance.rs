@@ -278,7 +278,7 @@ impl SimInstanceInner {
             }
 
             self.state.apply_propolis_observation(&ObservedPropolisState::new(
-                self.state.migration(),
+                self.state.instance(),
                 &self.last_response,
             ))
         } else {
