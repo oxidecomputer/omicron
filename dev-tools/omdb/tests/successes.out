@@ -504,7 +504,8 @@ task: "region_replacement_driver"
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     number of region replacement drive sagas started ok: 0
-    errors querying, or number of region replacement drive saga start errors: 0
+    number of region replacement finish sagas started ok: 0
+    number of errors: 0
 
 task: "service_firewall_rule_propagation"
   configured period: every 5m

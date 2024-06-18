@@ -28,6 +28,7 @@ use nexus_client::types::SledSelector;
 use nexus_client::types::UninitializedSledId;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::deployment::Blueprint;
+use nexus_types::internal_api::background::RegionReplacementDriverStatus;
 use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -1050,30 +1051,35 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             }
         };
     } else if name == "region_replacement_driver" {
-        #[derive(Deserialize)]
-        struct TaskSuccess {
-            /// how many region replacement drive sagas were started ok
-            region_replacement_driven_ok: usize,
-
-            /// errors querying the db, or region replacement drive sagas that
-            /// were not started ok
-            region_replacement_driven_err: usize,
-        }
-
-        match serde_json::from_value::<TaskSuccess>(details.clone()) {
+        match serde_json::from_value::<RegionReplacementDriverStatus>(
+            details.clone(),
+        ) {
             Err(error) => eprintln!(
                 "warning: failed to interpret task details: {:?}: {:?}",
                 error, details
             ),
-            Ok(success) => {
+
+            Ok(status) => {
                 println!(
                     "    number of region replacement drive sagas started ok: {}",
-                    success.region_replacement_driven_ok
+                    status.drive_invoked_ok.len()
                 );
+                for line in &status.drive_invoked_ok {
+                    println!("    > {line}");
+                }
+
                 println!(
-                    "    errors querying, or number of region replacement drive saga start errors: {}",
-                    success.region_replacement_driven_err
+                    "    number of region replacement finish sagas started ok: {}",
+                    status.finish_invoked_ok.len()
                 );
+                for line in &status.finish_invoked_ok {
+                    println!("    > {line}");
+                }
+
+                println!("    number of errors: {}", status.errors.len());
+                for line in &status.errors {
+                    println!("    > {line}");
+                }
             }
         };
     } else {

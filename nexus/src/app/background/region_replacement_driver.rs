@@ -25,8 +25,7 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use serde::Deserialize;
-use serde::Serialize;
+use nexus_types::internal_api::background::RegionReplacementDriverStatus;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
@@ -34,13 +33,6 @@ use tokio::sync::mpsc::Sender;
 pub struct RegionReplacementDriver {
     datastore: Arc<DataStore>,
     saga_request: Sender<sagas::SagaRequest>,
-}
-
-#[derive(Serialize, Deserialize, Default)]
-pub struct RegionReplacementDriverStatus {
-    drive_invoked_ok: Vec<String>,
-    finish_invoked_ok: Vec<String>,
-    errors: Vec<String>,
 }
 
 impl RegionReplacementDriver {
