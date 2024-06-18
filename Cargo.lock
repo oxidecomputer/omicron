@@ -7473,7 +7473,7 @@ dependencies = [
 [[package]]
 name = "qorb"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/qorb?branch=master#bacbcd46ba0a8c81034db16cdfa5becc43b617f5"
+source = "git+https://github.com/oxidecomputer/qorb?branch=master#7e415597cdb3a7373bb42f2cd677b29ba2c6417e"
 dependencies = [
  "anyhow",
  "async-trait",

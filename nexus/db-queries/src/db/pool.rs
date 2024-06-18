@@ -61,7 +61,6 @@ fn make_dns_resolver(
         service::Name(internal_dns::ServiceName::Cockroach.srv_name()),
         bootstrap_dns,
         DnsResolverConfig {
-            query_interval: tokio::time::Duration::from_secs(10),
             hardcoded_ttl: Some(tokio::time::Duration::MAX),
             ..Default::default()
         },

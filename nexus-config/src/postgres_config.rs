@@ -36,7 +36,7 @@ impl PostgresConfigWithUrl {
 
     /// Accesses the first ip / port pair within the URL.
     ///
-    /// # Safety
+    /// # Panics
     ///
     /// This method makes the assumption that the hostname has at least one
     /// "host IP / port" pair which can be extracted. If the supplied URL
