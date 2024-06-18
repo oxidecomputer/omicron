@@ -7,13 +7,13 @@
 use anyhow::anyhow;
 use anyhow::Context;
 use futures::FutureExt;
+use hickory_resolver::config::{
+    NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
+};
+use hickory_resolver::TokioAsyncResolver;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use thiserror::Error;
-use trust_dns_resolver::config::{
-    NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
-};
-use trust_dns_resolver::TokioAsyncResolver;
 
 progenitor::generate_api!(
     spec = "../../openapi/nexus.json",
@@ -46,14 +46,14 @@ impl CustomDnsResolver {
             socket_addr: dns_addr,
             protocol: Protocol::Udp,
             tls_dns_name: None,
-            trust_nx_responses: false,
+            trust_negative_responses: false,
             bind_addr: None,
         });
 
-        let resolver = Arc::new(
-            TokioAsyncResolver::tokio(resolver_config, ResolverOpts::default())
-                .context("failed to create resolver")?,
-        );
+        let resolver = Arc::new(TokioAsyncResolver::tokio(
+            resolver_config,
+            ResolverOpts::default(),
+        ));
         Ok(CustomDnsResolver { dns_addr, resolver })
     }
 

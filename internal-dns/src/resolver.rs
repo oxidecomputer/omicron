@@ -2,24 +2,24 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use hickory_resolver::config::{
+    LookupIpStrategy, NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
+};
+use hickory_resolver::lookup::SrvLookup;
+use hickory_resolver::TokioAsyncResolver;
 use hyper::client::connect::dns::Name;
 use omicron_common::address::{
     Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX, DNS_PORT,
 };
 use slog::{debug, error, info, trace};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
-use trust_dns_resolver::config::{
-    LookupIpStrategy, NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
-};
-use trust_dns_resolver::lookup::SrvLookup;
-use trust_dns_resolver::TokioAsyncResolver;
 
 pub type DnsError = dns_service_client::Error<dns_service_client::types::Error>;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ResolveError {
     #[error(transparent)]
-    Resolve(#[from] trust_dns_resolver::error::ResolveError),
+    Resolve(#[from] hickory_resolver::error::ResolveError),
 
     #[error("Record not found for SRV key: {}", .0.dns_name())]
     NotFound(crate::ServiceName),
@@ -66,7 +66,7 @@ impl Resolver {
                 socket_addr,
                 protocol: Protocol::Udp,
                 tls_dns_name: None,
-                trust_nx_responses: false,
+                trust_negative_responses: false,
                 bind_addr: None,
             });
         }
@@ -77,7 +77,7 @@ impl Resolver {
         // the IPv4 variant.
         opts.ip_strategy = LookupIpStrategy::Ipv6Only;
         opts.negative_max_ttl = Some(std::time::Duration::from_secs(15));
-        let resolver = TokioAsyncResolver::tokio(rc, opts)?;
+        let resolver = TokioAsyncResolver::tokio(rc, opts);
 
         Ok(Self { log, resolver })
     }
@@ -163,7 +163,7 @@ impl Resolver {
             .iter()
             .next()
             .ok_or_else(|| ResolveError::NotFound(srv))?;
-        Ok(*address)
+        Ok(address.0)
     }
 
     /// Returns the targets of the SRV records for a DNS name
@@ -313,7 +313,7 @@ impl Resolver {
     //   (1) it returns `IpAddr`'s rather than `SocketAddr`'s
     //   (2) it doesn't actually return all the addresses from the Additional
     //       section of the DNS server's response.
-    //       See bluejekyll/trust-dns#1980
+    //       See bluejekyll/hickory-dns#1980
     //
     // (1) is not a huge deal as we can try to match up the targets ourselves
     // to grab the port for creating a `SocketAddr` but (2) means we need to do
@@ -350,10 +350,9 @@ impl Resolver {
             .await
             .into_iter()
             .flat_map(move |target| match target {
-                Ok((ips, port)) => Some(
-                    ips.into_iter()
-                        .map(move |ip| SocketAddrV6::new(ip, port, 0, 0)),
-                ),
+                Ok((ips, port)) => Some(ips.into_iter().map(move |aaaa| {
+                    SocketAddrV6::new(aaaa.into(), port, 0, 0)
+                })),
                 Err((target, err)) => {
                     error!(
                         log,
@@ -510,7 +509,7 @@ mod test {
         assert!(
             matches!(
                 dns_error.kind(),
-                trust_dns_resolver::error::ResolveErrorKind::NoRecordsFound { .. },
+                hickory_resolver::error::ResolveErrorKind::NoRecordsFound { .. },
             ),
             "Saw error: {dns_error}",
         );
@@ -663,7 +662,7 @@ mod test {
             error,
             ResolveError::Resolve(error)
                 if matches!(error.kind(),
-                    trust_dns_resolver::error::ResolveErrorKind::NoRecordsFound { .. }
+                    hickory_resolver::error::ResolveErrorKind::NoRecordsFound { .. }
                 )
         );
 

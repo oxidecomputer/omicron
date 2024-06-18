@@ -95,6 +95,8 @@
 use crate::dns_types::{DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord};
 use anyhow::{anyhow, Context};
 use camino::Utf8PathBuf;
+use hickory_client::rr::Name;
+use hickory_proto::rr::LowerName;
 use serde::{Deserialize, Serialize};
 use sled::transaction::ConflictableTransactionError;
 use slog::{debug, error, info, o, warn};
@@ -104,8 +106,6 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
-use trust_dns_client::rr::LowerName;
-use trust_dns_client::rr::Name;
 
 const KEY_CONFIG: &'static str = "config";
 
@@ -586,7 +586,7 @@ impl Store {
     /// If the returned set would have been empty, returns `QueryError::NoName`.
     pub(crate) fn query(
         &self,
-        mr: &trust_dns_server::authority::MessageRequest,
+        mr: &hickory_server::authority::MessageRequest,
     ) -> Result<Vec<DnsRecord>, QueryError> {
         let name = mr.query().name();
         let orig_name = mr.query().original().name();
@@ -784,14 +784,14 @@ mod test {
     use anyhow::Context;
     use camino::Utf8PathBuf;
     use camino_tempfile::Utf8TempDir;
+    use hickory_client::rr::Name;
+    use hickory_proto::rr::LowerName;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
     use std::net::Ipv6Addr;
     use std::str::FromStr;
     use std::sync::Arc;
-    use trust_dns_client::rr::LowerName;
-    use trust_dns_client::rr::Name;
 
     /// As usual, `TestContext` groups the various pieces we need in a bunch of
     /// our tests and helps make sure they get cleaned up properly.

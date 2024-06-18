@@ -44,7 +44,7 @@ sled-agent-client.workspace = true
 slog.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
-trust-dns-resolver.workspace = true
+hickory-resolver.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 

@@ -48,13 +48,13 @@ pub mod http_server;
 pub mod storage;
 
 use anyhow::{anyhow, Context};
+use hickory_resolver::config::NameServerConfig;
+use hickory_resolver::config::Protocol;
+use hickory_resolver::config::ResolverConfig;
+use hickory_resolver::config::ResolverOpts;
+use hickory_resolver::TokioAsyncResolver;
 use slog::o;
 use std::net::SocketAddr;
-use trust_dns_resolver::config::NameServerConfig;
-use trust_dns_resolver::config::Protocol;
-use trust_dns_resolver::config::ResolverConfig;
-use trust_dns_resolver::config::ResolverOpts;
-use trust_dns_resolver::TokioAsyncResolver;
 
 /// Starts both the HTTP and DNS servers over a given store.
 pub async fn start_servers(
@@ -167,12 +167,11 @@ impl TransientServer {
             socket_addr: self.dns_server.local_address(),
             protocol: Protocol::Udp,
             tls_dns_name: None,
-            trust_nx_responses: false,
+            trust_negative_responses: false,
             bind_addr: None,
         });
         let resolver =
-            TokioAsyncResolver::tokio(resolver_config, ResolverOpts::default())
-                .context("creating DNS resolver")?;
+            TokioAsyncResolver::tokio(resolver_config, ResolverOpts::default());
         Ok(resolver)
     }
 }
