@@ -1368,7 +1368,7 @@ async fn srrd_drive_region_replacement_execute(
                     // If the Volume is active, that means reconcilation
                     // completed ok, and therefore Nexus can consider this
                     // repair complete. This is only true if one repair occurs
-                    // at a time per volume (which is true due to the presense
+                    // at a time per volume (which is true due to the presence
                     // of volume_repair records), and if this saga locks the
                     // region replacement request record as part of it executing
                     // (which it does through the SET_SAGA_ID forward action).
