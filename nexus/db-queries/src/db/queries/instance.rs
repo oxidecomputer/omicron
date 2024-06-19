@@ -18,9 +18,7 @@ use nexus_db_model::{
     },
     Generation, InstanceRuntimeState, MigrationState, VmmRuntimeState,
 };
-use omicron_common::api::internal::nexus::{
-    MigrationRole, MigrationRuntimeState,
-};
+use omicron_common::api::internal::nexus::{MigrationRuntimeState, Migrations};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid};
 use uuid::Uuid;
 
@@ -88,7 +86,8 @@ pub struct InstanceAndVmmUpdate {
     vmm_find: Box<dyn QueryFragment<Pg> + Send>,
     vmm_update: Box<dyn QueryFragment<Pg> + Send>,
     instance: Option<Update>,
-    migration: Option<Update>,
+    migration_in: Option<Update>,
+    migration_out: Option<Update>,
 }
 
 struct Update {
@@ -104,16 +103,38 @@ pub struct InstanceAndVmmUpdateResult {
     /// `Some(status)` if the target instance was found; the wrapped
     /// `UpdateStatus` indicates whether the row was updated. `None` if the
     /// instance was not found.
-    pub instance_status: Option<UpdateStatus>,
+    pub instance_status: RecordUpdateStatus,
 
     /// `Some(status)` if the target VMM was found; the wrapped `UpdateStatus`
     /// indicates whether the row was updated. `None` if the VMM was not found.
     pub vmm_status: Option<UpdateStatus>,
 
-    /// `Some(status)` if the target migration was found; the wrapped `UpdateStatus`
-    /// indicates whether the row was updated. `None` if the migration was not
-    /// found, or no migration update was performed.
-    pub migration_status: Option<UpdateStatus>,
+    /// `Some(status)` if the inbound migration was found; the wrapped `UpdateStatus`
+    /// indicates whether the row was updated. `None` if the inbound migration
+    /// was not found, or no migration update was performed.
+    pub migration_in_status: RecordUpdateStatus,
+
+    /// `Some(status)` if the outbound migration was found; the wrapped `UpdateStatus`
+    /// indicates whether the row was updated. `None` if the inbound migration
+    /// was not found, or no migration update was performed.
+    pub migration_out_status: RecordUpdateStatus,
+}
+
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum RecordUpdateStatus {
+    /// No record was found for the provided ID.
+    NotFound,
+    /// No record for this table was provided as part of the update.
+    NotProvided,
+    /// An update for this record was provided, and a a record matching the
+    /// provided ID exists.
+    Found(UpdateStatus),
+}
+
+impl RecordUpdateStatus {
+    pub fn was_updated(self) -> bool {
+        matches!(self, Self::Found(UpdateStatus::Updated))
+    }
 }
 
 /// Computes the update status to return from the results of queries that find
@@ -159,7 +180,7 @@ impl InstanceAndVmmUpdate {
         vmm_id: PropolisUuid,
         new_vmm_runtime_state: VmmRuntimeState,
         instance: Option<(InstanceUuid, InstanceRuntimeState)>,
-        migration: Option<MigrationRuntimeState>,
+        Migrations { migration_in, migration_out }: Migrations<'_>,
     ) -> Self {
         let vmm_find = Box::new(
             vmm_dsl::vmm
@@ -201,75 +222,98 @@ impl InstanceAndVmmUpdate {
             }
         });
 
-        let migration = migration.map(
+        fn migration_find(
+            migration_id: Uuid,
+        ) -> Box<dyn QueryFragment<Pg> + Send> {
+            Box::new(
+                migration_dsl::migration
+                    .filter(migration_dsl::id.eq(migration_id))
+                    .filter(migration_dsl::time_deleted.is_null())
+                    .select(migration_dsl::id),
+            )
+        }
+
+        let migration_in = migration_in.cloned().map(
             |MigrationRuntimeState {
-                 role,
                  migration_id,
                  state,
                  gen,
                  time_updated,
              }| {
                 let state = MigrationState::from(state);
-                let find = Box::new(
-                    migration_dsl::migration
-                        .filter(migration_dsl::id.eq(migration_id))
-                        .filter(migration_dsl::time_deleted.is_null())
-                        .select(migration_dsl::id),
-                );
                 let gen = Generation::from(gen);
-                let update: Box<dyn QueryFragment<Pg> + Send> = match role {
-                    MigrationRole::Target => Box::new(
-                        diesel::update(migration_dsl::migration)
-                            .filter(migration_dsl::id.eq(migration_id))
-                            .filter(
-                                migration_dsl::target_propolis_id
-                                    .eq(vmm_id.into_untyped_uuid()),
-                            )
-                            .filter(migration_dsl::target_gen.lt(gen))
-                            .set((
-                                migration_dsl::target_state.eq(state),
-                                migration_dsl::time_target_updated
-                                    .eq(time_updated),
-                            )),
-                    ),
-                    MigrationRole::Source => Box::new(
-                        diesel::update(migration_dsl::migration)
-                            .filter(migration_dsl::id.eq(migration_id))
-                            .filter(
-                                migration_dsl::source_propolis_id
-                                    .eq(vmm_id.into_untyped_uuid()),
-                            )
-                            .filter(migration_dsl::source_gen.lt(gen))
-                            .set((
-                                migration_dsl::source_state.eq(state),
-                                migration_dsl::time_source_updated
-                                    .eq(time_updated),
-                            )),
-                    ),
-                };
+                let update = Box::new(
+                    diesel::update(migration_dsl::migration)
+                        .filter(migration_dsl::id.eq(migration_id))
+                        .filter(
+                            migration_dsl::target_propolis_id
+                                .eq(vmm_id.into_untyped_uuid()),
+                        )
+                        .filter(migration_dsl::target_gen.lt(gen))
+                        .set((
+                            migration_dsl::target_state.eq(state),
+                            migration_dsl::time_target_updated.eq(time_updated),
+                        )),
+                );
                 Update {
-                    find,
+                    find: migration_find(migration_id),
                     update,
-                    name: "migration",
+                    name: "migration_in",
                     id: migration_dsl::id::NAME,
                 }
             },
         );
 
-        Self { vmm_find, vmm_update, instance, migration }
+        let migration_out = migration_out.cloned().map(
+            |MigrationRuntimeState {
+                 migration_id,
+                 state,
+                 gen,
+                 time_updated,
+             }| {
+                let state = MigrationState::from(state);
+                let gen = Generation::from(gen);
+                let update = Box::new(
+                    diesel::update(migration_dsl::migration)
+                        .filter(migration_dsl::id.eq(migration_id))
+                        .filter(
+                            migration_dsl::source_propolis_id
+                                .eq(vmm_id.into_untyped_uuid()),
+                        )
+                        .filter(migration_dsl::source_gen.lt(gen))
+                        .set((
+                            migration_dsl::source_state.eq(state),
+                            migration_dsl::time_source_updated.eq(time_updated),
+                        )),
+                );
+                Update {
+                    find: migration_find(migration_id),
+                    update,
+                    name: "migration_out",
+                    id: migration_dsl::id::NAME,
+                }
+            },
+        );
+
+        Self { vmm_find, vmm_update, instance, migration_in, migration_out }
     }
 
     pub async fn execute_and_check(
         self,
         conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection> + Sync),
     ) -> Result<InstanceAndVmmUpdateResult, DieselError> {
+        let has_migration_in = self.migration_in.is_some();
+        let has_migration_out = self.migration_out.is_some();
+        let has_instance = self.instance.is_some();
         let (
             vmm_found,
             vmm_updated,
             instance_found,
             instance_updated,
-            migration_found,
-            migration_updated,
+            migration_in_found,
+            migration_in_updated,
+            migration_out_found,
+            migration_out_updated,
         ) = self
             .get_result_async::<(
                 Option<Uuid>,
@@ -278,19 +322,43 @@ impl InstanceAndVmmUpdate {
                 Option<Uuid>,
                 Option<Uuid>,
                 Option<Uuid>,
+                Option<Uuid>,
+                Option<Uuid>,
+                // WHEW!
             )>(conn)
             .await?;
 
-        let instance_status =
-            compute_update_status(instance_found, instance_updated);
         let vmm_status = compute_update_status(vmm_found, vmm_updated);
-        let migration_status =
-            compute_update_status(migration_found, migration_updated);
+
+        let instance_status = if has_instance {
+            compute_update_status(instance_found, instance_updated)
+                .map(RecordUpdateStatus::Found)
+                .unwrap_or(RecordUpdateStatus::NotFound)
+        } else {
+            RecordUpdateStatus::NotProvided
+        };
+
+        let migration_in_status = if has_migration_in {
+            compute_update_status(migration_in_found, migration_in_updated)
+                .map(RecordUpdateStatus::Found)
+                .unwrap_or(RecordUpdateStatus::NotFound)
+        } else {
+            RecordUpdateStatus::NotProvided
+        };
+
+        let migration_out_status = if has_migration_out {
+            compute_update_status(migration_out_found, migration_out_updated)
+                .map(RecordUpdateStatus::Found)
+                .unwrap_or(RecordUpdateStatus::NotFound)
+        } else {
+            RecordUpdateStatus::NotProvided
+        };
 
         Ok(InstanceAndVmmUpdateResult {
             instance_status,
             vmm_status,
-            migration_status,
+            migration_in_status,
+            migration_out_status,
         })
     }
 }
@@ -302,6 +370,8 @@ impl QueryId for InstanceAndVmmUpdate {
 
 impl Query for InstanceAndVmmUpdate {
     type SqlType = (
+        Nullable<SqlUuid>,
+        Nullable<SqlUuid>,
         Nullable<SqlUuid>,
         Nullable<SqlUuid>,
         Nullable<SqlUuid>,
@@ -362,8 +432,13 @@ impl QueryFragment<Pg> for InstanceAndVmmUpdate {
             out.push_sql(", ");
         }
 
-        if let Some(ref migration) = self.migration {
-            migration.push_subqueries(&mut out)?;
+        if let Some(ref m) = self.migration_in {
+            m.push_subqueries(&mut out)?;
+            out.push_sql(", ");
+        }
+
+        if let Some(ref m) = self.migration_out {
+            m.push_subqueries(&mut out)?;
             out.push_sql(", ");
         }
 
@@ -386,24 +461,38 @@ impl QueryFragment<Pg> for InstanceAndVmmUpdate {
         out.push_identifier(vmm_dsl::id::NAME)?;
         out.push_sql(") ");
 
-        out.push_sql("SELECT vmm_result.found, vmm_result.updated, ");
-        if self.instance.is_some() {
-            out.push_sql("instance_result.found, instance_result.updated, ");
-        } else {
-            out.push_sql("NULL, NULL, ");
+        fn push_select_from_result(
+            update: Option<&Update>,
+            out: &mut AstPass<'_, '_, Pg>,
+        ) {
+            if let Some(update) = update {
+                out.push_sql(update.name);
+                out.push_sql("_result.found, ");
+                out.push_sql(update.name);
+                out.push_sql("_result.updated");
+            } else {
+                out.push_sql("NULL, NULL")
+            }
         }
 
-        if self.migration.is_some() {
-            out.push_sql("migration_result.found, migration_result.updated ");
-        } else {
-            out.push_sql("NULL, NULL ");
-        }
+        out.push_sql("SELECT vmm_result.found, vmm_result.updated, ");
+        push_select_from_result(self.instance.as_ref(), &mut out);
+        out.push_sql(", ");
+        push_select_from_result(self.migration_in.as_ref(), &mut out);
+        out.push_sql(", ");
+        push_select_from_result(self.migration_out.as_ref(), &mut out);
+        out.push_sql(" ");
+
         out.push_sql("FROM vmm_result");
         if self.instance.is_some() {
             out.push_sql(", instance_result");
         }
-        if self.migration.is_some() {
-            out.push_sql(", migration_result");
+        if self.migration_in.is_some() {
+            out.push_sql(", migration_in_result");
+        }
+
+        if self.migration_out.is_some() {
+            out.push_sql(", migration_out_result");
         }
 
         Ok(())
@@ -417,7 +506,6 @@ mod test {
     use crate::db::model::VmmState;
     use crate::db::raw_query_builder::expectorate_query_contents;
     use chrono::Utc;
-    use omicron_common::api::internal::nexus::MigrationRole;
     use omicron_common::api::internal::nexus::MigrationRuntimeState;
     use omicron_common::api::internal::nexus::MigrationState;
     use uuid::Uuid;
@@ -439,14 +527,13 @@ mod test {
         MigrationRuntimeState {
             migration_id,
             state: MigrationState::Pending,
-            role: MigrationRole::Source,
             gen: Generation::new().into(),
             time_updated: Utc::now(),
         }
     }
 
-    fn mk_instance_state() -> (Uuid, InstanceRuntimeState) {
-        let id = Uuid::nil();
+    fn mk_instance_state() -> (InstanceUuid, InstanceRuntimeState) {
+        let id = InstanceUuid::nil();
         let state = InstanceRuntimeState {
             time_updated: Utc::now(),
             gen: Generation::new(),
@@ -460,10 +547,15 @@ mod test {
 
     #[tokio::test]
     async fn expectorate_query_only_vmm() {
-        let vmm_id = Uuid::nil();
+        let vmm_id = PropolisUuid::nil();
         let vmm_state = mk_vmm_state();
 
-        let query = InstanceAndVmmUpdate::new(vmm_id, vmm_state, None, None);
+        let query = InstanceAndVmmUpdate::new(
+            vmm_id,
+            vmm_state,
+            None,
+            Migrations::default(),
+        );
         expectorate_query_contents(
             &query,
             "tests/output/instance_and_vmm_update_vmm_only.sql",
@@ -473,12 +565,16 @@ mod test {
 
     #[tokio::test]
     async fn expectorate_query_vmm_and_instance() {
-        let vmm_id = Uuid::nil();
+        let vmm_id = PropolisUuid::nil();
         let vmm_state = mk_vmm_state();
         let instance = mk_instance_state();
 
-        let query =
-            InstanceAndVmmUpdate::new(vmm_id, vmm_state, Some(instance), None);
+        let query = InstanceAndVmmUpdate::new(
+            vmm_id,
+            vmm_state,
+            Some(instance),
+            Migrations::default(),
+        );
         expectorate_query_contents(
             &query,
             "tests/output/instance_and_vmm_update_vmm_and_instance.sql",
@@ -487,23 +583,27 @@ mod test {
     }
 
     #[tokio::test]
-    async fn expectorate_query_vmm_and_migration() {
-        let vmm_id = Uuid::nil();
+    async fn expectorate_query_vmm_and_migration_in() {
+        let vmm_id = PropolisUuid::nil();
         let vmm_state = mk_vmm_state();
         let migration = mk_migration_state();
 
-        let query =
-            InstanceAndVmmUpdate::new(vmm_id, vmm_state, None, Some(migration));
+        let query = InstanceAndVmmUpdate::new(
+            vmm_id,
+            vmm_state,
+            None,
+            Migrations { migration_in: Some(&migration), migration_out: None },
+        );
         expectorate_query_contents(
             &query,
-            "tests/output/instance_and_vmm_update_vmm_and_imigration.sql",
+            "tests/output/instance_and_vmm_update_vmm_and_migration_in.sql",
         )
         .await;
     }
 
     #[tokio::test]
-    async fn expectorate_query_vmm_instance_and_migration() {
-        let vmm_id = Uuid::nil();
+    async fn expectorate_query_vmm_instance_and_migration_in() {
+        let vmm_id = PropolisUuid::nil();
         let vmm_state = mk_vmm_state();
         let instance = mk_instance_state();
         let migration = mk_migration_state();
@@ -512,11 +612,97 @@ mod test {
             vmm_id,
             vmm_state,
             Some(instance),
-            Some(migration),
+            Migrations { migration_in: Some(&migration), migration_out: None },
         );
         expectorate_query_contents(
             &query,
-            "tests/output/instance_and_vmm_update_vmm_instance_and_migration.sql",
+            "tests/output/instance_and_vmm_update_vmm_instance_and_migration_in.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn expectorate_query_vmm_and_migration_out() {
+        let vmm_id = PropolisUuid::nil();
+        let vmm_state = mk_vmm_state();
+        let migration = mk_migration_state();
+
+        let query = InstanceAndVmmUpdate::new(
+            vmm_id,
+            vmm_state,
+            None,
+            Migrations { migration_out: Some(&migration), migration_in: None },
+        );
+        expectorate_query_contents(
+            &query,
+            "tests/output/instance_and_vmm_update_vmm_and_migration_out.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn expectorate_query_vmm_instance_and_migration_out() {
+        let vmm_id = PropolisUuid::nil();
+        let vmm_state = mk_vmm_state();
+        let instance = mk_instance_state();
+        let migration = mk_migration_state();
+
+        let query = InstanceAndVmmUpdate::new(
+            vmm_id,
+            vmm_state,
+            Some(instance),
+            Migrations { migration_out: Some(&migration), migration_in: None },
+        );
+        expectorate_query_contents(
+            &query,
+            "tests/output/instance_and_vmm_update_vmm_instance_and_migration_out.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn expectorate_query_vmm_and_both_migrations() {
+        let vmm_id = PropolisUuid::nil();
+        let vmm_state = mk_vmm_state();
+        let migration_in = mk_migration_state();
+        let migration_out = mk_migration_state();
+
+        let query = InstanceAndVmmUpdate::new(
+            vmm_id,
+            vmm_state,
+            None,
+            Migrations {
+                migration_in: Some(&migration_in),
+                migration_out: Some(&migration_out),
+            },
+        );
+        expectorate_query_contents(
+            &query,
+            "tests/output/instance_and_vmm_update_vmm_and_both_migrations.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn expectorate_query_vmm_instance_and_both_migrations() {
+        let vmm_id = PropolisUuid::nil();
+        let vmm_state = mk_vmm_state();
+        let instance = mk_instance_state();
+        let migration_in = mk_migration_state();
+        let migration_out = mk_migration_state();
+
+        let query = InstanceAndVmmUpdate::new(
+            vmm_id,
+            vmm_state,
+            Some(instance),
+            Migrations {
+                migration_in: Some(&migration_in),
+                migration_out: Some(&migration_out),
+            },
+        );
+        expectorate_query_contents(
+            &query,
+            "tests/output/instance_and_vmm_update_vmm_instance_and_both_migrations.sql",
         )
         .await;
     }

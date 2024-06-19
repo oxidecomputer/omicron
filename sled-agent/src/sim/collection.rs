@@ -431,15 +431,19 @@ mod test {
     fn make_instance(
         logctx: &LogContext,
     ) -> (SimObject<SimInstance>, Receiver<()>) {
-        let propolis_id = Uuid::new_v4();
+        let propolis_id = PropolisUuid::new_v4();
         let vmm_state = VmmRuntimeState {
             state: VmmState::Starting,
             gen: Generation::new(),
             time_updated: Utc::now(),
         };
 
-        let state =
-            SledInstanceState { vmm_state, propolis_id, migration_state: None };
+        let state = SledInstanceState {
+            vmm_state,
+            propolis_id,
+            migration_in: None,
+            migration_out: None,
+        };
 
         SimObject::new_simulated_auto(&state, logctx.log.new(o!()))
     }
