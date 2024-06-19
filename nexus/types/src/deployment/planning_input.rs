@@ -482,6 +482,9 @@ pub enum SledFilter {
     /// Sleds on which reservations can be created.
     ReservationCreate,
 
+    /// Sleds which should be sent OPTE V2P mappings.
+    V2PMapping,
+
     /// Sleds which should be sent VPC firewall rules.
     VpcFirewall,
 }
@@ -536,6 +539,7 @@ impl SledPolicy {
                 SledFilter::InService => true,
                 SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => true,
+                SledFilter::V2PMapping => true,
                 SledFilter::VpcFirewall => true,
             },
             SledPolicy::InService {
@@ -547,6 +551,7 @@ impl SledPolicy {
                 SledFilter::InService => true,
                 SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => false,
+                SledFilter::V2PMapping => true,
                 SledFilter::VpcFirewall => true,
             },
             SledPolicy::Expunged => match filter {
@@ -556,6 +561,7 @@ impl SledPolicy {
                 SledFilter::InService => false,
                 SledFilter::QueryDuringInventory => false,
                 SledFilter::ReservationCreate => false,
+                SledFilter::V2PMapping => false,
                 SledFilter::VpcFirewall => false,
             },
         }
@@ -587,6 +593,7 @@ impl SledState {
                 SledFilter::InService => true,
                 SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => true,
+                SledFilter::V2PMapping => true,
                 SledFilter::VpcFirewall => true,
             },
             SledState::Decommissioned => match filter {
@@ -596,6 +603,7 @@ impl SledState {
                 SledFilter::InService => false,
                 SledFilter::QueryDuringInventory => false,
                 SledFilter::ReservationCreate => false,
+                SledFilter::V2PMapping => false,
                 SledFilter::VpcFirewall => false,
             },
         }
