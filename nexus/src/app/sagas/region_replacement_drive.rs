@@ -1524,6 +1524,61 @@ async fn srrd_drive_region_replacement_commit_undo(
     // step from db? The problem is that we did execute the step, and it's not
     // something we can roll back. Leave the last step in the DB so it can be
     // referenced during the check step the next time this saga is invoked.
+    //
+    // If the saga unwinds at the last step because it didn't commit the
+    // executed step to the database, this is ok! This would mean that the next
+    // invocation of the drive saga would be executing without the knowledge of
+    // what the previous one did - however, this author believes that this is ok
+    // due to the fact that this saga's forward actions are idempotent.
+    //
+    // If the final forward action fails to commit a step to the database, here
+    // are the cases where this saga could potentially repeat its action:
+    //
+    // 1. a propolis action was executed (read: a running propolis was sent a
+    //    replace request)
+    // 2. a pantry action was executed (read: the volume was attached
+    //    (activating in the background) to a pantry)
+    //
+    // # case 1 #
+    //
+    // In the case of the next invocation of the drive saga choosing a propolis
+    // action:
+    //
+    // - if the replace request is sent to the same propolis that originally
+    //   received it, the upstairs would respond with `StartedAlready`. The
+    //   drive saga would then consider the replacement not done and wait.
+    //
+    // - if the replace request is sent to a different propolis, that propolis
+    //   would have constructed the disk's volume with the replacement VCR, so
+    //   the upstairs would respond with `ReplaceResult::VcrMatches`. The drive
+    //   saga would then consider the replacement done only if propolis observed
+    //   that the volume activated ok.
+    //
+    // # case 2 #
+    //
+    // In the case of the next invocation of the drive saga choosing a pantry
+    // action, Nexus first checks if the volume was already attached to the
+    // selected Pantry, and if so, will detach it before sending a "attach in
+    // the background with this job id" request.
+    //
+    // - if Nexus chose same Pantry as the original drive saga, this would
+    //   cancel any existing reconciliation and start it up again from the
+    //   beginning. This is ok - reconciliation can be interrupted at any time.
+    //   If this repeatedly happened it would cause progress to be very slow,
+    //   but progress would be made.
+    //
+    // - if Nexus chose a different Pantry, the newly checked-out Volume would
+    //   steal the activation from the original Pantry, cancelling the
+    //   reconcilation only to start it up again on the different Pantry.
+    //
+    // # also!
+    //
+    // As well, both of these cases are equivalent to if Nexus chose to always
+    // attempt some sort of action, instead of choosing no-ops or waiting for
+    // operations driven by any previous steps to complete, aka if Nexus
+    // _always_ polled, instead of the behaviour it has now (wait or poll or
+    // receive push notifications). Polling all the time would be functionally
+    // correct but unnecessary (and in the case of crucible#1277, a problem!).
 
     Ok(())
 }
