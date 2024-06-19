@@ -12309,7 +12309,7 @@
         ]
       },
       "Distributiondouble": {
-        "description": "A distribution is a sequence of bins and counts in those bins, and some statistical information tracked to compute the mean, standard deviation, and quantile estimates.",
+        "description": "A distribution is a sequence of bins and counts in those bins, and some statistical information tracked to compute the mean, standard deviation, and quantile estimates.\n\nMin, max, and the p-* quantiles are treated as optional due to the possibility of distribution operations, like subtraction.",
         "type": "object",
         "properties": {
           "bins": {
@@ -12378,7 +12378,7 @@
         ]
       },
       "Distributionint64": {
-        "description": "A distribution is a sequence of bins and counts in those bins, and some statistical information tracked to compute the mean, standard deviation, and quantile estimates.",
+        "description": "A distribution is a sequence of bins and counts in those bins, and some statistical information tracked to compute the mean, standard deviation, and quantile estimates.\n\nMin, max, and the p-* quantiles are treated as optional due to the possibility of distribution operations, like subtraction.",
         "type": "object",
         "properties": {
           "bins": {

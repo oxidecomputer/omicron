@@ -1523,6 +1523,9 @@ impl DistributionSupport for f64 {}
 /// A distribution is a sequence of bins and counts in those bins, and some
 /// statistical information tracked to compute the mean, standard deviation, and
 /// quantile estimates.
+///
+/// Min, max, and the p-* quantiles are treated as optional due to the
+/// possibility of distribution operations, like subtraction.
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[schemars(rename = "Distribution{T}")]
 pub struct Distribution<T: DistributionSupport> {
@@ -1588,7 +1591,8 @@ where
     /// Subtract two distributions, checking that they have the same bins.
     ///
     /// Min and max values are returned as None, as they lose meaning
-    /// when subtracting distributions.
+    /// when subtracting distributions. The same is true for p50, p90, and p99
+    /// quantiles.
     fn checked_sub(
         &self,
         rhs: &Distribution<T>,
