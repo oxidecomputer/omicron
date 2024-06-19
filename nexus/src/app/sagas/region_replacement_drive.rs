@@ -1174,6 +1174,11 @@ async fn execute_pantry_drive_action(
                     "endpoint" => endpoint.clone(),
                 );
 
+                // In the case where this forward action is being rerun,
+                // detaching the volume would mean that the reconciliation would
+                // be interrupted. This is ok, as that operation can be
+                // interrupted at any time.
+
                 // Detach this volume so we can reattach with this saga's job id.
                 true
             }
