@@ -140,10 +140,12 @@ use super::{
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
     ACTION_GENERATE_ID,
 };
+use crate::app::db::datastore::InstanceAndActiveVmm;
 use crate::app::db::lookup::LookupPath;
 use crate::app::sagas::common_storage::get_pantry_address;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
+use chrono::DateTime;
 use chrono::Utc;
 use nexus_db_model::VmmState;
 use nexus_types::identity::Resource;
@@ -151,6 +153,8 @@ use omicron_common::api::external::Error;
 use propolis_client::types::ReplaceResult;
 use serde::Deserialize;
 use serde::Serialize;
+use slog::Logger;
+use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
 use uuid::Uuid;
@@ -357,115 +361,15 @@ async fn srrd_drive_region_replacement_check(
                 .await
                 .map_err(ActionError::action_failed)?;
 
-            // When this saga recorded a Propolis replacement step, an instance
-            // existed and had a running vmm. Is this true now?
-
-            let Some(current_vmm) = instance_and_vmm.vmm() else {
-                // There is no current VMM, but if the current repair step was
-                // `Propolis` then there was previously one. Some action is
-                // required: namely, attach disk to the pantry and let it
-                // perform reconcilation.
-
-                info!(
-                    log,
-                    "instance from last step no longer has vmm";
-                    "region replacement id" => ?params.request.id,
-                    "last replacement drive time" => ?last_request_step.step_time,
-                    "last replacement drive step" => "propolis",
-                    "instance id" => ?step_instance_id,
-                );
-
-                return Ok(DriveCheck::ActionRequired);
-            };
-
-            // Check if the VMM has changed.
-
-            if current_vmm.id != step_vmm_id {
-                // The VMM has changed! This can be due to a stop and start of
-                // the instance, or a migration. If this is the case, then the
-                // new VMM (propolis server) will be performing reconcilation as
-                // part of the Volume activation. Nexus should be receiving
-                // notifications from the Upstairs there.
-                //
-                // If the new vmm is in the right state, this drive saga can
-                // re-send the target replacement request to poll if the
-                // replacement is done yet.
-
-                info!(
-                    log,
-                    "vmm has changed from last step";
-                    "region replacement id" => ?params.request.id,
-                    "last replacement drive time" => ?last_request_step.step_time,
-                    "last replacement drive step" => "propolis",
-                    "instance id" => ?step_instance_id,
-                    "old vmm id" => ?step_vmm_id,
-                    "new vmm id" => ?current_vmm.id,
-                );
-
-                Ok(DriveCheck::ActionRequired)
-            } else {
-                // The VMM has not changed: check if the VMM is still active.
-
-                let state = current_vmm.runtime.state;
-
-                info!(
-                    log,
-                    "vmm from last step in state {}", state;
-                    "region replacement id" => ?params.request.id,
-                    "last replacement drive time" => ?last_request_step.step_time,
-                    "last replacement drive step" => "propolis",
-                    "instance id" => ?step_instance_id,
-                    "vmm id" => ?step_vmm_id,
-                );
-
-                match &state {
-                    // If propolis is running, or rebooting, then it is likely
-                    // that the Upstairs that was previously sent the volume
-                    // replacement request is still running the live repair
-                    // (note: rebooting does not affect the running volume).
-                    VmmState::Running | VmmState::Rebooting => {
-                        // Until crucible#1277 is merged, choose to _not_ poll
-                        // Propolis (which would happen if ActionRequired was
-                        // returned here).
-                        //
-                        // TODO Nexus needs to poll, as it could miss receiving
-                        // the "Finished" notification that would complete this
-                        // region replacement. Most of the time it will receive
-                        // that ok though.
-
-                        Ok(DriveCheck::LastStepStillRunning)
-                    }
-
-                    VmmState::Starting => {
-                        // This state is unexpected, considering Nexus
-                        // previously sent a target replacement request to this
-                        // propolis!
-
-                        return Err(ActionError::action_failed(format!(
-                            "vmm {} propolis is Starting",
-                            step_vmm_id,
-                        )));
-                    }
-
-                    VmmState::Stopping
-                    | VmmState::Stopped
-                    | VmmState::Migrating
-                    | VmmState::Failed
-                    | VmmState::Destroyed
-                    | VmmState::SagaUnwound => {
-                        // The VMM we sent the replacement request to is
-                        // probably not operating on the request anymore. Wait
-                        // to see where to send the next action: if the instance
-                        // is migrating, eventually that will be a new propolis.
-                        // If the instance is stopping, then that will be a
-                        // Pantry. Otherwise, the saga will wait: propolis
-                        // should only receive target replacement requests when
-                        // in a good state.
-
-                        Ok(DriveCheck::Wait)
-                    }
-                }
-            }
+            check_from_previous_propolis_step(
+                log,
+                params.request.id,
+                last_request_step.step_time,
+                step_instance_id,
+                step_vmm_id,
+                instance_and_vmm,
+            )
+            .await
         }
 
         db::model::RegionReplacementStepType::Pantry => {
@@ -487,9 +391,6 @@ async fn srrd_drive_region_replacement_check(
                 return Ok(DriveCheck::ActionRequired);
             };
 
-            let endpoint = format!("http://{}", pantry_address);
-            let client = crucible_pantry_client::Client::new(&endpoint);
-
             let Some(job_id) = last_request_step.step_associated_pantry_job_id
             else {
                 // This record is invalid, but we can still attempt to drive the
@@ -507,199 +408,313 @@ async fn srrd_drive_region_replacement_check(
                 return Ok(DriveCheck::ActionRequired);
             };
 
-            // If there is a committed step, Nexus attached this Volume to a
-            // Pantry, and requested activation in a background job. Is it
-            // finished?
+            let Some(new_region_id) = params.request.new_region_id else {
+                return Err(ActionError::action_failed(format!(
+                    "region replacement request {} has new_region_id = None",
+                    params.request.id,
+                )));
+            };
 
-            match client.is_job_finished(&job_id.to_string()).await {
-                Ok(status) => {
-                    if status.job_is_finished {
-                        // The job could be done because it failed: check the
-                        // volume status to query if it is active or gone.
+            let new_region: db::model::Region = osagactx
+                .datastore()
+                .get_region(new_region_id)
+                .await
+                .map_err(ActionError::action_failed)?;
 
-                        let Some(new_region_id) = params.request.new_region_id
-                        else {
-                            return Err(ActionError::action_failed(format!(
-                                "region replacement request {} has new_region_id = None",
-                                params.request.id,
-                            )));
-                        };
+            let volume_id = new_region.volume_id().to_string();
 
-                        let new_region: db::model::Region = osagactx
-                            .datastore()
-                            .get_region(new_region_id)
-                            .await
-                            .map_err(ActionError::action_failed)?;
+            check_from_previous_pantry_step(
+                log,
+                params.request.id,
+                last_request_step.step_time,
+                pantry_address,
+                job_id,
+                &volume_id.to_string(),
+            )
+            .await
+        }
+    }
+}
 
-                        let volume_id = new_region.volume_id().to_string();
+/// Generate a DriveCheck if the previous step was a Propolis step
+async fn check_from_previous_propolis_step(
+    log: &Logger,
+    request_id: Uuid,
+    step_time: DateTime<Utc>,
+    step_instance_id: Uuid,
+    step_vmm_id: Uuid,
+    instance_and_vmm: InstanceAndActiveVmm,
+) -> Result<DriveCheck, ActionError> {
+    // When this saga recorded a Propolis replacement step, an instance existed
+    // and had a running vmm. Is this true now?
 
-                        match client.volume_status(&volume_id).await {
-                            Ok(volume_status) => {
-                                info!(
-                                    log,
-                                    "pantry job finished, saw status {volume_status:?}";
-                                    "region replacement id" => %params.request.id,
-                                    "last replacement drive time" => ?last_request_step.step_time,
-                                    "last replacement drive step" => "pantry",
-                                    "pantry address" => ?pantry_address,
-                                );
+    let Some(current_vmm) = instance_and_vmm.vmm() else {
+        // There is no current VMM, but if the current repair step was
+        // `Propolis` then there was previously one. Some action is required:
+        // namely, attach disk to the pantry and let it perform reconcilation.
 
-                                if volume_status.seen_active {
-                                    // It may not be active now if a Propolis
-                                    // activated the volume, but if the Pantry's
-                                    // ever seen this Volume active before, then
-                                    // the reconciliation completed ok.
+        info!(
+            log,
+            "instance from last step no longer has vmm";
+            "region replacement id" => ?request_id,
+            "last replacement drive time" => ?step_time,
+            "last replacement drive step" => "propolis",
+            "instance id" => ?step_instance_id,
+        );
 
-                                    Ok(DriveCheck::Done)
-                                } else {
-                                    // The Pantry has never seen this active
-                                    // before, and the job finished - some
-                                    // action is required, the job failed.
+        return Ok(DriveCheck::ActionRequired);
+    };
 
-                                    Ok(DriveCheck::ActionRequired)
-                                }
-                            }
+    // Check if the VMM has changed.
 
-                            Err(e) => {
-                                // Seeing 410 Gone here may mean that the pantry
-                                // performed reconciliation successfully, but
-                                // had a propolis activation take over from the
-                                // pantry's. If this occurred before a
-                                // "reconciliation successful" notification
-                                // occurred, and the propolis activation does
-                                // not require a reconcilation (because the
-                                // pantry did it already), then another
-                                // notification will not be resent by propolis.
-                                //
-                                // Return ActionRequired here so that this saga
-                                // will re-send the target replacement request
-                                // to the propolis the did the take over: if the
-                                // above race occurred, that request will return
-                                // ReplaceResult::VcrMatches.
+    if current_vmm.id != step_vmm_id {
+        // The VMM has changed! This can be due to a stop and start of the
+        // instance, or a migration. If this is the case, then the new VMM
+        // (propolis server) will be performing reconcilation as part of the
+        // Volume activation. Nexus should be receiving notifications from the
+        // Upstairs there.
+        //
+        // If the new vmm is in the right state, this drive saga can re-send the
+        // target replacement request to poll if the replacement is done yet.
 
-                                error!(
-                                    log,
-                                    "pantry job finished, saw error {e}";
-                                    "region replacement id" => %params.request.id,
-                                    "last replacement drive time" => ?last_request_step.step_time,
-                                    "last replacement drive step" => "pantry",
-                                    "pantry address" => ?pantry_address,
-                                );
+        info!(
+            log,
+            "vmm has changed from last step";
+            "region replacement id" => ?request_id,
+            "last replacement drive time" => ?step_time,
+            "last replacement drive step" => "propolis",
+            "instance id" => ?step_instance_id,
+            "old vmm id" => ?step_vmm_id,
+            "new vmm id" => ?current_vmm.id,
+        );
 
-                                Ok(DriveCheck::ActionRequired)
-                            }
-                        }
-                    } else {
+        Ok(DriveCheck::ActionRequired)
+    } else {
+        // The VMM has not changed: check if the VMM is still active.
+
+        let state = current_vmm.runtime.state;
+
+        info!(
+            log,
+            "vmm from last step in state {}", state;
+            "region replacement id" => ?request_id,
+            "last replacement drive time" => ?step_time,
+            "last replacement drive step" => "propolis",
+            "instance id" => ?step_instance_id,
+            "vmm id" => ?step_vmm_id,
+        );
+
+        match &state {
+            // If propolis is running, or rebooting, then it is likely that the
+            // Upstairs that was previously sent the volume replacement request
+            // is still running the live repair (note: rebooting does not affect
+            // the running volume).
+            VmmState::Running | VmmState::Rebooting => {
+                // Until crucible#1277 is merged, choose to _not_ poll Propolis
+                // (which would happen if ActionRequired was returned here).
+                //
+                // TODO Nexus needs to poll, as it could miss receiving the
+                // "Finished" notification that would complete this region
+                // replacement. Most of the time it will receive that ok though.
+
+                Ok(DriveCheck::LastStepStillRunning)
+            }
+
+            VmmState::Starting => {
+                // This state is unexpected, considering Nexus previously sent a
+                // target replacement request to this propolis!
+
+                return Err(ActionError::action_failed(format!(
+                    "vmm {} propolis is Starting",
+                    step_vmm_id,
+                )));
+            }
+
+            VmmState::Stopping
+            | VmmState::Stopped
+            | VmmState::Migrating
+            | VmmState::Failed
+            | VmmState::Destroyed
+            | VmmState::SagaUnwound => {
+                // The VMM we sent the replacement request to is probably not
+                // operating on the request anymore. Wait to see where to send
+                // the next action: if the instance is migrating, eventually
+                // that will be a new propolis.  If the instance is stopping,
+                // then that will be a Pantry. Otherwise, the saga will wait:
+                // propolis should only receive target replacement requests when
+                // in a good state.
+
+                Ok(DriveCheck::Wait)
+            }
+        }
+    }
+}
+
+/// Generate a DriveCheck if the previous step was a Pantry step
+async fn check_from_previous_pantry_step(
+    log: &Logger,
+    request_id: Uuid,
+    step_time: DateTime<Utc>,
+    pantry_address: SocketAddrV6,
+    job_id: Uuid,
+    volume_id: &str,
+) -> Result<DriveCheck, ActionError> {
+    // If there is a committed step, Nexus attached this Volume to a Pantry, and
+    // requested activation in a background job. Is it finished?
+
+    let endpoint = format!("http://{}", pantry_address);
+    let client = crucible_pantry_client::Client::new(&endpoint);
+
+    match client.is_job_finished(&job_id.to_string()).await {
+        Ok(status) => {
+            if status.job_is_finished {
+                // The job could be done because it failed: check the volume
+                // status to query if it is active or gone.
+
+                match client.volume_status(volume_id).await {
+                    Ok(volume_status) => {
                         info!(
                             log,
-                            "pantry is still performing reconcilation";
-                            "region replacement id" => %params.request.id,
-                            "last replacement drive time" => ?last_request_step.step_time,
+                            "pantry job finished, saw status {volume_status:?}";
+                            "region replacement id" => %request_id,
+                            "last replacement drive time" => ?step_time,
                             "last replacement drive step" => "pantry",
                             "pantry address" => ?pantry_address,
                         );
 
-                        Ok(DriveCheck::LastStepStillRunning)
+                        if volume_status.seen_active {
+                            // It may not be active now if a Propolis activated
+                            // the volume, but if the Pantry's ever seen this
+                            // Volume active before, then the reconciliation
+                            // completed ok.
+
+                            Ok(DriveCheck::Done)
+                        } else {
+                            // The Pantry has never seen this active before, and
+                            // the job finished - some action is required, the
+                            // job failed.
+
+                            Ok(DriveCheck::ActionRequired)
+                        }
+                    }
+
+                    Err(e) => {
+                        // Seeing 410 Gone here may mean that the pantry
+                        // performed reconciliation successfully, but had a
+                        // propolis activation take over from the pantry's. If
+                        // this occurred before a "reconciliation successful"
+                        // notification occurred, and the propolis activation
+                        // does not require a reconcilation (because the pantry
+                        // did it already), then another notification will not
+                        // be resent by propolis.
+                        //
+                        // Return ActionRequired here so that this saga will
+                        // re-send the target replacement request to the
+                        // propolis the did the take over: if the above race
+                        // occurred, that request will return
+                        // ReplaceResult::VcrMatches.
+
+                        error!(
+                            log,
+                            "pantry job finished, saw error {e}";
+                            "region replacement id" => %request_id,
+                            "last replacement drive time" => ?step_time,
+                            "last replacement drive step" => "pantry",
+                            "pantry address" => ?pantry_address,
+                        );
+
+                        Ok(DriveCheck::ActionRequired)
                     }
                 }
+            } else {
+                info!(
+                    log,
+                    "pantry is still performing reconcilation";
+                    "region replacement id" => %request_id,
+                    "last replacement drive time" => ?step_time,
+                    "last replacement drive step" => "pantry",
+                    "pantry address" => ?pantry_address,
+                );
 
-                Err(e) => {
-                    // If there was some problem accessing the Pantry. It may be
-                    // because that Pantry is now gone, so check on it.
+                Ok(DriveCheck::LastStepStillRunning)
+            }
+        }
 
-                    error!(
-                        log,
-                        "pantry returned an error checking job {job_id}: {e}";
-                        "region replacement id" => %params.request.id,
-                        "last replacement drive time" => ?last_request_step.step_time,
-                        "last replacement drive step" => "pantry",
-                        "pantry address" => ?pantry_address,
-                    );
+        Err(e) => {
+            // If there was some problem accessing the Pantry. It may be because
+            // that Pantry is now gone, so check on it.
 
-                    match client.pantry_status().await {
+            error!(
+                log,
+                "pantry returned an error checking job {job_id}: {e}";
+                "region replacement id" => %request_id,
+                "last replacement drive time" => ?step_time,
+                "last replacement drive step" => "pantry",
+                "pantry address" => ?pantry_address,
+            );
+
+            match client.pantry_status().await {
+                Ok(_) => {
+                    // The pantry responded, so it's still there. It may be that
+                    // the volume is no longer attached because a Propolis
+                    // activation took over from the Pantry.
+
+                    match client.volume_status(&volume_id).await {
                         Ok(_) => {
-                            // The pantry responded, so it's still there. It may
-                            // be that the volume is no longer attached because
-                            // a Propolis activation took over from the Pantry.
+                            // The volume is still there as an entry, but the
+                            // job isn't? Action is required: this saga should
+                            // delete the attached volume, then re-attach it.
 
-                            let Some(new_region_id) =
-                                params.request.new_region_id
-                            else {
-                                return Err(ActionError::action_failed(format!(
-                                    "region replacement request {} has new_region_id = None",
-                                    params.request.id,
-                                )));
-                            };
+                            info!(
+                                log,
+                                "pantry still has active volume";
+                                "region replacement id" => %request_id,
+                                "last replacement drive time" => ?step_time,
+                                "last replacement drive step" => "pantry",
+                                "pantry address" => ?pantry_address,
+                                "volume id" => volume_id,
+                            );
 
-                            let new_region: db::model::Region = osagactx
-                                .datastore()
-                                .get_region(new_region_id)
-                                .await
-                                .map_err(ActionError::action_failed)?;
-
-                            let volume_id = new_region.volume_id().to_string();
-
-                            match client.volume_status(&volume_id).await {
-                                Ok(_) => {
-                                    // The volume is still there as an entry,
-                                    // but the job isn't? Action is required:
-                                    // this saga should delete the attached
-                                    // volume, then re-attach it.
-
-                                    info!(
-                                        log,
-                                        "pantry still has active volume";
-                                        "region replacement id" => %params.request.id,
-                                        "last replacement drive time" => ?last_request_step.step_time,
-                                        "last replacement drive step" => "pantry",
-                                        "pantry address" => ?pantry_address,
-                                        "volume id" => volume_id,
-                                    );
-
-                                    Ok(DriveCheck::ActionRequired)
-                                }
-
-                                Err(e) => {
-                                    // The volume is gone: it's likely been
-                                    // activated by a Propolis, but this could
-                                    // also be because the Pantry bounced. Some
-                                    // further action is required: either poll
-                                    // the propolis that stole the activation or
-                                    // send the volume to a new Pantry.
-
-                                    error!(
-                                        log,
-                                        "pantry returned an error checking on volume: {e}";
-                                        "region replacement id" => %params.request.id,
-                                        "last replacement drive time" => ?last_request_step.step_time,
-                                        "last replacement drive step" => "pantry",
-                                        "pantry address" => ?pantry_address,
-                                        "volume id" => volume_id,
-                                    );
-
-                                    Ok(DriveCheck::ActionRequired)
-                                }
-                            }
+                            Ok(DriveCheck::ActionRequired)
                         }
 
                         Err(e) => {
-                            // The pantry is not responding on its status
-                            // endpoint.  Further action is required to drive
-                            // the repair, which may be attaching to another
-                            // Pantry.
+                            // The volume is gone: it's likely been activated by
+                            // a Propolis, but this could also be because the
+                            // Pantry bounced. Some further action is required:
+                            // either poll the propolis that stole the
+                            // activation or send the volume to a new Pantry.
 
                             error!(
                                 log,
-                                "pantry returned an error checking on status: {e}";
-                                "region replacement id" => %params.request.id,
-                                "last replacement drive time" => ?last_request_step.step_time,
+                                "pantry returned an error checking on volume: {e}";
+                                "region replacement id" => %request_id,
+                                "last replacement drive time" => ?step_time,
                                 "last replacement drive step" => "pantry",
                                 "pantry address" => ?pantry_address,
+                                "volume id" => volume_id,
                             );
 
                             Ok(DriveCheck::ActionRequired)
                         }
                     }
+                }
+
+                Err(e) => {
+                    // The pantry is not responding on its status endpoint.
+                    // Further action is required to drive the repair, which may
+                    // be attaching to another Pantry.
+
+                    error!(
+                        log,
+                        "pantry returned an error checking on status: {e}";
+                        "region replacement id" => %request_id,
+                        "last replacement drive time" => ?step_time,
+                        "last replacement drive step" => "pantry",
+                        "pantry address" => ?pantry_address,
+                    );
+
+                    Ok(DriveCheck::ActionRequired)
                 }
             }
         }
