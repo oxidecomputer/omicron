@@ -375,7 +375,8 @@ impl SledAgent {
                 SledInstanceState {
                     vmm_state: vmm_runtime,
                     propolis_id,
-                    migration_state: None,
+                    migration_in: None,
+                    migration_out: None,
                 },
                 None,
             )

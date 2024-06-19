@@ -16,7 +16,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::nexus::{
-    InstanceRuntimeState, MigrationRole, SledInstanceState, VmmState,
+    InstanceRuntimeState, SledInstanceState, VmmState,
 };
 use propolis_client::types::{
     InstanceMigrateStatusResponse as PropolisMigrateResponse,
@@ -81,54 +81,47 @@ impl SimInstanceInner {
 
     /// Queue a successful simulated migration.
     ///
-    fn queue_successful_migration(&mut self, role: MigrationRole) {
+    fn queue_successful_migration(&mut self) {
         // Propolis transitions to the Migrating state once before
         // actually starting migration.
         self.queue_propolis_state(PropolisInstanceState::Migrating);
-        let migration_id = self.state.migration().unwrap_or_else(|| {
-            panic!(
-                "should have migration ID set before getting request to
-                    migrate in (current state: {:?})",
-                self
-            )
-        });
-
-        match role {
-            MigrationRole::Source => {
-                self.queue_migration_update(PropolisMigrateResponse {
-                    migration_in: None,
-                    migration_out: Some(PropolisMigrationStatus {
-                        id: migration_id,
-                        state: propolis_client::types::MigrationState::Sync,
-                    }),
-                });
-                self.queue_migration_update(PropolisMigrateResponse {
-                    migration_in: None,
-                    migration_out: Some(PropolisMigrationStatus {
-                        id: migration_id,
-                        state: propolis_client::types::MigrationState::Finish,
-                    }),
-                });
-                self.queue_graceful_stop();
-            }
-            MigrationRole::Target => {
-                self.queue_migration_update(PropolisMigrateResponse {
-                    migration_in: Some(PropolisMigrationStatus {
-                        id: migration_id,
-                        state: propolis_client::types::MigrationState::Sync,
-                    }),
-                    migration_out: None,
-                });
-                self.queue_migration_update(PropolisMigrateResponse {
-                    migration_in: Some(PropolisMigrationStatus {
-                        id: migration_id,
-                        state: propolis_client::types::MigrationState::Finish,
-                    }),
-                    migration_out: None,
-                });
-                self.queue_propolis_state(PropolisInstanceState::Running)
-            }
-        }
+        todo!("eliza: fix this bit")
+        // match role {
+        //     MigrationRole::Source => {
+        //         self.queue_migration_update(PropolisMigrateResponse {
+        //             migration_in: None,
+        //             migration_out: Some(PropolisMigrationStatus {
+        //                 id: todo!
+        //                 state: propolis_client::types::MigrationState::Sync,
+        //             }),
+        //         });
+        //         self.queue_migration_update(PropolisMigrateResponse {
+        //             migration_in: None,
+        //             migration_out: Some(PropolisMigrationStatus {
+        //                 id: migration_id,
+        //                 state: propolis_client::types::MigrationState::Finish,
+        //             }),
+        //         });
+        //         self.queue_graceful_stop();
+        //     }
+        //     MigrationRole::Target => {
+        //         self.queue_migration_update(PropolisMigrateResponse {
+        //             migration_in: Some(PropolisMigrationStatus {
+        //                 id: migration_id,
+        //                 state: propolis_client::types::MigrationState::Sync,
+        //             }),
+        //             migration_out: None,
+        //         });
+        //         self.queue_migration_update(PropolisMigrateResponse {
+        //             migration_in: Some(PropolisMigrationStatus {
+        //                 id: migration_id,
+        //                 state: propolis_client::types::MigrationState::Finish,
+        //             }),
+        //             migration_out: None,
+        //         });
+        //         self.queue_propolis_state(PropolisInstanceState::Running)
+        //     }
+        // }
     }
 
     fn queue_graceful_stop(&mut self) {
@@ -178,7 +171,7 @@ impl SimInstanceInner {
                     )));
                 }
 
-                self.queue_successful_migration(MigrationRole::Target)
+                // self.queue_successful_migration(MigrationRole::Target)
             }
             InstanceStateRequested::Running => {
                 match self.next_resting_state() {
@@ -278,7 +271,6 @@ impl SimInstanceInner {
             }
 
             self.state.apply_propolis_observation(&ObservedPropolisState::new(
-                &self.state,
                 &self.last_response,
             ))
         } else {
@@ -384,19 +376,20 @@ impl SimInstanceInner {
         // If we set migration IDs and are the migration source, ensure that we
         // will perform the correct state transitions to simulate a successful
         // migration.
-        if ids.is_some() {
-            let role = self
-            .state
-            .migration()
-            .expect(
-                "we just got a `put_migration_ids` request with `Some` IDs, \
-                so we should have a migration"
-            )
-            .role;
-            if role == MigrationRole::Source {
-                self.queue_successful_migration(MigrationRole::Source)
-            }
-        }
+        // if ids.is_some() {
+        //     let role = self
+        //     .state
+        //     .migration()
+        //     .expect(
+        //         "we just got a `put_migration_ids` request with `Some` IDs, \
+        //         so we should have a migration"
+        //     )
+        //     .role;
+        //     if role == MigrationRole::Source {
+        //         self.queue_successful_migration(MigrationRole::Source)
+        //     }
+        // }
+        todo!();
 
         Ok(self.state.sled_instance_state())
     }

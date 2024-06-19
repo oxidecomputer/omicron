@@ -123,9 +123,32 @@ pub struct SledInstanceState {
     /// The most recent state of the sled's VMM process.
     pub vmm_state: VmmRuntimeState,
 
-    /// The current state of any in-progress migration for this instance, as
-    /// understood by this sled.
-    pub migration_state: Option<MigrationRuntimeState>,
+    /// The current state of any inbound migration to this VMM.
+    pub migration_in: Option<MigrationRuntimeState>,
+
+    /// The state of any outbound migration to this VMM.
+    pub migration_out: Option<MigrationRuntimeState>,
+}
+
+#[derive(Copy, Clone, Debug, Default)]
+pub struct Migrations<'state> {
+    pub migration_in: Option<&'state MigrationRuntimeState>,
+    pub migration_out: Option<&'state MigrationRuntimeState>,
+}
+
+impl Migrations<'_> {
+    pub fn empty() -> Self {
+        Self { migration_in: None, migration_out: None }
+    }
+}
+
+impl SledInstanceState {
+    pub fn migrations(&self) -> Migrations<'_> {
+        Migrations {
+            migration_in: self.migration_in.as_ref(),
+            migration_out: self.migration_out.as_ref(),
+        }
+    }
 }
 
 /// An update from a sled regarding the state of a migration, indicating the
@@ -134,7 +157,6 @@ pub struct SledInstanceState {
 pub struct MigrationRuntimeState {
     pub migration_id: Uuid,
     pub state: MigrationState,
-    pub role: MigrationRole,
     pub gen: Generation,
 
     /// Timestamp for the migration state update.
@@ -184,32 +206,6 @@ impl MigrationState {
 }
 
 impl fmt::Display for MigrationState {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.label())
-    }
-}
-
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum MigrationRole {
-    /// This update concerns the source VMM of a migration.
-    Source,
-    /// This update concerns the target VMM of a migration.
-    Target,
-}
-
-impl MigrationRole {
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Source => "source",
-            Self::Target => "target",
-        }
-    }
-}
-
-impl fmt::Display for MigrationRole {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.label())
     }

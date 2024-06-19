@@ -47,7 +47,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
-use omicron_common::api::internal::nexus::MigrationRuntimeState;
+use omicron_common::api::internal::nexus::Migrations;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -549,13 +549,13 @@ impl DataStore {
         new_instance: &InstanceRuntimeState,
         vmm_id: &PropolisUuid,
         new_vmm: &VmmRuntimeState,
-        migration: &Option<MigrationRuntimeState>,
+        migrations: Migrations<'_>,
     ) -> Result<InstanceUpdateResult, Error> {
         let query = crate::db::queries::instance::InstanceAndVmmUpdate::new(
             *vmm_id,
             new_vmm.clone(),
             Some((*instance_id, new_instance.clone())),
-            migration.clone(),
+            migrations,
         );
 
         // The InstanceAndVmmUpdate query handles and indicates failure to find
@@ -566,26 +566,21 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        let instance_updated = match result.instance_status {
-            Some(UpdateStatus::Updated) => true,
-            Some(UpdateStatus::NotUpdatedButExists) => false,
-            None => false,
-        };
-
+        let instance_updated = result.instance_status.was_updated();
         let vmm_updated = match result.vmm_status {
             Some(UpdateStatus::Updated) => true,
             Some(UpdateStatus::NotUpdatedButExists) => false,
             None => false,
         };
 
-        let migration_updated = if migration.is_some() {
-            Some(match result.migration_status {
-                Some(UpdateStatus::Updated) => true,
-                Some(UpdateStatus::NotUpdatedButExists) => false,
-                None => false,
-            })
+        let migration_updated = if migrations.migration_in.is_some()
+            || migrations.migration_out.is_some()
+        {
+            Some(
+                result.migration_in_status.was_updated()
+                    || result.migration_out_status.was_updated(),
+            )
         } else {
-            debug_assert_eq!(result.migration_status, None);
             None
         };
 

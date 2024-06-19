@@ -384,10 +384,7 @@ impl InstanceRunner {
                     use InstanceMonitorRequest::*;
                     match request {
                         Some(Update { state, tx }) => {
-                            let observed = ObservedPropolisState::new(
-                                &self.state,
-                                &state,
-                            );
+                            let observed = ObservedPropolisState::new(&state);
                             let reaction = self.observe_state(&observed).await;
                             self.publish_state_to_nexus().await;
 
@@ -707,13 +704,7 @@ impl InstanceRunner {
 
         let migrate = match migrate {
             Some(params) => {
-                let migration_id = self
-                    .state
-                    .migration()
-                    .ok_or_else(|| {
-                        Error::Migration(anyhow!("Missing Migration UUID"))
-                    })?
-                    .migration_id;
+                let migration_id = todo!("eliza: this probably needs to be sent by Nexus directly now?");
                 Some(propolis_client::types::InstanceMigrateInitiateRequest {
                     src_addr: params.src_propolis_addr.to_string(),
                     src_uuid: params.src_propolis_id,

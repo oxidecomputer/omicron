@@ -164,7 +164,8 @@ impl From<types::SledInstanceState>
         Self {
             propolis_id: s.propolis_id,
             vmm_state: s.vmm_state.into(),
-            migration_state: s.migration_state.map(Into::into),
+            migration_in: s.migration_in.map(Into::into),
+            migration_out: s.migration_out.map(Into::into),
         }
     }
 }
@@ -176,21 +177,8 @@ impl From<types::MigrationRuntimeState>
         Self {
             migration_id: s.migration_id,
             state: s.state.into(),
-            role: s.role.into(),
             gen: s.gen,
             time_updated: s.time_updated,
-        }
-    }
-}
-
-impl From<types::MigrationRole>
-    for omicron_common::api::internal::nexus::MigrationRole
-{
-    fn from(r: types::MigrationRole) -> Self {
-        use omicron_common::api::internal::nexus::MigrationRole as Output;
-        match r {
-            types::MigrationRole::Source => Output::Source,
-            types::MigrationRole::Target => Output::Target,
         }
     }
 }
