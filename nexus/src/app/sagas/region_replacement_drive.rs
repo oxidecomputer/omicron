@@ -78,11 +78,11 @@
 //! halting progress.
 //!
 //! This saga is responsible for driving forward the Volume repair process, by
-//! initiating repair operations. One invocation of this saga is not enough to
-//! repair a Volume: Nexus must continuously monitor the degraded Volumes and
-//! initiate the necessary operation (LR or Reconciliation) until those Volumes
-//! are no longer degraded. Those operations can fail or be interrupted at any
-//! time due to user actions.
+//! initiating repair operations. One invocation of this saga is most likely not
+//! enough to repair a Volume: Nexus must continuously monitor the degraded
+//! Volumes and initiate the necessary operation (LR or Reconciliation) until
+//! those Volumes are no longer degraded. Those operations can fail or be
+//! interrupted at any time due to user actions.
 //!
 //! # what does the saga do? #
 //!
