@@ -505,7 +505,7 @@ mod test {
     #[test]
     fn destruction_after_migration_out_does_not_transition() {
         let mut state = make_migration_source_instance();
-        let migration_id = state.migration_out.unwrap().migration_id;
+        let migration_id = state.migration_out.as_ref().unwrap().migration_id;
 
         // After a migration succeeds, the source VM appears to stop but reports
         // that the migration has succeeded.
@@ -581,7 +581,7 @@ mod test {
     #[test]
     fn failure_after_migration_in_does_not_transition() {
         let mut state = make_migration_target_instance();
-        let migration_id = state.migration_in.unwrap().migration_id;
+        let migration_id = state.migration_in.as_ref().unwrap().migration_id;
 
         // Failure to migrate into an instance should mark the VMM as destroyed
         // but should not change the instance's migration IDs.
