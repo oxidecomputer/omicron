@@ -11,6 +11,8 @@ use crate::app::db::datastore::InstanceSnapshot;
 use crate::app::db::model::VmmState;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::{authn, authz};
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PropolisUuid;
 use serde::{Deserialize, Serialize};
 use steno::{ActionError, DagBuilder, Node, SagaName};
 use uuid::Uuid;
@@ -96,7 +98,7 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
                 let subsaga_params = destroyed::Params {
                     serialized_authn: params.serialized_authn.clone(),
                     authz_instance: params.authz_instance.clone(),
-                    vmm_id: active_vmm.id,
+                    vmm_id: PropolisUuid::from_untyped_uuid(active_vmm.id),
                     instance: params.state.instance.clone(),
                 };
                 let subsaga_dag = {
