@@ -14,9 +14,11 @@ use nexus_db_model::InstanceState;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PropolisUuid;
 use serde::{Deserialize, Serialize};
 use slog::info;
-use uuid::Uuid;
 
 // instance update (active VMM destroyed) subsaga: actions
 
@@ -71,7 +73,7 @@ pub(super) struct Params {
     pub(super) authz_instance: authz::Instance,
 
     /// The UUID of the VMM that was destroyed.
-    pub(super) vmm_id: Uuid,
+    pub(super) vmm_id: PropolisUuid,
 
     pub(super) instance: Instance,
 }
@@ -122,7 +124,7 @@ async fn siud_release_sled_resources(
 
     osagactx
         .datastore()
-        .sled_reservation_delete(&opctx, vmm_id)
+        .sled_reservation_delete(&opctx, vmm_id.into_untyped_uuid())
         .await
         .or_else(|err| {
             // Necessary for idempotency
@@ -161,7 +163,7 @@ async fn siud_release_virtual_provisioning(
         .datastore()
         .virtual_provisioning_collection_delete_instance(
             &opctx,
-            authz_instance.id(),
+            InstanceUuid::from_untyped_uuid(authz_instance.id()),
             instance.project_id,
             i64::from(instance.ncpus.0 .0),
             instance.memory,
@@ -269,7 +271,10 @@ async fn siud_update_instance(
     // It's okay for this to fail, it just means that the active VMM ID has changed.
     let _ = osagactx
         .datastore()
-        .instance_update_runtime(&authz_instance.id(), &new_runtime)
+        .instance_update_runtime(
+            &InstanceUuid::from_untyped_uuid(authz_instance.id()),
+            &new_runtime,
+        )
         .await;
     Ok(())
 }

@@ -161,28 +161,16 @@ impl InstanceWatcher {
                 "updating instance state";
                 "state" => ?new_runtime_state.vmm_state.state,
             );
-            check.result = crate::app::instance::notify_instance_updated(
-                &datastore,
-                &resolver,
-                &opctx,
-                &opctx,
-                &opctx.log,
-                &InstanceUuid::from_untyped_uuid(target.instance_id),
-                &new_runtime_state,
-                &v2p_manager,
-            )
-            .await
-            .map_err(|e| {
-                slog::warn!(
-                    opctx.log,
-                    "error updating instance";
-                    "error" => ?e,
-                    "state" => ?new_runtime_state.vmm_state.state,
-                );
-                Incomplete::UpdateFailed
-            })
-            .and_then(|updated| {
-                updated.ok_or_else(|| {
+            check.result =
+                crate::app::instance::notify_instance_updated_background(
+                    &datastore,
+                    &opctx,
+                    &saga_req,
+                    InstanceUuid::from_untyped_uuid(target.instance_id),
+                    new_runtime_state,
+                )
+                .await
+                .map_err(|e| {
                     slog::warn!(
                         opctx.log,
                         "error updating instance";
