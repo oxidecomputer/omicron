@@ -1035,8 +1035,6 @@ async fn srrd_drive_region_replacement_execute(
         &params.serialized_authn,
     );
 
-    let nexus = osagactx.nexus();
-
     // Look up the prepared action, and execute it. If something has changed
     // between when the action was determined and now, then bail out - the next
     // drive saga invocation will pick up the new state of the world and act
@@ -1051,200 +1049,23 @@ async fn srrd_drive_region_replacement_execute(
         }
 
         DriveAction::Pantry { step, volume_id } => {
-            // Importantly, _do not use `call_pantry_attach_for_disk`_! That
-            // uses `retry_until_known_result`, which we _do not want here_. The
-            // Pantry attach can fail if there's a racing Volume checkout to be
-            // sent to Propolis. Additionally, it uses `attach` instead of
-            // `attach_activate_background`, which means it will hang on the
-            // activation.
-
             let Some(pantry_address) = step.pantry_address() else {
                 return Err(ActionError::action_failed(String::from(
                     "pantry step does not have an address",
                 )));
             };
 
-            let endpoint = format!("http://{}", pantry_address);
-            let client = crucible_pantry_client::Client::new(&endpoint);
-
-            // Check pantry first, to see if this volume is attached already. This can
-            // occur if:
-            //
-            // - the volume is attached to the target pantry, but it can't be reliably
-            //   determined if reconcilation finished.
-            //
-            // - a previous repair operated on another region in the same Volume, and that
-            //   attachment was not garbage collected.
-            //
-            // Try to get the volume's status in order to check.
-
-            let detach_required = match client
-                .volume_status(&volume_id.to_string())
-                .await
-            {
-                Ok(volume_status) => {
-                    info!(
-                        log,
-                        "volume is already attached with status {volume_status:?}";
-                        "region replacement id" => %params.request.id,
-                        "volume id" => ?volume_id,
-                        "endpoint" => endpoint.clone(),
-                    );
-
-                    // Detach this volume so we can reattach with this saga's job id.
-                    true
-                }
-
-                Err(e) => {
-                    match e {
-                        crucible_pantry_client::Error::ErrorResponse(
-                            ref rv,
-                        ) => {
-                            match rv.status() {
-                                http::StatusCode::NOT_FOUND => {
-                                    // No detach required, this Volume isn't attached to
-                                    // this Pantry.
-                                    false
-                                }
-
-                                http::StatusCode::GONE => {
-                                    // 410 Gone means detach is required - it was
-                                    // previously attached and may have been activated
-                                    true
-                                }
-
-                                _ => {
-                                    error!(
-                                        log,
-                                        "error checking volume status: {e}";
-                                        "region replacement id" => %params.request.id,
-                                        "volume id" => ?volume_id,
-                                        "endpoint" => endpoint.clone(),
-                                    );
-
-                                    return Err(ActionError::action_failed(Error::internal_error(
-                                        &format!("unexpected error from volume_status: {e}")
-                                    )));
-                                }
-                            }
-                        }
-
-                        _ => {
-                            error!(
-                                log,
-                                "error checking volume status: {e}";
-                                "region replacement id" => %params.request.id,
-                                "volume id" => ?volume_id,
-                                "endpoint" => endpoint.clone(),
-                            );
-
-                            return Err(ActionError::action_failed(
-                                Error::internal_error(&format!(
-                                    "unexpected error from volume_status: {e}"
-                                )),
-                            ));
-                        }
-                    }
-                }
-            };
-
-            if detach_required {
-                info!(
-                    log,
-                    "detach required";
-                    "region replacement id" => %params.request.id,
-                    "volume id" => ?volume_id,
-                    "endpoint" => endpoint.clone(),
-                );
-
-                match client.detach(&volume_id.to_string()).await {
-                    Ok(_) => {
-                        info!(
-                            log,
-                            "detached volume";
-                            "region replacement id" => %params.request.id,
-                            "volume id" => ?volume_id,
-                            "endpoint" => endpoint.clone(),
-                        );
-                    }
-
-                    Err(e) => {
-                        error!(
-                            log,
-                            "error detaching volume: {e}";
-                            "region replacement id" => %params.request.id,
-                            "volume id" => ?volume_id,
-                            "endpoint" => endpoint.clone(),
-                        );
-
-                        // Cannot continue: the Pantry will return an error unless the
-                        // volume construction request matches what was originally
-                        // attached, and the job id matches what was originally sent. Even
-                        // if the VCR is the same, this saga does not have the same job
-                        // id. Bail out here: hopefully the next time this saga runs, it
-                        // will select a different Pantry.
-
-                        return Err(ActionError::action_failed(Error::invalid_request(
-                            String::from("cannot proceed, pantry will reject our request")
-                        )));
-                    }
-                }
-            } else {
-                info!(
-                    log,
-                    "no detach required";
-                    "region replacement id" => %params.request.id,
-                    "volume id" => ?volume_id,
-                    "endpoint" => endpoint.clone(),
-                );
-            }
-
-            // Attach the volume to the pantry, and let reconciliation occur.
-
-            info!(
-                log,
-                "sending attach for volume";
-                "region replacement id" => %params.request.id,
-                "volume id" => ?volume_id,
-                "endpoint" => endpoint.clone(),
-            );
-
-            let disk_volume = nexus
-                .datastore()
-                .volume_checkout(
-                    volume_id,
-                    db::datastore::VolumeCheckoutReason::Pantry,
-                )
-                .await
-                .map_err(ActionError::action_failed)?;
-
-            let volume_construction_request: crucible_pantry_client::types::VolumeConstructionRequest =
-                serde_json::from_str(&disk_volume.data()).map_err(|e| {
-                    ActionError::action_failed(Error::internal_error(&format!(
-                        "failed to deserialize volume {volume_id} data: {e}",
-                    )))
-                })?;
-
             let job_id = sagactx.lookup::<Uuid>("job_id")?;
 
-            let attach_request =
-                crucible_pantry_client::types::AttachBackgroundRequest {
-                    volume_construction_request,
-                    job_id: job_id.to_string(),
-                };
-
-            client
-                .attach_activate_background(
-                    &volume_id.to_string(),
-                    &attach_request,
-                )
-                .await
-                .map_err(|e| {
-                    ActionError::action_failed(format!(
-                        "pantry attach failed with {:?}",
-                        e,
-                    ))
-                })?;
+            execute_pantry_drive_action(
+                log,
+                osagactx.datastore(),
+                params.request.id,
+                pantry_address,
+                volume_id,
+                job_id,
+            )
+            .await?;
 
             ExecuteResult {
                 step_to_commit: Some(step),
@@ -1253,6 +1074,13 @@ async fn srrd_drive_region_replacement_execute(
         }
 
         DriveAction::Propolis { step, disk } => {
+            let Some((instance_id, vmm_id)) = step.instance_and_vmm_ids()
+            else {
+                return Err(ActionError::action_failed(Error::internal_error(
+                    "propolis step does not have instance and vmm ids",
+                )));
+            };
+
             // The disk is attached to an instance and there's an active
             // propolis server. Send a volume replacement request to the running
             // Volume there - either it will start a live repair, or be ignored
@@ -1274,18 +1102,12 @@ async fn srrd_drive_region_replacement_execute(
                 }
             };
 
-            let Some((instance_id, vmm_id)) = step.instance_and_vmm_ids()
-            else {
-                return Err(ActionError::action_failed(Error::internal_error(
-                    "propolis step does not have instance and vmm ids",
-                )));
-            };
-
             let instance_lookup =
                 LookupPath::new(&opctx, &osagactx.datastore())
                     .instance_id(instance_id);
 
-            let (vmm, client) = nexus
+            let (vmm, client) = osagactx
+                .nexus()
                 .propolis_client_for_instance(
                     &opctx,
                     &instance_lookup,
@@ -1294,159 +1116,361 @@ async fn srrd_drive_region_replacement_execute(
                 .await
                 .map_err(ActionError::action_failed)?;
 
-            // This client could be for a different VMM than the step was
-            // prepared for. Bail out if this is true
-            if vmm.id != vmm_id {
-                return Err(ActionError::action_failed(format!(
-                    "propolis client vmm {} does not match step vmm {}",
-                    vmm.id, vmm_id,
-                )));
-            }
-
-            info!(
+            let replacement_done = execute_propolis_drive_action(
                 log,
-                "sending replacement request for disk volume to propolis {vmm_id}";
-                "region replacement id" => %params.request.id,
-                "disk id" => ?disk.id(),
-                "volume id" => ?disk.volume_id,
-            );
-
-            // Start (or poll) the replacement
-            let result = client
-                .instance_issue_crucible_vcr_request()
-                .id(disk.id())
-                .body(
-                    propolis_client::types::InstanceVcrReplace {
-                        name: disk.name().to_string(),
-                        vcr_json: disk_new_volume_vcr.to_string(),
-                    }
-                )
-                .send()
-                .await
-                .map_err(|e| match e {
-                    propolis_client::Error::ErrorResponse(
-                        rv,
-                    ) => {
-                        ActionError::action_failed(rv.message.clone())
-                    }
-
-                    _ => {
-                        ActionError::action_failed(
-                            format!(
-                                "unexpected failure during `instance_issue_crucible_vcr_request`: {e}",
-                            )
-                        )
-                    }
-                })?;
-
-            let replace_result = result.into_inner();
-
-            info!(
-                log,
-                "saw replace result {replace_result:?}";
-                "region replacement id" => %params.request.id,
-                "disk id" => ?disk.id(),
-                "volume id" => ?disk.volume_id,
-            );
-
-            let replacement_done = match &replace_result {
-                ReplaceResult::Started => {
-                    // This drive saga's call just started the replacement
-                    false
-                }
-
-                ReplaceResult::StartedAlready => {
-                    // A previous drive saga's call started the replacement, but
-                    // it's not done yet.
-                    false
-                }
-
-                ReplaceResult::CompletedAlready => {
-                    // It's done! We see this if the same propolis that received
-                    // the original replace request started and finished the
-                    // live repair.
-                    true
-                }
-
-                ReplaceResult::VcrMatches => {
-                    // If this propolis booted after the volume construction
-                    // request was modified but before all the regions were
-                    // reconciled, then `VcrMatches` will be seen as a result of
-                    // `target_replace`: the new propolis will have received the
-                    // updated VCR when it was created.
-                    //
-                    // The upstairs will be performing reconciliation (or have
-                    // previously performed it), not live repair, and will have
-                    // no record of a previous replace request (sent to a
-                    // different propolis!) starting a live repair.
-                    //
-                    // If the Volume is active, that means reconcilation
-                    // completed ok, and therefore Nexus can consider this
-                    // repair complete. This is only true if one repair occurs
-                    // at a time per volume (which is true due to the presence
-                    // of volume_repair records), and if this saga locks the
-                    // region replacement request record as part of it executing
-                    // (which it does through the SET_SAGA_ID forward action).
-                    // If either of those conditions are not held, then multiple
-                    // replacement calls and activation checks can interleave
-                    // and confuse this saga.
-                    //
-                    // Check if the Volume activated.
-
-                    let result = client
-                        .disk_volume_status()
-                        .id(disk.id())
-                        .send()
-                        .await
-                        .map_err(|e| match e {
-                            propolis_client::Error::ErrorResponse(
-                                rv,
-                            ) => {
-                                ActionError::action_failed(rv.message.clone())
-                            }
-
-                            _ => {
-                                ActionError::action_failed(
-                                    format!(
-                                        "unexpected failure during `disk_volume_status`: {e}",
-                                    )
-                                )
-                            }
-                        })?;
-
-                    // If the Volume is active, then reconciliation finished
-                    // successfully.
-                    //
-                    // There's a few reasons it may not be active yet:
-                    //
-                    // - Propolis could be shutting down, and tearing down the
-                    //   Upstairs in the process (which deactivates the Volume)
-                    //
-                    // - reconciliation could still be going on
-                    //
-                    // - reconciliation could have failed
-                    //
-                    // If it's not active, wait until the next invocation of
-                    // this saga to decide what to do next.
-
-                    result.into_inner().active
-                }
-
-                ReplaceResult::Missing => {
-                    // The disk's volume does not contain the region to be
-                    // replaced. This is an error!
-
-                    return Err(ActionError::action_failed(String::from(
-                        "saw ReplaceResult::Missing",
-                    )));
-                }
-            };
+                params.request.id,
+                vmm_id,
+                vmm,
+                client,
+                disk,
+                disk_new_volume_vcr,
+            )
+            .await?;
 
             ExecuteResult { step_to_commit: Some(step), replacement_done }
         }
     };
 
     Ok(result)
+}
+
+/// Execute a prepared Pantry step
+async fn execute_pantry_drive_action(
+    log: &Logger,
+    datastore: &db::DataStore,
+    request_id: Uuid,
+    pantry_address: SocketAddrV6,
+    volume_id: Uuid,
+    job_id: Uuid,
+) -> Result<(), ActionError> {
+    // Importantly, _do not use `call_pantry_attach_for_disk`_! That uses
+    // `retry_until_known_result`, which we _do not want here_. The Pantry
+    // attach can fail if there's a racing Volume checkout to be sent to
+    // Propolis. Additionally, that call uses `attach` instead of
+    // `attach_activate_background`, which means it will hang on the activation.
+
+    let endpoint = format!("http://{}", pantry_address);
+    let client = crucible_pantry_client::Client::new(&endpoint);
+
+    // Check pantry first, to see if this volume is attached already. This can
+    // occur if:
+    //
+    // - the volume is attached to the target pantry, but it can't be reliably
+    // determined if reconcilation finished.
+    //
+    // - a previous repair operated on another region in the same Volume, and
+    // that attachment was not garbage collected.
+    //
+    // Try to get the volume's status in order to check.
+
+    let detach_required =
+        match client.volume_status(&volume_id.to_string()).await {
+            Ok(volume_status) => {
+                info!(
+                    log,
+                    "volume is already attached with status {volume_status:?}";
+                    "region replacement id" => %request_id,
+                    "volume id" => ?volume_id,
+                    "endpoint" => endpoint.clone(),
+                );
+
+                // Detach this volume so we can reattach with this saga's job id.
+                true
+            }
+
+            Err(e) => {
+                match e {
+                    crucible_pantry_client::Error::ErrorResponse(ref rv) => {
+                        match rv.status() {
+                            http::StatusCode::NOT_FOUND => {
+                                // No detach required, this Volume isn't attached to
+                                // this Pantry.
+                                false
+                            }
+
+                            http::StatusCode::GONE => {
+                                // 410 Gone means detach is required - it was
+                                // previously attached and may have been activated
+                                true
+                            }
+
+                            _ => {
+                                error!(
+                                    log,
+                                    "error checking volume status: {e}";
+                                    "region replacement id" => %request_id,
+                                    "volume id" => ?volume_id,
+                                    "endpoint" => endpoint.clone(),
+                                );
+
+                                return Err(ActionError::action_failed(
+                                    Error::internal_error(&format!(
+                                    "unexpected error from volume_status: {e}"
+                                )),
+                                ));
+                            }
+                        }
+                    }
+
+                    _ => {
+                        error!(
+                            log,
+                            "error checking volume status: {e}";
+                            "region replacement id" => %request_id,
+                            "volume id" => ?volume_id,
+                            "endpoint" => endpoint.clone(),
+                        );
+
+                        return Err(ActionError::action_failed(
+                            Error::internal_error(&format!(
+                                "unexpected error from volume_status: {e}"
+                            )),
+                        ));
+                    }
+                }
+            }
+        };
+
+    if detach_required {
+        info!(
+            log,
+            "detach required";
+            "region replacement id" => %request_id,
+            "volume id" => ?volume_id,
+            "endpoint" => endpoint.clone(),
+        );
+
+        match client.detach(&volume_id.to_string()).await {
+            Ok(_) => {
+                info!(
+                    log,
+                    "detached volume";
+                    "region replacement id" => %request_id,
+                    "volume id" => ?volume_id,
+                    "endpoint" => endpoint.clone(),
+                );
+            }
+
+            Err(e) => {
+                error!(
+                    log,
+                    "error detaching volume: {e}";
+                    "region replacement id" => %request_id,
+                    "volume id" => ?volume_id,
+                    "endpoint" => endpoint.clone(),
+                );
+
+                // Cannot continue: the Pantry will return an error unless the
+                // volume construction request matches what was originally
+                // attached, and the job id matches what was originally sent.
+                // Even if the VCR is the same, this saga does not have the same
+                // job id. Bail out here: hopefully the next time this saga
+                // runs, it will select a different Pantry.
+
+                return Err(ActionError::action_failed(
+                    Error::invalid_request(String::from(
+                        "cannot proceed, pantry will reject our request",
+                    )),
+                ));
+            }
+        }
+    } else {
+        info!(
+            log,
+            "no detach required";
+            "region replacement id" => %request_id,
+            "volume id" => ?volume_id,
+            "endpoint" => endpoint.clone(),
+        );
+    }
+
+    // Attach the volume to the pantry, and let reconciliation occur.
+
+    info!(
+        log,
+        "sending attach for volume";
+        "region replacement id" => %request_id,
+        "volume id" => ?volume_id,
+        "endpoint" => endpoint.clone(),
+    );
+
+    let disk_volume = datastore
+        .volume_checkout(volume_id, db::datastore::VolumeCheckoutReason::Pantry)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let volume_construction_request:
+        crucible_pantry_client::types::VolumeConstructionRequest =
+        serde_json::from_str(&disk_volume.data()).map_err(|e| {
+            ActionError::action_failed(Error::internal_error(&format!(
+                "failed to deserialize volume {volume_id} data: {e}",
+            )))
+        })?;
+
+    let attach_request =
+        crucible_pantry_client::types::AttachBackgroundRequest {
+            volume_construction_request,
+            job_id: job_id.to_string(),
+        };
+
+    client
+        .attach_activate_background(&volume_id.to_string(), &attach_request)
+        .await
+        .map_err(|e| {
+            ActionError::action_failed(format!(
+                "pantry attach failed with {:?}",
+                e,
+            ))
+        })?;
+
+    Ok(())
+}
+
+/// Execute a prepared Propolis step
+async fn execute_propolis_drive_action(
+    log: &Logger,
+    request_id: Uuid,
+    step_vmm_id: Uuid,
+    vmm: db::model::Vmm,
+    client: propolis_client::Client,
+    disk: db::model::Disk,
+    disk_new_volume_vcr: String,
+) -> Result<bool, ActionError> {
+    // This client could be for a different VMM than the step was
+    // prepared for. Bail out if this is true
+    if vmm.id != step_vmm_id {
+        return Err(ActionError::action_failed(format!(
+            "propolis client vmm {} does not match step vmm {}",
+            vmm.id, step_vmm_id,
+        )));
+    }
+
+    info!(
+        log,
+        "sending replacement request for disk volume to propolis {step_vmm_id}";
+        "region replacement id" => %request_id,
+        "disk id" => ?disk.id(),
+        "volume id" => ?disk.volume_id,
+    );
+
+    // Start (or poll) the replacement
+    let result = client
+        .instance_issue_crucible_vcr_request()
+        .id(disk.id())
+        .body(propolis_client::types::InstanceVcrReplace {
+            name: disk.name().to_string(),
+            vcr_json: disk_new_volume_vcr,
+        })
+        .send()
+        .await
+        .map_err(|e| match e {
+            propolis_client::Error::ErrorResponse(rv) => {
+                ActionError::action_failed(rv.message.clone())
+            }
+
+            _ => ActionError::action_failed(format!(
+                "unexpected failure during \
+                        `instance_issue_crucible_vcr_request`: {e}",
+            )),
+        })?;
+
+    let replace_result = result.into_inner();
+
+    info!(
+        log,
+        "saw replace result {replace_result:?}";
+        "region replacement id" => %request_id,
+        "disk id" => ?disk.id(),
+        "volume id" => ?disk.volume_id,
+    );
+
+    let replacement_done = match &replace_result {
+        ReplaceResult::Started => {
+            // This drive saga's call just started the replacement
+            false
+        }
+
+        ReplaceResult::StartedAlready => {
+            // A previous drive saga's call started the replacement, but it's
+            // not done yet.
+            false
+        }
+
+        ReplaceResult::CompletedAlready => {
+            // It's done! We see this if the same propolis that received the
+            // original replace request started and finished the live repair.
+            true
+        }
+
+        ReplaceResult::VcrMatches => {
+            // If this propolis booted after the volume construction request was
+            // modified but before all the regions were reconciled, then
+            // `VcrMatches` will be seen as a result of `target_replace`: the
+            // new propolis will have received the updated VCR when it was
+            // created.
+            //
+            // The upstairs will be performing reconciliation (or have
+            // previously performed it), not live repair, and will have no
+            // record of a previous replace request (sent to a different
+            // propolis!) starting a live repair.
+            //
+            // If the Volume is active, that means reconcilation completed ok,
+            // and therefore Nexus can consider this repair complete. This is
+            // only true if one repair occurs at a time per volume (which is
+            // true due to the presence of volume_repair records), and if this
+            // saga locks the region replacement request record as part of it
+            // executing (which it does through the SET_SAGA_ID forward action).
+            // If either of those conditions are not held, then multiple
+            // replacement calls and activation checks can interleave and
+            // confuse this saga.
+            //
+            // Check if the Volume activated.
+
+            let result = client
+                .disk_volume_status()
+                .id(disk.id())
+                .send()
+                .await
+                .map_err(|e| match e {
+                    propolis_client::Error::ErrorResponse(rv) => {
+                        ActionError::action_failed(rv.message.clone())
+                    }
+
+                    _ => ActionError::action_failed(format!(
+                        "unexpected failure during \
+                                `disk_volume_status`: {e}",
+                    )),
+                })?;
+
+            // If the Volume is active, then reconciliation finished
+            // successfully.
+            //
+            // There's a few reasons it may not be active yet:
+            //
+            // - Propolis could be shutting down, and tearing down the Upstairs
+            //   in the process (which deactivates the Volume)
+            //
+            // - reconciliation could still be going on
+            //
+            // - reconciliation could have failed
+            //
+            // If it's not active, wait until the next invocation of this saga
+            // to decide what to do next.
+
+            result.into_inner().active
+        }
+
+        ReplaceResult::Missing => {
+            // The disk's volume does not contain the region to be replaced.
+            // This is an error!
+
+            return Err(ActionError::action_failed(String::from(
+                "saw ReplaceResult::Missing",
+            )));
+        }
+    };
+
+    Ok(replacement_done)
 }
 
 async fn srrd_drive_region_replacement_commit(
