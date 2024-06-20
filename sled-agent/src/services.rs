@@ -1419,12 +1419,18 @@ impl ServiceManager {
     }
 
     fn zone_network_setup_install(
-        gw_addr: &Ipv6Addr,
+        gw_addr: Option<&Ipv6Addr>,
         zone: &InstalledZone,
         static_addrs: &[Ipv6Addr],
     ) -> Result<ServiceBuilder, Error> {
         let datalink = zone.get_control_vnic_name();
-        let gateway = &gw_addr.to_string();
+
+        // The switch zone is the only zone that will sometimes have an
+        // unknown underlay address at zone boot on the first scrimlet.
+        let gateway = match gw_addr {
+            Some(addr) => addr.to_string(),
+            None => "unknown".to_string(),
+        };
 
         let mut config_builder = PropertyGroupBuilder::new("config");
         config_builder = config_builder
@@ -1602,7 +1608,7 @@ impl ServiceManager {
                 let listen_port = &CLICKHOUSE_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    &info.underlay_address,
+                    Some(&info.underlay_address),
                     &installed_zone,
                     &[listen_addr],
                 )?;
@@ -1655,7 +1661,7 @@ impl ServiceManager {
                 let listen_port = &CLICKHOUSE_KEEPER_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    &info.underlay_address,
+                    Some(&info.underlay_address),
                     &installed_zone,
                     &[listen_addr],
                 )?;
@@ -1718,7 +1724,7 @@ impl ServiceManager {
                 .to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    &info.underlay_address,
+                    Some(&info.underlay_address),
                     &installed_zone,
                     &[crdb_listen_ip],
                 )?;
@@ -1782,7 +1788,7 @@ impl ServiceManager {
                 let listen_port = &CRUCIBLE_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    &info.underlay_address,
+                    Some(&info.underlay_address),
                     &installed_zone,
                     &[listen_addr],
                 )?;
@@ -1841,7 +1847,7 @@ impl ServiceManager {
                 let listen_port = &CRUCIBLE_PANTRY_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    &info.underlay_address,
+                    Some(&info.underlay_address),
                     &installed_zone,
                     &[listen_addr],
                 )?;
@@ -1893,7 +1899,7 @@ impl ServiceManager {
                 );
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    &info.underlay_address,
+                    Some(&info.underlay_address),
                     &installed_zone,
                     &[*underlay_address],
                 )?;
@@ -1934,7 +1940,7 @@ impl ServiceManager {
                 };
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    &info.underlay_address,
+                    Some(&info.underlay_address),
                     &installed_zone,
                     &[*underlay_address],
                 )?;
@@ -2021,7 +2027,7 @@ impl ServiceManager {
                 };
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    &info.underlay_address,
+                    Some(&info.underlay_address),
                     &installed_zone,
                     &[*underlay_address],
                 )?;
@@ -2114,7 +2120,7 @@ impl ServiceManager {
                 ..
             }) => {
                 let nw_setup_service = Self::zone_network_setup_install(
-                    gz_address,
+                    Some(gz_address),
                     &installed_zone,
                     &[*underlay_address],
                 )?;
@@ -2197,7 +2203,7 @@ impl ServiceManager {
                 };
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    &info.underlay_address,
+                    Some(&info.underlay_address),
                     &installed_zone,
                     &[*underlay_address],
                 )?;
@@ -2326,12 +2332,15 @@ impl ServiceManager {
                 zone: SwitchZoneConfig { id, services, addresses },
                 ..
             }) => {
-                let Some(info) = self.inner.sled_info.get() else {
-                    return Err(Error::SledAgentNotReady);
+                let info = self.inner.sled_info.get();
+
+                let gw_addr = match info {
+                    Some(i) => Some(&i.underlay_address),
+                    None => None,
                 };
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    &info.underlay_address,
+                    gw_addr,
                     &installed_zone,
                     addresses,
                 )?;
@@ -2395,12 +2404,15 @@ impl ServiceManager {
                                         "id",
                                         "astring",
                                         &id.to_string(),
-                                    )
-                                    .add_property(
-                                        "rack_id",
-                                        "astring",
-                                        &info.rack_id.to_string(),
                                     );
+
+                            if let Some(i) = info {
+                                mgs_config = mgs_config.add_property(
+                                    "rack_id",
+                                    "astring",
+                                    &i.rack_id.to_string(),
+                                );
+                            }
 
                             if let Some(address) = addresses.get(0) {
                                 // Don't use localhost twice
@@ -2446,11 +2458,7 @@ impl ServiceManager {
                                 });
                             };
 
-                            let rack_subnet = Ipv6Subnet::<AZ_PREFIX>::new(
-                                info.underlay_address,
-                            );
-
-                            let wicketd_config =
+                            let mut wicketd_config =
                                 PropertyGroupBuilder::new("config")
                                     .add_property(
                                         "address",
@@ -2481,12 +2489,19 @@ impl ServiceManager {
                                         "nexus-proxy-address",
                                         "astring",
                                         &format!("[::]:{WICKETD_NEXUS_PROXY_PORT}"),
-                                    )
-                                    .add_property(
-                                        "rack-subnet",
-                                        "astring",
-                                        &rack_subnet.net().addr().to_string(),
                                     );
+
+                            if let Some(i) = info {
+                                let rack_subnet = Ipv6Subnet::<AZ_PREFIX>::new(
+                                    i.underlay_address,
+                                );
+
+                                wicketd_config = wicketd_config.add_property(
+                                    "rack-subnet",
+                                    "astring",
+                                    &rack_subnet.net().addr().to_string(),
+                                );
+                            }
 
                             wicketd_service = wicketd_service.add_instance(
                                 ServiceInstanceBuilder::new("default")
@@ -2509,17 +2524,21 @@ impl ServiceManager {
                                 "Setting up dendrite service"
                             );
                             let mut dendrite_config =
-                                PropertyGroupBuilder::new("config")
+                                PropertyGroupBuilder::new("config");
+
+                            if let Some(i) = info {
+                                dendrite_config = dendrite_config
                                     .add_property(
                                         "sled_id",
                                         "astring",
-                                        &info.config.sled_id.to_string(),
+                                        &i.config.sled_id.to_string(),
                                     )
                                     .add_property(
                                         "rack_id",
                                         "astring",
-                                        &info.rack_id.to_string(),
+                                        &i.rack_id.to_string(),
                                     );
+                            }
 
                             for address in addresses {
                                 dendrite_config = dendrite_config.add_property(
@@ -2802,17 +2821,21 @@ impl ServiceManager {
                             info!(self.inner.log, "Setting up mgd service");
 
                             let mut mgd_config =
-                                PropertyGroupBuilder::new("config")
+                                PropertyGroupBuilder::new("config");
+
+                            if let Some(i) = info {
+                                mgd_config = mgd_config
                                     .add_property(
                                         "sled_uuid",
                                         "astring",
-                                        &info.config.sled_id.to_string(),
+                                        &i.config.sled_id.to_string(),
                                     )
                                     .add_property(
                                         "rack_uuid",
                                         "astring",
-                                        &info.rack_id.to_string(),
+                                        &i.rack_id.to_string(),
                                     );
+                            }
 
                             for address in addresses {
                                 if *address != Ipv6Addr::LOCALHOST {
@@ -2842,17 +2865,23 @@ impl ServiceManager {
                             let mut mg_ddm_config =
                                 PropertyGroupBuilder::new("config")
                                     .add_property("mode", "astring", mode)
-                                    .add_property("dendrite", "astring", "true")
+                                    .add_property(
+                                        "dendrite", "astring", "true",
+                                    );
+
+                            if let Some(i) = info {
+                                mg_ddm_config = mg_ddm_config
                                     .add_property(
                                         "sled_uuid",
                                         "astring",
-                                        &info.config.sled_id.to_string(),
+                                        &i.config.sled_id.to_string(),
                                     )
                                     .add_property(
                                         "rack_uuid",
                                         "astring",
-                                        &info.rack_id.to_string(),
+                                        &i.rack_id.to_string(),
                                     );
+                            }
 
                             for address in addresses {
                                 if *address != Ipv6Addr::LOCALHOST {
