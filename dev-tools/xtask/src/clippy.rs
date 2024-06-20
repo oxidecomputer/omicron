@@ -43,7 +43,6 @@ pub fn run_cmd(args: ClippyArgs) -> Result<()> {
         // Make sure we check everything.
         .arg("--all-targets")
         .arg("--workspace")
-        .arg("--keep-going")
         .arg("--")
         // For a list of lints, see
         // https://rust-lang.github.io/rust-clippy/master.
