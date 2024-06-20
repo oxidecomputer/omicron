@@ -15,6 +15,8 @@ use slog::{info, o, warn, Drain, Logger};
 use std::collections::{BTreeSet, HashMap};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
+use std::sync::OnceLock;
+use std::time::Duration;
 use strum::EnumIter;
 use strum::IntoEnumIterator;
 use tar::Archive;
@@ -23,6 +25,7 @@ use tokio::process::Command;
 
 const BUILDOMAT_URL: &'static str =
     "https://buildomat.eng.oxide.computer/public/file";
+const RETRY_ATTEMPTS: usize = 3;
 
 /// What is being downloaded?
 #[derive(
@@ -236,7 +239,17 @@ async fn get_values_from_file<const N: usize>(
 ///
 /// Writes the response to the file as it is received.
 async fn streaming_download(url: &str, path: &Utf8Path) -> Result<()> {
-    let mut response = reqwest::get(url).await?;
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+    let client = CLIENT.get_or_init(|| {
+        reqwest::ClientBuilder::new()
+            .timeout(Duration::from_secs(3600))
+            .tcp_keepalive(Duration::from_secs(60))
+            .connect_timeout(Duration::from_secs(15))
+            .build()
+            .unwrap()
+    });
+    let mut response = client.get(url).send().await?.error_for_status()?;
     let mut tarball = tokio::fs::File::create(&path).await?;
     while let Some(chunk) = response.chunk().await? {
         tarball.write_all(chunk.as_ref()).await?;
@@ -410,8 +423,22 @@ async fn download_file_and_verify(
     };
 
     if do_download {
-        info!(log, "Downloading {path}");
-        streaming_download(&url, &path).await?;
+        for attempt in 1..=RETRY_ATTEMPTS {
+            info!(
+                log,
+                "Downloading {path} (attempt {attempt}/{RETRY_ATTEMPTS})"
+            );
+            match streaming_download(&url, &path).await {
+                Ok(()) => break,
+                Err(err) => {
+                    if attempt == RETRY_ATTEMPTS {
+                        return Err(err);
+                    } else {
+                        warn!(log, "Download failed, retrying: {err}");
+                    }
+                }
+            }
+        }
     }
 
     let observed_checksum = algorithm.checksum(&path).await?;
