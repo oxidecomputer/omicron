@@ -1275,12 +1275,13 @@ impl SpHandler for Handler {
             "port" => ?port,
             "component" => ?component,
         );
-        if component == SpComponent::ROT {
-            Ok(rot_slot_id_to_u16(self.rot_active_slot))
-        } else {
+        match component {
+            SpComponent::ROT => Ok(rot_slot_id_to_u16(self.rot_active_slot)),
+            // The only active component is stage0
+            SpComponent::STAGE0 => Ok(0),
             // The real SP returns `RequestUnsupportedForComponent` for anything
             // other than the RoT, including SP_ITSELF.
-            Err(SpError::RequestUnsupportedForComponent)
+            _ => Err(SpError::RequestUnsupportedForComponent),
         }
     }
 
@@ -1300,16 +1301,27 @@ impl SpHandler for Handler {
             "slot" => slot,
             "persist" => persist,
         );
-        if component == SpComponent::ROT {
-            self.rot_active_slot = rot_slot_id_from_u16(slot)?;
-            Ok(())
-        } else if component == SpComponent::HOST_CPU_BOOT_FLASH {
-            self.update_state.set_active_host_slot(slot);
-            Ok(())
-        } else {
-            // The real SP returns `RequestUnsupportedForComponent` for anything
-            // other than the RoT and host boot flash, including SP_ITSELF.
-            Err(SpError::RequestUnsupportedForComponent)
+        match component {
+            SpComponent::ROT => {
+                self.rot_active_slot = rot_slot_id_from_u16(slot)?;
+                Ok(())
+            }
+            SpComponent::STAGE0 => {
+                if slot == 1 {
+                    return Ok(());
+                } else {
+                    Err(SpError::RequestUnsupportedForComponent)
+                }
+            }
+            SpComponent::HOST_CPU_BOOT_FLASH => {
+                self.update_state.set_active_host_slot(slot);
+                Ok(())
+            }
+            _ => {
+                // The real SP returns `RequestUnsupportedForComponent` for anything
+                // other than the RoT and host boot flash, including SP_ITSELF.
+                Err(SpError::RequestUnsupportedForComponent)
+            }
         }
     }
 
