@@ -14,12 +14,17 @@ use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use semver::Version;
 use serde::Deserialize;
+use slog::warn;
+use slog::Logger;
 use tufaceous_lib::assemble::DeserializedArtifactData;
 use tufaceous_lib::assemble::DeserializedArtifactSource;
 use tufaceous_lib::assemble::DeserializedFileArtifactSource;
 use tufaceous_lib::assemble::DeserializedManifest;
 
+use crate::RETRY_ATTEMPTS;
+
 pub(crate) async fn fetch_hubris_artifacts(
+    logger: Logger,
     base_url: &'static str,
     client: reqwest::Client,
     manifest_list: Utf8PathBuf,
@@ -43,7 +48,7 @@ pub(crate) async fn fetch_hubris_artifacts(
 
     for line in fs::read_to_string(manifest_list).await?.lines() {
         if let Some(hash) = line.split_whitespace().next() {
-            let data = fetch_hash(base_url, &client, hash).await?;
+            let data = fetch_hash(&logger, base_url, &client, hash).await?;
             let str = String::from_utf8(data).with_context(|| {
                 format!("hubris artifact manifest {} was not UTF-8", hash)
             })?;
@@ -85,7 +90,9 @@ pub(crate) async fn fetch_hubris_artifacts(
                         },
                     );
                     for hash in hashes {
-                        let data = fetch_hash(base_url, &client, &hash).await?;
+                        let data =
+                            fetch_hash(&logger, base_url, &client, &hash)
+                                .await?;
                         fs::write(output_dir.join(zip!(hash)), data).await?;
                     }
                 }
@@ -102,21 +109,39 @@ pub(crate) async fn fetch_hubris_artifacts(
 }
 
 async fn fetch_hash(
+    logger: &Logger,
     base_url: &'static str,
     client: &reqwest::Client,
     hash: &str,
 ) -> Result<Vec<u8>> {
-    client
-        .get(format!("{}/artifact/{}", base_url, hash))
-        .send()
-        .and_then(|response| response.json())
-        .await
-        .with_context(|| {
-            format!(
-                "failed to fetch hubris artifact {} from {}",
-                hash, base_url
-            )
-        })
+    let url = format!("{}/artifact/{}", base_url, hash);
+    for attempt in 1..=RETRY_ATTEMPTS {
+        let result = client
+            .get(&url)
+            .send()
+            .and_then(|response| {
+                futures::future::ready(response.error_for_status())
+            })
+            .and_then(|response| response.json())
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to fetch hubris artifact {} from {}",
+                    hash, base_url
+                )
+            });
+        match result {
+            Ok(data) => return Ok(data),
+            Err(err) => {
+                if attempt == RETRY_ATTEMPTS {
+                    return Err(err);
+                } else {
+                    warn!(logger, "fetching {} failed, retrying: {}", url, err);
+                }
+            }
+        }
+    }
+    unreachable!();
 }
 
 // These structs are similar to `DeserializeManifest` and friends from
