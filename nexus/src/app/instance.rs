@@ -548,7 +548,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_id: InstanceUuid,
-        sled_id: SledUuid,
+        src_propolis_id: PropolisUuid,
         prev_instance_runtime: &db::model::InstanceRuntimeState,
         migration_params: InstanceMigrationSourceParams,
     ) -> UpdateResult<db::model::Instance> {
@@ -560,42 +560,7 @@ impl super::Nexus {
             .lookup_for(authz::Action::Modify)
             .await?;
 
-        let sa = self.sled_client(&sled_id).await?;
-        let instance_put_result = sa
-            .instance_put_migration_ids(
-                &instance_id,
-                &InstancePutMigrationIdsBody {
-                    old_runtime: prev_instance_runtime.clone().into(),
-                    migration_params: Some(migration_params),
-                },
-            )
-            .await
-            .map(|res| Some(res.into_inner().into()))
-            .map_err(|e| SledAgentInstancePutError(e));
-
-        // Write the updated instance runtime state back to CRDB. If this
-        // outright fails, this operation fails. If the operation nominally
-        // succeeds but nothing was updated, this action is outdated and the
-        // caller should not proceed with migration.
-        let InstanceUpdateResult { instance_updated, .. } =
-            match instance_put_result {
-                Ok(state) => {
-                    self.write_returned_instance_state(&instance_id, state)
-                        .await?
-                }
-                Err(e) => {
-                    if e.instance_unhealthy() {
-                        let _ = self
-                            .mark_instance_failed(
-                                &instance_id,
-                                &prev_instance_runtime,
-                                &e,
-                            )
-                            .await;
-                    }
-                    return Err(e.into());
-                }
-            };
+        let instance_updated = todo!("eliza: do this transition purely in nexus rather than in sled-agent...");
 
         if instance_updated {
             Ok(self
@@ -627,44 +592,12 @@ impl super::Nexus {
     pub(crate) async fn instance_clear_migration_ids(
         &self,
         instance_id: InstanceUuid,
-        sled_id: SledUuid,
         prev_instance_runtime: &db::model::InstanceRuntimeState,
     ) -> Result<(), Error> {
         assert!(prev_instance_runtime.migration_id.is_some());
         assert!(prev_instance_runtime.dst_propolis_id.is_some());
 
-        let sa = self.sled_client(&sled_id).await?;
-        let instance_put_result = sa
-            .instance_put_migration_ids(
-                &instance_id,
-                &InstancePutMigrationIdsBody {
-                    old_runtime: prev_instance_runtime.clone().into(),
-                    migration_params: None,
-                },
-            )
-            .await
-            .map(|res| Some(res.into_inner().into()))
-            .map_err(|e| SledAgentInstancePutError(e));
-
-        match instance_put_result {
-            Ok(state) => {
-                self.write_returned_instance_state(&instance_id, state).await?;
-            }
-            Err(e) => {
-                if e.instance_unhealthy() {
-                    let _ = self
-                        .mark_instance_failed(
-                            &instance_id,
-                            &prev_instance_runtime,
-                            &e,
-                        )
-                        .await;
-                }
-                return Err(e.into());
-            }
-        }
-
-        Ok(())
+        todo!("eliza: do this transition in the DB rather than in sled-agent")
     }
 
     /// Reboot the specified instance.

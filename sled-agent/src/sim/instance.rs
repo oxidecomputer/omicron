@@ -8,27 +8,40 @@ use super::simulatable::Simulatable;
 
 use crate::common::instance::{ObservedPropolisState, PublishedVmmState};
 use crate::nexus::NexusClient;
-use crate::params::{InstanceMigrationSourceParams, InstanceStateRequested};
+use crate::params::InstanceStateRequested;
 use async_trait::async_trait;
 use chrono::Utc;
 use nexus_client;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::ResourceType;
-use omicron_common::api::internal::nexus::{
-    InstanceRuntimeState, SledInstanceState, VmmState,
-};
+use omicron_common::api::internal::nexus::{SledInstanceState, VmmState};
 use propolis_client::types::{
     InstanceMigrateStatusResponse as PropolisMigrateResponse,
     InstanceMigrationStatus as PropolisMigrationStatus,
     InstanceState as PropolisInstanceState, InstanceStateMonitorResponse,
 };
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
 use uuid::Uuid;
 
 use crate::common::instance::{Action as InstanceAction, InstanceStates};
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SimulateMigrationSource {
+    pub(in crate::sim) migration_id: Uuid,
+    pub(in crate::sim) result: SimulatedMigrationResult,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub(in crate::sim) enum SimulatedMigrationResult {
+    Success,
+    Failure,
+}
 
 #[derive(Clone, Debug)]
 enum MonitorChange {
@@ -79,49 +92,68 @@ impl SimInstanceInner {
         self.queue.push_back(MonitorChange::MigrateStatus(migrate_status))
     }
 
-    /// Queue a successful simulated migration.
-    ///
-    fn queue_successful_migration(&mut self) {
+    /// Queue a simulated migration out.
+    fn queue_migration_out(
+        &mut self,
+        migration_id: Uuid,
+        result: SimulatedMigrationResult,
+    ) {
+        let migration_update = |state| PropolisMigrateResponse {
+            migration_in: None,
+            migration_out: Some(PropolisMigrationStatus {
+                id: migration_id,
+                state,
+            }),
+        };
         // Propolis transitions to the Migrating state once before
         // actually starting migration.
         self.queue_propolis_state(PropolisInstanceState::Migrating);
-        todo!("eliza: fix this bit")
-        // match role {
-        //     MigrationRole::Source => {
-        //         self.queue_migration_update(PropolisMigrateResponse {
-        //             migration_in: None,
-        //             migration_out: Some(PropolisMigrationStatus {
-        //                 id: todo!
-        //                 state: propolis_client::types::MigrationState::Sync,
-        //             }),
-        //         });
-        //         self.queue_migration_update(PropolisMigrateResponse {
-        //             migration_in: None,
-        //             migration_out: Some(PropolisMigrationStatus {
-        //                 id: migration_id,
-        //                 state: propolis_client::types::MigrationState::Finish,
-        //             }),
-        //         });
-        //         self.queue_graceful_stop();
-        //     }
-        //     MigrationRole::Target => {
-        //         self.queue_migration_update(PropolisMigrateResponse {
-        //             migration_in: Some(PropolisMigrationStatus {
-        //                 id: migration_id,
-        //                 state: propolis_client::types::MigrationState::Sync,
-        //             }),
-        //             migration_out: None,
-        //         });
-        //         self.queue_migration_update(PropolisMigrateResponse {
-        //             migration_in: Some(PropolisMigrationStatus {
-        //                 id: migration_id,
-        //                 state: propolis_client::types::MigrationState::Finish,
-        //             }),
-        //             migration_out: None,
-        //         });
-        //         self.queue_propolis_state(PropolisInstanceState::Running)
-        //     }
-        // }
+        self.queue_migration_update(migration_update(
+            propolis_client::types::MigrationState::Sync,
+        ));
+        match result {
+            SimulatedMigrationResult::Success => {
+                self.queue_migration_update(migration_update(
+                    propolis_client::types::MigrationState::Finish,
+                ));
+                self.queue_graceful_stop();
+            }
+            SimulatedMigrationResult::Failure => {
+                todo!("finish this part when we actuall need it...")
+            }
+        }
+    }
+
+    /// Queue a simulated migration in.
+    fn queue_migration_in(
+        &mut self,
+        migration_id: Uuid,
+        result: SimulatedMigrationResult,
+    ) {
+        let migration_update = |state| PropolisMigrateResponse {
+            migration_in: Some(PropolisMigrationStatus {
+                id: migration_id,
+                state,
+            }),
+            migration_out: None,
+        };
+        // Propolis transitions to the Migrating state once before
+        // actually starting migration.
+        self.queue_propolis_state(PropolisInstanceState::Migrating);
+        self.queue_migration_update(migration_update(
+            propolis_client::types::MigrationState::Sync,
+        ));
+        match result {
+            SimulatedMigrationResult::Success => {
+                self.queue_migration_update(migration_update(
+                    propolis_client::types::MigrationState::Finish,
+                ));
+                self.queue_propolis_state(PropolisInstanceState::Running)
+            }
+            SimulatedMigrationResult::Failure => {
+                todo!("finish this part when we actuall need it...")
+            }
+        }
     }
 
     fn queue_graceful_stop(&mut self) {
@@ -171,7 +203,13 @@ impl SimInstanceInner {
                     )));
                 }
 
-                // self.queue_successful_migration(MigrationRole::Target)
+                let migration_id = self.state.migration_out()
+                    .ok_or_else(|| Error::invalid_request("can't request migration in for a vmm that wasn't created with a migration ID"))?
+                    .migration_id;
+                self.queue_migration_in(
+                    migration_id,
+                    SimulatedMigrationResult::Success,
+                );
             }
             InstanceStateRequested::Running => {
                 match self.next_resting_state() {
@@ -361,38 +399,6 @@ impl SimInstanceInner {
         self.destroyed = true;
         self.state.sled_instance_state()
     }
-
-    /// Stores a set of migration IDs in the instance's runtime state.
-    fn put_migration_ids(
-        &mut self,
-        ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<SledInstanceState, Error> {
-        if self.state.migration_ids_already_set(ids) {
-            return Ok(self.state.sled_instance_state());
-        }
-
-        self.state.set_migration_ids(ids, Utc::now());
-
-        // If we set migration IDs and are the migration source, ensure that we
-        // will perform the correct state transitions to simulate a successful
-        // migration.
-        // if ids.is_some() {
-        //     let role = self
-        //     .state
-        //     .migration()
-        //     .expect(
-        //         "we just got a `put_migration_ids` request with `Some` IDs, \
-        //         so we should have a migration"
-        //     )
-        //     .role;
-        //     if role == MigrationRole::Source {
-        //         self.queue_successful_migration(MigrationRole::Source)
-        //     }
-        // }
-        todo!();
-
-        Ok(self.state.sled_instance_state())
-    }
 }
 
 /// A simulation of an Instance created by the external Oxide API.
@@ -420,13 +426,14 @@ impl SimInstance {
         self.inner.lock().unwrap().terminate()
     }
 
-    pub async fn put_migration_ids(
+    pub(crate) fn set_simulated_migration_source(
         &self,
-        old_runtime: &InstanceRuntimeState,
-        ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<SledInstanceState, Error> {
-        let mut inner = self.inner.lock().unwrap();
-        inner.put_migration_ids(ids)
+        migration: SimulateMigrationSource,
+    ) {
+        self.inner
+            .lock()
+            .unwrap()
+            .queue_migration_in(migration.migration_id, migration.result);
     }
 }
 

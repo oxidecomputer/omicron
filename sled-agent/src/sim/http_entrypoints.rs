@@ -162,20 +162,13 @@ async fn instance_get_state(
     path = "/instances/{instance_id}/migration-ids",
 }]
 async fn instance_put_migration_ids(
-    rqctx: RequestContext<Arc<SledAgent>>,
-    path_params: Path<InstancePathParam>,
-    body: TypedBody<InstancePutMigrationIdsBody>,
+    _: RequestContext<Arc<SledAgent>>,
+    _: Path<InstancePathParam>,
+    _: TypedBody<InstancePutMigrationIdsBody>,
 ) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
-    let sa = rqctx.context();
-    let instance_id = path_params.into_inner().instance_id;
-    let body_args = body.into_inner();
-    Ok(HttpResponseOk(
-        sa.instance_put_migration_ids(
-            instance_id,
-            &body_args.old_runtime,
-            &body_args.migration_params,
-        )
-        .await?,
+    Err(HttpError::for_bad_request(
+        None,
+        "operation no longer supported".to_string(),
     ))
 }
 
@@ -222,6 +215,22 @@ async fn instance_poke_post(
     let sa = rqctx.context();
     let instance_id = path_params.into_inner().instance_id;
     sa.instance_poke(instance_id).await;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = POST,
+    path = "/instances/{instance_id}/sim-migration-source",
+}]
+async fn instance_post_sim_migration_source(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    path_params: Path<InstancePathParam>,
+    body: TypedBody<super::instance::SimulateMigrationSource>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    sa.instance_simulate_migration_source(instance_id, body.into_inner())
+        .await?;
     Ok(HttpResponseUpdatedNoContent())
 }
 

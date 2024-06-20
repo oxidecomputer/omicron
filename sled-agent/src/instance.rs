@@ -16,9 +16,9 @@ use crate::nexus::NexusClientWithResolver;
 use crate::params::ZoneBundleMetadata;
 use crate::params::{InstanceExternalIpBody, ZoneBundleCause};
 use crate::params::{
-    InstanceHardware, InstanceMetadata, InstanceMigrationSourceParams,
-    InstanceMigrationTargetParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse, VpcFirewallRule,
+    InstanceHardware, InstanceMetadata, InstanceMigrationTargetParams,
+    InstancePutStateResponse, InstanceStateRequested,
+    InstanceUnregisterResponse, VpcFirewallRule,
 };
 use crate::profile::*;
 use crate::zone_bundle::BundleError;
@@ -33,7 +33,7 @@ use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::svc::wait_for_service;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use omicron_common::api::internal::nexus::{
-    InstanceRuntimeState, SledInstanceState, VmmRuntimeState,
+    SledInstanceState, VmmRuntimeState,
 };
 use omicron_common::api::internal::shared::{
     NetworkInterface, SledIdentifiers, SourceNatConfig,
@@ -227,11 +227,6 @@ enum InstanceRequest {
     PutState {
         state: crate::params::InstanceStateRequested,
         tx: oneshot::Sender<Result<InstancePutStateResponse, ManagerError>>,
-    },
-    PutMigrationIds {
-        old_runtime: InstanceRuntimeState,
-        migration_ids: Option<InstanceMigrationSourceParams>,
-        tx: oneshot::Sender<Result<SledInstanceState, ManagerError>>,
     },
     Terminate {
         mark_failed: bool,
@@ -427,12 +422,6 @@ impl InstanceRunner {
                                 .map(|r| InstancePutStateResponse { updated_runtime: Some(r) })
                                 .map_err(|e| e.into()))
                                 .map_err(|_| Error::FailedSendClientClosed)
-                        },
-                        Some(PutMigrationIds{ old_runtime, migration_ids, tx }) => {
-                            tx.send(
-                                self.put_migration_ids(&migration_ids).await.map_err(|e| e.into())
-                            )
-                            .map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(Terminate { mark_failed, tx }) => {
                             tx.send(Ok(InstanceUnregisterResponse {
@@ -1155,23 +1144,6 @@ impl Instance {
         Ok(())
     }
 
-    pub async fn put_migration_ids(
-        &self,
-        tx: oneshot::Sender<Result<SledInstanceState, ManagerError>>,
-        old_runtime: InstanceRuntimeState,
-        migration_ids: Option<InstanceMigrationSourceParams>,
-    ) -> Result<(), Error> {
-        self.tx
-            .send(InstanceRequest::PutMigrationIds {
-                old_runtime,
-                migration_ids,
-                tx,
-            })
-            .await
-            .map_err(|_| Error::FailedSendChannelClosed)?;
-        Ok(())
-    }
-
     /// Rudely terminates this instance's Propolis (if it has one) and
     /// immediately transitions the instance to the Destroyed state.
     pub async fn terminate(
@@ -1355,20 +1327,6 @@ impl InstanceRunner {
         if let Some(s) = next_published {
             self.state.transition_vmm(s, Utc::now());
         }
-        Ok(self.state.sled_instance_state())
-    }
-
-    async fn put_migration_ids(
-        &mut self,
-        migration_ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<SledInstanceState, Error> {
-        // Allow this transition for idempotency if the instance is
-        // already in the requested goal state.
-        if self.state.migration_ids_already_set(migration_ids) {
-            return Ok(self.state.sled_instance_state());
-        }
-
-        self.state.set_migration_ids(migration_ids, Utc::now());
         Ok(self.state.sled_instance_state())
     }
 

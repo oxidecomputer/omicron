@@ -5,6 +5,9 @@
 //! Interface for making API requests to a Sled Agent
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
 use std::convert::TryFrom;
 use uuid::Uuid;
 
@@ -445,6 +448,11 @@ impl From<types::SledIdentifiers>
 #[async_trait]
 pub trait TestInterfaces {
     async fn instance_finish_transition(&self, id: Uuid);
+    async fn instance_simulate_migration_source(
+        &self,
+        id: Uuid,
+        params: SimulateMigrationSource,
+    );
     async fn disk_finish_transition(&self, id: Uuid);
 }
 
@@ -471,4 +479,36 @@ impl TestInterfaces for Client {
             .await
             .expect("disk_finish_transition() failed unexpectedly");
     }
+
+    async fn instance_simulate_migration_source(
+        &self,
+        id: Uuid,
+        params: SimulateMigrationSource,
+    ) {
+        let baseurl = self.baseurl();
+        let client = self.client();
+        let url = format!("{baseurl}/instances/{id}/sim-migration-source");
+        client
+            .post(url)
+            .send()
+            .await
+            .expect("instance_simulate_migration_source() failed unexpectedly");
+    }
+}
+
+// N.B. that this needs to be kept in sync with the types defined in
+// `sled_agent::sim`! AFAICT this is the first simulated-only interface that has
+// a body, so I wasn't sure whether there was a nice way to do this without
+// creating a cyclic dependency or taking a giant pile of query params instead
+// of JSON...
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SimulateMigrationSource {
+    pub migration_id: Uuid,
+    pub result: SimulatedMigrationResult,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub enum SimulatedMigrationResult {
+    Success,
+    Failure,
 }

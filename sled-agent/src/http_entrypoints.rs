@@ -501,20 +501,13 @@ async fn instance_get_state(
     path = "/instances/{instance_id}/migration-ids",
 }]
 async fn instance_put_migration_ids(
-    rqctx: RequestContext<SledAgent>,
-    path_params: Path<InstancePathParam>,
-    body: TypedBody<InstancePutMigrationIdsBody>,
+    _: RequestContext<SledAgent>,
+    _: Path<InstancePathParam>,
+    _: TypedBody<InstancePutMigrationIdsBody>,
 ) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
-    let sa = rqctx.context();
-    let instance_id = path_params.into_inner().instance_id;
-    let body_args = body.into_inner();
-    Ok(HttpResponseOk(
-        sa.instance_put_migration_ids(
-            instance_id,
-            &body_args.old_runtime,
-            &body_args.migration_params,
-        )
-        .await?,
+    Err(HttpError::for_bad_request(
+        None,
+        "operation no longer supported".to_string(),
     ))
 }
 

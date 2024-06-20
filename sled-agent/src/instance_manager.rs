@@ -12,8 +12,8 @@ use crate::params::InstanceExternalIpBody;
 use crate::params::InstanceMetadata;
 use crate::params::ZoneBundleMetadata;
 use crate::params::{
-    InstanceHardware, InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse,
+    InstanceHardware, InstancePutStateResponse, InstanceStateRequested,
+    InstanceUnregisterResponse,
 };
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
 use crate::zone_bundle::BundleError;
@@ -225,26 +225,6 @@ impl InstanceManager {
         }
     }
 
-    pub async fn put_migration_ids(
-        &self,
-        instance_id: InstanceUuid,
-        old_runtime: &InstanceRuntimeState,
-        migration_ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<SledInstanceState, Error> {
-        let (tx, rx) = oneshot::channel();
-        self.inner
-            .tx
-            .send(InstanceManagerRequest::PutMigrationIds {
-                instance_id,
-                old_runtime: old_runtime.clone(),
-                migration_ids: *migration_ids,
-                tx,
-            })
-            .await
-            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
-        rx.await?
-    }
-
     pub async fn instance_issue_disk_snapshot_request(
         &self,
         instance_id: InstanceUuid,
@@ -382,12 +362,7 @@ enum InstanceManagerRequest {
         target: InstanceStateRequested,
         tx: oneshot::Sender<Result<InstancePutStateResponse, Error>>,
     },
-    PutMigrationIds {
-        instance_id: InstanceUuid,
-        old_runtime: InstanceRuntimeState,
-        migration_ids: Option<InstanceMigrationSourceParams>,
-        tx: oneshot::Sender<Result<SledInstanceState, Error>>,
-    },
+
     InstanceIssueDiskSnapshot {
         instance_id: InstanceUuid,
         disk_id: Uuid,
@@ -514,9 +489,6 @@ impl InstanceManagerRunner {
                         },
                         Some(EnsureState { instance_id, target, tx }) => {
                             self.ensure_state(tx, instance_id, target).await
-                        },
-                        Some(PutMigrationIds { instance_id, old_runtime, migration_ids, tx }) => {
-                            self.put_migration_ids(tx, instance_id, &old_runtime, &migration_ids).await
                         },
                         Some(InstanceIssueDiskSnapshot { instance_id, disk_id, snapshot_id, tx }) => {
                             self.instance_issue_disk_snapshot_request(tx, instance_id, disk_id, snapshot_id).await
@@ -725,25 +697,6 @@ impl InstanceManagerRunner {
             return Ok(());
         };
         instance.put_state(tx, target).await?;
-        Ok(())
-    }
-
-    /// Idempotently attempts to set the instance's migration IDs to the
-    /// supplied IDs.
-    async fn put_migration_ids(
-        &mut self,
-        tx: oneshot::Sender<Result<SledInstanceState, Error>>,
-        instance_id: InstanceUuid,
-        old_runtime: &InstanceRuntimeState,
-        migration_ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<(), Error> {
-        let (_, instance) = self
-            .instances
-            .get(&instance_id)
-            .ok_or_else(|| Error::NoSuchInstance(instance_id))?;
-        instance
-            .put_migration_ids(tx, old_runtime.clone(), *migration_ids)
-            .await?;
         Ok(())
     }
 
