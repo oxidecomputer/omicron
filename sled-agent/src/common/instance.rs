@@ -4,7 +4,6 @@
 
 //! Describes the states of VM instances.
 
-use crate::params::InstanceMigrationSourceParams;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::{
@@ -191,6 +190,14 @@ impl InstanceStates {
         self.propolis_id
     }
 
+    pub fn migration_in(&self) -> Option<&MigrationRuntimeState> {
+        self.migration_in.as_ref()
+    }
+
+    pub fn migration_out(&self) -> Option<&MigrationRuntimeState> {
+        self.migration_out.as_ref()
+    }
+
     /// Creates a `SledInstanceState` structure containing the entirety of this
     /// structure's runtime state. This requires cloning; for simple read access
     /// use the `instance` or `vmm` accessors instead.
@@ -347,27 +354,6 @@ impl InstanceStates {
         };
 
         self.apply_propolis_observation(&fake_observed);
-    }
-
-    /// Sets or clears this instance's migration IDs and advances its Propolis
-    /// generation number.
-    #[deprecated(note = "eliza get rid of this")]
-    pub(crate) fn set_migration_ids(
-        &mut self,
-        ids: &Option<InstanceMigrationSourceParams>,
-        now: DateTime<Utc>,
-    ) {
-    }
-
-    /// Returns true if the migration IDs in this instance are already set as they
-    /// would be on a successful transition from the migration IDs in
-    /// `old_runtime` to the ones in `migration_ids`.
-    #[deprecated(note = "eliza get rid of this")]
-    pub(crate) fn migration_ids_already_set(
-        &self,
-        migration_ids: &Option<InstanceMigrationSourceParams>,
-    ) -> bool {
-        false
     }
 }
 

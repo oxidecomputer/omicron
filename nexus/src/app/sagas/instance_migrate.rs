@@ -77,14 +77,7 @@ declare_saga_actions! {
 
 
     // This step the instance's migration ID and destination Propolis ID
-    // fields. Because the instance is active, its current sled agent maintains
-    // its most recent runtime state, so to update it, the saga calls into the
-    // sled and asks it to produce an updated instance record with the
-    // appropriate migration IDs and a new generation number.
-    //
-    // The source sled agent synchronizes concurrent attempts to set these IDs.
-    // Setting a new migration ID and re-setting an existing ID are allowed, but
-    // trying to set an ID when a different ID is already present fails.
+    // fields.
     SET_MIGRATION_IDS -> "set_migration_ids" {
         + sim_set_migration_ids
         - sim_clear_migration_ids
@@ -323,14 +316,15 @@ async fn sim_set_migration_ids(
 
     let db_instance = &params.instance;
     let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
-    let src_sled_id = SledUuid::from_untyped_uuid(params.src_vmm.sled_id);
+    let src_propolis_id =
+        PropolisUuid::from_untyped_uuid(params.src_vmm.sled_id);
     let migration_id = sagactx.lookup::<Uuid>("migrate_id")?;
     let dst_propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
 
     info!(osagactx.log(), "setting migration IDs on migration source sled";
           "instance_id" => %db_instance.id(),
-          "sled_id" => %src_sled_id,
           "migration_id" => %migration_id,
+          "src_propolis_id" => %src_propolis_id,
           "dst_propolis_id" => %dst_propolis_id,
           "prev_runtime_state" => ?db_instance.runtime());
 
@@ -339,7 +333,7 @@ async fn sim_set_migration_ids(
         .instance_set_migration_ids(
             &opctx,
             instance_id,
-            src_sled_id,
+            src_propolis_id,
             db_instance.runtime(),
             InstanceMigrationSourceParams { dst_propolis_id, migration_id },
         )
@@ -378,11 +372,7 @@ async fn sim_clear_migration_ids(
     // as failed.
     if let Err(e) = osagactx
         .nexus()
-        .instance_clear_migration_ids(
-            instance_id,
-            src_sled_id,
-            db_instance.runtime(),
-        )
+        .instance_clear_migration_ids(instance_id, db_instance.runtime())
         .await
     {
         warn!(osagactx.log(),

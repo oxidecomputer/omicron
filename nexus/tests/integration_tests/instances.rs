@@ -842,10 +842,18 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     // sufficient to move the instance back into a Running state (strictly
     // speaking no further updates from the source are required if the target
     // successfully takes over).
-    instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
+    instance_simulate_migration_source(
+        cptestctx,
+        nexus,
+        original_sled,
+        instance_id,
+        migration_id,
+    )
+    .await;
     // Ensure that both sled agents report that the migration has completed.
     instance_simulate_on_sled(cptestctx, nexus, original_sled, instance_id)
         .await;
+    instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
 
     let instance = instance_get(&client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Running);
@@ -973,8 +981,40 @@ async fn test_instance_migrate_v2p_and_routes(
     .parsed_body::<Instance>()
     .unwrap();
 
+    let migration_id = {
+        let datastore = apictx.nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            datastore.clone(),
+        );
+        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+            .instance_id(instance.identity.id)
+            .lookup_for(nexus_db_queries::authz::Action::Read)
+            .await
+            .unwrap();
+        datastore
+            .instance_refetch(&opctx, &authz_instance)
+            .await
+            .unwrap()
+            .runtime_state
+            .migration_id
+            .expect("since we've started a migration, the instance record must have a migration id!")
+    };
+
+    // Tell both sled-agents to pretend to do the migration.
+    instance_simulate_migration_source(
+        cptestctx,
+        nexus,
+        original_sled,
+        instance_id,
+        migration_id,
+    )
+    .await;
+    instance_simulate_on_sled(cptestctx, nexus, original_sled_id, instance_id)
+        .await;
     instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
     let instance = instance_get(&client, &instance_url).await;
+
     assert_eq!(instance.runtime.run_state, InstanceState::Running);
     let current_sled = nexus
         .instance_sled_id(&instance_id)
@@ -4922,4 +4962,37 @@ async fn instance_simulate_on_sled(
           "instance_id" => %instance_id, "sled_id" => %sled_id);
     let sa = nexus.sled_client(&sled_id).await.unwrap();
     sa.instance_finish_transition(instance_id.into_untyped_uuid()).await;
+}
+
+/// Simulates a migration source for the provided instance ID, sled ID, and
+/// migration ID.
+//
+// XXX(eliza): I had really wanted to have the migration target's simulated
+// sled-agent do this automagically when it's told to start a migration in, but
+// unfortunately, I wasn't able to figure out a way for it to get the simulated
+// *sled-agent*'s IP --- it just gets the Propolis IP in the migration target
+// params, and the propolis doesn't actually exist...
+async fn instance_simulate_migration_source(
+    cptestctx: &ControlPlaneTestContext,
+    nexus: &Arc<Nexus>,
+    sled_id: SledUuid,
+    instance_id: InstanceUuid,
+    migration_id: Uuid,
+) {
+    info!(
+        &cptestctx.logctx.log,
+        "Simulating migration source sled";
+        "instance_id" => %instance_id,
+        "sled_id" => %sled_id,
+        "migration_id" => %migration_id,
+    );
+    let sa = nexus.sled_client(&sled_id).await.unwrap();
+    sa.instance_simulate_migrationSource(
+        instance_id.into_untyped_uuid(),
+        sled_agent_client::SimulateMigrationSource {
+            migration_id,
+            result: sled_agent_client::SimulatedMigrationResult::Success,
+        },
+    )
+    .await;
 }
