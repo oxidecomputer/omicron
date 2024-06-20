@@ -892,7 +892,7 @@ async fn log_in_and_extract_token(
     let (session_token, rest) = session_cookie.split_once("; ").unwrap();
 
     assert!(session_token.starts_with("session="));
-    assert_eq!(rest, "Path=/; HttpOnly; SameSite=Lax; Max-Age=28800");
+    assert_eq!(rest, "Path=/; HttpOnly; SameSite=Lax; Max-Age=86400");
 
     session_token.to_string()
 }
