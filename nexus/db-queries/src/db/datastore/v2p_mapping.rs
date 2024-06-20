@@ -76,13 +76,15 @@ impl DataStore {
                 .await
                 .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
                 .into_iter()
-                .map(|i: (NetworkInterface, Sled, Vpc)| V2PMappingView {
-                    nic_id: i.0.identity.id,
-                    sled_id: i.1.identity.id,
-                    sled_ip: i.1.ip,
-                    vni: i.2.vni,
-                    mac: i.0.mac,
-                    ip: i.0.ip,
+                .map(|(nic, sled, vpc): (NetworkInterface, Sled, Vpc)| {
+                    V2PMappingView {
+                        nic_id: nic.identity.id,
+                        sled_id: sled.identity.id,
+                        sled_ip: sled.ip,
+                        vni: vpc.vni,
+                        mac: nic.mac,
+                        ip: nic.ip,
+                    }
                 })
                 .collect();
 
@@ -124,13 +126,15 @@ impl DataStore {
                 .await
                 .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
                 .into_iter()
-                .map(|i: (NetworkInterface, Sled, Vpc)| V2PMappingView {
-                    nic_id: i.0.identity.id,
-                    sled_id: i.1.identity.id,
-                    sled_ip: i.1.ip,
-                    vni: i.2.vni,
-                    mac: i.0.mac,
-                    ip: i.0.ip,
+                .map(|(nic, sled, vpc): (NetworkInterface, Sled, Vpc)| {
+                    V2PMappingView {
+                        nic_id: nic.identity.id,
+                        sled_id: sled.identity.id,
+                        sled_ip: sled.ip,
+                        vni: vpc.vni,
+                        mac: nic.mac,
+                        ip: nic.ip,
+                    }
                 })
                 .collect();
 
