@@ -88,7 +88,6 @@ use omicron_common::backoff::{
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use once_cell::sync::OnceCell;
-use rand::prelude::SliceRandom;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
 use sled_hardware::SledMode;
@@ -2188,6 +2187,7 @@ impl ServiceManager {
                             },
                         underlay_address,
                         id,
+                        ..
                     },
                 ..
             }) => {
@@ -3381,13 +3381,13 @@ impl ServiceManager {
     ) -> Result<Utf8PathBuf, Error> {
         let name = zone.zone_name();
 
-        // For each new zone request, we pick a U.2 to store the zone
-        // filesystem. Note: This isn't known to Nexus right now, so it's a
-        // local-to-sled decision.
+        // If the caller has requested a specific durable dataset,
+        // ensure that it is encrypted and that it exists.
         //
-        // Currently, the zone filesystem should be destroyed between
-        // reboots, so it's fine to make this decision locally.
-        let root = if let Some(dataset) = zone.dataset_name() {
+        // Typically, the transient filesystem pool will be placed on the same
+        // zpool as the durable dataset (to reduce the fault domain), but that
+        // decision belongs to Nexus, and is not enforced here.
+        if let Some(dataset) = zone.dataset_name() {
             // Check that the dataset is actually ready to be used.
             let [zoned, canmount, encryption] =
                 illumos_utils::zfs::Zfs::get_values(
@@ -3417,11 +3417,6 @@ impl ServiceManager {
                 check_property("encryption", encryption, "aes-256-gcm")?;
             }
 
-            // If the zone happens to already manage a dataset, then
-            // we co-locate the zone dataset on the same zpool.
-            //
-            // This slightly reduces the underlying fault domain for the
-            // service.
             let data_pool = dataset.pool();
             if !all_u2_pools.contains(&data_pool) {
                 warn!(
@@ -3434,20 +3429,21 @@ impl ServiceManager {
                     device: format!("zpool: {data_pool}"),
                 });
             }
-            data_pool.dataset_mountpoint(&mount_config.root, ZONE_DATASET)
-        } else {
-            // If the zone it not coupled to other datsets, we pick one
-            // arbitrarily.
-            let mut rng = rand::thread_rng();
-            all_u2_pools
-                .choose(&mut rng)
-                .map(|pool| {
-                    pool.dataset_mountpoint(&mount_config.root, ZONE_DATASET)
-                })
-                .ok_or_else(|| Error::U2NotFound)?
-                .clone()
-        };
-        Ok(root)
+        }
+
+        let filesystem_pool = &zone.filesystem_pool;
+        if !all_u2_pools.contains(&filesystem_pool) {
+            warn!(
+                self.inner.log,
+                "zone filesystem dataset requested on a zpool which doesn't exist";
+                "zone" => &name,
+                "zpool" => %filesystem_pool
+            );
+            return Err(Error::MissingDevice {
+                device: format!("zpool: {filesystem_pool}"),
+            });
+        }
+        Ok(filesystem_pool.dataset_mountpoint(&mount_config.root, ZONE_DATASET))
     }
 
     pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
