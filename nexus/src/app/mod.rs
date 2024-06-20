@@ -943,7 +943,7 @@ impl Nexus {
                         Ok(_) => {
                             info!(
                                 nexus.log,
-                                "region replacement drive saga completed ok"
+                                "region replacement start saga completed ok"
                             );
                         }
 
