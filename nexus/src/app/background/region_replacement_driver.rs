@@ -167,8 +167,8 @@ impl RegionReplacementDriver {
 
                 Err(e) => {
                     let s = format!(
-                    "query for done region replacement requests failed: {e}"
-                );
+                        "query for done region replacement requests failed: {e}"
+                    );
 
                     error!(&log, "{s}");
                     status.errors.push(s);
@@ -306,6 +306,8 @@ mod test {
             request
         };
 
+        let request_id = request.id;
+
         datastore
             .insert_region_replacement_request(&opctx, request)
             .await
@@ -316,7 +318,12 @@ mod test {
         let result: RegionReplacementDriverStatus =
             serde_json::from_value(task.activate(&opctx).await).unwrap();
 
-        assert_eq!(result.drive_invoked_ok.len(), 1);
+        assert_eq!(
+            result.drive_invoked_ok,
+            vec![format!("{request_id}: drive invoked ok")]
+        );
+        assert!(result.finish_invoked_ok.is_empty());
+        assert!(result.errors.is_empty());
 
         let request = saga_request_rx.try_recv().unwrap();
 
@@ -399,6 +406,8 @@ mod test {
             request
         };
 
+        let request_id = request.id;
+
         datastore
             .insert_region_replacement_request(&opctx, request)
             .await
@@ -409,7 +418,12 @@ mod test {
         let result: RegionReplacementDriverStatus =
             serde_json::from_value(task.activate(&opctx).await).unwrap();
 
-        assert_eq!(result.finish_invoked_ok.len(), 1);
+        assert!(result.drive_invoked_ok.is_empty());
+        assert_eq!(
+            result.finish_invoked_ok,
+            vec![format!("{request_id}: finish invoked ok")]
+        );
+        assert!(result.errors.is_empty());
 
         let request = saga_request_rx.try_recv().unwrap();
 
@@ -491,6 +505,8 @@ mod test {
             request
         };
 
+        let request_id = request.id;
+
         datastore
             .insert_region_replacement_request(&opctx, request.clone())
             .await
@@ -501,7 +517,12 @@ mod test {
         let result: RegionReplacementDriverStatus =
             serde_json::from_value(task.activate(&opctx).await).unwrap();
 
-        assert_eq!(result.drive_invoked_ok.len(), 1);
+        assert_eq!(
+            result.drive_invoked_ok,
+            vec![format!("{request_id}: drive invoked ok")]
+        );
+        assert!(result.finish_invoked_ok.is_empty());
+        assert!(result.errors.is_empty());
 
         let saga_request = saga_request_rx.try_recv().unwrap();
 
@@ -638,6 +659,8 @@ mod test {
             request
         };
 
+        let request_id = request.id;
+
         datastore
             .insert_region_replacement_request(&opctx, request.clone())
             .await
@@ -648,7 +671,12 @@ mod test {
         let result: RegionReplacementDriverStatus =
             serde_json::from_value(task.activate(&opctx).await).unwrap();
 
-        assert_eq!(result.drive_invoked_ok.len(), 1);
+        assert_eq!(
+            result.drive_invoked_ok,
+            vec![format!("{request_id}: drive invoked ok")]
+        );
+        assert!(result.finish_invoked_ok.is_empty());
+        assert!(result.errors.is_empty());
 
         let saga_request = saga_request_rx.try_recv().unwrap();
 
@@ -691,7 +719,12 @@ mod test {
         let result: RegionReplacementDriverStatus =
             serde_json::from_value(task.activate(&opctx).await).unwrap();
 
-        assert_eq!(result.drive_invoked_ok.len(), 1);
+        assert_eq!(
+            result.drive_invoked_ok,
+            vec![format!("{request_id}: drive invoked ok")]
+        );
+        assert!(result.finish_invoked_ok.is_empty());
+        assert!(result.errors.is_empty());
 
         let saga_request = saga_request_rx.try_recv().unwrap();
 
