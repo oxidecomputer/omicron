@@ -216,8 +216,8 @@ impl<'a> RequestBuilder<'a> {
 
     /// Add header and value to check for at execution time
     ///
-    /// Behaves like header() rather than expect_allowed_headers() in that it
-    /// takes one header at a time rather than a whole set.
+    /// Behaves like header() in that it takes one header at a time rather than
+    /// a whole set.
     pub fn expect_response_header<K, V, KE, VE>(
         mut self,
         name: K,
@@ -291,8 +291,9 @@ impl<'a> RequestBuilder<'a> {
     /// response, and make the response available to the caller
     ///
     /// This function checks the returned status code (if [`Self::expect_status()`]
-    /// was used), allowed headers (if [`Self::expect_allowed_headers()`] was used), and
-    /// various other properties of the response.
+    /// was used), allowed headers (if [`Self::expect_websocket_handshake()`] or
+    /// [`Self::expect_console_asset()`] was used), and various other properties
+    /// of the response.
     pub async fn execute(self) -> Result<TestResponse, anyhow::Error> {
         if let Some(error) = self.error {
             return Err(error);
