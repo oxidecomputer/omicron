@@ -87,6 +87,7 @@ members = [
 ]
 
 default-members = [
+    "api_identity",
     "bootstore",
     "certificates",
     "clients/bootstrap-agent-client",
@@ -113,6 +114,8 @@ default-members = [
     # hakari to not work as well and build times to be longer.
     # See omicron#4392.
     "dns-server",
+    # Do not include end-to-end-tests in the list of default members, as its
+    # tests only work on a deployed control plane.
     "gateway-cli",
     "gateway-test-utils",
     "gateway",
@@ -128,18 +131,21 @@ default-members = [
     "nexus-config",
     "nexus/authz-macros",
     "nexus/auth",
-    "nexus/macros-common",
-    "nexus/metrics-producer-gc",
-    "nexus/networking",
     "nexus/db-fixed-data",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/defaults",
     "nexus/inventory",
+    "nexus/macros-common",
+    "nexus/metrics-producer-gc",
+    "nexus/networking",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
+    "nexus/test-interface",
+    "nexus/test-utils-macros",
+    "nexus/test-utils",
     "nexus/types",
     "oximeter/collector",
     "oximeter/db",
@@ -166,6 +172,7 @@ default-members = [
     "wicket-dbg",
     "wicket",
     "wicketd",
+    "workspace-hack",
     "zone-setup",
 ]
 resolver = "2"
