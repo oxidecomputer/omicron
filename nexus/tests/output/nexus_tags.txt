@@ -85,8 +85,6 @@ API operations found with tag "projects"
 OPERATION ID                             METHOD   URL PATH
 project_create                           POST     /v1/projects
 project_delete                           DELETE   /v1/projects/{project}
-project_ip_pool_list                     GET      /v1/ip-pools
-project_ip_pool_view                     GET      /v1/ip-pools/{pool}
 project_list                             GET      /v1/projects
 project_policy_update                    PUT      /v1/projects/{project}/policy
 project_policy_view                      GET      /v1/projects/{project}/policy
@@ -115,6 +113,8 @@ certificate_list                         GET      /v1/certificates
 certificate_view                         GET      /v1/certificates/{certificate}
 group_list                               GET      /v1/groups
 group_view                               GET      /v1/groups/{group_id}
+ip_pool_list                             GET      /v1/ip-pools
+ip_pool_view                             GET      /v1/ip-pools/{pool}
 policy_update                            PUT      /v1/policy
 policy_view                              GET      /v1/policy
 user_list                                GET      /v1/users
@@ -155,7 +155,6 @@ API operations found with tag "system/networking"
 OPERATION ID                             METHOD   URL PATH
 ip_pool_create                           POST     /v1/system/ip-pools
 ip_pool_delete                           DELETE   /v1/system/ip-pools/{pool}
-ip_pool_list                             GET      /v1/system/ip-pools
 ip_pool_range_add                        POST     /v1/system/ip-pools/{pool}/ranges/add
 ip_pool_range_list                       GET      /v1/system/ip-pools/{pool}/ranges
 ip_pool_range_remove                     POST     /v1/system/ip-pools/{pool}/ranges/remove
@@ -169,7 +168,6 @@ ip_pool_silo_unlink                      DELETE   /v1/system/ip-pools/{pool}/sil
 ip_pool_silo_update                      PUT      /v1/system/ip-pools/{pool}/silos/{silo}
 ip_pool_update                           PUT      /v1/system/ip-pools/{pool}
 ip_pool_utilization_view                 GET      /v1/system/ip-pools/{pool}/utilization
-ip_pool_view                             GET      /v1/system/ip-pools/{pool}
 networking_address_lot_block_list        GET      /v1/system/networking/address-lot/{address_lot}/blocks
 networking_address_lot_create            POST     /v1/system/networking/address-lot
 networking_address_lot_delete            DELETE   /v1/system/networking/address-lot/{address_lot}
@@ -195,6 +193,8 @@ networking_switch_port_settings_create   POST     /v1/system/networking/switch-p
 networking_switch_port_settings_delete   DELETE   /v1/system/networking/switch-port-settings
 networking_switch_port_settings_list     GET      /v1/system/networking/switch-port-settings
 networking_switch_port_settings_view     GET      /v1/system/networking/switch-port-settings/{port}
+system_ip_pool_list                      GET      /v1/system/ip-pools
+system_ip_pool_view                      GET      /v1/system/ip-pools/{pool}
 
 API operations found with tag "system/silos"
 OPERATION ID                             METHOD   URL PATH

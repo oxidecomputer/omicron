@@ -116,17 +116,17 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(project_update)?;
         api.register(project_policy_view)?;
         api.register(project_policy_update)?;
-        api.register(project_ip_pool_list)?;
-        api.register(project_ip_pool_view)?;
+        api.register(ip_pool_list)?;
+        api.register(ip_pool_view)?;
 
         // Operator-Accessible IP Pools API
-        api.register(ip_pool_list)?;
+        api.register(system_ip_pool_list)?;
+        api.register(system_ip_pool_view)?;
         api.register(ip_pool_create)?;
         api.register(ip_pool_silo_list)?;
         api.register(ip_pool_silo_link)?;
         api.register(ip_pool_silo_unlink)?;
         api.register(ip_pool_silo_update)?;
-        api.register(ip_pool_view)?;
         api.register(ip_pool_delete)?;
         api.register(ip_pool_update)?;
         // Variants for internal services
@@ -1506,12 +1506,14 @@ async fn project_policy_update(
 // IP Pools
 
 /// List IP pools
+///
+/// List IP pools linked to current silo.
 #[endpoint {
     method = GET,
     path = "/v1/ip-pools",
-    tags = ["projects"],
+    tags = ["silos"],
 }]
-async fn project_ip_pool_list(
+async fn ip_pool_list(
     rqctx: RequestContext<ApiContext>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<views::SiloIpPool>>, HttpError> {
@@ -1546,12 +1548,14 @@ async fn project_ip_pool_list(
 }
 
 /// Fetch IP pool
+///
+/// Fetch IP pool linked to current silo.
 #[endpoint {
     method = GET,
     path = "/v1/ip-pools/{pool}",
-    tags = ["projects"],
+    tags = ["silos"],
 }]
-async fn project_ip_pool_view(
+async fn ip_pool_view(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::IpPoolPath>,
 ) -> Result<HttpResponseOk<views::SiloIpPool>, HttpError> {
@@ -1574,13 +1578,16 @@ async fn project_ip_pool_view(
         .await
 }
 
+// Note system_ prefix only on list and view because they need to be distinguished
+// from silo-scoped list and view
+
 /// List IP pools
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools",
     tags = ["system/networking"],
 }]
-async fn ip_pool_list(
+async fn system_ip_pool_list(
     rqctx: RequestContext<ApiContext>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<IpPool>>, HttpError> {
@@ -1647,7 +1654,7 @@ async fn ip_pool_create(
     path = "/v1/system/ip-pools/{pool}",
     tags = ["system/networking"],
 }]
-async fn ip_pool_view(
+async fn system_ip_pool_view(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::IpPoolPath>,
 ) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
