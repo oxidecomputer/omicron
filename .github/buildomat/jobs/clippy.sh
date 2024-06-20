@@ -30,4 +30,4 @@ ptime -m bash ./tools/install_builder_prerequisites.sh -y
 banner clippy
 export CARGO_INCREMENTAL=0
 ptime -m cargo xtask clippy
-ptime -m cargo doc
+RUSTDOCFLAGS="-Dwarnings" ptime -m cargo doc --workspace --keep-going
