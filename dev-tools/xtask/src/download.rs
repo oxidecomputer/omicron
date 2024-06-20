@@ -787,19 +787,15 @@ impl<'a> Downloader<'a> {
         let destination_dir = self.output_dir.join("npuzone");
         tokio::fs::create_dir_all(&destination_dir).await?;
 
-        let repo = "oxidecomputer/softnpu";
+        let checksums_path = self.versions_dir.join("softnpu_version");
+        let [commit, sha2] =
+            get_values_from_file(["COMMIT", "SHA2"], &checksums_path).await?;
 
-        // TODO: This should probably live in a separate file, but
-        // at the moment we're just building parity with
-        // "ci_download_softnpu_machinery".
-        let commit = "3203c51cf4473d30991b522062ac0df2e045c2f2";
+        let repo = "oxidecomputer/softnpu";
 
         let filename = "npuzone";
         let base_url = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
         let artifact_url = format!("{base_url}/{filename}");
-        let sha2_url = format!("{base_url}/{filename}.sha256.txt");
-        let sha2 = reqwest::get(sha2_url).await?.text().await?;
-        let sha2 = sha2.trim();
 
         let path = destination_dir.join(filename);
         download_file_and_verify(
