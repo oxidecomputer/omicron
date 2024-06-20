@@ -16,9 +16,7 @@ use nexus_db_queries::{authn, authz, db};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::{
-    InstanceMigrationSourceParams, InstanceMigrationTargetParams,
-};
+use sled_agent_client::types::InstanceMigrationTargetParams;
 use slog::warn;
 use std::net::{Ipv6Addr, SocketAddr};
 use steno::ActionError;
@@ -72,12 +70,27 @@ declare_saga_actions! {
 
     CREATE_MIGRATION_RECORD -> "migration_record" {
         + sim_create_migration_record
-        - sim_delete_migration_record
+        - sim_fail_migration_record
     }
 
-
     // This step the instance's migration ID and destination Propolis ID
-    // fields.
+    // fields in the database.
+    //
+    // If the instance's migration ID has already been set when we attempt to
+    // set ours, that means we have probably raced with another migrate saga for
+    // the same instance. If this is the case, this action will fail and the
+    // saga will unwind.
+    //
+    // Yes, it's a bit unfortunate that our attempt to compare-and-swap in a
+    // migration ID happens only after we've created VMM and migration records,
+    // and that we'll have to destroy them as we unwind. However, the
+    // alternative, setting the migration IDs *before* records for the target
+    // VMM and the migration are created, would mean that there is a period of
+    // time during which the instance record contains foreign keys into the
+    // `vmm` and `migration` tables that don't have corresponding records to
+    // those tables. Because the `instance` table is queried in the public API,
+    // we take care to ensure that it doesn't have "dangling pointers" to
+    // records in the `vmm` and `migration` tables that don't exist yet.
     SET_MIGRATION_IDS -> "set_migration_ids" {
         + sim_set_migration_ids
         - sim_clear_migration_ids
@@ -232,7 +245,7 @@ async fn sim_create_migration_record(
         .map_err(ActionError::action_failed)
 }
 
-async fn sim_delete_migration_record(
+async fn sim_fail_migration_record(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx: &std::sync::Arc<crate::saga_interface::SagaContext> =
@@ -244,9 +257,24 @@ async fn sim_delete_migration_record(
     );
     let migration_id = sagactx.lookup::<Uuid>("migrate_id")?;
 
-    info!(osagactx.log(), "deleting migration record";
-          "migration_id" => %migration_id);
-    osagactx.datastore().migration_mark_deleted(&opctx, migration_id).await?;
+    info!(
+        osagactx.log(),
+        "migration saga unwinding, marking migration record as failed";
+        "instance_id" => %params.instance.id(),
+        "migration_id" => %migration_id,
+    );
+    // If the migration record wasn't updated, this means it's already deleted,
+    // which...seems weird, but isn't worth getting the whole saga unwind stuck over.
+    if let Err(e) =
+        osagactx.datastore().migration_mark_deleted(&opctx, migration_id).await
+    {
+        warn!(osagactx.log(),
+              "Error marking migration record as failed during rollback";
+              "instance_id" => %params.instance.id(),
+              "migration_id" => %migration_id,
+              "error" => ?e);
+    }
+
     Ok(())
 }
 
@@ -306,7 +334,7 @@ async fn sim_destroy_vmm_record(
 
 async fn sim_set_migration_ids(
     sagactx: NexusActionContext,
-) -> Result<db::model::Instance, ActionError> {
+) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let opctx = crate::context::op_context_for_saga_action(
@@ -328,19 +356,19 @@ async fn sim_set_migration_ids(
           "dst_propolis_id" => %dst_propolis_id,
           "prev_runtime_state" => ?db_instance.runtime());
 
-    let updated_record = osagactx
-        .nexus()
+    osagactx
+        .datastore()
         .instance_set_migration_ids(
             &opctx,
             instance_id,
             src_propolis_id,
-            db_instance.runtime(),
-            InstanceMigrationSourceParams { dst_propolis_id, migration_id },
+            migration_id,
+            dst_propolis_id,
         )
         .await
         .map_err(ActionError::action_failed)?;
 
-    Ok(updated_record)
+    Ok(())
 }
 
 async fn sim_clear_migration_ids(
@@ -348,31 +376,31 @@ async fn sim_clear_migration_ids(
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     let src_sled_id = SledUuid::from_untyped_uuid(params.src_vmm.sled_id);
-    let db_instance =
-        sagactx.lookup::<db::model::Instance>("set_migration_ids")?;
+    let db_instance = params.instance;
     let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
+
+    let migration_id = sagactx.lookup::<Uuid>("migrate_id")?;
+    let dst_propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
 
     info!(osagactx.log(), "clearing migration IDs for saga unwind";
           "instance_id" => %db_instance.id(),
           "sled_id" => %src_sled_id,
-          "prev_runtime_state" => ?db_instance.runtime());
+          "migration_id" => %migration_id,
+          "dst_propolis_id" => %dst_propolis_id);
 
-    // Because the migration never actually started (and thus didn't finish),
-    // the instance should be at the same Propolis generation as it was when
-    // migration IDs were set, which means sled agent should accept a request to
-    // clear them. The only exception is if the instance stopped, but that also
-    // clears its migration IDs; in that case there is no work to do here.
-    //
-    // Other failures to clear migration IDs are handled like any other failure
-    // to update an instance's state: the callee attempts to mark the instance
-    // as failed; if the failure occurred because the instance changed state
-    // such that sled agent could not fulfill the request, the callee will
-    // produce a stale generation number and will not actually mark the instance
-    // as failed.
     if let Err(e) = osagactx
-        .nexus()
-        .instance_clear_migration_ids(instance_id, db_instance.runtime())
+        .datastore()
+        .instance_unset_migration_ids(
+            &opctx,
+            instance_id,
+            migration_id,
+            dst_propolis_id,
+        )
         .await
     {
         warn!(osagactx.log(),

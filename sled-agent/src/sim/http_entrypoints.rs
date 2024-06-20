@@ -53,6 +53,7 @@ pub fn api() -> SledApiDescription {
         api.register(instance_put_external_ip)?;
         api.register(instance_delete_external_ip)?;
         api.register(instance_poke_post)?;
+        api.register(instance_post_sim_migration_source)?;
         api.register(disk_put)?;
         api.register(disk_poke_post)?;
         api.register(update_artifact)?;

@@ -1005,7 +1005,7 @@ async fn test_instance_migrate_v2p_and_routes(
     instance_simulate_migration_source(
         cptestctx,
         nexus,
-        original_sled,
+        original_sled_id,
         instance_id,
         migration_id,
     )
@@ -4987,7 +4987,7 @@ async fn instance_simulate_migration_source(
         "migration_id" => %migration_id,
     );
     let sa = nexus.sled_client(&sled_id).await.unwrap();
-    sa.instance_simulate_migrationSource(
+    sa.instance_simulate_migration_source(
         instance_id.into_untyped_uuid(),
         sled_agent_client::SimulateMigrationSource {
             migration_id,
