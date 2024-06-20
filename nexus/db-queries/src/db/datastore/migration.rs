@@ -76,24 +76,24 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Marks a migration record as deleted if and only if both sides of the
-    /// migration are in a terminal state.
-    pub async fn migration_terminate(
+    /// Marks a migration record as failed.
+    pub async fn migration_mark_failed(
         &self,
         opctx: &OpContext,
         migration_id: Uuid,
     ) -> UpdateResult<bool> {
-        const TERMINAL_STATES: &[MigrationState] = &[
-            MigrationState(nexus::MigrationState::Completed),
-            MigrationState(nexus::MigrationState::Failed),
-        ];
-
+        let failed = MigrationState(nexus::MigrationState::Failed);
         diesel::update(dsl::migration)
             .filter(dsl::id.eq(migration_id))
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::source_state.eq_any(TERMINAL_STATES))
-            .filter(dsl::target_state.eq_any(TERMINAL_STATES))
-            .set(dsl::time_deleted.eq(Utc::now()))
+            .set((
+                dsl::source_state.eq(failed),
+                dsl::source_gen.eq(dsl::source_gen + 1),
+                dsl::time_source_updated.eq(Utc::now()),
+                dsl::target_state.eq(failed),
+                dsl::target_gen.eq(dsl::target_gen + 1),
+                dsl::time_target_updated.eq(Utc::now()),
+            ))
             .check_if_exists::<Migration>(migration_id)
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await

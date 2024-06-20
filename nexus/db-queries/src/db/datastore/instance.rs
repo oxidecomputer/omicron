@@ -518,6 +518,164 @@ impl DataStore {
         Ok(updated)
     }
 
+    /// Updates an instance record by setting the instance's migration ID.
+    pub async fn instance_set_migration_ids(
+        &self,
+        opctx: &OpContext,
+        instance_id: InstanceUuid,
+        src_propolis_id: PropolisUuid,
+        migration_id: Uuid,
+        target_propolis_id: PropolisUuid,
+    ) -> Result<bool, Error> {
+        use db::schema::instance::dsl;
+
+        let instance_id = instance_id.into_untyped_uuid();
+        let target_propolis_id = target_propolis_id.into_untyped_uuid();
+        let src_propolis_id = src_propolis_id.into_untyped_uuid();
+        let updated = diesel::update(dsl::instance)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(instance_id))
+            .filter(dsl::migration_id.is_null())
+            .filter(dsl::target_propolis_id.is_null())
+            .filter(dsl::active_propolis_id.eq(src_propolis_id))
+            .set((
+                dsl::migration_id.eq(Some(migration_id)),
+                dsl::target_propolis_id.eq(Some(target_propolis_id)),
+                // advance the generation
+                dsl::state_generation.eq(dsl::state_generation + 1),
+                dsl::time_state_updated.eq(Utc::now()),
+            ))
+            .check_if_exists::<Instance>(instance_id.into_untyped_uuid())
+            .execute_and_check(&*self.pool_connection_authorized(&opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Instance,
+                        LookupType::ById(instance_id),
+                    ),
+                )
+            })?;
+
+        match updated {
+            // If we updated the instance, that's great! Good job team!
+            UpdateAndQueryResult { status: UpdateStatus::Updated, .. } => {
+                Ok(true)
+            }
+            // No update was performed because the migration ID has already been
+            // set to the ID we were trying to set it to. That's fine, count it
+            // as a success.
+            UpdateAndQueryResult {
+                found: Instance { runtime_state, .. },
+                ..
+            } if runtime_state.migration_id == Some(migration_id) => {
+                debug_assert_eq!(
+                    runtime_state.dst_propolis_id,
+                    Some(target_propolis_id)
+                );
+                debug_assert_eq!(
+                    runtime_state.propolis_id,
+                    Some(src_propolis_id)
+                );
+                Ok(false)
+            }
+
+            // On the other hand, if there was already a different migration ID,
+            // that means another migrate saga has already started a migration.
+            // Guess I'll die!
+            UpdateAndQueryResult {
+                found:
+                    Instance {
+                        runtime_state:
+                            InstanceRuntimeState {
+                                migration_id: Some(actual_migration_id),
+                                ..
+                            },
+                        ..
+                    },
+                ..
+            } => {
+                slog::info!(
+                    opctx.log,
+                    "failed to set instance migration IDs: a different migration ID was already set";
+                    "instance_id" => %instance_id,
+                    "desired_migration_id" => %migration_id,
+                    "actual_migration_id" => %actual_migration_id,
+                );
+                Err(Error::conflict("instance is already migrating"))
+            }
+            // If one of the other filters didn't match, our understanding of
+            // the instance's state is clearly pretty wromg.
+            UpdateAndQueryResult {
+                found: Instance { runtime_state, .. },
+                ..
+            } => {
+                slog::warn!(
+                    opctx.log,
+                    "failed to set instance migration IDs: one of its Propolis IDs was what way we anticipated!";
+                    "instance_id" => %instance_id,
+                    "desired_migration_id" => %migration_id,
+                    "desired_active_propolis_id" => %src_propolis_id,
+                    "desired_target_propolis_id" => %target_propolis_id,
+                    "actual_migration_id" => ?runtime_state.migration_id,
+                    "actual_active_propolis_id" => ?runtime_state.propolis_id,
+                    "actual_target_propolis_id" => ?runtime_state.dst_propolis_id,
+                );
+                Err(Error::conflict(
+                    "instance snapshot didn't match actual state",
+                ))
+            }
+        }
+    }
+
+    /// Unsets the migration IDs set by
+    /// [`DataStore::instance_set_migration_ids`].
+    ///
+    /// This method will only unset the instance's migration IDs if they match
+    /// the provided ones.
+    pub async fn instance_unset_migration_ids(
+        &self,
+        opctx: &OpContext,
+        instance_id: InstanceUuid,
+        migration_id: Uuid,
+        target_propolis_id: PropolisUuid,
+    ) -> Result<bool, Error> {
+        use db::schema::instance::dsl;
+
+        let instance_id = instance_id.into_untyped_uuid();
+        let target_propolis_id = target_propolis_id.into_untyped_uuid();
+        let updated = diesel::update(dsl::instance)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(instance_id))
+            .filter(dsl::migration_id.eq(migration_id))
+            .filter(dsl::target_propolis_id.eq(target_propolis_id))
+            .set((
+                dsl::migration_id.eq(None::<Uuid>),
+                dsl::target_propolis_id.eq(None::<Uuid>),
+                // advance the generation
+                dsl::state_generation.eq(dsl::state_generation + 1),
+                dsl::time_state_updated.eq(Utc::now()),
+            ))
+            .check_if_exists::<Instance>(instance_id.into_untyped_uuid())
+            .execute_and_check(&*self.pool_connection_authorized(&opctx).await?)
+            .await
+            .map(|r| match r.status {
+                UpdateStatus::Updated => true,
+                UpdateStatus::NotUpdatedButExists => false,
+            })
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Instance,
+                        LookupType::ById(instance_id),
+                    ),
+                )
+            })?;
+        Ok(updated)
+    }
+
     /// Updates an instance record and a VMM record with a single database
     /// command.
     ///

@@ -59,10 +59,8 @@ use propolis_client::support::InstanceSerialConsoleHelper;
 use propolis_client::support::WSClientOffset;
 use propolis_client::support::WebSocketStream;
 use sagas::instance_common::ExternalIpAttach;
-use sled_agent_client::types::InstanceMigrationSourceParams;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::InstanceProperties;
-use sled_agent_client::types::InstancePutMigrationIdsBody;
 use sled_agent_client::types::InstancePutStateBody;
 use std::matches;
 use std::net::SocketAddr;
@@ -527,77 +525,6 @@ impl super::Nexus {
         // Should we lookup the instance again here?
         // See comment in project_create_instance.
         self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
-    }
-
-    /// Attempts to set the migration IDs for the supplied instance via the
-    /// sled specified in `db_instance`.
-    ///
-    /// The caller is assumed to have fetched the current instance record from
-    /// the DB and verified that the record has no migration IDs.
-    ///
-    /// Returns `Ok` and the updated instance record if this call successfully
-    /// updated the instance with the sled agent and that update was
-    /// successfully reflected into CRDB. Returns `Err` with an appropriate
-    /// error otherwise.
-    ///
-    /// # Panics
-    ///
-    /// Asserts that `db_instance` has no migration ID or destination Propolis
-    /// ID set.
-    pub(crate) async fn instance_set_migration_ids(
-        &self,
-        opctx: &OpContext,
-        instance_id: InstanceUuid,
-        src_propolis_id: PropolisUuid,
-        prev_instance_runtime: &db::model::InstanceRuntimeState,
-        migration_params: InstanceMigrationSourceParams,
-    ) -> UpdateResult<db::model::Instance> {
-        assert!(prev_instance_runtime.migration_id.is_none());
-        assert!(prev_instance_runtime.dst_propolis_id.is_none());
-
-        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .instance_id(instance_id.into_untyped_uuid())
-            .lookup_for(authz::Action::Modify)
-            .await?;
-
-        let instance_updated = todo!("eliza: do this transition purely in nexus rather than in sled-agent...");
-
-        if instance_updated {
-            Ok(self
-                .db_datastore
-                .instance_refetch(opctx, &authz_instance)
-                .await?)
-        } else {
-            Err(Error::conflict(
-                "instance is already migrating, or underwent an operation that \
-                 prevented this migration from proceeding"
-            ))
-        }
-    }
-
-    /// Attempts to clear the migration IDs for the supplied instance via the
-    /// sled specified in `db_instance`.
-    ///
-    /// The supplied instance record must contain valid migration IDs.
-    ///
-    /// Returns `Ok` if sled agent accepted the request to clear migration IDs
-    /// and the resulting attempt to write instance runtime state back to CRDB
-    /// succeeded. This routine returns `Ok` even if the update was not actually
-    /// applied (due to a separate generation number change).
-    ///
-    /// # Panics
-    ///
-    /// Asserts that `db_instance` has a migration ID and destination Propolis
-    /// ID set.
-    pub(crate) async fn instance_clear_migration_ids(
-        &self,
-        instance_id: InstanceUuid,
-        prev_instance_runtime: &db::model::InstanceRuntimeState,
-    ) -> Result<(), Error> {
-        assert!(prev_instance_runtime.migration_id.is_some());
-        assert!(prev_instance_runtime.dst_propolis_id.is_some());
-
-        todo!("eliza: do this transition in the DB rather than in sled-agent")
     }
 
     /// Reboot the specified instance.
