@@ -43,6 +43,13 @@ WITH
         vmm_found LEFT JOIN vmm_updated ON vmm_found.id = vmm_updated.id
     )
 SELECT
-  vmm_result.found, vmm_result.updated, instance_result.found, instance_result.updated, NULL, NULL
+  vmm_result.found,
+  vmm_result.updated,
+  instance_result.found,
+  instance_result.updated,
+  NULL,
+  NULL,
+  NULL,
+  NULL
 FROM
   vmm_result, instance_result
