@@ -254,7 +254,7 @@ async fn siud_update_instance(
     let osagactx = sagactx.user_data();
     let new_runtime = InstanceRuntimeState {
         propolis_id: None,
-        nexus_state: InstanceState::NoVmm.into(),
+        nexus_state: InstanceState::NoVmm,
         gen: Generation(instance.runtime_state.gen.0.next()),
         ..instance.runtime_state
     };
