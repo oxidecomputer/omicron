@@ -3380,13 +3380,16 @@
         "enum": [
           "gimlet_sp",
           "gimlet_rot",
+          "gimlet_rot_bootloader",
           "host",
           "trampoline",
           "control_plane",
           "psc_sp",
           "psc_rot",
+          "psc_rot_bootloader",
           "switch_sp",
-          "switch_rot"
+          "switch_rot",
+          "switch_rot_bootloader"
         ]
       },
       "L4PortRange": {

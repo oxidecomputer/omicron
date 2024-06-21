@@ -15,6 +15,8 @@ use slog::{info, o, warn, Drain, Logger};
 use std::collections::{BTreeSet, HashMap};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
+use std::sync::OnceLock;
+use std::time::Duration;
 use strum::EnumIter;
 use strum::IntoEnumIterator;
 use tar::Archive;
@@ -23,6 +25,7 @@ use tokio::process::Command;
 
 const BUILDOMAT_URL: &'static str =
     "https://buildomat.eng.oxide.computer/public/file";
+const RETRY_ATTEMPTS: usize = 3;
 
 /// What is being downloaded?
 #[derive(
@@ -218,7 +221,7 @@ async fn get_values_from_file<const N: usize>(
         .context("Failed to read {path}")?;
     for line in content.lines() {
         let line = line.trim();
-        let Some((key, value)) = line.split_once("=") else {
+        let Some((key, value)) = line.split_once('=') else {
             continue;
         };
         let value = value.trim_matches('"');
@@ -236,7 +239,17 @@ async fn get_values_from_file<const N: usize>(
 ///
 /// Writes the response to the file as it is received.
 async fn streaming_download(url: &str, path: &Utf8Path) -> Result<()> {
-    let mut response = reqwest::get(url).await?;
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+    let client = CLIENT.get_or_init(|| {
+        reqwest::ClientBuilder::new()
+            .timeout(Duration::from_secs(3600))
+            .tcp_keepalive(Duration::from_secs(60))
+            .connect_timeout(Duration::from_secs(15))
+            .build()
+            .unwrap()
+    });
+    let mut response = client.get(url).send().await?.error_for_status()?;
     let mut tarball = tokio::fs::File::create(&path).await?;
     while let Some(chunk) = response.chunk().await? {
         tarball.write_all(chunk.as_ref()).await?;
@@ -410,8 +423,22 @@ async fn download_file_and_verify(
     };
 
     if do_download {
-        info!(log, "Downloading {path}");
-        streaming_download(&url, &path).await?;
+        for attempt in 1..=RETRY_ATTEMPTS {
+            info!(
+                log,
+                "Downloading {path} (attempt {attempt}/{RETRY_ATTEMPTS})"
+            );
+            match streaming_download(&url, &path).await {
+                Ok(()) => break,
+                Err(err) => {
+                    if attempt == RETRY_ATTEMPTS {
+                        return Err(err);
+                    } else {
+                        warn!(log, "Download failed, retrying: {err}");
+                    }
+                }
+            }
+        }
     }
 
     let observed_checksum = algorithm.checksum(&path).await?;
@@ -787,19 +814,15 @@ impl<'a> Downloader<'a> {
         let destination_dir = self.output_dir.join("npuzone");
         tokio::fs::create_dir_all(&destination_dir).await?;
 
-        let repo = "oxidecomputer/softnpu";
+        let checksums_path = self.versions_dir.join("softnpu_version");
+        let [commit, sha2] =
+            get_values_from_file(["COMMIT", "SHA2"], &checksums_path).await?;
 
-        // TODO: This should probably live in a separate file, but
-        // at the moment we're just building parity with
-        // "ci_download_softnpu_machinery".
-        let commit = "3203c51cf4473d30991b522062ac0df2e045c2f2";
+        let repo = "oxidecomputer/softnpu";
 
         let filename = "npuzone";
         let base_url = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
         let artifact_url = format!("{base_url}/{filename}");
-        let sha2_url = format!("{base_url}/{filename}.sha256.txt");
-        let sha2 = reqwest::get(sha2_url).await?.text().await?;
-        let sha2 = sha2.trim();
 
         let path = destination_dir.join(filename);
         download_file_and_verify(

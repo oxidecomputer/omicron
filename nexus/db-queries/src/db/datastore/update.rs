@@ -25,7 +25,7 @@ use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
 use swrite::{swrite, SWrite};
 
-/// The return value of [`DataStore::update_tuf_repo_description_insert`].
+/// The return value of [`DataStore::update_tuf_repo_insert`].
 ///
 /// This is similar to [`external::TufRepoInsertResponse`], but uses
 /// nexus-db-model's types instead of external types.

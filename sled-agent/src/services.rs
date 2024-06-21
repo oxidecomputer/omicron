@@ -757,6 +757,22 @@ impl ServiceManager {
         self.inner.switch_zone_bootstrap_address
     }
 
+    // TODO: This function refers to an old, deprecated format for storing
+    // service information. It is not deprecated for cleanup purposes, but
+    // should otherwise not be called in new code.
+    async fn all_service_ledgers(&self) -> Vec<Utf8PathBuf> {
+        pub const SERVICES_LEDGER_FILENAME: &str = "services.json";
+        if let Some(dir) = self.inner.ledger_directory_override.get() {
+            return vec![dir.join(SERVICES_LEDGER_FILENAME)];
+        }
+        let resources = self.inner.storage.get_latest_disks().await;
+        resources
+            .all_m2_mountpoints(CONFIG_DATASET)
+            .into_iter()
+            .map(|p| p.join(SERVICES_LEDGER_FILENAME))
+            .collect()
+    }
+
     async fn all_omicron_zone_ledgers(&self) -> Vec<Utf8PathBuf> {
         if let Some(dir) = self.inner.ledger_directory_override.get() {
             return vec![dir.join(ZONES_LEDGER_FILENAME)];
@@ -777,26 +793,48 @@ impl ServiceManager {
         // lock.
         _map: &MutexGuard<'_, ZoneMap>,
     ) -> Result<Option<Ledger<OmicronZonesConfigLocal>>, Error> {
-        // First, try to load the current software's zone ledger.  If that
-        // works, we're done.
         let log = &self.inner.log;
+
+        // NOTE: This is a function where we used to access zones by "service
+        // ledgers". This format has since been deprecated, and these files,
+        // if they exist, should not be used.
+        //
+        // We try to clean them up at this spot. Deleting this "removal" code
+        // in the future should be a safe operation; this is a non-load-bearing
+        // cleanup.
+        for path in self.all_service_ledgers().await {
+            match tokio::fs::remove_file(&path).await {
+                Ok(_) => (),
+                Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => (),
+                Err(e) => {
+                    warn!(
+                        log,
+                        "Failed to delete old service ledger";
+                        "err" => ?e,
+                        "path" => ?path,
+                    );
+                }
+            }
+        }
+
+        // Try to load the current software's zone ledger
         let ledger_paths = self.all_omicron_zone_ledgers().await;
         info!(log, "Loading Omicron zones from: {ledger_paths:?}");
         let maybe_ledger =
             Ledger::<OmicronZonesConfigLocal>::new(log, ledger_paths.clone())
                 .await;
 
-        if let Some(ledger) = maybe_ledger {
-            info!(
-                log,
-                "Loaded Omicron zones";
-                "zones_config" => ?ledger.data()
-            );
-            return Ok(Some(ledger));
-        }
+        let Some(ledger) = maybe_ledger else {
+            info!(log, "Loading Omicron zones - No zones detected");
+            return Ok(None);
+        };
 
-        info!(log, "Loading Omicron zones - No zones detected");
-        Ok(None)
+        info!(
+            log,
+            "Loaded Omicron zones";
+            "zones_config" => ?ledger.data()
+        );
+        Ok(Some(ledger))
     }
 
     // TODO(https://github.com/oxidecomputer/omicron/issues/2973):

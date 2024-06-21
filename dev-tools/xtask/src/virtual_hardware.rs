@@ -235,9 +235,7 @@ fn unload_xde_driver() -> Result<()> {
         .context("Invalid modinfo output")?
         .lines()
         .find_map(|line| {
-            let mut cols = line.trim().splitn(2, ' ');
-            let id = cols.next()?;
-            let desc = cols.next()?;
+            let (id, desc) = line.trim().split_once(' ')?;
             if !desc.contains("xde") {
                 return None;
             }
@@ -419,7 +417,7 @@ fn run_scadm_command(args: Vec<&str>) -> Result<Output> {
     for arg in &args {
         cmd.arg(arg);
     }
-    Ok(execute(cmd)?)
+    execute(cmd)
 }
 
 fn default_gateway_ip() -> Result<String> {
@@ -497,8 +495,8 @@ struct SledAgentConfig {
 impl SledAgentConfig {
     fn read(path: &Utf8Path) -> Result<Self> {
         let config = std::fs::read_to_string(path)?;
-        Ok(toml::from_str(&config)
-            .context("Could not parse sled agent config as toml")?)
+        toml::from_str(&config)
+            .context("Could not parse sled agent config as toml")
     }
 }
 
@@ -605,7 +603,7 @@ fn swap_list() -> Result<Vec<Utf8PathBuf>> {
     let mut cmd = Command::new(SWAP);
     cmd.arg("-l");
 
-    let output = cmd.output().context(format!("Could not start swap"))?;
+    let output = cmd.output().context("Could not start swap")?;
     if !output.status.success() {
         if let Ok(stderr) = String::from_utf8(output.stderr) {
             // This is an exceptional case - if there are no swap devices,
