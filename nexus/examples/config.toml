@@ -5,7 +5,7 @@
 [console]
 # Directory for static assets. Absolute path or relative to CWD.
 static_dir = "out/console-assets"
-session_idle_timeout_minutes = 480      # 6 hours
+session_idle_timeout_minutes = 480 # 8 hours
 session_absolute_timeout_minutes = 1440 # 24 hours
 
 # List of authentication schemes to support.
