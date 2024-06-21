@@ -39,6 +39,7 @@ use nexus_db_model::Vmm;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
+use omicron_uuid_kinds::{GenericUuid, PropolisUuid};
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
@@ -108,10 +109,14 @@ impl AbandonedVmmReaper {
         slog::debug!(opctx.log, "Found abandoned VMMs"; "count" => vmms.len());
 
         for vmm in vmms {
-            let vmm_id = vmm.id;
+            let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
             slog::trace!(opctx.log, "Deleting abandoned VMM"; "vmm" => %vmm_id);
             // Attempt to remove the abandoned VMM's sled resource reservation.
-            match self.datastore.sled_reservation_delete(opctx, vmm_id).await {
+            match self
+                .datastore
+                .sled_reservation_delete(opctx, vmm_id.into_untyped_uuid())
+                .await
+            {
                 Ok(_) => {
                     slog::trace!(
                         opctx.log,
@@ -235,7 +240,7 @@ mod tests {
     const PROJECT_NAME: &str = "carcosa";
 
     struct TestFixture {
-        destroyed_vmm_id: Uuid,
+        destroyed_vmm_id: PropolisUuid,
     }
 
     impl TestFixture {
@@ -255,12 +260,12 @@ mod tests {
             )
             .await;
 
-            let destroyed_vmm_id = Uuid::new_v4();
+            let destroyed_vmm_id = PropolisUuid::new_v4();
             datastore
                 .vmm_insert(
                     &opctx,
                     dbg!(Vmm {
-                        id: destroyed_vmm_id,
+                        id: destroyed_vmm_id.into_untyped_uuid(),
                         time_created: Utc::now(),
                         time_deleted: None,
                         instance_id: instance.identity.id,
@@ -287,7 +292,7 @@ mod tests {
             dbg!(datastore
                 .sled_reservation_create(
                     &opctx,
-                    destroyed_vmm_id,
+                    destroyed_vmm_id.into_untyped_uuid(),
                     SledResourceKind::Instance,
                     resources.clone(),
                     constraints,
@@ -308,7 +313,9 @@ mod tests {
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             let fetched_vmm = vmm_dsl::vmm
-                .filter(vmm_dsl::id.eq(self.destroyed_vmm_id))
+                .filter(
+                    vmm_dsl::id.eq(self.destroyed_vmm_id.into_untyped_uuid()),
+                )
                 .filter(vmm_dsl::time_deleted.is_null())
                 .select(Vmm::as_select())
                 .first_async::<Vmm>(&*conn)
@@ -321,7 +328,10 @@ mod tests {
             );
 
             let fetched_sled_resource = sled_resource_dsl::sled_resource
-                .filter(sled_resource_dsl::id.eq(self.destroyed_vmm_id))
+                .filter(
+                    sled_resource_dsl::id
+                        .eq(self.destroyed_vmm_id.into_untyped_uuid()),
+                )
                 .select(SledResource::as_select())
                 .first_async::<SledResource>(&*conn)
                 .await
@@ -439,7 +449,10 @@ mod tests {
         assert!(!abandoned_vmms.is_empty());
 
         datastore
-            .sled_reservation_delete(&opctx, fixture.destroyed_vmm_id)
+            .sled_reservation_delete(
+                &opctx,
+                fixture.destroyed_vmm_id.into_untyped_uuid(),
+            )
             .await
             .expect(
                 "simulate another nexus marking the sled reservation deleted",

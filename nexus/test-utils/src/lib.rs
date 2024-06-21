@@ -881,13 +881,14 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             self.nexus_internal_addr.expect("Must launch Nexus first");
 
         // Set up a single sled agent.
-        let sa_id: Uuid = if switch_location == SwitchLocation::Switch0 {
+        let sa_id: SledUuid = if switch_location == SwitchLocation::Switch0 {
             SLED_AGENT_UUID
         } else {
             SLED_AGENT2_UUID
         }
         .parse()
         .unwrap();
+
         let tempdir = camino_tempfile::tempdir().unwrap();
         let sled_agent = start_sled_agent(
             self.logctx.log.new(o!(
@@ -1384,12 +1385,12 @@ async fn setup_with_config_impl<N: NexusServer>(
 pub async fn start_sled_agent(
     log: Logger,
     nexus_address: SocketAddr,
-    id: Uuid,
+    id: SledUuid,
     update_directory: &Utf8Path,
     sim_mode: sim::SimMode,
 ) -> Result<sim::Server, String> {
     let config = sim::Config::for_testing(
-        id,
+        id.into_untyped_uuid(),
         sim_mode,
         Some(nexus_address),
         Some(update_directory),

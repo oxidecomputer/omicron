@@ -34,7 +34,7 @@ use std::collections::BTreeSet;
 use std::hash::Hash;
 use std::str::FromStr;
 
-use self::omicron_zone_placement::DiscretionaryOmicronZone;
+pub(crate) use self::omicron_zone_placement::DiscretionaryOmicronZone;
 use self::omicron_zone_placement::OmicronZonePlacement;
 use self::omicron_zone_placement::OmicronZonePlacementSledState;
 
@@ -305,7 +305,8 @@ impl<'a> Planner<'a> {
                 continue;
             }
 
-            // Every provisionable zpool on the sled should have a Crucible zone on it.
+            // Every provisionable zpool on the sled should have a Crucible zone
+            // on it.
             let mut ncrucibles_added = 0;
             for zpool_id in sled_resources.all_zpools(ZpoolFilter::InService) {
                 if self
@@ -338,70 +339,132 @@ impl<'a> Planner<'a> {
             }
         }
 
-        self.ensure_correct_number_of_nexus_zones(&sleds_waiting_for_ntp_zone)?;
+        self.do_plan_add_discretionary_zones(&sleds_waiting_for_ntp_zone)
+    }
+
+    fn do_plan_add_discretionary_zones(
+        &mut self,
+        sleds_waiting_for_ntp_zone: &BTreeSet<SledUuid>,
+    ) -> Result<(), Error> {
+        // We usually don't need to construct an `OmicronZonePlacement` to add
+        // discretionary zones, so defer its creation until it's needed.
+        let mut zone_placement = None;
+
+        for zone_kind in [
+            DiscretionaryOmicronZone::Nexus,
+            DiscretionaryOmicronZone::CockroachDb,
+        ] {
+            let num_zones_to_add = self.num_additional_zones_needed(zone_kind);
+            if num_zones_to_add == 0 {
+                continue;
+            }
+            // We need to add at least one zone; construct our `zone_placement`
+            // (or reuse the existing one if a previous loop iteration already
+            // created it).
+            let zone_placement = match zone_placement.as_mut() {
+                Some(zone_placement) => zone_placement,
+                None => {
+                    // This constructs a picture of the sleds as we currently
+                    // understand them, as far as which sleds have discretionary
+                    // zones. This will remain valid as we loop through the
+                    // `zone_kind`s in this function, as any zone additions will
+                    // update the `zone_placement` heap in-place.
+                    let current_discretionary_zones = self
+                        .input
+                        .all_sled_resources(SledFilter::Discretionary)
+                        .filter(|(sled_id, _)| {
+                            !sleds_waiting_for_ntp_zone.contains(&sled_id)
+                        })
+                        .map(|(sled_id, sled_resources)| {
+                            OmicronZonePlacementSledState {
+                            sled_id,
+                            num_zpools: sled_resources
+                                .all_zpools(ZpoolFilter::InService)
+                                .count(),
+                            discretionary_zones: self
+                                .blueprint
+                                .current_sled_zones(sled_id)
+                                .filter_map(|zone| {
+                                    DiscretionaryOmicronZone::from_zone_type(
+                                        &zone.zone_type,
+                                    )
+                                })
+                                .collect(),
+                        }
+                        });
+                    zone_placement.insert(OmicronZonePlacement::new(
+                        current_discretionary_zones,
+                    ))
+                }
+            };
+            self.add_discretionary_zones(
+                zone_placement,
+                zone_kind,
+                num_zones_to_add,
+            )?;
+        }
 
         Ok(())
     }
 
-    fn ensure_correct_number_of_nexus_zones(
+    // Given the current blueprint state and policy, returns the number of
+    // additional zones needed of the given `zone_kind` to satisfy the policy.
+    fn num_additional_zones_needed(
         &mut self,
-        sleds_waiting_for_ntp_zone: &BTreeSet<SledUuid>,
-    ) -> Result<(), Error> {
-        // Count the number of Nexus zones on all in-service sleds. This will
-        // include sleds that are in service but not eligible for new services,
-        // but will not include sleds that have been expunged or decommissioned.
-        let mut num_total_nexus = 0;
+        zone_kind: DiscretionaryOmicronZone,
+    ) -> usize {
+        // Count the number of `kind` zones on all in-service sleds. This
+        // will include sleds that are in service but not eligible for new
+        // services, but will not include sleds that have been expunged or
+        // decommissioned.
+        let mut num_existing_kind_zones = 0;
         for sled_id in self.input.all_sled_ids(SledFilter::InService) {
-            let num_nexus = self.blueprint.sled_num_nexus_zones(sled_id);
-            num_total_nexus += num_nexus;
+            let num_zones_of_kind = self
+                .blueprint
+                .sled_num_zones_of_kind(sled_id, zone_kind.into());
+            num_existing_kind_zones += num_zones_of_kind;
         }
 
-        // TODO-correctness What should we do if we have _too many_ Nexus
-        // instances? For now, just log it the number of zones any time we have
-        // at least the minimum number.
-        let mut nexus_to_add = self
-            .input
-            .target_nexus_zone_count()
-            .saturating_sub(num_total_nexus);
-        if nexus_to_add == 0 {
+        let target_count = match zone_kind {
+            DiscretionaryOmicronZone::Nexus => {
+                self.input.target_nexus_zone_count()
+            }
+            DiscretionaryOmicronZone::CockroachDb => {
+                self.input.target_cockroachdb_zone_count()
+            }
+        };
+
+        // TODO-correctness What should we do if we have _too many_
+        // `zone_kind` zones? For now, just log it the number of zones any
+        // time we have at least the minimum number.
+        let num_zones_to_add =
+            target_count.saturating_sub(num_existing_kind_zones);
+        if num_zones_to_add == 0 {
             info!(
-                self.log, "sufficient Nexus zones exist in plan";
-                "desired_count" => self.input.target_nexus_zone_count(),
-                "current_count" => num_total_nexus,
+                self.log, "sufficient {zone_kind:?} zones exist in plan";
+                "desired_count" => target_count,
+                "current_count" => num_existing_kind_zones,
             );
-            return Ok(());
         }
+        num_zones_to_add
+    }
 
-        let mut zone_placement = OmicronZonePlacement::new(
-            self.input
-                .all_sled_resources(SledFilter::Discretionary)
-                .filter(|(sled_id, _)| {
-                    !sleds_waiting_for_ntp_zone.contains(&sled_id)
-                })
-                .map(|(sled_id, sled_resources)| {
-                    OmicronZonePlacementSledState {
-                        sled_id,
-                        num_zpools: sled_resources
-                            .all_zpools(ZpoolFilter::InService)
-                            .count(),
-                        discretionary_zones: self
-                            .blueprint
-                            .current_sled_zones(sled_id)
-                            .filter_map(|zone| {
-                                DiscretionaryOmicronZone::from_zone_type(
-                                    &zone.zone_type,
-                                )
-                            })
-                            .collect(),
-                    }
-                }),
-        );
-
-        // Build a map of sled -> new nexus zones to add.
+    // Attempts to place `num_zones_to_add` new zones of `kind`.
+    //
+    // It is not an error if there are too few eligible sleds to start a
+    // sufficient number of zones; instead, we'll log a warning and start as
+    // many as we can (up to `num_zones_to_add`).
+    fn add_discretionary_zones(
+        &mut self,
+        zone_placement: &mut OmicronZonePlacement,
+        kind: DiscretionaryOmicronZone,
+        mut num_zones_to_add: usize,
+    ) -> Result<(), Error> {
+        // Build a map of sled -> new zones to add.
         let mut sleds_to_change: BTreeMap<SledUuid, usize> = BTreeMap::new();
 
-        for i in 0..nexus_to_add {
-            match zone_placement.place_zone(DiscretionaryOmicronZone::Nexus) {
+        for i in 0..num_zones_to_add {
+            match zone_placement.place_zone(kind) {
                 Ok(sled_id) => {
                     *sleds_to_change.entry(sled_id).or_default() += 1;
                 }
@@ -412,14 +475,14 @@ impl<'a> Planner<'a> {
                     // able to produce blueprints to achieve that status.
                     warn!(
                         self.log,
-                        "failed to place all new desired Nexus instances";
+                        "failed to place all new desired {kind:?} zones";
                         "placed" => i,
-                        "wanted_to_place" => nexus_to_add,
+                        "wanted_to_place" => num_zones_to_add,
                     );
 
-                    // Adjust `nexus_to_add` downward so it's consistent with
-                    // the number of Nexuses we're actually adding.
-                    nexus_to_add = i;
+                    // Adjust `num_zones_to_add` downward so it's consistent
+                    // with the number of zones we're actually adding.
+                    num_zones_to_add = i;
 
                     break;
                 }
@@ -427,30 +490,43 @@ impl<'a> Planner<'a> {
         }
 
         // For each sled we need to change, actually do so.
-        let mut total_added = 0;
-        for (sled_id, additional_nexus_count) in sleds_to_change {
+        let mut new_zones_added = 0;
+        for (sled_id, additional_zone_count) in sleds_to_change {
             // TODO-cleanup This is awkward: the builder wants to know how many
-            // total Nexus zones go on a given sled, but we have a count of how
-            // many we want to add. Construct a new target count. Maybe the
-            // builder should provide a different interface here?
-            let new_nexus_count = self.blueprint.sled_num_nexus_zones(sled_id)
-                + additional_nexus_count;
-            match self
-                .blueprint
-                .sled_ensure_zone_multiple_nexus(sled_id, new_nexus_count)?
-            {
+            // total zones go on a given sled, but we have a count of how many
+            // we want to add. Construct a new target count. Maybe the builder
+            // should provide a different interface here?
+            let new_total_zone_count =
+                self.blueprint.sled_num_zones_of_kind(sled_id, kind.into())
+                    + additional_zone_count;
+
+            let result = match kind {
+                DiscretionaryOmicronZone::Nexus => {
+                    self.blueprint.sled_ensure_zone_multiple_nexus(
+                        sled_id,
+                        new_total_zone_count,
+                    )?
+                }
+                DiscretionaryOmicronZone::CockroachDb => {
+                    self.blueprint.sled_ensure_zone_multiple_cockroachdb(
+                        sled_id,
+                        new_total_zone_count,
+                    )?
+                }
+            };
+            match result {
                 EnsureMultiple::Changed { added, removed: _ } => {
                     info!(
                         self.log, "will add {added} Nexus zone(s) to sled";
                         "sled_id" => %sled_id,
                     );
-                    total_added += added;
+                    new_zones_added += added;
                 }
                 // This is only possible if we asked the sled to ensure the same
                 // number of zones it already has, but that's impossible based
                 // on the way we built up `sleds_to_change`.
                 EnsureMultiple::NotNeeded => unreachable!(
-                    "sled on which we added Nexus zones did not add any"
+                    "sled on which we added {kind:?} zones did not add any"
                 ),
             }
         }
@@ -459,8 +535,8 @@ impl<'a> Planner<'a> {
         // arrived here, we think we've added the number of Nexus zones we
         // needed to.
         assert_eq!(
-            total_added, nexus_to_add,
-            "internal error counting Nexus zones"
+            new_zones_added, num_zones_to_add,
+            "internal error counting {kind:?} zones"
         );
 
         Ok(())
@@ -928,7 +1004,7 @@ mod test {
             1
         );
 
-        // Now run the planner.  It should add additional Nexus instances to the
+        // Now run the planner.  It should add additional Nexus zones to the
         // one sled we have.
         let mut builder = input.into_builder();
         builder.policy_mut().target_nexus_zone_count = 5;

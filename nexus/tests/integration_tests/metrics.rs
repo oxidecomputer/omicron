@@ -20,6 +20,7 @@ use nexus_test_utils::resource_helpers::{
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use oximeter::types::Datum;
 use oximeter::types::Measurement;
 use oximeter::TimeseriesSchema;
@@ -429,11 +430,11 @@ async fn test_instance_watcher_metrics(
     #[track_caller]
     fn count_state(
         table: &oximeter_db::oxql::Table,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         state: &'static str,
     ) -> i64 {
         use oximeter_db::oxql::point::ValueArray;
-        let uuid = FieldValue::Uuid(instance_id);
+        let uuid = FieldValue::Uuid(instance_id.into_untyped_uuid());
         let state = FieldValue::String(state.into());
         let mut timeserieses = table.timeseries().filter(|ts| {
             ts.fields.get(INSTANCE_ID_FIELD) == Some(&uuid)
@@ -473,7 +474,7 @@ async fn test_instance_watcher_metrics(
 
     eprintln!("--- creating instance 1 ---");
     let instance1 = create_instance(&client, project_name, "i-1").await;
-    let instance1_uuid = instance1.identity.id;
+    let instance1_uuid = InstanceUuid::from_untyped_uuid(instance1.identity.id);
 
     // activate the instance watcher background task.
     activate_instance_watcher().await;
@@ -489,7 +490,7 @@ async fn test_instance_watcher_metrics(
     // okay, make another instance
     eprintln!("--- creating instance 2 ---");
     let instance2 = create_instance(&client, project_name, "i-2").await;
-    let instance2_uuid = instance2.identity.id;
+    let instance2_uuid = InstanceUuid::from_untyped_uuid(instance2.identity.id);
 
     // activate the instance watcher background task.
     activate_instance_watcher().await;

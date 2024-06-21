@@ -218,7 +218,7 @@ async fn get_values_from_file<const N: usize>(
         .context("Failed to read {path}")?;
     for line in content.lines() {
         let line = line.trim();
-        let Some((key, value)) = line.split_once("=") else {
+        let Some((key, value)) = line.split_once('=') else {
             continue;
         };
         let value = value.trim_matches('"');

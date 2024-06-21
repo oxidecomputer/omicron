@@ -11647,6 +11647,10 @@
         "description": "View of a Certificate",
         "type": "object",
         "properties": {
+          "cert": {
+            "description": "PEM-formatted string containing public certificate chain",
+            "type": "string"
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
@@ -11665,7 +11669,12 @@
             ]
           },
           "service": {
-            "$ref": "#/components/schemas/ServiceUsingCertificate"
+            "description": "The service using this certificate",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ServiceUsingCertificate"
+              }
+            ]
           },
           "time_created": {
             "description": "timestamp when this resource was created",
@@ -11679,6 +11688,7 @@
           }
         },
         "required": [
+          "cert",
           "description",
           "id",
           "name",

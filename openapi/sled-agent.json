@@ -230,8 +230,7 @@
             "name": "instance_id",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/TypedUuidForInstanceKind"
             }
           }
         ],
@@ -272,8 +271,7 @@
             "name": "instance_id",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/TypedUuidForInstanceKind"
             }
           }
         ],
@@ -360,8 +358,7 @@
             "name": "instance_id",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/TypedUuidForInstanceKind"
             }
           }
         ],
@@ -395,8 +392,7 @@
             "name": "instance_id",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/TypedUuidForInstanceKind"
             }
           }
         ],
@@ -432,8 +428,7 @@
             "name": "instance_id",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/TypedUuidForInstanceKind"
             }
           }
         ],
@@ -476,8 +471,7 @@
             "name": "instance_id",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/TypedUuidForInstanceKind"
             }
           }
         ],
@@ -508,8 +502,7 @@
             "name": "instance_id",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/TypedUuidForInstanceKind"
             }
           }
         ],
@@ -2869,8 +2862,11 @@
           },
           "propolis_id": {
             "description": "The ID of the VMM being registered. This may not be the active VMM ID in the instance runtime state (e.g. if the new VMM is going to be a migration target).",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              }
+            ]
           },
           "vmm_runtime": {
             "description": "The initial VMM runtime state for the VMM being registered.",
@@ -3039,8 +3035,7 @@
         "type": "object",
         "properties": {
           "dst_propolis_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForPropolisKind"
           },
           "migration_id": {
             "type": "string",
@@ -3161,8 +3156,11 @@
           "dst_propolis_id": {
             "nullable": true,
             "description": "If a migration is active, the ID of the target VMM.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              }
+            ]
           },
           "gen": {
             "description": "Generation number for this state.",
@@ -3181,8 +3179,11 @@
           "propolis_id": {
             "nullable": true,
             "description": "The instance's currently active VMM ID.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              }
+            ]
           },
           "time_updated": {
             "description": "Timestamp for this information.",
@@ -3436,13 +3437,16 @@
         "enum": [
           "gimlet_sp",
           "gimlet_rot",
+          "gimlet_rot_bootloader",
           "host",
           "trampoline",
           "control_plane",
           "psc_sp",
           "psc_rot",
+          "psc_rot_bootloader",
           "switch_sp",
-          "switch_rot"
+          "switch_rot",
+          "switch_rot_bootloader"
         ]
       },
       "L4PortRange": {
@@ -4517,8 +4521,11 @@
           },
           "propolis_id": {
             "description": "The ID of the VMM whose state is being reported.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              }
+            ]
           },
           "vmm_state": {
             "description": "The most recent state of the sled's VMM process.",
@@ -4735,6 +4742,10 @@
           "stratum",
           "sync"
         ]
+      },
+      "TypedUuidForPropolisKind": {
+        "type": "string",
+        "format": "uuid"
       },
       "TypedUuidForZpoolKind": {
         "type": "string",
@@ -5281,6 +5292,10 @@
           "A",
           "B"
         ]
+      },
+      "TypedUuidForInstanceKind": {
+        "type": "string",
+        "format": "uuid"
       }
     },
     "responses": {

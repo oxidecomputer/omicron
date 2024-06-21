@@ -91,6 +91,10 @@ impl PlanningInput {
         self.policy.target_nexus_zone_count
     }
 
+    pub fn target_cockroachdb_zone_count(&self) -> usize {
+        self.policy.target_cockroachdb_zone_count
+    }
+
     pub fn target_cockroachdb_cluster_version(
         &self,
     ) -> CockroachDbClusterVersion {
@@ -478,6 +482,9 @@ pub enum SledFilter {
     /// Sleds on which reservations can be created.
     ReservationCreate,
 
+    /// Sleds which should be sent OPTE V2P mappings.
+    V2PMapping,
+
     /// Sleds which should be sent VPC firewall rules.
     VpcFirewall,
 }
@@ -532,6 +539,7 @@ impl SledPolicy {
                 SledFilter::InService => true,
                 SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => true,
+                SledFilter::V2PMapping => true,
                 SledFilter::VpcFirewall => true,
             },
             SledPolicy::InService {
@@ -543,6 +551,7 @@ impl SledPolicy {
                 SledFilter::InService => true,
                 SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => false,
+                SledFilter::V2PMapping => true,
                 SledFilter::VpcFirewall => true,
             },
             SledPolicy::Expunged => match filter {
@@ -552,6 +561,7 @@ impl SledPolicy {
                 SledFilter::InService => false,
                 SledFilter::QueryDuringInventory => false,
                 SledFilter::ReservationCreate => false,
+                SledFilter::V2PMapping => false,
                 SledFilter::VpcFirewall => false,
             },
         }
@@ -583,6 +593,7 @@ impl SledState {
                 SledFilter::InService => true,
                 SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => true,
+                SledFilter::V2PMapping => true,
                 SledFilter::VpcFirewall => true,
             },
             SledState::Decommissioned => match filter {
@@ -592,6 +603,7 @@ impl SledState {
                 SledFilter::InService => false,
                 SledFilter::QueryDuringInventory => false,
                 SledFilter::ReservationCreate => false,
+                SledFilter::V2PMapping => false,
                 SledFilter::VpcFirewall => false,
             },
         }
@@ -631,6 +643,9 @@ pub struct Policy {
 
     /// desired total number of deployed Nexus zones
     pub target_nexus_zone_count: usize,
+
+    /// desired total number of deployed CockroachDB zones
+    pub target_cockroachdb_zone_count: usize,
 
     /// desired CockroachDB `cluster.preserve_downgrade_option` setting.
     /// at present this is hardcoded based on the version of CockroachDB we
@@ -684,6 +699,7 @@ impl PlanningInputBuilder {
             policy: Policy {
                 service_ip_pool_ranges: Vec::new(),
                 target_nexus_zone_count: 0,
+                target_cockroachdb_zone_count: 0,
                 target_cockroachdb_cluster_version:
                     CockroachDbClusterVersion::POLICY,
             },

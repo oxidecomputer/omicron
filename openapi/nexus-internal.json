@@ -3145,8 +3145,11 @@
           "dst_propolis_id": {
             "nullable": true,
             "description": "If a migration is active, the ID of the target VMM.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              }
+            ]
           },
           "gen": {
             "description": "Generation number for this state.",
@@ -3165,8 +3168,11 @@
           "propolis_id": {
             "nullable": true,
             "description": "The instance's currently active VMM ID.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              }
+            ]
           },
           "time_updated": {
             "description": "Timestamp for this information.",
@@ -4672,8 +4678,11 @@
           },
           "propolis_id": {
             "description": "The ID of the VMM whose state is being reported.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              }
+            ]
           },
           "vmm_state": {
             "description": "The most recent state of the sled's VMM process.",
@@ -4909,6 +4918,10 @@
         "format": "uuid"
       },
       "TypedUuidForOmicronZoneKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForPropolisKind": {
         "type": "string",
         "format": "uuid"
       },

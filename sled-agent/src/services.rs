@@ -1703,6 +1703,7 @@ impl ServiceManager {
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
                     OmicronZoneConfig {
+                        id: zone_id,
                         zone_type: OmicronZoneType::CockroachDb { .. },
                         underlay_address,
                         ..
@@ -1744,6 +1745,7 @@ impl ServiceManager {
                 // Configure the Omicron cockroach-admin service.
                 let cockroach_admin_config =
                     PropertyGroupBuilder::new("config")
+                        .add_property("zone_id", "astring", zone_id.to_string())
                         .add_property(
                             "cockroach_address",
                             "astring",

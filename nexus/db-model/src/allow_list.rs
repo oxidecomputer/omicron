@@ -44,7 +44,7 @@ impl AllowList {
         Self { id, time_created: now, time_modified: now, allowed_ips }
     }
 
-    /// Create an `AllowedSourceIps` type from the contained address.
+    /// Create an `AllowedSourceIps` type from the contained addresses.
     pub fn allowed_source_ips(
         &self,
     ) -> Result<external::AllowedSourceIps, Error> {
