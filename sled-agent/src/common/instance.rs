@@ -447,11 +447,6 @@ mod test {
         }
     }
 
-    fn test_termination_fails_in_progress_migration(
-        mk_instance: impl Fn() -> InstanceStates,
-    ) {
-    }
-
     #[test]
     fn source_termination_fails_in_progress_migration() {
         for state in [Observed::Destroyed, Observed::Failed] {

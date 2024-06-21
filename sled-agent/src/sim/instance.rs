@@ -151,7 +151,7 @@ impl SimInstanceInner {
                 self.queue_propolis_state(PropolisInstanceState::Running)
             }
             SimulatedMigrationResult::Failure => {
-                todo!("finish this part when we actuall need it...")
+                todo!("finish this part when we actually need it...")
             }
         }
     }
@@ -433,7 +433,7 @@ impl SimInstance {
         self.inner
             .lock()
             .unwrap()
-            .queue_migration_in(migration.migration_id, migration.result);
+            .queue_migration_out(migration.migration_id, migration.result);
     }
 }
 

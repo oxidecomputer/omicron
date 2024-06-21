@@ -693,7 +693,12 @@ impl InstanceRunner {
 
         let migrate = match migrate {
             Some(params) => {
-                let migration_id = todo!("eliza: this probably needs to be sent by Nexus directly now?");
+                let migration_id = self.state
+                    .migration_in()
+                    // TODO(eliza): this is a bit of a shame; it would be nice
+                    // to refactor this code so we don't unwrap here.
+                    .expect("if we have migration target params, we should also have a migration in")
+                    .migration_id;
                 Some(propolis_client::types::InstanceMigrateInitiateRequest {
                     src_addr: params.src_propolis_addr.to_string(),
                     src_uuid: params.src_propolis_id,
