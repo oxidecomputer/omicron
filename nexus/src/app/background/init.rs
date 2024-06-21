@@ -9,6 +9,7 @@ use super::bfd;
 use super::blueprint_execution;
 use super::blueprint_load;
 use super::common;
+use super::crdb_node_id_collector;
 use super::dns_config;
 use super::dns_propagation;
 use super::dns_servers;
@@ -86,6 +87,9 @@ pub struct BackgroundTasks {
 
     /// task handle for blueprint execution background task
     pub task_blueprint_executor: common::TaskHandle,
+
+    /// task handle for collecting CockroachDB node IDs
+    pub task_crdb_node_id_collector: common::TaskHandle,
 
     /// task handle for the service zone nat tracker
     pub task_service_zone_nat_tracker: common::TaskHandle,
@@ -266,6 +270,21 @@ impl BackgroundTasks {
             String::from("Executes the target blueprint"),
             config.blueprints.period_secs_execute,
             Box::new(blueprint_executor),
+            opctx.child(BTreeMap::new()),
+            vec![Box::new(rx_blueprint.clone())],
+        );
+
+        // Background task: CockroachDB node ID collector
+        let crdb_node_id_collector =
+            crdb_node_id_collector::CockroachNodeIdCollector::new(
+                datastore.clone(),
+                rx_blueprint.clone(),
+            );
+        let task_crdb_node_id_collector = driver.register(
+            String::from("crdb_node_id_collector"),
+            String::from("Collects node IDs of running CockroachDB zones"),
+            config.blueprints.period_secs_collect_crdb_node_ids,
+            Box::new(crdb_node_id_collector),
             opctx.child(BTreeMap::new()),
             vec![Box::new(rx_blueprint)],
         );
@@ -456,6 +475,7 @@ impl BackgroundTasks {
             task_phantom_disks,
             task_blueprint_loader,
             task_blueprint_executor,
+            task_crdb_node_id_collector,
             task_service_zone_nat_tracker,
             task_switch_port_settings_manager,
             task_v2p_manager,

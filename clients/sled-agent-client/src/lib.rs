@@ -58,6 +58,8 @@ progenitor::generate_api!(
         RouterVersion = omicron_common::api::internal::shared::RouterVersion,
         SourceNatConfig = omicron_common::api::internal::shared::SourceNatConfig,
         SwitchLocation = omicron_common::api::external::SwitchLocation,
+        TypedUuidForInstanceKind = omicron_uuid_kinds::InstanceUuid,
+        TypedUuidForPropolisKind = omicron_uuid_kinds::PropolisUuid,
         TypedUuidForZpoolKind = omicron_uuid_kinds::ZpoolUuid,
         Vni = omicron_common::api::external::Vni,
         ZpoolKind = omicron_common::zpool_name::ZpoolKind,
@@ -487,6 +489,15 @@ impl From<omicron_common::api::internal::nexus::KnownArtifactKind>
         use omicron_common::api::internal::nexus::KnownArtifactKind;
 
         match s {
+            KnownArtifactKind::GimletRotBootloader => {
+                types::KnownArtifactKind::GimletRotBootloader
+            }
+            KnownArtifactKind::PscRotBootloader => {
+                types::KnownArtifactKind::PscRotBootloader
+            }
+            KnownArtifactKind::SwitchRotBootloader => {
+                types::KnownArtifactKind::SwitchRotBootloader
+            }
             KnownArtifactKind::GimletSp => types::KnownArtifactKind::GimletSp,
             KnownArtifactKind::GimletRot => types::KnownArtifactKind::GimletRot,
             KnownArtifactKind::Host => types::KnownArtifactKind::Host,

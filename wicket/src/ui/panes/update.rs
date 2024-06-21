@@ -1711,6 +1711,7 @@ struct ComponentForceUpdateSelectionState {
 }
 
 struct ForceUpdateSelectionState {
+    rot_bootloader: Option<ComponentForceUpdateSelectionState>,
     rot: Option<ComponentForceUpdateSelectionState>,
     sp: Option<ComponentForceUpdateSelectionState>,
 }
@@ -1722,6 +1723,7 @@ impl From<&'_ State> for ForceUpdateSelectionState {
         let inventory = &state.inventory;
         let update_item = &state.update_state.items[&component_id];
 
+        let mut rot_bootloader = None;
         let mut rot = None;
         let mut sp = None;
 
@@ -1737,6 +1739,22 @@ impl From<&'_ State> for ForceUpdateSelectionState {
             let installed_version =
                 active_installed_version(&component_id, component, inventory);
             match component {
+                UpdateComponent::RotBootloader => {
+                    assert!(
+                        rot_bootloader.is_none(),
+                        "update item contains multiple RoT bootloader entries"
+                    );
+                    if artifact_version == installed_version {
+                        rot_bootloader =
+                            Some(ComponentForceUpdateSelectionState {
+                                version: artifact_version,
+                                toggled_on: state
+                                    .force_update_state
+                                    .force_update_rot_bootloader,
+                                selected: false, // set below
+                            });
+                    }
+                }
                 UpdateComponent::Rot => {
                     assert!(
                         rot.is_none(),
@@ -1773,28 +1791,63 @@ impl From<&'_ State> for ForceUpdateSelectionState {
 
         // If we only have one force-updateable component, mark it as selected;
         // otherwise, respect the option currently selected in `State`.
-        match (rot.as_mut(), sp.as_mut()) {
-            (Some(rot), None) => rot.selected = true,
-            (None, Some(sp)) => sp.selected = true,
-            (Some(rot), Some(sp)) => {
+        match (rot_bootloader.as_mut(), rot.as_mut(), sp.as_mut()) {
+            (Some(rot_bootloader), None, None) => {
+                rot_bootloader.selected = true
+            }
+            (None, Some(rot), None) => rot.selected = true,
+            (None, None, Some(sp)) => sp.selected = true,
+            // Two selected
+            (Some(rot_bootloader), Some(rot), None) => {
+                if state.force_update_state.selected_component()
+                    == UpdateComponent::RotBootloader
+                {
+                    rot_bootloader.selected = true
+                } else {
+                    rot.selected = true
+                }
+            }
+            (None, Some(rot), Some(sp)) => {
                 if state.force_update_state.selected_component()
                     == UpdateComponent::Rot
                 {
-                    rot.selected = true;
+                    rot.selected = true
                 } else {
-                    sp.selected = true;
+                    sp.selected = true
                 }
             }
-            (None, None) => (),
+            (Some(rot_bootloader), None, Some(sp)) => {
+                if state.force_update_state.selected_component()
+                    == UpdateComponent::RotBootloader
+                {
+                    rot_bootloader.selected = true
+                } else {
+                    sp.selected = true
+                }
+            }
+            // All three
+            (Some(rot_bootloader), Some(rot), Some(sp)) => {
+                match state.force_update_state.selected_component() {
+                    UpdateComponent::Rot => rot.selected = true,
+                    UpdateComponent::Sp => sp.selected = true,
+                    UpdateComponent::RotBootloader => {
+                        rot_bootloader.selected = true
+                    }
+                    _ => (),
+                }
+            }
+            (None, None, None) => (),
         }
 
-        Self { rot, sp }
+        Self { rot_bootloader, rot, sp }
     }
 }
 
 impl ForceUpdateSelectionState {
     fn num_spans(&self) -> usize {
-        usize::from(self.rot.is_some()) + usize::from(self.sp.is_some())
+        usize::from(self.rot.is_some())
+            + usize::from(self.sp.is_some())
+            + usize::from(self.rot_bootloader.is_some())
     }
 
     fn next_component(&self, state: &mut State) {
@@ -1826,6 +1879,13 @@ impl ForceUpdateSelectionState {
             state.force_update_state.toggle(UpdateComponent::Rot);
         } else if self.sp.as_ref().map(|sp| sp.selected).unwrap_or(false) {
             state.force_update_state.toggle(UpdateComponent::Sp);
+        } else if self
+            .rot_bootloader
+            .as_ref()
+            .map(|rot_bootloader| rot_bootloader.selected)
+            .unwrap_or(false)
+        {
+            state.force_update_state.toggle(UpdateComponent::RotBootloader);
         }
     }
 
@@ -1850,6 +1910,9 @@ impl ForceUpdateSelectionState {
         }
 
         let mut spans = Vec::new();
+        if let Some(rot_bootloader) = self.rot_bootloader.as_ref() {
+            spans.push(make_spans("RoT Bootloader", rot_bootloader));
+        }
         if let Some(rot) = self.rot.as_ref() {
             spans.push(make_spans("RoT", rot));
         }
@@ -2201,6 +2264,10 @@ fn active_installed_version(
 ) -> String {
     let component = inventory.get_inventory(id);
     match update_component {
+        UpdateComponent::RotBootloader => component.map_or_else(
+            || "UNKNOWN".to_string(),
+            |component| component.stage0_version(),
+        ),
         UpdateComponent::Sp => component.map_or_else(
             || "UNKNOWN".to_string(),
             |component| component.sp_version_active(),
@@ -2254,6 +2321,26 @@ fn all_installed_versions(
                 ]
             },
         ),
+        UpdateComponent::RotBootloader => component.map_or_else(
+            || {
+                vec![InstalledVersion {
+                    title: base_title.into(),
+                    version: "UNKNOWN".into(),
+                }]
+            },
+            |component| {
+                vec![
+                    InstalledVersion {
+                        title: base_title.into(),
+                        version: component.stage0_version().into(),
+                    },
+                    InstalledVersion {
+                        title: format!("{base_title}_NEXT").into(),
+                        version: component.stage0next_version().into(),
+                    },
+                ]
+            },
+        ),
         UpdateComponent::Rot => component.map_or_else(
             || {
                 vec![InstalledVersion {
@@ -2301,6 +2388,9 @@ fn artifact_version(
     versions: &BTreeMap<KnownArtifactKind, SemverVersion>,
 ) -> String {
     let artifact = match (id, component) {
+        (ComponentId::Sled(_), UpdateComponent::RotBootloader) => {
+            KnownArtifactKind::GimletRotBootloader
+        }
         (ComponentId::Sled(_), UpdateComponent::Rot) => {
             KnownArtifactKind::GimletRot
         }
@@ -2310,11 +2400,17 @@ fn artifact_version(
         (ComponentId::Sled(_), UpdateComponent::Host) => {
             KnownArtifactKind::Host
         }
+        (ComponentId::Switch(_), UpdateComponent::RotBootloader) => {
+            KnownArtifactKind::SwitchRotBootloader
+        }
         (ComponentId::Switch(_), UpdateComponent::Rot) => {
             KnownArtifactKind::SwitchRot
         }
         (ComponentId::Switch(_), UpdateComponent::Sp) => {
             KnownArtifactKind::SwitchSp
+        }
+        (ComponentId::Psc(_), UpdateComponent::RotBootloader) => {
+            KnownArtifactKind::PscRotBootloader
         }
         (ComponentId::Psc(_), UpdateComponent::Rot) => {
             KnownArtifactKind::PscRot
@@ -2363,7 +2459,7 @@ impl Control for UpdatePane {
                 [
                     Constraint::Length(3),
                     Constraint::Length(3),
-                    Constraint::Length(6),
+                    Constraint::Length(8),
                     Constraint::Min(0),
                     Constraint::Length(3),
                 ]

@@ -19,6 +19,7 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::shared::{
     NetworkInterface, SourceNatConfig,
 };
+use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -117,7 +118,7 @@ pub struct InstanceEnsureBody {
     /// The ID of the VMM being registered. This may not be the active VMM ID in
     /// the instance runtime state (e.g. if the new VMM is going to be a
     /// migration target).
-    pub propolis_id: Uuid,
+    pub propolis_id: PropolisUuid,
 
     /// The address at which this VMM should serve a Propolis server API.
     pub propolis_addr: SocketAddr,
@@ -214,7 +215,7 @@ impl InstanceStateRequested {
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceMigrationSourceParams {
     pub migration_id: Uuid,
-    pub dst_propolis_id: Uuid,
+    pub dst_propolis_id: PropolisUuid,
 }
 
 /// The body of a request to set or clear the migration identifiers from a

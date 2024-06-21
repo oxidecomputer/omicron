@@ -177,7 +177,10 @@ pub struct Project {
 pub struct Certificate {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
+    /// The service using this certificate
     pub service: ServiceUsingCertificate,
+    /// PEM-formatted string containing public certificate chain
+    pub cert: String,
 }
 
 // IMAGES

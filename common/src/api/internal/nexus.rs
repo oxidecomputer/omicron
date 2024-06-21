@@ -10,6 +10,7 @@ use crate::api::external::{
 };
 use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::DownstairsRegionKind;
+use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsRepairKind;
 use omicron_uuid_kinds::UpstairsSessionKind;
@@ -50,9 +51,9 @@ pub struct InstanceProperties {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceRuntimeState {
     /// The instance's currently active VMM ID.
-    pub propolis_id: Option<Uuid>,
+    pub propolis_id: Option<PropolisUuid>,
     /// If a migration is active, the ID of the target VMM.
-    pub dst_propolis_id: Option<Uuid>,
+    pub dst_propolis_id: Option<PropolisUuid>,
     /// If a migration is active, the ID of that migration.
     pub migration_id: Option<Uuid>,
     /// Generation number for this state.
@@ -105,7 +106,7 @@ pub struct SledInstanceState {
     pub instance_state: InstanceRuntimeState,
 
     /// The ID of the VMM whose state is being reported.
-    pub propolis_id: Uuid,
+    pub propolis_id: PropolisUuid,
 
     /// The most recent state of the sled's VMM process.
     pub vmm_state: VmmRuntimeState,
@@ -272,15 +273,10 @@ pub struct UpdateArtifactId {
 //
 // 1. Add it here.
 //
-// 2. Add the new kind to <repo root>/{nexus-client,sled-agent-client}/lib.rs.
+// 2. Add the new kind to <repo root>/clients/src/lib.rs.
 //    The mapping from `UpdateArtifactKind::*` to `types::UpdateArtifactKind::*`
 //    must be left as a `todo!()` for now; `types::UpdateArtifactKind` will not
 //    be updated with the new variant until step 5 below.
-//
-// 3. Add it to the sql database schema under (CREATE TYPE
-//    omicron.public.update_artifact_kind).
-//
-//    TODO: After omicron ships this would likely involve a DB migration.
 //
 // 4. Add the new kind and the mapping to its `update_artifact_kind` to
 //    <repo root>/nexus/db-model/src/update_artifact.rs
@@ -323,6 +319,7 @@ pub enum KnownArtifactKind {
     // Sled Artifacts
     GimletSp,
     GimletRot,
+    GimletRotBootloader,
     Host,
     Trampoline,
     ControlPlane,
@@ -330,10 +327,12 @@ pub enum KnownArtifactKind {
     // PSC Artifacts
     PscSp,
     PscRot,
+    PscRotBootloader,
 
     // Switch Artifacts
     SwitchSp,
     SwitchRot,
+    SwitchRotBootloader,
 }
 
 impl KnownArtifactKind {

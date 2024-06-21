@@ -74,28 +74,13 @@ impl BackgroundTask for V2PManager {
             // create a set of updates from the v2p mappings
             let desired_v2p: HashSet<_> = v2p_mappings
                 .into_iter()
-                .filter_map(|mapping| {
-                    let physical_host_ip = match mapping.sled_ip.ip() {
-                        std::net::IpAddr::V4(v) => {
-                            // sled ip should never be ipv4
-                            error!(
-                                &log,
-                                "sled ip should be ipv6 but is ipv4: {v}"
-                            );
-                            return None;
-                        }
-                        std::net::IpAddr::V6(v) => v,
-                    };
-
-                    let vni = mapping.vni.0;
-
-                    let mapping = VirtualNetworkInterfaceHost {
+                .map(|mapping| {
+                    VirtualNetworkInterfaceHost {
                         virtual_ip: mapping.ip.ip(),
                         virtual_mac: *mapping.mac,
-                        physical_host_ip,
-                        vni,
-                    };
-                    Some(mapping)
+                        physical_host_ip: *mapping.sled_ip,
+                        vni: mapping.vni.0,
+                    }
                 })
                 .collect();
 

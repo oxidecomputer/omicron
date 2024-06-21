@@ -12,6 +12,7 @@ use omicron_cockroach_admin::CockroachCli;
 use omicron_cockroach_admin::Config;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 
@@ -38,6 +39,10 @@ enum Args {
         /// Path to the server config file
         #[clap(long, action)]
         config_file_path: Utf8PathBuf,
+
+        /// ID of the zone within which we're running
+        #[clap(long, action)]
+        zone_id: OmicronZoneUuid,
     },
 }
 
@@ -59,16 +64,20 @@ async fn main_impl() -> Result<(), CmdError> {
             cockroach_address,
             http_address,
             config_file_path,
+            zone_id,
         } => {
             let cockroach_cli =
                 CockroachCli::new(path_to_cockroach_binary, cockroach_address);
             let mut config = Config::from_file(&config_file_path)
                 .map_err(|err| CmdError::Failure(anyhow!(err)))?;
             config.dropshot.bind_address = SocketAddr::V6(http_address);
-            let server =
-                omicron_cockroach_admin::start_server(cockroach_cli, config)
-                    .await
-                    .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+            let server = omicron_cockroach_admin::start_server(
+                zone_id,
+                cockroach_cli,
+                config,
+            )
+            .await
+            .map_err(|err| CmdError::Failure(anyhow!(err)))?;
             server.await.map_err(|err| {
                 CmdError::Failure(anyhow!(
                     "server failed after starting: {err}"

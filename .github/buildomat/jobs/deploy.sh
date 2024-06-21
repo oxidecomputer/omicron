@@ -30,9 +30,15 @@ set -o xtrace
 #
 _exit_trap() {
 	local status=$?
+	set +o errexit
+
+	#
+	# Stop cron in all zones (to stop logadm log rotation)
+	#
+	pfexec svcadm -Z disable -s cron
+
 	[[ $status -eq 0 ]] && exit 0
 
-	set +o errexit
 	set -o xtrace
 	banner evidence
 	zoneadm list -civ

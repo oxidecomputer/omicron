@@ -11,18 +11,18 @@ use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, MigrationRole, MigrationRuntimeState, MigrationState,
     SledInstanceState, VmmRuntimeState, VmmState,
 };
+use omicron_uuid_kinds::PropolisUuid;
 use propolis_client::types::{
     InstanceState as PropolisApiState, InstanceStateMonitorResponse,
     MigrationState as PropolisMigrationState,
 };
-use uuid::Uuid;
 
 /// The instance and VMM state that sled agent maintains on a per-VMM basis.
 #[derive(Clone, Debug)]
 pub struct InstanceStates {
     instance: InstanceRuntimeState,
     vmm: VmmRuntimeState,
-    propolis_id: Uuid,
+    propolis_id: PropolisUuid,
     migration: Option<MigrationRuntimeState>,
 }
 
@@ -117,50 +117,57 @@ impl ObservedPropolisState {
         instance_runtime: &InstanceRuntimeState,
         propolis_state: &InstanceStateMonitorResponse,
     ) -> Self {
-        let migration_status =
-            match (instance_runtime.migration_id, &propolis_state.migration) {
-                // If the runtime state and Propolis state agree that there's
-                // a migration in progress, and they agree on its ID, the
-                // Propolis migration state determines the migration status.
-                (Some(this_id), Some(propolis_migration))
-                    if this_id == propolis_migration.migration_id =>
-                {
-                    match propolis_migration.state {
-                        PropolisMigrationState::Finish => {
-                            ObservedMigrationStatus::Succeeded
-                        }
-                        PropolisMigrationState::Error => {
-                            ObservedMigrationStatus::Failed
-                        }
-                        _ => ObservedMigrationStatus::InProgress,
-                    }
-                }
-
-                // If both sides have a migration ID, but the IDs don't match,
-                // assume the instance's migration ID is newer. This can happen
-                // if Propolis was initialized via migration in and has not yet
-                // been told to migrate out.
-                (Some(_), Some(_)) => ObservedMigrationStatus::Pending,
-
-                // If only Propolis has a migration ID, assume it was from a
-                // prior migration in and report that no migration is in
-                // progress. This could be improved with propolis#508.
-                (None, Some(_)) => ObservedMigrationStatus::NoMigration,
-
-                // A migration source's migration IDs get set before its
-                // Propolis actually gets asked to migrate, so it's possible for
-                // the runtime state to contain an ID while the Propolis has
-                // none, in which case the migration is pending.
-                (Some(_), None) => ObservedMigrationStatus::Pending,
-
-                // If neither side has a migration ID, then there's clearly no
-                // migration.
-                (None, None) => ObservedMigrationStatus::NoMigration,
+        // If there's no migration currently registered with this sled, report
+        // the current state and that no migration is currently in progress,
+        // even if Propolis has some migration data to share. (This case arises
+        // when Propolis returns state from a previous migration that sled agent
+        // has already retired.)
+        //
+        // N.B. This needs to be read from the instance runtime state and not
+        //      the migration runtime state to ensure that, once a migration in
+        //      completes, the "completed" observation is reported to
+        //      `InstanceStates::apply_propolis_observation` exactly once.
+        //      Otherwise that routine will try to apply the "inbound migration
+        //      complete" instance state transition twice.
+        let Some(migration_id) = instance_runtime.migration_id else {
+            return Self {
+                vmm_state: PropolisInstanceState(propolis_state.state),
+                migration_status: ObservedMigrationStatus::NoMigration,
+                time: Utc::now(),
             };
+        };
+
+        // Sled agent believes a live migration may be in progress. See if
+        // either of the Propolis migrations corresponds to it.
+        let propolis_migration = match (
+            &propolis_state.migration.migration_in,
+            &propolis_state.migration.migration_out,
+        ) {
+            (Some(inbound), _) if inbound.id == migration_id => inbound,
+            (_, Some(outbound)) if outbound.id == migration_id => outbound,
+            _ => {
+                // Sled agent believes this instance should be migrating, but
+                // Propolis isn't reporting a matching migration yet, so assume
+                // the migration is still pending.
+                return Self {
+                    vmm_state: PropolisInstanceState(propolis_state.state),
+                    migration_status: ObservedMigrationStatus::Pending,
+                    time: Utc::now(),
+                };
+            }
+        };
 
         Self {
             vmm_state: PropolisInstanceState(propolis_state.state),
-            migration_status,
+            migration_status: match propolis_migration.state {
+                PropolisMigrationState::Finish => {
+                    ObservedMigrationStatus::Succeeded
+                }
+                PropolisMigrationState::Error => {
+                    ObservedMigrationStatus::Failed
+                }
+                _ => ObservedMigrationStatus::InProgress,
+            },
             time: Utc::now(),
         }
     }
@@ -209,7 +216,7 @@ impl InstanceStates {
     pub fn new(
         instance: InstanceRuntimeState,
         vmm: VmmRuntimeState,
-        propolis_id: Uuid,
+        propolis_id: PropolisUuid,
     ) -> Self {
         let migration = instance.migration_id.map(|migration_id| {
             let dst_propolis_id = instance.dst_propolis_id.expect("if an instance has a migration ID, it should also have a target VMM ID");
@@ -237,7 +244,7 @@ impl InstanceStates {
         &self.vmm
     }
 
-    pub fn propolis_id(&self) -> Uuid {
+    pub fn propolis_id(&self) -> PropolisUuid {
         self.propolis_id
     }
 
@@ -602,7 +609,7 @@ mod test {
     use uuid::Uuid;
 
     fn make_instance() -> InstanceStates {
-        let propolis_id = Uuid::new_v4();
+        let propolis_id = PropolisUuid::new_v4();
         let now = Utc::now();
         let instance = InstanceRuntimeState {
             propolis_id: Some(propolis_id),
@@ -626,7 +633,7 @@ mod test {
         state.vmm.state = VmmState::Migrating;
         let migration_id = Uuid::new_v4();
         state.instance.migration_id = Some(migration_id);
-        state.instance.dst_propolis_id = Some(Uuid::new_v4());
+        state.instance.dst_propolis_id = Some(PropolisUuid::new_v4());
         state.migration = Some(MigrationRuntimeState {
             migration_id,
             state: MigrationState::InProgress,
@@ -636,6 +643,7 @@ mod test {
             gen: Generation::new().next(),
             time_updated: Utc::now(),
         });
+
         state
     }
 
@@ -644,7 +652,7 @@ mod test {
         state.vmm.state = VmmState::Migrating;
         let migration_id = Uuid::new_v4();
         state.instance.migration_id = Some(migration_id);
-        state.propolis_id = Uuid::new_v4();
+        state.propolis_id = PropolisUuid::new_v4();
         state.instance.dst_propolis_id = Some(state.propolis_id);
         state.migration = Some(MigrationRuntimeState {
             migration_id,
@@ -935,7 +943,7 @@ mod test {
         state.set_migration_ids(
             &Some(InstanceMigrationSourceParams {
                 migration_id,
-                dst_propolis_id: Uuid::new_v4(),
+                dst_propolis_id: PropolisUuid::new_v4(),
             }),
             Utc::now(),
         );
@@ -1020,7 +1028,7 @@ mod test {
         // new IDs are present should indicate that they are indeed present.
         let migration_ids = InstanceMigrationSourceParams {
             migration_id: Uuid::new_v4(),
-            dst_propolis_id: Uuid::new_v4(),
+            dst_propolis_id: PropolisUuid::new_v4(),
         };
 
         new_instance.set_migration_ids(&Some(migration_ids), Utc::now());
@@ -1056,7 +1064,7 @@ mod test {
         ));
 
         new_instance.instance.migration_id = Some(migration_ids.migration_id);
-        new_instance.instance.dst_propolis_id = Some(Uuid::new_v4());
+        new_instance.instance.dst_propolis_id = Some(PropolisUuid::new_v4());
         assert!(!new_instance.migration_ids_already_set(
             old_instance.instance(),
             &Some(migration_ids)
