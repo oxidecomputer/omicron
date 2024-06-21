@@ -686,7 +686,8 @@ async fn test_instance_start_creates_networking_state(
 
     let mut checked = false;
     for agent in &sled_agents {
-        if Some(agent.id) == with_vmm.sled_id() {
+        if Some(agent.id) == with_vmm.sled_id().map(SledUuid::into_untyped_uuid)
+        {
             assert_sled_vpc_routes(
                 agent,
                 &opctx,

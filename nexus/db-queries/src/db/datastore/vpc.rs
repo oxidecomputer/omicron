@@ -1801,6 +1801,7 @@ mod tests {
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::SledUuid;
     use oxnet::IpNet;
     use oxnet::Ipv4Net;
@@ -2666,7 +2667,7 @@ mod tests {
                 &opctx,
                 &authz_project,
                 db::model::Instance::new(
-                    Uuid::new_v4(),
+                    InstanceUuid::new_v4(),
                     authz_project.id(),
                     &params::InstanceCreate {
                         identity: IdentityMetadataCreateParams {
@@ -2711,7 +2712,7 @@ mod tests {
                 &authz_instance,
                 IncompleteNetworkInterface::new_instance(
                     Uuid::new_v4(),
-                    db_inst.id(),
+                    InstanceUuid::from_untyped_uuid(db_inst.id()),
                     sub0,
                     IdentityMetadataCreateParams {
                         name: "nic".parse().unwrap(),
