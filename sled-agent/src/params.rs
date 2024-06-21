@@ -125,9 +125,6 @@ pub struct InstanceEnsureBody {
 
     /// Metadata used to track instance statistics.
     pub metadata: InstanceMetadata,
-
-    /// The zpool which will hold this propolis zone's filesystem
-    pub filesystem_pool: ZpoolName,
 }
 
 /// The body of a request to move a previously-ensured instance into a specific
@@ -359,10 +356,7 @@ impl From<OmicronZoneConfig> for sled_agent_client::types::OmicronZoneConfig {
         Self {
             id: local.id,
             underlay_address: local.underlay_address,
-//            filesystem_pool: sled_agent_client::ZpoolName::try_from(
-//                local.filesystem_pool.to_string(),
-//            )
-//            .expect("Failed to convert pool name to progenitor type"),
+            filesystem_pool: local.filesystem_pool,
             zone_type: local.zone_type.into(),
         }
     }

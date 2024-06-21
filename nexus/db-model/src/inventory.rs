@@ -37,6 +37,7 @@ use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::ZpoolUuid;
 use uuid::Uuid;
 
@@ -1008,6 +1009,7 @@ pub struct InvOmicronZone {
     pub sled_id: DbTypedUuid<SledKind>,
     pub id: Uuid,
     pub underlay_address: ipv6::Ipv6Addr,
+    pub filesystem_pool: DbTypedUuid<ZpoolKind>,
     pub zone_type: ZoneType,
     pub primary_service_ip: ipv6::Ipv6Addr,
     pub primary_service_port: SqlU16,
@@ -1039,6 +1041,7 @@ impl InvOmicronZone {
             sled_id,
             zone.id,
             zone.underlay_address,
+            zone.filesystem_pool.id(),
             &zone.zone_type,
             external_ip_id,
         )?;
@@ -1047,6 +1050,7 @@ impl InvOmicronZone {
             sled_id: zone.sled_id.into(),
             id: zone.id,
             underlay_address: zone.underlay_address,
+            filesystem_pool: zone.filesystem_pool.into(),
             zone_type: zone.zone_type,
             primary_service_ip: zone.primary_service_ip,
             primary_service_port: zone.primary_service_port,
@@ -1075,6 +1079,7 @@ impl InvOmicronZone {
             sled_id: self.sled_id.into(),
             id: self.id,
             underlay_address: self.underlay_address,
+            filesystem_pool: self.filesystem_pool.into(),
             zone_type: self.zone_type,
             primary_service_ip: self.primary_service_ip,
             primary_service_port: self.primary_service_port,

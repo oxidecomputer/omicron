@@ -1454,6 +1454,7 @@ table! {
 
         id -> Uuid,
         underlay_address -> Inet,
+        filesystem_pool -> Uuid,
         zone_type -> crate::ZoneTypeEnum,
 
         primary_service_ip -> Inet,
@@ -1568,6 +1569,7 @@ table! {
 
         id -> Uuid,
         underlay_address -> Inet,
+        filesystem_pool -> Uuid,
         zone_type -> crate::ZoneTypeEnum,
 
         primary_service_ip -> Inet,

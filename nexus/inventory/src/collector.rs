@@ -379,7 +379,11 @@ mod test {
     use gateway_messages::SpPort;
     use nexus_types::inventory::Collection;
     use omicron_common::api::external::Generation;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_sled_agent::sim;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
+    use rand::prelude::SliceRandom;
     use std::fmt::Write;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
@@ -547,6 +551,16 @@ mod test {
         let sled_url = format!("http://{}/", agent.http_server.local_addr());
         let client = sled_agent_client::Client::new(&sled_url, log);
 
+        let zpools = agent.sled_agent.get_zpools().await;
+        let filesystem_pool = zpools
+            .choose(&mut rand::thread_rng())
+            .map(|request| {
+                ZpoolName::new_external(ZpoolUuid::from_untyped_uuid(
+                    request.id,
+                ))
+            })
+            .expect("No zpools for filesystem zpool");
+
         let zone_address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0);
         client
             .omicron_zones_put(&sled_agent_client::types::OmicronZonesConfig {
@@ -558,6 +572,7 @@ mod test {
                         sled_agent_client::types::OmicronZoneType::Oximeter {
                             address: zone_address.to_string(),
                         },
+                    filesystem_pool,
                 }],
             })
             .await

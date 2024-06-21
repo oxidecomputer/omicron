@@ -141,12 +141,8 @@ impl BlueprintZoneType {
         }
     }
 
-    // Returns the dataset associated with this zone.
-    //
-    // TODO-cleanup This currently returns `None` for zones that only have
-    // transient datasets. This should change to a non-optional value once Nexus
-    // is aware of them.
-    pub fn dataset(&self) -> Option<&OmicronZoneDataset> {
+    /// Returns a durable dataset associated with this zone, if any exists.
+    pub fn durable_dataset(&self) -> Option<&OmicronZoneDataset> {
         match self {
             BlueprintZoneType::Clickhouse(
                 blueprint_zone_type::Clickhouse { dataset, .. },

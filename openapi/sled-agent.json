@@ -3657,6 +3657,14 @@
         "description": "Describes one Omicron-managed zone running on a sled",
         "type": "object",
         "properties": {
+          "filesystem_pool": {
+            "description": "The pool on which we'll place this zone's filesystem.\n\nNote that this is transient -- the sled agent is permitted to destroy the zone's dataset on this pool each time the zone is initialized.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ZpoolName"
+              }
+            ]
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -3670,6 +3678,7 @@
           }
         },
         "required": [
+          "filesystem_pool",
           "id",
           "underlay_address",
           "zone_type"

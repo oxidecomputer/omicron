@@ -1035,6 +1035,7 @@ mod test {
         IdentityMetadataCreateParams, MacAddr, Vni,
     };
     use omicron_common::api::internal::shared::SourceNatConfig;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{ExternalIpUuid, OmicronZoneUuid};
     use omicron_uuid_kinds::{GenericUuid, ZpoolUuid};
@@ -1287,6 +1288,10 @@ mod test {
     fn_to_get_all!(ip_pool_range, IpPoolRange);
     fn_to_get_all!(dataset, Dataset);
 
+    fn random_zpool() -> ZpoolName {
+        ZpoolName::new_external(ZpoolUuid::new_v4())
+    }
+
     fn random_dataset() -> OmicronZoneDataset {
         OmicronZoneDataset {
             pool_name: illumos_utils::zpool::ZpoolName::new_external(
@@ -1361,6 +1366,7 @@ mod test {
         let mut macs = MacAddr::iter_system();
 
         let mut blueprint_zones = BTreeMap::new();
+        let dataset = random_dataset();
         blueprint_zones.insert(
             SledUuid::from_untyped_uuid(sled1.id()),
             BlueprintZonesConfig {
@@ -1370,9 +1376,10 @@ mod test {
                         disposition: BlueprintZoneDisposition::InService,
                         id: external_dns_id,
                         underlay_address: Ipv6Addr::LOCALHOST,
+                        filesystem_pool: dataset.pool_name.clone(),
                         zone_type: BlueprintZoneType::ExternalDns(
                             blueprint_zone_type::ExternalDns {
-                                dataset: random_dataset(),
+                                dataset,
                                 http_address: "[::1]:80".parse().unwrap(),
                                 dns_address: OmicronZoneExternalFloatingAddr {
                                     id: ExternalIpUuid::new_v4(),
@@ -1398,6 +1405,7 @@ mod test {
                         disposition: BlueprintZoneDisposition::InService,
                         id: ntp1_id,
                         underlay_address: Ipv6Addr::LOCALHOST,
+                        filesystem_pool: random_zpool(),
                         zone_type: BlueprintZoneType::BoundaryNtp(
                             blueprint_zone_type::BoundaryNtp {
                                 address: "[::1]:80".parse().unwrap(),
@@ -1439,6 +1447,7 @@ mod test {
                         disposition: BlueprintZoneDisposition::InService,
                         id: nexus_id,
                         underlay_address: Ipv6Addr::LOCALHOST,
+                        filesystem_pool: random_zpool(),
                         zone_type: BlueprintZoneType::Nexus(
                             blueprint_zone_type::Nexus {
                                 internal_address: "[::1]:80".parse().unwrap(),
@@ -1470,6 +1479,7 @@ mod test {
                         disposition: BlueprintZoneDisposition::InService,
                         id: ntp2_id,
                         underlay_address: Ipv6Addr::LOCALHOST,
+                        filesystem_pool: random_zpool(),
                         zone_type: BlueprintZoneType::BoundaryNtp(
                             blueprint_zone_type::BoundaryNtp {
                                 address: "[::1]:80".parse().unwrap(),
@@ -1510,6 +1520,7 @@ mod test {
                     disposition: BlueprintZoneDisposition::InService,
                     id: ntp3_id,
                     underlay_address: Ipv6Addr::LOCALHOST,
+                    filesystem_pool: random_zpool(),
                     zone_type: BlueprintZoneType::InternalNtp(
                         blueprint_zone_type::InternalNtp {
                             address: "[::1]:80".parse().unwrap(),
@@ -1692,6 +1703,7 @@ mod test {
                         disposition: BlueprintZoneDisposition::InService,
                         id: nexus_id1,
                         underlay_address: Ipv6Addr::LOCALHOST,
+                        filesystem_pool: random_zpool(),
                         zone_type: BlueprintZoneType::Nexus(
                             blueprint_zone_type::Nexus {
                                 internal_address: "[::1]:80".parse().unwrap(),
@@ -1723,6 +1735,7 @@ mod test {
                         disposition: BlueprintZoneDisposition::InService,
                         id: nexus_id2,
                         underlay_address: Ipv6Addr::LOCALHOST,
+                        filesystem_pool: random_zpool(),
                         zone_type: BlueprintZoneType::Nexus(
                             blueprint_zone_type::Nexus {
                                 internal_address: "[::1]:80".parse().unwrap(),
@@ -1963,6 +1976,7 @@ mod test {
                     disposition: BlueprintZoneDisposition::InService,
                     id: nexus_id,
                     underlay_address: Ipv6Addr::LOCALHOST,
+                    filesystem_pool: random_zpool(),
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:80".parse().unwrap(),
@@ -2060,6 +2074,7 @@ mod test {
         let mut macs = MacAddr::iter_system();
 
         let mut blueprint_zones = BTreeMap::new();
+        let dataset = random_dataset();
         blueprint_zones.insert(
             SledUuid::from_untyped_uuid(sled.id()),
             BlueprintZonesConfig {
@@ -2069,9 +2084,10 @@ mod test {
                         disposition: BlueprintZoneDisposition::InService,
                         id: external_dns_id,
                         underlay_address: Ipv6Addr::LOCALHOST,
+                        filesystem_pool: dataset.pool_name.clone(),
                         zone_type: BlueprintZoneType::ExternalDns(
                             blueprint_zone_type::ExternalDns {
-                                dataset: random_dataset(),
+                                dataset,
                                 http_address: "[::1]:80".parse().unwrap(),
                                 dns_address: OmicronZoneExternalFloatingAddr {
                                     id: ExternalIpUuid::new_v4(),
@@ -2097,6 +2113,7 @@ mod test {
                         disposition: BlueprintZoneDisposition::InService,
                         id: nexus_id,
                         underlay_address: Ipv6Addr::LOCALHOST,
+                        filesystem_pool: random_zpool(),
                         zone_type: BlueprintZoneType::Nexus(
                             blueprint_zone_type::Nexus {
                                 internal_address: "[::1]:80".parse().unwrap(),

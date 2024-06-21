@@ -898,9 +898,7 @@ impl SledInfo {
         }
     }
 
-    fn alloc_zpool_from_u2s(
-        &self,
-    ) -> Result<ZpoolName, PlanError> {
+    fn alloc_zpool_from_u2s(&self) -> Result<ZpoolName, PlanError> {
         self.u2_zpools
             .choose(&mut rand::thread_rng())
             .map(|z| z.clone())

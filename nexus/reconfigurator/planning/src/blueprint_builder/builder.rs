@@ -50,6 +50,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use rand::prelude::IteratorRandom;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use sled_agent_client::ZoneKind;
@@ -631,7 +632,6 @@ impl<'a> BlueprintBuilder<'a> {
         let sled_subnet = sled_info.subnet;
         let ip = self.sled_alloc_ip(sled_id)?;
         let ntp_address = SocketAddrV6::new(ip, NTP_PORT, 0, 0);
-
         // Construct the list of internal DNS servers.
         //
         // It'd be tempting to get this list from the other internal NTP
@@ -659,18 +659,22 @@ impl<'a> BlueprintBuilder<'a> {
             })
             .collect();
 
+        let zone_type =
+            BlueprintZoneType::InternalNtp(blueprint_zone_type::InternalNtp {
+                address: ntp_address,
+                ntp_servers,
+                dns_servers,
+                domain: None,
+            });
+        let filesystem_pool =
+            self.sled_select_filesystem_pool(sled_id, &zone_type)?;
+
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: self.rng.zone_rng.next(),
             underlay_address: ip,
-            zone_type: BlueprintZoneType::InternalNtp(
-                blueprint_zone_type::InternalNtp {
-                    address: ntp_address,
-                    ntp_servers,
-                    dns_servers,
-                    domain: None,
-                },
-            ),
+            filesystem_pool,
+            zone_type,
         };
 
         self.sled_add_zone(sled_id, zone)?;
@@ -713,16 +717,20 @@ impl<'a> BlueprintBuilder<'a> {
         let ip = self.sled_alloc_ip(sled_id)?;
         let port = omicron_common::address::CRUCIBLE_PORT;
         let address = SocketAddrV6::new(ip, port, 0, 0);
+        let zone_type =
+            BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
+                address,
+                dataset: OmicronZoneDataset { pool_name },
+            });
+        let filesystem_pool =
+            self.sled_select_filesystem_pool(sled_id, &zone_type)?;
+
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: self.rng.zone_rng.next(),
             underlay_address: ip,
-            zone_type: BlueprintZoneType::Crucible(
-                blueprint_zone_type::Crucible {
-                    address,
-                    dataset: OmicronZoneDataset { pool_name },
-                },
-            ),
+            filesystem_pool,
+            zone_type,
         };
 
         self.sled_add_zone(sled_id, zone)?;
@@ -834,19 +842,23 @@ impl<'a> BlueprintBuilder<'a> {
             let ip = self.sled_alloc_ip(sled_id)?;
             let port = omicron_common::address::NEXUS_INTERNAL_PORT;
             let internal_address = SocketAddrV6::new(ip, port, 0, 0);
+            let zone_type =
+                BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                    internal_address,
+                    external_ip,
+                    nic,
+                    external_tls,
+                    external_dns_servers: external_dns_servers.clone(),
+                });
+            let filesystem_pool =
+                self.sled_select_filesystem_pool(sled_id, &zone_type)?;
+
             let zone = BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: nexus_id,
                 underlay_address: ip,
-                zone_type: BlueprintZoneType::Nexus(
-                    blueprint_zone_type::Nexus {
-                        internal_address,
-                        external_ip,
-                        nic,
-                        external_tls,
-                        external_dns_servers: external_dns_servers.clone(),
-                    },
-                ),
+                filesystem_pool,
+                zone_type,
             };
             self.sled_add_zone(sled_id, zone)?;
         }
@@ -889,21 +901,57 @@ impl<'a> BlueprintBuilder<'a> {
             )?;
             let port = omicron_common::address::COCKROACH_PORT;
             let address = SocketAddrV6::new(underlay_ip, port, 0, 0);
+            let zone_type = BlueprintZoneType::CockroachDb(
+                blueprint_zone_type::CockroachDb {
+                    address,
+                    dataset: OmicronZoneDataset { pool_name },
+                },
+            );
+            let filesystem_pool =
+                self.sled_select_filesystem_pool(sled_id, &zone_type)?;
+
             let zone = BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: zone_id,
                 underlay_address: underlay_ip,
-                zone_type: BlueprintZoneType::CockroachDb(
-                    blueprint_zone_type::CockroachDb {
-                        address,
-                        dataset: OmicronZoneDataset { pool_name },
-                    },
-                ),
+                filesystem_pool,
+                zone_type,
             };
             self.sled_add_zone(sled_id, zone)?;
         }
 
         Ok(EnsureMultiple::Changed { added: num_crdb_to_add, removed: 0 })
+    }
+
+    // Selects a filesystem zpool for this zone type.
+    //
+    // For zones containing durable datasets, the filesystem pools are
+    // co-located, and determistic.
+    //
+    // For zones without durable datasets, the filesystem pools are randomly
+    // selected. This random choice makes this function not idempotent.
+    fn sled_select_filesystem_pool(
+        &self,
+        sled_id: SledUuid,
+        zone_type: &BlueprintZoneType,
+    ) -> Result<ZpoolName, Error> {
+        let resources = self.sled_resources(sled_id)?;
+
+        // Transient filesystem is co-located with durable dataset.
+        if let Some(dataset) = zone_type.durable_dataset() {
+            return Ok(dataset.pool_name.clone());
+        }
+
+        // No durable dataset exists; pick one randomly.
+        resources
+            .zpools
+            .keys()
+            .map(|id| ZpoolName::new_external(*id))
+            .choose(&mut rand::thread_rng())
+            .ok_or_else(|| Error::NoAvailableZpool {
+                sled_id,
+                kind: zone_type.kind(),
+            })
     }
 
     fn sled_add_zone(
@@ -1296,12 +1344,14 @@ pub mod test {
 
         // On any given zpool, we should have at most one zone of any given
         // kind.
+        //
+        // TODO: we may want a similar check for non-durable datasets?
         let mut kinds_by_zpool: BTreeMap<
             ZpoolUuid,
             BTreeMap<ZoneKind, OmicronZoneUuid>,
         > = BTreeMap::new();
         for (_, zone) in blueprint.all_omicron_zones(BlueprintZoneFilter::All) {
-            if let Some(dataset) = zone.zone_type.dataset() {
+            if let Some(dataset) = zone.zone_type.durable_dataset() {
                 let kind = zone.zone_type.kind();
                 if let Some(previous) = kinds_by_zpool
                     .entry(dataset.pool_name.id())

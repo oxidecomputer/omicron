@@ -23,8 +23,9 @@ use nexus_types::deployment::{
 };
 use nexus_types::inventory::{NetworkInterface, OmicronZoneType};
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{
-    ExternalIpUuid, GenericUuid, OmicronZoneUuid, SledUuid,
+    ExternalIpUuid, GenericUuid, OmicronZoneUuid, SledUuid, ZpoolUuid,
 };
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use uuid::Uuid;
@@ -34,6 +35,7 @@ pub(crate) struct OmicronZone {
     pub(crate) sled_id: SledUuid,
     pub(crate) id: Uuid,
     pub(crate) underlay_address: ipv6::Ipv6Addr,
+    pub(crate) filesystem_pool: ZpoolUuid,
     pub(crate) zone_type: ZoneType,
     pub(crate) primary_service_ip: ipv6::Ipv6Addr,
     pub(crate) primary_service_port: SqlU16,
@@ -60,6 +62,7 @@ impl OmicronZone {
         sled_id: SledUuid,
         zone_id: Uuid,
         zone_underlay_address: Ipv6Addr,
+        filesystem_pool: ZpoolUuid,
         zone_type: &nexus_types::inventory::OmicronZoneType,
         external_ip_id: Option<ExternalIpUuid>,
     ) -> anyhow::Result<Self> {
@@ -201,6 +204,7 @@ impl OmicronZone {
             sled_id,
             id,
             underlay_address,
+            filesystem_pool,
             zone_type,
             primary_service_ip,
             primary_service_port,
@@ -365,6 +369,7 @@ impl OmicronZone {
             disposition,
             id: OmicronZoneUuid::from_untyped_uuid(common.id),
             underlay_address: std::net::Ipv6Addr::from(common.underlay_address),
+            filesystem_pool: ZpoolName::new_external(common.filesystem_pool),
             zone_type,
         })
     }
@@ -468,6 +473,7 @@ impl OmicronZone {
         Ok(nexus_types::inventory::OmicronZoneConfig {
             id: common.id,
             underlay_address: std::net::Ipv6Addr::from(common.underlay_address),
+            filesystem_pool: ZpoolName::new_external(common.filesystem_pool),
             zone_type,
         })
     }
@@ -558,6 +564,7 @@ impl OmicronZone {
         Ok(ZoneConfigCommon {
             id: self.id,
             underlay_address: self.underlay_address,
+            filesystem_pool: self.filesystem_pool,
             zone_type: self.zone_type,
             primary_service_address,
             snat_ip: self.snat_ip,
@@ -582,6 +589,7 @@ impl OmicronZone {
 struct ZoneConfigCommon {
     id: Uuid,
     underlay_address: ipv6::Ipv6Addr,
+    filesystem_pool: ZpoolUuid,
     zone_type: ZoneType,
     primary_service_address: SocketAddrV6,
     snat_ip: Option<IpNetwork>,

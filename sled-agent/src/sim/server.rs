@@ -359,7 +359,8 @@ pub async fn run_standalone_server(
     let all_u2_zpools = server.sled_agent.get_zpools().await;
     let get_random_zpool = || {
         use rand::seq::SliceRandom;
-        let pool = all_u2_zpools.choose(&mut rand::thread_rng())
+        let pool = all_u2_zpools
+            .choose(&mut rand::thread_rng())
             .expect("No external zpools found, but we need one");
         ZpoolName::new_external(ZpoolUuid::from_untyped_uuid(pool.id))
     };
@@ -375,9 +376,7 @@ pub async fn run_standalone_server(
         id: Uuid::new_v4(),
         underlay_address: *http_bound.ip(),
         zone_type: OmicronZoneType::InternalDns {
-            dataset: OmicronZoneDataset {
-                pool_name: pool_name.clone(),
-            },
+            dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
             http_address: http_bound,
             dns_address: match dns.dns_server.local_address() {
                 SocketAddr::V4(_) => panic!("did not expect v4 address"),
@@ -448,9 +447,7 @@ pub async fn run_standalone_server(
             id,
             underlay_address: ip,
             zone_type: OmicronZoneType::ExternalDns {
-                dataset: OmicronZoneDataset {
-                    pool_name: pool_name.clone(),
-                },
+                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
                 http_address: external_dns_internal_addr,
                 dns_address: SocketAddr::V6(external_dns_internal_addr),
                 nic: nexus_types::inventory::NetworkInterface {

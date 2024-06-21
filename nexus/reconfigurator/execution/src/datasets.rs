@@ -278,6 +278,7 @@ mod tests {
             disposition: BlueprintZoneDisposition::InService,
             id: OmicronZoneUuid::new_v4(),
             underlay_address: "::1".parse().unwrap(),
+            filesystem_pool: ZpoolName::new_external(new_zpool_id),
             zone_type: BlueprintZoneType::Crucible(
                 blueprint_zone_type::Crucible {
                     address: "[::1]:0".parse().unwrap(),

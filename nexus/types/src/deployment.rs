@@ -623,6 +623,7 @@ pub struct BlueprintZoneConfig {
 
     pub id: OmicronZoneUuid,
     pub underlay_address: Ipv6Addr,
+    pub filesystem_pool: ZpoolName,
     pub zone_type: BlueprintZoneType,
 }
 
@@ -873,6 +874,7 @@ impl BlueprintZoneConfig {
             disposition,
             id: OmicronZoneUuid::from_untyped_uuid(config.id),
             underlay_address: config.underlay_address,
+            filesystem_pool: config.filesystem_pool,
             zone_type,
         })
     }
@@ -883,6 +885,7 @@ impl From<BlueprintZoneConfig> for OmicronZoneConfig {
         Self {
             id: z.id.into_untyped_uuid(),
             underlay_address: z.underlay_address,
+            filesystem_pool: z.filesystem_pool,
             zone_type: z.zone_type.into(),
         }
     }

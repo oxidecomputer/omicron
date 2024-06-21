@@ -445,7 +445,9 @@ mod tests {
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::Vni;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::ExternalIpUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use oxnet::IpNet;
     use std::net::IpAddr;
     use std::net::Ipv6Addr;
@@ -590,6 +592,9 @@ mod tests {
                     disposition: BlueprintZoneDisposition::InService,
                     id: self.nexus_id,
                     underlay_address: Ipv6Addr::LOCALHOST,
+                    filesystem_pool: ZpoolName::new_external(
+                        ZpoolUuid::new_v4(),
+                    ),
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:0".parse().unwrap(),
@@ -604,6 +609,9 @@ mod tests {
                     disposition: BlueprintZoneDisposition::InService,
                     id: self.dns_id,
                     underlay_address: Ipv6Addr::LOCALHOST,
+                    filesystem_pool: ZpoolName::new_external(
+                        ZpoolUuid::new_v4(),
+                    ),
                     zone_type: BlueprintZoneType::ExternalDns(
                         blueprint_zone_type::ExternalDns {
                             dataset: OmicronZoneDataset {
@@ -621,6 +629,9 @@ mod tests {
                     disposition: BlueprintZoneDisposition::InService,
                     id: self.ntp_id,
                     underlay_address: Ipv6Addr::LOCALHOST,
+                    filesystem_pool: ZpoolName::new_external(
+                        ZpoolUuid::new_v4(),
+                    ),
                     zone_type: BlueprintZoneType::BoundaryNtp(
                         blueprint_zone_type::BoundaryNtp {
                             address: "[::1]:0".parse().unwrap(),

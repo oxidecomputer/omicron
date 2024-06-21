@@ -43,6 +43,7 @@ progenitor::generate_api!(
         TypedUuidForUpstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsKind>,
         TypedUuidForUpstairsRepairKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsRepairKind>,
         TypedUuidForUpstairsSessionKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsSessionKind>,
+        TypedUuidForZpoolKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::ZpoolKind>,
     },
     patch = {
         SledAgentInfo = { derives = [PartialEq, Eq] },

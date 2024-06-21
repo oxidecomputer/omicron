@@ -129,9 +129,11 @@ mod test {
     use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::OmicronZoneDataset;
     use omicron_common::api::external::Generation;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use serde::Deserialize;
     use serde_json::json;
     use std::collections::BTreeMap;
@@ -260,16 +262,18 @@ mod test {
         fn make_zones(
             disposition: BlueprintZoneDisposition,
         ) -> BlueprintZonesConfig {
+            let pool_id = ZpoolUuid::new_v4();
             BlueprintZonesConfig {
                 generation: Generation::new(),
                 zones: vec![BlueprintZoneConfig {
                     disposition,
                     id: OmicronZoneUuid::new_v4(),
                     underlay_address: "::1".parse().unwrap(),
+                    filesystem_pool: ZpoolName::new_external(pool_id),
                     zone_type: BlueprintZoneType::InternalDns(
                         blueprint_zone_type::InternalDns {
                             dataset: OmicronZoneDataset {
-                                pool_name: format!("oxp_{}", Uuid::new_v4())
+                                pool_name: format!("oxp_{}", pool_id)
                                     .parse()
                                     .unwrap(),
                             },
