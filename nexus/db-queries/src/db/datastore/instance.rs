@@ -177,14 +177,14 @@ pub struct InstanceUpdateResult {
     pub instance_updated: bool,
     /// `true` if the VMM record was updated, `false` otherwise.
     pub vmm_updated: bool,
-    /// Indicates whether a migration record for this instance was updated, if a
-    /// [`MigrationRuntimeState`] was provided to
+    /// Indicates whether a migration record for this instance was updated, if
+    /// [`Migrations`] were provided to
     /// [`DataStore::instance_and_vmm_update_runtime`].
     ///
     /// - `Some(true)` if a migration record was updated
-    /// - `Some(false)` if a [`MigrationRuntimeState`] was provided, but the
+    /// - `Some(false)` if [`Migrations`] were provided, but the
     ///   migration record was not updated
-    /// - `None` if no [`MigrationRuntimeState`] was provided
+    /// - `None` if no [`Migrations`] were provided
     pub migration_updated: Option<bool>,
 }
 
