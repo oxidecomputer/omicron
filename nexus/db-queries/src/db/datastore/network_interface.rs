@@ -93,9 +93,7 @@ impl From<NicInfo> for omicron_common::api::internal::shared::NetworkInterface {
             vni: nic.vni.0,
             primary: nic.primary,
             slot: u8::try_from(nic.slot).unwrap(),
-            transit_ips: Some(
-                nic.transit_ips.iter().map(|v| (*v).into()).collect(),
-            ),
+            transit_ips: nic.transit_ips.iter().map(|v| (*v).into()).collect(),
         }
     }
 }

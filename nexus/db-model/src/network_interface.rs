@@ -105,9 +105,7 @@ impl NetworkInterface {
             vni: external::Vni::try_from(0).unwrap(),
             primary: self.primary,
             slot: *self.slot,
-            transit_ips: Some(
-                self.transit_ips.into_iter().map(Into::into).collect(),
-            ),
+            transit_ips: self.transit_ips.into_iter().map(Into::into).collect(),
         }
     }
 }

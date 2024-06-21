@@ -3557,7 +3557,7 @@
             "$ref": "#/components/schemas/IpNet"
           },
           "transit_ips": {
-            "nullable": true,
+            "default": [],
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/IpNet"

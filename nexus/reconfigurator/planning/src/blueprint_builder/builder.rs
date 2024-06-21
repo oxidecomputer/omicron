@@ -828,7 +828,7 @@ impl<'a> BlueprintBuilder<'a> {
                     vni: Vni::SERVICES_VNI,
                     primary: true,
                     slot: 0,
-                    transit_ips: None,
+                    transit_ips: vec![],
                 }
             };
 

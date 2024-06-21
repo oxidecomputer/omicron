@@ -410,7 +410,7 @@ pub async fn run_standalone_server(
                     vni: Vni::SERVICES_VNI,
                     primary: true,
                     slot: 0,
-                    transit_ips: None,
+                    transit_ips: vec![],
                 },
                 external_tls: false,
                 external_dns_servers: vec![],
@@ -454,7 +454,7 @@ pub async fn run_standalone_server(
                     vni: Vni::SERVICES_VNI,
                     primary: true,
                     slot: 0,
-                    transit_ips: None,
+                    transit_ips: vec![],
                 },
             },
         });

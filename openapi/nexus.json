@@ -14668,6 +14668,7 @@
           },
           "transit_ips": {
             "description": "A set of additional networks that this interface may send and receive traffic on.",
+            "default": [],
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/IpNet"
@@ -14690,7 +14691,6 @@
           "subnet_id",
           "time_created",
           "time_modified",
-          "transit_ips",
           "vpc_id"
         ]
       },
@@ -14835,15 +14835,13 @@
           },
           "transit_ips": {
             "description": "A set of additional networks that this interface may send and receive traffic on.",
+            "default": [],
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/IpNet"
             }
           }
-        },
-        "required": [
-          "transit_ips"
-        ]
+        }
       },
       "InstanceResultsPage": {
         "description": "A single page of results",
@@ -15817,7 +15815,7 @@
             "$ref": "#/components/schemas/IpNet"
           },
           "transit_ips": {
-            "nullable": true,
+            "default": [],
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/IpNet"

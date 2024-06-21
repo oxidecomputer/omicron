@@ -1982,6 +1982,7 @@ pub struct InstanceNetworkInterface {
 
     /// A set of additional networks that this interface may send and
     /// receive traffic on.
+    #[serde(default)]
     pub transit_ips: Vec<IpNet>,
 }
 
