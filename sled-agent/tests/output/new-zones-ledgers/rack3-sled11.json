@@ -170,7 +170,7 @@
             "vni": 100,
             "primary": true,
             "slot": 0,
-            "transit_ips": null
+            "transit_ips": []
           },
           "snat_cfg": {
             "ip": "45.154.216.39",

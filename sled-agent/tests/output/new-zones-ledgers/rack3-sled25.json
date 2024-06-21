@@ -82,7 +82,7 @@
             "vni": 100,
             "primary": true,
             "slot": 0,
-            "transit_ips": null
+            "transit_ips": []
           }
         }
       },

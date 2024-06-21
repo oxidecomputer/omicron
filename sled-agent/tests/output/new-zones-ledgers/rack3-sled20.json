@@ -135,7 +135,7 @@
             "vni": 100,
             "primary": true,
             "slot": 0,
-            "transit_ips": null
+            "transit_ips": []
           },
           "external_tls": true,
           "external_dns_servers": [
