@@ -519,6 +519,14 @@ impl DataStore {
     }
 
     /// Updates an instance record by setting the instance's migration ID.
+    //
+    // TODO-design It's tempting to return the updated state of the Instance
+    // here because it's convenient for consumers and by using a RETURNING
+    // clause, we could ensure that the "update" and "fetch" are atomic.
+    // But in the unusual case that we _don't_ update the row because our
+    // update is older than the one in the database, we would have to fetch
+    // the current state explicitly.  For now, we'll just require consumers
+    // to explicitly fetch the state if they want that.
     pub async fn instance_set_migration_ids(
         &self,
         opctx: &OpContext,
@@ -526,7 +534,7 @@ impl DataStore {
         src_propolis_id: PropolisUuid,
         migration_id: Uuid,
         target_propolis_id: PropolisUuid,
-    ) -> Result<Instance, Error> {
+    ) -> Result<bool, Error> {
         use db::schema::instance::dsl;
 
         let instance_id = instance_id.into_untyped_uuid();
@@ -560,8 +568,8 @@ impl DataStore {
 
         match updated {
             // If we updated the instance, that's great! Good job team!
-            UpdateAndQueryResult { status: UpdateStatus::Updated, found } => {
-                Ok(found)
+            UpdateAndQueryResult { status: UpdateStatus::Updated, .. } => {
+                Ok(true)
             }
             // No update was performed because the migration ID has already been
             // set to the ID we were trying to set it to. That's fine, count it
@@ -577,7 +585,7 @@ impl DataStore {
                     found.runtime_state.propolis_id,
                     Some(src_propolis_id)
                 );
-                Ok(found)
+                Ok(false)
             }
 
             // On the other hand, if there was already a different migration ID,
