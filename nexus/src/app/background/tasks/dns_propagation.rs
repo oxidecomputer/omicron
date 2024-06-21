@@ -4,8 +4,8 @@
 
 //! Background task for propagating DNS configuration to all DNS servers
 
-use super::common::BackgroundTask;
 use super::dns_servers::DnsServersList;
+use crate::app::background::common::BackgroundTask;
 use anyhow::Context;
 use dns_service_client::types::DnsConfigParams;
 use futures::future::BoxFuture;

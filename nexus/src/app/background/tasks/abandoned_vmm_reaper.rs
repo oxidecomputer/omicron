@@ -31,7 +31,7 @@
 //! is handled elsewhere, by `notify_instance_updated` and (eventually) the
 //! `instance-update` saga.
 
-use super::common::BackgroundTask;
+use crate::app::background::common::BackgroundTask;
 use anyhow::Context;
 use futures::future::BoxFuture;
 use futures::FutureExt;

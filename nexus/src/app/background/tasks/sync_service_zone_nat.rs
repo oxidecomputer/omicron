@@ -7,8 +7,8 @@
 
 use crate::app::map_switch_zone_addrs;
 
-use super::common::BackgroundTask;
 use super::networking::build_dpd_clients;
+use crate::app::background::common::BackgroundTask;
 use anyhow::Context;
 use futures::future::BoxFuture;
 use futures::FutureExt;

@@ -4,7 +4,7 @@
 
 //! Background task for reading inventory for the rack
 
-use super::common::BackgroundTask;
+use crate::app::background::common::BackgroundTask;
 use anyhow::ensure;
 use anyhow::Context;
 use futures::future::BoxFuture;

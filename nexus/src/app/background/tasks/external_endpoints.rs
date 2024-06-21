@@ -6,7 +6,7 @@
 //! all Silos, their externally-visible DNS names, and the TLS certificates
 //! associated with those names
 
-use super::common::BackgroundTask;
+use crate::app::background::common::BackgroundTask;
 use crate::app::external_endpoints::read_all_endpoints;
 pub use crate::app::external_endpoints::ExternalEndpoints;
 use futures::future::BoxFuture;

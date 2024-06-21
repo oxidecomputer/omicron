@@ -4,7 +4,7 @@
 
 //! Background task for keeping track of DNS servers
 
-use super::common::BackgroundTask;
+use crate::app::background::common::BackgroundTask;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use internal_dns::names::ServiceName;

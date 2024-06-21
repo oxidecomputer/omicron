@@ -4,7 +4,7 @@
 
 //! Background task for keeping track of DNS configuration
 
-use super::common::BackgroundTask;
+use crate::app::background::common::BackgroundTask;
 use dns_service_client::types::DnsConfigParams;
 use futures::future::BoxFuture;
 use futures::FutureExt;

@@ -4,7 +4,7 @@
 
 //! Background task for realizing a plan blueprint
 
-use super::common::BackgroundTask;
+use crate::app::background::common::BackgroundTask;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::context::OpContext;

@@ -23,7 +23,7 @@
 //! the status of all nodes and looking for orphans, perhaps) to determine
 //! whether a zone without a known node ID ever existed.
 
-use super::common::BackgroundTask;
+use crate::app::background::common::BackgroundTask;
 use anyhow::ensure;
 use anyhow::Context;
 use futures::future::BoxFuture;

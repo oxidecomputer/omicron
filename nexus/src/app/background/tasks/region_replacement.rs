@@ -10,8 +10,8 @@
 //! for any requests that are in state "Requested". See the documentation there
 //! for more information.
 
-use super::common::BackgroundTask;
 use crate::app::authn;
+use crate::app::background::common::BackgroundTask;
 use crate::app::sagas;
 use crate::app::RegionAllocationStrategy;
 use futures::future::BoxFuture;
