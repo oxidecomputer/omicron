@@ -87,6 +87,7 @@ use omicron_common::backoff::{
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use once_cell::sync::OnceCell;
+use rand::prelude::SliceRandom;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
 use sled_hardware::SledMode;
@@ -3331,7 +3332,21 @@ impl ServiceManager {
             }
         }
 
-        let filesystem_pool = &zone.filesystem_pool;
+        let filesystem_pool = match (&zone.filesystem_pool, zone.dataset_name()) {
+            // If a pool was explicitly requested, use it.
+            (Some(pool), _) => pool.clone(),
+            // NOTE: The following cases are for backwards compatibility.
+            //
+            // If no pool was selected, prefer to use the same pool as the
+            // durable dataset. Otherwise, pick one randomly.
+            (None, Some(dataset)) => dataset.pool().clone(),
+            (None, None) =>  {
+                all_u2_pools.choose(&mut rand::thread_rng())
+                    .ok_or_else(|| Error::U2NotFound)?
+                    .clone()
+            }
+        };
+
         if !all_u2_pools.contains(&filesystem_pool) {
             warn!(
                 self.inner.log,

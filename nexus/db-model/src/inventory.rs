@@ -1009,7 +1009,7 @@ pub struct InvOmicronZone {
     pub sled_id: DbTypedUuid<SledKind>,
     pub id: Uuid,
     pub underlay_address: ipv6::Ipv6Addr,
-    pub filesystem_pool: DbTypedUuid<ZpoolKind>,
+    pub filesystem_pool: Option<DbTypedUuid<ZpoolKind>>,
     pub zone_type: ZoneType,
     pub primary_service_ip: ipv6::Ipv6Addr,
     pub primary_service_port: SqlU16,
