@@ -177,7 +177,7 @@ async fn do_for_all_rust_packages(
         .0
         .iter()
         .map(|(name, value)| format!("{name}-{value}"))
-        .collect::<BTreeSet<_>>();
+        .collect::<Vec<_>>();
 
     // We split the packages to be built into "release" and "debug" lists
     let mut release =
@@ -196,10 +196,9 @@ async fn do_for_all_rust_packages(
             })?;
             // Add all features we want to request to the plan
             plan.features.extend(
-                metadata
-                    .features
-                    .keys()
-                    .filter(|feature| features.contains(*feature)),
+                features
+                    .iter()
+                    .filter(|feature| metadata.features.contains_key(*feature)),
             );
         }
     }
