@@ -53,7 +53,7 @@ enum Cmds {
     /// Verify we are not leaking library bindings outside of intended
     /// crates
     #[cfg(target_os = "illumos")]
-    VerifyLibraries(verify_libraries::Args),
+    VerifyLibraries,
     /// Manage virtual hardware
     #[cfg(target_os = "illumos")]
     VirtualHardware(virtual_hardware::Args),
@@ -93,7 +93,7 @@ async fn main() -> Result<()> {
             external.cargo_args(["--release"]).exec_bin("omicron-releng")
         }
         #[cfg(target_os = "illumos")]
-        Cmds::VerifyLibraries(args) => verify_libraries::run_cmd(args),
+        Cmds::VerifyLibraries => verify_libraries::run_cmd(),
         #[cfg(target_os = "illumos")]
         Cmds::VirtualHardware(args) => virtual_hardware::run_cmd(args),
 

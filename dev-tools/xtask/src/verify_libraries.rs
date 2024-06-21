@@ -5,7 +5,6 @@
 use anyhow::{bail, Context, Result};
 use camino::Utf8Path;
 use cargo_metadata::Message;
-use clap::Parser;
 use fs_err as fs;
 use serde::Deserialize;
 use std::{
@@ -16,13 +15,6 @@ use std::{
 use swrite::{swriteln, SWrite};
 
 use crate::load_workspace;
-
-#[derive(Parser)]
-pub struct Args {
-    /// Build in release mode
-    #[clap(long)]
-    release: bool,
-}
 
 #[derive(Deserialize, Debug)]
 struct LibraryConfig {
@@ -91,29 +83,20 @@ fn verify_executable(
 
     Ok(())
 }
-
-pub fn run_cmd(args: Args) -> Result<()> {
+pub fn run_cmd() -> Result<()> {
     let metadata = load_workspace()?;
     let mut config_path = metadata.workspace_root;
     config_path.push(".cargo/xtask.toml");
     let config = read_xtask_toml(&config_path)?;
 
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
-    let mut command = Command::new(cargo);
-    command.args([
-        "build",
-        "--bins",
-        "--message-format=json-render-diagnostics",
-    ]);
-    if args.release {
-        command.arg("--release");
-    }
-    let mut child = command
+    let mut command = Command::new(cargo)
+        .args(["build", "--bins", "--message-format=json-render-diagnostics"])
         .stdout(Stdio::piped())
         .spawn()
         .context("failed to spawn cargo build")?;
 
-    let reader = BufReader::new(child.stdout.take().context("take stdout")?);
+    let reader = BufReader::new(command.stdout.take().context("take stdout")?);
 
     let mut errors = Default::default();
     for message in cargo_metadata::Message::parse_stream(reader) {
@@ -125,7 +108,7 @@ pub fn run_cmd(args: Args) -> Result<()> {
         }
     }
 
-    let status = child.wait()?;
+    let status = command.wait()?;
     if !status.success() {
         bail!("Failed to execute cargo build successfully {}", status);
     }
