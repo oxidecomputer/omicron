@@ -24,14 +24,13 @@ use slog::o;
 use slog::Drain;
 use slog::Logger;
 use slog::{info, warn};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs::create_dir_all;
 use std::io::Write;
 use std::str::FromStr;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
-use swrite::{swrite, SWrite};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
@@ -106,81 +105,107 @@ struct Args {
     subcommand: SubCommand,
 }
 
-async fn run_cargo_on_packages<I, S>(
-    subcmd: &str,
-    packages: I,
+#[derive(Debug, Default)]
+struct CargoPlan<'a> {
+    command: &'a str,
+    bins: BTreeSet<&'a String>,
+    features: BTreeSet<&'a String>,
     release: bool,
-    features: &str,
-) -> Result<()>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<std::ffi::OsStr>,
-{
-    let mut cmd = Command::new("cargo");
-    // We rely on the rust-toolchain.toml file for toolchain information,
-    // rather than specifying one within the packaging tool.
-    cmd.arg(subcmd);
-    for package in packages {
-        cmd.arg("-p").arg(package);
-    }
-    cmd.arg("--features").arg(features);
-    if release {
-        cmd.arg("--release");
-    }
-    let status = cmd
-        .status()
-        .await
-        .context(format!("Failed to run command: ({:?})", cmd))?;
-    if !status.success() {
-        bail!("Failed to build packages");
-    }
+}
 
-    Ok(())
+impl<'a> CargoPlan<'a> {
+    async fn run(&self, log: &Logger) -> Result<()> {
+        if self.bins.is_empty() {
+            return Ok(());
+        }
+
+        let mut cmd = Command::new("cargo");
+        // We rely on the rust-toolchain.toml file for toolchain information,
+        // rather than specifying one within the packaging tool.
+        cmd.arg(self.command);
+        for bin in &self.bins {
+            cmd.arg("--bin").arg(bin);
+        }
+        if !self.features.is_empty() {
+            cmd.arg("--features").arg(self.features.iter().fold(
+                String::new(),
+                |mut acc, s| {
+                    if !acc.is_empty() {
+                        acc.push(' ');
+                    }
+                    acc.push_str(s);
+                    acc
+                },
+            ));
+        }
+        if self.release {
+            cmd.arg("--release");
+        }
+        info!(log, "running: {:?}", cmd.as_std());
+        let status = cmd
+            .status()
+            .await
+            .context(format!("Failed to run command: ({:?})", cmd))?;
+        if !status.success() {
+            bail!("Failed to build packages");
+        }
+
+        Ok(())
+    }
 }
 
 async fn do_for_all_rust_packages(
     config: &Config,
     command: &str,
 ) -> Result<()> {
-    // First, filter out all Rust packages from the configuration that should be
-    // built, and partition them into "release" and "debug" categories.
-    let (release_pkgs, debug_pkgs): (Vec<_>, _) = config
-        .packages_to_build()
-        .0
+    // Collect a map of all of the workspace packages
+    let workspace = cargo_metadata::MetadataCommand::new().exec()?;
+    let workspace_pkgs = workspace
+        .packages
         .into_iter()
-        .filter_map(|(name, pkg)| match &pkg.source {
-            PackageSource::Local { rust: Some(rust_pkg), .. } => {
-                Some((name, rust_pkg.release))
-            }
-            _ => None,
+        .filter_map(|package| {
+            workspace
+                .workspace_members
+                .contains(&package.id)
+                .then_some((package.name.clone(), package))
         })
-        .partition(|(_, release)| *release);
+        .collect::<BTreeMap<_, _>>();
 
-    let features =
-        config.target.0.iter().fold(String::new(), |mut acc, (name, value)| {
-            swrite!(acc, "{}-{} ", name, value);
-            acc
-        });
+    // Generate a list of all features we might want to request
+    let features = config
+        .target
+        .0
+        .iter()
+        .map(|(name, value)| format!("{name}-{value}"))
+        .collect::<BTreeSet<_>>();
 
-    // Execute all the release / debug packages at the same time.
-    if !release_pkgs.is_empty() {
-        run_cargo_on_packages(
-            command,
-            release_pkgs.iter().map(|(name, _)| name),
-            true,
-            &features,
-        )
-        .await?;
+    // We split the packages to be built into "release" and "debug" lists
+    let mut release =
+        CargoPlan { command, release: true, ..Default::default() };
+    let mut debug = CargoPlan { command, release: false, ..Default::default() };
+
+    for (name, pkg) in config.packages_to_build().0 {
+        // If this is a Rust package...
+        if let PackageSource::Local { rust: Some(rust_pkg), .. } = &pkg.source {
+            let plan = if rust_pkg.release { &mut release } else { &mut debug };
+            // Add the binaries we want to build to the plan
+            plan.bins.extend(&rust_pkg.binary_names);
+            // Get the package metadata
+            let metadata = workspace_pkgs.get(name).with_context(|| {
+                format!("package '{name}' is not a workspace package")
+            })?;
+            // Add all features we want to request to the plan
+            plan.features.extend(
+                metadata
+                    .features
+                    .keys()
+                    .filter(|feature| features.contains(*feature)),
+            );
+        }
     }
-    if !debug_pkgs.is_empty() {
-        run_cargo_on_packages(
-            command,
-            debug_pkgs.iter().map(|(name, _)| name),
-            false,
-            &features,
-        )
-        .await?;
-    }
+
+    release.run(&config.log).await?;
+    debug.run(&config.log).await?;
     Ok(())
 }
 

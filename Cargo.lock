@@ -5632,6 +5632,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
+ "cargo_metadata",
  "clap",
  "expectorate",
  "futures",
@@ -5653,7 +5654,6 @@ dependencies = [
  "slog-term",
  "smf",
  "strum",
- "swrite",
  "tar",
  "thiserror",
  "tokio",
