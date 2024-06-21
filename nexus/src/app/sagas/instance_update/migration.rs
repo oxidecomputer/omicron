@@ -5,6 +5,7 @@
 use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::db::model::Instance;
 use crate::app::db::model::Migration;
+use crate::app::db::model::MigrationState;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::{authn, authz};
 use omicron_uuid_kinds::GenericUuid;
@@ -23,6 +24,18 @@ declare_saga_actions! {
     // Clear migration IDs and write back the instance
     CLEAR_MIGRATION_IDS -> "clear_migration_ids" {
         + sium_clear_migration_ids
+        - sium_unclear_migration_ids
+    }
+
+    // Set the target VMM to the active VMM.
+    SET_NEW_ACTIVE_VMM -> "set_new_active_vmm" {
+        + sium_set_new_active_vmm
+        - sium_unset_new_active_vmm
+    }
+
+    // Update network configuration to point to the new active VMM.
+    UPDATE_NETWORK_CONFIG -> "update_network_config" {
+        + sium_update_network_config
     }
 }
 
@@ -54,7 +67,20 @@ impl NexusSaga for SagaMigrationUpdate {
         params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
-        todo!("eliza: draw the rest of the saga...")
+        if params.migration.either_side_failed() {
+            builder.append(clear_migration_ids_action());
+            return Ok(builder.build()?);
+        }
+
+        if params.migration.either_side_completed() {
+            builder.append(set_new_active_vmm_action());
+            builder.append(update_network_config_action());
+            if params.migration.target_state == MigrationState::COMPLETED {
+                builder.append(clear_migration_ids_action());
+            }
+        }
+
+        Ok(builder.build()?)
     }
 }
 
@@ -97,4 +123,28 @@ async fn sium_clear_migration_ids(
         .map_err(ActionError::action_failed)?;
 
     Ok(())
+}
+
+async fn sium_unclear_migration_ids(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    todo!("eliza")
+}
+
+async fn sium_set_new_active_vmm(
+    sagactx: NexusActionContext,
+) -> Result<Instance, ActionError> {
+    todo!("eliza")
+}
+
+async fn sium_unset_new_active_vmm(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    todo!("eliza")
+}
+
+async fn sium_update_network_config(
+    sagactx: NexusActionContext,
+) -> Result<InstanceCreate, ActionError> {
+    todo!("eliza")
 }
