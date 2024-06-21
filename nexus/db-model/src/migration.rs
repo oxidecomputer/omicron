@@ -90,6 +90,12 @@ impl Migration {
         }
     }
 
+    /// Returns `true` if either side reports that the migration is in a
+    /// terminal state.
+    pub fn is_terminal(&self) -> bool {
+        self.source_state.is_terminal() || self.target_state.is_terminal()
+    }
+
     /// Returns `true` if either side of the migration has failed.
     pub fn either_side_failed(&self) -> bool {
         self.source_state == MigrationState::FAILED

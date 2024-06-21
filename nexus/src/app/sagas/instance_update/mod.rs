@@ -136,17 +136,17 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
         // will only return a migration if it is the instance's currently active
         // migration, so if we have one here, that means that there's a
         // migration.
-        if let Some(migration) = params.state.migration.clone() {
-            if migration.either_side_failed()
-                || migration.either_side_completed()
-            {
+        if let Some(ref migration) = params.state.migration {
+            // If either side of the migration reports a terminal state, update
+            // the instance to reflect that.
+            if migration.is_terminal() {
                 const MIGRATION_SUBSAGA_PARAMS: &str =
                     "params_for_migration_subsaga";
                 let subsaga_params = migration::Params {
                     serialized_authn: params.serialized_authn.clone(),
                     authz_instance: params.authz_instance.clone(),
                     instance: params.state.instance.clone(),
-                    migration,
+                    migration: migration.clone(),
                 };
                 let subsaga_dag = {
                     let subsaga_builder = DagBuilder::new(SagaName::new(

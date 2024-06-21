@@ -32,6 +32,10 @@ impl MigrationState {
         MigrationState(nexus::MigrationState::Completed);
     pub const FAILED: MigrationState =
         MigrationState(nexus::MigrationState::Failed);
+    pub const PENDING: MigrationState =
+        MigrationState(nexus::MigrationState::Pending);
+    pub const IN_PROGRESS: MigrationState =
+        MigrationState(nexus::MigrationState::InProgress);
 
     /// Returns `true` if this migration state means that the migration is no
     /// longer in progress (it has either succeeded or failed).
