@@ -295,8 +295,8 @@ pub struct Bin<T> {
     pub count: u64,
 }
 
-/// Internal, creation-specific newtype wrapper around Vec<Bin<T>> to implement
-/// conversion(s).
+/// Internal, creation-specific newtype wrapper around `Vec<Bin<T>>` to
+/// implement conversion(s).
 struct Bins<T>(Vec<Bin<T>>);
 
 /// Histogram metric
