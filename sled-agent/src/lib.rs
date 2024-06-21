@@ -33,7 +33,6 @@ mod profile;
 pub mod rack_setup;
 pub mod server;
 pub mod services;
-pub mod services_migration;
 mod sled_agent;
 mod smf_helper;
 mod storage_monitor;
