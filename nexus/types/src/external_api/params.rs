@@ -1271,7 +1271,8 @@ pub struct RouterRouteCreate {
     pub identity: IdentityMetadataCreateParams,
     /// The location that matched packets should be forwarded to.
     pub target: RouteTarget,
-    /// A CIDR block (or named subnet) which this route will apply to.
+    /// The set of destination IP addresses or subnets that this route
+    /// will match packets against.
     pub destination: RouteDestination,
 }
 

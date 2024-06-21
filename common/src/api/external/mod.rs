@@ -1407,14 +1407,14 @@ pub struct RouterRoute {
     /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-
     /// The ID of the VPC Router to which the route belongs
     pub vpc_router_id: Uuid,
-
     /// Describes the kind of router. Set at creation. `read-only`
     pub kind: RouterRouteKind,
-
+    /// The location that matched packets should be forwarded to.
     pub target: RouteTarget,
+    /// The set of destination IP addresses or subnets that this route
+    /// will match packets against.
     pub destination: RouteDestination,
 }
 

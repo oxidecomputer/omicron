@@ -16749,7 +16749,12 @@
             "type": "string"
           },
           "destination": {
-            "$ref": "#/components/schemas/RouteDestination"
+            "description": "The set of destination IP addresses or subnets that this route will match packets against.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouteDestination"
+              }
+            ]
           },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
@@ -16773,7 +16778,12 @@
             ]
           },
           "target": {
-            "$ref": "#/components/schemas/RouteTarget"
+            "description": "The location that matched packets should be forwarded to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouteTarget"
+              }
+            ]
           },
           "time_created": {
             "description": "timestamp when this resource was created",
@@ -16811,7 +16821,7 @@
             "type": "string"
           },
           "destination": {
-            "description": "A CIDR block (or named subnet) which this route will apply to.",
+            "description": "The set of destination IP addresses or subnets that this route will match packets against.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/RouteDestination"
