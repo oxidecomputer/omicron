@@ -28,6 +28,11 @@ impl_enum_wrapper!(
 );
 
 impl MigrationState {
+    pub const COMPLETED: MigrationState =
+        MigrationState(nexus::MigrationState::Completed);
+    pub const FAILED: MigrationState =
+        MigrationState(nexus::MigrationState::Failed);
+
     /// Returns `true` if this migration state means that the migration is no
     /// longer in progress (it has either succeeded or failed).
     #[must_use]
