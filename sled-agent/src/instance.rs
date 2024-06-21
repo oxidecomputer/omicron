@@ -955,6 +955,9 @@ pub(crate) struct InstanceInitialState {
     pub hardware: InstanceHardware,
     pub vmm_runtime: VmmRuntimeState,
     pub propolis_addr: SocketAddr,
+    /// UUID of the migration in to this VMM, if the VMM is being created as the
+    /// target of an active migration.
+    pub migration_id: Option<Uuid>,
 }
 
 impl Instance {
@@ -965,20 +968,16 @@ impl Instance {
     /// * `log`: Logger for dumping debug information.
     /// * `id`: UUID of the instance to be created.
     /// * `propolis_id`: UUID for the VMM to be created.
-    /// * `migration_id`: UUID of the migration in to this VMM, if the VMM is
-    ///   being created as the target of an active migration.
     /// * `ticket`: A ticket that ensures this instance is a member of its
     ///   instance manager's tracking table.
     /// * `state`: The initial state of this instance.
     /// * `services`: A set of instance manager-provided services.
     /// * `sled_identifiers`: Sled-related metadata used to track statistics.
     /// * `metadata`: Instance-related metadata used to track statistics.
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         log: Logger,
         id: InstanceUuid,
         propolis_id: PropolisUuid,
-        migration_id: Option<Uuid>,
         ticket: InstanceTicket,
         state: InstanceInitialState,
         services: InstanceManagerServices,
@@ -988,11 +987,15 @@ impl Instance {
         info!(log, "initializing new Instance";
               "instance_id" => %id,
               "propolis_id" => %propolis_id,
-              "migration_id" => ?migration_id,
+              "migration_id" => ?state.migration_id,
               "state" => ?state);
 
         let InstanceInitialState {
-            hardware, vmm_runtime, propolis_addr, ..
+            hardware,
+            vmm_runtime,
+            propolis_addr,
+            migration_id,
+            ..
         } = state;
 
         let InstanceManagerServices {

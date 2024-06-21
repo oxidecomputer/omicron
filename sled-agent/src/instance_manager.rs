@@ -621,13 +621,13 @@ impl InstanceManagerRunner {
                     hardware,
                     vmm_runtime,
                     propolis_addr,
+                    migration_id: instance_runtime.migration_id,
                 };
 
                 let instance = Instance::new(
                     instance_log,
                     instance_id,
                     propolis_id,
-                    instance_runtime.migration_id,
                     ticket,
                     state,
                     services,
