@@ -18,6 +18,7 @@ use steno::{ActionError, DagBuilder, Node, SagaName};
 use uuid::Uuid;
 
 mod destroyed;
+mod migration;
 
 // The public interface to this saga is actually a smaller saga that starts the
 // "real" update saga, which inherits the lock from the start saga. This is
@@ -125,6 +126,52 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
                     "vmm_destroyed_subsaga_no_result",
                     subsaga_dag,
                     DESTROYED_SUBSAGA_PARAMS,
+                ));
+            }
+        }
+
+        // Next, determine what to do with the migration. A migration update
+        // saga needs to be scheduled if (and only if) the instance's migration
+        // ID currently points to a migration. The `instance_fetch_all` query
+        // will only return a migration if it is the instance's currently active
+        // migration, so if we have one here, that means that there's a
+        // migration.
+        if let Some(migration) = params.state.migration.clone() {
+            if migration.either_side_failed()
+                || migration.either_side_completed()
+            {
+                const MIGRATION_SUBSAGA_PARAMS: &str =
+                    "params_for_migration_subsaga";
+                let subsaga_params = migration::Params {
+                    serialized_authn: params.serialized_authn.clone(),
+                    authz_instance: params.authz_instance.clone(),
+                    instance: params.state.instance.clone(),
+                    migration,
+                };
+                let subsaga_dag = {
+                    let subsaga_builder = DagBuilder::new(SagaName::new(
+                        migration::SagaMigrationUpdate::NAME,
+                    ));
+                    migration::SagaMigrationUpdate::make_saga_dag(
+                        &subsaga_params,
+                        subsaga_builder,
+                    )?
+                };
+
+                builder.append(Node::constant(
+                    MIGRATION_SUBSAGA_PARAMS,
+                    serde_json::to_value(&subsaga_params).map_err(|e| {
+                        SagaInitError::SerializeError(
+                            MIGRATION_SUBSAGA_PARAMS.to_string(),
+                            e,
+                        )
+                    })?,
+                ));
+
+                builder.append(Node::subsaga(
+                    "migration_subsaga_no_result",
+                    subsaga_dag,
+                    MIGRATION_SUBSAGA_PARAMS,
                 ));
             }
         }

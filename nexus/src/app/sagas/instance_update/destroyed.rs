@@ -269,13 +269,24 @@ async fn siud_update_instance(
     );
 
     // It's okay for this to fail, it just means that the active VMM ID has changed.
-    let _ = osagactx
+    if let Err(e) = osagactx
         .datastore()
         .instance_update_runtime(
             &InstanceUuid::from_untyped_uuid(authz_instance.id()),
             &new_runtime,
         )
-        .await;
+        .await
+    {
+        warn!(
+            osagactx.log(),
+            "instance update (VMM destroyed): updating runtime state failed";
+            "instance_id" => %authz_instance.id(),
+            "propolis_id" => %vmm_id,
+            "new_runtime_state" => ?new_runtime,
+            "instance_update" => %"VMM destroyed",
+            "error" => %e,
+        );
+    }
     Ok(())
 }
 
