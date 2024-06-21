@@ -46,6 +46,7 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
+use futures::stream::{self, StreamExt};
 use ipnetwork::IpNetwork;
 use nexus_db_fixed_data::vpc::SERVICES_VPC_ID;
 use nexus_types::deployment::BlueprintZoneFilter;
@@ -1582,51 +1583,58 @@ impl DataStore {
         }
 
         // TODO: This would be nice to solve in fewer queries.
-        let mut subnets = HashMap::new();
-        for name in subnet_names.drain() {
-            if let Ok((.., subnet)) = db::lookup::LookupPath::new(opctx, self)
-                .vpc_id(authz_vpc.id())
-                .vpc_subnet_name(Name::ref_cast(&name))
-                .fetch()
-                .await
-            {
-                subnets.insert(name, subnet);
-            }
-        }
-        let mut vpcs = HashMap::new();
-        for name in vpc_names.drain() {
-            if let Ok((.., vpc)) = db::lookup::LookupPath::new(opctx, self)
-                .project_id(authz_project.id())
-                .vpc_name(Name::ref_cast(&name))
-                .fetch()
-                .await
-            {
-                vpcs.insert(name, vpc);
-            }
-        }
-        let mut instances = HashMap::new();
-        for name in instance_names.drain() {
-            if let Ok((.., authz_instance, instance)) =
+        let subnets = stream::iter(subnet_names)
+            .filter_map(|name| async {
+                db::lookup::LookupPath::new(opctx, self)
+                    .vpc_id(authz_vpc.id())
+                    .vpc_subnet_name(Name::ref_cast(&name))
+                    .fetch()
+                    .await
+                    .ok()
+                    .map(|(.., subnet)| (name, subnet))
+            })
+            .collect::<HashMap<_, _>>()
+            .await;
+
+        // TODO: unused until VPC peering.
+        let _vpcs = stream::iter(vpc_names)
+            .filter_map(|name| async {
+                db::lookup::LookupPath::new(opctx, self)
+                    .project_id(authz_project.id())
+                    .vpc_name(Name::ref_cast(&name))
+                    .fetch()
+                    .await
+                    .ok()
+                    .map(|(.., vpc)| (name, vpc))
+            })
+            .collect::<HashMap<_, _>>()
+            .await;
+
+        let instances = stream::iter(instance_names)
+            .filter_map(|name| async {
                 db::lookup::LookupPath::new(opctx, self)
                     .project_id(authz_project.id())
                     .instance_name(Name::ref_cast(&name))
                     .fetch()
                     .await
-            {
+                    .ok()
+                    .map(|(.., auth, inst)| (name, auth, inst))
+            })
+            .filter_map(|(name, authz_instance, instance)| async move {
                 // XXX: currently an instance can have one primary NIC,
                 //      and it is not dual-stack (v4 + v6). We need
                 //      to clarify what should be resolved in the v6 case.
-                if let Ok(primary_nic) = self
-                    .instance_get_primary_network_interface(
-                        opctx,
-                        &authz_instance,
-                    )
-                    .await
-                {
-                    instances.insert(name, (instance, primary_nic));
-                }
-            }
-        }
+                self.instance_get_primary_network_interface(
+                    opctx,
+                    &authz_instance,
+                )
+                .await
+                .ok()
+                .map(|primary_nic| (name, (instance, primary_nic)))
+            })
+            .collect::<HashMap<_, _>>()
+            .await;
+
         // TODO: validate names of Internet Gateways.
 
         // See the discussion in `resolve_firewall_rules_for_sled_agent` on
