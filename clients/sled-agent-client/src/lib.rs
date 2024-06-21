@@ -490,6 +490,7 @@ impl TestInterfaces for Client {
         let url = format!("{baseurl}/instances/{id}/sim-migration-source");
         client
             .post(url)
+            .json(&params)
             .send()
             .await
             .expect("instance_simulate_migration_source() failed unexpectedly");
