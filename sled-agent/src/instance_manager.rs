@@ -621,6 +621,7 @@ impl InstanceManagerRunner {
                     instance_log,
                     instance_id,
                     propolis_id,
+                    instance_runtime.migration_id,
                     ticket,
                     state,
                     services,
