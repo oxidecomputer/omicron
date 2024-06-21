@@ -940,20 +940,27 @@ impl Config {
 
     /// Returns target packages to be assembled on the builder machine, limited
     /// to those specified in `only` (if set).
-    // TODO: should this be moved to omicron-zone-package?
     fn packages_to_build(&self) -> PackageMap<'_> {
         let packages = self.package_config.packages_to_build(&self.target);
         if self.only.is_empty() {
             packages
         } else {
-            // create a new PackageMap and copy over the selected packages
             let mut filtered_packages = PackageMap(BTreeMap::new());
+            let mut to_walk = PackageMap(BTreeMap::new());
+            // add the requested packages to `to_walk`
             for package_name in &self.only {
-                if let Some(package) = packages.0.get(package_name) {
-                    filtered_packages.0.insert(package_name, package);
-                }
+                to_walk.0.insert(
+                    package_name,
+                    packages.0.get(package_name).unwrap_or_else(|| {
+                        panic!(
+                            "Explicitly-requested package '{}' does not exist",
+                            package_name
+                        )
+                    }),
+                );
             }
-            // recursively find and copy over the dependencies
+            // dependencies are listed by output name, so create a lookup table
+            // to get a package by its output name.
             let lookup_by_output = packages
                 .0
                 .iter()
@@ -961,34 +968,32 @@ impl Config {
                     (package.get_output_file(name), (*name, *package))
                 })
                 .collect::<BTreeMap<_, _>>();
-            loop {
-                let to_add = filtered_packages
-                    .0
-                    .values()
-                    .filter_map(|package| {
-                        if let PackageSource::Composite { packages } =
-                            &package.source
-                        {
-                            Some(packages)
-                        } else {
-                            None
+            // packages yet to be walked are added to `to_walk`. pop each
+            // entry and add its dependencies to `to_walk`, then add the package
+            // we finished walking to `filtered_packages`.
+            while let Some((package_name, package)) = to_walk.0.pop_first() {
+                if let PackageSource::Composite { packages } = &package.source {
+                    for output in packages {
+                        // find the package by output name
+                        let (dep_name, dep_package) =
+                            lookup_by_output.get(output).unwrap_or_else(|| {
+                                panic!(
+                                    "Could not find a package which creates '{}'",
+                                    output
+                                )
+                            });
+                        if dep_name.as_str() == package_name {
+                            panic!("'{}' depends on itself", package_name);
                         }
-                    })
-                    .flatten()
-                    .map(|output| {
-                        *lookup_by_output.get(output).unwrap_or_else(|| {
-                            panic!(
-                                "Could not find a package which creates '{}'",
-                                output
-                            )
-                        })
-                    })
-                    .collect::<Vec<_>>();
-                let old_len = filtered_packages.0.len();
-                filtered_packages.0.extend(to_add);
-                if old_len == filtered_packages.0.len() {
-                    break;
+                        // if we've seen this package already, it will be in
+                        // `filtered_packages`. otherwise, add it to `to_walk`.
+                        if !filtered_packages.0.contains_key(dep_name) {
+                            to_walk.0.insert(dep_name, dep_package);
+                        }
+                    }
                 }
+                // we're done looking at this package's deps
+                filtered_packages.0.insert(package_name, package);
             }
             filtered_packages
         }
