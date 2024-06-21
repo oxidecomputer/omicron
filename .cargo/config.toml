@@ -4,6 +4,12 @@
 # binaries and the test suite.  There's no need for typical library
 # documentation of public interfaces.)
 #
+# NOTE: If you change this, also change the `RUSTDOCFLAGS` values in the various
+# CI scripts:
+# - .github/buildomat/build-and-test.sh
+# - .github/buildomat/jobs/clippy.sh
+# - .github/workflows/rust.yml
+#
 [build]
 rustdocflags = "--document-private-items"
 

@@ -150,7 +150,7 @@ pub struct UpdatePane {
     /// TODO: Move following  state into global `State` so that recorder snapshots
     /// capture all state.
     ///
-    /// TODO: The <usize> generic parameter is carried over from earlier versions
+    /// TODO: The usize generic parameter is carried over from earlier versions
     /// of tui-tree-widget, but there's likely a better index type.
     tree_state: TreeState<usize>,
     items: Vec<TreeItem<'static, usize>>,

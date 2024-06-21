@@ -1164,12 +1164,13 @@ impl<'a> BlueprintZonesBuilder<'a> {
 
 /// Helper for working with sets of disks on each sled
 ///
-/// Tracking the set of disks is slightly non-trivial because we need to bump
-/// the per-sled generation number iff the disks are changed.  So we need to
-/// keep track of whether we've changed the disks relative to the parent
-/// blueprint.  We do this by keeping a copy of any [`BlueprintDisksConfig`]
-/// that we've changed and a _reference_ to the parent blueprint's disks.  This
-/// struct makes it easy for callers iterate over the right set of disks.
+/// Tracking the set of disks is slightly non-trivial because we need to
+/// bump the per-sled generation number iff the disks are changed.  So
+/// we need to keep track of whether we've changed the disks relative
+/// to the parent blueprint.  We do this by keeping a copy of any
+/// [`BlueprintPhysicalDisksConfig`] that we've changed and a _reference_ to
+/// the parent blueprint's disks.  This struct makes it easy for callers iterate
+/// over the right set of disks.
 struct BlueprintDisksBuilder<'a> {
     changed_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
     parent_disks: &'a BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
