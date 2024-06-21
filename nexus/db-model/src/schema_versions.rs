@@ -30,7 +30,6 @@ static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
         KnownVersion::new(79, "nic-spoof-allow"),
-        KnownVersion::new(75, "vpc-subnet-routing"),
         KnownVersion::new(78, "vpc-subnet-routing"),
         KnownVersion::new(77, "remove-view-for-v2p-mappings"),
         KnownVersion::new(76, "lookup-region-snapshot-by-snapshot-id"),
