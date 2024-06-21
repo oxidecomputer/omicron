@@ -378,8 +378,8 @@ where
     sum_of_samples: T::Width,
     /// M2 for Welford's algorithm for variance calculation.
     ///
-    /// Read more on Welford's algorithm at
-    /// <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm>
+    /// Read about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm)
+    /// for more information on the algorithm.
     squared_mean: f64,
     /// p50 Quantile
     p50: Quantile,

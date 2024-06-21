@@ -13247,7 +13247,7 @@
             ]
           },
           "squared_mean": {
-            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead more on Welford's algorithm at <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm>",
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
             "type": "number",
             "format": "double"
           },
@@ -13327,7 +13327,7 @@
             ]
           },
           "squared_mean": {
-            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead more on Welford's algorithm at <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm>",
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
             "type": "number",
             "format": "double"
           },
@@ -13407,7 +13407,7 @@
             ]
           },
           "squared_mean": {
-            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead more on Welford's algorithm at <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm>",
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
             "type": "number",
             "format": "double"
           },
@@ -13487,7 +13487,7 @@
             ]
           },
           "squared_mean": {
-            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead more on Welford's algorithm at <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm>",
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
             "type": "number",
             "format": "double"
           },
@@ -13567,7 +13567,7 @@
             ]
           },
           "squared_mean": {
-            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead more on Welford's algorithm at <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm>",
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
             "type": "number",
             "format": "double"
           },
@@ -13647,7 +13647,7 @@
             ]
           },
           "squared_mean": {
-            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead more on Welford's algorithm at <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm>",
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
             "type": "number",
             "format": "double"
           },
@@ -13729,7 +13729,7 @@
             ]
           },
           "squared_mean": {
-            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead more on Welford's algorithm at <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm>",
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
             "type": "number",
             "format": "double"
           },
@@ -13811,7 +13811,7 @@
             ]
           },
           "squared_mean": {
-            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead more on Welford's algorithm at <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm>",
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
             "type": "number",
             "format": "double"
           },
@@ -13893,7 +13893,7 @@
             ]
           },
           "squared_mean": {
-            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead more on Welford's algorithm at <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm>",
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
             "type": "number",
             "format": "double"
           },
@@ -13975,7 +13975,7 @@
             ]
           },
           "squared_mean": {
-            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead more on Welford's algorithm at <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm>",
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
             "type": "number",
             "format": "double"
           },

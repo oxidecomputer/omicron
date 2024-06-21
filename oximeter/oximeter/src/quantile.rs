@@ -10,7 +10,8 @@
 //! a very small and fixed storage requirement regardless of the
 //! number of observations.
 //!
-//! Read <https://www.cs.wustl.edu/~jain/papers/ftp/psqr.pdf> for more.
+//! Read the [paper](https://www.cs.wustl.edu/~jain/papers/ftp/psqr.pdf)
+//! for more specifics.
 
 // Copyright 2024 Oxide Computer Company
 
