@@ -36,6 +36,8 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::SimpleIdentity;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterTarget;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use std::collections::HashMap;
 
 pub const PROJECT_NAME: &str = "cartographer";
@@ -512,7 +514,11 @@ async fn test_vpc_routers_custom_delivered_to_instance(
             true,
         )
         .await;
-        instance_simulate(nexus, &instance.identity.id).await;
+        instance_simulate(
+            nexus,
+            &InstanceUuid::from_untyped_uuid(instance.identity.id),
+        )
+        .await;
 
         let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
             .instance_id(instance.identity.id)
