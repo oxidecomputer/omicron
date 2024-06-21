@@ -344,8 +344,7 @@ async fn sim_set_migration_ids(
 
     let db_instance = &params.instance;
     let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
-    let src_propolis_id =
-        PropolisUuid::from_untyped_uuid(params.src_vmm.sled_id);
+    let src_propolis_id = PropolisUuid::from_untyped_uuid(params.src_vmm.id);
     let migration_id = sagactx.lookup::<Uuid>("migrate_id")?;
     let dst_propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
 
@@ -380,17 +379,16 @@ async fn sim_clear_migration_ids(
         &sagactx,
         &params.serialized_authn,
     );
-    let src_sled_id = SledUuid::from_untyped_uuid(params.src_vmm.sled_id);
     let db_instance = params.instance;
     let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
-
+    let src_propolis_id = PropolisUuid::from_untyped_uuid(params.src_vmm.id);
     let migration_id = sagactx.lookup::<Uuid>("migrate_id")?;
     let dst_propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
 
     info!(osagactx.log(), "clearing migration IDs for saga unwind";
           "instance_id" => %db_instance.id(),
-          "sled_id" => %src_sled_id,
           "migration_id" => %migration_id,
+          "src_propolis_id" => %src_propolis_id,
           "dst_propolis_id" => %dst_propolis_id);
 
     if let Err(e) = osagactx
@@ -406,6 +404,8 @@ async fn sim_clear_migration_ids(
         warn!(osagactx.log(),
               "Error clearing migration IDs during rollback";
               "instance_id" => %instance_id,
+              "src_propolis_id" => %src_propolis_id,
+              "dst_propolis_id" => %dst_propolis_id,
               "error" => ?e);
     }
 
