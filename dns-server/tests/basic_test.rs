@@ -374,16 +374,18 @@ async fn init_client_server(
     )
     .await?;
 
-    let mut rc = ResolverConfig::new();
-    rc.add_name_server(NameServerConfig {
+    let mut resolver_config = ResolverConfig::new();
+    resolver_config.add_name_server(NameServerConfig {
         socket_addr: dns_server.local_address(),
         protocol: Protocol::Udp,
         tls_dns_name: None,
         trust_negative_responses: false,
         bind_addr: None,
     });
+    let mut resolver_opts = ResolverOpts::default();
+    resolver_opts.edns0 = true;
 
-    let resolver = TokioAsyncResolver::tokio(rc, ResolverOpts::default());
+    let resolver = TokioAsyncResolver::tokio(resolver_config, resolver_opts);
     let client =
         Client::new(&format!("http://{}", dropshot_server.local_addr()), log);
 

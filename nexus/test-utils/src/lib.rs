@@ -1571,8 +1571,9 @@ pub async fn start_dns_server(
         trust_negative_responses: false,
         bind_addr: None,
     });
-    let resolver =
-        TokioAsyncResolver::tokio(resolver_config, ResolverOpts::default());
+    let mut resolver_opts = ResolverOpts::default();
+    resolver_opts.edns0 = true;
+    let resolver = TokioAsyncResolver::tokio(resolver_config, resolver_opts);
 
     Ok((dns_server, http_server, resolver))
 }

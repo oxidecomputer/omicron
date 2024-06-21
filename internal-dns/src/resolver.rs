@@ -71,6 +71,7 @@ impl Resolver {
             });
         }
         let mut opts = ResolverOpts::default();
+        opts.edns0 = true;
         opts.use_hosts_file = false;
         opts.num_concurrent_reqs = dns_server_count;
         // The underlay is IPv6 only, so this helps avoid needless lookups of

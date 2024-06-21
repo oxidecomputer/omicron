@@ -31,6 +31,7 @@ impl Resolver {
             });
         }
         let mut opts = ResolverOpts::default();
+        opts.edns0 = true;
         opts.use_hosts_file = false;
         // Do as many requests in parallel as we have configured servers
         opts.num_concurrent_reqs = dns_servers.len();

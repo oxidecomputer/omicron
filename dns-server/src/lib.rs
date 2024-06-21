@@ -170,8 +170,10 @@ impl TransientServer {
             trust_negative_responses: false,
             bind_addr: None,
         });
+        let mut resolver_opts = ResolverOpts::default();
+        resolver_opts.edns0 = true;
         let resolver =
-            TokioAsyncResolver::tokio(resolver_config, ResolverOpts::default());
+            TokioAsyncResolver::tokio(resolver_config, resolver_opts);
         Ok(resolver)
     }
 }

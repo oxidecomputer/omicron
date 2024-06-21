@@ -49,11 +49,11 @@ impl CustomDnsResolver {
             trust_negative_responses: false,
             bind_addr: None,
         });
+        let mut resolver_opts = ResolverOpts::default();
+        resolver_opts.edns0 = true;
 
-        let resolver = Arc::new(TokioAsyncResolver::tokio(
-            resolver_config,
-            ResolverOpts::default(),
-        ));
+        let resolver =
+            Arc::new(TokioAsyncResolver::tokio(resolver_config, resolver_opts));
         Ok(CustomDnsResolver { dns_addr, resolver })
     }
 

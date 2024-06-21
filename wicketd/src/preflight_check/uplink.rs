@@ -1234,6 +1234,9 @@ impl DnsLookupStep {
     fn build_resolver(&mut self, dns_ip: IpAddr) -> TokioAsyncResolver {
         let mut options = ResolverOpts::default();
 
+        // Enable edns for potentially larger records
+        options.edns0 = true;
+
         // We will retry ourselves; we don't want the resolver
         // retrying internally too.
         options.attempts = 1;
