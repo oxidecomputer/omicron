@@ -1609,10 +1609,13 @@ where
             .collect::<Option<_>>()
             .context("Underflow subtracting distributions values")?;
 
-        // Subtract sum_of_samples and squared_mean directly.
-        // We allow underflow here.
+        // Subtract sum_of_samples.
         let sum_of_samples = self.sum_of_samples - rhs.sum_of_samples;
-        let squared_mean = self.squared_mean - rhs.squared_mean;
+
+        // Squared means are not linear, so we subtract the means and then
+        // square that number.
+        let sub_means = self.mean() - rhs.mean();
+        let squared_mean = sub_means.powi(2);
 
         Ok(Self {
             bins: self.bins.clone(),
@@ -1938,19 +1941,20 @@ mod tests {
             oximeter::histogram::Histogram::new(&[0i64, 10, 20]).unwrap();
         hist2.sample(5).unwrap();
         hist2.sample(10).unwrap();
+        hist2.sample(15).unwrap();
         hist2.set_start_time(current2);
         let dist1 = Distribution::from(&hist1);
         let dist2 = Distribution::from(&hist2);
 
         let diff = dist2.checked_sub(&dist1).unwrap();
         assert_eq!(diff.bins(), &[i64::MIN, 0, 10, 20]);
-        assert_eq!(diff.counts(), &[0, 0, 1, 0]);
-        assert_eq!(diff.n_samples(), 1);
+        assert_eq!(diff.counts(), &[0, 0, 2, 0]);
+        assert_eq!(diff.n_samples(), 2);
         assert!(diff.min().is_none());
         assert!(diff.max().is_none());
-        assert_eq!(diff.mean(), 14.0);
-        assert!(diff.std_dev().is_none());
-        assert!(diff.sample_std_dev().is_none());
+        assert_eq!(diff.mean(), 14.5);
+        assert_eq!(diff.std_dev(), Some(6.363961030678928));
+        assert_eq!(diff.sample_std_dev(), Some(9.0));
         assert!(diff.p50.is_none());
         assert!(diff.p90.is_none());
         assert!(diff.p99.is_none());
