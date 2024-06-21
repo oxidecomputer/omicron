@@ -155,10 +155,8 @@
           "$ref": "#/definitions/IpNet"
         },
         "transit_ips": {
-          "type": [
-            "array",
-            "null"
-          ],
+          "default": [],
+          "type": "array",
           "items": {
             "$ref": "#/definitions/IpNet"
           }
