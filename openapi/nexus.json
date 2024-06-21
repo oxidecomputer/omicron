@@ -2679,11 +2679,10 @@
     "/v1/ip-pools": {
       "get": {
         "tags": [
-          "silos"
+          "projects"
         ],
         "summary": "List IP pools",
-        "description": "List IP pools linked to current silo.",
-        "operationId": "ip_pool_list",
+        "operationId": "project_ip_pool_list",
         "parameters": [
           {
             "in": "query",
@@ -2739,11 +2738,10 @@
     "/v1/ip-pools/{pool}": {
       "get": {
         "tags": [
-          "silos"
+          "projects"
         ],
         "summary": "Fetch IP pool",
-        "description": "Fetch IP pool linked to current silo.",
-        "operationId": "ip_pool_view",
+        "operationId": "project_ip_pool_view",
         "parameters": [
           {
             "in": "path",
@@ -5269,7 +5267,7 @@
           "system/networking"
         ],
         "summary": "List IP pools",
-        "operationId": "system_ip_pool_list",
+        "operationId": "ip_pool_list",
         "parameters": [
           {
             "in": "query",
@@ -5363,7 +5361,7 @@
           "system/networking"
         ],
         "summary": "Fetch IP pool",
-        "operationId": "system_ip_pool_view",
+        "operationId": "ip_pool_view",
         "parameters": [
           {
             "in": "path",
