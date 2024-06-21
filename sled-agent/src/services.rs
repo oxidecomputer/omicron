@@ -3332,7 +3332,8 @@ impl ServiceManager {
             }
         }
 
-        let filesystem_pool = match (&zone.filesystem_pool, zone.dataset_name()) {
+        let filesystem_pool = match (&zone.filesystem_pool, zone.dataset_name())
+        {
             // If a pool was explicitly requested, use it.
             (Some(pool), _) => pool.clone(),
             // NOTE: The following cases are for backwards compatibility.
@@ -3340,11 +3341,10 @@ impl ServiceManager {
             // If no pool was selected, prefer to use the same pool as the
             // durable dataset. Otherwise, pick one randomly.
             (None, Some(dataset)) => dataset.pool().clone(),
-            (None, None) =>  {
-                all_u2_pools.choose(&mut rand::thread_rng())
-                    .ok_or_else(|| Error::U2NotFound)?
-                    .clone()
-            }
+            (None, None) => all_u2_pools
+                .choose(&mut rand::thread_rng())
+                .ok_or_else(|| Error::U2NotFound)?
+                .clone(),
         };
 
         if !all_u2_pools.contains(&filesystem_pool) {

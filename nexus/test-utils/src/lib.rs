@@ -422,7 +422,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             disposition: BlueprintZoneDisposition::InService,
             id: OmicronZoneUuid::from_untyped_uuid(dataset_id),
             underlay_address: *address.ip(),
-            filesystem_pool: ZpoolName::new_external(zpool_id),
+            filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
             zone_type: BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb {
                     address,
@@ -475,7 +475,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             disposition: BlueprintZoneDisposition::InService,
             id: OmicronZoneUuid::from_untyped_uuid(dataset_id),
             underlay_address: *address.ip(),
-            filesystem_pool: ZpoolName::new_external(zpool_id),
+            filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
             zone_type: BlueprintZoneType::Clickhouse(
                 blueprint_zone_type::Clickhouse {
                     address,
@@ -664,7 +664,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             disposition: BlueprintZoneDisposition::InService,
             id: nexus_id,
             underlay_address: *address.ip(),
-            filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
+            filesystem_pool: Some(ZpoolName::new_external(ZpoolUuid::new_v4())),
             zone_type: BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 external_dns_servers: self
                     .config
@@ -986,7 +986,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
             underlay_address: *address.ip(),
-            filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
+            filesystem_pool: Some(ZpoolName::new_external(ZpoolUuid::new_v4())),
             zone_type: BlueprintZoneType::CruciblePantry(
                 blueprint_zone_type::CruciblePantry { address },
             ),
@@ -1028,7 +1028,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
             underlay_address: *dropshot_address.ip(),
-            filesystem_pool: ZpoolName::new_external(zpool_id),
+            filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
             zone_type: BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns {
                     dataset: OmicronZoneDataset { pool_name },
@@ -1090,7 +1090,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
             underlay_address: *http_address.ip(),
-            filesystem_pool: ZpoolName::new_external(zpool_id),
+            filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
             zone_type: BlueprintZoneType::InternalDns(
                 blueprint_zone_type::InternalDns {
                     dataset: OmicronZoneDataset { pool_name },

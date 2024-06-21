@@ -265,7 +265,7 @@ impl BpOmicronZone {
             sled_id,
             blueprint_zone.id.into_untyped_uuid(),
             blueprint_zone.underlay_address,
-            blueprint_zone.filesystem_pool.id(),
+            blueprint_zone.filesystem_pool.as_ref().map(|pool| pool.id()),
             &blueprint_zone.zone_type.clone().into(),
             external_ip_id,
         )?;
@@ -274,7 +274,10 @@ impl BpOmicronZone {
             sled_id: zone.sled_id.into(),
             id: zone.id,
             underlay_address: zone.underlay_address,
-            filesystem_pool: blueprint_zone.filesystem_pool.id().into(),
+            filesystem_pool: blueprint_zone
+                .filesystem_pool
+                .as_ref()
+                .map(|pool| pool.id().into()),
             zone_type: zone.zone_type,
             primary_service_ip: zone.primary_service_ip,
             primary_service_port: zone.primary_service_port,
@@ -305,7 +308,7 @@ impl BpOmicronZone {
             sled_id: self.sled_id.into(),
             id: self.id,
             underlay_address: self.underlay_address,
-            filesystem_pool: self.filesystem_pool.into(),
+            filesystem_pool: self.filesystem_pool.map(|id| id.into()),
             zone_type: self.zone_type,
             primary_service_ip: self.primary_service_ip,
             primary_service_port: self.primary_service_port,

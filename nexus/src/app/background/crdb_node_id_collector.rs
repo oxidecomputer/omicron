@@ -273,7 +273,7 @@ mod tests {
                 disposition,
                 id,
                 underlay_address: *addr.ip(),
-                filesystem_pool: ZpoolName::new_external(zpool_id),
+                filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
                 zone_type: BlueprintZoneType::CockroachDb(
                     blueprint_zone_type::CockroachDb {
                         address: addr,
@@ -316,7 +316,7 @@ mod tests {
             disposition: BlueprintZoneDisposition::InService,
             id: OmicronZoneUuid::new_v4(),
             underlay_address: "::1".parse().unwrap(),
-            filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
+            filesystem_pool: Some(ZpoolName::new_external(ZpoolUuid::new_v4())),
             zone_type: BlueprintZoneType::CruciblePantry(
                 blueprint_zone_type::CruciblePantry {
                     address: "[::1]:0".parse().unwrap(),

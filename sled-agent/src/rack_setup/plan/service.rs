@@ -406,7 +406,7 @@ impl Plan {
                 .unwrap();
             let dataset_name =
                 sled.alloc_dataset_from_u2s(DatasetKind::InternalDns)?;
-            let filesystem_pool = dataset_name.pool().clone();
+            let filesystem_pool = Some(dataset_name.pool().clone());
 
             sled.request.zones.push(OmicronZoneConfig {
                 // TODO-cleanup use TypedUuid everywhere
@@ -446,7 +446,7 @@ impl Plan {
                 .unwrap();
             let dataset_name =
                 sled.alloc_dataset_from_u2s(DatasetKind::CockroachDb)?;
-            let filesystem_pool = dataset_name.pool().clone();
+            let filesystem_pool = Some(dataset_name.pool().clone());
             sled.request.zones.push(OmicronZoneConfig {
                 // TODO-cleanup use TypedUuid everywhere
                 id: id.into_untyped_uuid(),
@@ -491,7 +491,7 @@ impl Plan {
             let dns_address = SocketAddr::new(external_ip, dns_port);
             let dataset_kind = DatasetKind::ExternalDns;
             let dataset_name = sled.alloc_dataset_from_u2s(dataset_kind)?;
-            let filesystem_pool = dataset_name.pool().clone();
+            let filesystem_pool = Some(dataset_name.pool().clone());
 
             sled.request.zones.push(OmicronZoneConfig {
                 // TODO-cleanup use TypedUuid everywhere
@@ -527,7 +527,7 @@ impl Plan {
                 )
                 .unwrap();
             let (nic, external_ip) = svc_port_builder.next_nexus(id)?;
-            let filesystem_pool = sled.alloc_zpool_from_u2s()?;
+            let filesystem_pool = Some(sled.alloc_zpool_from_u2s()?);
             sled.request.zones.push(OmicronZoneConfig {
                 // TODO-cleanup use TypedUuid everywhere
                 id: id.into_untyped_uuid(),
@@ -572,7 +572,7 @@ impl Plan {
                     omicron_common::address::OXIMETER_PORT,
                 )
                 .unwrap();
-            let filesystem_pool = sled.alloc_zpool_from_u2s()?;
+            let filesystem_pool = Some(sled.alloc_zpool_from_u2s()?);
             sled.request.zones.push(OmicronZoneConfig {
                 // TODO-cleanup use TypedUuid everywhere
                 id: id.into_untyped_uuid(),
@@ -611,7 +611,7 @@ impl Plan {
                 .unwrap();
             let dataset_name =
                 sled.alloc_dataset_from_u2s(DatasetKind::Clickhouse)?;
-            let filesystem_pool = dataset_name.pool().clone();
+            let filesystem_pool = Some(dataset_name.pool().clone());
             sled.request.zones.push(OmicronZoneConfig {
                 // TODO-cleanup use TypedUuid everywhere
                 id: id.into_untyped_uuid(),
@@ -650,7 +650,7 @@ impl Plan {
                 .unwrap();
             let dataset_name =
                 sled.alloc_dataset_from_u2s(DatasetKind::ClickhouseKeeper)?;
-            let filesystem_pool = dataset_name.pool().clone();
+            let filesystem_pool = Some(dataset_name.pool().clone());
             sled.request.zones.push(OmicronZoneConfig {
                 // TODO-cleanup use TypedUuid everywhere
                 id: id.into_untyped_uuid(),
@@ -676,7 +676,7 @@ impl Plan {
             let address = sled.addr_alloc.next().expect("Not enough addrs");
             let port = omicron_common::address::CRUCIBLE_PANTRY_PORT;
             let id = OmicronZoneUuid::new_v4();
-            let filesystem_pool = sled.alloc_zpool_from_u2s()?;
+            let filesystem_pool = Some(sled.alloc_zpool_from_u2s()?);
             dns_builder
                 .host_zone_with_one_backend(
                     id,
@@ -721,7 +721,7 @@ impl Plan {
                         address,
                         dataset: OmicronZoneDataset { pool_name: pool.clone() },
                     },
-                    filesystem_pool: pool.clone(),
+                    filesystem_pool: Some(pool.clone()),
                 });
             }
         }
@@ -734,7 +734,7 @@ impl Plan {
             let id = OmicronZoneUuid::new_v4();
             let address = sled.addr_alloc.next().expect("Not enough addrs");
             let ntp_address = SocketAddrV6::new(address, NTP_PORT, 0, 0);
-            let filesystem_pool = sled.alloc_zpool_from_u2s()?;
+            let filesystem_pool = Some(sled.alloc_zpool_from_u2s()?);
 
             let (zone_type, svcname) = if idx < BOUNDARY_NTP_COUNT {
                 boundary_ntp_servers

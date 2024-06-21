@@ -572,7 +572,7 @@ mod test {
                         sled_agent_client::types::OmicronZoneType::Oximeter {
                             address: zone_address.to_string(),
                         },
-                    filesystem_pool,
+                    filesystem_pool: Some(filesystem_pool),
                 }],
             })
             .await

@@ -192,7 +192,7 @@ mod test {
                     disposition: BlueprintZoneDisposition::InService,
                     id: OmicronZoneUuid::new_v4(),
                     underlay_address: "::1".parse().unwrap(),
-                    filesystem_pool: zpool.clone(),
+                    filesystem_pool: Some(zpool.clone()),
                     zone_type: BlueprintZoneType::InternalDns(
                         blueprint_zone_type::InternalDns {
                             dataset: OmicronZoneDataset { pool_name: zpool },
@@ -295,7 +295,9 @@ mod test {
                 disposition,
                 id: OmicronZoneUuid::new_v4(),
                 underlay_address: "::1".parse().unwrap(),
-                filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
+                filesystem_pool: Some(ZpoolName::new_external(
+                    ZpoolUuid::new_v4(),
+                )),
                 zone_type: BlueprintZoneType::InternalNtp(
                     blueprint_zone_type::InternalNtp {
                         address: "[::1]:0".parse().unwrap(),

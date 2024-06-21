@@ -673,7 +673,7 @@ impl<'a> BlueprintBuilder<'a> {
             disposition: BlueprintZoneDisposition::InService,
             id: self.rng.zone_rng.next(),
             underlay_address: ip,
-            filesystem_pool,
+            filesystem_pool: Some(filesystem_pool),
             zone_type,
         };
 
@@ -729,7 +729,7 @@ impl<'a> BlueprintBuilder<'a> {
             disposition: BlueprintZoneDisposition::InService,
             id: self.rng.zone_rng.next(),
             underlay_address: ip,
-            filesystem_pool,
+            filesystem_pool: Some(filesystem_pool),
             zone_type,
         };
 
@@ -857,7 +857,7 @@ impl<'a> BlueprintBuilder<'a> {
                 disposition: BlueprintZoneDisposition::InService,
                 id: nexus_id,
                 underlay_address: ip,
-                filesystem_pool,
+                filesystem_pool: Some(filesystem_pool),
                 zone_type,
             };
             self.sled_add_zone(sled_id, zone)?;
@@ -914,7 +914,7 @@ impl<'a> BlueprintBuilder<'a> {
                 disposition: BlueprintZoneDisposition::InService,
                 id: zone_id,
                 underlay_address: underlay_ip,
-                filesystem_pool,
+                filesystem_pool: Some(filesystem_pool),
                 zone_type,
             };
             self.sled_add_zone(sled_id, zone)?;

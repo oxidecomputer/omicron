@@ -623,7 +623,9 @@ mod test {
                 disposition: BlueprintZoneDisposition::Quiesced,
                 id: out_of_service_id,
                 underlay_address: out_of_service_addr,
-                filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
+                filesystem_pool: Some(ZpoolName::new_external(
+                    ZpoolUuid::new_v4(),
+                )),
                 zone_type: BlueprintZoneType::Oximeter(
                     blueprint_zone_type::Oximeter {
                         address: SocketAddrV6::new(

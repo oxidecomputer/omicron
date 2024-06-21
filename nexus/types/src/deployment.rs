@@ -623,7 +623,7 @@ pub struct BlueprintZoneConfig {
 
     pub id: OmicronZoneUuid,
     pub underlay_address: Ipv6Addr,
-    pub filesystem_pool: ZpoolName,
+    pub filesystem_pool: Option<ZpoolName>,
     pub zone_type: BlueprintZoneType,
 }
 
