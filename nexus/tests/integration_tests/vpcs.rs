@@ -18,7 +18,6 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::{params, views::Vpc};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::Ipv6Net;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -76,7 +75,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
 
     // Make sure creating a VPC fails if we specify an IPv6 prefix that is
     // not a valid ULA range.
-    let bad_prefix = Ipv6Net("2000:1000::/48".parse().unwrap());
+    let bad_prefix = "2000:1000::/48".parse().unwrap();
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &vpcs_url)
             .expect_status(Some(StatusCode::BAD_REQUEST))
@@ -101,7 +100,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(vpc.identity.description, "vpc description");
     assert_eq!(vpc.dns_name, "abc");
     assert_eq!(
-        vpc.ipv6_prefix.prefix(),
+        vpc.ipv6_prefix.width(),
         48,
         "Expected a 48-bit ULA IPv6 address prefix"
     );

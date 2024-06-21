@@ -182,36 +182,36 @@ impl KeyHandler {
         if let Some(seq) = self.seq {
             match seq {
                 MultiKeySeqStart::g => match event.code {
-                    KeyCode::Char('g') => {
+                    KeyCode::Char('g') | KeyCode::Char('G') => {
                         self.seq = None;
                         return Some(Cmd::GotoTop);
                     }
-                    KeyCode::Char('e') => {
+                    KeyCode::Char('e') | KeyCode::Char('E') => {
                         self.seq = None;
                         return Some(Cmd::GotoBottom);
                     }
                     _ => (),
                 },
                 MultiKeySeqStart::CtrlR => match event.code {
-                    KeyCode::Char('a')
+                    KeyCode::Char('a') | KeyCode::Char('A')
                         if event.modifiers == KeyModifiers::CONTROL =>
                     {
                         self.seq = None;
                         return Some(Cmd::AbortUpdate);
                     }
-                    KeyCode::Char('r')
+                    KeyCode::Char('r') | KeyCode::Char('R')
                         if event.modifiers == KeyModifiers::CONTROL =>
                     {
                         self.seq = None;
                         return Some(Cmd::ResetState);
                     }
-                    KeyCode::Char('s')
+                    KeyCode::Char('s') | KeyCode::Char('S')
                         if event.modifiers == KeyModifiers::CONTROL =>
                     {
                         self.seq = None;
                         return Some(Cmd::DumpSnapshot);
                     }
-                    KeyCode::Char('t')
+                    KeyCode::Char('t') | KeyCode::Char('T')
                         if event.modifiers == KeyModifiers::CONTROL =>
                     {
                         self.seq = None;
@@ -230,10 +230,10 @@ impl KeyHandler {
             KeyCode::Enter => Cmd::Enter,
             KeyCode::Esc => Cmd::Exit,
             KeyCode::Char(' ') => Cmd::Toggle,
-            KeyCode::Char('e') => Cmd::Expand,
-            KeyCode::Char('c') => Cmd::Collapse,
-            KeyCode::Char('d') => Cmd::Details,
-            KeyCode::Char('i') => Cmd::Ignition,
+            KeyCode::Char('e') | KeyCode::Char('E') => Cmd::Expand,
+            KeyCode::Char('c') | KeyCode::Char('C') => Cmd::Collapse,
+            KeyCode::Char('d') | KeyCode::Char('D') => Cmd::Details,
+            KeyCode::Char('i') | KeyCode::Char('I') => Cmd::Ignition,
             KeyCode::Up => Cmd::Up,
             KeyCode::Down => Cmd::Down,
             KeyCode::Right => Cmd::Right,
@@ -242,18 +242,24 @@ impl KeyHandler {
             KeyCode::PageDown => Cmd::PageDown,
             KeyCode::Home => Cmd::GotoTop,
             KeyCode::End => Cmd::GotoBottom,
-            KeyCode::Char('y') => Cmd::Yes,
-            KeyCode::Char('u') if event.modifiers == KeyModifiers::CONTROL => {
+            KeyCode::Char('y') | KeyCode::Char('Y') => Cmd::Yes,
+            KeyCode::Char('u') | KeyCode::Char('U')
+                if event.modifiers == KeyModifiers::CONTROL =>
+            {
                 Cmd::StartUpdate
             }
-            KeyCode::Char('r') if event.modifiers == KeyModifiers::CONTROL => {
+            KeyCode::Char('r') | KeyCode::Char('R')
+                if event.modifiers == KeyModifiers::CONTROL =>
+            {
                 self.seq = Some(MultiKeySeqStart::CtrlR);
                 return None;
             }
-            KeyCode::Char('k') if event.modifiers == KeyModifiers::CONTROL => {
+            KeyCode::Char('k') | KeyCode::Char('K')
+                if event.modifiers == KeyModifiers::CONTROL =>
+            {
                 Cmd::StartRackSetup
             }
-            KeyCode::Char('n') => Cmd::No,
+            KeyCode::Char('n') | KeyCode::Char('N') => Cmd::No,
             KeyCode::Tab => Cmd::NextPane,
             KeyCode::BackTab => Cmd::PrevPane,
 

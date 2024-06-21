@@ -10,20 +10,35 @@ use crate::blueprint_builder::BlueprintBuilder;
 use crate::blueprint_builder::Ensure;
 use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::Error;
+use crate::blueprint_builder::Operation;
+use crate::planner::omicron_zone_placement::PlacementError;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::CockroachDbClusterVersion;
+use nexus_types::deployment::CockroachDbPreserveDowngrade;
+use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_client::ZoneKind;
 use slog::error;
 use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;
+use std::str::FromStr;
+
+pub(crate) use self::omicron_zone_placement::DiscretionaryOmicronZone;
+use self::omicron_zone_placement::OmicronZonePlacement;
+use self::omicron_zone_placement::OmicronZonePlacementSledState;
+
+mod omicron_zone_placement;
 
 pub struct Planner<'a> {
     log: Logger,
@@ -83,6 +98,7 @@ impl<'a> Planner<'a> {
         self.do_plan_expunge()?;
         self.do_plan_add()?;
         self.do_plan_decommission()?;
+        self.do_plan_cockroachdb_settings();
 
         Ok(())
     }
@@ -158,15 +174,8 @@ impl<'a> Planner<'a> {
         {
             commissioned_sled_ids.insert(sled_id);
 
-            // Does this sled need zone expungement based on the details?
-            let Some(reason) =
-                needs_zone_expungement(sled_details.state, sled_details.policy)
-            else {
-                continue;
-            };
-
-            // Perform the expungement.
-            self.blueprint.expunge_all_zones_for_sled(sled_id, reason)?;
+            // Perform the expungement, for any zones that might need it.
+            self.blueprint.expunge_zones_for_sled(sled_id, sled_details)?;
         }
 
         // Check for any decommissioned sleds (i.e., sleds for which our
@@ -214,23 +223,26 @@ impl<'a> Planner<'a> {
         // We will not mark sleds getting Crucible zones as ineligible; other
         // control plane service zones starting concurrently with Crucible zones
         // is fine.
-        let mut sleds_waiting_for_ntp_zones = BTreeSet::new();
+        let mut sleds_waiting_for_ntp_zone = BTreeSet::new();
 
         for (sled_id, sled_resources) in
             self.input.all_sled_resources(SledFilter::InService)
         {
             // First, we need to ensure that sleds are using their expected
             // disks. This is necessary before we can allocate any zones.
-            if self.blueprint.sled_ensure_disks(sled_id, &sled_resources)?
-                == Ensure::Added
+            if let EnsureMultiple::Changed { added, removed } =
+                self.blueprint.sled_ensure_disks(sled_id, &sled_resources)?
             {
                 info!(
                     &self.log,
                     "altered physical disks";
                     "sled_id" => %sled_id
                 );
-                self.blueprint
-                    .comment(&format!("sled {}: altered disks", sled_id));
+                self.blueprint.record_operation(Operation::UpdateDisks {
+                    sled_id,
+                    added,
+                    removed,
+                });
 
                 // Note that this doesn't actually need to short-circuit the
                 // rest of the blueprint planning, as long as during execution
@@ -247,12 +259,14 @@ impl<'a> Planner<'a> {
                     "found sled missing NTP zone (will add one)";
                     "sled_id" => %sled_id
                 );
-                self.blueprint
-                    .comment(&format!("sled {}: add NTP zone", sled_id));
+                self.blueprint.record_operation(Operation::AddZone {
+                    sled_id,
+                    kind: ZoneKind::BoundaryNtp,
+                });
                 // Don't make any other changes to this sled.  However, this
                 // change is compatible with any other changes to other sleds,
                 // so we can "continue" here rather than "break".
-                sleds_waiting_for_ntp_zones.insert(sled_id);
+                sleds_waiting_for_ntp_zone.insert(sled_id);
                 continue;
             }
 
@@ -291,7 +305,8 @@ impl<'a> Planner<'a> {
                 continue;
             }
 
-            // Every provisionable zpool on the sled should have a Crucible zone on it.
+            // Every provisionable zpool on the sled should have a Crucible zone
+            // on it.
             let mut ncrucibles_added = 0;
             for zpool_id in sled_resources.all_zpools(ZpoolFilter::InService) {
                 if self
@@ -316,127 +331,202 @@ impl<'a> Planner<'a> {
                 // (Yes, it's currently the last thing in the loop, but being
                 // explicit here means we won't forget to do this when more code
                 // is added below.)
-                self.blueprint.comment(&format!("sled {}: add zones", sled_id));
+                self.blueprint.record_operation(Operation::AddZone {
+                    sled_id,
+                    kind: ZoneKind::Crucible,
+                });
                 continue;
             }
         }
 
-        self.ensure_correct_number_of_nexus_zones(
-            &sleds_waiting_for_ntp_zones,
-        )?;
+        self.do_plan_add_discretionary_zones(&sleds_waiting_for_ntp_zone)
+    }
+
+    fn do_plan_add_discretionary_zones(
+        &mut self,
+        sleds_waiting_for_ntp_zone: &BTreeSet<SledUuid>,
+    ) -> Result<(), Error> {
+        // We usually don't need to construct an `OmicronZonePlacement` to add
+        // discretionary zones, so defer its creation until it's needed.
+        let mut zone_placement = None;
+
+        for zone_kind in [
+            DiscretionaryOmicronZone::Nexus,
+            DiscretionaryOmicronZone::CockroachDb,
+        ] {
+            let num_zones_to_add = self.num_additional_zones_needed(zone_kind);
+            if num_zones_to_add == 0 {
+                continue;
+            }
+            // We need to add at least one zone; construct our `zone_placement`
+            // (or reuse the existing one if a previous loop iteration already
+            // created it).
+            let zone_placement = match zone_placement.as_mut() {
+                Some(zone_placement) => zone_placement,
+                None => {
+                    // This constructs a picture of the sleds as we currently
+                    // understand them, as far as which sleds have discretionary
+                    // zones. This will remain valid as we loop through the
+                    // `zone_kind`s in this function, as any zone additions will
+                    // update the `zone_placement` heap in-place.
+                    let current_discretionary_zones = self
+                        .input
+                        .all_sled_resources(SledFilter::Discretionary)
+                        .filter(|(sled_id, _)| {
+                            !sleds_waiting_for_ntp_zone.contains(&sled_id)
+                        })
+                        .map(|(sled_id, sled_resources)| {
+                            OmicronZonePlacementSledState {
+                            sled_id,
+                            num_zpools: sled_resources
+                                .all_zpools(ZpoolFilter::InService)
+                                .count(),
+                            discretionary_zones: self
+                                .blueprint
+                                .current_sled_zones(sled_id)
+                                .filter_map(|zone| {
+                                    DiscretionaryOmicronZone::from_zone_type(
+                                        &zone.zone_type,
+                                    )
+                                })
+                                .collect(),
+                        }
+                        });
+                    zone_placement.insert(OmicronZonePlacement::new(
+                        current_discretionary_zones,
+                    ))
+                }
+            };
+            self.add_discretionary_zones(
+                zone_placement,
+                zone_kind,
+                num_zones_to_add,
+            )?;
+        }
 
         Ok(())
     }
 
-    fn ensure_correct_number_of_nexus_zones(
+    // Given the current blueprint state and policy, returns the number of
+    // additional zones needed of the given `zone_kind` to satisfy the policy.
+    fn num_additional_zones_needed(
         &mut self,
-        sleds_waiting_for_ntp_zone: &BTreeSet<SledUuid>,
-    ) -> Result<(), Error> {
-        // Count the number of Nexus zones on all in-service sleds. This will
-        // include sleds that are in service but not eligible for new services,
-        // but will not include sleds that have been expunged or decommissioned.
-        let mut num_total_nexus = 0;
+        zone_kind: DiscretionaryOmicronZone,
+    ) -> usize {
+        // Count the number of `kind` zones on all in-service sleds. This
+        // will include sleds that are in service but not eligible for new
+        // services, but will not include sleds that have been expunged or
+        // decommissioned.
+        let mut num_existing_kind_zones = 0;
         for sled_id in self.input.all_sled_ids(SledFilter::InService) {
-            let num_nexus = self.blueprint.sled_num_nexus_zones(sled_id);
-            num_total_nexus += num_nexus;
+            let num_zones_of_kind = self
+                .blueprint
+                .sled_num_zones_of_kind(sled_id, zone_kind.into());
+            num_existing_kind_zones += num_zones_of_kind;
         }
 
-        // TODO-correctness What should we do if we have _too many_ Nexus
-        // instances? For now, just log it the number of zones any time we have
-        // at least the minimum number.
-        let nexus_to_add = self
-            .input
-            .target_nexus_zone_count()
-            .saturating_sub(num_total_nexus);
-        if nexus_to_add == 0 {
+        let target_count = match zone_kind {
+            DiscretionaryOmicronZone::Nexus => {
+                self.input.target_nexus_zone_count()
+            }
+            DiscretionaryOmicronZone::CockroachDb => {
+                self.input.target_cockroachdb_zone_count()
+            }
+        };
+
+        // TODO-correctness What should we do if we have _too many_
+        // `zone_kind` zones? For now, just log it the number of zones any
+        // time we have at least the minimum number.
+        let num_zones_to_add =
+            target_count.saturating_sub(num_existing_kind_zones);
+        if num_zones_to_add == 0 {
             info!(
-                self.log, "sufficient Nexus zones exist in plan";
-                "desired_count" => self.input.target_nexus_zone_count(),
-                "current_count" => num_total_nexus,
+                self.log, "sufficient {zone_kind:?} zones exist in plan";
+                "desired_count" => target_count,
+                "current_count" => num_existing_kind_zones,
             );
-            return Ok(());
         }
+        num_zones_to_add
+    }
 
-        // Now bin all the sleds which are eligible choices for a new Nexus zone
-        // by their current Nexus zone count. Skip sleds with a policy/state
-        // that should be eligible for Nexus but that don't yet have an NTP
-        // zone.
-        let mut sleds_by_num_nexus: BTreeMap<usize, Vec<SledUuid>> =
-            BTreeMap::new();
-        for sled_id in self
-            .input
-            .all_sled_ids(SledFilter::Discretionary)
-            .filter(|sled_id| !sleds_waiting_for_ntp_zone.contains(sled_id))
-        {
-            let num_nexus = self.blueprint.sled_num_nexus_zones(sled_id);
-            sleds_by_num_nexus.entry(num_nexus).or_default().push(sled_id);
-        }
-
-        // Ensure we have at least one sled on which we can add Nexus zones. If
-        // we don't, we have nothing else to do. This isn't a hard error,
-        // because we might be waiting for NTP on all eligible sleds (although
-        // it would be weird, since we're presumably running from within Nexus
-        // on some sled).
-        if sleds_by_num_nexus.is_empty() {
-            warn!(self.log, "want to add Nexus zones, but no eligible sleds");
-            return Ok(());
-        }
-
-        // Build a map of sled -> new nexus zone count.
+    // Attempts to place `num_zones_to_add` new zones of `kind`.
+    //
+    // It is not an error if there are too few eligible sleds to start a
+    // sufficient number of zones; instead, we'll log a warning and start as
+    // many as we can (up to `num_zones_to_add`).
+    fn add_discretionary_zones(
+        &mut self,
+        zone_placement: &mut OmicronZonePlacement,
+        kind: DiscretionaryOmicronZone,
+        mut num_zones_to_add: usize,
+    ) -> Result<(), Error> {
+        // Build a map of sled -> new zones to add.
         let mut sleds_to_change: BTreeMap<SledUuid, usize> = BTreeMap::new();
 
-        'outer: for _ in 0..nexus_to_add {
-            // `sleds_by_num_nexus` is sorted by key already, and we want to
-            // pick from the lowest-numbered bin. We can just loop over its
-            // keys, expecting to stop on the first iteration, with the only
-            // exception being when we've removed all the sleds from a bin.
-            for (&num_nexus, sleds) in sleds_by_num_nexus.iter_mut() {
-                // `sleds` contains all sleds with the minimum number of Nexus
-                // zones. Pick one arbitrarily but deterministically.
-                let Some(sled_id) = sleds.pop() else {
-                    // We already drained this bin; move on.
-                    continue;
-                };
+        for i in 0..num_zones_to_add {
+            match zone_placement.place_zone(kind) {
+                Ok(sled_id) => {
+                    *sleds_to_change.entry(sled_id).or_default() += 1;
+                }
+                Err(PlacementError::NoSledsEligible { .. }) => {
+                    // We won't treat this as a hard error; it's possible
+                    // (albeit unlikely?) we're in a weird state where we need
+                    // more sleds or disks to come online, and we may need to be
+                    // able to produce blueprints to achieve that status.
+                    warn!(
+                        self.log,
+                        "failed to place all new desired {kind:?} zones";
+                        "placed" => i,
+                        "wanted_to_place" => num_zones_to_add,
+                    );
 
-                // This insert might overwrite an old value for this sled (e.g.,
-                // in the "we have 1 sled and need to add many Nexus instances
-                // to it" case). That's fine.
-                sleds_to_change.insert(sled_id, num_nexus + 1);
+                    // Adjust `num_zones_to_add` downward so it's consistent
+                    // with the number of zones we're actually adding.
+                    num_zones_to_add = i;
 
-                // Put this sled back in our map, but now with one more Nexus.
-                sleds_by_num_nexus
-                    .entry(num_nexus + 1)
-                    .or_default()
-                    .push(sled_id);
-
-                continue 'outer;
+                    break;
+                }
             }
-
-            // This should be unreachable: it's only possible if we fail to find
-            // a nonempty vec in `sleds_by_num_nexus`, and we checked above that
-            // `sleds_by_num_nexus` is not empty.
-            unreachable!("logic error finding sleds for Nexus");
         }
 
         // For each sled we need to change, actually do so.
-        let mut total_added = 0;
-        for (sled_id, new_nexus_count) in sleds_to_change {
-            match self
-                .blueprint
-                .sled_ensure_zone_multiple_nexus(sled_id, new_nexus_count)?
-            {
-                EnsureMultiple::Added(n) => {
+        let mut new_zones_added = 0;
+        for (sled_id, additional_zone_count) in sleds_to_change {
+            // TODO-cleanup This is awkward: the builder wants to know how many
+            // total zones go on a given sled, but we have a count of how many
+            // we want to add. Construct a new target count. Maybe the builder
+            // should provide a different interface here?
+            let new_total_zone_count =
+                self.blueprint.sled_num_zones_of_kind(sled_id, kind.into())
+                    + additional_zone_count;
+
+            let result = match kind {
+                DiscretionaryOmicronZone::Nexus => {
+                    self.blueprint.sled_ensure_zone_multiple_nexus(
+                        sled_id,
+                        new_total_zone_count,
+                    )?
+                }
+                DiscretionaryOmicronZone::CockroachDb => {
+                    self.blueprint.sled_ensure_zone_multiple_cockroachdb(
+                        sled_id,
+                        new_total_zone_count,
+                    )?
+                }
+            };
+            match result {
+                EnsureMultiple::Changed { added, removed: _ } => {
                     info!(
-                        self.log, "will add {n} Nexus zone(s) to sled";
+                        self.log, "will add {added} Nexus zone(s) to sled";
                         "sled_id" => %sled_id,
                     );
-                    total_added += n;
+                    new_zones_added += added;
                 }
                 // This is only possible if we asked the sled to ensure the same
                 // number of zones it already has, but that's impossible based
                 // on the way we built up `sleds_to_change`.
                 EnsureMultiple::NotNeeded => unreachable!(
-                    "sled on which we added Nexus zones did not add any"
+                    "sled on which we added {kind:?} zones did not add any"
                 ),
             }
         }
@@ -445,17 +535,111 @@ impl<'a> Planner<'a> {
         // arrived here, we think we've added the number of Nexus zones we
         // needed to.
         assert_eq!(
-            total_added, nexus_to_add,
-            "internal error counting Nexus zones"
+            new_zones_added, num_zones_to_add,
+            "internal error counting {kind:?} zones"
         );
 
         Ok(())
+    }
+
+    fn do_plan_cockroachdb_settings(&mut self) {
+        // Figure out what we should set the CockroachDB "preserve downgrade
+        // option" setting to based on the planning input.
+        //
+        // CockroachDB version numbers look like SemVer but are not. Major
+        // version numbers consist of the first *two* components, which
+        // represent the year and the Nth release that year. So the major
+        // version in "22.2.7" is "22.2".
+        //
+        // A given major version of CockroachDB is backward compatible with the
+        // storage format of the previous major version of CockroachDB. This is
+        // shown by the `version` setting, which displays the current storage
+        // format version. When `version` is '22.2', versions v22.2.x or v23.1.x
+        // can be used to run a node. This allows for rolling upgrades of nodes
+        // within the cluster and also preserves the ability to rollback until
+        // the new software version can be validated.
+        //
+        // By default, when all nodes of a cluster are upgraded to a new major
+        // version, the upgrade is "auto-finalized"; `version` is changed to the
+        // new major version, and rolling back to a previous major version of
+        // CockroachDB is no longer possible.
+        //
+        // The `cluster.preserve_downgrade_option` setting can be used to
+        // control this. This setting can only be set to the current value
+        // of the `version` setting, and when it is set, CockroachDB will not
+        // perform auto-finalization. To perform finalization and finish the
+        // upgrade, a client must reset the "preserve downgrade option" setting.
+        // Finalization occurs in the background, and the "preserve downgrade
+        // option" setting should not be changed again until finalization
+        // completes.
+        //
+        // We determine the appropriate value for `preserve_downgrade_option`
+        // based on:
+        //
+        // 1. the _target_ cluster version from the `Policy` (what we want to
+        //    be running)
+        // 2. the `version` setting reported by CockroachDB (what we're
+        //    currently running)
+        //
+        // by saying:
+        //
+        // - If we don't recognize the `version` CockroachDB reports, we will
+        //   do nothing.
+        // - If our target version is _equal to_ what CockroachDB reports,
+        //   we will ensure `preserve_downgrade_option` is set to the current
+        //   `version`. This prevents auto-finalization when we deploy the next
+        //   major version of CockroachDB as part of an update.
+        // - If our target version is _older than_ what CockroachDB reports, we
+        //   will also ensure `preserve_downgrade_option` is set to the current
+        //   `version`. (This will happen on newly-initialized clusters when
+        //   we deploy a version of CockroachDB that is newer than our current
+        //   policy.)
+        // - If our target version is _newer than_ what CockroachDB reports, we
+        //   will ensure `preserve_downgrade_option` is set to the default value
+        //   (the empty string). This will trigger finalization.
+
+        let policy = self.input.target_cockroachdb_cluster_version();
+        let CockroachDbSettings { version, .. } =
+            self.input.cockroachdb_settings();
+        let value = match CockroachDbClusterVersion::from_str(version) {
+            // The current version is known to us.
+            Ok(version) => {
+                if policy > version {
+                    // Ensure `cluster.preserve_downgrade_option` is reset so we
+                    // can upgrade.
+                    CockroachDbPreserveDowngrade::AllowUpgrade
+                } else {
+                    // The cluster version is equal to or newer than the
+                    // version we want by policy. In either case, ensure
+                    // `cluster.preserve_downgrade_option` is set.
+                    CockroachDbPreserveDowngrade::Set(version)
+                }
+            }
+            // The current version is unknown to us; we are likely in the middle
+            // of an cluster upgrade.
+            Err(_) => CockroachDbPreserveDowngrade::DoNotModify,
+        };
+        self.blueprint.cockroachdb_preserve_downgrade(value);
+        info!(
+            &self.log,
+            "will ensure cockroachdb setting";
+            "setting" => "cluster.preserve_downgrade_option",
+            "value" => ?value,
+        );
+
+        // Hey! Listen!
+        //
+        // If we need to manage more CockroachDB settings, we should ensure
+        // that no settings will be modified if we don't recognize the current
+        // cluster version -- we're likely in the middle of an upgrade!
+        //
+        // https://www.cockroachlabs.com/docs/stable/cluster-settings#change-a-cluster-setting
     }
 }
 
 /// Returns `Some(reason)` if the sled needs its zones to be expunged,
 /// based on the policy and state.
-fn needs_zone_expungement(
+fn sled_needs_all_zones_expunged(
     state: SledState,
     policy: SledPolicy,
 ) -> Option<ZoneExpungeReason> {
@@ -466,7 +650,7 @@ fn needs_zone_expungement(
             // an illegal state, but representable. If we see a sled in this
             // state, we should still expunge all zones in it, but parent code
             // should warn on it.
-            return Some(ZoneExpungeReason::SledDecommissioned { policy });
+            return Some(ZoneExpungeReason::SledDecommissioned);
         }
     }
 
@@ -476,13 +660,36 @@ fn needs_zone_expungement(
     }
 }
 
+pub(crate) fn zone_needs_expungement(
+    sled_details: &SledDetails,
+    zone_config: &BlueprintZoneConfig,
+) -> Option<ZoneExpungeReason> {
+    // Should we expunge the zone because the sled is gone?
+    if let Some(reason) =
+        sled_needs_all_zones_expunged(sled_details.state, sled_details.policy)
+    {
+        return Some(reason);
+    }
+
+    // Should we expunge the zone because durable storage is gone?
+    if let Some(durable_storage_zpool) = zone_config.zone_type.zpool() {
+        let zpool_id = durable_storage_zpool.id();
+        if !sled_details.resources.zpool_is_provisionable(&zpool_id) {
+            return Some(ZoneExpungeReason::DiskExpunged);
+        }
+    };
+
+    None
+}
+
 /// The reason a sled's zones need to be expunged.
 ///
 /// This is used only for introspection and logging -- it's not part of the
 /// logical flow.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub(crate) enum ZoneExpungeReason {
-    SledDecommissioned { policy: SledPolicy },
+    DiskExpunged,
+    SledDecommissioned,
     SledExpunged,
 }
 
@@ -504,7 +711,13 @@ mod test {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::BlueprintZoneType;
+    use nexus_types::deployment::CockroachDbClusterVersion;
+    use nexus_types::deployment::CockroachDbPreserveDowngrade;
+    use nexus_types::deployment::CockroachDbSettings;
     use nexus_types::deployment::OmicronZoneNetworkResources;
+    use nexus_types::deployment::SledDisk;
+    use nexus_types::external_api::views::PhysicalDiskPolicy;
+    use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
@@ -791,7 +1004,7 @@ mod test {
             1
         );
 
-        // Now run the planner.  It should add additional Nexus instances to the
+        // Now run the planner.  It should add additional Nexus zones to the
         // one sled we have.
         let mut builder = input.into_builder();
         builder.policy_mut().target_nexus_zone_count = 5;
@@ -926,7 +1139,7 @@ mod test {
         // Make generated disk ids deterministic
         let mut disk_rng =
             TypedUuidRng::from_seed(TEST_NAME, "NewPhysicalDisks");
-        let mut new_sled_disk = |policy| nexus_types::deployment::SledDisk {
+        let mut new_sled_disk = |policy| SledDisk {
             disk_identity: DiskIdentity {
                 vendor: "test-vendor".to_string(),
                 serial: "test-serial".to_string(),
@@ -934,7 +1147,7 @@ mod test {
             },
             disk_id: PhysicalDiskUuid::from(disk_rng.next()),
             policy,
-            state: nexus_types::external_api::views::PhysicalDiskState::Active,
+            state: PhysicalDiskState::Active,
         };
 
         let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
@@ -951,13 +1164,13 @@ mod test {
         for _ in 0..NEW_IN_SERVICE_DISKS {
             sled_details.resources.zpools.insert(
                 ZpoolUuid::from(zpool_rng.next()),
-                new_sled_disk(nexus_types::external_api::views::PhysicalDiskPolicy::InService),
+                new_sled_disk(PhysicalDiskPolicy::InService),
             );
         }
         for _ in 0..NEW_EXPUNGED_DISKS {
             sled_details.resources.zpools.insert(
                 ZpoolUuid::from(zpool_rng.next()),
-                new_sled_disk(nexus_types::external_api::views::PhysicalDiskPolicy::Expunged),
+                new_sled_disk(PhysicalDiskPolicy::Expunged),
             );
         }
 
@@ -986,6 +1199,73 @@ mod test {
             NEW_IN_SERVICE_DISKS
         );
         assert!(!diff.zones.removed.contains_key(sled_id));
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_disk_expungement_removes_zones() {
+        static TEST_NAME: &str = "planner_disk_expungement_removes_zones";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Create an example system with a single sled
+        let (collection, input, blueprint1) =
+            example(&logctx.log, TEST_NAME, 1);
+
+        let mut builder = input.into_builder();
+
+        // Aside: Avoid churning on the quantity of Nexus zones - we're okay
+        // staying at one.
+        builder.policy_mut().target_nexus_zone_count = 1;
+
+        // The example system should be assigning crucible zones to each
+        // in-service disk. When we expunge one of these disks, the planner
+        // should remove the associated zone.
+        let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
+        let (_, disk) =
+            sled_details.resources.zpools.iter_mut().next().unwrap();
+        disk.policy = PhysicalDiskPolicy::Expunged;
+
+        let input = builder.build();
+
+        let blueprint2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &input,
+            "test: expunge a disk",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("failed to plan");
+
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        println!("1 -> 2 (expunge a disk):\n{}", diff.display());
+        assert_eq!(diff.sleds_added.len(), 0);
+        assert_eq!(diff.sleds_removed.len(), 0);
+        assert_eq!(diff.sleds_modified.len(), 1);
+
+        // We should be removing a single zone, associated with the Crucible
+        // using that device.
+        assert_eq!(diff.zones.added.len(), 0);
+        assert_eq!(diff.zones.removed.len(), 0);
+        assert_eq!(diff.zones.modified.len(), 1);
+
+        let (_zone_id, modified_zones) =
+            diff.zones.modified.iter().next().unwrap();
+        assert_eq!(modified_zones.zones.len(), 1);
+        let modified_zone = &modified_zones.zones.first().unwrap().zone;
+        assert!(
+            matches!(modified_zone.kind(), ZoneKind::Crucible),
+            "Expected the modified zone to be a Crucible zone, but it was: {:?}",
+            modified_zone.kind()
+        );
+        assert_eq!(
+            modified_zone.disposition(),
+            BlueprintZoneDisposition::Expunged,
+            "Should have expunged this zone"
+        );
 
         logctx.cleanup_successful();
     }
@@ -1358,6 +1638,128 @@ mod test {
         assert_eq!(diff.sleds_removed.len(), 0);
         assert_eq!(diff.sleds_modified.len(), 0);
         assert_eq!(diff.sleds_unchanged.len(), DEFAULT_N_SLEDS);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_ensure_preserve_downgrade_option() {
+        static TEST_NAME: &str = "planner_ensure_preserve_downgrade_option";
+        let logctx = test_setup_log(TEST_NAME);
+
+        let (collection, input, bp1) = example(&logctx.log, TEST_NAME, 0);
+        let mut builder = input.into_builder();
+        assert!(bp1.cockroachdb_fingerprint.is_empty());
+        assert_eq!(
+            bp1.cockroachdb_setting_preserve_downgrade,
+            CockroachDbPreserveDowngrade::DoNotModify
+        );
+
+        // If `preserve_downgrade_option` is unset and the current cluster
+        // version matches `POLICY`, we ensure it is set.
+        builder.set_cockroachdb_settings(CockroachDbSettings {
+            state_fingerprint: "bp2".to_owned(),
+            version: CockroachDbClusterVersion::POLICY.to_string(),
+            preserve_downgrade: String::new(),
+        });
+        let bp2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &bp1,
+            &builder.clone().build(),
+            "initial settings",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("failed to plan");
+        assert_eq!(bp2.cockroachdb_fingerprint, "bp2");
+        assert_eq!(
+            bp2.cockroachdb_setting_preserve_downgrade,
+            CockroachDbClusterVersion::POLICY.into()
+        );
+
+        // If `preserve_downgrade_option` is unset and the current cluster
+        // version is known to us and _newer_ than `POLICY`, we still ensure
+        // it is set. (During a "tock" release, `POLICY == NEWLY_INITIALIZED`
+        // and this won't be materially different than the above test, but it
+        // shouldn't need to change when moving to a "tick" release.)
+        builder.set_cockroachdb_settings(CockroachDbSettings {
+            state_fingerprint: "bp3".to_owned(),
+            version: CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string(),
+            preserve_downgrade: String::new(),
+        });
+        let bp3 = Planner::new_based_on(
+            logctx.log.clone(),
+            &bp1,
+            &builder.clone().build(),
+            "initial settings",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp3"))
+        .plan()
+        .expect("failed to plan");
+        assert_eq!(bp3.cockroachdb_fingerprint, "bp3");
+        assert_eq!(
+            bp3.cockroachdb_setting_preserve_downgrade,
+            CockroachDbClusterVersion::NEWLY_INITIALIZED.into()
+        );
+
+        // When we run the planner again after setting the setting, the inputs
+        // will change; we should still be ensuring the setting.
+        builder.set_cockroachdb_settings(CockroachDbSettings {
+            state_fingerprint: "bp4".to_owned(),
+            version: CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string(),
+            preserve_downgrade: CockroachDbClusterVersion::NEWLY_INITIALIZED
+                .to_string(),
+        });
+        let bp4 = Planner::new_based_on(
+            logctx.log.clone(),
+            &bp1,
+            &builder.clone().build(),
+            "after ensure",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp4"))
+        .plan()
+        .expect("failed to plan");
+        assert_eq!(bp4.cockroachdb_fingerprint, "bp4");
+        assert_eq!(
+            bp4.cockroachdb_setting_preserve_downgrade,
+            CockroachDbClusterVersion::NEWLY_INITIALIZED.into()
+        );
+
+        // When `version` isn't recognized, do nothing regardless of the value
+        // of `preserve_downgrade`.
+        for preserve_downgrade in [
+            String::new(),
+            CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string(),
+            "definitely not a real cluster version".to_owned(),
+        ] {
+            builder.set_cockroachdb_settings(CockroachDbSettings {
+                state_fingerprint: "bp5".to_owned(),
+                version: "definitely not a real cluster version".to_owned(),
+                preserve_downgrade: preserve_downgrade.clone(),
+            });
+            let bp5 = Planner::new_based_on(
+                logctx.log.clone(),
+                &bp1,
+                &builder.clone().build(),
+                "unknown version",
+                &collection,
+            )
+            .expect("failed to create planner")
+            .with_rng_seed((TEST_NAME, format!("bp5-{}", preserve_downgrade)))
+            .plan()
+            .expect("failed to plan");
+            assert_eq!(bp5.cockroachdb_fingerprint, "bp5");
+            assert_eq!(
+                bp5.cockroachdb_setting_preserve_downgrade,
+                CockroachDbPreserveDowngrade::DoNotModify
+            );
+        }
 
         logctx.cleanup_successful();
     }

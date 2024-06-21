@@ -4,10 +4,12 @@
 
 //! Background task initialization
 
+use super::abandoned_vmm_reaper;
 use super::bfd;
 use super::blueprint_execution;
 use super::blueprint_load;
 use super::common;
+use super::crdb_node_id_collector;
 use super::dns_config;
 use super::dns_propagation;
 use super::dns_servers;
@@ -22,6 +24,7 @@ use super::region_replacement;
 use super::service_firewall_rules;
 use super::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::sync_switch_configuration::SwitchPortSettingsManager;
+use super::v2p_mappings::V2PManager;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::sagas::SagaRequest;
 use nexus_config::BackgroundTaskConfig;
@@ -84,11 +87,17 @@ pub struct BackgroundTasks {
     /// task handle for blueprint execution background task
     pub task_blueprint_executor: common::TaskHandle,
 
+    /// task handle for collecting CockroachDB node IDs
+    pub task_crdb_node_id_collector: common::TaskHandle,
+
     /// task handle for the service zone nat tracker
     pub task_service_zone_nat_tracker: common::TaskHandle,
 
     /// task handle for the switch port settings manager
     pub task_switch_port_settings_manager: common::TaskHandle,
+
+    /// task handle for the opte v2p manager
+    pub task_v2p_manager: common::TaskHandle,
 
     /// task handle for the task that detects if regions need replacement and
     /// begins the process
@@ -100,6 +109,10 @@ pub struct BackgroundTasks {
     /// task handle for propagation of VPC firewall rules for Omicron services
     /// with external network connectivity,
     pub task_service_firewall_propagation: common::TaskHandle,
+
+    /// task handle for deletion of database records for VMMs abandoned by their
+    /// instances.
+    pub task_abandoned_vmm_reaper: common::TaskHandle,
 }
 
 impl BackgroundTasks {
@@ -113,6 +126,10 @@ impl BackgroundTasks {
         nexus_id: Uuid,
         resolver: internal_dns::resolver::Resolver,
         saga_request: Sender<SagaRequest>,
+        v2p_watcher: (
+            tokio::sync::watch::Sender<()>,
+            tokio::sync::watch::Receiver<()>,
+        ),
         producer_registry: &ProducerRegistry,
     ) -> BackgroundTasks {
         let mut driver = common::Driver::new();
@@ -250,6 +267,21 @@ impl BackgroundTasks {
             config.blueprints.period_secs_execute,
             Box::new(blueprint_executor),
             opctx.child(BTreeMap::new()),
+            vec![Box::new(rx_blueprint.clone())],
+        );
+
+        // Background task: CockroachDB node ID collector
+        let crdb_node_id_collector =
+            crdb_node_id_collector::CockroachNodeIdCollector::new(
+                datastore.clone(),
+                rx_blueprint.clone(),
+            );
+        let task_crdb_node_id_collector = driver.register(
+            String::from("crdb_node_id_collector"),
+            String::from("Collects node IDs of running CockroachDB zones"),
+            config.blueprints.period_secs_collect_crdb_node_ids,
+            Box::new(crdb_node_id_collector),
+            opctx.child(BTreeMap::new()),
             vec![Box::new(rx_blueprint)],
         );
 
@@ -332,6 +364,17 @@ impl BackgroundTasks {
             )
         };
 
+        let task_v2p_manager = {
+            driver.register(
+                "v2p_manager".to_string(),
+                String::from("manages opte v2p mappings for vpc networking"),
+                config.v2p_mapping_propagation.period_secs,
+                Box::new(V2PManager::new(datastore.clone())),
+                opctx.child(BTreeMap::new()),
+                vec![Box::new(v2p_watcher.1)],
+            )
+        };
+
         // Background task: detect if a region needs replacement and begin the
         // process
         let task_region_replacement = {
@@ -358,6 +401,7 @@ impl BackgroundTasks {
                 resolver.clone(),
                 producer_registry,
                 instance_watcher::WatcherIdentity { nexus_id, rack_id },
+                v2p_watcher.0,
             );
             driver.register(
                 "instance_watcher".to_string(),
@@ -377,11 +421,25 @@ impl BackgroundTasks {
             ),
             config.service_firewall_propagation.period_secs,
             Box::new(service_firewall_rules::ServiceRulePropagator::new(
-                datastore,
+                datastore.clone(),
             )),
             opctx.child(BTreeMap::new()),
             vec![],
         );
+
+        // Background task: abandoned VMM reaping
+        let task_abandoned_vmm_reaper = driver.register(
+        String::from("abandoned_vmm_reaper"),
+        String::from(
+            "deletes sled reservations for VMMs that have been abandoned by their instances",
+        ),
+        config.abandoned_vmm_reaper.period_secs,
+        Box::new(abandoned_vmm_reaper::AbandonedVmmReaper::new(
+            datastore,
+        )),
+        opctx.child(BTreeMap::new()),
+        vec![],
+    );
 
         BackgroundTasks {
             driver,
@@ -399,11 +457,14 @@ impl BackgroundTasks {
             task_phantom_disks,
             task_blueprint_loader,
             task_blueprint_executor,
+            task_crdb_node_id_collector,
             task_service_zone_nat_tracker,
             task_switch_port_settings_manager,
+            task_v2p_manager,
             task_region_replacement,
             task_instance_watcher,
             task_service_firewall_propagation,
+            task_abandoned_vmm_reaper,
         }
     }
 

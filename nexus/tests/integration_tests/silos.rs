@@ -4,9 +4,7 @@
 
 use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
 use dropshot::ResultsPage;
-use nexus_db_queries::authn::silos::{
-    AuthenticatedSubject, IdentityProviderType,
-};
+use nexus_db_queries::authn::silos::AuthenticatedSubject;
 use nexus_db_queries::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use nexus_db_queries::authz::{self};
 use nexus_db_queries::context::OpContext;
@@ -525,19 +523,22 @@ async fn test_deleting_a_silo_deletes_the_idp(
     // Expect that the silo is gone
     let nexus = &cptestctx.server.server_context().nexus;
 
-    let response = IdentityProviderType::lookup(
-        &nexus.datastore(),
-        &nexus.opctx_external_authn(),
-        &omicron_common::api::external::Name::try_from(SILO_NAME.to_string())
+    let response = nexus
+        .datastore()
+        .identity_provider_lookup(
+            &nexus.opctx_external_authn(),
+            &omicron_common::api::external::Name::try_from(
+                SILO_NAME.to_string(),
+            )
             .unwrap()
             .into(),
-        &omicron_common::api::external::Name::try_from(
-            "some-totally-real-saml-provider".to_string(),
+            &omicron_common::api::external::Name::try_from(
+                "some-totally-real-saml-provider".to_string(),
+            )
+            .unwrap()
+            .into(),
         )
-        .unwrap()
-        .into(),
-    )
-    .await;
+        .await;
 
     assert!(response.is_err());
     match response.err().unwrap() {

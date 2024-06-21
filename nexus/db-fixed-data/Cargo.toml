@@ -1,0 +1,25 @@
+[package]
+name = "nexus-db-fixed-data"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+description = "Hard-coded database data, including defaults and built-ins"
+
+[lints]
+workspace = true
+
+[build-dependencies]
+omicron-rpaths.workspace = true
+
+[dependencies]
+once_cell.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
+strum.workspace = true
+uuid.workspace = true
+
+nexus-db-model.workspace = true
+nexus-types.workspace = true
+omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
+

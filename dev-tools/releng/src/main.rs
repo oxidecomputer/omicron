@@ -41,7 +41,9 @@ use crate::job::Jobs;
 /// to as "v8", "version 8", or "release 8" to customers). The use of semantic
 /// versioning is mostly to hedge for perhaps wanting something more granular in
 /// the future.
-const BASE_VERSION: Version = Version::new(8, 0, 0);
+const BASE_VERSION: Version = Version::new(9, 0, 0);
+
+const RETRY_ATTEMPTS: usize = 3;
 
 #[derive(Debug, Clone, Copy)]
 enum InstallMethod {
@@ -234,7 +236,8 @@ async fn main() -> Result<()> {
 
     let client = reqwest::ClientBuilder::new()
         .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(120))
+        .tcp_keepalive(Duration::from_secs(60))
         .build()
         .context("failed to build reqwest client")?;
 
@@ -565,6 +568,7 @@ async fn main() -> Result<()> {
         jobs.push(
             format!("hubris-{}", name),
             hubris::fetch_hubris_artifacts(
+                logger.clone(),
                 base_url,
                 client.clone(),
                 WORKSPACE_DIR.join(format!("tools/permslip_{}", name)),

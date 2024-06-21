@@ -3,7 +3,7 @@
 #: name = "build-and-test (ubuntu-22.04)"
 #: variety = "basic"
 #: target = "ubuntu-22.04"
-#: rust_toolchain = "1.77.2"
+#: rust_toolchain = true
 #: output_rules = [
 #:	"%/work/*",
 #:	"%/var/tmp/omicron_tmp/*",

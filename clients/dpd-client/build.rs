@@ -43,7 +43,7 @@ fn main() -> Result<()> {
                     format!("../../out/downloads/dpd-{commit}.json")
                 });
             if !Path::new(&local_path).exists() {
-                bail!("{local_path} doesn't exist; rerun `tools/ci_download_dendrite_openapi` (after updating `tools/dendrite_openapi_version` if the dendrite commit in package-manifest.toml has changed)");
+                bail!("{local_path} doesn't exist; rerun `cargo xtask download dendrite-openapi` (after updating `tools/dendrite_openapi_version` if the dendrite commit in package-manifest.toml has changed)");
             }
             println!("cargo:rerun-if-changed={local_path}");
             local_path

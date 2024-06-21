@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Types helpful for rendering [`Blueprints`].
+//! Types helpful for rendering blueprints.
 
 use omicron_common::api::external::Generation;
 use std::fmt;
@@ -18,6 +18,10 @@ pub mod constants {
     pub(super) const SUB_LAST: &str = "└─";
 
     pub const ARROW: &str = "->";
+    pub const COCKROACHDB_HEADING: &str = "COCKROACHDB SETTINGS";
+    pub const COCKROACHDB_FINGERPRINT: &str = "state fingerprint";
+    pub const COCKROACHDB_PRESERVE_DOWNGRADE: &str =
+        "cluster.preserve_downgrade_option";
     pub const METADATA_HEADING: &str = "METADATA";
     pub const CREATED_BY: &str = "created by";
     pub const CREATED_AT: &str = "created at";
@@ -29,6 +33,7 @@ pub mod constants {
     pub const NONE_PARENS: &str = "(none)";
     pub const NOT_PRESENT_IN_COLLECTION_PARENS: &str =
         "(not present in collection)";
+    pub const INVALID_VALUE_PARENS: &str = "(invalid value)";
 }
 use constants::*;
 
@@ -171,7 +176,6 @@ pub trait BpSledSubtableData {
 }
 
 /// A table specific to a sled resource, such as a zone or disk.
-/// `BpSledSubtable`s are always nested under [`BpSledTable`]s.
 pub struct BpSledSubtable {
     table_name: &'static str,
     column_names: &'static [&'static str],

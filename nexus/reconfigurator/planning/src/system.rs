@@ -10,6 +10,8 @@ use gateway_client::types::RotState;
 use gateway_client::types::SpState;
 use indexmap::IndexMap;
 use nexus_inventory::CollectionBuilder;
+use nexus_types::deployment::CockroachDbClusterVersion;
+use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledDetails;
@@ -74,6 +76,8 @@ pub struct SystemDescription {
     available_non_scrimlet_slots: BTreeSet<u16>,
     available_scrimlet_slots: BTreeSet<u16>,
     target_nexus_zone_count: usize,
+    target_cockroachdb_zone_count: usize,
+    target_cockroachdb_cluster_version: CockroachDbClusterVersion,
     service_ip_pool_ranges: Vec<IpRange>,
     internal_dns_version: Generation,
     external_dns_version: Generation,
@@ -121,6 +125,15 @@ impl SystemDescription {
 
         // Policy defaults
         let target_nexus_zone_count = NEXUS_REDUNDANCY;
+
+        // TODO-cleanup This is wrong, but we don't currently set up any CRDB
+        // nodes in our fake system, so this prevents downstream test issues
+        // with the planner thinking our system is out of date from the gate.
+        let target_cockroachdb_zone_count = 0;
+
+        let target_cockroachdb_cluster_version =
+            CockroachDbClusterVersion::POLICY;
+
         // IPs from TEST-NET-1 (RFC 5737)
         let service_ip_pool_ranges = vec![IpRange::try_from((
             "192.0.2.2".parse::<Ipv4Addr>().unwrap(),
@@ -135,6 +148,8 @@ impl SystemDescription {
             available_non_scrimlet_slots,
             available_scrimlet_slots,
             target_nexus_zone_count,
+            target_cockroachdb_zone_count,
+            target_cockroachdb_cluster_version,
             service_ip_pool_ranges,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -301,11 +316,15 @@ impl SystemDescription {
         let policy = Policy {
             service_ip_pool_ranges: self.service_ip_pool_ranges.clone(),
             target_nexus_zone_count: self.target_nexus_zone_count,
+            target_cockroachdb_zone_count: self.target_cockroachdb_zone_count,
+            target_cockroachdb_cluster_version: self
+                .target_cockroachdb_cluster_version,
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
             self.internal_dns_version,
             self.external_dns_version,
+            CockroachDbSettings::empty(),
         );
 
         for sled in self.sleds.values() {
@@ -445,8 +464,10 @@ impl Sled {
         let model = format!("model{}", unique);
         let serial = format!("serial{}", unique);
         let revision = 0;
-        let mut zpool_rng =
-            TypedUuidRng::from_seed("SystemSimultatedSled", "ZpoolUuid");
+        let mut zpool_rng = TypedUuidRng::from_seed(
+            "SystemSimultatedSled",
+            (sled_id, "ZpoolUuid"),
+        );
         let zpools: BTreeMap<_, _> = (0..nzpools)
             .map(|_| {
                 let zpool = ZpoolUuid::from(zpool_rng.next());
@@ -474,16 +495,18 @@ impl Sled {
                         model: model.clone(),
                         power_state: PowerState::A2,
                         revision,
-                        rot: RotState::Enabled {
+                        rot: RotState::V3 {
                             active: RotSlot::A,
                             pending_persistent_boot_preference: None,
                             persistent_boot_preference: RotSlot::A,
-                            slot_a_sha3_256_digest: Some(String::from(
-                                "slotAdigest1",
-                            )),
-                            slot_b_sha3_256_digest: Some(String::from(
-                                "slotBdigest1",
-                            )),
+                            slot_a_fwid: String::from("slotAdigest1"),
+                            slot_b_fwid: String::from("slotBdigest1"),
+                            stage0_fwid: String::from("stage0_fwid"),
+                            stage0next_fwid: String::from("stage0next_fwid"),
+                            slot_a_error: None,
+                            slot_b_error: None,
+                            stage0_error: None,
+                            stage0next_error: None,
                             transient_boot_preference: None,
                         },
                         serial_number: serial.clone(),
@@ -573,35 +596,86 @@ impl Sled {
             .unwrap_or(sled_agent_client::types::Baseboard::Unknown);
 
         let inventory_sp = inventory_sp.map(|sledhw| {
-            let sp_state = SpState {
-                base_mac_address: [0; 6],
-                hubris_archive_id: sledhw.sp.hubris_archive.clone(),
-                model: sledhw.baseboard_id.part_number.clone(),
-                power_state: sledhw.sp.power_state,
-                revision: sledhw.sp.baseboard_revision,
-                rot: RotState::Enabled {
-                    active: sledhw.rot.active_slot,
-                    pending_persistent_boot_preference: sledhw
-                        .rot
-                        .pending_persistent_boot_preference,
-                    persistent_boot_preference: sledhw
-                        .rot
-                        .persistent_boot_preference,
-                    slot_a_sha3_256_digest: sledhw
-                        .rot
-                        .slot_a_sha3_256_digest
-                        .clone(),
-                    slot_b_sha3_256_digest: sledhw
-                        .rot
-                        .slot_b_sha3_256_digest
-                        .clone(),
-                    transient_boot_preference: sledhw
-                        .rot
-                        .transient_boot_preference,
-                },
-                serial_number: sledhw.baseboard_id.serial_number.clone(),
+            // RotStateV3 unconditionally sets all of these
+            let sp_state = if sledhw.rot.slot_a_sha3_256_digest.is_some()
+                && sledhw.rot.slot_b_sha3_256_digest.is_some()
+                && sledhw.rot.stage0_digest.is_some()
+                && sledhw.rot.stage0next_digest.is_some()
+            {
+                SpState {
+                    base_mac_address: [0; 6],
+                    hubris_archive_id: sledhw.sp.hubris_archive.clone(),
+                    model: sledhw.baseboard_id.part_number.clone(),
+                    power_state: sledhw.sp.power_state,
+                    revision: sledhw.sp.baseboard_revision,
+                    rot: RotState::V3 {
+                        active: sledhw.rot.active_slot,
+                        pending_persistent_boot_preference: sledhw
+                            .rot
+                            .pending_persistent_boot_preference,
+                        persistent_boot_preference: sledhw
+                            .rot
+                            .persistent_boot_preference,
+                        slot_a_fwid: sledhw
+                            .rot
+                            .slot_a_sha3_256_digest
+                            .clone()
+                            .expect("slot_a_fwid should be set"),
+                        slot_b_fwid: sledhw
+                            .rot
+                            .slot_b_sha3_256_digest
+                            .clone()
+                            .expect("slot_b_fwid should be set"),
+                        stage0_fwid: sledhw
+                            .rot
+                            .stage0_digest
+                            .clone()
+                            .expect("stage0 fwid should be set"),
+                        stage0next_fwid: sledhw
+                            .rot
+                            .stage0next_digest
+                            .clone()
+                            .expect("stage0 fwid should be set"),
+                        transient_boot_preference: sledhw
+                            .rot
+                            .transient_boot_preference,
+                        slot_a_error: sledhw.rot.slot_a_error,
+                        slot_b_error: sledhw.rot.slot_b_error,
+                        stage0_error: sledhw.rot.stage0_error,
+                        stage0next_error: sledhw.rot.stage0next_error,
+                    },
+                    serial_number: sledhw.baseboard_id.serial_number.clone(),
+                }
+            } else {
+                SpState {
+                    base_mac_address: [0; 6],
+                    hubris_archive_id: sledhw.sp.hubris_archive.clone(),
+                    model: sledhw.baseboard_id.part_number.clone(),
+                    power_state: sledhw.sp.power_state,
+                    revision: sledhw.sp.baseboard_revision,
+                    rot: RotState::V2 {
+                        active: sledhw.rot.active_slot,
+                        pending_persistent_boot_preference: sledhw
+                            .rot
+                            .pending_persistent_boot_preference,
+                        persistent_boot_preference: sledhw
+                            .rot
+                            .persistent_boot_preference,
+                        slot_a_sha3_256_digest: sledhw
+                            .rot
+                            .slot_a_sha3_256_digest
+                            .clone(),
+                        slot_b_sha3_256_digest: sledhw
+                            .rot
+                            .slot_b_sha3_256_digest
+                            .clone(),
+                        transient_boot_preference: sledhw
+                            .rot
+                            .transient_boot_preference,
+                    },
+                    serial_number: sledhw.baseboard_id.serial_number.clone(),
+                }
             };
-
             (sledhw.sp.sp_slot, sp_state)
         });
 

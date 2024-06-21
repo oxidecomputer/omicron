@@ -10,6 +10,7 @@ use omicron_common::address::{
     get_64_subnet, Ipv6Subnet, AZ_PREFIX, RACK_PREFIX, SLED_PREFIX,
 };
 
+pub use crate::bootstrap::params::back_compat::RackInitializeRequestV1 as SetupServiceConfigV1;
 use crate::bootstrap::params::Certificate;
 pub use crate::bootstrap::params::RackInitializeRequest as SetupServiceConfig;
 
@@ -18,8 +19,9 @@ impl SetupServiceConfig {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(&path)
             .map_err(|err| ConfigError::Io { path: path.into(), err })?;
-        let mut raw_config: SetupServiceConfig = toml::from_str(&contents)
-            .map_err(|err| ConfigError::Parse { path: path.into(), err })?;
+        let mut raw_config =
+            SetupServiceConfig::from_toml_with_fallback(&contents)
+                .map_err(|err| ConfigError::Parse { path: path.into(), err })?;
 
         // In the same way that sled-agent itself (our caller) discovers the
         // optional config-rss.toml in a well-known path relative to its config
@@ -70,13 +72,15 @@ impl SetupServiceConfig {
     }
 
     pub fn az_subnet(&self) -> Ipv6Subnet<AZ_PREFIX> {
-        Ipv6Subnet::<AZ_PREFIX>::new(self.rack_network_config.rack_subnet.ip())
+        Ipv6Subnet::<AZ_PREFIX>::new(
+            self.rack_network_config.rack_subnet.addr(),
+        )
     }
 
     /// Returns the subnet for our rack.
     pub fn rack_subnet(&self) -> Ipv6Subnet<RACK_PREFIX> {
         Ipv6Subnet::<RACK_PREFIX>::new(
-            self.rack_network_config.rack_subnet.ip(),
+            self.rack_network_config.rack_subnet.addr(),
         )
     }
 
@@ -96,6 +100,7 @@ mod test {
     use omicron_common::address::IpRange;
     use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_common::api::internal::shared::RackNetworkConfig;
+    use oxnet::Ipv6Net;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     #[test]
@@ -123,7 +128,11 @@ mod test {
                     .unwrap(),
             },
             rack_network_config: RackNetworkConfig {
-                rack_subnet: "fd00:1122:3344:0100::".parse().unwrap(),
+                rack_subnet: Ipv6Net::new(
+                    "fd00:1122:3344:0100::".parse().unwrap(),
+                    RACK_PREFIX,
+                )
+                .unwrap(),
                 infra_ip_first: Ipv4Addr::LOCALHOST,
                 infra_ip_last: Ipv4Addr::LOCALHOST,
                 ports: Vec::new(),

@@ -695,7 +695,7 @@ impl SledTransition {
     /// (which is always considered valid).
     ///
     /// For a more descriptive listing of valid transitions, see
-    /// [`test_sled_transitions`].
+    /// `test_sled_transitions`.
     fn valid_old_policies(&self) -> Vec<SledPolicy> {
         use SledPolicy::*;
         use SledProvisionPolicy::*;
@@ -731,7 +731,7 @@ impl SledTransition {
     /// (which is always considered valid).
     ///
     /// For a more descriptive listing of valid transitions, see
-    /// [`test_sled_transitions`].
+    /// `test_sled_transitions`.
     fn valid_old_states(&self) -> Vec<SledState> {
         use SledState::*;
 

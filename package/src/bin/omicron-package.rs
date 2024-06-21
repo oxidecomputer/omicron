@@ -29,7 +29,8 @@ use std::env;
 use std::fs::create_dir_all;
 use std::io::Write;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 use swrite::{swrite, SWrite};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -348,6 +349,8 @@ async fn download_prebuilt(
     expected_digest: &Vec<u8>,
     path: &Utf8Path,
 ) -> Result<()> {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
     progress.set_message("downloading prebuilt".into());
     let url = format!(
         "https://buildomat.eng.oxide.computer/public/file/oxidecomputer/{}/image/{}/{}",
@@ -355,7 +358,15 @@ async fn download_prebuilt(
         commit,
         path.file_name().unwrap(),
     );
-    let response = reqwest::Client::new()
+    let client = CLIENT.get_or_init(|| {
+        reqwest::ClientBuilder::new()
+            .timeout(Duration::from_secs(3600))
+            .tcp_keepalive(Duration::from_secs(60))
+            .connect_timeout(Duration::from_secs(15))
+            .build()
+            .unwrap()
+    });
+    let response = client
         .get(&url)
         .send()
         .await

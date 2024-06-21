@@ -4,6 +4,8 @@
 
 //! Integration tests for operating on IP Pools
 
+use std::net::Ipv4Addr;
+
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::ResultsPage;
@@ -20,8 +22,10 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::assert_ip_pool_utilization;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_ip_pool;
+use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::create_silo;
+use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::link_ip_pool;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::object_create_error;
@@ -41,6 +45,7 @@ use nexus_types::external_api::params::IpPoolUpdate;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
 use nexus_types::external_api::shared::SiloIdentityMode;
+use nexus_types::external_api::shared::SiloRole;
 use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::IpPoolSiloLink;
@@ -54,6 +59,8 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::SimpleIdentity;
 use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
 use omicron_nexus::TestInterfaces;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use sled_agent_client::TestInterfaces as SledTestInterfaces;
 use uuid::Uuid;
 
@@ -724,6 +731,54 @@ async fn test_ip_pool_pagination(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(get_names(next_page.items), &pool_names[5..8]);
 }
 
+#[nexus_test]
+async fn test_ip_pool_silos_pagination(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    // one pool, and there should be no linked silos
+    create_pool(client, "p0").await;
+    let silos_p0 = silos_for_pool(client, "p0").await;
+    assert_eq!(silos_p0.items.len(), 0);
+
+    // create and link some silos. we need to use discoverable silos because
+    // non-discoverable silos, while linkable, are filtered out of the list of
+    // linked silos for a pool
+    let mut silo_ids = vec![];
+    for i in 1..=8 {
+        let name = format!("silo-{}", i);
+        let silo =
+            create_silo(&client, &name, true, SiloIdentityMode::SamlJit).await;
+        silo_ids.push(silo.id());
+        link_ip_pool(client, "p0", &silo.id(), false).await;
+    }
+
+    // we paginate by ID, so these should be in order to match
+    silo_ids.sort();
+
+    let base_url = "/v1/system/ip-pools/p0/silos";
+    let first_five_url = format!("{}?limit=5", base_url);
+    let first_five =
+        objects_list_page_authz::<IpPoolSiloLink>(client, &first_five_url)
+            .await;
+    assert!(first_five.next_page.is_some());
+    assert_eq!(
+        first_five.items.iter().map(|s| s.silo_id).collect::<Vec<_>>(),
+        &silo_ids[0..5]
+    );
+
+    let next_page_url = format!(
+        "{}?limit=5&page_token={}",
+        base_url,
+        first_five.next_page.unwrap()
+    );
+    let next_page =
+        objects_list_page_authz::<IpPoolSiloLink>(client, &next_page_url).await;
+    assert_eq!(
+        next_page.items.iter().map(|s| s.silo_id).collect::<Vec<_>>(),
+        &silo_ids[5..8]
+    );
+}
+
 /// helper to make tests less ugly
 fn get_names(pools: Vec<IpPool>) -> Vec<String> {
     pools.iter().map(|p| p.identity.name.to_string()).collect()
@@ -1094,52 +1149,94 @@ async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_ip_pool_list_in_silo(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let mypool_name = "mypool";
 
-    const PROJECT_NAME: &str = "myproj";
-    create_project(client, PROJECT_NAME).await;
+    let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
+    let silo: Silo = object_get(client, &silo_url).await;
 
-    // create pool with range and link (as default pool) to default silo, which
-    // is the privileged user's silo
-    let mypool_range = IpRange::V4(
-        Ipv4Range::new(
-            std::net::Ipv4Addr::new(10, 0, 0, 51),
-            std::net::Ipv4Addr::new(10, 0, 0, 52),
-        )
-        .unwrap(),
+    // manually create default pool and link to test silo, as opposed to default
+    // silo, which is what the helper would do
+    let _ = create_ip_pool(&client, "default", None).await;
+    let default_name = "default";
+    link_ip_pool(&client, default_name, &silo.identity.id, true).await;
+
+    // create other pool and link to silo
+    let other_pool_range = IpRange::V4(
+        Ipv4Range::new(Ipv4Addr::new(10, 1, 0, 1), Ipv4Addr::new(10, 1, 0, 5))
+            .unwrap(),
     );
-    create_ip_pool(client, mypool_name, Some(mypool_range)).await;
-    link_ip_pool(client, mypool_name, &DEFAULT_SILO.id(), true).await;
+    let other_name = "other-pool";
+    create_ip_pool(&client, other_name, Some(other_pool_range)).await;
+    link_ip_pool(&client, other_name, &silo.identity.id, false).await;
 
-    // create another pool and don't link it to anything
-    let otherpool_name = "other-pool";
-    let otherpool_range = IpRange::V4(
-        Ipv4Range::new(
-            std::net::Ipv4Addr::new(10, 0, 0, 53),
-            std::net::Ipv4Addr::new(10, 0, 0, 54),
-        )
-        .unwrap(),
+    // create third pool and don't link to silo
+    let unlinked_pool_range = IpRange::V4(
+        Ipv4Range::new(Ipv4Addr::new(10, 2, 0, 1), Ipv4Addr::new(10, 2, 0, 5))
+            .unwrap(),
     );
-    create_ip_pool(client, otherpool_name, Some(otherpool_range)).await;
+    let unlinked_name = "unlinked-pool";
+    create_ip_pool(&client, unlinked_name, Some(unlinked_pool_range)).await;
 
-    let list = objects_list_page_authz::<SiloIpPool>(client, "/v1/ip-pools")
+    // Create a silo user
+    let user = create_local_user(
+        client,
+        &silo,
+        &"user".parse().unwrap(),
+        params::UserPassword::LoginDisallowed,
+    )
+    .await;
+
+    // Make silo collaborator
+    grant_iam(
+        client,
+        &silo_url,
+        SiloRole::Collaborator,
+        user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let list = NexusRequest::object_get(client, "/v1/ip-pools")
+        .authn_as(AuthnMode::SiloUser(user.id))
+        .execute_and_parse_unwrap::<ResultsPage<SiloIpPool>>()
         .await
         .items;
 
-    // only mypool shows up because it's linked to my silo
-    assert_eq!(list.len(), 1);
-    assert_eq!(list[0].identity.name.to_string(), mypool_name);
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[0].identity.name.to_string(), default_name);
     assert!(list[0].is_default);
+    assert_eq!(list[1].identity.name.to_string(), other_name);
+    assert!(!list[1].is_default);
 
-    // fetch the pool directly too
-    let url = format!("/v1/ip-pools/{}", mypool_name);
-    let pool = object_get::<SiloIpPool>(client, &url).await;
-    assert_eq!(pool.identity.name.as_str(), mypool_name);
+    // fetch the pools directly too
+    let url = format!("/v1/ip-pools/{}", default_name);
+    let pool = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::SiloUser(user.id))
+        .execute_and_parse_unwrap::<SiloIpPool>()
+        .await;
+    assert_eq!(pool.identity.name.as_str(), default_name);
     assert!(pool.is_default);
 
+    let url = format!("/v1/ip-pools/{}", other_name);
+    let pool = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::SiloUser(user.id))
+        .execute_and_parse_unwrap::<SiloIpPool>()
+        .await;
+    assert_eq!(pool.identity.name.as_str(), other_name);
+    assert!(!pool.is_default);
+
     // fetching the other pool directly 404s
-    let url = format!("/v1/ip-pools/{}", otherpool_name);
-    object_get_error(client, &url, StatusCode::NOT_FOUND).await;
+    let url = format!("/v1/ip-pools/{}", unlinked_name);
+    let _error = NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, &url)
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<HttpErrorResponseBody>()
+    .unwrap();
+    dbg!(_error);
 }
 
 #[nexus_test]
@@ -1206,6 +1303,7 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
     const INSTANCE_NAME: &str = "myinst";
     create_project(client, PROJECT_NAME).await;
     let instance = create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // We should not be able to delete the range, since there's an external IP
     // address in use out of it.
@@ -1245,7 +1343,7 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
 
     // Simulate the transition, wait until it is in fact stopped.
     let sa = nexus
-        .instance_sled_by_id(&instance.identity.id)
+        .instance_sled_by_id(&instance_id)
         .await
         .unwrap()
         .expect("running instance should be on a sled");

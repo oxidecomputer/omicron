@@ -3,7 +3,7 @@
 #: name = "clippy (helios)"
 #: variety = "basic"
 #: target = "helios-2.0"
-#: rust_toolchain = "1.77.2"
+#: rust_toolchain = true
 #: output_rules = []
 
 # Run clippy on illumos (not just other systems) because a bunch of our code
@@ -30,4 +30,4 @@ ptime -m bash ./tools/install_builder_prerequisites.sh -y
 banner clippy
 export CARGO_INCREMENTAL=0
 ptime -m cargo xtask clippy
-ptime -m cargo doc
+RUSTDOCFLAGS="--document-private-items -D warnings" ptime -m cargo doc --workspace --no-deps

@@ -54,9 +54,10 @@ impl BlueprintExecutor {
         let update = self.rx_blueprint.borrow_and_update().clone();
 
         let Some(update) = update else {
-            warn!(&opctx.log,
-                      "Blueprint execution: skipped";
-                      "reason" => "no blueprint");
+            warn!(
+                &opctx.log, "Blueprint execution: skipped";
+                "reason" => "no blueprint",
+            );
             return json!({"error": "no blueprint" });
         };
 
@@ -123,7 +124,7 @@ mod test {
     use nexus_types::deployment::{
         blueprint_zone_type, Blueprint, BlueprintPhysicalDisksConfig,
         BlueprintTarget, BlueprintZoneConfig, BlueprintZoneDisposition,
-        BlueprintZoneType, BlueprintZonesConfig,
+        BlueprintZoneType, BlueprintZonesConfig, CockroachDbPreserveDowngrade,
     };
     use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::OmicronZoneDataset;
@@ -165,9 +166,12 @@ mod test {
                 blueprint_zones,
                 blueprint_disks,
                 sled_state,
+                cockroachdb_setting_preserve_downgrade:
+                    CockroachDbPreserveDowngrade::DoNotModify,
                 parent_blueprint_id: None,
                 internal_dns_version: dns_version,
                 external_dns_version: dns_version,
+                cockroachdb_fingerprint: String::new(),
                 time_created: chrono::Utc::now(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),

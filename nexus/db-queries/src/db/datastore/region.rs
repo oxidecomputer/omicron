@@ -13,6 +13,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Dataset;
+use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::Region;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -22,8 +23,32 @@ use nexus_types::external_api::params;
 use omicron_common::api::external;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::LookupResult;
 use slog::Logger;
 use uuid::Uuid;
+
+pub enum RegionAllocationFor {
+    /// Allocate region(s) for a disk volume
+    DiskVolume { volume_id: Uuid },
+
+    /// Allocate region(s) for a snapshot volume, which may have read-only
+    /// targets.
+    SnapshotVolume { volume_id: Uuid, snapshot_id: Uuid },
+}
+
+/// Describe the region(s) to be allocated
+pub enum RegionAllocationParameters<'a> {
+    FromDiskSource {
+        disk_source: &'a params::DiskSource,
+        size: external::ByteCount,
+    },
+
+    FromRaw {
+        block_size: u64,
+        blocks_per_extent: u64,
+        extent_count: u64,
+    },
+}
 
 impl DataStore {
     pub(super) fn get_allocated_regions_query(
@@ -66,6 +91,22 @@ impl DataStore {
                 &*self.pool_connection_unauthorized().await?,
             )
             .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn get_region_optional(
+        &self,
+        region_id: Uuid,
+    ) -> Result<Option<Region>, Error> {
+        use db::schema::region::dsl;
+        dsl::region
+            .filter(dsl::id.eq(region_id))
+            .select(Region::as_select())
+            .get_result_async::<Region>(
+                &*self.pool_connection_unauthorized().await?,
+            )
+            .await
+            .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
@@ -138,9 +179,8 @@ impl DataStore {
     ) -> Result<Vec<(Dataset, Region)>, Error> {
         self.arbitrary_region_allocate(
             opctx,
-            volume_id,
-            disk_source,
-            size,
+            RegionAllocationFor::DiskVolume { volume_id },
+            RegionAllocationParameters::FromDiskSource { disk_source, size },
             allocation_strategy,
             REGION_REDUNDANCY_THRESHOLD,
         )
@@ -157,25 +197,60 @@ impl DataStore {
     /// level for a volume. If a single region is allocated in isolation this
     /// could land on the same dataset as one of the existing volume's regions.
     ///
+    /// For allocating for snapshot volumes, it's important to take into account
+    /// `region_snapshot`s that may be used as some of the targets in the region
+    /// set, representing read-only downstairs served out of a ZFS snapshot
+    /// instead of a dataset.
+    ///
     /// Returns the allocated regions, as well as the datasets to which they
     /// belong.
     pub async fn arbitrary_region_allocate(
         &self,
         opctx: &OpContext,
-        volume_id: Uuid,
-        disk_source: &params::DiskSource,
-        size: external::ByteCount,
+        region_for: RegionAllocationFor,
+        region_parameters: RegionAllocationParameters<'_>,
         allocation_strategy: &RegionAllocationStrategy,
         num_regions_required: usize,
     ) -> Result<Vec<(Dataset, Region)>, Error> {
-        let block_size =
-            self.get_block_size_from_disk_source(opctx, &disk_source).await?;
-        let (blocks_per_extent, extent_count) =
-            Self::get_crucible_allocation(&block_size, size);
+        let (volume_id, maybe_snapshot_id) = match region_for {
+            RegionAllocationFor::DiskVolume { volume_id } => (volume_id, None),
+
+            RegionAllocationFor::SnapshotVolume { volume_id, snapshot_id } => {
+                (volume_id, Some(snapshot_id))
+            }
+        };
+
+        let (block_size, blocks_per_extent, extent_count) =
+            match region_parameters {
+                RegionAllocationParameters::FromDiskSource {
+                    disk_source,
+                    size,
+                } => {
+                    let block_size = self
+                        .get_block_size_from_disk_source(opctx, &disk_source)
+                        .await?;
+
+                    let (blocks_per_extent, extent_count) =
+                        Self::get_crucible_allocation(&block_size, size);
+
+                    (
+                        u64::from(block_size.to_bytes()),
+                        blocks_per_extent,
+                        extent_count,
+                    )
+                }
+
+                RegionAllocationParameters::FromRaw {
+                    block_size,
+                    blocks_per_extent,
+                    extent_count,
+                } => (block_size, blocks_per_extent, extent_count),
+            };
 
         let query = crate::db::queries::region_allocation::allocation_query(
             volume_id,
-            u64::from(block_size.to_bytes()),
+            maybe_snapshot_id,
+            block_size,
             blocks_per_extent,
             extent_count,
             allocation_strategy,
@@ -193,6 +268,7 @@ impl DataStore {
             self.log,
             "Allocated regions for volume";
             "volume_id" => %volume_id,
+            "maybe_snapshot_id" => ?maybe_snapshot_id,
             "datasets_and_regions" => ?dataset_and_regions,
         );
 
@@ -323,6 +399,40 @@ impl DataStore {
         } else {
             Ok(0)
         }
+    }
+
+    /// Find regions on expunged disks
+    pub async fn find_regions_on_expunged_physical_disks(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<Vec<Region>> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::physical_disk::dsl as physical_disk_dsl;
+        use db::schema::region::dsl as region_dsl;
+        use db::schema::zpool::dsl as zpool_dsl;
+
+        region_dsl::region
+            .filter(region_dsl::dataset_id.eq_any(
+                dataset_dsl::dataset
+                    .filter(dataset_dsl::time_deleted.is_null())
+                    .filter(dataset_dsl::pool_id.eq_any(
+                        zpool_dsl::zpool
+                            .filter(zpool_dsl::time_deleted.is_null())
+                            .filter(zpool_dsl::physical_disk_id.eq_any(
+                                physical_disk_dsl::physical_disk
+                                    .filter(physical_disk_dsl::disk_policy.eq(PhysicalDiskPolicy::Expunged))
+                                    .select(physical_disk_dsl::id)
+                            ))
+                            .select(zpool_dsl::id)
+                    ))
+                    .select(dataset_dsl::id)
+            ))
+            .select(Region::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
 

@@ -15,6 +15,7 @@
 // NOTE: emanates from Tabled macros
 #![allow(clippy::useless_vec)]
 
+use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
 use crate::Omdb;
@@ -25,7 +26,9 @@ use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
 use camino::Utf8PathBuf;
+use chrono::DateTime;
 use chrono::SecondsFormat;
+use chrono::Utc;
 use clap::ArgAction;
 use clap::Args;
 use clap::Subcommand;
@@ -39,6 +42,9 @@ use diesel::NullableExpressionMethods;
 use diesel::OptionalExtension;
 use diesel::TextExpressionMethods;
 use gateway_client::types::SpType;
+use indicatif::ProgressBar;
+use indicatif::ProgressDrawTarget;
+use indicatif::ProgressStyle;
 use ipnetwork::IpNetwork;
 use nexus_config::PostgresConfigWithUrl;
 use nexus_db_model::Dataset;
@@ -59,12 +65,18 @@ use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_model::Probe;
 use nexus_db_model::Project;
 use nexus_db_model::Region;
+use nexus_db_model::RegionReplacement;
+use nexus_db_model::RegionReplacementState;
+use nexus_db_model::RegionReplacementStep;
+use nexus_db_model::RegionReplacementStepType;
 use nexus_db_model::RegionSnapshot;
 use nexus_db_model::Sled;
 use nexus_db_model::Snapshot;
 use nexus_db_model::SnapshotState;
 use nexus_db_model::SwCaboose;
 use nexus_db_model::SwRotPage;
+use nexus_db_model::UpstairsRepairNotification;
+use nexus_db_model::UpstairsRepairProgress;
 use nexus_db_model::Vmm;
 use nexus_db_model::Volume;
 use nexus_db_model::VpcSubnet;
@@ -99,6 +111,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::MacAddr;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_client::types::VolumeConstructionRequest;
 use std::borrow::Cow;
@@ -117,12 +130,18 @@ use uuid::Uuid;
 const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
 const NOT_ON_SLED_MSG: &str = "<not on any sled>";
 
-struct MaybePropolisId(Option<Uuid>);
-struct MaybeSledId(Option<Uuid>);
+struct MaybePropolisId(Option<PropolisUuid>);
+struct MaybeSledId(Option<SledUuid>);
 
 impl From<&InstanceAndActiveVmm> for MaybePropolisId {
     fn from(value: &InstanceAndActiveVmm) -> Self {
-        Self(value.instance().runtime().propolis_id)
+        Self(
+            value
+                .instance()
+                .runtime()
+                .propolis_id
+                .map(PropolisUuid::from_untyped_uuid),
+        )
     }
 }
 
@@ -270,6 +289,9 @@ enum DbCommands {
     Inventory(InventoryArgs),
     /// Save the current Reconfigurator inputs to a file
     ReconfiguratorSave(ReconfiguratorSaveArgs),
+    /// Query for information about region replacements, optionally manually
+    /// triggering one.
+    RegionReplacement(RegionReplacementArgs),
     /// Print information about sleds
     Sleds(SledsArgs),
     /// Print information about customer instances
@@ -435,6 +457,47 @@ struct SledsArgs {
 }
 
 #[derive(Debug, Args)]
+struct RegionReplacementArgs {
+    #[command(subcommand)]
+    command: RegionReplacementCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum RegionReplacementCommands {
+    /// List region replacement requests
+    List(RegionReplacementListArgs),
+    /// Show current region replacements and their status
+    Status,
+    /// Show detailed information for a region replacement
+    Info(RegionReplacementInfoArgs),
+    /// Manually request a region replacement
+    Request(RegionReplacementRequestArgs),
+}
+
+#[derive(Debug, Args)]
+struct RegionReplacementListArgs {
+    /// Only show region replacement requests in this state
+    #[clap(long)]
+    state: Option<RegionReplacementState>,
+
+    /// Only show region replacement requests after a certain date
+    #[clap(long)]
+    after: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Args)]
+struct RegionReplacementInfoArgs {
+    /// The UUID of the region replacement request
+    replacement_id: Uuid,
+}
+
+#[derive(Debug, Args)]
+struct RegionReplacementRequestArgs {
+    /// The UUID of the region to replace
+    region_id: Uuid,
+}
+
+#[derive(Debug, Args)]
 struct NetworkArgs {
     #[command(subcommand)]
     command: NetworkCommands,
@@ -539,6 +602,40 @@ impl DbArgs {
                     &opctx,
                     &datastore,
                     reconfig_save_args,
+                )
+                .await
+            }
+            DbCommands::RegionReplacement(RegionReplacementArgs {
+                command: RegionReplacementCommands::List(args),
+            }) => {
+                cmd_db_region_replacement_list(
+                    &datastore,
+                    &self.fetch_opts,
+                    args,
+                )
+                .await
+            }
+            DbCommands::RegionReplacement(RegionReplacementArgs {
+                command: RegionReplacementCommands::Status,
+            }) => {
+                cmd_db_region_replacement_status(
+                    &opctx,
+                    &datastore,
+                    &self.fetch_opts,
+                )
+                .await
+            }
+            DbCommands::RegionReplacement(RegionReplacementArgs {
+                command: RegionReplacementCommands::Info(args),
+            }) => {
+                cmd_db_region_replacement_info(&opctx, &datastore, args).await
+            }
+            DbCommands::RegionReplacement(RegionReplacementArgs {
+                command: RegionReplacementCommands::Request(args),
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_db_region_replacement_request(
+                    &opctx, &datastore, args, token,
                 )
                 .await
             }
@@ -950,7 +1047,7 @@ async fn cmd_db_disk_info(
             let my_sled_id = instance.sled_id().unwrap();
 
             let (_, my_sled) = LookupPath::new(opctx, datastore)
-                .sled_id(my_sled_id)
+                .sled_id(my_sled_id.into_untyped_uuid())
                 .fetch()
                 .await
                 .context("failed to look up sled")?;
@@ -1273,16 +1370,6 @@ async fn cmd_db_disk_physical(
 
 // SERVICES
 
-#[derive(Tabled)]
-#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-struct ServiceInstanceRow {
-    #[tabled(rename = "SERVICE")]
-    kind: String,
-    instance_id: Uuid,
-    addr: String,
-    sled_serial: String,
-}
-
 // Snapshots
 fn format_snapshot(state: &SnapshotState) -> impl Display {
     match state {
@@ -1436,16 +1523,330 @@ async fn cmd_db_snapshot_info(
     Ok(())
 }
 
-// SLEDS
+/// List all region replacement requests
+async fn cmd_db_region_replacement_list(
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &RegionReplacementListArgs,
+) -> Result<(), anyhow::Error> {
+    let ctx = || "listing region replacement requests".to_string();
+    let limit = fetch_opts.fetch_limit;
 
-#[derive(Tabled)]
-#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-struct ServiceInstanceSledRow {
-    #[tabled(rename = "SERVICE")]
-    kind: String,
-    instance_id: Uuid,
-    addr: String,
+    let requests: Vec<RegionReplacement> = {
+        let conn = datastore.pool_connection_for_tests().await?;
+
+        use db::schema::region_replacement::dsl;
+
+        match (args.state, args.after) {
+            (Some(state), Some(after)) => {
+                dsl::region_replacement
+                    .filter(dsl::replacement_state.eq(state))
+                    .filter(dsl::request_time.gt(after))
+                    .limit(i64::from(u32::from(limit)))
+                    .select(RegionReplacement::as_select())
+                    .get_results_async(&*conn)
+                    .await?
+            }
+
+            (Some(state), None) => {
+                dsl::region_replacement
+                    .filter(dsl::replacement_state.eq(state))
+                    .limit(i64::from(u32::from(limit)))
+                    .select(RegionReplacement::as_select())
+                    .get_results_async(&*conn)
+                    .await?
+            }
+
+            (None, Some(after)) => {
+                dsl::region_replacement
+                    .filter(dsl::request_time.gt(after))
+                    .limit(i64::from(u32::from(limit)))
+                    .select(RegionReplacement::as_select())
+                    .get_results_async(&*conn)
+                    .await?
+            }
+
+            (None, None) => {
+                dsl::region_replacement
+                    .limit(i64::from(u32::from(limit)))
+                    .select(RegionReplacement::as_select())
+                    .get_results_async(&*conn)
+                    .await?
+            }
+        }
+    };
+
+    check_limit(&requests, limit, ctx);
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct Row {
+        pub id: Uuid,
+        pub request_time: DateTime<Utc>,
+        pub replacement_state: String,
+    }
+
+    let mut rows = Vec::with_capacity(requests.len());
+
+    for request in requests {
+        rows.push(Row {
+            id: request.id,
+            request_time: request.request_time,
+            replacement_state: format!("{:?}", request.replacement_state),
+        });
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .with(tabled::settings::Panel::header("Region replacement requests"))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
 }
+
+/// Display all non-complete region replacements
+async fn cmd_db_region_replacement_status(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+) -> Result<(), anyhow::Error> {
+    let ctx = || "listing region replacement requests".to_string();
+    let limit = fetch_opts.fetch_limit;
+
+    let requests: Vec<RegionReplacement> = {
+        let conn = datastore.pool_connection_for_tests().await?;
+
+        use db::schema::region_replacement::dsl;
+
+        dsl::region_replacement
+            .filter(dsl::replacement_state.ne(RegionReplacementState::Complete))
+            .limit(i64::from(u32::from(limit)))
+            .select(RegionReplacement::as_select())
+            .get_results_async(&*conn)
+            .await?
+    };
+
+    check_limit(&requests, limit, ctx);
+
+    for request in requests {
+        println!("{}:", request.id);
+        println!();
+
+        println!("      started: {}", request.request_time);
+        println!("        state: {:?}", request.replacement_state);
+        println!("old region id: {}", request.old_region_id);
+        println!("new region id: {:?}", request.new_region_id);
+        println!();
+
+        if let Some(new_region_id) = request.new_region_id {
+            // Find the most recent upstairs repair notification where the
+            // downstairs being repaired is a "new" region id. This will give us
+            // the most recent repair id.
+            let maybe_repair: Option<UpstairsRepairNotification> = datastore
+                .most_recent_started_repair_notification(opctx, new_region_id)
+                .await?;
+
+            if let Some(repair) = maybe_repair {
+                let maybe_repair_progress: Option<UpstairsRepairProgress> =
+                    datastore
+                        .most_recent_repair_progress(
+                            opctx,
+                            repair.repair_id.into(),
+                        )
+                        .await?;
+
+                if let Some(repair_progress) = maybe_repair_progress {
+                    let bar = ProgressBar::with_draw_target(
+                        Some(repair_progress.total_items as u64),
+                        ProgressDrawTarget::stdout(),
+                    )
+                    .with_style(ProgressStyle::with_template(
+                        "progress:\t{wide_bar:.green} [{pos:>7}/{len:>7}]",
+                    )?)
+                    .with_position(repair_progress.current_item as u64);
+
+                    bar.abandon();
+
+                    println!();
+                }
+            }
+        }
+
+        println!();
+    }
+
+    Ok(())
+}
+
+/// Show details for a single region replacement
+async fn cmd_db_region_replacement_info(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &RegionReplacementInfoArgs,
+) -> Result<(), anyhow::Error> {
+    let request = datastore
+        .get_region_replacement_request_by_id(opctx, args.replacement_id)
+        .await?;
+
+    // Show details
+    println!("      started: {}", request.request_time);
+    println!("        state: {:?}", request.replacement_state);
+    println!("old region id: {}", request.old_region_id);
+    println!("new region id: {:?}", request.new_region_id);
+    println!();
+
+    if let Some(new_region_id) = request.new_region_id {
+        // Find all related notifications
+        let notifications: Vec<UpstairsRepairNotification> = datastore
+            .repair_notifications_for_region(opctx, new_region_id)
+            .await?;
+
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct Row {
+            pub time: DateTime<Utc>,
+
+            pub repair_id: String,
+            pub repair_type: String,
+
+            pub upstairs_id: String,
+            pub session_id: String,
+
+            pub notification_type: String,
+        }
+
+        let mut rows = Vec::with_capacity(notifications.len());
+
+        for notification in &notifications {
+            rows.push(Row {
+                time: notification.time,
+                repair_id: notification.repair_id.to_string(),
+                repair_type: format!("{:?}", notification.repair_type),
+                upstairs_id: notification.upstairs_id.to_string(),
+                session_id: notification.session_id.to_string(),
+                notification_type: format!(
+                    "{:?}",
+                    notification.notification_type
+                ),
+            });
+        }
+
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .with(tabled::settings::Panel::header("Repair notifications"))
+            .to_string();
+
+        println!("{}", table);
+
+        println!();
+
+        // Use the most recent notification to get the most recent repair ID,
+        // and use that to search for progress.
+
+        let maybe_repair: Option<UpstairsRepairNotification> = datastore
+            .most_recent_started_repair_notification(opctx, new_region_id)
+            .await?;
+
+        if let Some(repair) = maybe_repair {
+            let maybe_repair_progress: Option<UpstairsRepairProgress> =
+                datastore
+                    .most_recent_repair_progress(opctx, repair.repair_id.into())
+                    .await?;
+
+            if let Some(repair_progress) = maybe_repair_progress {
+                let bar = ProgressBar::with_draw_target(
+                    Some(repair_progress.total_items as u64),
+                    ProgressDrawTarget::stdout(),
+                )
+                .with_style(ProgressStyle::with_template(
+                    "progress:\t{wide_bar:.green} [{pos:>7}/{len:>7}]",
+                )?)
+                .with_position(repair_progress.current_item as u64);
+
+                bar.abandon();
+
+                println!();
+            }
+        }
+
+        // Find the steps that the driver saga has committed to the DB.
+
+        let steps: Vec<RegionReplacementStep> = datastore
+            .region_replacement_request_steps(opctx, args.replacement_id)
+            .await?;
+
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct StepRow {
+            pub time: DateTime<Utc>,
+            pub step_type: String,
+            pub details: String,
+        }
+
+        let mut rows = Vec::with_capacity(steps.len());
+
+        for step in steps {
+            rows.push(StepRow {
+                time: step.step_time,
+                step_type: format!("{:?}", step.step_type),
+                details: match step.step_type {
+                    RegionReplacementStepType::Propolis => {
+                        format!(
+                            "instance {:?} vmm {:?}",
+                            step.step_associated_instance_id,
+                            step.step_associated_vmm_id,
+                        )
+                    }
+
+                    RegionReplacementStepType::Pantry => {
+                        format!(
+                            "address {:?}:{:?} job {:?}",
+                            step.step_associated_pantry_ip,
+                            step.step_associated_pantry_port,
+                            step.step_associated_pantry_job_id,
+                        )
+                    }
+                },
+            });
+        }
+
+        println!();
+
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .with(tabled::settings::Panel::header("Repair steps"))
+            .to_string();
+
+        println!("{}", table);
+    }
+
+    Ok(())
+}
+
+/// Manually request a region replacement
+async fn cmd_db_region_replacement_request(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &RegionReplacementRequestArgs,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let region = datastore.get_region(args.region_id).await?;
+
+    let request_id = datastore
+        .create_region_replacement_request_for_region(opctx, &region)
+        .await?;
+
+    println!("region replacement {request_id} created");
+
+    Ok(())
+}
+
+// SLEDS
 
 #[derive(Tabled)]
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -1554,7 +1955,7 @@ async fn cmd_db_instances(
     check_limit(&instances, limit, ctx);
 
     let mut rows = Vec::new();
-    let mut h_to_s: HashMap<Uuid, String> = HashMap::new();
+    let mut h_to_s: HashMap<SledUuid, String> = HashMap::new();
 
     for i in instances {
         let host_serial = if i.vmm().is_some() {
@@ -1562,7 +1963,7 @@ async fn cmd_db_instances(
                 h_to_s.entry(i.sled_id().unwrap())
             {
                 let (_, my_sled) = LookupPath::new(opctx, datastore)
-                    .sled_id(i.sled_id().unwrap())
+                    .sled_id(i.sled_id().unwrap().into_untyped_uuid())
                     .fetch()
                     .await
                     .context("failed to look up sled")?;

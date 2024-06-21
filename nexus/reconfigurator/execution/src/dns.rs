@@ -477,6 +477,9 @@ mod test {
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZonesConfig;
+    use nexus_types::deployment::CockroachDbClusterVersion;
+    use nexus_types::deployment::CockroachDbPreserveDowngrade;
+    use nexus_types::deployment::CockroachDbSettings;
     use nexus_types::deployment::SledFilter;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
@@ -490,6 +493,7 @@ mod test {
     use omicron_common::address::get_switch_zone_address;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
+    use omicron_common::address::COCKROACHDB_REDUNDANCY;
     use omicron_common::address::NEXUS_REDUNDANCY;
     use omicron_common::address::RACK_PREFIX;
     use omicron_common::address::SLED_PREFIX;
@@ -498,6 +502,7 @@ mod test {
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use sled_agent_client::ZoneKind;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
@@ -596,9 +601,12 @@ mod test {
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
             sled_state,
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
             internal_dns_version: initial_dns_generation,
             external_dns_version: Generation::new(),
+            cockroachdb_fingerprint: String::new(),
             time_created: now_db_precision(),
             creator: "test-suite".to_string(),
             comment: "test blueprint".to_string(),
@@ -1147,11 +1155,14 @@ mod test {
             .expect("fetching initial external DNS");
 
         // Fetch the initial blueprint installed during rack initialization.
-        let (_blueprint_target, blueprint) = datastore
+        let (_blueprint_target, mut blueprint) = datastore
             .blueprint_target_get_current_full(&opctx)
             .await
             .expect("failed to read current target blueprint");
         eprintln!("blueprint: {}", blueprint.display());
+        // Override the CockroachDB settings so that we don't try to set them.
+        blueprint.cockroachdb_setting_preserve_downgrade =
+            CockroachDbPreserveDowngrade::DoNotModify;
 
         // Now, execute the initial blueprint.
         let overrides = Overridables::for_test(cptestctx);
@@ -1222,9 +1233,13 @@ mod test {
                 .into(),
                 // These are not used because we're not actually going through
                 // the planner.
+                cockroachdb_settings: &CockroachDbSettings::empty(),
                 external_ip_rows: &[],
                 service_nic_rows: &[],
                 target_nexus_zone_count: NEXUS_REDUNDANCY,
+                target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
+                target_cockroachdb_cluster_version:
+                    CockroachDbClusterVersion::POLICY,
                 log,
             }
             .build()
@@ -1248,11 +1263,11 @@ mod test {
         .unwrap();
         let sled_id =
             blueprint.sleds().next().expect("expected at least one sled");
-        let nalready = builder.sled_num_nexus_zones(sled_id);
+        let nalready = builder.sled_num_zones_of_kind(sled_id, ZoneKind::Nexus);
         let rv = builder
             .sled_ensure_zone_multiple_nexus(sled_id, nalready + 1)
             .unwrap();
-        assert_eq!(rv, EnsureMultiple::Added(1));
+        assert_eq!(rv, EnsureMultiple::Changed { added: 1, removed: 0 });
         let blueprint2 = builder.build();
         eprintln!("blueprint2: {}", blueprint2.display());
         // Figure out the id of the new zone.

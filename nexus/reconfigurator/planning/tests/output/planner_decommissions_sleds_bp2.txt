@@ -7,16 +7,16 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
     ----------------------------------------------------------------------
     vendor        model        serial                                     
     ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-088f76ef-e985-41fd-8630-c321ed8cca37
-    fake-vendor   fake-model   serial-30d0e693-dec4-402f-baa0-d6d9a93c98a7
-    fake-vendor   fake-model   serial-32e90a17-7080-4c33-a94d-05f4bfb5d368
-    fake-vendor   fake-model   serial-44473266-e28a-43fa-9314-c3416b8b3c14
-    fake-vendor   fake-model   serial-53372ece-d666-4f5b-8f25-286e36242088
-    fake-vendor   fake-model   serial-795061c9-db7b-404a-a2a3-0dad5fdfceb1
-    fake-vendor   fake-model   serial-7b8bc126-4ff8-434f-a949-e98eda2709a5
-    fake-vendor   fake-model   serial-b644318e-da11-46e1-b650-47a067e6024c
-    fake-vendor   fake-model   serial-bb2b397b-a3f5-4142-a433-4f2ab5fe284b
-    fake-vendor   fake-model   serial-bdbf1352-725d-4b17-98d5-4d7105726721
+    fake-vendor   fake-model   serial-1e2ec79e-9c11-4133-ac77-e0b994a507d5
+    fake-vendor   fake-model   serial-440ae69d-5e2e-4539-91d0-e2930bdd7203
+    fake-vendor   fake-model   serial-4e91d4a3-bb6c-44bb-bd4e-bf8913c1ba2b
+    fake-vendor   fake-model   serial-67de3a80-29cb-4066-b743-e285a2ca1f4e
+    fake-vendor   fake-model   serial-9139b70f-c1d3-475d-8f02-7c9acba52b2b
+    fake-vendor   fake-model   serial-95fbb110-5272-4646-ab50-21b31b7cde23
+    fake-vendor   fake-model   serial-9bf35cd7-4938-4c34-8189-288b3195cb64
+    fake-vendor   fake-model   serial-9d833141-18a1-4f24-8a34-6076c026aa87
+    fake-vendor   fake-model   serial-a279461f-a7b9-413f-a79f-cb4dab4c3fce
+    fake-vendor   fake-model   serial-ff7e002b-3ad8-4d45-b03a-c46ef0ac8e59
 
 
     omicron zones at generation 2:
@@ -44,16 +44,16 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
     ----------------------------------------------------------------------
     vendor        model        serial                                     
     ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-088f76ef-e985-41fd-8630-c321ed8cca37
-    fake-vendor   fake-model   serial-30d0e693-dec4-402f-baa0-d6d9a93c98a7
-    fake-vendor   fake-model   serial-32e90a17-7080-4c33-a94d-05f4bfb5d368
-    fake-vendor   fake-model   serial-44473266-e28a-43fa-9314-c3416b8b3c14
-    fake-vendor   fake-model   serial-53372ece-d666-4f5b-8f25-286e36242088
-    fake-vendor   fake-model   serial-795061c9-db7b-404a-a2a3-0dad5fdfceb1
-    fake-vendor   fake-model   serial-7b8bc126-4ff8-434f-a949-e98eda2709a5
-    fake-vendor   fake-model   serial-b644318e-da11-46e1-b650-47a067e6024c
-    fake-vendor   fake-model   serial-bb2b397b-a3f5-4142-a433-4f2ab5fe284b
-    fake-vendor   fake-model   serial-bdbf1352-725d-4b17-98d5-4d7105726721
+    fake-vendor   fake-model   serial-07068f19-1ff2-48da-8e72-874780df2339
+    fake-vendor   fake-model   serial-0f12e6ee-41d2-4eb0-813f-ba5240900ded
+    fake-vendor   fake-model   serial-0fdb4a39-3cd5-47a0-9064-e7f3c285af61
+    fake-vendor   fake-model   serial-13572832-83ad-40d6-896a-751f7e53f4f6
+    fake-vendor   fake-model   serial-3602bdd9-f7bb-4490-87a6-8f061f7712f5
+    fake-vendor   fake-model   serial-65707837-95a4-45d7-84e6-8b9a4da215f1
+    fake-vendor   fake-model   serial-7a43b2b0-3846-401c-8317-d555715a00f7
+    fake-vendor   fake-model   serial-855e3ef1-6929-4e21-8451-0e62bd93c7c9
+    fake-vendor   fake-model   serial-8adcf329-4cee-4075-b798-28b5add1edf5
+    fake-vendor   fake-model   serial-99e926d6-bd42-4cde-9f63-5ecc7ea14322
 
 
     omicron zones at generation 3:
@@ -97,10 +97,14 @@ WARNING: Zones exist without physical disks!
 
 
 
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none)
+    cluster.preserve_downgrade_option:   (do not modify)
+
  METADATA:
     created by:::::::::::   test_blueprint2
     created at:::::::::::   1970-01-01T00:00:00.000Z
-    comment::::::::::::::   sled a1b477db-b629-48eb-911d-1ccdafca75b9 (sled policy is expunged): 12 zones expunged
+    comment::::::::::::::   sled a1b477db-b629-48eb-911d-1ccdafca75b9: expunged 12 zones because: sled policy is expunged
     internal DNS version:   1
     external DNS version:   1
 

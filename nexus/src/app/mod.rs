@@ -44,6 +44,7 @@ pub(crate) mod background;
 mod bfd;
 mod bgp;
 mod certificate;
+mod crucible;
 mod deployment;
 mod device_auth;
 mod disk;
@@ -200,6 +201,9 @@ pub struct Nexus {
 
     /// Default Crucible region allocation strategy
     default_region_allocation_strategy: RegionAllocationStrategy,
+
+    /// Channel for notifying background task of change to opte v2p state
+    v2p_notification_tx: tokio::sync::watch::Sender<()>,
 }
 
 impl Nexus {
@@ -373,7 +377,7 @@ impl Nexus {
             log.new(o!("component" => "DataLoader")),
             Arc::clone(&authz),
             authn::Context::internal_db_init(),
-            Arc::clone(&db_datastore),
+            Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
 
         let populate_args = PopulateArgs::new(rack_id);
@@ -387,8 +391,10 @@ impl Nexus {
             log.new(o!("component" => "BackgroundTasks")),
             Arc::clone(&authz),
             authn::Context::internal_api(),
-            Arc::clone(&db_datastore),
+            Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
+
+        let v2p_watcher_channel = tokio::sync::watch::channel(());
 
         let (saga_request, mut saga_request_recv) = SagaRequest::channel();
 
@@ -400,6 +406,7 @@ impl Nexus {
             config.deployment.id,
             resolver.clone(),
             saga_request,
+            v2p_watcher_channel.clone(),
             producer_registry,
         );
 
@@ -433,13 +440,15 @@ impl Nexus {
                 log.new(o!("component" => "InstanceAllocator")),
                 Arc::clone(&authz),
                 authn::Context::internal_read(),
-                Arc::clone(&db_datastore),
+                Arc::clone(&db_datastore)
+                    as Arc<dyn nexus_auth::storage::Storage>,
             ),
             opctx_external_authn: OpContext::for_background(
                 log.new(o!("component" => "ExternalAuthn")),
                 Arc::clone(&authz),
                 authn::Context::external_authn(),
-                Arc::clone(&db_datastore),
+                Arc::clone(&db_datastore)
+                    as Arc<dyn nexus_auth::storage::Storage>,
             ),
             samael_max_issue_delay: std::sync::Mutex::new(None),
             internal_resolver: resolver,
@@ -453,6 +462,7 @@ impl Nexus {
                 .pkg
                 .default_region_allocation_strategy
                 .clone(),
+            v2p_notification_tx: v2p_watcher_channel.0,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -461,7 +471,7 @@ impl Nexus {
             log.new(o!("component" => "SagaRecoverer")),
             Arc::clone(&authz),
             authn::Context::internal_saga_recovery(),
-            Arc::clone(&db_datastore),
+            Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
         let saga_logger = nexus.log.new(o!("saga_type" => "recovery"));
         let recovery_task = db::recover(
@@ -693,7 +703,8 @@ impl Nexus {
             self.log.new(o!("component" => "ServiceBalancer")),
             Arc::clone(&self.authz),
             authn::Context::internal_service_balancer(),
-            Arc::clone(&self.db_datastore),
+            Arc::clone(&self.db_datastore)
+                as Arc<dyn nexus_auth::storage::Storage>,
         )
     }
 
@@ -703,7 +714,8 @@ impl Nexus {
             self.log.new(o!("component" => "InternalApi")),
             Arc::clone(&self.authz),
             authn::Context::internal_api(),
-            Arc::clone(&self.db_datastore),
+            Arc::clone(&self.db_datastore)
+                as Arc<dyn nexus_auth::storage::Storage>,
         )
     }
 
@@ -908,11 +920,38 @@ impl Nexus {
 
     /// Reliable persistent workflows can request that sagas be executed by
     /// sending a SagaRequest to a supplied channel. Execute those here.
-    pub(crate) async fn handle_saga_request(&self, saga_request: SagaRequest) {
+    pub(crate) async fn handle_saga_request(
+        self: &Arc<Self>,
+        saga_request: SagaRequest,
+    ) {
         match saga_request {
             #[cfg(test)]
             SagaRequest::TestOnly => {
                 unimplemented!();
+            }
+
+            SagaRequest::RegionReplacementStart { params } => {
+                let nexus = self.clone();
+                tokio::spawn(async move {
+                    let saga_result = nexus
+                        .execute_saga::<sagas::region_replacement_start::SagaRegionReplacementStart>(
+                            params,
+                        )
+                        .await;
+
+                    match saga_result {
+                        Ok(_) => {
+                            info!(
+                                nexus.log,
+                                "region replacement drive saga completed ok"
+                            );
+                        }
+
+                        Err(e) => {
+                            warn!(nexus.log, "region replacement start saga returned an error: {e}");
+                        }
+                    }
+                });
             }
         }
     }

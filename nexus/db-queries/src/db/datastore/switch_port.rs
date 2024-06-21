@@ -529,7 +529,7 @@ impl DataStore {
                             let (block, rsvd_block) =
                                 crate::db::datastore::address_lot::try_reserve_block(
                                     address_lot_id,
-                                    address.address.ip().into(),
+                                    address.address.addr().into(),
                                     // TODO: Should we allow anycast addresses for switch_ports?
                                     // anycast
                                     false,
@@ -549,6 +549,7 @@ impl DataStore {
                                 rsvd_block.id,
                                 address.address.into(),
                                 interface_name.clone(),
+				address.vlan_id
                             ));
 
                         }

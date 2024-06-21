@@ -1,0 +1,64 @@
+#
+# Build private documentation for this package to serve as internal developer
+# documentation.  (The "library" in this package only exists to implement the
+# binaries and the test suite.  There's no need for typical library
+# documentation of public interfaces.)
+#
+# NOTE: If you change this, also change the `RUSTDOCFLAGS` values in the various
+# CI scripts:
+# - .github/buildomat/build-and-test.sh
+# - .github/buildomat/jobs/clippy.sh
+# - .github/workflows/rust.yml
+#
+[build]
+rustdocflags = "--document-private-items"
+
+# On illumos, use `-znocompstrtab` to reduce link time. We also add the Oxide
+# specific platform directory to the RPATH where additional libraries can be
+# found such as libipcc.
+#
+# Our reasoning for including `-R/usr/platform/oxide/lib/amd64` here:
+# - Oxide specific features - This path contains Oxide specific libraries such
+#   as libipcc and will likely grow over time to include more functionality.
+# - Avoid the rpaths crate - The rpaths crate was built to deal with runtime
+#   paths that are dynamic such as with libraries like libpq which can live in
+#   different locations based on OS. This path will only ever be found on
+#   illumos and will be tied directly to the Oxide platform.
+# - Less developer burden - Having something like the ipcc crate emit
+#   `DEP_IPCC_LIBDIRS` means that we end up littering the repo with Cargo.toml
+#   and build.rs changes whenever ipcc shows up somewhere in the dependency
+#   tree. While initially exploring that path we ran into a significant number
+#   of tests failing due to not being able to find libipcc in the runtime path
+#   which can be confusing or surprising to someone doing work on omicron.
+#
+# We could also update Helios so that a symlink is created from
+# /usr/platform/oxide/lib/amd64 into /usr/lib/64 but we opted to not take
+# this route forward as it meant waiting for another round of updates on
+# shared build machines and to buildomat itself.
+#
+# As documented at:
+# https://doc.rust-lang.org/cargo/reference/config.html#buildrustflags
+#
+# There are four mutually exclusive sources of extra flags. They are checked in
+# order, with the first one being used:
+#   1. `CARGO_ENCODED_RUSTFLAGS` environment variable.
+#   2. `RUSTFLAGS` environment variable.
+#   3. All matching target.<triple>.rustflags and target.<cfg>.rustflags config
+#      entries joined together.
+#   4. build.rustflags config value.
+#
+# When overriding the defaults in this config by environment variable the user
+# may need to manually pass the additional options found below.
+#
+# Note that other runtime paths should not be added here, but should instead
+# reuse the infrastructure found in the `rpaths` crate which can be found in
+# this repo. Those paths are usually platform specific and will vary based on a
+# variety of things such as host OS.
+[target.x86_64-unknown-illumos]
+rustflags = [
+    "-C", "link-arg=-Wl,-znocompstrtab,-R/usr/platform/oxide/lib/amd64"
+]
+
+# Set up `cargo xtask`.
+[alias]
+xtask = "run --package xtask -- "

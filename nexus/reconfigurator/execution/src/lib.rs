@@ -24,6 +24,7 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
 
+mod cockroachdb;
 mod datasets;
 mod dns;
 mod external_networking;
@@ -213,6 +214,13 @@ where
             .map(|(&sled_id, _)| sled_id),
     )
     .await?;
+
+    // This is likely to error if any cluster upgrades are in progress (which
+    // can take some time), so it should remain at the end so that other parts
+    // of the blueprint can progress normally.
+    cockroachdb::ensure_settings(&opctx, datastore, blueprint)
+        .await
+        .map_err(|err| vec![err])?;
 
     Ok(())
 }

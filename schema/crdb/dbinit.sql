@@ -954,17 +954,36 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_project_by_silo ON omicron.public.proje
  * Instances
  */
 
-CREATE TYPE IF NOT EXISTS omicron.public.instance_state AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.instance_state_v2 AS ENUM (
+    /* The instance exists in the DB but its create saga is still in flight. */
     'creating',
+
+    /*
+     * The instance has no active VMM. Corresponds to the "stopped" external
+     * state.
+     */
+    'no_vmm',
+
+    /* The instance's state is derived from its active VMM's state. */
+    'vmm',
+
+    /* Something bad happened while trying to interact with the instance. */
+    'failed',
+
+    /* The instance has been destroyed. */
+    'destroyed'
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.vmm_state AS ENUM (
     'starting',
     'running',
     'stopping',
     'stopped',
     'rebooting',
     'migrating',
-    'repairing',
     'failed',
-    'destroyed'
+    'destroyed',
+    'saga_unwound'
 );
 
 /*
@@ -989,8 +1008,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     /* user data for instance initialization systems (e.g. cloud-init) */
     user_data BYTES NOT NULL,
 
-    /* The state of the instance when it has no active VMM. */
-    state omicron.public.instance_state NOT NULL,
+    /* The last-updated time and generation for the instance's state. */
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
 
@@ -1007,7 +1025,28 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     ncpus INT NOT NULL,
     memory INT NOT NULL,
     hostname STRING(63) NOT NULL,
-    boot_on_fault BOOL NOT NULL DEFAULT false
+    boot_on_fault BOOL NOT NULL DEFAULT false,
+
+    /* ID of the instance update saga that has locked this instance for
+     * updating, if one exists. */
+    updater_id UUID,
+
+    /* Generation of the instance updater lock */
+    updater_gen INT NOT NULL DEFAULT 0,
+
+    /*
+     * The internal instance state. If this is 'vmm', the externally-visible
+     * instance state is derived from its active VMM's state. This column is
+     * distant from its generation number and update time because it is
+     * deleted and recreated by the schema upgrade process; see the
+     * `separate-instance-and-vmm-states` schema change for details.
+     */
+    state omicron.public.instance_state_v2 NOT NULL,
+
+    CONSTRAINT vmm_iff_active_propolis CHECK (
+        ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
+        ((state != 'vmm') AND (active_propolis_id IS NULL))
+    )
 );
 
 -- Names for instances within a project should be unique
@@ -2724,6 +2763,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_address_config (
     rsvd_address_lot_block_id UUID NOT NULL,
     address INET,
     interface_name TEXT,
+    vlan_id INT4,
 
     /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
     PRIMARY KEY (port_settings_id, address, interface_name)
@@ -2904,6 +2944,22 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_service_processor (
     PRIMARY KEY (inv_collection_id, hw_baseboard_id)
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.rot_image_error AS ENUM (
+        'unchecked',
+        'first_page_erased',
+        'partially_programmed',
+        'invalid_length',
+        'header_not_programmed',
+        'bootloader_too_small',
+        'bad_magic',
+        'header_image_size',
+        'unaligned_length',
+        'unsupported_type',
+        'not_thumb2',
+        'reset_vector',
+        'signature'
+);
+
 -- root of trust information reported by SP
 -- There's usually one row here for each row in inv_service_processor, but not
 -- necessarily.
@@ -2925,6 +2981,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_root_of_trust (
     slot_boot_pref_persistent_pending omicron.public.hw_rot_slot, -- nullable
     slot_a_sha3_256 TEXT, -- nullable
     slot_b_sha3_256 TEXT, -- nullable
+    stage0_fwid TEXT, -- nullable
+    stage0next_fwid TEXT, -- nullable
+
+    slot_a_error omicron.public.rot_image_error, -- nullable
+    slot_b_error omicron.public.rot_image_error, -- nullable
+    stage0_error omicron.public.rot_image_error, -- nullable
+    stage0next_error omicron.public.rot_image_error, -- nullable
 
     PRIMARY KEY (inv_collection_id, hw_baseboard_id)
 );
@@ -2933,7 +2996,9 @@ CREATE TYPE IF NOT EXISTS omicron.public.caboose_which AS ENUM (
     'sp_slot_0',
     'sp_slot_1',
     'rot_slot_A',
-    'rot_slot_B'
+    'rot_slot_B',
+    'stage0',
+    'stage0next'
 );
 
 -- cabooses found
@@ -3238,7 +3303,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     -- identifies the latest internal DNS version when blueprint planning began
     internal_dns_version INT8 NOT NULL,
     -- identifies the latest external DNS version when blueprint planning began
-    external_dns_version INT8 NOT NULL
+    external_dns_version INT8 NOT NULL,
+    -- identifies the CockroachDB state fingerprint when blueprint planning began
+    cockroachdb_fingerprint TEXT NOT NULL,
+
+    -- CockroachDB settings managed by blueprints.
+    --
+    -- We use NULL in these columns to reflect that blueprint execution should
+    -- not modify the option; we're able to do this because CockroachDB settings
+    -- require the value to be the correct type and not NULL. There is no value
+    -- that represents "please reset this setting to the default value"; that is
+    -- represented by the presence of the default value in that field.
+    --
+    -- `cluster.preserve_downgrade_option`
+    cockroachdb_setting_preserve_downgrade TEXT
 );
 
 -- table describing both the current and historical target blueprints of the
@@ -3415,6 +3493,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone_nic (
     PRIMARY KEY (blueprint_id, id)
 );
 
+-- Mapping of Omicron zone ID to CockroachDB node ID. This isn't directly used
+-- by the blueprint tables above, but is used by the more general Reconfigurator
+-- system along with them (e.g., to decommission expunged CRDB nodes).
+CREATE TABLE IF NOT EXISTS omicron.public.cockroachdb_zone_id_to_node_id (
+    omicron_zone_id UUID NOT NULL UNIQUE,
+    crdb_node_id TEXT NOT NULL UNIQUE,
+
+    -- We require the pair to be unique, and also require each column to be
+    -- unique: there should only be one entry for a given zone ID, one entry for
+    -- a given node ID, and we need a unique requirement on the pair (via this
+    -- primary key) to support `ON CONFLICT DO NOTHING` idempotent inserts.
+    PRIMARY KEY (omicron_zone_id, crdb_node_id)
+);
+
 /*******************************************************************/
 
 /*
@@ -3431,12 +3523,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     time_created TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
     instance_id UUID NOT NULL,
-    state omicron.public.instance_state NOT NULL,
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
     sled_id UUID NOT NULL,
     propolis_ip INET NOT NULL,
-    propolis_port INT4 NOT NULL CHECK (propolis_port BETWEEN 0 AND 65535) DEFAULT 12400
+    propolis_port INT4 NOT NULL CHECK (propolis_port BETWEEN 0 AND 65535) DEFAULT 12400,
+    state omicron.public.vmm_state NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS lookup_vmms_by_sled_id ON omicron.public.vmm (
@@ -3799,6 +3891,99 @@ ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_loca
 
 CREATE INDEX IF NOT EXISTS switch_port_name ON omicron.public.switch_port (port_name);
 
+CREATE INDEX IF NOT EXISTS network_interface_by_parent
+ON omicron.public.network_interface (parent_id)
+STORING (name, kind, vpc_id, subnet_id, mac, ip, slot);
+
+CREATE INDEX IF NOT EXISTS sled_by_policy_and_state
+ON omicron.public.sled (sled_policy, sled_state, id) STORING (ip);
+
+CREATE INDEX IF NOT EXISTS active_vmm
+ON omicron.public.vmm (time_deleted, sled_id, instance_id);
+
+CREATE INDEX IF NOT EXISTS v2p_mapping_details
+ON omicron.public.network_interface (
+  time_deleted, kind, subnet_id, vpc_id, parent_id
+) STORING (mac, ip);
+
+CREATE INDEX IF NOT EXISTS sled_by_policy
+ON omicron.public.sled (sled_policy) STORING (ip, sled_state);
+
+CREATE INDEX IF NOT EXISTS vmm_by_instance_id
+ON omicron.public.vmm (instance_id) STORING (sled_id);
+
+CREATE TYPE IF NOT EXISTS omicron.public.region_replacement_state AS ENUM (
+  'requested',
+  'allocating',
+  'running',
+  'driving',
+  'replacement_done',
+  'completing',
+  'complete'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.region_replacement (
+    /* unique ID for this region replacement */
+    id UUID PRIMARY KEY,
+
+    request_time TIMESTAMPTZ NOT NULL,
+
+    old_region_id UUID NOT NULL,
+
+    volume_id UUID NOT NULL,
+
+    old_region_volume_id UUID,
+
+    new_region_id UUID,
+
+    replacement_state omicron.public.region_replacement_state NOT NULL,
+
+    operating_saga_id UUID
+);
+
+CREATE INDEX IF NOT EXISTS lookup_region_replacement_by_state on omicron.public.region_replacement (replacement_state);
+
+CREATE TABLE IF NOT EXISTS omicron.public.volume_repair (
+    volume_id UUID PRIMARY KEY,
+    repair_id UUID NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS lookup_volume_repair_by_repair_id on omicron.public.volume_repair (
+    repair_id
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.region_replacement_step_type AS ENUM (
+  'propolis',
+  'pantry'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.region_replacement_step (
+    replacement_id UUID NOT NULL,
+
+    step_time TIMESTAMPTZ NOT NULL,
+
+    step_type omicron.public.region_replacement_step_type NOT NULL,
+
+    step_associated_instance_id UUID,
+    step_associated_vmm_id UUID,
+
+    step_associated_pantry_ip INET,
+    step_associated_pantry_port INT4 CHECK (step_associated_pantry_port BETWEEN 0 AND 65535),
+    step_associated_pantry_job_id UUID,
+
+    PRIMARY KEY (replacement_id, step_time, step_type)
+);
+
+CREATE INDEX IF NOT EXISTS step_time_order on omicron.public.region_replacement_step (step_time);
+
+CREATE INDEX IF NOT EXISTS search_for_repair_notifications ON omicron.public.upstairs_repair_notification (region_id, notification_type);
+
+CREATE INDEX IF NOT EXISTS lookup_any_disk_by_volume_id ON omicron.public.disk (
+    volume_id
+);
+
+CREATE INDEX IF NOT EXISTS lookup_snapshot_by_destination_volume_id ON omicron.public.snapshot ( destination_volume_id );
+
 /*
  * Metadata for the schema itself. This version number isn't great, as there's
  * nothing to ensure it gets bumped when it should be, but it's a start.
@@ -3847,6 +4032,60 @@ VALUES (
 ON CONFLICT (id)
 DO NOTHING;
 
+CREATE TYPE IF NOT EXISTS omicron.public.migration_state AS ENUM (
+  'pending',
+  'in_progress',
+  'failed',
+  'completed'
+);
+
+-- A table of the states of current migrations.
+CREATE TABLE IF NOT EXISTS omicron.public.migration (
+    id UUID PRIMARY KEY,
+
+    /* The time this migration record was created. */
+    time_created TIMESTAMPTZ NOT NULL,
+
+    /* The time this migration record was deleted. */
+    time_deleted TIMESTAMPTZ,
+
+    /* The state of the migration source */
+    source_state omicron.public.migration_state NOT NULL,
+
+    /* The ID of the migration source Propolis */
+    source_propolis_id UUID NOT NULL,
+
+    /* Generation number owned and incremented by the source sled-agent */
+    source_gen INT8 NOT NULL DEFAULT 1,
+
+    /* Timestamp of when the source field was last updated.
+     *
+     * This is provided by the sled-agent when publishing a migration state
+     * update.
+     */
+    time_source_updated TIMESTAMPTZ,
+
+    /* The state of the migration target */
+    target_state omicron.public.migration_state NOT NULL,
+
+    /* The ID of the migration target Propolis */
+    target_propolis_id UUID NOT NULL,
+
+    /* Generation number owned and incremented by the target sled-agent */
+    target_gen INT8 NOT NULL DEFAULT 1,
+
+    /* Timestamp of when the source field was last updated.
+     *
+     * This is provided by the sled-agent when publishing a migration state
+     * update.
+     */
+    time_target_updated TIMESTAMPTZ
+);
+
+/* Lookup region snapshot by snapshot id */
+CREATE INDEX IF NOT EXISTS lookup_region_snapshot_by_snapshot_id on omicron.public.region_snapshot (
+    snapshot_id
+);
 
 /*
  * Keep this at the end of file so that the database does not contain a version
@@ -3859,7 +4098,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '63.0.0', NULL)
+    (TRUE, NOW(), NOW(), '77.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

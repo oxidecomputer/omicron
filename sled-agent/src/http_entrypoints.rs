@@ -25,15 +25,14 @@ use dropshot::{
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, StreamingBody,
     TypedBody,
 };
-use illumos_utils::opte::params::{
-    DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
-};
+use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use installinator_common::M2Slot;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, SledInstanceState, UpdateArtifactId,
 };
 use omicron_common::api::internal::shared::SwitchPorts;
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::DiskVariant;
@@ -71,6 +70,7 @@ pub fn api() -> SledApiDescription {
         api.register(zone_bundle_cleanup_context_update)?;
         api.register(zone_bundle_cleanup)?;
         api.register(sled_role_get)?;
+        api.register(list_v2p)?;
         api.register(set_v2p)?;
         api.register(del_v2p)?;
         api.register(timesync_get)?;
@@ -415,7 +415,7 @@ async fn cockroachdb_init(
 /// Path parameters for Instance requests (sled agent API)
 #[derive(Deserialize, JsonSchema)]
 struct InstancePathParam {
-    instance_id: Uuid,
+    instance_id: InstanceUuid,
 }
 
 #[endpoint {
@@ -615,7 +615,7 @@ async fn instance_issue_disk_snapshot_request(
     let body = body.into_inner();
 
     sa.instance_issue_disk_snapshot_request(
-        path_params.instance_id,
+        InstanceUuid::from_untyped_uuid(path_params.instance_id),
         path_params.disk_id,
         body.snapshot_id,
     )
@@ -652,24 +652,16 @@ async fn vpc_firewall_rules_put(
     Ok(HttpResponseUpdatedNoContent())
 }
 
-/// Path parameters for V2P mapping related requests (sled agent API)
-#[allow(dead_code)]
-#[derive(Deserialize, JsonSchema)]
-struct V2pPathParam {
-    interface_id: Uuid,
-}
-
 /// Create a mapping from a virtual NIC to a physical host
 // Keep interface_id to maintain parity with the simulated sled agent, which
 // requires interface_id on the path.
 #[endpoint {
     method = PUT,
-    path = "/v2p/{interface_id}",
+    path = "/v2p/",
 }]
 async fn set_v2p(
     rqctx: RequestContext<SledAgent>,
-    _path_params: Path<V2pPathParam>,
-    body: TypedBody<SetVirtualNetworkInterfaceHost>,
+    body: TypedBody<VirtualNetworkInterfaceHost>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
     let body_args = body.into_inner();
@@ -684,12 +676,11 @@ async fn set_v2p(
 // requires interface_id on the path.
 #[endpoint {
     method = DELETE,
-    path = "/v2p/{interface_id}",
+    path = "/v2p/",
 }]
 async fn del_v2p(
     rqctx: RequestContext<SledAgent>,
-    _path_params: Path<V2pPathParam>,
-    body: TypedBody<DeleteVirtualNetworkInterfaceHost>,
+    body: TypedBody<VirtualNetworkInterfaceHost>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
     let body_args = body.into_inner();
@@ -697,6 +688,22 @@ async fn del_v2p(
     sa.unset_virtual_nic_host(&body_args).await.map_err(Error::from)?;
 
     Ok(HttpResponseUpdatedNoContent())
+}
+
+/// List v2p mappings present on sled
+// Used by nexus background task
+#[endpoint {
+    method = GET,
+    path = "/v2p/",
+}]
+async fn list_v2p(
+    rqctx: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<Vec<VirtualNetworkInterfaceHost>>, HttpError> {
+    let sa = rqctx.context();
+
+    let vnics = sa.list_virtual_nics().await.map_err(Error::from)?;
+
+    Ok(HttpResponseOk(vnics))
 }
 
 #[endpoint {

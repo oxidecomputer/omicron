@@ -1055,7 +1055,7 @@
             "description": "The set of prefixes for the BGP router to originate.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Ipv4Network"
+              "$ref": "#/components/schemas/Ipv4Net"
             }
           },
           "shaper": {
@@ -1666,6 +1666,11 @@
         ]
       },
       "IpNet": {
+        "x-rust-type": {
+          "crate": "oxnet",
+          "path": "oxnet::IpNet",
+          "version": "0.1.0"
+        },
         "oneOf": [
           {
             "title": "v4",
@@ -1680,27 +1685,6 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/Ipv6Net"
-              }
-            ]
-          }
-        ]
-      },
-      "IpNetwork": {
-        "x-rust-type": "ipnetwork::IpNetwork",
-        "oneOf": [
-          {
-            "title": "v4",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Ipv4Network"
-              }
-            ]
-          },
-          {
-            "title": "v6",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Ipv6Network"
               }
             ]
           }
@@ -1729,14 +1713,14 @@
       "Ipv4Net": {
         "example": "192.168.1.0/24",
         "title": "An IPv4 subnet",
-        "description": "An IPv4 subnet, including prefix and subnet mask",
+        "description": "An IPv4 subnet, including prefix and prefix length",
+        "x-rust-type": {
+          "crate": "oxnet",
+          "path": "oxnet::Ipv4Net",
+          "version": "0.1.0"
+        },
         "type": "string",
         "pattern": "^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([0-9]|1[0-9]|2[0-9]|3[0-2])$"
-      },
-      "Ipv4Network": {
-        "x-rust-type": "ipnetwork::Ipv4Network",
-        "type": "string",
-        "pattern": "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\/(3[0-2]|[0-2]?[0-9])$"
       },
       "Ipv4Range": {
         "description": "A non-decreasing IPv4 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
@@ -1760,13 +1744,13 @@
         "example": "fd12:3456::/64",
         "title": "An IPv6 subnet",
         "description": "An IPv6 subnet, including prefix and subnet mask",
+        "x-rust-type": {
+          "crate": "oxnet",
+          "path": "oxnet::Ipv6Net",
+          "version": "0.1.0"
+        },
         "type": "string",
         "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
-      },
-      "Ipv6Network": {
-        "x-rust-type": "ipnetwork::Ipv6Network",
-        "type": "string",
-        "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\")[/](12[0-8]|1[0-1][0-9]|[0-9]?[0-9])$"
       },
       "Ipv6Range": {
         "description": "A non-decreasing IPv6 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
@@ -2600,6 +2584,25 @@
           "sps"
         ]
       },
+      "RotImageError": {
+        "description": "RotImageError\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"unchecked\", \"first_page_erased\", \"partially_programmed\", \"invalid_length\", \"header_not_programmed\", \"bootloader_too_small\", \"bad_magic\", \"header_image_size\", \"unaligned_length\", \"unsupported_type\", \"reset_vector_not_thumb2\", \"reset_vector\", \"signature\" ] } ``` </details>",
+        "type": "string",
+        "enum": [
+          "unchecked",
+          "first_page_erased",
+          "partially_programmed",
+          "invalid_length",
+          "header_not_programmed",
+          "bootloader_too_small",
+          "bad_magic",
+          "header_image_size",
+          "unaligned_length",
+          "unsupported_type",
+          "reset_vector_not_thumb2",
+          "reset_vector",
+          "signature"
+        ]
+      },
       "RotInventory": {
         "description": "RoT-related data that isn't already supplied in [`SpState`].",
         "type": "object",
@@ -2616,6 +2619,22 @@
             ]
           },
           "caboose_b": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentCaboose"
+              }
+            ]
+          },
+          "caboose_stage0": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentCaboose"
+              }
+            ]
+          },
+          "caboose_stage0next": {
             "nullable": true,
             "allOf": [
               {
@@ -2662,7 +2681,7 @@
         ]
       },
       "RotState": {
-        "description": "RotState\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"active\", \"persistent_boot_preference\", \"state\" ], \"properties\": { \"active\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"pending_persistent_boot_preference\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] }, \"persistent_boot_preference\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"slot_a_sha3_256_digest\": { \"type\": [ \"string\", \"null\" ] }, \"slot_b_sha3_256_digest\": { \"type\": [ \"string\", \"null\" ] }, \"state\": { \"type\": \"string\", \"enum\": [ \"enabled\" ] }, \"transient_boot_preference\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } } }, { \"type\": \"object\", \"required\": [ \"message\", \"state\" ], \"properties\": { \"message\": { \"type\": \"string\" }, \"state\": { \"type\": \"string\", \"enum\": [ \"communication_failed\" ] } } } ] } ``` </details>",
+        "description": "RotState\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"active\", \"persistent_boot_preference\", \"state\" ], \"properties\": { \"active\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"pending_persistent_boot_preference\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] }, \"persistent_boot_preference\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"slot_a_sha3_256_digest\": { \"type\": [ \"string\", \"null\" ] }, \"slot_b_sha3_256_digest\": { \"type\": [ \"string\", \"null\" ] }, \"state\": { \"type\": \"string\", \"enum\": [ \"v2\" ] }, \"transient_boot_preference\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } } }, { \"type\": \"object\", \"required\": [ \"message\", \"state\" ], \"properties\": { \"message\": { \"type\": \"string\" }, \"state\": { \"type\": \"string\", \"enum\": [ \"communication_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"active\", \"persistent_boot_preference\", \"slot_a_fwid\", \"slot_b_fwid\", \"stage0_fwid\", \"stage0next_fwid\", \"state\" ], \"properties\": { \"active\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"pending_persistent_boot_preference\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] }, \"persistent_boot_preference\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"slot_a_error\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] }, \"slot_a_fwid\": { \"type\": \"string\" }, \"slot_b_error\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] }, \"slot_b_fwid\": { \"type\": \"string\" }, \"stage0_error\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] }, \"stage0_fwid\": { \"type\": \"string\" }, \"stage0next_error\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] }, \"stage0next_fwid\": { \"type\": \"string\" }, \"state\": { \"type\": \"string\", \"enum\": [ \"v3\" ] }, \"transient_boot_preference\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -2692,7 +2711,7 @@
               "state": {
                 "type": "string",
                 "enum": [
-                  "enabled"
+                  "v2"
                 ]
               },
               "transient_boot_preference": {
@@ -2727,6 +2746,92 @@
               "message",
               "state"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "active": {
+                "$ref": "#/components/schemas/RotSlot"
+              },
+              "pending_persistent_boot_preference": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              },
+              "persistent_boot_preference": {
+                "$ref": "#/components/schemas/RotSlot"
+              },
+              "slot_a_error": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageError"
+                  }
+                ]
+              },
+              "slot_a_fwid": {
+                "type": "string"
+              },
+              "slot_b_error": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageError"
+                  }
+                ]
+              },
+              "slot_b_fwid": {
+                "type": "string"
+              },
+              "stage0_error": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageError"
+                  }
+                ]
+              },
+              "stage0_fwid": {
+                "type": "string"
+              },
+              "stage0next_error": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageError"
+                  }
+                ]
+              },
+              "stage0next_fwid": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "v3"
+                ]
+              },
+              "transient_boot_preference": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "active",
+              "persistent_boot_preference",
+              "slot_a_fwid",
+              "slot_b_fwid",
+              "stage0_fwid",
+              "stage0next_fwid",
+              "state"
+            ]
           }
         ]
       },
@@ -2737,7 +2842,7 @@
             "description": "The destination of the route.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/IpNetwork"
+                "$ref": "#/components/schemas/IpNet"
               }
             ]
           },
@@ -3169,6 +3274,10 @@
       "StartUpdateOptions": {
         "type": "object",
         "properties": {
+          "skip_rot_bootloader_version_check": {
+            "description": "If true, skip the check on the current RoT version and always update it regardless of whether the update appears to be neeeded.",
+            "type": "boolean"
+          },
           "skip_rot_version_check": {
             "description": "If true, skip the check on the current RoT version and always update it regardless of whether the update appears to be neeeded.",
             "type": "boolean"
@@ -3183,6 +3292,15 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/UpdateTestError"
+              }
+            ]
+          },
+          "test_simulate_rot_bootloader_result": {
+            "nullable": true,
+            "description": "If passed in, simulates a result for the RoT Bootloader update.\n\nThis is used for testing.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateSimulatedResult"
               }
             ]
           },
@@ -3213,6 +3331,7 @@
           }
         },
         "required": [
+          "skip_rot_bootloader_version_check",
           "skip_rot_version_check",
           "skip_sp_version_check"
         ]
@@ -4635,6 +4754,20 @@
               "component": {
                 "type": "string",
                 "enum": [
+                  "rot_bootloader"
+                ]
+              }
+            },
+            "required": [
+              "component"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
                   "rot"
                 ]
               }
@@ -4715,6 +4848,20 @@
             "required": [
               "id",
               "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "interrogate_rot_bootloader"
+                ]
+              }
+            },
+            "required": [
+              "id"
             ]
           },
           {
@@ -4894,6 +5041,24 @@
           }
         ]
       },
+      "UplinkAddressConfig": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "$ref": "#/components/schemas/IpNet"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id (if any) associated with this address.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "address"
+        ]
+      },
       "UserSpecifiedBgpPeerConfig": {
         "description": "User-specified version of [`BgpPeerConfig`].\n\nThis is similar to [`BgpPeerConfig`], except it doesn't have the sensitive `md5_auth_key` parameter, instead requiring that the user provide the key separately.\n\n[`BgpPeerConfig`]: omicron_common::api::internal::shared::BgpPeerConfig",
         "type": "object",
@@ -5039,13 +5204,13 @@
         }
       },
       "UserSpecifiedPortConfig": {
-        "description": "User-specified version of [`PortConfigV1`].\n\nAll of [`PortConfigV1`] is user-specified. But we expect the port name to be a key, rather than a field as in [`PortConfigV1`]. So this has all of the fields other than the port name.\n\n[`PortConfigV1`]: omicron_common::api::internal::shared::PortConfigV1",
+        "description": "User-specified version of [`PortConfigV2`].\n\nAll of [`PortConfigV2`] is user-specified. But we expect the port name to be a key, rather than a field as in [`PortConfigV2`]. So this has all of the fields other than the port name.\n\n[`PortConfigV2`]: omicron_common::api::internal::shared::PortConfigV2",
         "type": "object",
         "properties": {
           "addresses": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/IpNetwork"
+              "$ref": "#/components/schemas/UplinkAddressConfig"
             }
           },
           "autoneg": {

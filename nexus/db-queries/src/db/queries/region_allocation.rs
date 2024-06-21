@@ -67,8 +67,14 @@ type SelectableSql<T> = <
     <T as diesel::Selectable<Pg>>::SelectExpression as diesel::Expression
 >::SqlType;
 
+/// For a given volume, idempotently allocate enough regions (according to some
+/// allocation strategy) to meet some redundancy level. This should only be used
+/// for the region set that is in the top level of the Volume (not the deeper
+/// layers of the hierarchy). If that volume has region snapshots in the region
+/// set, a `snapshot_id` should be supplied matching those entries.
 pub fn allocation_query(
     volume_id: uuid::Uuid,
+    snapshot_id: Option<uuid::Uuid>,
     block_size: u64,
     blocks_per_extent: u64,
     extent_count: u64,
@@ -116,24 +122,42 @@ pub fn allocation_query(
     SELECT
       dataset.pool_id,
       sum(dataset.size_used) AS size_used
-    FROM dataset WHERE ((dataset.size_used IS NOT NULL) AND (dataset.time_deleted IS NULL)) GROUP BY dataset.pool_id),")
+    FROM dataset WHERE ((dataset.size_used IS NOT NULL) AND (dataset.time_deleted IS NULL)) GROUP BY dataset.pool_id),");
 
-    // Any zpool already have this volume's existing regions?
-    .sql("
-  existing_zpools AS (
-    SELECT
-      dataset.pool_id
-    FROM
-      dataset INNER JOIN old_regions ON (old_regions.dataset_id = dataset.id)
-  ),")
+    let builder = if let Some(snapshot_id) = snapshot_id {
+        // Any zpool already have this volume's existing regions, or host the
+        // snapshot volume's regions?
+        builder.sql("
+      existing_zpools AS ((
+        SELECT
+          dataset.pool_id
+        FROM
+          dataset INNER JOIN old_regions ON (old_regions.dataset_id = dataset.id)
+      ) UNION (
+       select dataset.pool_id from
+ dataset inner join region_snapshot on (region_snapshot.dataset_id = dataset.id)
+ where region_snapshot.snapshot_id = ").param().sql(")),")
+        .bind::<sql_types::Uuid, _>(snapshot_id)
+    } else {
+        // Any zpool already have this volume's existing regions?
+        builder.sql("
+      existing_zpools AS (
+        SELECT
+          dataset.pool_id
+        FROM
+          dataset INNER JOIN old_regions ON (old_regions.dataset_id = dataset.id)
+      ),")
+    };
 
     // Identifies zpools with enough space for region allocation, that are not
     // currently used by this Volume's existing regions.
     //
     // NOTE: 'distinct_sleds' changes the format of the underlying SQL query, as it uses
     // distinct bind parameters depending on the conditional branch.
-    .sql("
-  candidate_zpools AS (");
+    let builder = builder.sql(
+        "
+  candidate_zpools AS (",
+    );
     let builder = if distinct_sleds {
         builder.sql("SELECT DISTINCT ON (zpool.sled_id) ")
     } else {
@@ -369,6 +393,7 @@ mod test {
     use super::*;
     use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
     use crate::db::explain::ExplainableAsync;
+    use crate::db::raw_query_builder::expectorate_query_contents;
     use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
     use uuid::Uuid;
@@ -383,10 +408,15 @@ mod test {
         let blocks_per_extent = 4;
         let extent_count = 8;
 
+        // Start with snapshot_id = None
+
+        let snapshot_id = None;
+
         // First structure: "RandomWithDistinctSleds"
 
         let region_allocate = allocation_query(
             volume_id,
+            snapshot_id,
             block_size,
             blocks_per_extent,
             extent_count,
@@ -395,35 +425,68 @@ mod test {
             },
             REGION_REDUNDANCY_THRESHOLD,
         );
-        let s = dev::db::format_sql(
-            &diesel::debug_query::<Pg, _>(&region_allocate).to_string(),
-        )
-        .await
-        .unwrap();
-        expectorate::assert_contents(
+        expectorate_query_contents(
+            &region_allocate,
             "tests/output/region_allocate_distinct_sleds.sql",
-            &s,
-        );
+        )
+        .await;
 
         // Second structure: "Random"
 
         let region_allocate = allocation_query(
             volume_id,
+            snapshot_id,
             block_size,
             blocks_per_extent,
             extent_count,
             &RegionAllocationStrategy::Random { seed: Some(1) },
             REGION_REDUNDANCY_THRESHOLD,
         );
-        let s = dev::db::format_sql(
-            &diesel::debug_query::<Pg, _>(&region_allocate).to_string(),
-        )
-        .await
-        .unwrap();
-        expectorate::assert_contents(
+        expectorate_query_contents(
+            &region_allocate,
             "tests/output/region_allocate_random_sleds.sql",
-            &s,
+        )
+        .await;
+
+        // Next, put a value in for snapshot_id
+
+        let snapshot_id = Some(Uuid::new_v4());
+
+        // First structure: "RandomWithDistinctSleds"
+
+        let region_allocate = allocation_query(
+            volume_id,
+            snapshot_id,
+            block_size,
+            blocks_per_extent,
+            extent_count,
+            &RegionAllocationStrategy::RandomWithDistinctSleds {
+                seed: Some(1),
+            },
+            REGION_REDUNDANCY_THRESHOLD,
         );
+        expectorate_query_contents(
+            &region_allocate,
+            "tests/output/region_allocate_with_snapshot_distinct_sleds.sql",
+        )
+        .await;
+
+        // Second structure: "Random"
+
+        let region_allocate = allocation_query(
+            volume_id,
+            snapshot_id,
+            block_size,
+            blocks_per_extent,
+            extent_count,
+            &RegionAllocationStrategy::Random { seed: Some(1) },
+            REGION_REDUNDANCY_THRESHOLD,
+        );
+        expectorate_query_contents(
+            &region_allocate,
+            "tests/output/region_allocate_with_snapshot_random_sleds.sql",
+        )
+        .await;
     }
 
     // Explain the possible forms of the SQL query to ensure that it
@@ -446,6 +509,7 @@ mod test {
 
         let region_allocate = allocation_query(
             volume_id,
+            None,
             block_size,
             blocks_per_extent,
             extent_count,
@@ -461,6 +525,7 @@ mod test {
 
         let region_allocate = allocation_query(
             volume_id,
+            None,
             block_size,
             blocks_per_extent,
             extent_count,

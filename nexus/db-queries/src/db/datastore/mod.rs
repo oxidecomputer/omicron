@@ -41,18 +41,21 @@ use omicron_common::api::external::SemverVersion;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service, BackoffError,
 };
+use omicron_uuid_kinds::{GenericUuid, SledUuid};
 use slog::Logger;
 use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use uuid::Uuid;
 
 mod address_lot;
 mod allow_list;
+mod auth;
 mod bfd;
 mod bgp;
 mod bootstore;
 mod certificate;
+mod cockroachdb_node_id;
+mod cockroachdb_settings;
 mod console_session;
 mod dataset;
 mod db_metadata;
@@ -63,10 +66,11 @@ mod dns;
 mod external_ip;
 mod identity_provider;
 mod image;
-mod instance;
+pub mod instance;
 mod inventory;
 mod ip_pool;
 mod ipv4_nat_entry;
+mod migration;
 mod network_interface;
 mod oximeter;
 mod physical_disk;
@@ -77,6 +81,7 @@ pub mod pub_test_utils;
 mod quota;
 mod rack;
 mod region;
+mod region_replacement;
 mod region_snapshot;
 mod role;
 mod saga;
@@ -94,6 +99,7 @@ mod switch_port;
 pub(crate) mod test_utils;
 mod update;
 mod utilization;
+mod v2p_mapping;
 mod virtual_provisioning_collection;
 mod vmm;
 mod volume;
@@ -109,6 +115,8 @@ use nexus_db_model::AllSchemaVersions;
 pub use probe::ProbeInfo;
 pub use rack::RackInit;
 pub use rack::SledUnderlayAllocationResult;
+pub use region::RegionAllocationFor;
+pub use region::RegionAllocationParameters;
 pub use silo::Discoverability;
 pub use sled::SledTransition;
 pub use sled::TransitionError;
@@ -118,6 +126,7 @@ pub use volume::read_only_resources_associated_with_volume;
 pub use volume::CrucibleResources;
 pub use volume::CrucibleTargets;
 pub use volume::VolumeCheckoutReason;
+pub use volume::VolumeReplacementParams;
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.
@@ -125,9 +134,6 @@ pub const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 
 /// The name of the built-in IP pool for Oxide services.
 pub const SERVICE_IP_POOL_NAME: &str = "oxide-service-pool";
-
-/// The name of the built-in Project and VPC for Oxide services.
-pub const SERVICES_DB_NAME: &str = "oxide-services";
 
 /// "limit" to be used in SQL queries that paginate through large result sets
 ///
@@ -301,11 +307,13 @@ impl DataStore {
     pub async fn next_ipv6_address(
         &self,
         opctx: &OpContext,
-        sled_id: Uuid,
+        sled_id: SledUuid,
     ) -> Result<Ipv6Addr, Error> {
         use db::schema::sled::dsl;
         let net = diesel::update(
-            dsl::sled.find(sled_id).filter(dsl::time_deleted.is_null()),
+            dsl::sled
+                .find(sled_id.into_untyped_uuid())
+                .filter(dsl::time_deleted.is_null()),
         )
         .set(dsl::last_used_address.eq(dsl::last_used_address + 1))
         .returning(dsl::last_used_address)
@@ -316,7 +324,7 @@ impl DataStore {
                 e,
                 ErrorHandler::NotFoundByLookup(
                     ResourceType::Sled,
-                    LookupType::ById(sled_id),
+                    LookupType::ById(sled_id.into_untyped_uuid()),
                 ),
             )
         })?;
@@ -381,8 +389,6 @@ mod test {
         IneligibleSledKind, IneligibleSleds,
     };
     use crate::db::explain::ExplainableAsync;
-    use crate::db::fixed_data::silo::DEFAULT_SILO;
-    use crate::db::fixed_data::silo::DEFAULT_SILO_ID;
     use crate::db::identity::Asset;
     use crate::db::lookup::LookupPath;
     use crate::db::model::{
@@ -396,6 +402,8 @@ mod test {
     use futures::stream;
     use futures::StreamExt;
     use nexus_config::RegionAllocationStrategy;
+    use nexus_db_fixed_data::silo::DEFAULT_SILO;
+    use nexus_db_fixed_data::silo::DEFAULT_SILO_ID;
     use nexus_db_model::IpAttachState;
     use nexus_db_model::{to_db_typed_uuid, Generation};
     use nexus_test_utils::db::test_setup_database;
@@ -481,7 +489,7 @@ mod test {
             logctx.log.new(o!("component" => "TestExternalAuthn")),
             Arc::new(authz::Authz::new(&logctx.log)),
             authn::Context::external_authn(),
-            Arc::clone(&datastore),
+            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
 
         let token = "a_token".to_string();
@@ -583,7 +591,7 @@ mod test {
                 *DEFAULT_SILO_ID,
                 SiloAuthnPolicy::try_from(&*DEFAULT_SILO).unwrap(),
             ),
-            Arc::clone(&datastore),
+            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
         let delete = datastore
             .session_hard_delete(&silo_user_opctx, &authz_session)
@@ -983,8 +991,8 @@ mod test {
                 // This is a little goofy, but it catches a bug that has
                 // happened before. The returned columns share names (like
                 // "id"), so we need to process them in-order.
-                assert!(regions.get(&dataset.id()).is_none());
-                assert!(disk_datasets.get(&region.id()).is_none());
+                assert!(!regions.contains(&dataset.id()));
+                assert!(!disk_datasets.contains(&region.id()));
 
                 // Dataset must not be eligible for provisioning.
                 if let Some(kind) =
@@ -1589,8 +1597,8 @@ mod test {
                 name: external::Name::try_from(String::from("name")).unwrap(),
                 description: String::from("description"),
             },
-            external::Ipv4Net("172.30.0.0/22".parse().unwrap()),
-            external::Ipv6Net("fd00::/64".parse().unwrap()),
+            "172.30.0.0/22".parse().unwrap(),
+            "fd00::/64".parse().unwrap(),
         );
         let values = FilterConflictingVpcSubnetRangesQuery::new(subnet);
         let query =
@@ -1620,8 +1628,10 @@ mod test {
         let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
         let datastore =
             Arc::new(DataStore::new(&logctx.log, pool, None).await.unwrap());
-        let opctx =
-            OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
+        let opctx = OpContext::for_tests(
+            logctx.log.new(o!()),
+            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
+        );
 
         let rack_id = Uuid::new_v4();
         let addr1 = "[fd00:1de::1]:12345".parse().unwrap();
@@ -1648,6 +1658,8 @@ mod test {
         );
         datastore.sled_upsert(sled2).await.unwrap();
 
+        let sled1_id = SledUuid::from_untyped_uuid(sled1_id);
+        let sled2_id = SledUuid::from_untyped_uuid(sled2_id);
         let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();
         let expected_ip = Ipv6Addr::new(0xfd00, 0x1de, 0, 0, 0, 0, 1, 0);
         assert_eq!(ip, expected_ip);

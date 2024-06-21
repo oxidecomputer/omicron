@@ -30,6 +30,7 @@ use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
+use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::external_api::params::UserId;
@@ -64,7 +65,7 @@ use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use sled_agent_client::types::EarlyNetworkConfig;
 use sled_agent_client::types::EarlyNetworkConfigBody;
-use sled_agent_client::types::RackNetworkConfigV1;
+use sled_agent_client::types::RackNetworkConfigV2;
 use slog::{debug, error, o, Logger};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -675,7 +676,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 nic: NetworkInterface {
                     id: Uuid::new_v4(),
                     ip: NEXUS_OPTE_IPV4_SUBNET
-                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
                         .unwrap()
                         .into(),
                     kind: NetworkInterfaceKind::Service {
@@ -790,6 +791,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     .try_into()
                     .expect("bad internal DNS generation"),
                 external_dns_version: Generation::new(),
+                cockroachdb_fingerprint: String::new(),
+                cockroachdb_setting_preserve_downgrade:
+                    CockroachDbPreserveDowngrade::DoNotModify,
                 time_created: Utc::now(),
                 creator: "nexus-test-utils".to_string(),
                 comment: "initial test blueprint".to_string(),
@@ -876,13 +880,14 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             self.nexus_internal_addr.expect("Must launch Nexus first");
 
         // Set up a single sled agent.
-        let sa_id: Uuid = if switch_location == SwitchLocation::Switch0 {
+        let sa_id: SledUuid = if switch_location == SwitchLocation::Switch0 {
             SLED_AGENT_UUID
         } else {
             SLED_AGENT2_UUID
         }
         .parse()
         .unwrap();
+
         let tempdir = camino_tempfile::tempdir().unwrap();
         let sled_agent = start_sled_agent(
             self.logctx.log.new(o!(
@@ -935,7 +940,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .write_network_bootstore_config(&EarlyNetworkConfig {
                 body: EarlyNetworkConfigBody {
                     ntp_servers: Vec::new(),
-                    rack_network_config: Some(RackNetworkConfigV1 {
+                    rack_network_config: Some(RackNetworkConfigV2 {
                         bfd: Vec::new(),
                         bgp: Vec::new(),
                         infra_ip_first: "192.0.2.10".parse().unwrap(),
@@ -947,7 +952,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     }),
                 },
                 generation: 1,
-                schema_version: 1,
+                schema_version: 2,
             })
             .await
             .expect("Failed to write early networking config to bootstore");
@@ -1029,7 +1034,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     nic: NetworkInterface {
                         id: Uuid::new_v4(),
                         ip: DNS_OPTE_IPV4_SUBNET
-                            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+                            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
                             .unwrap()
                             .into(),
                         kind: NetworkInterfaceKind::Service {
@@ -1378,12 +1383,12 @@ async fn setup_with_config_impl<N: NexusServer>(
 pub async fn start_sled_agent(
     log: Logger,
     nexus_address: SocketAddr,
-    id: Uuid,
+    id: SledUuid,
     update_directory: &Utf8Path,
     sim_mode: sim::SimMode,
 ) -> Result<sim::Server, String> {
     let config = sim::Config::for_testing(
-        id,
+        id.into_untyped_uuid(),
         sim_mode,
         Some(nexus_address),
         Some(update_directory),

@@ -29,34 +29,28 @@ use diesel::RunQueryDsl;
 use nexus_db_model::InstanceState as DbInstanceState;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpAttachStateEnum;
+use nexus_db_model::VmmState as DbVmmState;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external;
-use omicron_common::api::external::InstanceState as ApiInstanceState;
 use uuid::Uuid;
 
 // Broadly, we want users to be able to attach/detach at will
 // once an instance is created and functional.
-pub const SAFE_TO_ATTACH_INSTANCE_STATES_CREATING: [DbInstanceState; 3] = [
-    DbInstanceState(ApiInstanceState::Stopped),
-    DbInstanceState(ApiInstanceState::Running),
-    DbInstanceState(ApiInstanceState::Creating),
-];
-pub const SAFE_TO_ATTACH_INSTANCE_STATES: [DbInstanceState; 2] = [
-    DbInstanceState(ApiInstanceState::Stopped),
-    DbInstanceState(ApiInstanceState::Running),
-];
+pub const SAFE_TO_ATTACH_INSTANCE_STATES_CREATING: [DbInstanceState; 3] =
+    [DbInstanceState::NoVmm, DbInstanceState::Vmm, DbInstanceState::Creating];
+pub const SAFE_TO_ATTACH_INSTANCE_STATES: [DbInstanceState; 2] =
+    [DbInstanceState::NoVmm, DbInstanceState::Vmm];
 // If we're in a state which will naturally resolve to either
 // stopped/running, we want users to know that the request can be
 // retried safely via Error::unavail.
 // TODO: We currently stop if there's a migration or other state change.
 //       There may be a good case for RPWing
 //       external_ip_state -> { NAT RPW, sled-agent } in future.
-pub const SAFE_TRANSIENT_INSTANCE_STATES: [DbInstanceState; 5] = [
-    DbInstanceState(ApiInstanceState::Starting),
-    DbInstanceState(ApiInstanceState::Stopping),
-    DbInstanceState(ApiInstanceState::Creating),
-    DbInstanceState(ApiInstanceState::Rebooting),
-    DbInstanceState(ApiInstanceState::Migrating),
+pub const SAFE_TRANSIENT_INSTANCE_STATES: [DbVmmState; 4] = [
+    DbVmmState::Starting,
+    DbVmmState::Stopping,
+    DbVmmState::Rebooting,
+    DbVmmState::Migrating,
 ];
 
 /// The maximum number of disks that can be attached to an instance.
@@ -901,6 +895,7 @@ mod tests {
     use omicron_test_utils::dev::db::CockroachInstance;
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use sled_agent_client::ZoneKind;
     use std::net::IpAddr;
@@ -1006,8 +1001,8 @@ mod tests {
             .expect("Failed to create IP Pool range");
         }
 
-        async fn create_instance(&self, name: &str) -> Uuid {
-            let instance_id = Uuid::new_v4();
+        async fn create_instance(&self, name: &str) -> InstanceUuid {
+            let instance_id = InstanceUuid::new_v4();
             let project_id = Uuid::new_v4();
             let instance = Instance::new(instance_id, project_id, &InstanceCreate {
                 identity: IdentityMetadataCreateParams { name: String::from(name).parse().unwrap(), description: format!("instance {}", name) },
@@ -1068,7 +1063,7 @@ mod tests {
             (0..super::MAX_PORT).step_by(NUM_SOURCE_NAT_PORTS.into())
         {
             let id = Uuid::new_v4();
-            let instance_id = Uuid::new_v4();
+            let instance_id = InstanceUuid::new_v4();
             let ip = context
                 .db_datastore
                 .allocate_instance_snat_ip(
@@ -1085,7 +1080,7 @@ mod tests {
         }
 
         // The next allocation should fail, due to IP exhaustion
-        let instance_id = Uuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
         let err = context
             .db_datastore
             .allocate_instance_snat_ip(
@@ -1218,7 +1213,7 @@ mod tests {
         // Allocate two addresses
         let mut ips = Vec::with_capacity(2);
         for (expected_ip, expected_first_port) in external_ips.clone().take(2) {
-            let instance_id = Uuid::new_v4();
+            let instance_id = InstanceUuid::new_v4();
             let ip = context
                 .db_datastore
                 .allocate_instance_snat_ip(
@@ -1246,7 +1241,7 @@ mod tests {
 
         // Allocate a new one, ensure it's the same as the first one we
         // released.
-        let instance_id = Uuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
         let ip = context
             .db_datastore
             .allocate_instance_snat_ip(
@@ -1273,7 +1268,7 @@ mod tests {
 
         // Allocate one more, ensure it's the next chunk after the second one
         // from the original loop.
-        let instance_id = Uuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
         let ip = context
             .db_datastore
             .allocate_instance_snat_ip(
@@ -1585,7 +1580,7 @@ mod tests {
         context.create_ip_pool("default", range, true).await;
 
         // Create one SNAT IP address.
-        let instance_id = Uuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
         let id = Uuid::new_v4();
         let ip = context
             .db_datastore

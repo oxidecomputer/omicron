@@ -33,7 +33,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::OmicronPhysicalDisksConfig;
-use sled_agent_client::ZoneKind;
 use slog_error_chain::SlogInlineError;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -62,6 +61,9 @@ pub use network_resources::OmicronZoneExternalSnatIp;
 pub use network_resources::OmicronZoneNetworkResources;
 pub use network_resources::OmicronZoneNic;
 pub use network_resources::OmicronZoneNicEntry;
+pub use planning_input::CockroachDbClusterVersion;
+pub use planning_input::CockroachDbPreserveDowngrade;
+pub use planning_input::CockroachDbSettings;
 pub use planning_input::DiskFilter;
 pub use planning_input::PlanningInput;
 pub use planning_input::PlanningInputBuildError;
@@ -72,6 +74,7 @@ pub use planning_input::SledDisk;
 pub use planning_input::SledFilter;
 pub use planning_input::SledResources;
 pub use planning_input::ZpoolFilter;
+pub use sled_agent_client::ZoneKind;
 pub use zone_type::blueprint_zone_type;
 pub use zone_type::BlueprintZoneType;
 
@@ -155,6 +158,14 @@ pub struct Blueprint {
     // See blueprint execution for more on this.
     pub external_dns_version: Generation,
 
+    /// CockroachDB state fingerprint when this blueprint was created
+    // See `nexus/db-queries/src/db/datastore/cockroachdb_settings.rs` for more
+    // on this.
+    pub cockroachdb_fingerprint: String,
+
+    /// Whether to set `cluster.preserve_downgrade_option` and what to set it to
+    pub cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
+
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,
     /// identity of the component that generated the blueprint (for debugging)
@@ -173,6 +184,10 @@ impl Blueprint {
             parent_blueprint_id: self.parent_blueprint_id,
             internal_dns_version: self.internal_dns_version,
             external_dns_version: self.external_dns_version,
+            cockroachdb_fingerprint: self.cockroachdb_fingerprint.clone(),
+            cockroachdb_setting_preserve_downgrade: Some(
+                self.cockroachdb_setting_preserve_downgrade,
+            ),
             time_created: self.time_created,
             creator: self.creator.clone(),
             comment: self.comment.clone(),
@@ -346,7 +361,28 @@ pub struct BlueprintDisplay<'a> {
 }
 
 impl<'a> BlueprintDisplay<'a> {
-    pub(super) fn make_metadata_table(&self) -> KvListWithHeading {
+    fn make_cockroachdb_table(&self) -> KvListWithHeading {
+        let fingerprint = if self.blueprint.cockroachdb_fingerprint.is_empty() {
+            NONE_PARENS.to_string()
+        } else {
+            self.blueprint.cockroachdb_fingerprint.clone()
+        };
+
+        KvListWithHeading::new_unchanged(
+            COCKROACHDB_HEADING,
+            vec![
+                (COCKROACHDB_FINGERPRINT, fingerprint),
+                (
+                    COCKROACHDB_PRESERVE_DOWNGRADE,
+                    self.blueprint
+                        .cockroachdb_setting_preserve_downgrade
+                        .to_string(),
+                ),
+            ],
+        )
+    }
+
+    fn make_metadata_table(&self) -> KvListWithHeading {
         let comment = if self.blueprint.comment.is_empty() {
             NONE_PARENS.to_string()
         } else {
@@ -446,6 +482,7 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
             }
         }
 
+        writeln!(f, "{}", self.make_cockroachdb_table())?;
         writeln!(f, "{}", self.make_metadata_table())?;
 
         Ok(())
@@ -998,6 +1035,12 @@ pub struct BlueprintMetadata {
     pub internal_dns_version: Generation,
     /// external DNS version when this blueprint was created
     pub external_dns_version: Generation,
+    /// CockroachDB state fingerprint when this blueprint was created
+    pub cockroachdb_fingerprint: String,
+    /// Whether to set `cluster.preserve_downgrade_option` and what to set it to
+    /// (`None` if this value was retrieved from the database and was invalid)
+    pub cockroachdb_setting_preserve_downgrade:
+        Option<CockroachDbPreserveDowngrade>,
 
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,
