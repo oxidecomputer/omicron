@@ -203,8 +203,15 @@ impl SimInstanceInner {
                     )));
                 }
 
-                let migration_id = self.state.migration_out()
-                    .ok_or_else(|| Error::invalid_request("can't request migration in for a vmm that wasn't created with a migration ID"))?
+                let migration_id = self
+                    .state
+                    .migration_in()
+                    .ok_or_else(|| {
+                        Error::invalid_request(
+                            "can't request migration in for a vmm that wasn't \
+                        created with a migration ID",
+                        )
+                    })?
                     .migration_id;
                 self.queue_migration_in(
                     migration_id,
