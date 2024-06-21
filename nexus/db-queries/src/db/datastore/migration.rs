@@ -105,10 +105,6 @@ impl DataStore {
     }
 
     /// Unconditionally mark a migration record as deleted.
-    ///
-    /// This is distinct from [`DataStore::migration_terminate`], as it will
-    /// mark a migration as deleted regardless of the states of the source and
-    /// target VMMs.
     pub async fn migration_mark_deleted(
         &self,
         opctx: &OpContext,
