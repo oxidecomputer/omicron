@@ -794,6 +794,8 @@ impl ServiceManager {
         // lock.
         _map: &MutexGuard<'_, ZoneMap>,
     ) -> Result<Option<Ledger<OmicronZonesConfigLocal>>, Error> {
+        let log = &self.inner.log;
+
         // NOTE: This is a function where we used to access zones by "service
         // ledgers". This format has since been deprecated, and these files,
         // if they exist, should not be used.
@@ -806,16 +808,17 @@ impl ServiceManager {
                 Ok(_) => (),
                 Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => (),
                 Err(e) => {
-                    return Err(Error::io(
-                        "Failed to delete old service ledger",
-                        e,
-                    ))
+                    warn!(
+                        log,
+                        "Failed to delete old service ledger";
+                        "err" => ?e,
+                        "path" => ?path,
+                    );
                 }
             }
         }
 
         // Try to load the current software's zone ledger
-        let log = &self.inner.log;
         let ledger_paths = self.all_omicron_zone_ledgers().await;
         info!(log, "Loading Omicron zones from: {ledger_paths:?}");
         let maybe_ledger =
