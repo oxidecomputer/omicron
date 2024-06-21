@@ -4,7 +4,7 @@
 
 //! Utility for bundling target binaries as tarfiles.
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Parser, Subcommand};
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -188,12 +188,23 @@ async fn do_for_all_rust_packages(
         // If this is a Rust package...
         if let PackageSource::Local { rust: Some(rust_pkg), .. } = &pkg.source {
             let plan = if rust_pkg.release { &mut release } else { &mut debug };
-            // Add the binaries we want to build to the plan
-            plan.bins.extend(&rust_pkg.binary_names);
             // Get the package metadata
             let metadata = workspace_pkgs.get(name).with_context(|| {
                 format!("package '{name}' is not a workspace package")
             })?;
+            // Add the binaries we want to build to the plan
+            let bins = metadata
+                .targets
+                .iter()
+                .filter_map(|target| target.is_bin().then_some(&target.name))
+                .collect::<BTreeSet<_>>();
+            for bin in &rust_pkg.binary_names {
+                ensure!(
+                    bins.contains(bin),
+                    "bin target '{bin}' does not belong to package '{name}'"
+                );
+                plan.bins.insert(bin);
+            }
             // Add all features we want to request to the plan
             plan.features.extend(
                 features
