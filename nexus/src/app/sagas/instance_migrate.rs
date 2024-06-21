@@ -334,7 +334,7 @@ async fn sim_destroy_vmm_record(
 
 async fn sim_set_migration_ids(
     sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
+) -> Result<db::model::Instance, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let opctx = crate::context::op_context_for_saga_action(
@@ -365,9 +365,7 @@ async fn sim_set_migration_ids(
             dst_propolis_id,
         )
         .await
-        .map_err(ActionError::action_failed)?;
-
-    Ok(())
+        .map_err(ActionError::action_failed)
 }
 
 async fn sim_clear_migration_ids(

@@ -526,7 +526,7 @@ impl DataStore {
         src_propolis_id: PropolisUuid,
         migration_id: Uuid,
         target_propolis_id: PropolisUuid,
-    ) -> Result<bool, Error> {
+    ) -> Result<Instance, Error> {
         use db::schema::instance::dsl;
 
         let instance_id = instance_id.into_untyped_uuid();
@@ -560,25 +560,24 @@ impl DataStore {
 
         match updated {
             // If we updated the instance, that's great! Good job team!
-            UpdateAndQueryResult { status: UpdateStatus::Updated, .. } => {
-                Ok(true)
+            UpdateAndQueryResult { status: UpdateStatus::Updated, found } => {
+                Ok(found)
             }
             // No update was performed because the migration ID has already been
             // set to the ID we were trying to set it to. That's fine, count it
             // as a success.
-            UpdateAndQueryResult {
-                found: Instance { runtime_state, .. },
-                ..
-            } if runtime_state.migration_id == Some(migration_id) => {
+            UpdateAndQueryResult { found, .. }
+                if found.runtime_state.migration_id == Some(migration_id) =>
+            {
                 debug_assert_eq!(
-                    runtime_state.dst_propolis_id,
+                    found.runtime_state.dst_propolis_id,
                     Some(target_propolis_id)
                 );
                 debug_assert_eq!(
-                    runtime_state.propolis_id,
+                    found.runtime_state.propolis_id,
                     Some(src_propolis_id)
                 );
-                Ok(false)
+                Ok(found)
             }
 
             // On the other hand, if there was already a different migration ID,
