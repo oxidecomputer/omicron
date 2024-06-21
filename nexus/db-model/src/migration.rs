@@ -89,4 +89,20 @@ impl Migration {
             time_target_updated: None,
         }
     }
+
+    pub const COMPLETED: MigrationState =
+        MigrationState(nexus::MigrationState::Completed);
+    pub const FAILED: MigrationState =
+        MigrationState(nexus::MigrationState::Failed);
+
+    /// Returns `true` if either side of the migration has failed.
+    pub fn either_side_failed(&self) -> bool {
+        self.source_state == Self::FAILED || self.target_state == Self::FAILED
+    }
+
+    /// Returns `true` if either side of the migration has completed.
+    pub fn either_side_completed(&self) -> bool {
+        self.source_state == Self::COMPLETED
+            || self.target_state == Self::COMPLETED
+    }
 }
