@@ -965,6 +965,8 @@ impl Instance {
     /// * `log`: Logger for dumping debug information.
     /// * `id`: UUID of the instance to be created.
     /// * `propolis_id`: UUID for the VMM to be created.
+    /// * `migration_id`: UUID of the migration in to this VMM, if the VMM is
+    ///   being created as the target of an active migration.
     /// * `ticket`: A ticket that ensures this instance is a member of its
     ///   instance manager's tracking table.
     /// * `state`: The initial state of this instance.
@@ -976,6 +978,7 @@ impl Instance {
         log: Logger,
         id: InstanceUuid,
         propolis_id: PropolisUuid,
+        migration_id: Option<Uuid>,
         ticket: InstanceTicket,
         state: InstanceInitialState,
         services: InstanceManagerServices,
@@ -985,6 +988,7 @@ impl Instance {
         info!(log, "initializing new Instance";
               "instance_id" => %id,
               "propolis_id" => %propolis_id,
+              "migration_id" => ?migration_id,
               "state" => ?state);
 
         let InstanceInitialState {
@@ -1078,7 +1082,7 @@ impl Instance {
             dhcp_config,
             requested_disks: hardware.disks,
             cloud_init_bytes: hardware.cloud_init_bytes,
-            state: InstanceStates::new(vmm_runtime, propolis_id),
+            state: InstanceStates::new(vmm_runtime, propolis_id, migration_id),
             running_state: None,
             nexus_client,
             storage,

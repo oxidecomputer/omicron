@@ -173,13 +173,21 @@ pub enum Action {
 }
 
 impl InstanceStates {
-    pub fn new(vmm: VmmRuntimeState, propolis_id: PropolisUuid) -> Self {
-        InstanceStates {
-            vmm,
-            propolis_id,
-            migration_in: None,
-            migration_out: None,
-        }
+    pub fn new(
+        vmm: VmmRuntimeState,
+        propolis_id: PropolisUuid,
+        migration_id: Option<Uuid>,
+    ) -> Self {
+        // If this instance is created with a migration ID, we are the intended
+        // target of a migration in. Set that up now.
+        let migration_in =
+            migration_id.map(|migration_id| MigrationRuntimeState {
+                migration_id,
+                state: MigrationState::Pending,
+                gen: Generation::new(),
+                time_updated: Utc::now(),
+            });
+        InstanceStates { vmm, propolis_id, migration_in, migration_out: None }
     }
 
     pub fn vmm(&self) -> &VmmRuntimeState {
@@ -376,7 +384,7 @@ mod test {
             time_updated: now,
         };
 
-        InstanceStates::new(vmm, propolis_id)
+        InstanceStates::new(vmm, propolis_id, None)
     }
 
     fn make_migration_source_instance() -> InstanceStates {
@@ -396,18 +404,16 @@ mod test {
     }
 
     fn make_migration_target_instance() -> InstanceStates {
-        let mut state = make_instance();
-        state.vmm.state = VmmState::Migrating;
-        let migration_id = Uuid::new_v4();
-        state.migration_in = Some(MigrationRuntimeState {
-            migration_id,
-            state: MigrationState::InProgress,
-            // advance the generation once, since we are starting out in the
-            // `InProgress` state.
-            gen: Generation::new().next(),
-            time_updated: Utc::now(),
-        });
-        state
+        let propolis_id = PropolisUuid::new_v4();
+        let now = Utc::now();
+
+        let vmm = VmmRuntimeState {
+            state: VmmState::Migrating,
+            gen: Generation::new(),
+            time_updated: now,
+        };
+
+        InstanceStates::new(vmm, propolis_id, Some(Uuid::new_v4()))
     }
 
     fn make_observed_state(

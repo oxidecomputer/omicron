@@ -465,6 +465,7 @@ impl Simulatable for SimInstance {
                 state: InstanceStates::new(
                     current.vmm_state,
                     current.propolis_id,
+                    current.migration_in.map(|m| m.migration_id),
                 ),
                 last_response: InstanceStateMonitorResponse {
                     gen: 1,
