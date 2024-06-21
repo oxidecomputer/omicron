@@ -117,8 +117,8 @@ impl BackgroundTask for ExternalEndpointsWatcher {
 
 #[cfg(test)]
 mod test {
+    use super::ExternalEndpointsWatcher;
     use crate::app::background::common::BackgroundTask;
-    use crate::app::background::external_endpoints::ExternalEndpointsWatcher;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
     use nexus_test_utils::resource_helpers::create_silo;

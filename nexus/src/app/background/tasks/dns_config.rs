@@ -157,8 +157,8 @@ impl BackgroundTask for DnsConfigWatcher {
 
 #[cfg(test)]
 mod test {
+    use super::DnsConfigWatcher;
     use crate::app::background::common::BackgroundTask;
-    use crate::app::background::dns_config::DnsConfigWatcher;
     use crate::app::background::init::test::write_test_dns_generation;
     use assert_matches::assert_matches;
     use async_bb8_diesel::AsyncRunQueryDsl;

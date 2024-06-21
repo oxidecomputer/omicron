@@ -6,7 +6,7 @@
 //! to relevant management daemons (dendrite, mgd, sled-agent, etc.)
 
 use crate::app::{
-    background::networking::{
+    background::tasks::networking::{
         api_to_dpd_port_settings, build_dpd_clients, build_mgd_clients,
     },
     map_switch_zone_addrs,

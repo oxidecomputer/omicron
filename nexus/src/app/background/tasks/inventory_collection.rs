@@ -186,10 +186,10 @@ impl<'a> nexus_inventory::SledAgentEnumerator for DbSledAgentEnumerator<'a> {
 
 #[cfg(test)]
 mod test {
+    use super::DbSledAgentEnumerator;
+    use super::InventoryCollector;
     use crate::app::authz;
     use crate::app::background::common::BackgroundTask;
-    use crate::app::background::inventory_collection::DbSledAgentEnumerator;
-    use crate::app::background::inventory_collection::InventoryCollector;
     use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledSystemHardware;

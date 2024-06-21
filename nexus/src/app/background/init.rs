@@ -4,27 +4,27 @@
 
 //! Background task initialization
 
-use super::abandoned_vmm_reaper;
-use super::bfd;
-use super::blueprint_execution;
-use super::blueprint_load;
 use super::common;
-use super::crdb_node_id_collector;
-use super::dns_config;
-use super::dns_propagation;
-use super::dns_servers;
-use super::external_endpoints;
-use super::instance_watcher;
-use super::inventory_collection;
-use super::metrics_producer_gc;
-use super::nat_cleanup;
-use super::phantom_disks;
-use super::physical_disk_adoption;
-use super::region_replacement;
-use super::service_firewall_rules;
-use super::sync_service_zone_nat::ServiceZoneNatTracker;
-use super::sync_switch_configuration::SwitchPortSettingsManager;
-use super::v2p_mappings::V2PManager;
+use super::tasks::abandoned_vmm_reaper;
+use super::tasks::bfd;
+use super::tasks::blueprint_execution;
+use super::tasks::blueprint_load;
+use super::tasks::crdb_node_id_collector;
+use super::tasks::dns_config;
+use super::tasks::dns_propagation;
+use super::tasks::dns_servers;
+use super::tasks::external_endpoints;
+use super::tasks::instance_watcher;
+use super::tasks::inventory_collection;
+use super::tasks::metrics_producer_gc;
+use super::tasks::nat_cleanup;
+use super::tasks::phantom_disks;
+use super::tasks::physical_disk_adoption;
+use super::tasks::region_replacement;
+use super::tasks::service_firewall_rules;
+use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
+use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
+use super::tasks::v2p_mappings::V2PManager;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::sagas::SagaRequest;
 use nexus_config::BackgroundTaskConfig;
