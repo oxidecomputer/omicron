@@ -825,14 +825,13 @@ impl Client {
         datum_type: oximeter::DatumType,
     ) -> String {
         let value_columns = if datum_type.is_histogram() {
-            r#"timeseries_key, start_time, timestamp, bins, counts, min, max,
-               sum_of_samples, squared_mean,
-               p50_marker_heights, p50_marker_positions,
-               p50_desired_marker_positions,
-               p90_marker_heights, p90_marker_positions,
-               p90_desired_marker_positions,
-               p99_marker_heights, p99_marker_positions,
-               p99_desired_marker_positions"#
+            concat!(
+                "timeseries_key, start_time, timestamp, bins, counts, min, max, ",
+                "sum_of_samples, squared_mean, p50_marker_heights, p50_marker_positions, ",
+                "p50_desired_marker_positions, p90_marker_heights, p90_marker_positions, ",
+                "p90_desired_marker_positions, p99_marker_heights, p99_marker_positions, ",
+                "p99_desired_marker_positions"
+            )
         } else if datum_type.is_cumulative() {
             "timeseries_key, start_time, timestamp, datum"
         } else {

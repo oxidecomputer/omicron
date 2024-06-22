@@ -611,7 +611,7 @@ impl RestrictedQuery {
     //
     // Scalar measurements have only a timestamp and datum. Cumulative counters
     // have those plus a start_time. And histograms have those plus the bins,
-    // counts, min, max, sum of samples, sum of squares, and quantiile arrays.
+    // counts, min, max, sum of samples, sum of squares, and quantile arrays.
     fn datum_type_to_columns(
         datum_type: &DatumType,
     ) -> &'static [&'static str] {

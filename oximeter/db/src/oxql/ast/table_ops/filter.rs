@@ -518,21 +518,9 @@ fn implicit_field_names(
                 MetricType::Gauge,
                 DataType::IntegerDistribution | DataType::DoubleDistribution,
             ) => {
-                out.insert(special_idents::BINS);
-                out.insert(special_idents::COUNTS);
-                out.insert(special_idents::MIN);
-                out.insert(special_idents::MAX);
-                out.insert(special_idents::SUM_OF_SAMPLES);
-                out.insert(special_idents::SQUARED_MEAN);
-                out.insert(special_idents::P50_MARKER_HEIGHTS);
-                out.insert(special_idents::P50_MARKER_POSITIONS);
-                out.insert(special_idents::P50_DESIRED_MARKER_POSITIONS);
-                out.insert(special_idents::P90_MARKER_HEIGHTS);
-                out.insert(special_idents::P90_MARKER_POSITIONS);
-                out.insert(special_idents::P90_DESIRED_MARKER_POSITIONS);
-                out.insert(special_idents::P99_MARKER_HEIGHTS);
-                out.insert(special_idents::P99_MARKER_POSITIONS);
-                out.insert(special_idents::P99_DESIRED_MARKER_POSITIONS);
+                special_idents::DISTRIBUTION_IDENTS.iter().for_each(|ident| {
+                    out.insert(ident);
+                });
             }
             // Scalars, either delta or cumulatives.
             (
@@ -547,21 +535,9 @@ fn implicit_field_names(
                 MetricType::Delta | MetricType::Cumulative,
                 DataType::IntegerDistribution | DataType::DoubleDistribution,
             ) => {
-                out.insert(special_idents::BINS);
-                out.insert(special_idents::COUNTS);
-                out.insert(special_idents::MIN);
-                out.insert(special_idents::MAX);
-                out.insert(special_idents::SUM_OF_SAMPLES);
-                out.insert(special_idents::SQUARED_MEAN);
-                out.insert(special_idents::P50_MARKER_HEIGHTS);
-                out.insert(special_idents::P50_MARKER_POSITIONS);
-                out.insert(special_idents::P50_DESIRED_MARKER_POSITIONS);
-                out.insert(special_idents::P90_MARKER_HEIGHTS);
-                out.insert(special_idents::P90_MARKER_POSITIONS);
-                out.insert(special_idents::P90_DESIRED_MARKER_POSITIONS);
-                out.insert(special_idents::P99_MARKER_HEIGHTS);
-                out.insert(special_idents::P99_MARKER_POSITIONS);
-                out.insert(special_idents::P99_DESIRED_MARKER_POSITIONS);
+                special_idents::DISTRIBUTION_IDENTS.iter().for_each(|ident| {
+                    out.insert(ident);
+                });
                 out.insert(special_idents::START_TIME);
             }
             // Impossible combinations

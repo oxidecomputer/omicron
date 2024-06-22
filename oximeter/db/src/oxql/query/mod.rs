@@ -44,27 +44,30 @@ pub mod special_idents {
     pub const MAX: &str = "max";
     pub const SUM_OF_SAMPLES: &str = "sum_of_samples";
     pub const SQUARED_MEAN: &str = "squared_mean";
-    pub const P50_MARKER_HEIGHTS: &str = gen_marker!("50", "marker_heights");
-    pub const P50_MARKER_POSITIONS: &str =
-        gen_marker!("50", "marker_positions");
-    pub const P50_DESIRED_MARKER_POSITIONS: &str =
-        gen_marker!("50", "desired_marker_positions");
-    pub const P90_MARKER_HEIGHTS: &str = gen_marker!("90", "marker_heights");
-    pub const P90_MARKER_POSITIONS: &str =
-        gen_marker!("90", "marker_positions");
-    pub const P90_DESIRED_MARKER_POSITIONS: &str =
-        gen_marker!("90", "desired_marker_positions");
-    pub const P99_MARKER_HEIGHTS: &str = gen_marker!("99", "marker_heights");
-    pub const P99_MARKER_POSITIONS: &str =
-        gen_marker!("99", "marker_positions");
-    pub const P99_DESIRED_MARKER_POSITIONS: &str =
-        gen_marker!("99", "desired_marker_positions");
     pub const DATETIME64: &str = "DateTime64";
     pub const ARRAYU64: &str = "Array[u64]";
     pub const ARRAYFLOAT64: &str = "Array[f64]";
     pub const ARRAYINT64: &str = "Array[i64]";
     pub const FLOAT64: &str = "f64";
     pub const UINT64: &str = "u64";
+
+    pub const DISTRIBUTION_IDENTS: [&str; 15] = [
+        "bins",
+        "counts",
+        "min",
+        "max",
+        "sum_of_samples",
+        "squared_mean",
+        gen_marker!("50", "marker_heights"),
+        gen_marker!("50", "marker_positions"),
+        gen_marker!("50", "desired_marker_positions"),
+        gen_marker!("90", "marker_heights"),
+        gen_marker!("90", "marker_positions"),
+        gen_marker!("90", "desired_marker_positions"),
+        gen_marker!("99", "marker_heights"),
+        gen_marker!("99", "marker_positions"),
+        gen_marker!("99", "desired_marker_positions"),
+    ];
 
     pub fn array_type_name_from_histogram_type(
         type_: DatumType,

@@ -93,7 +93,6 @@ impl Quantile {
             p,
             marker_heights: [0.; FILLED_MARKER_LEN],
             // We start with a sample size of 0.
-            //marker_positions: [0, 1, 2, 3, 0],
             marker_positions: [1, 2, 3, 4, 0],
             // 1-indexed, which is like the paper, but
             // used to keep track of the sample size without
@@ -250,7 +249,6 @@ impl Quantile {
         // We've already checked that the value is finite.
         let value_f = value.to_f64().unwrap();
 
-        // if !self.is_filled {
         if self.len() < FILLED_MARKER_LEN as u64 {
             self.marker_heights[self.len() as usize] = value_f;
             self.marker_positions[4] += 1;
@@ -311,14 +309,11 @@ impl Quantile {
         if value < self.marker_heights[0] {
             None
         } else {
-            let mut k = 0;
-            while k + 1 < FILLED_MARKER_LEN
-                && value >= self.marker_heights[k + 1]
-            {
-                k += 1;
-            }
-
-            Some(k)
+            Some(
+                self.marker_heights
+                    .partition_point(|&height| height <= value)
+                    .saturating_sub(1),
+            )
         }
     }
 
@@ -333,7 +328,7 @@ impl Quantile {
         if (d >= 1.
             && self.marker_positions[i + 1] > self.marker_positions[i] + 1)
             || (d <= -1.
-                && self.marker_positions[i - 1] < self.marker_positions[i])
+                && self.marker_positions[i - 1] < self.marker_positions[i] - 1)
         {
             let d_signum = d.signum();
             let q_prime = self.parabolic(i, d_signum);
@@ -362,8 +357,8 @@ impl Quantile {
     /// Read <https://aakinshin.net/posts/p2-quantile-estimator-initialization>
     /// for more.
     fn adaptive_init(&mut self) {
-        self.desired_marker_positions[1..FILLED_MARKER_LEN]
-            .copy_from_slice(&self.marker_heights[1..FILLED_MARKER_LEN]);
+        self.desired_marker_positions[..FILLED_MARKER_LEN]
+            .copy_from_slice(&self.marker_heights[..FILLED_MARKER_LEN]);
 
         self.marker_positions[1] = (1. + 2. * self.p()).round() as u64;
         self.marker_positions[2] = (1. + 4. * self.p()).round() as u64;
@@ -435,6 +430,33 @@ mod tests {
         q
     }
 
+    #[test]
+    fn test_min_p() {
+        let observations = [3, 6, 7, 8, 8, 10, 13, 15, 16, 20];
+
+        let mut q = Quantile::new(0.0).unwrap();
+        //assert_eq!(q.p(), 0.1);
+        for &o in observations.iter() {
+            q.append(o).unwrap();
+        }
+        assert_eq!(q.estimate().unwrap(), 3.);
+    }
+
+    /// Compared with C# implementation of P² algorithm.
+    #[test]
+    fn test_max_p() {
+        let observations = [3, 6, 7, 8, 8, 10, 13, 15, 16, 20];
+
+        let mut q = Quantile::new(1.).unwrap();
+        assert_eq!(q.p(), 1.);
+
+        for &o in observations.iter() {
+            q.append(o).unwrap();
+        }
+
+        assert_eq!(q.estimate().unwrap(), 11.66543209876543);
+    }
+
     /// Example observations from the P² paper.
     #[test]
     fn test_float_observations() {
@@ -447,8 +469,9 @@ mod tests {
             q.append(o).unwrap();
         }
         assert_eq!(q.marker_positions, [1, 6, 10, 16, 20]);
-        assert_eq!(q.desired_marker_positions, [1., 5.75, 10.50, 15.25, 20.0]);
+        assert_eq!(q.desired_marker_positions, [0.02, 5.75, 10.5, 15.25, 20.0]);
         assert_eq!(q.p(), 0.5);
+        assert_eq!(q.len(), 20);
         assert_relative_eq!(q.estimate().unwrap(), 4.2462394088036435,);
     }
 

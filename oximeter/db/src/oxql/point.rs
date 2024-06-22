@@ -1553,27 +1553,22 @@ where
             .collect::<Vec<_>>()
             .join(", ");
 
-        let p50_estimate = self
-            .p50
-            .as_ref()
-            .map(|q| q.estimate().unwrap_or_default())
-            .unwrap_or_default();
-        let p90_estimate = self
-            .p90
-            .as_ref()
-            .map(|q| q.estimate().unwrap_or_default())
-            .unwrap_or_default();
-        let p99_estimate = self
-            .p99
-            .as_ref()
-            .map(|q| q.estimate().unwrap_or_default())
-            .unwrap_or_default();
+        let unwrap_estimate = |opt: Option<Quantile>| {
+            opt.map_or("None".to_string(), |v| match v.estimate() {
+                Ok(v) => v.to_string(),
+                Err(err) => err.to_string(),
+            })
+        };
+
+        let p50_estimate = unwrap_estimate(self.p50);
+        let p90_estimate = unwrap_estimate(self.p90);
+        let p99_estimate = unwrap_estimate(self.p99);
 
         write!(
             f,
             "{}, min: {}, max: {}, mean: {}, std_dev: {}, p50: {}, p90: {}, p99: {}",
             elems,
-            self.min.unwrap_or_default(),
+            self.min.map_or("none".to_string(), |m| m.to_string()),
             self.max.unwrap_or_default(),
             self.mean(),
             self.std_dev().unwrap_or_default(),
@@ -1593,6 +1588,16 @@ where
     /// Min and max values are returned as None, as they lose meaning
     /// when subtracting distributions. The same is true for p50, p90, and p99
     /// quantiles.
+    ///
+    /// TODO: It's not really clear how to compute the "difference" of two
+    /// histograms for items like min, max, p*'s. It's certainly not linear, and
+    /// although we might be able to make some estimates in the case of min and
+    /// max, we'll defer it for now. Instead, we'll store None for all these
+    /// values when computing the diff. They will be very useful later, when we
+    /// start generating distributions in OxQL itself, from a sequence of
+    /// scalars (similar to a DTrace aggregation). We'll wait to put that in
+    /// place until we have more data that we want to start aggregating that
+    /// way.
     fn checked_sub(
         &self,
         rhs: &Distribution<T>,
