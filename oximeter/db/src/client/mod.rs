@@ -4381,8 +4381,8 @@ mod tests {
         // the direct path.
         let extra_keys: Vec<_> = tables_through_upgrades
             .keys()
+            .filter(|k| !tables.contains_key(k.as_str()))
             .cloned()
-            .filter(|k| !tables.contains_key(k))
             .collect();
         assert!(
             extra_keys.is_empty(),
@@ -4400,7 +4400,7 @@ mod tests {
         client: &Client,
     ) -> BTreeMap<String, serde_json::Map<String, serde_json::Value>> {
         let out = client
-            .execute_with_body(format!(
+            .execute_with_body(
                 "SELECT \
                 name,
                 engine_full,
@@ -4409,8 +4409,8 @@ mod tests {
                 primary_key
             FROM system.tables \
             WHERE database = 'oximeter'\
-            FORMAT JSONEachRow;"
-            ))
+            FORMAT JSONEachRow;",
+            )
             .await
             .unwrap()
             .1;
