@@ -159,7 +159,7 @@ async fn do_for_all_rust_packages(
     command: &str,
 ) -> Result<()> {
     // Collect a map of all of the workspace packages
-    let workspace = cargo_metadata::MetadataCommand::new().exec()?;
+    let workspace = cargo_metadata::MetadataCommand::new().no_deps().exec()?;
     let workspace_pkgs = workspace
         .packages
         .into_iter()
