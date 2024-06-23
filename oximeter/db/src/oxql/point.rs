@@ -1615,6 +1615,7 @@ where
             .context("Underflow subtracting distributions values")?;
 
         // Subtract sum_of_samples.
+        // This can be negative as T is either i64 or f64.
         let sum_of_samples = self.sum_of_samples - rhs.sum_of_samples;
 
         // Squared means are not linear, so we subtract the means and then
