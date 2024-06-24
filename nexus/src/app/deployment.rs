@@ -17,6 +17,7 @@ use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
+use omicron_common::address::COCKROACHDB_REDUNDANCY;
 use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -175,6 +176,7 @@ impl super::Nexus {
             external_ip_rows: &external_ip_rows,
             service_nic_rows: &service_nic_rows,
             target_nexus_zone_count: NEXUS_REDUNDANCY,
+            target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
             target_cockroachdb_cluster_version:
                 CockroachDbClusterVersion::POLICY,
             log: &opctx.log,

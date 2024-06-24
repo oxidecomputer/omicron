@@ -22,6 +22,7 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::{Error, InternalContext};
 use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use ref_cast::RefCast;
 use serde::Deserialize;
 use serde::Serialize;
@@ -51,14 +52,14 @@ pub(crate) struct Params {
 struct NetParams {
     saga_params: Params,
     which: usize,
-    instance_id: Uuid,
+    instance_id: InstanceUuid,
     new_id: Uuid,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 struct NetworkConfigParams {
     saga_params: Params,
-    instance_id: Uuid,
+    instance_id: InstanceUuid,
     which: usize,
     switch_location: SwitchLocation,
 }
@@ -67,7 +68,7 @@ struct NetworkConfigParams {
 struct DiskAttachParams {
     serialized_authn: authn::saga::Serialized,
     project_id: Uuid,
-    instance_id: Uuid,
+    instance_id: InstanceUuid,
     attach_params: InstanceDiskAttachment,
 }
 
@@ -122,7 +123,7 @@ impl NexusSaga for SagaInstanceCreate {
     ) -> Result<steno::Dag, SagaInitError> {
         // Pre-create the instance ID so that it can be supplied as a constant
         // parameter to the subsagas that create and attach devices.
-        let instance_id = Uuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
 
         builder.append(Node::constant(
             "instance_id",
@@ -307,7 +308,7 @@ async fn sic_associate_ssh_keys(
         &sagactx,
         &saga_params.serialized_authn,
     );
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
 
     // Gather the SSH public keys of the actor making the request so
     // that they may be injected into the new image via cloud-init.
@@ -359,7 +360,7 @@ async fn sic_associate_ssh_keys_undo(
         &sagactx,
         &saga_params.serialized_authn,
     );
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
     datastore
         .instance_ssh_keys_delete(&opctx, instance_id)
         .await
@@ -423,7 +424,7 @@ async fn sic_create_network_interface_undo(
     );
     let interface_id = repeat_saga_params.new_id;
     let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(instance_id)
+        .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::Modify)
         .await
         .map_err(ActionError::action_failed)?;
@@ -469,7 +470,7 @@ async fn sic_create_network_interface_undo(
 async fn create_custom_network_interface(
     sagactx: &NexusActionContext,
     saga_params: &Params,
-    instance_id: Uuid,
+    instance_id: InstanceUuid,
     interface_id: Uuid,
     interface_params: &params::InstanceNetworkInterfaceCreate,
 ) -> Result<(), ActionError> {
@@ -482,7 +483,7 @@ async fn create_custom_network_interface(
 
     // Lookup authz objects, used in the call to create the NIC itself.
     let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(instance_id)
+        .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::CreateChild)
         .await
         .map_err(ActionError::action_failed)?;
@@ -544,7 +545,7 @@ async fn create_default_primary_network_interface(
     sagactx: &NexusActionContext,
     saga_params: &Params,
     nic_index: usize,
-    instance_id: Uuid,
+    instance_id: InstanceUuid,
     interface_id: Uuid,
 ) -> Result<(), ActionError> {
     // We're statically creating up to MAX_NICS_PER_INSTANCE saga nodes, but
@@ -588,7 +589,7 @@ async fn create_default_primary_network_interface(
 
     // Lookup authz objects, used in the call to actually create the NIC.
     let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(instance_id)
+        .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::CreateChild)
         .await
         .map_err(ActionError::action_failed)?;
@@ -643,7 +644,7 @@ async fn sic_allocate_instance_snat_ip(
         &sagactx,
         &saga_params.serialized_authn,
     );
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
     let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
 
     let (.., pool) = datastore
@@ -886,7 +887,7 @@ async fn ensure_instance_disk_attach_state(
 
     let (.., authz_instance, _db_instance) =
         LookupPath::new(&opctx, &datastore)
-            .instance_id(instance_id)
+            .instance_id(instance_id.into_untyped_uuid())
             .fetch()
             .await
             .map_err(ActionError::action_failed)?;
@@ -929,7 +930,7 @@ async fn sic_create_instance_record(
         &sagactx,
         &params.serialized_authn,
     );
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
 
     let new_instance = db::model::Instance::new(
         instance_id,
@@ -962,7 +963,7 @@ async fn sic_delete_instance_record(
         &sagactx,
         &params.serialized_authn,
     );
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
     let instance_name = sagactx
         .lookup::<db::model::Instance>("instance_record")?
         .name()
@@ -1024,7 +1025,7 @@ async fn sic_move_to_stopped(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
     let instance_record =
         sagactx.lookup::<db::model::Instance>("instance_record")?;
 

@@ -13,8 +13,9 @@ use std::mem;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
-pub(super) enum DiscretionaryOmicronZone {
+pub(crate) enum DiscretionaryOmicronZone {
     Nexus,
+    CockroachDb,
     // TODO expand this enum as we start to place more services
 }
 
@@ -24,11 +25,11 @@ impl DiscretionaryOmicronZone {
     ) -> Option<Self> {
         match zone_type {
             BlueprintZoneType::Nexus(_) => Some(Self::Nexus),
+            BlueprintZoneType::CockroachDb(_) => Some(Self::CockroachDb),
             // Zones that we should place but don't yet.
             BlueprintZoneType::BoundaryNtp(_)
             | BlueprintZoneType::Clickhouse(_)
             | BlueprintZoneType::ClickhouseKeeper(_)
-            | BlueprintZoneType::CockroachDb(_)
             | BlueprintZoneType::CruciblePantry(_)
             | BlueprintZoneType::ExternalDns(_)
             | BlueprintZoneType::InternalDns(_)
@@ -46,6 +47,7 @@ impl From<DiscretionaryOmicronZone> for ZoneKind {
     fn from(zone: DiscretionaryOmicronZone) -> Self {
         match zone {
             DiscretionaryOmicronZone::Nexus => Self::Nexus,
+            DiscretionaryOmicronZone::CockroachDb => Self::CockroachDb,
         }
     }
 }

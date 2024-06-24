@@ -51,6 +51,8 @@ use omicron_common::api::internal::nexus::RepairStartInfo;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::DownstairsKind;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsKind;
@@ -274,7 +276,11 @@ async fn cpapi_instances_put(
     let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
     let handler = async {
         nexus
-            .notify_instance_updated(&opctx, &path.instance_id, &new_state)
+            .notify_instance_updated(
+                &opctx,
+                &InstanceUuid::from_untyped_uuid(path.instance_id),
+                &new_state,
+            )
             .await?;
         Ok(HttpResponseUpdatedNoContent())
     };

@@ -27,6 +27,8 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PropolisUuid;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
@@ -52,16 +54,16 @@ impl DataStore {
     pub async fn vmm_mark_deleted(
         &self,
         opctx: &OpContext,
-        vmm_id: &Uuid,
+        vmm_id: &PropolisUuid,
     ) -> UpdateResult<bool> {
         let valid_states = vec![DbVmmState::Destroyed, DbVmmState::Failed];
 
         let updated = diesel::update(dsl::vmm)
-            .filter(dsl::id.eq(*vmm_id))
+            .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
             .filter(dsl::state.eq_any(valid_states))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(Utc::now()))
-            .check_if_exists::<Vmm>(*vmm_id)
+            .check_if_exists::<Vmm>(vmm_id.into_untyped_uuid())
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map(|r| match r.status {
@@ -73,7 +75,7 @@ impl DataStore {
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::Vmm,
-                        LookupType::ById(*vmm_id),
+                        LookupType::ById(vmm_id.into_untyped_uuid()),
                     ),
                 )
             })?;
@@ -85,12 +87,12 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        vmm_id: &Uuid,
+        vmm_id: &PropolisUuid,
     ) -> LookupResult<Vmm> {
         opctx.authorize(authz::Action::Read, authz_instance).await?;
 
         let vmm = dsl::vmm
-            .filter(dsl::id.eq(*vmm_id))
+            .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
             .filter(dsl::instance_id.eq(authz_instance.id()))
             .filter(dsl::time_deleted.is_null())
             .select(Vmm::as_select())
@@ -101,7 +103,7 @@ impl DataStore {
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::Vmm,
-                        LookupType::ById(*vmm_id),
+                        LookupType::ById(vmm_id.into_untyped_uuid()),
                     ),
                 )
             })?;
@@ -111,15 +113,15 @@ impl DataStore {
 
     pub async fn vmm_update_runtime(
         &self,
-        vmm_id: &Uuid,
+        vmm_id: &PropolisUuid,
         new_runtime: &VmmRuntimeState,
     ) -> Result<bool, Error> {
         let updated = diesel::update(dsl::vmm)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(*vmm_id))
+            .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
             .filter(dsl::state_generation.lt(new_runtime.gen))
             .set(new_runtime.clone())
-            .check_if_exists::<Vmm>(*vmm_id)
+            .check_if_exists::<Vmm>(vmm_id.into_untyped_uuid())
             .execute_and_check(&*self.pool_connection_unauthorized().await?)
             .await
             .map(|r| match r.status {
@@ -131,7 +133,7 @@ impl DataStore {
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::Vmm,
-                        LookupType::ById(*vmm_id),
+                        LookupType::ById(vmm_id.into_untyped_uuid()),
                     ),
                 )
             })?;
@@ -150,13 +152,13 @@ impl DataStore {
     pub async fn vmm_overwrite_addr_for_test(
         &self,
         opctx: &OpContext,
-        vmm_id: &Uuid,
+        vmm_id: &PropolisUuid,
         new_addr: SocketAddr,
     ) -> UpdateResult<Vmm> {
         let new_ip = ipnetwork::IpNetwork::from(new_addr.ip());
         let new_port = new_addr.port();
         let vmm = diesel::update(dsl::vmm)
-            .filter(dsl::id.eq(*vmm_id))
+            .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
             .set((
                 dsl::propolis_ip.eq(new_ip),
                 dsl::propolis_port.eq(i32::from(new_port)),

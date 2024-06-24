@@ -51,8 +51,8 @@ use omicron_common::{
 use serde_json::json;
 use sled_agent_client::types::{
     BgpConfig as SledBgpConfig, BgpPeerConfig as SledBgpPeerConfig,
-    EarlyNetworkConfig, EarlyNetworkConfigBody, HostPortConfig, PortConfigV1,
-    RackNetworkConfigV1, RouteConfig as SledRouteConfig,
+    EarlyNetworkConfig, EarlyNetworkConfigBody, HostPortConfig, PortConfigV2,
+    RackNetworkConfigV2, RouteConfig as SledRouteConfig, UplinkAddressConfig,
 };
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
@@ -901,7 +901,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 bgp.dedup();
 
-                let mut ports: Vec<PortConfigV1> = vec![];
+                let mut ports: Vec<PortConfigV2> = vec![];
 
                 for (location, port, change) in &changes {
                     let PortSettingsChange::Apply(info) = change else {
@@ -922,8 +922,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         },
                     };
 
-                    let mut port_config = PortConfigV1 {
-                        addresses: info.addresses.iter().map(|a| a.address.into()).collect(),
+                    let mut port_config = PortConfigV2 {
+                        addresses: info.addresses.iter().map(|a|
+			    UplinkAddressConfig {
+				    address: a.address.into(),
+				    vlan_id: a.vlan_id.map(|v| v.into())
+			    }).collect(),
                         autoneg: info
                             .links
                             .get(0) //TODO breakout support
@@ -1096,10 +1100,10 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 let mut desired_config = EarlyNetworkConfig {
                     generation: 0,
-                    schema_version: 1,
+                    schema_version: 2,
                     body: EarlyNetworkConfigBody {
                         ntp_servers,
-                        rack_network_config: Some(RackNetworkConfigV1 {
+                        rack_network_config: Some(RackNetworkConfigV2 {
                             rack_subnet: subnet,
                             infra_ip_first,
                             infra_ip_last,
@@ -1401,7 +1405,14 @@ fn uplinks(
         };
         let config = HostPortConfig {
             port: port.port_name.clone(),
-            addrs: config.addresses.iter().map(|a| a.address.into()).collect(),
+            addrs: config
+                .addresses
+                .iter()
+                .map(|a| UplinkAddressConfig {
+                    address: a.address.into(),
+                    vlan_id: a.vlan_id.map(|v| v.into()),
+                })
+                .collect(),
         };
 
         match uplinks.entry(*location) {

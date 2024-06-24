@@ -24,6 +24,7 @@ use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::ZoneKind;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::inventory::Collection;
@@ -744,7 +745,8 @@ fn cmd_blueprint_edit(
 
     let label = match args.edit_command {
         BlueprintEditCommands::AddNexus { sled_id } => {
-            let current = builder.sled_num_nexus_zones(sled_id);
+            let current =
+                builder.sled_num_zones_of_kind(sled_id, ZoneKind::Nexus);
             let added = builder
                 .sled_ensure_zone_multiple_nexus(sled_id, current + 1)
                 .context("failed to add Nexus zone")?;

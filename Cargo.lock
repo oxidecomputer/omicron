@@ -464,9 +464,9 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=6d7ed9a033babc054db9eff5b59dee978d2b0d76#6d7ed9a033babc054db9eff5b59dee978d2b0d76"
+source = "git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753#50cb28f586083fdb990e401bc6146e7dac9b2753"
 dependencies = [
- "bhyve_api_sys 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=6d7ed9a033babc054db9eff5b59dee978d2b0d76)",
+ "bhyve_api_sys 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753)",
  "libc",
  "strum",
 ]
@@ -484,7 +484,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=6d7ed9a033babc054db9eff5b59dee978d2b0d76#6d7ed9a033babc054db9eff5b59dee978d2b0d76"
+source = "git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753#50cb28f586083fdb990e401bc6146e7dac9b2753"
 dependencies = [
  "libc",
  "strum",
@@ -1061,6 +1061,20 @@ name = "cobs"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67ba02a97a2bd10f4b59b25c7973101c79642302776489e030cd13cdab09ed15"
+
+[[package]]
+name = "cockroach-admin-client"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "progenitor",
+ "reqwest",
+ "schemars",
+ "serde",
+ "slog",
+]
 
 [[package]]
 name = "colorchoice"
@@ -3225,9 +3239,10 @@ dependencies = [
 
 [[package]]
 name = "hubtools"
-version = "0.4.1"
-source = "git+https://github.com/oxidecomputer/hubtools.git?branch=main#73cd5a84689d59ecce9da66ad4389c540d315168"
+version = "0.4.6"
+source = "git+https://github.com/oxidecomputer/hubtools.git?branch=main#943c4bbe6b50d1ab635d085d6204895fb4154e79"
 dependencies = [
+ "hex",
  "lpc55_areas",
  "lpc55_sign",
  "object 0.30.4",
@@ -3457,7 +3472,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "bhyve_api 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=6d7ed9a033babc054db9eff5b59dee978d2b0d76)",
+ "bhyve_api 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753)",
  "byteorder",
  "camino",
  "camino-tempfile",
@@ -4131,8 +4146,8 @@ checksum = "90ed8c1e510134f979dbc4f070f87d4313098b704861a105fe34231c70a3901c"
 
 [[package]]
 name = "lpc55_areas"
-version = "0.2.4"
-source = "git+https://github.com/oxidecomputer/lpc55_support#96f064eaae5e95930efaab6c29fd1b2e22225dac"
+version = "0.2.5"
+source = "git+https://github.com/oxidecomputer/lpc55_support#131520fc913ecce9b80557e854751953f743a7d2"
 dependencies = [
  "bitfield",
  "clap",
@@ -4142,8 +4157,8 @@ dependencies = [
 
 [[package]]
 name = "lpc55_sign"
-version = "0.3.3"
-source = "git+https://github.com/oxidecomputer/lpc55_support#96f064eaae5e95930efaab6c29fd1b2e22225dac"
+version = "0.3.4"
+source = "git+https://github.com/oxidecomputer/lpc55_support#131520fc913ecce9b80557e854751953f743a7d2"
 dependencies = [
  "byteorder",
  "const-oid",
@@ -5246,22 +5261,30 @@ dependencies = [
  "clap",
  "csv",
  "dropshot",
+ "expectorate",
  "http 0.2.12",
  "illumos-utils",
  "nexus-test-utils",
  "omicron-common",
  "omicron-rpaths",
  "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "once_cell",
+ "openapi-lint",
+ "openapiv3",
  "pq-sys",
  "schemars",
  "serde",
+ "serde_json",
  "slog",
  "slog-async",
  "slog-dtrace",
  "slog-error-chain",
+ "subprocess",
  "thiserror",
  "tokio",
+ "tokio-postgres",
  "toml 0.8.13",
  "url",
 ]
@@ -5432,6 +5455,7 @@ dependencies = [
  "cancel-safe-futures",
  "chrono",
  "clap",
+ "cockroach-admin-client",
  "criterion",
  "crucible-agent-client",
  "crucible-pantry-client",
@@ -5503,7 +5527,7 @@ dependencies = [
  "pq-sys",
  "pretty_assertions",
  "progenitor-client",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=6d7ed9a033babc054db9eff5b59dee978d2b0d76)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753)",
  "rand 0.8.5",
  "rcgen",
  "ref-cast",
@@ -5608,6 +5632,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
+ "cargo_metadata",
  "clap",
  "expectorate",
  "futures",
@@ -5629,7 +5654,6 @@ dependencies = [
  "slog-term",
  "smf",
  "strum",
- "swrite",
  "tar",
  "thiserror",
  "tokio",
@@ -5753,7 +5777,7 @@ dependencies = [
  "oximeter-producer",
  "oxnet",
  "pretty_assertions",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=6d7ed9a033babc054db9eff5b59dee978d2b0d76)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753)",
  "propolis-mock-server",
  "rand 0.8.5",
  "rcgen",
@@ -7184,7 +7208,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=6d7ed9a033babc054db9eff5b59dee978d2b0d76#6d7ed9a033babc054db9eff5b59dee978d2b0d76"
+source = "git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753#50cb28f586083fdb990e401bc6146e7dac9b2753"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -7198,7 +7222,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "tokio-tungstenite 0.20.1",
+ "tokio-tungstenite 0.21.0",
  "uuid",
 ]
 
@@ -7226,7 +7250,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=6d7ed9a033babc054db9eff5b59dee978d2b0d76#6d7ed9a033babc054db9eff5b59dee978d2b0d76"
+source = "git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753#50cb28f586083fdb990e401bc6146e7dac9b2753"
 dependencies = [
  "anyhow",
  "atty",
@@ -7236,7 +7260,7 @@ dependencies = [
  "futures",
  "hyper 0.14.28",
  "progenitor",
- "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=6d7ed9a033babc054db9eff5b59dee978d2b0d76)",
+ "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753)",
  "rand 0.8.5",
  "reqwest",
  "schemars",
@@ -7249,7 +7273,7 @@ dependencies = [
  "slog-term",
  "thiserror",
  "tokio",
- "tokio-tungstenite 0.20.1",
+ "tokio-tungstenite 0.21.0",
  "uuid",
 ]
 
@@ -7268,7 +7292,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=6d7ed9a033babc054db9eff5b59dee978d2b0d76#6d7ed9a033babc054db9eff5b59dee978d2b0d76"
+source = "git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753#50cb28f586083fdb990e401bc6146e7dac9b2753"
 dependencies = [
  "schemars",
  "serde",
@@ -11361,9 +11385,11 @@ dependencies = [
  "slog-term",
  "strum",
  "swrite",
+ "tabled",
  "tar",
  "tokio",
  "toml 0.8.13",
+ "usdt",
 ]
 
 [[package]]

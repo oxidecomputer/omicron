@@ -301,7 +301,10 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                     UplinkProperty(format!("uplinks/{}_0", port));
 
                 for addr in &uplink.addresses {
-                    let uplink_cidr = addr.to_string();
+                    // This includes the CIDR only
+                    let uplink_cidr = addr.address.to_string();
+                    // This includes the VLAN ID, if any
+                    let uplink_cfg = addr.to_string();
                     if let Err(err) = execute_command(&[
                         SVCCFG,
                         "-s",
@@ -309,7 +312,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                         "addpropvalue",
                         &uplink_property.0,
                         "astring:",
-                        &uplink_cidr,
+                        &uplink_cfg,
                     ])
                     .await
                     {

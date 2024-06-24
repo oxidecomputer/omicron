@@ -21,6 +21,7 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::Generation;
 use crate::db::model::Instance;
 use crate::db::model::InstanceRuntimeState;
+use crate::db::model::Migration;
 use crate::db::model::Name;
 use crate::db::model::Project;
 use crate::db::model::Sled;
@@ -46,7 +47,12 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::internal::nexus::MigrationRuntimeState;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::SledUuid;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
@@ -66,8 +72,8 @@ impl InstanceAndActiveVmm {
         &self.vmm
     }
 
-    pub fn sled_id(&self) -> Option<Uuid> {
-        self.vmm.as_ref().map(|v| v.sled_id)
+    pub fn sled_id(&self) -> Option<SledUuid> {
+        self.vmm.as_ref().map(|v| SledUuid::from_untyped_uuid(v.sled_id))
     }
 
     pub fn effective_state(
@@ -118,6 +124,26 @@ impl From<InstanceAndActiveVmm> for omicron_common::api::external::Instance {
     }
 }
 
+/// A complete snapshot of the database records describing the current state of
+/// an instance: the [`Instance`] record itself, along with its active [`Vmm`],
+/// target [`Vmm`], and current [`Migration`], if they exist.
+///
+/// This is returned by [`DataStore::instance_fetch_all`].
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct InstanceSnapshot {
+    /// The instance record.
+    pub instance: Instance,
+    /// The [`Vmm`] record pointed to by the instance's `active_propolis_id`, if
+    /// it is set.
+    pub active_vmm: Option<Vmm>,
+    /// The [`Vmm`] record pointed to by the instance's `target_propolis_id`, if
+    /// it is set.
+    pub target_vmm: Option<Vmm>,
+    /// The [`Migration`] record pointed to by the instance's `migration_id`, if
+    /// it is set.
+    pub migration: Option<Migration>,
+}
+
 /// A token which represents that a saga holds the instance-updater lock on a
 /// particular instance.
 ///
@@ -139,6 +165,25 @@ pub enum UpdaterLockError {
     /// An error occurred executing the query.
     #[error("error locking instance: {0}")]
     Query(#[from] Error),
+}
+
+/// The result of an [`DataStore::instance_and_vmm_update_runtime`] call,
+/// indicating which records were updated.
+#[derive(Copy, Clone, Debug)]
+pub struct InstanceUpdateResult {
+    /// `true` if the instance record was updated, `false` otherwise.
+    pub instance_updated: bool,
+    /// `true` if the VMM record was updated, `false` otherwise.
+    pub vmm_updated: bool,
+    /// Indicates whether a migration record for this instance was updated, if a
+    /// [`MigrationRuntimeState`] was provided to
+    /// [`DataStore::instance_and_vmm_update_runtime`].
+    ///
+    /// - `Some(true)` if a migration record was updated
+    /// - `Some(false)` if a [`MigrationRuntimeState`] was provided, but the
+    ///   migration record was not updated
+    /// - `None` if no [`MigrationRuntimeState`] was provided
+    pub migration_updated: Option<bool>,
 }
 
 impl DataStore {
@@ -310,6 +355,92 @@ impl DataStore {
         Ok(InstanceAndActiveVmm { instance, vmm })
     }
 
+    /// Fetches all database records describing the state of the provided
+    /// instance in a single atomic query.
+    ///
+    /// If an instance with the provided UUID exists, this method returns an
+    /// [`InstanceSnapshot`], which contains the following:
+    ///
+    /// - The [`Instance`] record itself,
+    /// - The instance's active [`Vmm`] record, if the `active_propolis_id`
+    ///   column is not null,
+    /// - The instance's target [`Vmm`] record, if the `target_propolis_id`
+    ///   column is not null,
+    /// - The instance's current active [`Migration`], if the `migration_id`
+    ///   column is not null.
+    pub async fn instance_fetch_all(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+    ) -> LookupResult<InstanceSnapshot> {
+        opctx.authorize(authz::Action::Read, authz_instance).await?;
+
+        use db::schema::instance::dsl as instance_dsl;
+        use db::schema::migration::dsl as migration_dsl;
+        use db::schema::vmm;
+
+        // Create a Diesel alias to allow us to LEFT JOIN the `instance` table
+        // with the `vmm` table twice; once on the `active_propolis_id` and once
+        // on the `target_propolis_id`.
+        let (active_vmm, target_vmm) =
+            diesel::alias!(vmm as active_vmm, vmm as target_vmm);
+        let vmm_selection =
+            <Vmm as Selectable<diesel::pg::Pg>>::construct_selection();
+
+        let query = instance_dsl::instance
+            .filter(instance_dsl::id.eq(authz_instance.id()))
+            .filter(instance_dsl::time_deleted.is_null())
+            .left_join(
+                active_vmm.on(active_vmm
+                    .field(vmm::id)
+                    .nullable()
+                    .eq(instance_dsl::active_propolis_id)
+                    .and(active_vmm.field(vmm::time_deleted).is_null())),
+            )
+            .left_join(
+                target_vmm.on(target_vmm
+                    .field(vmm::id)
+                    .nullable()
+                    .eq(instance_dsl::target_propolis_id)
+                    .and(target_vmm.field(vmm::time_deleted).is_null())),
+            )
+            .left_join(
+                migration_dsl::migration.on(migration_dsl::id
+                    .nullable()
+                    .eq(instance_dsl::migration_id)
+                    .and(migration_dsl::time_deleted.is_null())),
+            )
+            .select((
+                Instance::as_select(),
+                active_vmm.fields(vmm_selection).nullable(),
+                target_vmm.fields(vmm_selection).nullable(),
+                Option::<Migration>::as_select(),
+            ));
+
+        let (instance, active_vmm, target_vmm, migration) =
+            query
+                .first_async::<(
+                    Instance,
+                    Option<Vmm>,
+                    Option<Vmm>,
+                    Option<Migration>,
+                )>(
+                    &*self.pool_connection_authorized(opctx).await?
+                )
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::NotFoundByLookup(
+                            ResourceType::Instance,
+                            LookupType::ById(authz_instance.id()),
+                        ),
+                    )
+                })?;
+
+        Ok(InstanceSnapshot { instance, migration, active_vmm, target_vmm })
+    }
+
     // TODO-design It's tempting to return the updated state of the Instance
     // here because it's convenient for consumers and by using a RETURNING
     // clause, we could ensure that the "update" and "fetch" are atomic.
@@ -319,21 +450,21 @@ impl DataStore {
     // to explicitly fetch the state if they want that.
     pub async fn instance_update_runtime(
         &self,
-        instance_id: &Uuid,
+        instance_id: &InstanceUuid,
         new_runtime: &InstanceRuntimeState,
     ) -> Result<bool, Error> {
         use db::schema::instance::dsl;
 
         let updated = diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(*instance_id))
+            .filter(dsl::id.eq(instance_id.into_untyped_uuid()))
             // Runtime state updates are allowed if either:
             // - the active Propolis ID will not change, the state generation
             //   increased, and the Propolis generation will not change, or
             // - the Propolis generation increased.
             .filter(dsl::state_generation.lt(new_runtime.gen))
             .set(new_runtime.clone())
-            .check_if_exists::<Instance>(*instance_id)
+            .check_if_exists::<Instance>(instance_id.into_untyped_uuid())
             .execute_and_check(&*self.pool_connection_unauthorized().await?)
             .await
             .map(|r| match r.status {
@@ -345,7 +476,7 @@ impl DataStore {
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::Instance,
-                        LookupType::ById(*instance_id),
+                        LookupType::ById(instance_id.into_untyped_uuid()),
                     ),
                 )
             })?;
@@ -372,25 +503,26 @@ impl DataStore {
     ///
     /// # Return value
     ///
-    /// - `Ok((instance_updated, vmm_updated))` if the query was issued
-    ///   successfully. `instance_updated` and `vmm_updated` are each true if
-    ///   the relevant item was updated and false otherwise. Note that an update
-    ///   can fail because it was inapplicable (i.e. the database has state with
-    ///   a newer generation already) or because the relevant record was not
-    ///   found.
+    /// - `Ok(`[`InstanceUpdateResult`]`)` if the query was issued
+    ///   successfully. The returned [`InstanceUpdateResult`] indicates which
+    ///   database record(s) were updated. Note that an update can fail because
+    ///   it was inapplicable (i.e. the database has state with a newer
+    ///   generation already) or because the relevant record was not found.
     /// - `Err` if another error occurred while accessing the database.
     pub async fn instance_and_vmm_update_runtime(
         &self,
-        instance_id: &Uuid,
+        instance_id: &InstanceUuid,
         new_instance: &InstanceRuntimeState,
-        vmm_id: &Uuid,
+        vmm_id: &PropolisUuid,
         new_vmm: &VmmRuntimeState,
-    ) -> Result<(bool, bool), Error> {
+        migration: &Option<MigrationRuntimeState>,
+    ) -> Result<InstanceUpdateResult, Error> {
         let query = crate::db::queries::instance::InstanceAndVmmUpdate::new(
             *instance_id,
             new_instance.clone(),
             *vmm_id,
             new_vmm.clone(),
+            migration.clone(),
         );
 
         // The InstanceAndVmmUpdate query handles and indicates failure to find
@@ -413,7 +545,22 @@ impl DataStore {
             None => false,
         };
 
-        Ok((instance_updated, vmm_updated))
+        let migration_updated = if migration.is_some() {
+            Some(match result.migration_status {
+                Some(UpdateStatus::Updated) => true,
+                Some(UpdateStatus::NotUpdatedButExists) => false,
+                None => false,
+            })
+        } else {
+            debug_assert_eq!(result.migration_status, None);
+            None
+        };
+
+        Ok(InstanceUpdateResult {
+            instance_updated,
+            vmm_updated,
+            migration_updated,
+        })
     }
 
     /// Lists all instances on in-service sleds with active Propolis VMM
@@ -551,7 +698,11 @@ impl DataStore {
                 }
             })?;
 
-        self.instance_ssh_keys_delete(opctx, authz_instance.id()).await?;
+        self.instance_ssh_keys_delete(
+            opctx,
+            InstanceUuid::from_untyped_uuid(authz_instance.id()),
+        )
+        .await?;
 
         Ok(())
     }
@@ -610,7 +761,7 @@ impl DataStore {
         // important than handling that extremely unlikely edge case.
         let mut did_lock = false;
         loop {
-            match instance.runtime_state.updater_id {
+            match instance.updater_id {
                 // If the `updater_id` field is not null and the ID equals this
                 // saga's ID, we already have the lock. We're done here!
                 Some(lock_id) if lock_id == saga_lock_id => {
@@ -623,7 +774,7 @@ impl DataStore {
                     );
                     return Ok(UpdaterLock {
                         saga_lock_id,
-                        locked_gen: instance.runtime_state.updater_gen,
+                        locked_gen: instance.updater_gen,
                     });
                 }
                 // The `updater_id` field is set, but it's not our ID. The instance
@@ -644,7 +795,7 @@ impl DataStore {
             }
 
             // Okay, now attempt to acquire the lock
-            let current_gen = instance.runtime_state.updater_gen;
+            let current_gen = instance.updater_gen;
             slog::debug!(
                 &opctx.log,
                 "attempting to acquire instance updater lock";
@@ -759,12 +910,12 @@ impl DataStore {
             UpdateAndQueryResult {
                 status: UpdateStatus::NotUpdatedButExists,
                 ref found,
-            } if found.runtime_state.updater_gen > locked_gen => Ok(false),
+            } if found.updater_gen > locked_gen => Ok(false),
             // The instance exists, but the lock ID doesn't match our lock ID.
             // This means we were trying to release a lock we never held, whcih
             // is almost certainly a programmer error.
             UpdateAndQueryResult { ref found, .. } => {
-                match found.runtime_state.updater_id {
+                match found.updater_id {
                     Some(lock_holder) => {
                         debug_assert_ne!(lock_holder, saga_lock_id);
                         Err(Error::internal_error(
@@ -785,20 +936,22 @@ mod tests {
     use super::*;
     use crate::db::datastore::test_utils::datastore_test;
     use crate::db::lookup::LookupPath;
+    use nexus_db_model::InstanceState;
     use nexus_db_model::Project;
+    use nexus_db_model::VmmState;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
 
-    async fn test_setup(
+    async fn create_test_instance(
         datastore: &DataStore,
         opctx: &OpContext,
     ) -> authz::Instance {
         let silo_id = *nexus_db_fixed_data::silo::DEFAULT_SILO_ID;
         let project_id = Uuid::new_v4();
-        let instance_id = Uuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
 
         let (authz_project, _project) = datastore
             .project_create(
@@ -816,7 +969,6 @@ mod tests {
             )
             .await
             .expect("project must be created successfully");
-
         let _ = datastore
             .project_create_instance(
                 &opctx,
@@ -846,7 +998,7 @@ mod tests {
             .expect("instance must be created successfully");
 
         let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
-            .instance_id(instance_id)
+            .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await
             .expect("instance must exist");
@@ -861,7 +1013,7 @@ mod tests {
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
         let saga1 = Uuid::new_v4();
         let saga2 = Uuid::new_v4();
-        let authz_instance = test_setup(&datastore, &opctx).await;
+        let authz_instance = create_test_instance(&datastore, &opctx).await;
 
         macro_rules! assert_locked {
             ($id:expr) => {{
@@ -935,7 +1087,7 @@ mod tests {
             dev::test_setup_log("test_instance_updater_lock_is_idempotent");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
-        let authz_instance = test_setup(&datastore, &opctx).await;
+        let authz_instance = create_test_instance(&datastore, &opctx).await;
         let saga1 = Uuid::new_v4();
 
         // attempt to lock the instance once.
@@ -993,7 +1145,7 @@ mod tests {
         );
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
-        let authz_instance = test_setup(&datastore, &opctx).await;
+        let authz_instance = create_test_instance(&datastore, &opctx).await;
         let saga1 = Uuid::new_v4();
         let saga2 = Uuid::new_v4();
 
@@ -1067,6 +1219,173 @@ mod tests {
                 "attempted to release a lock on an instance \
                 that is not locked! this is a bug!"
             ),
+        );
+
+        // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_instance_fetch_all() {
+        // Setup
+        let logctx = dev::test_setup_log("test_instance_fetch_all");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let authz_instance = create_test_instance(&datastore, &opctx).await;
+        let snapshot =
+            dbg!(datastore.instance_fetch_all(&opctx, &authz_instance).await)
+                .expect("instance fetch must succeed");
+
+        assert_eq!(
+            dbg!(snapshot.instance.id()),
+            dbg!(authz_instance.id()),
+            "must have fetched the correct instance"
+        );
+        assert_eq!(
+            dbg!(snapshot.active_vmm),
+            None,
+            "instance does not have an active VMM"
+        );
+        assert_eq!(
+            dbg!(snapshot.target_vmm),
+            None,
+            "instance does not have a target VMM"
+        );
+        assert_eq!(
+            dbg!(snapshot.migration),
+            None,
+            "instance does not have a migration"
+        );
+
+        let active_vmm = datastore
+            .vmm_insert(
+                &opctx,
+                Vmm {
+                    id: Uuid::new_v4(),
+                    time_created: Utc::now(),
+                    time_deleted: None,
+                    instance_id: authz_instance.id(),
+                    sled_id: Uuid::new_v4(),
+                    propolis_ip: "10.1.9.32".parse().unwrap(),
+                    propolis_port: 420.into(),
+                    runtime: VmmRuntimeState {
+                        time_state_updated: Utc::now(),
+                        gen: Generation::new(),
+                        state: VmmState::Running,
+                    },
+                },
+            )
+            .await
+            .expect("active VMM should be inserted successfully!");
+
+        let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
+        datastore
+            .instance_update_runtime(
+                &instance_id,
+                &InstanceRuntimeState {
+                    time_updated: Utc::now(),
+                    gen: Generation(
+                        snapshot.instance.runtime_state.gen.0.next(),
+                    ),
+                    nexus_state: InstanceState::Vmm,
+                    propolis_id: Some(active_vmm.id),
+                    ..snapshot.instance.runtime_state.clone()
+                },
+            )
+            .await
+            .expect("instance update should work");
+        let snapshot =
+            dbg!(datastore.instance_fetch_all(&opctx, &authz_instance).await)
+                .expect("instance fetch must succeed");
+
+        assert_eq!(
+            dbg!(snapshot.instance.id()),
+            dbg!(authz_instance.id()),
+            "must have fetched the correct instance"
+        );
+        assert_eq!(
+            dbg!(snapshot.active_vmm.map(|vmm| vmm.id)),
+            Some(dbg!(active_vmm.id)),
+            "fetched active VMM must be the instance's active VMM"
+        );
+        assert_eq!(
+            dbg!(snapshot.target_vmm),
+            None,
+            "instance does not have a target VMM"
+        );
+        assert_eq!(
+            dbg!(snapshot.migration),
+            None,
+            "instance does not have a migration"
+        );
+
+        let target_vmm = datastore
+            .vmm_insert(
+                &opctx,
+                Vmm {
+                    id: Uuid::new_v4(),
+                    time_created: Utc::now(),
+                    time_deleted: None,
+                    instance_id: authz_instance.id(),
+                    sled_id: Uuid::new_v4(),
+                    propolis_ip: "10.1.9.42".parse().unwrap(),
+                    propolis_port: 666.into(),
+                    runtime: VmmRuntimeState {
+                        time_state_updated: Utc::now(),
+                        gen: Generation::new(),
+                        state: VmmState::Running,
+                    },
+                },
+            )
+            .await
+            .expect("target VMM should be inserted successfully!");
+        let migration = datastore
+            .migration_insert(
+                &opctx,
+                Migration::new(Uuid::new_v4(), active_vmm.id, target_vmm.id),
+            )
+            .await
+            .expect("migration should be inserted successfully!");
+        datastore
+            .instance_update_runtime(
+                &instance_id,
+                &InstanceRuntimeState {
+                    time_updated: Utc::now(),
+                    gen: Generation(
+                        snapshot.instance.runtime_state.gen.0.next(),
+                    ),
+                    nexus_state: InstanceState::Vmm,
+                    propolis_id: Some(active_vmm.id),
+                    dst_propolis_id: Some(target_vmm.id),
+                    migration_id: Some(migration.id),
+                },
+            )
+            .await
+            .expect("instance update should work");
+        let snapshot =
+            dbg!(datastore.instance_fetch_all(&opctx, &authz_instance).await)
+                .expect("instance fetch must succeed");
+
+        assert_eq!(
+            dbg!(snapshot.instance.id()),
+            dbg!(authz_instance.id()),
+            "must have fetched the correct instance"
+        );
+        assert_eq!(
+            dbg!(snapshot.active_vmm.map(|vmm| vmm.id)),
+            Some(dbg!(active_vmm.id)),
+            "fetched active VMM must be the instance's active VMM"
+        );
+        assert_eq!(
+            dbg!(snapshot.target_vmm.map(|vmm| vmm.id)),
+            Some(dbg!(target_vmm.id)),
+            "fetched target VMM must be the instance's target VMM"
+        );
+        assert_eq!(
+            dbg!(snapshot.migration.map(|m| m.id)),
+            Some(dbg!(migration.id)),
+            "fetched migration must be the instance's migration"
         );
 
         // Clean up.

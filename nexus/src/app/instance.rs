@@ -25,6 +25,7 @@ use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::instance::InstanceUpdateResult;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup;
@@ -46,6 +47,10 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::VmmState;
 use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::SledUuid;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::CloseFrame;
 use propolis_client::support::tungstenite::Message as WebSocketMessage;
@@ -173,14 +178,14 @@ enum InstanceStateChangeRequestAction {
 
     /// Request the appropriate state change from the sled with the specified
     /// UUID.
-    SendToSled(Uuid),
+    SendToSled(SledUuid),
 }
 
 /// What is the higher level operation that is calling
 /// `instance_ensure_registered`?
 pub(crate) enum InstanceRegisterReason {
-    Start { vmm_id: Uuid },
-    Migrate { vmm_id: Uuid, target_vmm_id: Uuid },
+    Start { vmm_id: PropolisUuid },
+    Migrate { vmm_id: PropolisUuid, target_vmm_id: PropolisUuid },
 }
 
 impl super::Nexus {
@@ -533,8 +538,8 @@ impl super::Nexus {
     pub(crate) async fn instance_set_migration_ids(
         &self,
         opctx: &OpContext,
-        instance_id: Uuid,
-        sled_id: Uuid,
+        instance_id: InstanceUuid,
+        sled_id: SledUuid,
         prev_instance_runtime: &db::model::InstanceRuntimeState,
         migration_params: InstanceMigrationSourceParams,
     ) -> UpdateResult<db::model::Instance> {
@@ -542,7 +547,7 @@ impl super::Nexus {
         assert!(prev_instance_runtime.dst_propolis_id.is_none());
 
         let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .instance_id(instance_id)
+            .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await?;
 
@@ -563,25 +568,27 @@ impl super::Nexus {
         // outright fails, this operation fails. If the operation nominally
         // succeeds but nothing was updated, this action is outdated and the
         // caller should not proceed with migration.
-        let (updated, _) = match instance_put_result {
-            Ok(state) => {
-                self.write_returned_instance_state(&instance_id, state).await?
-            }
-            Err(e) => {
-                if e.instance_unhealthy() {
-                    let _ = self
-                        .mark_instance_failed(
-                            &instance_id,
-                            &prev_instance_runtime,
-                            &e,
-                        )
-                        .await;
+        let InstanceUpdateResult { instance_updated, .. } =
+            match instance_put_result {
+                Ok(state) => {
+                    self.write_returned_instance_state(&instance_id, state)
+                        .await?
                 }
-                return Err(e.into());
-            }
-        };
+                Err(e) => {
+                    if e.instance_unhealthy() {
+                        let _ = self
+                            .mark_instance_failed(
+                                &instance_id,
+                                &prev_instance_runtime,
+                                &e,
+                            )
+                            .await;
+                    }
+                    return Err(e.into());
+                }
+            };
 
-        if updated {
+        if instance_updated {
             Ok(self
                 .db_datastore
                 .instance_refetch(opctx, &authz_instance)
@@ -610,8 +617,8 @@ impl super::Nexus {
     /// ID set.
     pub(crate) async fn instance_clear_migration_ids(
         &self,
-        instance_id: Uuid,
-        sled_id: Uuid,
+        instance_id: InstanceUuid,
+        sled_id: SledUuid,
         prev_instance_runtime: &db::model::InstanceRuntimeState,
     ) -> Result<(), Error> {
         assert!(prev_instance_runtime.migration_id.is_some());
@@ -679,7 +686,9 @@ impl super::Nexus {
                 if inner.instance_unhealthy() {
                     let _ = self
                         .mark_instance_failed(
-                            &authz_instance.id(),
+                            &InstanceUuid::from_untyped_uuid(
+                                authz_instance.id(),
+                            ),
                             state.instance().runtime(),
                             inner,
                         )
@@ -783,7 +792,9 @@ impl super::Nexus {
                 if inner.instance_unhealthy() {
                     let _ = self
                         .mark_instance_failed(
-                            &authz_instance.id(),
+                            &InstanceUuid::from_untyped_uuid(
+                                authz_instance.id(),
+                            ),
                             state.instance().runtime(),
                             inner,
                         )
@@ -804,19 +815,19 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        sled_id: &Uuid,
+        sled_id: &SledUuid,
     ) -> Result<Option<nexus::SledInstanceState>, InstanceStateChangeError>
     {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
         let sa = self.sled_client(&sled_id).await?;
-        sa.instance_unregister(&authz_instance.id())
-            .await
-            .map(|res| res.into_inner().updated_runtime.map(Into::into))
-            .map_err(|e| {
-                InstanceStateChangeError::SledAgent(SledAgentInstancePutError(
-                    e,
-                ))
-            })
+        sa.instance_unregister(&InstanceUuid::from_untyped_uuid(
+            authz_instance.id(),
+        ))
+        .await
+        .map(|res| res.into_inner().updated_runtime.map(Into::into))
+        .map_err(|e| {
+            InstanceStateChangeError::SledAgent(SledAgentInstancePutError(e))
+        })
     }
 
     /// Determines the action to take on an instance's active VMM given a
@@ -852,7 +863,7 @@ impl super::Nexus {
         // instance's current sled agent. If there is none, the request needs to
         // be handled specially based on its type.
         let sled_id = if let Some(vmm) = vmm_state {
-            vmm.sled_id
+            SledUuid::from_untyped_uuid(vmm.sled_id)
         } else {
             match effective_state {
                 // If there's no active sled because the instance is stopped,
@@ -971,7 +982,7 @@ impl super::Nexus {
         requested: InstanceStateChangeRequest,
     ) -> Result<(), InstanceStateChangeError> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
-        let instance_id = authz_instance.id();
+        let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
         match self.select_runtime_change_action(
             prev_instance_state,
@@ -1018,7 +1029,7 @@ impl super::Nexus {
         opctx: &OpContext,
         authz_instance: &authz::Instance,
         db_instance: &db::model::Instance,
-        propolis_id: &Uuid,
+        propolis_id: &PropolisUuid,
         initial_vmm: &db::model::Vmm,
         operation: InstanceRegisterReason,
     ) -> Result<(), Error> {
@@ -1108,7 +1119,10 @@ impl super::Nexus {
         // Collect the external IPs for the instance.
         let (snat_ip, external_ips): (Vec<_>, Vec<_>) = self
             .db_datastore
-            .instance_lookup_external_ips(&opctx, authz_instance.id())
+            .instance_lookup_external_ips(
+                &opctx,
+                InstanceUuid::from_untyped_uuid(authz_instance.id()),
+            )
             .await?
             .into_iter()
             .partition(|ip| ip.kind == IpKind::SNat);
@@ -1261,10 +1275,13 @@ impl super::Nexus {
             )),
         };
 
-        let sa = self.sled_client(&initial_vmm.sled_id).await?;
+        let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
+        let sa = self
+            .sled_client(&SledUuid::from_untyped_uuid(initial_vmm.sled_id))
+            .await?;
         let instance_register_result = sa
             .instance_register(
-                &db_instance.id(),
+                &instance_id,
                 &sled_agent_client::types::InstanceEnsureBody {
                     hardware: instance_hardware,
                     instance_runtime: db_instance.runtime().clone().into(),
@@ -1284,14 +1301,13 @@ impl super::Nexus {
 
         match instance_register_result {
             Ok(state) => {
-                self.write_returned_instance_state(&db_instance.id(), state)
-                    .await?;
+                self.write_returned_instance_state(&instance_id, state).await?;
             }
             Err(e) => {
                 if e.instance_unhealthy() {
                     let _ = self
                         .mark_instance_failed(
-                            &db_instance.id(),
+                            &instance_id,
                             db_instance.runtime(),
                             &e,
                         )
@@ -1319,9 +1335,9 @@ impl super::Nexus {
     ///   owing to an outdated generation number) will return `Ok`.
     async fn write_returned_instance_state(
         &self,
-        instance_id: &Uuid,
+        instance_id: &InstanceUuid,
         state: Option<nexus::SledInstanceState>,
-    ) -> Result<(bool, bool), Error> {
+    ) -> Result<InstanceUpdateResult, Error> {
         slog::debug!(&self.log,
                      "writing instance state returned from sled agent";
                      "instance_id" => %instance_id,
@@ -1335,6 +1351,7 @@ impl super::Nexus {
                     &state.instance_state.into(),
                     &state.propolis_id,
                     &state.vmm_state.into(),
+                    &state.migration_state,
                 )
                 .await;
 
@@ -1346,7 +1363,13 @@ impl super::Nexus {
 
             update_result
         } else {
-            Ok((false, false))
+            // There was no instance state to write back, so --- perhaps
+            // obviously --- nothing happened.
+            Ok(InstanceUpdateResult {
+                instance_updated: false,
+                vmm_updated: false,
+                migration_updated: None,
+            })
         }
     }
 
@@ -1355,7 +1378,7 @@ impl super::Nexus {
     /// agent instance API, supplied in `reason`.
     pub(crate) async fn mark_instance_failed(
         &self,
-        instance_id: &Uuid,
+        instance_id: &InstanceUuid,
         prev_instance_runtime: &db::model::InstanceRuntimeState,
         reason: &SledAgentInstancePutError,
     ) -> Result<(), Error> {
@@ -1513,7 +1536,7 @@ impl super::Nexus {
     pub(crate) async fn notify_instance_updated(
         &self,
         opctx: &OpContext,
-        instance_id: &Uuid,
+        instance_id: &InstanceUuid,
         new_runtime_state: &nexus::SledInstanceState,
     ) -> Result<(), Error> {
         notify_instance_updated(
@@ -1954,16 +1977,6 @@ impl super::Nexus {
     }
 }
 
-/// Records what aspects of an instance's state were actually changed in a
-/// [`notify_instance_updated`] call.
-///
-/// This is (presently) used for debugging purposes only.
-#[derive(Copy, Clone)]
-pub(crate) struct InstanceUpdated {
-    pub instance_updated: bool,
-    pub vmm_updated: bool,
-}
-
 /// Invoked by a sled agent to publish an updated runtime state for an
 /// Instance.
 #[allow(clippy::too_many_arguments)] // :(
@@ -1973,22 +1986,23 @@ pub(crate) async fn notify_instance_updated(
     opctx_alloc: &OpContext,
     opctx: &OpContext,
     log: &slog::Logger,
-    instance_id: &Uuid,
+    instance_id: &InstanceUuid,
     new_runtime_state: &nexus::SledInstanceState,
     v2p_notification_tx: tokio::sync::watch::Sender<()>,
-) -> Result<Option<InstanceUpdated>, Error> {
+) -> Result<Option<InstanceUpdateResult>, Error> {
     let propolis_id = new_runtime_state.propolis_id;
 
     info!(log, "received new runtime state from sled agent";
             "instance_id" => %instance_id,
             "instance_state" => ?new_runtime_state.instance_state,
             "propolis_id" => %propolis_id,
-            "vmm_state" => ?new_runtime_state.vmm_state);
+            "vmm_state" => ?new_runtime_state.vmm_state,
+            "migration_state" => ?new_runtime_state.migration_state);
 
     // Grab the current state of the instance in the DB to reason about
     // whether this update is stale or not.
     let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(*instance_id)
+        .instance_id(instance_id.into_untyped_uuid())
         .fetch()
         .await?;
 
@@ -2053,8 +2067,13 @@ pub(crate) async fn notify_instance_updated(
         // an instance's state changes.
         //
         // Tracked in https://github.com/oxidecomputer/omicron/issues/3742.
-        super::oximeter::unassign_producer(datastore, log, opctx, instance_id)
-            .await?;
+        super::oximeter::unassign_producer(
+            datastore,
+            log,
+            opctx,
+            &instance_id.into_untyped_uuid(),
+        )
+        .await?;
     }
 
     // Write the new instance and VMM states back to CRDB. This needs to be
@@ -2071,8 +2090,43 @@ pub(crate) async fn notify_instance_updated(
             &db::model::VmmRuntimeState::from(
                 new_runtime_state.vmm_state.clone(),
             ),
+            &new_runtime_state.migration_state,
         )
         .await;
+
+    // Has a migration terminated? If so,mark the migration record as deleted if
+    // and only if both sides of the migration are in a terminal state.
+    if let Some(nexus::MigrationRuntimeState {
+        migration_id,
+        state,
+        role,
+        ..
+    }) = new_runtime_state.migration_state
+    {
+        if state.is_terminal() {
+            info!(
+                log,
+                "migration has terminated, trying to delete it...";
+                "instance_id" => %instance_id,
+                "propolis_id" => %propolis_id,
+                "migration_id" => %propolis_id,
+                "migration_state" => %state,
+                "migration_role" => %role,
+            );
+            if !datastore.migration_terminate(opctx, migration_id).await? {
+                info!(
+                    log,
+                    "did not mark migration record as deleted (the other half \
+                    may not yet have reported termination)";
+                    "instance_id" => %instance_id,
+                    "propolis_id" => %propolis_id,
+                    "migration_id" => %propolis_id,
+                    "migration_state" => %state,
+                    "migration_role" => %role,
+                );
+            }
+        }
+    }
 
     // If the VMM is now in a terminal state, make sure its resources get
     // cleaned up.
@@ -2100,7 +2154,9 @@ pub(crate) async fn notify_instance_updated(
                     "instance_id" => %instance_id,
                     "propolis_id" => %propolis_id);
 
-            datastore.sled_reservation_delete(opctx, propolis_id).await?;
+            datastore
+                .sled_reservation_delete(opctx, propolis_id.into_untyped_uuid())
+                .await?;
 
             if !datastore.vmm_mark_deleted(opctx, &propolis_id).await? {
                 warn!(log, "failed to mark vmm record as deleted";
@@ -2112,13 +2168,14 @@ pub(crate) async fn notify_instance_updated(
     }
 
     match result {
-        Ok((instance_updated, vmm_updated)) => {
+        Ok(result) => {
             info!(log, "instance and vmm updated by sled agent";
                     "instance_id" => %instance_id,
                     "propolis_id" => %propolis_id,
-                    "instance_updated" => instance_updated,
-                    "vmm_updated" => vmm_updated);
-            Ok(Some(InstanceUpdated { instance_updated, vmm_updated }))
+                    "instance_updated" => result.instance_updated,
+                    "vmm_updated" => result.vmm_updated,
+                    "migration_updated" => ?result.migration_updated);
+            Ok(Some(result))
         }
 
         // The update command should swallow object-not-found errors and

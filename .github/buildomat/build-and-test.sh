@@ -54,7 +54,7 @@ ptime -m bash ./tools/install_builder_prerequisites.sh -y
 #
 banner build
 export RUSTFLAGS="-D warnings"
-export RUSTDOCFLAGS="-D warnings"
+export RUSTDOCFLAGS="--document-private-items -D warnings"
 # When running on illumos we need to pass an additional runpath that is
 # usually configured via ".cargo/config" but the `RUSTFLAGS` env variable
 # takes precedence. This path contains oxide specific libraries such as

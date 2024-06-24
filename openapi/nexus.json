@@ -8996,6 +8996,13 @@
                 "$ref": "#/components/schemas/NameOrId"
               }
             ]
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "Optional VLAN ID for this address",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
@@ -11014,6 +11021,10 @@
         "description": "View of a Certificate",
         "type": "object",
         "properties": {
+          "cert": {
+            "description": "PEM-formatted string containing public certificate chain",
+            "type": "string"
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
@@ -11032,7 +11043,12 @@
             ]
           },
           "service": {
-            "$ref": "#/components/schemas/ServiceUsingCertificate"
+            "description": "The service using this certificate",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ServiceUsingCertificate"
+              }
+            ]
           },
           "time_created": {
             "description": "timestamp when this resource was created",
@@ -11046,6 +11062,7 @@
           }
         },
         "required": [
+          "cert",
           "description",
           "id",
           "name",
@@ -17282,6 +17299,13 @@
             "description": "The port settings object this address configuration belongs to.",
             "type": "string",
             "format": "uuid"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "An optional VLAN ID",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
