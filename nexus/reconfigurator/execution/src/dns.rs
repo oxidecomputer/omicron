@@ -1242,8 +1242,6 @@ mod test {
                 .await
                 .unwrap()
         };
-        info!(log, "Sled rows"; "rows" => ?sled_rows);
-        info!(log, "Zpool rows"; "rows" => ?zpool_rows);
         let planning_input = {
             let mut builder = PlanningInputFromDb {
                 sled_rows: &sled_rows,
