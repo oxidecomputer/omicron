@@ -7,6 +7,7 @@ use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::ActionError;
+use chrono::Utc;
 use nexus_db_model::Generation;
 use nexus_db_model::Instance;
 use nexus_db_model::InstanceRuntimeState;
@@ -256,6 +257,7 @@ async fn siud_update_instance(
         propolis_id: None,
         nexus_state: InstanceState::NoVmm,
         gen: Generation(instance.runtime_state.gen.0.next()),
+        time_updated: Utc::now(),
         ..instance.runtime_state
     };
 
