@@ -2229,10 +2229,19 @@ mod tests {
             serial: "fake-serial".into(),
         };
 
+        let instance_runtime = InstanceRuntimeState {
+            propolis_id: Some(propolis_id),
+            dst_propolis_id: None,
+            migration_id: None,
+            gen: Generation::new(),
+            time_updated: Default::default(),
+        };
+
         mgr.ensure_registered(
             instance_id,
             propolis_id,
             hardware,
+            instance_runtime,
             vmm_runtime,
             propolis_addr,
             sled_identifiers,
