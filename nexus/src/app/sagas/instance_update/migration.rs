@@ -8,6 +8,7 @@ use crate::app::db::model::Instance;
 use crate::app::db::model::Migration;
 use crate::app::db::model::MigrationState;
 use crate::app::sagas::declare_saga_actions;
+use chrono::Utc;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::{authn, authz};
 use omicron_common::api::external::Error;
@@ -85,6 +86,7 @@ async fn sium_update_instance_record(
 
     let mut new_runtime = instance.runtime().clone();
     new_runtime.gen = Generation(new_runtime.gen.next());
+    new_runtime.time_updated = Utc::now();
 
     // Determine how to update the instance record to reflect the current
     // migration state.
