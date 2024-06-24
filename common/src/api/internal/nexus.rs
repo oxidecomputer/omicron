@@ -273,15 +273,10 @@ pub struct UpdateArtifactId {
 //
 // 1. Add it here.
 //
-// 2. Add the new kind to <repo root>/{nexus-client,sled-agent-client}/lib.rs.
+// 2. Add the new kind to <repo root>/clients/src/lib.rs.
 //    The mapping from `UpdateArtifactKind::*` to `types::UpdateArtifactKind::*`
 //    must be left as a `todo!()` for now; `types::UpdateArtifactKind` will not
 //    be updated with the new variant until step 5 below.
-//
-// 3. Add it to the sql database schema under (CREATE TYPE
-//    omicron.public.update_artifact_kind).
-//
-//    TODO: After omicron ships this would likely involve a DB migration.
 //
 // 4. Add the new kind and the mapping to its `update_artifact_kind` to
 //    <repo root>/nexus/db-model/src/update_artifact.rs
@@ -324,6 +319,7 @@ pub enum KnownArtifactKind {
     // Sled Artifacts
     GimletSp,
     GimletRot,
+    GimletRotBootloader,
     Host,
     Trampoline,
     ControlPlane,
@@ -331,10 +327,12 @@ pub enum KnownArtifactKind {
     // PSC Artifacts
     PscSp,
     PscRot,
+    PscRotBootloader,
 
     // Switch Artifacts
     SwitchSp,
     SwitchRot,
+    SwitchRotBootloader,
 }
 
 impl KnownArtifactKind {

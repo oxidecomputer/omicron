@@ -257,7 +257,7 @@ peg::parser! {
         ///
         /// We support the following common escape sequences:
         ///
-        /// ```ignore
+        /// ```text
         /// \n
         /// \r
         /// \t
@@ -271,7 +271,7 @@ peg::parser! {
         /// styles if required, by writing them as their Unicode escape
         /// sequences. For example, this string:
         ///
-        /// ```ignore
+        /// ```text
         /// "this string has \u{22} in it"
         /// ```
         ///

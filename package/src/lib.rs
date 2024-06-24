@@ -103,6 +103,9 @@ pub enum BuildCommand {
         /// By default, the cache is used.
         #[clap(short, long)]
         disable_cache: bool,
+        /// Limit to building only these packages
+        #[clap(long)]
+        only: Vec<String>,
     },
     /// Stamps semver versions onto packages within a manifest
     Stamp {
