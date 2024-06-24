@@ -21,7 +21,6 @@ use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::redact_variable;
 use omicron_test_utils::dev::test_cmds::run_command;
 use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::debug;
 use std::io::BufReader;
@@ -59,19 +58,10 @@ type ControlPlaneTestContext =
 async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     // Setup
     //
-    // Add a zpool to both sleds, just to ensure that all new zones can find
+    // Add a zpool to all sleds, just to ensure that all new zones can find
     // a transient filesystem wherever they end up being placed.
-    let _sled_agent_zpools = DiskTestBuilder::new(&cptestctx)
-        .on_sled(SledUuid::from_untyped_uuid(
-            cptestctx.sled_agent.sled_agent.id,
-        ))
-        .with_zpool_count(1)
-        .build()
-        .await;
-    let _sled_agent2_zpools = DiskTestBuilder::new(&cptestctx)
-        .on_sled(SledUuid::from_untyped_uuid(
-            cptestctx.sled_agent2.sled_agent.id,
-        ))
+    DiskTestBuilder::new(&cptestctx)
+        .on_all_sleds()
         .with_zpool_count(1)
         .build()
         .await;

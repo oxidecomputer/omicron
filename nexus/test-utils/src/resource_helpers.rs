@@ -44,6 +44,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use slog::debug;
+use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -704,34 +705,43 @@ pub struct TestZpool {
     pub datasets: Vec<TestDataset>,
 }
 
+enum WhichSledAgents {
+    Specific(SledUuid),
+    All,
+}
+
+/// A test utility to add zpools to some sleds.
+///
+/// This builder helps initialize a set of zpools on sled agents with
+/// minimal overhead, though additional disks can be added via the [DiskTest]
+/// API after initialization.
 pub struct DiskTestBuilder<'a, N: NexusServer> {
     cptestctx: &'a ControlPlaneTestContext<N>,
-    sled_agent: Option<Arc<omicron_sled_agent::sim::SledAgent>>,
+    sled_agents: WhichSledAgents,
     zpool_count: u32,
 }
 
 impl<'a, N: NexusServer> DiskTestBuilder<'a, N> {
+    /// Creates a new [DiskTestBuilder] with default configuration options.
     pub fn new(cptestctx: &'a ControlPlaneTestContext<N>) -> Self {
         Self {
             cptestctx,
-            sled_agent: Some(cptestctx.sled_agent.sled_agent.clone()),
-            zpool_count: DiskTest::DEFAULT_ZPOOL_COUNT,
+            sled_agents: WhichSledAgents::Specific(
+                SledUuid::from_untyped_uuid(cptestctx.sled_agent.sled_agent.id),
+            ),
+            zpool_count: DiskTest::<'a, N>::DEFAULT_ZPOOL_COUNT,
         }
     }
 
-    /// Chooses a specific sled where disks should be added
-    pub fn on_sled(mut self, sled_id: SledUuid) -> Self {
-        // This list is hardcoded, because ControlPlaneTestContext is
-        // hardcoded to use two sled agents.
-        let sleds = [&self.cptestctx.sled_agent, &self.cptestctx.sled_agent2];
+    /// Specifies that zpools should be added on all sleds
+    pub fn on_all_sleds(mut self) -> Self {
+        self.sled_agents = WhichSledAgents::All;
+        self
+    }
 
-        self.sled_agent = sleds.into_iter().find_map(|server| {
-            if server.sled_agent.id == sled_id.into_untyped_uuid() {
-                Some(server.sled_agent.clone())
-            } else {
-                None
-            }
-        });
+    /// Chooses a specific sled where zpools should be added
+    pub fn on_specific_sled(mut self, sled_id: SledUuid) -> Self {
+        self.sled_agents = WhichSledAgents::Specific(sled_id);
         self
     }
 
@@ -741,70 +751,117 @@ impl<'a, N: NexusServer> DiskTestBuilder<'a, N> {
         self
     }
 
-    pub async fn build(self) -> DiskTest {
+    /// Creates a DiskTest, actually creating the requested zpools.
+    pub async fn build(self) -> DiskTest<'a, N> {
         DiskTest::new_from_builder(
             self.cptestctx,
-            self.sled_agent.expect("Sled Agent does not exist"),
+            self.sled_agents,
             self.zpool_count,
         )
         .await
     }
 }
 
-pub struct DiskTest {
-    pub sled_agent: Arc<SledAgent>,
-    pub zpools: Vec<TestZpool>,
+struct PerSledDiskState {
+    zpools: Vec<TestZpool>,
 }
 
-impl DiskTest {
+pub struct ZpoolIterator<'a> {
+    sleds: &'a BTreeMap<SledUuid, PerSledDiskState>,
+    sled: Option<SledUuid>,
+    index: usize,
+}
+
+impl<'a> Iterator for ZpoolIterator<'a> {
+    type Item = &'a TestZpool;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let Some(sled_id) = self.sled else {
+                return None;
+            };
+
+            let Some(pools) = self.sleds.get(&sled_id) else {
+                return None;
+            };
+
+            if let Some(pool) = pools.zpools.get(self.index) {
+                self.index += 1;
+                return Some(pool);
+            }
+
+            self.sled = self
+                .sleds
+                .range((
+                    std::ops::Bound::Excluded(&sled_id),
+                    std::ops::Bound::Unbounded,
+                ))
+                .map(|(id, _)| *id)
+                .next();
+            self.index = 0;
+        }
+    }
+}
+
+pub struct DiskTest<'a, N: NexusServer> {
+    cptestctx: &'a ControlPlaneTestContext<N>,
+    sleds: BTreeMap<SledUuid, PerSledDiskState>,
+}
+
+impl<'a, N: NexusServer> DiskTest<'a, N> {
     pub const DEFAULT_ZPOOL_SIZE_GIB: u32 = 10;
     pub const DEFAULT_ZPOOL_COUNT: u32 = 3;
 
-    /// Creates a new "DiskTest", but does not actually add any zpools.
-    pub async fn empty<N: NexusServer>(
-        cptestctx: &ControlPlaneTestContext<N>,
-    ) -> Self {
-        let sled_agent = cptestctx.sled_agent.sled_agent.clone();
-
-        Self { sled_agent, zpools: vec![] }
+    /// Creates a new [DiskTest] with default configuration.
+    ///
+    /// This is the same as calling [DiskTestBuilder::new] and
+    /// [DiskTestBuilder::build].
+    pub async fn new(cptestctx: &'a ControlPlaneTestContext<N>) -> Self {
+        DiskTestBuilder::new(cptestctx).build().await
     }
 
-    pub async fn new<N: NexusServer>(
-        cptestctx: &ControlPlaneTestContext<N>,
-    ) -> Self {
-        let sled_agent = cptestctx.sled_agent.sled_agent.clone();
-
-        let mut disk_test = Self { sled_agent, zpools: vec![] };
-
-        // Create three Zpools, each 10 GiB, each with one Crucible dataset.
-        for _ in 0..Self::DEFAULT_ZPOOL_COUNT {
-            disk_test.add_zpool_with_dataset(cptestctx).await;
-        }
-
-        disk_test
-    }
-
-    pub async fn new_from_builder<N: NexusServer>(
-        cptestctx: &ControlPlaneTestContext<N>,
-        sled_agent: Arc<SledAgent>,
+    async fn new_from_builder(
+        cptestctx: &'a ControlPlaneTestContext<N>,
+        sled_agents: WhichSledAgents,
         zpool_count: u32,
     ) -> Self {
-        let mut disk_test = Self { sled_agent, zpools: vec![] };
+        let input_sleds = match sled_agents {
+            WhichSledAgents::Specific(id) => {
+                vec![id]
+            }
+            WhichSledAgents::All => {
+                vec![
+                    SledUuid::from_untyped_uuid(
+                        cptestctx.sled_agent.sled_agent.id,
+                    ),
+                    SledUuid::from_untyped_uuid(
+                        cptestctx.sled_agent2.sled_agent.id,
+                    ),
+                ]
+            }
+        };
 
-        // Create three Zpools, each 10 GiB, each with one Crucible dataset.
-        for _ in 0..zpool_count {
-            disk_test.add_zpool_with_dataset(cptestctx).await;
+        let mut sleds = BTreeMap::new();
+        for sled_id in input_sleds {
+            sleds.insert(sled_id, PerSledDiskState { zpools: vec![] });
+        }
+
+        let mut disk_test = Self { cptestctx, sleds };
+
+        for sled_id in
+            disk_test.sleds.keys().cloned().collect::<Vec<SledUuid>>()
+        {
+            for _ in 0..zpool_count {
+                disk_test.add_zpool_with_dataset(sled_id).await;
+            }
         }
 
         disk_test
     }
 
-    pub async fn add_zpool_with_dataset<N: NexusServer>(
-        &mut self,
-        cptestctx: &ControlPlaneTestContext<N>,
-    ) {
+    pub async fn add_zpool_with_dataset(&mut self, sled_id: SledUuid) {
         self.add_zpool_with_dataset_ext(
-            cptestctx,
+            sled_id,
             Uuid::new_v4(),
             ZpoolUuid::new_v4(),
             Uuid::new_v4(),
@@ -813,14 +870,38 @@ impl DiskTest {
         .await
     }
 
-    pub async fn add_zpool_with_dataset_ext<N: NexusServer>(
+    fn get_sled(&self, sled_id: SledUuid) -> Arc<SledAgent> {
+        let sleds = self.cptestctx.all_sled_agents();
+        sleds
+            .into_iter()
+            .find_map(|server| {
+                if server.sled_agent.id == sled_id.into_untyped_uuid() {
+                    Some(server.sled_agent.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("Cannot find sled")
+    }
+
+    pub fn zpools(&self) -> ZpoolIterator {
+        ZpoolIterator {
+            sleds: &self.sleds,
+            sled: self.sleds.keys().next().copied(),
+            index: 0,
+        }
+    }
+
+    pub async fn add_zpool_with_dataset_ext(
         &mut self,
-        cptestctx: &ControlPlaneTestContext<N>,
+        sled_id: SledUuid,
         physical_disk_id: Uuid,
         zpool_id: ZpoolUuid,
         dataset_id: Uuid,
         gibibytes: u32,
     ) {
+        let cptestctx = self.cptestctx;
+
         // To get a dataset, we actually need to create a new simulated physical
         // disk, zpool, and dataset, all contained within one another.
         let zpool = TestZpool {
@@ -843,40 +924,55 @@ impl DiskTest {
                 model: disk_identity.model.clone(),
                 variant:
                     nexus_types::external_api::params::PhysicalDiskKind::U2,
-                sled_id: self.sled_agent.id,
+                sled_id: sled_id.into_untyped_uuid(),
             };
 
         let zpool_request =
             nexus_types::internal_api::params::ZpoolPutRequest {
                 id: zpool.id.into_untyped_uuid(),
                 physical_disk_id,
-                sled_id: self.sled_agent.id,
+                sled_id: sled_id.into_untyped_uuid(),
             };
+
+        // Find the sled on which we're adding a zpool
+        let sleds = cptestctx.all_sled_agents();
+        let sled_agent = sleds
+            .into_iter()
+            .find_map(|server| {
+                if server.sled_agent.id == sled_id.into_untyped_uuid() {
+                    Some(server.sled_agent.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("Cannot find sled");
+
+        let zpools = &mut self
+            .sleds
+            .entry(sled_id)
+            .or_insert_with(|| PerSledDiskState { zpools: Vec::new() })
+            .zpools;
 
         // Tell the simulated sled agent to create the disk and zpool containing
         // these datasets.
 
-        self.sled_agent
+        sled_agent
             .create_external_physical_disk(
                 physical_disk_id,
                 disk_identity.clone(),
             )
             .await;
-        self.sled_agent
+        sled_agent
             .create_zpool(zpool.id, physical_disk_id, zpool.size.to_bytes())
             .await;
 
         for dataset in &zpool.datasets {
             // Sled Agent side: Create the Dataset, make sure regions can be
             // created immediately if Nexus requests anything.
-            let address = self
-                .sled_agent
-                .create_crucible_dataset(zpool.id, dataset.id)
-                .await;
-            let crucible = self
-                .sled_agent
-                .get_crucible_dataset(zpool.id, dataset.id)
-                .await;
+            let address =
+                sled_agent.create_crucible_dataset(zpool.id, dataset.id).await;
+            let crucible =
+                sled_agent.get_crucible_dataset(zpool.id, dataset.id).await;
             crucible
                 .set_create_callback(Box::new(|_| RegionState::Created))
                 .await;
@@ -950,58 +1046,65 @@ impl DiskTest {
         .await
         .expect("expected to find inventory collection");
 
-        self.zpools.push(zpool);
+        zpools.push(zpool);
     }
 
     pub async fn set_requested_then_created_callback(&self) {
-        for zpool in &self.zpools {
-            for dataset in &zpool.datasets {
-                let crucible = self
-                    .sled_agent
-                    .get_crucible_dataset(zpool.id, dataset.id)
-                    .await;
-                let called = std::sync::atomic::AtomicBool::new(false);
-                crucible
-                    .set_create_callback(Box::new(move |_| {
-                        if !called.load(std::sync::atomic::Ordering::SeqCst) {
-                            called.store(
-                                true,
-                                std::sync::atomic::Ordering::SeqCst,
-                            );
-                            RegionState::Requested
-                        } else {
-                            RegionState::Created
-                        }
-                    }))
-                    .await;
+        for (sled_id, state) in &self.sleds {
+            for zpool in &state.zpools {
+                for dataset in &zpool.datasets {
+                    let crucible = self
+                        .get_sled(*sled_id)
+                        .get_crucible_dataset(zpool.id, dataset.id)
+                        .await;
+                    let called = std::sync::atomic::AtomicBool::new(false);
+                    crucible
+                        .set_create_callback(Box::new(move |_| {
+                            if !called.load(std::sync::atomic::Ordering::SeqCst)
+                            {
+                                called.store(
+                                    true,
+                                    std::sync::atomic::Ordering::SeqCst,
+                                );
+                                RegionState::Requested
+                            } else {
+                                RegionState::Created
+                            }
+                        }))
+                        .await;
+                }
             }
         }
     }
 
     pub async fn set_always_fail_callback(&self) {
-        for zpool in &self.zpools {
-            for dataset in &zpool.datasets {
-                let crucible = self
-                    .sled_agent
-                    .get_crucible_dataset(zpool.id, dataset.id)
-                    .await;
-                crucible
-                    .set_create_callback(Box::new(|_| RegionState::Failed))
-                    .await;
+        for (sled_id, state) in &self.sleds {
+            for zpool in &state.zpools {
+                for dataset in &zpool.datasets {
+                    let crucible = self
+                        .get_sled(*sled_id)
+                        .get_crucible_dataset(zpool.id, dataset.id)
+                        .await;
+                    crucible
+                        .set_create_callback(Box::new(|_| RegionState::Failed))
+                        .await;
+                }
             }
         }
     }
 
     /// Returns true if all Crucible resources were cleaned up, false otherwise.
     pub async fn crucible_resources_deleted(&self) -> bool {
-        for zpool in &self.zpools {
-            for dataset in &zpool.datasets {
-                let crucible = self
-                    .sled_agent
-                    .get_crucible_dataset(zpool.id, dataset.id)
-                    .await;
-                if !crucible.is_empty().await {
-                    return false;
+        for (sled_id, state) in &self.sleds {
+            for zpool in &state.zpools {
+                for dataset in &zpool.datasets {
+                    let crucible = self
+                        .get_sled(*sled_id)
+                        .get_crucible_dataset(zpool.id, dataset.id)
+                        .await;
+                    if !crucible.is_empty().await {
+                        return false;
+                    }
                 }
             }
         }

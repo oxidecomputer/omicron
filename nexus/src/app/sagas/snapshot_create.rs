@@ -1617,7 +1617,6 @@ mod test {
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::delete_disk;
     use nexus_test_utils::resource_helpers::object_create;
-    use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::params::InstanceDiskAttachment;
     use omicron_common::api::external::ByteCount;
@@ -1629,6 +1628,9 @@ mod test {
     use sled_agent_client::types::CrucibleOpts;
     use sled_agent_client::TestInterfaces as SledAgentTestInterfaces;
     use std::str::FromStr;
+
+    type DiskTest<'a> =
+        nexus_test_utils::resource_helpers::DiskTest<'a, crate::Server>;
 
     #[test]
     fn test_create_snapshot_from_disk_modify_request() {
@@ -1955,7 +1957,7 @@ mod test {
 
     async fn verify_clean_slate(
         cptestctx: &ControlPlaneTestContext,
-        test: &DiskTest,
+        test: &DiskTest<'_>,
     ) {
         // Verifies:
         // - No disk records exist

@@ -29,7 +29,6 @@ use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
-use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
@@ -54,6 +53,12 @@ use uuid::Uuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
+type DiskTest<'a> =
+    nexus_test_utils::resource_helpers::DiskTest<'a, omicron_nexus::Server>;
+type DiskTestBuilder<'a> = nexus_test_utils::resource_helpers::DiskTestBuilder<
+    'a,
+    omicron_nexus::Server,
+>;
 
 const PROJECT_NAME: &str = "springfield-squidport-disks";
 const PROJECT_NAME_2: &str = "bouncymeadow-octopusharbor-disks";
@@ -992,9 +997,9 @@ async fn test_disk_backed_by_multiple_region_sets(
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
     // Create another three zpools, all 10 gibibytes, each with one dataset
-    test.add_zpool_with_dataset(cptestctx).await;
-    test.add_zpool_with_dataset(cptestctx).await;
-    test.add_zpool_with_dataset(cptestctx).await;
+    test.add_zpool_with_dataset(cptestctx.first_sled()).await;
+    test.add_zpool_with_dataset(cptestctx.first_sled()).await;
+    test.add_zpool_with_dataset(cptestctx.first_sled()).await;
 
     create_project_and_pool(client).await;
 
@@ -1322,9 +1327,11 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
     );
 
     // Set the third agent to fail when deleting regions
-    let zpool = &disk_test.zpools[2];
+    let zpool =
+        &disk_test.zpools().nth(2).expect("Expected at least three zpools");
     let dataset = &zpool.datasets[0];
-    disk_test
+    cptestctx
+        .sled_agent
         .sled_agent
         .get_crucible_dataset(zpool.id, dataset.id)
         .await
@@ -1361,7 +1368,8 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
     assert_eq!(disk.state, DiskState::Faulted);
 
     // Set the third agent to respond normally
-    disk_test
+    cptestctx
+        .sled_agent
         .sled_agent
         .get_crucible_dataset(zpool.id, dataset.id)
         .await
@@ -1545,7 +1553,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     create_project_and_pool(client).await;
 
     // Total occupied size should start at 0
-    for zpool in &test.zpools {
+    for zpool in test.zpools() {
         for dataset in &zpool.datasets {
             assert_eq!(
                 datastore
@@ -1584,7 +1592,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
 
     // Total occupied size is 7 GiB * 3 (each Crucible disk requires three
     // regions to make a region set for an Upstairs, one region per dataset)
-    for zpool in &test.zpools {
+    for zpool in test.zpools() {
         for dataset in &zpool.datasets {
             assert_eq!(
                 datastore
@@ -1621,7 +1629,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     .expect("unexpected success creating 4 GiB disk");
 
     // Total occupied size is still 7 GiB * 3
-    for zpool in &test.zpools {
+    for zpool in test.zpools() {
         for dataset in &zpool.datasets {
             assert_eq!(
                 datastore
@@ -1645,7 +1653,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     .expect("unexpected failure deleting 7 GiB disk");
 
     // Total occupied size should be 0
-    for zpool in &test.zpools {
+    for zpool in test.zpools() {
         for dataset in &zpool.datasets {
             assert_eq!(
                 datastore
@@ -1681,7 +1689,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     .expect("unexpected failure creating 10 GiB disk");
 
     // Total occupied size should be 10 GiB * 3
-    for zpool in &test.zpools {
+    for zpool in test.zpools() {
         for dataset in &zpool.datasets {
             assert_eq!(
                 datastore
@@ -1702,14 +1710,14 @@ async fn test_multiple_disks_multiple_zpools(
     let client = &cptestctx.external_client;
 
     // Create six 10 GB zpools, each with one dataset
-    let mut test = DiskTest::new(&cptestctx).await;
+    let _test = DiskTestBuilder::new(&cptestctx)
+        .on_specific_sled(cptestctx.first_sled())
+        .with_zpool_count(6)
+        .build()
+        .await;
 
     // Assert default is still 10 GiB
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
-
-    test.add_zpool_with_dataset(cptestctx).await;
-    test.add_zpool_with_dataset(cptestctx).await;
-    test.add_zpool_with_dataset(cptestctx).await;
 
     create_project_and_pool(client).await;
 
@@ -2083,7 +2091,7 @@ async fn test_single_region_allocate(cptestctx: &ControlPlaneTestContext) {
     // request
     let mut number_of_matching_regions = 0;
 
-    for zpool in &disk_test.zpools {
+    for zpool in disk_test.zpools() {
         for dataset in &zpool.datasets {
             let total_size = datastore
                 .regions_total_occupied_size(dataset.id)
@@ -2114,8 +2122,11 @@ async fn test_region_allocation_strategy_random_is_idempotent(
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     // Create four 10 GiB zpools, each with one dataset.
-    let mut disk_test = DiskTest::new(&cptestctx).await;
-    disk_test.add_zpool_with_dataset(&cptestctx).await;
+    let _test = DiskTestBuilder::new(&cptestctx)
+        .on_specific_sled(cptestctx.first_sled())
+        .with_zpool_count(4)
+        .build()
+        .await;
 
     // Assert default is still 10 GiB
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
@@ -2181,8 +2192,11 @@ async fn test_region_allocation_strategy_random_is_idempotent_arbitrary(
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     // Create four 10 GiB zpools, each with one dataset.
-    let mut disk_test = DiskTest::new(&cptestctx).await;
-    disk_test.add_zpool_with_dataset(&cptestctx).await;
+    let _test = DiskTestBuilder::new(&cptestctx)
+        .on_specific_sled(cptestctx.first_sled())
+        .with_zpool_count(4)
+        .build()
+        .await;
 
     // Assert default is still 10 GiB
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
@@ -2240,12 +2254,12 @@ async fn test_single_region_allocate_for_replace(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Create three 10 GiB zpools, each with one dataset.
-    let mut disk_test = DiskTest::new(&cptestctx).await;
-
-    // One more zpool and dataset is required to meet `region_allocate`'s
-    // redundancy requirement.
-    disk_test.add_zpool_with_dataset(&cptestctx).await;
+    // Create four 10 GiB zpools, each with one dataset.
+    let _test = DiskTestBuilder::new(&cptestctx)
+        .on_specific_sled(cptestctx.first_sled())
+        .with_zpool_count(4)
+        .build()
+        .await;
 
     // Assert default is still 10 GiB
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
@@ -2517,7 +2531,7 @@ async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
         .unwrap();
 
     // Choose one of the datasets, and drop the simulated Crucible agent
-    let zpool = &disk_test.zpools[0];
+    let zpool = disk_test.zpools().next().expect("Expected at least one zpool");
     let dataset = &zpool.datasets[0];
 
     cptestctx.sled_agent.sled_agent.drop_dataset(zpool.id, dataset.id).await;

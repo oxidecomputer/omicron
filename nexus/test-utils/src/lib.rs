@@ -130,6 +130,14 @@ pub struct ControlPlaneTestContext<N> {
 }
 
 impl<N: NexusServer> ControlPlaneTestContext<N> {
+    pub fn first_sled(&self) -> SledUuid {
+        SledUuid::from_untyped_uuid(self.sled_agent.sled_agent.id)
+    }
+
+    pub fn all_sled_agents(&self) -> impl Iterator<Item = &sim::Server> {
+        [&self.sled_agent, &self.sled_agent2].into_iter()
+    }
+
     pub fn wildcard_silo_dns_name(&self) -> String {
         format!("*.sys.{}", self.external_dns_zone_name)
     }
