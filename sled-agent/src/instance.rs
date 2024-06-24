@@ -1572,7 +1572,9 @@ mod tests {
     use omicron_common::api::external::{
         ByteCount, Generation, Hostname, InstanceCpuCount,
     };
-    use omicron_common::api::internal::nexus::{InstanceProperties, VmmState};
+    use omicron_common::api::internal::nexus::{
+        InstanceProperties, InstanceRuntimeState, VmmState,
+    };
     use omicron_common::api::internal::shared::SledIdentifiers;
     use omicron_common::FileKv;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
