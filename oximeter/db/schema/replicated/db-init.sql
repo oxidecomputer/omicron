@@ -394,27 +394,7 @@ ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami8 ON CLUSTER oximeter_cluster
-(
-    timeseries_name String,
-    timeseries_key UInt64,
-    start_time DateTime64(9, 'UTC'),
-    timestamp DateTime64(9, 'UTC'),
-    bins Array(Int8),
-    counts Array(UInt64),
-    min Int8,
-    max Int8,
-    sum_of_samples Int64,
-    squared_mean Float64,
-    p50_marker_heights Array(Float64),
-    p50_marker_positions Array(UInt64),
-    p50_desired_marker_positions Array(Float64),
-    p90_marker_heights Array(Float64),
-    p90_marker_positions Array(UInt64),
-    p90_desired_marker_positions Array(Float64),
-    p99_marker_heights Array(Float64),
-    p99_marker_positions Array(UInt64),
-    p99_desired_marker_positions Array(Float64)
-)
+AS oximeter.measurements_histogrami8_local
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogrami8_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu8_local ON CLUSTER oximeter_cluster
@@ -444,27 +424,7 @@ ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu8 ON CLUSTER oximeter_cluster
-(
-    timeseries_name String,
-    timeseries_key UInt64,
-    start_time DateTime64(9, 'UTC'),
-    timestamp DateTime64(9, 'UTC'),
-    bins Array(UInt8),
-    counts Array(UInt64),
-    min UInt8,
-    max UInt8,
-    sum_of_samples Int64,
-    squared_mean Float64,
-    p50_marker_heights Array(Float64),
-    p50_marker_positions Array(UInt64),
-    p50_desired_marker_positions Array(Float64),
-    p90_marker_heights Array(Float64),
-    p90_marker_positions Array(UInt64),
-    p90_desired_marker_positions Array(Float64),
-    p99_marker_heights Array(Float64),
-    p99_marker_positions Array(UInt64),
-    p99_desired_marker_positions Array(Float64)
-)
+AS oximeter.measurements_histogramu8_local
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogramu8_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami16_local ON CLUSTER oximeter_cluster
@@ -494,27 +454,7 @@ ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami16 ON CLUSTER oximeter_cluster
-(
-    timeseries_name String,
-    timeseries_key UInt64,
-    start_time DateTime64(9, 'UTC'),
-    timestamp DateTime64(9, 'UTC'),
-    bins Array(Int16),
-    counts Array(UInt64),
-    min Int16,
-    max Int16,
-    sum_of_samples Int64,
-    squared_mean Float64,
-    p50_marker_heights Array(Float64),
-    p50_marker_positions Array(UInt64),
-    p50_desired_marker_positions Array(Float64),
-    p90_marker_heights Array(Float64),
-    p90_marker_positions Array(UInt64),
-    p90_desired_marker_positions Array(Float64),
-    p99_marker_heights Array(Float64),
-    p99_marker_positions Array(UInt64),
-    p99_desired_marker_positions Array(Float64)
-)
+AS oximeter.measurements_histogrami16_local
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogrami16_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu16_local ON CLUSTER oximeter_cluster
@@ -544,27 +484,7 @@ ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu16 ON CLUSTER oximeter_cluster
-(
-    timeseries_name String,
-    timeseries_key UInt64,
-    start_time DateTime64(9, 'UTC'),
-    timestamp DateTime64(9, 'UTC'),
-    bins Array(UInt16),
-    counts Array(UInt64),
-    min UInt16,
-    max UInt16,
-    sum_of_samples Int64,
-    squared_mean Float64,
-    p50_marker_heights Array(Float64),
-    p50_marker_positions Array(UInt64),
-    p50_desired_marker_positions Array(Float64),
-    p90_marker_heights Array(Float64),
-    p90_marker_positions Array(UInt64),
-    p90_desired_marker_positions Array(Float64),
-    p99_marker_heights Array(Float64),
-    p99_marker_positions Array(UInt64),
-    p99_desired_marker_positions Array(Float64)
-)
+AS oximeter.measurements_histogramu16_local
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogramu16_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami32_local ON CLUSTER oximeter_cluster
@@ -594,27 +514,7 @@ ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami32 ON CLUSTER oximeter_cluster
-(
-    timeseries_name String,
-    timeseries_key UInt64,
-    start_time DateTime64(9, 'UTC'),
-    timestamp DateTime64(9, 'UTC'),
-    bins Array(Int32),
-    counts Array(UInt64),
-    min Int32,
-    max Int32,
-    sum_of_samples Int64,
-    squared_mean Float64,
-    p50_marker_heights Array(Float64),
-    p50_marker_positions Array(UInt64),
-    p50_desired_marker_positions Array(Float64),
-    p90_marker_heights Array(Float64),
-    p90_marker_positions Array(UInt64),
-    p90_desired_marker_positions Array(Float64),
-    p99_marker_heights Array(Float64),
-    p99_marker_positions Array(UInt64),
-    p99_desired_marker_positions Array(Float64)
-)
+AS oximeter.measurements_histogrami32_local
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogrami32_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu32_local ON CLUSTER oximeter_cluster
@@ -644,27 +544,7 @@ ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu32 ON CLUSTER oximeter_cluster
-(
-    timeseries_name String,
-    timeseries_key UInt64,
-    start_time DateTime64(9, 'UTC'),
-    timestamp DateTime64(9, 'UTC'),
-    bins Array(UInt32),
-    counts Array(UInt64),
-    min UInt32,
-    max UInt32,
-    sum_of_samples Int64,
-    squared_mean Float64,
-    p50_marker_heights Array(Float64),
-    p50_marker_positions Array(UInt64),
-    p50_desired_marker_positions Array(Float64),
-    p90_marker_heights Array(Float64),
-    p90_marker_positions Array(UInt64),
-    p90_desired_marker_positions Array(Float64),
-    p99_marker_heights Array(Float64),
-    p99_marker_positions Array(UInt64),
-    p99_desired_marker_positions Array(Float64)
-)
+AS oximeter.measurements_histogramu32_local
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogramu32_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami64_local ON CLUSTER oximeter_cluster
@@ -694,27 +574,7 @@ ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami64 ON CLUSTER oximeter_cluster
-(
-    timeseries_name String,
-    timeseries_key UInt64,
-    start_time DateTime64(9, 'UTC'),
-    timestamp DateTime64(9, 'UTC'),
-    bins Array(Int64),
-    counts Array(UInt64),
-    min Int64,
-    max Int64,
-    sum_of_samples Int64,
-    squared_mean Float64,
-    p50_marker_heights Array(Float64),
-    p50_marker_positions Array(UInt64),
-    p50_desired_marker_positions Array(Float64),
-    p90_marker_heights Array(Float64),
-    p90_marker_positions Array(UInt64),
-    p90_desired_marker_positions Array(Float64),
-    p99_marker_heights Array(Float64),
-    p99_marker_positions Array(UInt64),
-    p99_desired_marker_positions Array(Float64)
-)
+AS oximeter.measurements_histogrami64_local
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogrami64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu64_local ON CLUSTER oximeter_cluster
@@ -744,27 +604,7 @@ ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu64 ON CLUSTER oximeter_cluster
-(
-    timeseries_name String,
-    timeseries_key UInt64,
-    start_time DateTime64(9, 'UTC'),
-    timestamp DateTime64(9, 'UTC'),
-    bins Array(UInt64),
-    counts Array(UInt64),
-    min UInt64,
-    max UInt64,
-    sum_of_samples Int64,
-    squared_mean Float64,
-    p50_marker_heights Array(Float64),
-    p50_marker_positions Array(UInt64),
-    p50_desired_marker_positions Array(Float64),
-    p90_marker_heights Array(Float64),
-    p90_marker_positions Array(UInt64),
-    p90_desired_marker_positions Array(Float64),
-    p99_marker_heights Array(Float64),
-    p99_marker_positions Array(UInt64),
-    p99_desired_marker_positions Array(Float64)
-)
+AS oximeter.measurements_histogramu64_local
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogramu64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf32_local ON CLUSTER oximeter_cluster
@@ -794,27 +634,7 @@ ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf32 ON CLUSTER oximeter_cluster
-(
-    timeseries_name String,
-    timeseries_key UInt64,
-    start_time DateTime64(9, 'UTC'),
-    timestamp DateTime64(9, 'UTC'),
-    bins Array(Float32),
-    counts Array(UInt64),
-    min Float32,
-    max Float32,
-    sum_of_samples Float64,
-    squared_mean Float64,
-    p50_marker_heights Array(Float64),
-    p50_marker_positions Array(UInt64),
-    p50_desired_marker_positions Array(Float64),
-    p90_marker_heights Array(Float64),
-    p90_marker_positions Array(UInt64),
-    p90_desired_marker_positions Array(Float64),
-    p99_marker_heights Array(Float64),
-    p99_marker_positions Array(UInt64),
-    p99_desired_marker_positions Array(Float64)
-)
+AS oximeter.measurements_histogramf32_local
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogramf32_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf64_local ON CLUSTER oximeter_cluster
@@ -844,27 +664,7 @@ ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf64 ON CLUSTER oximeter_cluster
-(
-    timeseries_name String,
-    timeseries_key UInt64,
-    start_time DateTime64(9, 'UTC'),
-    timestamp DateTime64(9, 'UTC'),
-    bins Array(Float64),
-    counts Array(UInt64),
-    min Float64,
-    max Float64,
-    sum_of_samples Float64,
-    squared_mean Float64,
-    p50_marker_heights Array(Float64),
-    p50_marker_positions Array(UInt64),
-    p50_desired_marker_positions Array(Float64),
-    p90_marker_heights Array(Float64),
-    p90_marker_positions Array(UInt64),
-    p90_desired_marker_positions Array(Float64),
-    p99_marker_heights Array(Float64),
-    p99_marker_positions Array(UInt64),
-    p99_desired_marker_positions Array(Float64)
-)
+AS oximeter.measurements_histogramf64_local
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_histogramf64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
 /* The field tables store named dimensions of each timeseries.
