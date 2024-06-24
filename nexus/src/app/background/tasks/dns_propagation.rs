@@ -178,8 +178,8 @@ async fn dns_propagate_one(
 #[cfg(test)]
 mod test {
     use super::DnsPropagator;
-    use crate::app::background::BackgroundTask;
     use crate::app::background::tasks::dns_servers::DnsServersList;
+    use crate::app::background::BackgroundTask;
     use dns_service_client::types::DnsConfigParams;
     use httptest::matchers::request;
     use httptest::responders::status_code;
