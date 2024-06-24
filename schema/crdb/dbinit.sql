@@ -3178,9 +3178,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
     -- unique id for this zone
     id UUID NOT NULL,
     underlay_address INET NOT NULL,
-    -- TODO: This is nullable for backwards compatibility.
-    -- Eventually, that nullability should be removed.
-    filesystem_pool UUID,
     zone_type omicron.public.zone_type NOT NULL,
 
     -- SocketAddr of the "primary" service for this zone
@@ -3232,6 +3229,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
         CHECK (snat_first_port IS NULL OR snat_first_port BETWEEN 0 AND 65535),
     snat_last_port INT4
         CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
+
+    -- TODO: This is nullable for backwards compatibility.
+    -- Eventually, that nullability should be removed.
+    filesystem_pool UUID,
 
     PRIMARY KEY (inv_collection_id, id)
 );
@@ -3415,9 +3416,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- unique id for this zone
     id UUID NOT NULL,
     underlay_address INET NOT NULL,
-    -- TODO: This is nullable for backwards compatibility.
-    -- Eventually, that nullability should be removed.
-    filesystem_pool UUID,
     zone_type omicron.public.zone_type NOT NULL,
 
     -- SocketAddr of the "primary" service for this zone
@@ -3481,6 +3479,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- blueprint has not yet been realized, it's possible the IP hasn't been
     -- created yet.
     external_ip_id UUID,
+
+    -- TODO: This is nullable for backwards compatibility.
+    -- Eventually, that nullability should be removed.
+    filesystem_pool UUID,
 
     PRIMARY KEY (blueprint_id, id)
 );
@@ -4104,7 +4106,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '77.0.0', NULL)
+    (TRUE, NOW(), NOW(), '78.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -227,7 +227,6 @@ pub struct BpOmicronZone {
     pub sled_id: DbTypedUuid<SledKind>,
     pub id: Uuid,
     pub underlay_address: ipv6::Ipv6Addr,
-    pub filesystem_pool: Option<DbTypedUuid<ZpoolKind>>,
     pub zone_type: ZoneType,
     pub primary_service_ip: ipv6::Ipv6Addr,
     pub primary_service_port: SqlU16,
@@ -249,6 +248,7 @@ pub struct BpOmicronZone {
     disposition: DbBpZoneDisposition,
 
     pub external_ip_id: Option<DbTypedUuid<ExternalIpKind>>,
+    pub filesystem_pool: Option<DbTypedUuid<ZpoolKind>>,
 }
 
 impl BpOmicronZone {
@@ -274,10 +274,6 @@ impl BpOmicronZone {
             sled_id: zone.sled_id.into(),
             id: zone.id,
             underlay_address: zone.underlay_address,
-            filesystem_pool: blueprint_zone
-                .filesystem_pool
-                .as_ref()
-                .map(|pool| pool.id().into()),
             zone_type: zone.zone_type,
             primary_service_ip: zone.primary_service_ip,
             primary_service_port: zone.primary_service_port,
@@ -297,6 +293,10 @@ impl BpOmicronZone {
             snat_last_port: zone.snat_last_port,
             disposition: to_db_bp_zone_disposition(blueprint_zone.disposition),
             external_ip_id: zone.external_ip_id.map(From::from),
+            filesystem_pool: blueprint_zone
+                .filesystem_pool
+                .as_ref()
+                .map(|pool| pool.id().into()),
         })
     }
 

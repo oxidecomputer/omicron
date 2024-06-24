@@ -1009,7 +1009,6 @@ pub struct InvOmicronZone {
     pub sled_id: DbTypedUuid<SledKind>,
     pub id: Uuid,
     pub underlay_address: ipv6::Ipv6Addr,
-    pub filesystem_pool: Option<DbTypedUuid<ZpoolKind>>,
     pub zone_type: ZoneType,
     pub primary_service_ip: ipv6::Ipv6Addr,
     pub primary_service_port: SqlU16,
@@ -1027,6 +1026,7 @@ pub struct InvOmicronZone {
     pub snat_ip: Option<IpNetwork>,
     pub snat_first_port: Option<SqlU16>,
     pub snat_last_port: Option<SqlU16>,
+    pub filesystem_pool: Option<DbTypedUuid<ZpoolKind>>,
 }
 
 impl InvOmicronZone {
@@ -1050,7 +1050,6 @@ impl InvOmicronZone {
             sled_id: zone.sled_id.into(),
             id: zone.id,
             underlay_address: zone.underlay_address,
-            filesystem_pool: zone.filesystem_pool.map(|id| id.into()),
             zone_type: zone.zone_type,
             primary_service_ip: zone.primary_service_ip,
             primary_service_port: zone.primary_service_port,
@@ -1068,6 +1067,7 @@ impl InvOmicronZone {
             snat_ip: zone.snat_ip,
             snat_first_port: zone.snat_first_port,
             snat_last_port: zone.snat_last_port,
+            filesystem_pool: zone.filesystem_pool.map(|id| id.into()),
         })
     }
 

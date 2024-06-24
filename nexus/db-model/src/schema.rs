@@ -1454,7 +1454,6 @@ table! {
 
         id -> Uuid,
         underlay_address -> Inet,
-        filesystem_pool -> Nullable<Uuid>,
         zone_type -> crate::ZoneTypeEnum,
 
         primary_service_ip -> Inet,
@@ -1473,6 +1472,7 @@ table! {
         snat_ip -> Nullable<Inet>,
         snat_first_port -> Nullable<Int4>,
         snat_last_port -> Nullable<Int4>,
+        filesystem_pool -> Nullable<Uuid>,
     }
 }
 
@@ -1569,7 +1569,6 @@ table! {
 
         id -> Uuid,
         underlay_address -> Inet,
-        filesystem_pool -> Nullable<Uuid>,
         zone_type -> crate::ZoneTypeEnum,
 
         primary_service_ip -> Inet,
@@ -1590,6 +1589,7 @@ table! {
         snat_last_port -> Nullable<Int4>,
         disposition -> crate::DbBpZoneDispositionEnum,
         external_ip_id -> Nullable<Uuid>,
+        filesystem_pool -> Nullable<Uuid>,
     }
 }
 
