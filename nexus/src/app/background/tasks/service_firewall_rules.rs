@@ -38,8 +38,8 @@ impl BackgroundTask for ServiceRulePropagator {
                 .new(slog::o!("component" => "service-firewall-rule-progator"));
             debug!(
                 log,
-                "starting background task for service \
-                firewall rule propagation"
+                "starting background task for service firewall rule \
+                 propagation"
             );
             let start = std::time::Instant::now();
             let res = nexus_networking::plumb_service_firewall_rules(

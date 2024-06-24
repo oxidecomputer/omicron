@@ -82,8 +82,7 @@ impl BackgroundTask for RegionReplacementDetector {
                 Err(e) => {
                     error!(
                         &log,
-                        "find_regions_on_expunged_physical_disks failed: \
-                            {e}"
+                        "find_regions_on_expunged_physical_disks failed: {e}"
                     );
                     err += 1;
 
@@ -110,8 +109,8 @@ impl BackgroundTask for RegionReplacementDetector {
                     Err(e) => {
                         error!(
                             &log,
-                            "error looking for existing region \
-                                replacement requests for {}: {e}",
+                            "error looking for existing region replacement \
+                             requests for {}: {e}",
                             region.id(),
                         );
                         continue;
@@ -130,7 +129,7 @@ impl BackgroundTask for RegionReplacementDetector {
                             info!(
                                 &log,
                                 "added region replacement request \
-                                {request_id} for {} volume {}",
+                                 {request_id} for {} volume {}",
                                 region.id(),
                                 region.volume_id(),
                             );
@@ -140,7 +139,7 @@ impl BackgroundTask for RegionReplacementDetector {
                             error!(
                                 &log,
                                 "error adding region replacement request for \
-                                region {} volume id {}: {e}",
+                                 region {} volume id {}: {e}",
                                 region.id(),
                                 region.volume_id(),
                             );
@@ -172,7 +171,7 @@ impl BackgroundTask for RegionReplacementDetector {
                                 error!(
                                     &log,
                                     "sending region replacement start request \
-                                    failed: {e}",
+                                     failed: {e}",
                                 );
                                 err += 1;
                             }

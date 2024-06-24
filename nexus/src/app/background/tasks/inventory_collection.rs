@@ -270,8 +270,8 @@ mod test {
             // has pushed us out.
             if our_collections.is_empty() {
                 println!(
-                    "iter {i}: no test collections \
-                    ({num_collections} Nexus collections)",
+                    "iter {i}: no test collections ({num_collections} Nexus \
+                     collections)",
                 );
                 continue;
             }
@@ -285,8 +285,8 @@ mod test {
             // tail of all IDs we've seen matches the ones we saw in this
             // iteration (i.e., we're pushing out old collections in order).
             println!(
-                "iter {i}: saw {our_collections:?}; \
-                 should match tail of {all_our_collection_ids:?}"
+                "iter {i}: saw {our_collections:?}; should match tail of \
+                 {all_our_collection_ids:?}"
             );
             assert_eq!(
                 all_our_collection_ids
@@ -398,8 +398,8 @@ mod test {
         assert_eq!(
             removed_urls.len(),
             1,
-            "expected to find exactly one sled URL matching our \
-            expunged sled's URL"
+            "expected to find exactly one sled URL matching our expunged \
+             sled's URL"
         );
         let mut found_urls = db_enum.list_sled_agents().await.unwrap();
         found_urls.sort();

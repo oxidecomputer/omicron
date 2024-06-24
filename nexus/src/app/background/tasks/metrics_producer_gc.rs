@@ -144,7 +144,7 @@ mod tests {
         {
             panic!(
                 "failed to update time_modified for producer {producer_id}: \
-                {err}"
+                 {err}"
             );
         }
     }

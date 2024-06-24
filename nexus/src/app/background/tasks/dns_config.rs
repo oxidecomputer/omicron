@@ -100,8 +100,8 @@ impl BackgroundTask for DnsConfigWatcher {
                         // we just read.  This should never happen because we
                         // never remove the latest generation.
                         let message = format!(
-                            "found latest DNS generation ({}) is older \
-                            than the one we already know about ({})",
+                            "found latest DNS generation ({}) is older than \
+                             the one we already know about ({})",
                             new.generation, old.generation
                         );
 
@@ -115,8 +115,8 @@ impl BackgroundTask for DnsConfigWatcher {
                             // immutable once created.
                             let message = format!(
                                 "found DNS config at generation {} that does \
-                                not match the config that we already have for \
-                                the same generation",
+                                 not match the config that we already have \
+                                 for the same generation",
                                 new.generation
                             );
                             error!(&log, "{}", message);

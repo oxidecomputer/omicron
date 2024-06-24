@@ -135,7 +135,8 @@ impl AbandonedVmmReaper {
                     results.error_count += 1;
                     *last_err = Err(e).with_context(|| {
                         format!(
-                            "failed to delete sled reservation for VMM {vmm_id}"
+                            "failed to delete sled reservation for VMM \
+                             {vmm_id}"
                         )
                     });
                 }
