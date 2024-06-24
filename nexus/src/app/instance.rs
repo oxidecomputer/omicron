@@ -1861,7 +1861,7 @@ impl super::Nexus {
     }
 }
 
-/// [`Nexus::notify_instance_updated`] (~~Taylor~~ background task's version)
+/// `Nexus::notify_instance_updated` (~~Taylor~~ background task's version)
 pub(crate) async fn notify_instance_updated_background(
     datastore: &DataStore,
     opctx: &OpContext,
