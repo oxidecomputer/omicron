@@ -2682,7 +2682,7 @@
           "projects"
         ],
         "summary": "List IP pools",
-        "operationId": "project_ip_pool_list",
+        "operationId": "current_silo_ip_pool_list",
         "parameters": [
           {
             "in": "query",
@@ -2741,7 +2741,7 @@
           "projects"
         ],
         "summary": "Fetch IP pool",
-        "operationId": "project_ip_pool_view",
+        "operationId": "current_silo_ip_pool_view",
         "parameters": [
           {
             "in": "path",

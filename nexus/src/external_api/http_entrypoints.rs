@@ -116,8 +116,8 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(project_update)?;
         api.register(project_policy_view)?;
         api.register(project_policy_update)?;
-        api.register(project_ip_pool_list)?;
-        api.register(project_ip_pool_view)?;
+        api.register(current_silo_ip_pool_list)?;
+        api.register(current_silo_ip_pool_view)?;
 
         // Operator-Accessible IP Pools API
         api.register(ip_pool_list)?;
@@ -1505,13 +1505,18 @@ async fn project_policy_update(
 
 // IP Pools
 
+// current_silo prefix is needed to distinguish silo-scoped endpoints from
+// fleet-scoped. In other cases we might choose to put the prefix on the fleet
+// endpoints, but in this case the vast majority of IP pool-related endpoints
+// are at fleet level, so we put the prefix on the silo-scoped endpoints.
+
 /// List IP pools
 #[endpoint {
     method = GET,
     path = "/v1/ip-pools",
     tags = ["projects"],
 }]
-async fn project_ip_pool_list(
+async fn current_silo_ip_pool_list(
     rqctx: RequestContext<ApiContext>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<views::SiloIpPool>>, HttpError> {
@@ -1551,7 +1556,7 @@ async fn project_ip_pool_list(
     path = "/v1/ip-pools/{pool}",
     tags = ["projects"],
 }]
-async fn project_ip_pool_view(
+async fn current_silo_ip_pool_view(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::IpPoolPath>,
 ) -> Result<HttpResponseOk<views::SiloIpPool>, HttpError> {

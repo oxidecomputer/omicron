@@ -83,10 +83,10 @@ system_policy_view                       GET      /v1/system/policy
 
 API operations found with tag "projects"
 OPERATION ID                             METHOD   URL PATH
+current_silo_ip_pool_list                GET      /v1/ip-pools
+current_silo_ip_pool_view                GET      /v1/ip-pools/{pool}
 project_create                           POST     /v1/projects
 project_delete                           DELETE   /v1/projects/{project}
-project_ip_pool_list                     GET      /v1/ip-pools
-project_ip_pool_view                     GET      /v1/ip-pools/{pool}
 project_list                             GET      /v1/projects
 project_policy_update                    PUT      /v1/projects/{project}/policy
 project_policy_view                      GET      /v1/projects/{project}/policy
