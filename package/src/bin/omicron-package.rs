@@ -978,60 +978,60 @@ impl Config {
     fn packages_to_build(&self) -> PackageMap<'_> {
         let packages = self.package_config.packages_to_build(&self.target);
         if self.only.is_empty() {
-            packages
-        } else {
-            let mut filtered_packages = PackageMap(BTreeMap::new());
-            let mut to_walk = PackageMap(BTreeMap::new());
-            // add the requested packages to `to_walk`
-            for package_name in &self.only {
-                to_walk.0.insert(
-                    package_name,
-                    packages.0.get(package_name).unwrap_or_else(|| {
-                        panic!(
-                            "Explicitly-requested package '{}' does not exist",
-                            package_name
-                        )
-                    }),
-                );
-            }
-            // dependencies are listed by output name, so create a lookup table
-            // to get a package by its output name.
-            let lookup_by_output = packages
-                .0
-                .iter()
-                .map(|(name, package)| {
-                    (package.get_output_file(name), (*name, *package))
-                })
-                .collect::<BTreeMap<_, _>>();
-            // packages yet to be walked are added to `to_walk`. pop each
-            // entry and add its dependencies to `to_walk`, then add the package
-            // we finished walking to `filtered_packages`.
-            while let Some((package_name, package)) = to_walk.0.pop_first() {
-                if let PackageSource::Composite { packages } = &package.source {
-                    for output in packages {
-                        // find the package by output name
-                        let (dep_name, dep_package) =
-                            lookup_by_output.get(output).unwrap_or_else(|| {
-                                panic!(
-                                    "Could not find a package which creates '{}'",
-                                    output
-                                )
-                            });
-                        if dep_name.as_str() == package_name {
-                            panic!("'{}' depends on itself", package_name);
-                        }
-                        // if we've seen this package already, it will be in
-                        // `filtered_packages`. otherwise, add it to `to_walk`.
-                        if !filtered_packages.0.contains_key(dep_name) {
-                            to_walk.0.insert(dep_name, dep_package);
-                        }
+            return packages;
+        }
+
+        let mut filtered_packages = PackageMap(BTreeMap::new());
+        let mut to_walk = PackageMap(BTreeMap::new());
+        // add the requested packages to `to_walk`
+        for package_name in &self.only {
+            to_walk.0.insert(
+                package_name,
+                packages.0.get(package_name).unwrap_or_else(|| {
+                    panic!(
+                        "Explicitly-requested package '{}' does not exist",
+                        package_name
+                    )
+                }),
+            );
+        }
+        // dependencies are listed by output name, so create a lookup table to
+        // get a package by its output name.
+        let lookup_by_output = packages
+            .0
+            .iter()
+            .map(|(name, package)| {
+                (package.get_output_file(name), (*name, *package))
+            })
+            .collect::<BTreeMap<_, _>>();
+        // packages yet to be walked are added to `to_walk`. pop each entry and
+        // add its dependencies to `to_walk`, then add the package we finished
+        // walking to `filtered_packages`.
+        while let Some((package_name, package)) = to_walk.0.pop_first() {
+            if let PackageSource::Composite { packages } = &package.source {
+                for output in packages {
+                    // find the package by output name
+                    let (dep_name, dep_package) =
+                        lookup_by_output.get(output).unwrap_or_else(|| {
+                            panic!(
+                                "Could not find a package which creates '{}'",
+                                output
+                            )
+                        });
+                    if dep_name.as_str() == package_name {
+                        panic!("'{}' depends on itself", package_name);
+                    }
+                    // if we've seen this package already, it will be in
+                    // `filtered_packages`. otherwise, add it to `to_walk`.
+                    if !filtered_packages.0.contains_key(dep_name) {
+                        to_walk.0.insert(dep_name, dep_package);
                     }
                 }
-                // we're done looking at this package's deps
-                filtered_packages.0.insert(package_name, package);
             }
-            filtered_packages
+            // we're done looking at this package's deps
+            filtered_packages.0.insert(package_name, package);
         }
+        filtered_packages
     }
 }
 
