@@ -4,7 +4,7 @@
 
 //! Background task for reading inventory for the rack
 
-use crate::app::background::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 use anyhow::ensure;
 use anyhow::Context;
 use futures::future::BoxFuture;
@@ -189,7 +189,7 @@ mod test {
     use super::DbSledAgentEnumerator;
     use super::InventoryCollector;
     use crate::app::authz;
-    use crate::app::background::common::BackgroundTask;
+    use crate::app::background::BackgroundTask;
     use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledSystemHardware;

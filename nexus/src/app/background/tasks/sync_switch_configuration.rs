@@ -23,7 +23,7 @@ use nexus_db_model::{
 };
 use uuid::Uuid;
 
-use crate::app::background::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 use display_error_chain::DisplayErrorChain;
 use dpd_client::types::PortId;
 use futures::future::BoxFuture;

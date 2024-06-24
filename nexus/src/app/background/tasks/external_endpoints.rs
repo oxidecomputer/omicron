@@ -6,7 +6,7 @@
 //! all Silos, their externally-visible DNS names, and the TLS certificates
 //! associated with those names
 
-use crate::app::background::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 use crate::app::external_endpoints::read_all_endpoints;
 pub use crate::app::external_endpoints::ExternalEndpoints;
 use futures::future::BoxFuture;
@@ -118,7 +118,7 @@ impl BackgroundTask for ExternalEndpointsWatcher {
 #[cfg(test)]
 mod test {
     use super::ExternalEndpointsWatcher;
-    use crate::app::background::common::BackgroundTask;
+    use crate::app::background::BackgroundTask;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
     use nexus_test_utils::resource_helpers::create_silo;

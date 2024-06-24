@@ -5,7 +5,7 @@
 //! Background task for propagating DNS configuration to all DNS servers
 
 use super::dns_servers::DnsServersList;
-use crate::app::background::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 use anyhow::Context;
 use dns_service_client::types::DnsConfigParams;
 use futures::future::BoxFuture;
@@ -178,7 +178,7 @@ async fn dns_propagate_one(
 #[cfg(test)]
 mod test {
     use super::DnsPropagator;
-    use crate::app::background::common::BackgroundTask;
+    use crate::app::background::BackgroundTask;
     use crate::app::background::tasks::dns_servers::DnsServersList;
     use dns_service_client::types::DnsConfigParams;
     use httptest::matchers::request;

@@ -9,7 +9,7 @@ use crate::app::{
     background::tasks::networking::build_mgd_clients, map_switch_zone_addrs,
 };
 
-use crate::app::background::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use internal_dns::{resolver::Resolver, ServiceName};

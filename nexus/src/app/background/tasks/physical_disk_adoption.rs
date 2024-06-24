@@ -11,7 +11,7 @@
 //!
 //! In the future, this may become more explicitly operator-controlled.
 
-use crate::app::background::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_model::PhysicalDisk;

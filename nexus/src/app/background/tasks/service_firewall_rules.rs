@@ -10,7 +10,7 @@
 //! handle general changes to customer-visible VPC firewalls, and is mostly in
 //! place to propagate changes in the IP allowlist for user-facing services.
 
-use crate::app::background::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::context::OpContext;

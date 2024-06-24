@@ -11,7 +11,7 @@
 //! for more information.
 
 use crate::app::authn;
-use crate::app::background::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 use crate::app::sagas;
 use crate::app::RegionAllocationStrategy;
 use futures::future::BoxFuture;

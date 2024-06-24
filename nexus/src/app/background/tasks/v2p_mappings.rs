@@ -12,7 +12,7 @@ use omicron_common::api::external::Vni;
 use serde_json::json;
 use sled_agent_client::types::VirtualNetworkInterfaceHost;
 
-use crate::app::background::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 
 pub struct V2PManager {
     datastore: Arc<DataStore>,
