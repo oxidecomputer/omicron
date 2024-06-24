@@ -108,11 +108,14 @@ pub use oximeter_macro_impl::*;
 extern crate self as oximeter;
 
 pub mod histogram;
+pub mod quantile;
 pub mod schema;
 pub mod test_util;
 pub mod traits;
 pub mod types;
 
+pub use quantile::Quantile;
+pub use quantile::QuantileError;
 pub use schema::FieldSchema;
 pub use schema::TimeseriesName;
 pub use schema::TimeseriesSchema;

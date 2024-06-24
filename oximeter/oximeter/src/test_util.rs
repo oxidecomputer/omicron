@@ -6,7 +6,7 @@
 // Copyright 2021 Oxide Computer Company
 
 use crate::histogram;
-use crate::histogram::Histogram;
+use crate::histogram::{Histogram, Record};
 use crate::types::{Cumulative, Sample};
 use uuid::Uuid;
 
