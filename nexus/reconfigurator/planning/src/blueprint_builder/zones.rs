@@ -190,6 +190,9 @@ mod tests {
     };
 
     use maplit::btreeset;
+    use nexus_types::deployment::SledDisk;
+    use nexus_types::external_api::views::PhysicalDiskPolicy;
+    use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::{
         deployment::{
             blueprint_zone_type, BlueprintZoneType, SledDetails, SledFilter,
@@ -198,8 +201,10 @@ mod tests {
         external_api::views::{SledPolicy, SledState},
     };
     use omicron_common::address::Ipv6Subnet;
+    use omicron_common::disk::DiskIdentity;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
 
     use crate::{
@@ -235,7 +240,19 @@ mod tests {
                             subnet: Ipv6Subnet::new(
                                 "fd00:1::".parse().unwrap(),
                             ),
-                            zpools: BTreeMap::new(),
+                            zpools: BTreeMap::from([(
+                                ZpoolUuid::new_v4(),
+                                SledDisk {
+                                    disk_identity: DiskIdentity {
+                                        vendor: String::from("fake-vendor"),
+                                        serial: String::from("fake-serial"),
+                                        model: String::from("fake-model"),
+                                    },
+                                    disk_id: PhysicalDiskUuid::new_v4(),
+                                    policy: PhysicalDiskPolicy::InService,
+                                    state: PhysicalDiskState::Active,
+                                },
+                            )]),
                         },
                     },
                 )
