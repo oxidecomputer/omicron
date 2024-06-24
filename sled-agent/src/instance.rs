@@ -985,7 +985,6 @@ impl Instance {
             vmm_runtime,
             propolis_addr,
             migration_id,
-            ..
         } = state;
 
         let InstanceManagerServices {
@@ -1788,19 +1787,13 @@ mod tests {
 
         InstanceInitialState {
             hardware,
-            instance_runtime: InstanceRuntimeState {
-                propolis_id: Some(propolis_id),
-                dst_propolis_id: None,
-                migration_id: None,
-                gen: Generation::new(),
-                time_updated: Default::default(),
-            },
             vmm_runtime: VmmRuntimeState {
                 state: VmmState::Starting,
                 gen: Generation::new(),
                 time_updated: Default::default(),
             },
             propolis_addr,
+            migration_id: None,
         }
     }
 
@@ -2135,9 +2128,9 @@ mod tests {
         let propolis_id = PropolisUuid::new_v4();
         let InstanceInitialState {
             hardware,
-            instance_runtime,
             vmm_runtime,
             propolis_addr,
+            migration_id,
         } = fake_instance_initial_state(propolis_id, propolis_addr);
 
         let metadata = InstanceMetadata {
@@ -2156,7 +2149,6 @@ mod tests {
             instance_id,
             propolis_id,
             hardware,
-            instance_runtime,
             vmm_runtime,
             propolis_addr,
             sled_identifiers,
