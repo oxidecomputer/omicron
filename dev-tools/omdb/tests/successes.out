@@ -287,6 +287,10 @@ task: "external_endpoints"
     on each one
 
 
+task: "instance_updater"
+    detects if instances require update sagas and schedules them
+
+
 task: "instance_watcher"
     periodically checks instance states
 
@@ -482,6 +486,13 @@ task: "external_endpoints"
 
     TLS certificates: 0
 
+task: "instance_updater"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "instance_updater" (don't know how to interpret details: Object {"destroyed_active_vmms": Number(0), "error": Null, "sagas_started": Number(0)})
+
 task: "instance_watcher"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
@@ -490,6 +501,7 @@ task: "instance_watcher"
     total instances checked: 0
     checks completed: 0
        successful checks: 0
+       update sagas queued: 0
        failed checks: 0
     checks that could not be completed: 0
     stale instance metrics pruned: 0
