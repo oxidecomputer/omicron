@@ -156,7 +156,7 @@ impl Driver {
     ///
     /// If the task is currently running, it will be activated again when it
     /// finishes.
-    pub fn activate(&self, task: &TaskHandle) {
+    pub(super) fn activate(&self, task: &TaskHandle) {
         self.task_required(task).notify.notify_one();
     }
 

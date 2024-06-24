@@ -68,10 +68,10 @@ pub struct BackgroundTasks {
         Option<external_endpoints::ExternalEndpoints>,
     >,
     /// task handle for the ipv4 nat entry garbage collector
-    pub nat_cleanup: TaskHandle,
+    pub task_nat_cleanup: TaskHandle,
 
     /// task handle for the switch bfd manager
-    pub bfd_manager: TaskHandle,
+    pub task_bfd_manager: TaskHandle,
 
     /// task handle for the task that collects inventory
     pub task_inventory_collection: TaskHandle,
@@ -191,7 +191,7 @@ impl BackgroundTasks {
             (task, watcher_channel)
         };
 
-        let nat_cleanup = {
+        let task_nat_cleanup = {
             driver.register(
                 "nat_v4_garbage_collector".to_string(),
                 String::from(
@@ -208,7 +208,7 @@ impl BackgroundTasks {
             )
         };
 
-        let bfd_manager = {
+        let task_bfd_manager = {
             driver.register(
                 "bfd_manager".to_string(),
                 String::from(
@@ -454,8 +454,8 @@ impl BackgroundTasks {
             task_metrics_producer_gc,
             task_external_endpoints,
             external_endpoints,
-            nat_cleanup,
-            bfd_manager,
+            task_nat_cleanup,
+            task_bfd_manager,
             task_inventory_collection,
             task_physical_disk_adoption,
             task_phantom_disks,
@@ -472,6 +472,10 @@ impl BackgroundTasks {
         }
     }
 
+    /// Activate the specified background task
+    ///
+    /// If the task is currently running, it will be activated again when it
+    /// finishes.
     pub fn activate(&self, task: &TaskHandle) {
         self.driver.activate(task);
     }
