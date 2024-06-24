@@ -4362,6 +4362,7 @@ mod test {
                         id,
                         underlay_address: Ipv6Addr::LOCALHOST,
                         zone_type,
+                        filesystem_pool: None,
                     }],
                 },
                 Some(&tmp_dir),
@@ -4393,6 +4394,7 @@ mod test {
                         dns_servers: vec![],
                         domain: None,
                     },
+                    filesystem_pool: None,
                 }],
             },
             Some(&tmp_dir),
@@ -4809,6 +4811,7 @@ mod test {
                 dns_servers: vec![],
                 domain: None,
             },
+            filesystem_pool: None,
         }];
 
         let tmp_dir = String::from(test_config.config_dir.path().as_str());
@@ -4837,6 +4840,7 @@ mod test {
                 dns_servers: vec![],
                 domain: None,
             },
+            filesystem_pool: None,
         });
 
         // Now try to apply that list with an older generation number.  This
