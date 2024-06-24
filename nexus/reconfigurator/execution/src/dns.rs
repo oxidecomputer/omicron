@@ -471,6 +471,7 @@ mod test {
     use nexus_reconfigurator_planning::example::example;
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
     use nexus_test_utils::resource_helpers::create_silo;
+    use nexus_test_utils::resource_helpers::DiskTestBuilder;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
@@ -502,6 +503,7 @@ mod test {
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::ExternalIpUuid;
+    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_client::ZoneKind;
@@ -1139,6 +1141,23 @@ mod test {
     async fn test_silos_external_dns_end_to_end(
         cptestctx: &ControlPlaneTestContext,
     ) {
+        // Add a zpool to both sleds, just to ensure that all new zones can find
+        // a transient filesystem wherever they end up being placed.
+        let _sled_agent_zpools = DiskTestBuilder::new(&cptestctx)
+            .on_sled(SledUuid::from_untyped_uuid(
+                cptestctx.sled_agent.sled_agent.id,
+            ))
+            .with_zpool_count(1)
+            .build()
+            .await;
+        let _sled_agent2_zpools = DiskTestBuilder::new(&cptestctx)
+            .on_sled(SledUuid::from_untyped_uuid(
+                cptestctx.sled_agent2.sled_agent.id,
+            ))
+            .with_zpool_count(1)
+            .build()
+            .await;
+
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let log = &cptestctx.logctx.log;
@@ -1223,6 +1242,8 @@ mod test {
                 .await
                 .unwrap()
         };
+        info!(log, "Sled rows"; "rows" => ?sled_rows);
+        info!(log, "Zpool rows"; "rows" => ?zpool_rows);
         let planning_input = {
             let mut builder = PlanningInputFromDb {
                 sled_rows: &sled_rows,

@@ -41,6 +41,7 @@ use omicron_sled_agent::sim::SledAgent;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use slog::debug;
 use std::net::IpAddr;
@@ -703,6 +704,53 @@ pub struct TestZpool {
     pub datasets: Vec<TestDataset>,
 }
 
+pub struct DiskTestBuilder<'a, N: NexusServer> {
+    cptestctx: &'a ControlPlaneTestContext<N>,
+    sled_agent: Option<Arc<omicron_sled_agent::sim::SledAgent>>,
+    zpool_count: u32,
+}
+
+impl<'a, N: NexusServer> DiskTestBuilder<'a, N> {
+    pub fn new(cptestctx: &'a ControlPlaneTestContext<N>) -> Self {
+        Self {
+            cptestctx,
+            sled_agent: Some(cptestctx.sled_agent.sled_agent.clone()),
+            zpool_count: DiskTest::DEFAULT_ZPOOL_COUNT,
+        }
+    }
+
+    /// Chooses a specific sled where disks should be added
+    pub fn on_sled(mut self, sled_id: SledUuid) -> Self {
+        // This list is hardcoded, because ControlPlaneTestContext is
+        // hardcoded to use two sled agents.
+        let sleds = [&self.cptestctx.sled_agent, &self.cptestctx.sled_agent2];
+
+        self.sled_agent = sleds.into_iter().find_map(|server| {
+            if server.sled_agent.id == sled_id.into_untyped_uuid() {
+                Some(server.sled_agent.clone())
+            } else {
+                None
+            }
+        });
+        self
+    }
+
+    /// Selects a specific number of zpools to be created
+    pub fn with_zpool_count(mut self, count: u32) -> Self {
+        self.zpool_count = count;
+        self
+    }
+
+    pub async fn build(self) -> DiskTest {
+        DiskTest::new_from_builder(
+            self.cptestctx,
+            self.sled_agent.expect("Sled Agent does not exist"),
+            self.zpool_count,
+        )
+        .await
+    }
+}
+
 pub struct DiskTest {
     pub sled_agent: Arc<SledAgent>,
     pub zpools: Vec<TestZpool>,
@@ -730,6 +778,21 @@ impl DiskTest {
 
         // Create three Zpools, each 10 GiB, each with one Crucible dataset.
         for _ in 0..Self::DEFAULT_ZPOOL_COUNT {
+            disk_test.add_zpool_with_dataset(cptestctx).await;
+        }
+
+        disk_test
+    }
+
+    pub async fn new_from_builder<N: NexusServer>(
+        cptestctx: &ControlPlaneTestContext<N>,
+        sled_agent: Arc<SledAgent>,
+        zpool_count: u32,
+    ) -> Self {
+        let mut disk_test = Self { sled_agent, zpools: vec![] };
+
+        // Create three Zpools, each 10 GiB, each with one Crucible dataset.
+        for _ in 0..zpool_count {
             disk_test.add_zpool_with_dataset(cptestctx).await;
         }
 
