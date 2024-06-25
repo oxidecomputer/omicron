@@ -163,9 +163,9 @@ where
 }
 
 // Creates new page params for querying sagas.
-fn new_page_params(
-    marker: Option<&uuid::Uuid>,
-) -> DataPageParams<'_, uuid::Uuid> {
+fn new_page_params<T>(
+    marker: Option<&T>
+) -> DataPageParams<'_, T> {
     DataPageParams {
         marker,
         direction: dropshot::PaginationOrder::Ascending,
@@ -295,7 +295,7 @@ async fn load_saga_log(
             break;
         }
         events.append(&mut some_events);
-        last_id = Some(events.last().as_ref().unwrap().saga_id.0);
+        last_id = Some(events.last().as_ref().unwrap().node_id.into());
     }
     Ok(events)
 }

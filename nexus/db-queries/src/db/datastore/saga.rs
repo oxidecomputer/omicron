@@ -131,10 +131,10 @@ impl DataStore {
     pub async fn saga_node_event_list_by_id(
         &self,
         id: db::saga_types::SagaId,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, db::saga_types::SagaNodeId>,
     ) -> ListResultVec<steno::SagaNodeEvent> {
         use db::schema::saga_node_event::dsl;
-        paginated(dsl::saga_node_event, dsl::saga_id, &pagparams)
+        paginated(dsl::saga_node_event, dsl::node_id, &pagparams)
             .filter(dsl::saga_id.eq(id))
             .load_async::<db::saga_types::SagaNodeEvent>(
                 &*self.pool_connection_unauthorized().await?,
