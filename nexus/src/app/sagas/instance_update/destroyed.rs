@@ -152,15 +152,23 @@ async fn siud_release_virtual_provisioning(
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
 
-    info!(
-        osagactx.log(),
-        "instance update (VMM destroyed): deallocating virtual provisioning resources";
-        "instance_id" => %authz_instance.id(),
-        "propolis_id" => %vmm_id,
-        "instance_update" => %"VMM destroyed",
-    );
-
-    osagactx
+    // `virtual_provisioning_collection_delete_instace` will only delete virtual
+    // provisioning records that are *less than* the max generation parameter,
+    // not less than or equal to it --- the idea is that the generation number
+    // has already been advanced when we are deallocating the virtual
+    // provisioning records. This is kind of an artifact of sled-agent
+    // previously owning instance runtime state generations, since the
+    // sled-agent would have already advanced the instance's generation.
+    //
+    // However, now that the instance record is owned by Nexus, and we are
+    // updating the instance in response to a VMM state update from sled-agent,
+    // the instance record snapshot we are holding has not yet had its
+    // generation advanced, so we want to allow deleting virtual provisioning
+    // records that were created with the instance's current generation. The
+    // generation will be advanced at the end of this saga, once we have updated
+    // the actual instance record.
+    let max_gen = instance.runtime_state.gen.next();
+    let result = osagactx
         .datastore()
         .virtual_provisioning_collection_delete_instance(
             &opctx,
@@ -168,17 +176,42 @@ async fn siud_release_virtual_provisioning(
             instance.project_id,
             i64::from(instance.ncpus.0 .0),
             instance.memory,
-            i64::try_from(&instance.runtime_state.gen.0).unwrap(),
+            i64::try_from(&max_gen).unwrap(),
         )
-        .await
-        .map(|_| ())
-        .or_else(|err| {
-            // Necessary for idempotency
-            match err {
-                Error::ObjectNotFound { .. } => Ok(()),
-                _ => Err(ActionError::action_failed(err)),
-            }
-        })
+        .await;
+    match result {
+        Ok(deleted) => {
+            info!(
+                osagactx.log(),
+                "instance update (VMM destroyed): deallocated virtual \
+                 provisioning resources";
+                "instance_id" => %authz_instance.id(),
+                "propolis_id" => %vmm_id,
+                "records_deleted" => ?deleted,
+                "instance_update" => %"VMM destroyed",
+            );
+        }
+        // Necessary for idempotency --- the virtual provisioning resources may
+        // have been deleted already, that's fine.
+        Err(Error::ObjectNotFound { .. }) => {
+            // TODO(eliza): it would be nice if we could distinguish
+            // between errors returned by
+            // `virtual_provisioning_collection_delete_instance` where
+            // the instance ID was not found, and errors where the
+            // generation number was too low...
+            info!(
+                osagactx.log(),
+                "instance update (VMM destroyed): virtual provisioning \
+                 record not found; perhaps it has already been deleted?";
+                "instance_id" => %authz_instance.id(),
+                "propolis_id" => %vmm_id,
+                "instance_update" => %"VMM destroyed",
+            );
+        }
+        Err(err) => return Err(ActionError::action_failed(err)),
+    };
+
+    Ok(())
 }
 
 async fn siud_unassign_oximeter_producer(
