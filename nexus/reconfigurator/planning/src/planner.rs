@@ -679,6 +679,14 @@ pub(crate) fn zone_needs_expungement(
         }
     };
 
+    // Should we expunge the zone because transient storage is gone?
+    if let Some(ref filesystem_zpool) = zone_config.filesystem_pool {
+        let zpool_id = filesystem_zpool.id();
+        if !sled_details.resources.zpool_is_provisionable(&zpool_id) {
+            return Some(ZoneExpungeReason::DiskExpunged);
+        }
+    };
+
     None
 }
 
@@ -730,6 +738,7 @@ mod test {
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_client::ZoneKind;
+    use std::collections::HashMap;
     use std::mem;
     use typed_rng::TypedUuidRng;
 
@@ -1204,8 +1213,9 @@ mod test {
     }
 
     #[test]
-    fn test_disk_expungement_removes_zones() {
-        static TEST_NAME: &str = "planner_disk_expungement_removes_zones";
+    fn test_disk_expungement_removes_zones_durable_zpool() {
+        static TEST_NAME: &str =
+            "planner_disk_expungement_removes_zones_durable_zpool";
         let logctx = test_setup_log(TEST_NAME);
 
         // Create an example system with a single sled
@@ -1221,9 +1231,30 @@ mod test {
         // The example system should be assigning crucible zones to each
         // in-service disk. When we expunge one of these disks, the planner
         // should remove the associated zone.
+        //
+        // Find a disk which is only used by a single zone, if one exists.
+        //
+        // If we don't do this, we might select a physical disk supporting
+        // multiple zones of distinct types.
+        let mut zpool_by_zone_usage = HashMap::new();
+        for zones in blueprint1.blueprint_zones.values() {
+            for zone in &zones.zones {
+                let pool = zone.filesystem_pool.as_ref().unwrap();
+                zpool_by_zone_usage
+                    .entry(pool.id())
+                    .and_modify(|count| *count += 1)
+                    .or_insert_with(|| 1);
+            }
+        }
         let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
-        let (_, disk) =
-            sled_details.resources.zpools.iter_mut().next().unwrap();
+        let (_, disk) = sled_details
+            .resources
+            .zpools
+            .iter_mut()
+            .find(|(zpool_id, _disk)| {
+                *zpool_by_zone_usage.get(*zpool_id).unwrap() == 1
+            })
+            .expect("Couldn't find zpool only used by a single zone");
         disk.policy = PhysicalDiskPolicy::Expunged;
 
         let input = builder.build();
@@ -1266,6 +1297,113 @@ mod test {
             BlueprintZoneDisposition::Expunged,
             "Should have expunged this zone"
         );
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_disk_expungement_removes_zones_transient_filesystem() {
+        static TEST_NAME: &str =
+            "planner_disk_expungement_removes_zones_transient_filesystem";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Create an example system with a single sled
+        let (collection, input, blueprint1) =
+            example(&logctx.log, TEST_NAME, 1);
+
+        let mut builder = input.into_builder();
+
+        // Aside: Avoid churning on the quantity of Nexus zones - we're okay
+        // staying at one.
+        builder.policy_mut().target_nexus_zone_count = 1;
+
+        // Find whatever pool NTP was using
+        let pool_to_expunge = blueprint1
+            .blueprint_zones
+            .iter()
+            .find_map(|(_, zones_config)| {
+                for zone_config in &zones_config.zones {
+                    if zone_config.zone_type.is_ntp() {
+                        return zone_config.filesystem_pool.clone();
+                    }
+                }
+                None
+            })
+            .expect("No NTP zone pool?");
+
+        // This is mostly for test stability across "example system" changes:
+        // Find how many other zones are using this same zone.
+        let zones_using_zpool = blueprint1.blueprint_zones.iter().fold(
+            0,
+            |acc, (_, zones_config)| {
+                let mut zones_using_zpool = 0;
+                for zone_config in &zones_config.zones {
+                    if let Some(pool) = &zone_config.filesystem_pool {
+                        if pool == &pool_to_expunge {
+                            zones_using_zpool += 1;
+                            continue;
+                        }
+                    }
+                    if let Some(pool) = zone_config.zone_type.durable_zpool() {
+                        if pool == &pool_to_expunge {
+                            zones_using_zpool += 1;
+                            continue;
+                        }
+                    }
+                }
+                acc + zones_using_zpool
+            },
+        );
+        assert!(
+            zones_using_zpool > 0,
+            "We should be expunging at least one zone using this zpool"
+        );
+
+        // For that pool, find the physical disk behind it, and mark it
+        // expunged.
+        let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
+        let disk = sled_details
+            .resources
+            .zpools
+            .get_mut(&pool_to_expunge.id())
+            .unwrap();
+        disk.policy = PhysicalDiskPolicy::Expunged;
+
+        let input = builder.build();
+
+        let blueprint2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &input,
+            "test: expunge a disk with a zone on top",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("failed to plan");
+
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        println!("1 -> 2 (expunge a disk):\n{}", diff.display());
+        assert_eq!(diff.sleds_added.len(), 0);
+        assert_eq!(diff.sleds_removed.len(), 0);
+        assert_eq!(diff.sleds_modified.len(), 1);
+
+        // We should be removing all zones using this zpool
+        assert_eq!(diff.zones.added.len(), 0);
+        assert_eq!(diff.zones.removed.len(), 0);
+        assert_eq!(diff.zones.modified.len(), 1);
+
+        let (_zone_id, modified_zones) =
+            diff.zones.modified.iter().next().unwrap();
+        assert_eq!(modified_zones.zones.len(), zones_using_zpool);
+        for modified_zone in &modified_zones.zones {
+            assert_eq!(
+                modified_zone.zone.disposition(),
+                BlueprintZoneDisposition::Expunged,
+                "Should have expunged this zone"
+            );
+        }
 
         logctx.cleanup_successful();
     }
