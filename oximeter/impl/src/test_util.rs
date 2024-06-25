@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Utilities for testing the oximeter crate.
-// Copyright 2021 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
 use crate::histogram;
 use crate::histogram::{Histogram, Record};

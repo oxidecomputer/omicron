@@ -4,11 +4,12 @@
 
 //! Types used to describe targets, metrics, and measurements.
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
 use crate::histogram;
 use crate::traits;
 use crate::Producer;
+use crate::TimeseriesName;
 use bytes::Bytes;
 use chrono::DateTime;
 use chrono::Utc;
@@ -24,6 +25,7 @@ use std::fmt;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
+use std::num::NonZeroU8;
 use std::ops::Add;
 use std::ops::AddAssign;
 use std::sync::Arc;
@@ -667,8 +669,21 @@ pub enum MetricsError {
 
     #[error("Missing datum of type {datum_type} cannot have a start time")]
     MissingDatumCannotHaveStartTime { datum_type: DatumType },
+
     #[error("Invalid timeseries name")]
     InvalidTimeseriesName,
+
+    #[error("TOML deserialization error: {0}")]
+    Toml(String),
+
+    #[error("Schema definition error: {0}")]
+    SchemaDefinition(String),
+
+    #[error("Target version {target} does not match metric version {metric}")]
+    TargetMetricVersionMismatch {
+        target: std::num::NonZeroU8,
+        metric: std::num::NonZeroU8,
+    },
 }
 
 impl From<MetricsError> for omicron_common::api::external::Error {
@@ -795,7 +810,13 @@ pub struct Sample {
     pub measurement: Measurement,
 
     /// The name of the timeseries this sample belongs to
-    pub timeseries_name: String,
+    pub timeseries_name: TimeseriesName,
+
+    /// The version of the timeseries this sample belongs to
+    //
+    // TODO-cleanup: This should be removed once schema are tracked in CRDB.
+    #[serde(default = "::oximeter::schema::default_schema_version")]
+    pub timeseries_version: NonZeroU8,
 
     // Target name and fields
     target: FieldSet,
@@ -810,7 +831,8 @@ impl PartialEq for Sample {
     /// Two samples are considered equal if they have equal targets and metrics, and occur at the
     /// same time. Importantly, the _data_ is not used during comparison.
     fn eq(&self, other: &Sample) -> bool {
-        self.target.eq(&other.target)
+        self.timeseries_version.eq(&other.timeseries_version)
+            && self.target.eq(&other.target)
             && self.metric.eq(&other.metric)
             && self.measurement.start_time().eq(&other.measurement.start_time())
             && self.measurement.timestamp().eq(&other.measurement.timestamp())
@@ -831,11 +853,19 @@ impl Sample {
         T: traits::Target,
         M: traits::Metric<Datum = D>,
     {
+        if target.version() != metric.version() {
+            return Err(MetricsError::TargetMetricVersionMismatch {
+                target: target.version(),
+                metric: metric.version(),
+            });
+        }
         let target_fields = FieldSet::from_target(target);
         let metric_fields = FieldSet::from_metric(metric);
         Self::verify_field_names(&target_fields, &metric_fields)?;
+        let timeseries_name = crate::timeseries_name(target, metric)?;
         Ok(Self {
-            timeseries_name: crate::timeseries_name(target, metric),
+            timeseries_name,
+            timeseries_version: target.version(),
             target: target_fields,
             metric: metric_fields,
             measurement: metric.measure(timestamp),
@@ -853,12 +883,20 @@ impl Sample {
         T: traits::Target,
         M: traits::Metric<Datum = D>,
     {
+        if target.version() != metric.version() {
+            return Err(MetricsError::TargetMetricVersionMismatch {
+                target: target.version(),
+                metric: metric.version(),
+            });
+        }
         let target_fields = FieldSet::from_target(target);
         let metric_fields = FieldSet::from_metric(metric);
         Self::verify_field_names(&target_fields, &metric_fields)?;
         let datum = Datum::Missing(MissingDatum::from(metric));
+        let timeseries_name = crate::timeseries_name(target, metric)?;
         Ok(Self {
-            timeseries_name: crate::timeseries_name(target, metric),
+            timeseries_name,
+            timeseries_version: target.version(),
             target: target_fields,
             metric: metric_fields,
             measurement: Measurement { timestamp, datum },
