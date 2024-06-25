@@ -8,32 +8,12 @@ use super::DESTROYED_VMM_ID;
 use crate::app::sagas::ActionError;
 use chrono::Utc;
 use nexus_db_model::Generation;
-use nexus_db_model::Instance;
 use nexus_db_model::InstanceRuntimeState;
 use nexus_db_model::InstanceState;
-use nexus_db_queries::authn;
-use nexus_db_queries::authz;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
-use serde::{Deserialize, Serialize};
-use slog::info;
-
-/// Parameters to the instance update (active VMM destroyed) sub-saga.
-#[derive(Debug, Deserialize, Serialize)]
-pub(super) struct RealRealParams {
-    /// Authentication context to use to fetch the instance's current state from
-    /// the database.
-    pub(super) serialized_authn: authn::saga::Serialized,
-
-    pub(super) authz_instance: authz::Instance,
-
-    /// The UUID of the VMM that was destroyed.
-    pub(super) vmm_id: PropolisUuid,
-
-    pub(super) instance: Instance,
-}
 
 pub(super) async fn siu_destroyed_release_sled_resources(
     sagactx: NexusActionContext,
@@ -164,14 +144,15 @@ pub(super) async fn siu_destroyed_unassign_oximeter_producer(
     .map_err(ActionError::action_failed)
 }
 
-pub(super) async fn siu_destroyed_delete_v2p_mappings(
+pub(super) async fn siu_destroyed_update_network_config(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    let RealParams { ref authz_instance, .. } =
+    let osagactx = sagactx.user_data();
+    let RealParams { ref serialized_authn, ref authz_instance, .. } =
         sagactx.saga_params::<RealParams>()?;
     let vmm_id = sagactx.lookup::<PropolisUuid>(DESTROYED_VMM_ID)?;
+    let nexus = osagactx.nexus();
 
-    let osagactx = sagactx.user_data();
     info!(
         osagactx.log(),
         "instance update (VMM destroyed): deleting V2P mappings";
@@ -180,20 +161,7 @@ pub(super) async fn siu_destroyed_delete_v2p_mappings(
         "instance_update" => %"VMM destroyed",
     );
 
-    let nexus = osagactx.nexus();
     nexus.background_tasks.activate(&nexus.background_tasks.task_v2p_manager);
-    Ok(())
-}
-
-pub(super) async fn siu_destroyed_delete_nat_entries(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    let osagactx = sagactx.user_data();
-    let RealParams { ref serialized_authn, ref authz_instance, .. } =
-        sagactx.saga_params::<RealParams>()?;
-    let vmm_id = sagactx.lookup::<PropolisUuid>(DESTROYED_VMM_ID)?;
-    let opctx =
-        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
 
     info!(
         osagactx.log(),
@@ -203,8 +171,9 @@ pub(super) async fn siu_destroyed_delete_nat_entries(
         "instance_update" => %"VMM destroyed",
     );
 
-    osagactx
-        .nexus()
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+    nexus
         .instance_delete_dpd_config(&opctx, &authz_instance)
         .await
         .map_err(ActionError::action_failed)?;
