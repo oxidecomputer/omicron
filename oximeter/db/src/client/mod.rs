@@ -4217,7 +4217,7 @@ mod tests {
         const FIRST_VERSION: u64 = 3;
         for version in FIRST_VERSION..=OXIMETER_VERSION {
             let upgrade_file_contents = Client::read_schema_upgrade_sql_files(
-                log, false, version, SCHEMA_DIR,
+                log, replicated, version, SCHEMA_DIR,
             )
             .await
             .expect("failed to read schema upgrade files");

@@ -59,10 +59,12 @@ members = [
     "nexus/types",
     "oximeter/collector",
     "oximeter/db",
+    "oximeter/impl",
     "oximeter/instruments",
     "oximeter/oximeter-macro-impl",
     "oximeter/oximeter",
     "oximeter/producer",
+    "oximeter/timeseries-macro",
     "package",
     "passwords",
     "rpaths",
@@ -149,10 +151,12 @@ default-members = [
     "nexus/types",
     "oximeter/collector",
     "oximeter/db",
+    "oximeter/impl",
     "oximeter/instruments",
     "oximeter/oximeter-macro-impl",
     "oximeter/oximeter",
     "oximeter/producer",
+    "oximeter/timeseries-macro",
     "package",
     "passwords",
     "rpaths",
@@ -280,6 +284,7 @@ expectorate = "1.1.0"
 fatfs = "0.3.6"
 filetime = "0.2.23"
 flate2 = "1.0.30"
+float-ord = "0.3.2"
 flume = "0.11.0"
 foreign-types = "0.3.2"
 fs-err = "2.11.0"
@@ -319,7 +324,7 @@ internet-checksum = "0.2"
 ipnetwork = { version = "0.20", features = ["schemars"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
 key-manager = { path = "key-manager" }
-kstat-rs = "0.2.3"
+kstat-rs = "0.2.4"
 libc = "0.2.155"
 libfalcon = { git = "https://github.com/oxidecomputer/falcon", rev = "e69694a1f7cc9fe31fab27f321017280531fb5f7" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe" }
@@ -381,9 +386,11 @@ oximeter = { path = "oximeter/oximeter" }
 oximeter-client = { path = "clients/oximeter-client" }
 oximeter-db = { path = "oximeter/db/" }
 oximeter-collector = { path = "oximeter/collector" }
+oximeter-impl = { path = "oximeter/impl" }
 oximeter-instruments = { path = "oximeter/instruments" }
 oximeter-macro-impl = { path = "oximeter/oximeter-macro-impl" }
 oximeter-producer = { path = "oximeter/producer" }
+oximeter-timeseries-macro = { path = "oximeter/timeseries-macro" }
 p256 = "0.13"
 parse-display = "0.9.0"
 partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }
@@ -408,6 +415,7 @@ proptest = "1.4.0"
 quote = "1.0"
 rand = "0.8.5"
 rand_core = "0.6.4"
+rand_distr = "0.4.3"
 rand_seeder = "0.2.3"
 ratatui = "0.26.2"
 rayon = "1.10"

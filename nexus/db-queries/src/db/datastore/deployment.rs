@@ -504,7 +504,7 @@ impl DataStore {
                 )
                 .filter(dsl::blueprint_id.eq(blueprint_id))
                 .select(BpOmicronZone::as_select())
-                .load_async::<BpOmicronZone>(&*conn)
+                .load_async(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
