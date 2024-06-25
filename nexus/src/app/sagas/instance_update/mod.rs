@@ -20,10 +20,11 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use serde::{Deserialize, Serialize};
-use steno::{ActionError, DagBuilder, Node, SagaName};
+use steno::{ActionError, DagBuilder, Node};
 use uuid::Uuid;
 
 mod destroyed;
+use destroyed::*;
 
 // The public interface to this saga is actually a smaller saga that starts the
 // "real" update saga, which inherits the lock from the start saga. This is
@@ -54,6 +55,7 @@ struct RealParams {
 
 const INSTANCE_LOCK_ID: &str = "saga_instance_lock_id";
 const INSTANCE_LOCK: &str = "updater_lock";
+const DESTROYED_VMM_ID: &str = "destroyed_vmm_id";
 const MIGRATION: &str = "migration";
 
 // instance update saga: actions
@@ -66,6 +68,12 @@ declare_saga_actions! {
         + siu_become_updater
         - siu_unbecome_updater
     }
+
+    UNLOCK_INSTANCE -> "unlocked" {
+        + siu_unlock_instance
+    }
+
+    // === migration update actions ===
 
     // Update the instance record to reflect a migration event. If the
     // migration has completed on the target VMM, or if the migration has
@@ -81,8 +89,39 @@ declare_saga_actions! {
         + siu_migration_update_network_config
     }
 
-    UNLOCK_INSTANCE -> "unlocked" {
-        + siu_unlock_instance
+    // === active VMM destroyed actions ===
+
+    // Deallocate physical sled resources reserved for the destroyed VMM, as it
+    // is no longer using them.
+    DESTROYED_RELEASE_SLED_RESOURCES -> "destroyed_vmm_release_sled_resources" {
+        + siu_destroyed_release_sled_resources
+    }
+
+    // Deallocate virtual provisioning resources reserved by the instance, as it
+    // is no longer running.
+    DESTROYED_RELEASE_VIRTUAL_PROVISIONING -> "destroyed_vmm_release_virtual_provisioning" {
+        + siu_destroyed_release_virtual_provisioning
+    }
+
+    // Unassign the instance's Oximeter producer.
+    DESTROYED_UNASSIGN_OXIMETER_PRODUCER -> "destroyed_vmm_unassign_oximeter" {
+        + siu_destroyed_unassign_oximeter_producer
+    }
+
+    DESTROYED_DELETE_V2P_MAPPINGS -> "destroyed_vmm_delete_v2p_mappings" {
+        + siu_destroyed_delete_v2p_mappings
+    }
+
+    DESTROYED_DELETE_NAT_ENTRIES -> "destroyed_vmm_delete_nat_entries" {
+        + siu_destroyed_delete_nat_entries
+    }
+
+    DESTROYED_UPDATE_INSTANCE -> "destroyed_vmm_update_instance" {
+        + siu_destroyed_update_instance
+    }
+
+    DESTROYED_MARK_VMM_DELETED -> "destroyed_mark_vmm_deleted" {
+        + siu_destroyed_mark_vmm_deleted
     }
 }
 
@@ -101,13 +140,6 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
         params: &Self::Params,
         mut builder: DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
-        builder.append(Node::action(
-            INSTANCE_LOCK_ID,
-            "GenerateInstanceLockId",
-            ACTION_GENERATE_ID.as_ref(),
-        ));
-        builder.append(become_updater_action());
-
         fn const_node(
             name: &'static str,
             value: &impl serde::Serialize,
@@ -118,45 +150,34 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
             Ok(Node::constant(name, value))
         }
 
-        // determine which subsaga(s) to execute based on the state of the instance
-        // and the VMMs associated with it.
+        builder.append(Node::action(
+            INSTANCE_LOCK_ID,
+            "GenerateInstanceLockId",
+            ACTION_GENERATE_ID.as_ref(),
+        ));
+        builder.append(become_updater_action());
+
+        // TODO(eliza): perhaps the start saga could determine whether it even
+        // needs to create a "real" saga based on whether either of the relevant
+        // state changes have occurred?
+
+        // If the active VMM's state has changed to "destroyed", then clean up
+        // after it.
         if let Some(ref active_vmm) = params.state.active_vmm {
             // If the active VMM is `Destroyed`, schedule the active VMM
             // destroyed subsaga.
             if active_vmm.runtime.state == VmmState::Destroyed {
-                const DESTROYED_SUBSAGA_PARAMS: &str =
-                    "params_for_vmm_destroyed_subsaga";
-                let subsaga_params = destroyed::Params {
-                    serialized_authn: params.serialized_authn.clone(),
-                    authz_instance: params.authz_instance.clone(),
-                    vmm_id: PropolisUuid::from_untyped_uuid(active_vmm.id),
-                    instance: params.state.instance.clone(),
-                };
-                let subsaga_dag = {
-                    let subsaga_builder = DagBuilder::new(SagaName::new(
-                        destroyed::SagaVmmDestroyed::NAME,
-                    ));
-                    destroyed::SagaVmmDestroyed::make_saga_dag(
-                        &subsaga_params,
-                        subsaga_builder,
-                    )?
-                };
-
-                builder.append(Node::constant(
-                    DESTROYED_SUBSAGA_PARAMS,
-                    serde_json::to_value(&subsaga_params).map_err(|e| {
-                        SagaInitError::SerializeError(
-                            DESTROYED_SUBSAGA_PARAMS.to_string(),
-                            e,
-                        )
-                    })?,
-                ));
-
-                builder.append(Node::subsaga(
-                    "vmm_destroyed_subsaga_no_result",
-                    subsaga_dag,
-                    DESTROYED_SUBSAGA_PARAMS,
-                ));
+                builder.append(const_node(
+                    DESTROYED_VMM_ID,
+                    &PropolisUuid::from_untyped_uuid(active_vmm.id),
+                )?);
+                builder.append(destroyed_release_sled_resources_action());
+                builder.append(destroyed_release_virtual_provisioning_action());
+                builder.append(destroyed_unassign_oximeter_producer_action());
+                builder.append(destroyed_delete_v2p_mappings_action());
+                builder.append(destroyed_delete_nat_entries_action());
+                builder.append(destroyed_update_instance_action());
+                builder.append(destroyed_mark_vmm_deleted_action());
             }
         }
 
@@ -336,9 +357,12 @@ async fn siu_migration_update_network_config(
         // active VMM and is destroying it, it should also have retired that
         // VMM.
         Err(Error::ObjectNotFound { .. }) => {
-            error!(osagactx.log(), "instance's active vmm unexpectedly not found";
-                    "instance_id" => %instance_id,
-                    "propolis_id" => %active_propolis_id);
+            error!(
+                osagactx.log(),
+                "instance's active vmm unexpectedly not found";
+                "instance_id" => %instance_id,
+                "propolis_id" => %active_propolis_id,
+            );
 
             return Ok(());
         }
