@@ -6,7 +6,6 @@
 
 use crate::ip_allocator::IpAllocator;
 use crate::planner::zone_needs_expungement;
-use crate::planner::DiscretionaryOmicronZone;
 use crate::planner::ZoneExpungeReason;
 use anyhow::anyhow;
 use internal_dns::config::Host;
@@ -50,7 +49,6 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use rand::prelude::IteratorRandom;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use sled_agent_client::ZoneKind;
@@ -667,7 +665,7 @@ impl<'a> BlueprintBuilder<'a> {
                 domain: None,
             });
         let filesystem_pool =
-            self.sled_select_filesystem_pool(sled_id, &zone_type)?;
+            self.sled_select_zpool(sled_id, zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -720,10 +718,9 @@ impl<'a> BlueprintBuilder<'a> {
         let zone_type =
             BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
                 address,
-                dataset: OmicronZoneDataset { pool_name },
+                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
             });
-        let filesystem_pool =
-            self.sled_select_filesystem_pool(sled_id, &zone_type)?;
+        let filesystem_pool = pool_name;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -851,7 +848,7 @@ impl<'a> BlueprintBuilder<'a> {
                     external_dns_servers: external_dns_servers.clone(),
                 });
             let filesystem_pool =
-                self.sled_select_filesystem_pool(sled_id, &zone_type)?;
+                self.sled_select_zpool(sled_id, zone_type.kind())?;
 
             let zone = BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
@@ -895,20 +892,19 @@ impl<'a> BlueprintBuilder<'a> {
         for _ in 0..num_crdb_to_add {
             let zone_id = self.rng.zone_rng.next();
             let underlay_ip = self.sled_alloc_ip(sled_id)?;
-            let pool_name = self.sled_alloc_zpool(
-                sled_id,
-                DiscretionaryOmicronZone::CockroachDb,
-            )?;
+            let pool_name =
+                self.sled_select_zpool(sled_id, ZoneKind::CockroachDb)?;
             let port = omicron_common::address::COCKROACH_PORT;
             let address = SocketAddrV6::new(underlay_ip, port, 0, 0);
             let zone_type = BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb {
                     address,
-                    dataset: OmicronZoneDataset { pool_name },
+                    dataset: OmicronZoneDataset {
+                        pool_name: pool_name.clone(),
+                    },
                 },
             );
-            let filesystem_pool =
-                self.sled_select_filesystem_pool(sled_id, &zone_type)?;
+            let filesystem_pool = pool_name;
 
             let zone = BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
@@ -921,37 +917,6 @@ impl<'a> BlueprintBuilder<'a> {
         }
 
         Ok(EnsureMultiple::Changed { added: num_crdb_to_add, removed: 0 })
-    }
-
-    // Selects a filesystem zpool for this zone type.
-    //
-    // For zones containing durable datasets, the filesystem pools are
-    // co-located, and determistic.
-    //
-    // For zones without durable datasets, the filesystem pools are randomly
-    // selected. This random choice makes this function not idempotent.
-    fn sled_select_filesystem_pool(
-        &self,
-        sled_id: SledUuid,
-        zone_type: &BlueprintZoneType,
-    ) -> Result<ZpoolName, Error> {
-        let resources = self.sled_resources(sled_id)?;
-
-        // Transient filesystem is co-located with durable dataset.
-        if let Some(dataset) = zone_type.durable_dataset() {
-            return Ok(dataset.pool_name.clone());
-        }
-
-        // No durable dataset exists; pick one randomly.
-        resources
-            .zpools
-            .keys()
-            .map(|id| ZpoolName::new_external(*id))
-            .choose(&mut rand::thread_rng())
-            .ok_or_else(|| Error::NoAvailableZpool {
-                sled_id,
-                kind: zone_type.kind(),
-            })
     }
 
     fn sled_add_zone(
@@ -1010,44 +975,40 @@ impl<'a> BlueprintBuilder<'a> {
         allocator.alloc().ok_or(Error::OutOfAddresses { sled_id })
     }
 
-    fn sled_alloc_zpool(
-        &mut self,
+    // Selects a zpools for this zone type.
+    //
+    // This zpool may be used for either durable storage or transient
+    // storage - the usage is up to the caller.
+    //
+    // If `zone_kind` already exists on `sled_id`, it is prevented
+    // from using the same zpool as exisitng zones with the same kind.
+    fn sled_select_zpool(
+        &self,
         sled_id: SledUuid,
-        kind: DiscretionaryOmicronZone,
+        zone_kind: ZoneKind,
     ) -> Result<ZpoolName, Error> {
-        let resources = self.sled_resources(sled_id)?;
+        let all_in_service_zpools =
+            self.sled_resources(sled_id)?.all_zpools(ZpoolFilter::InService);
 
-        // We refuse to choose a zpool for a zone of a given `kind` if this
-        // sled already has a zone of that kind on the same zpool. Build up a
-        // set of invalid zpools for this sled/kind pair.
+        // We refuse to choose a zpool for a zone of a given `zone_kind` if this
+        // sled already has a durable zone of that kind on the same zpool. Build
+        // up a set of invalid zpools for this sled/kind pair.
         let mut skip_zpools = BTreeSet::new();
         for zone_config in self.current_sled_zones(sled_id) {
-            match (kind, &zone_config.zone_type) {
-                (
-                    DiscretionaryOmicronZone::Nexus,
-                    BlueprintZoneType::Nexus(_),
-                ) => {
-                    // TODO handle this case once we track transient datasets
+            if let Some(zpool) = zone_config.zone_type.durable_zpool() {
+                if zone_kind == zone_config.zone_type.kind() {
+                    skip_zpools.insert(zpool);
                 }
-                (
-                    DiscretionaryOmicronZone::CockroachDb,
-                    BlueprintZoneType::CockroachDb(crdb),
-                ) => {
-                    skip_zpools.insert(&crdb.dataset.pool_name);
-                }
-                (DiscretionaryOmicronZone::Nexus, _)
-                | (DiscretionaryOmicronZone::CockroachDb, _) => (),
             }
         }
 
-        for &zpool_id in resources.all_zpools(ZpoolFilter::InService) {
+        for &zpool_id in all_in_service_zpools {
             let zpool_name = ZpoolName::new_external(zpool_id);
             if !skip_zpools.contains(&zpool_name) {
                 return Ok(zpool_name);
             }
         }
-
-        Err(Error::NoAvailableZpool { sled_id, kind: kind.into() })
+        Err(Error::NoAvailableZpool { sled_id, kind: zone_kind })
     }
 
     fn sled_resources(
@@ -1693,6 +1654,31 @@ pub mod test {
             assert!(builder.disks.parent_disks.is_empty());
         }
 
+        logctx.cleanup_successful();
+    }
+
+    // Tests that provisioning zones with durable zones co-locates their zone filesystems.
+    #[test]
+    fn test_zone_filesystem_zpool_colocated() {
+        static TEST_NAME: &str =
+            "blueprint_builder_test_zone_filesystem_zpool_colocated";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, blueprint) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+
+        for (_, zone_config) in &blueprint.blueprint_zones {
+            for zone in &zone_config.zones {
+                // The pool should only be optional for backwards compatibility.
+                let filesystem_pool = zone
+                    .filesystem_pool
+                    .as_ref()
+                    .expect("Should have filesystem pool");
+
+                if let Some(durable_pool) = zone.zone_type.durable_zpool() {
+                    assert_eq!(durable_pool, filesystem_pool);
+                }
+            }
+        }
         logctx.cleanup_successful();
     }
 

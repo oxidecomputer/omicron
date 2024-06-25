@@ -4720,7 +4720,6 @@ dependencies = [
  "omicron-sled-agent",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "rand 0.8.5",
  "regex",
  "reqwest",
  "serde_json",
