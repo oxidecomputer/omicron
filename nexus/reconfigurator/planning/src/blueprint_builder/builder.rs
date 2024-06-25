@@ -1657,6 +1657,31 @@ pub mod test {
         logctx.cleanup_successful();
     }
 
+    // Tests that provisioning zones with durable zones co-locates their zone filesystems.
+    #[test]
+    fn test_zone_filesystem_zpool_colocated() {
+        static TEST_NAME: &str =
+            "blueprint_builder_test_zone_filesystem_zpool_colocated";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, blueprint) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+
+        for (_, zone_config) in &blueprint.blueprint_zones {
+            for zone in &zone_config.zones {
+                // The pool should only be optional for backwards compatibility.
+                let filesystem_pool = zone
+                    .filesystem_pool
+                    .as_ref()
+                    .expect("Should have filesystem pool");
+
+                if let Some(durable_pool) = zone.zone_type.durable_zpool() {
+                    assert_eq!(durable_pool, filesystem_pool);
+                }
+            }
+        }
+        logctx.cleanup_successful();
+    }
+
     #[test]
     fn test_add_nexus_with_no_existing_nexus_zones() {
         static TEST_NAME: &str =
