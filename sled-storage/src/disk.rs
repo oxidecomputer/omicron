@@ -436,9 +436,7 @@ impl Disk {
         }
     }
 
-    // Today the only update we expect to be able to apply to
-    // a `Disk` is firmware.
-    pub(crate) fn update_disk(&mut self, raw_disk: &RawDisk) {
+    pub(crate) fn update_firmware_metadata(&mut self, raw_disk: &RawDisk) {
         match self {
             Disk::Real(pooled_disk) => {
                 pooled_disk.firmware = raw_disk.firmware().clone();

@@ -274,7 +274,7 @@ impl HardwareView {
         let mut removed = Vec::new();
         let mut updated = Vec::new();
 
-        // Find new or udpated disks.
+        // Find new or updated disks.
         for (key, value) in &polled_hw.disks {
             match self.disks.get(&key) {
                 Some(found) => {

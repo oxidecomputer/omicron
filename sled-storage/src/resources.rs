@@ -494,10 +494,12 @@ impl StorageResources {
         let disk_identity = disk.identity().clone();
         info!(self.log, "Inserting disk"; "identity" => ?disk_identity);
 
-        // XXX MTZ: Is this okay to do if we find an existing disk with no updates to apply?
+        // This is a trade-off for simplicity even though we may be potentially
+        // cloning data before we know if there is a write action to perform.
         let disks = Arc::make_mut(&mut self.disks.values);
 
-        // First check if there are any updates we need to apply to existing managed disks.
+        // First check if there are any updates we need to apply to existing
+        // managed disks.
         if let Some(managed) = disks.get_mut(&disk_identity) {
             let mut updated = false;
             match managed {
@@ -505,7 +507,7 @@ impl StorageResources {
                 | ManagedDisk::ImplicitlyManaged(mdisk) => {
                     let old = RawDisk::from(mdisk.clone());
                     if old != disk {
-                        mdisk.update_disk(&disk);
+                        mdisk.update_firmware_metadata(&disk);
                         updated = true;
                     }
                 }
@@ -520,12 +522,14 @@ impl StorageResources {
             if updated {
                 self.disk_updates.send_replace(self.disks.clone());
             } else {
-                info!(self.log, "Disk already exists and has no updates"; "identity" => ?disk_identity);
+                info!(self.log, "Disk already exists and has no updates";
+                    "identity" => ?disk_identity);
             }
 
             return Ok(());
         }
 
+        // If there's no update then we are inserting a new disk.
         match disk.variant() {
             DiskVariant::U2 => {
                 disks.insert(disk_identity, ManagedDisk::Unmanaged(disk));
