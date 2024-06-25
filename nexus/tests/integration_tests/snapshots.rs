@@ -1467,6 +1467,9 @@ async fn test_region_allocation_for_snapshot(
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     // Create four 10 GiB zpools, each with one dataset.
+    //
+    // We add one more than the "three" default to avoid failing
+    // with "not enough storage".
     let sled_id = cptestctx.first_sled();
     let mut disk_test = DiskTestBuilder::new(&cptestctx)
         .on_specific_sled(cptestctx.first_sled())

@@ -2255,6 +2255,9 @@ async fn test_single_region_allocate_for_replace(
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     // Create four 10 GiB zpools, each with one dataset.
+    //
+    // We add one more then the "three" default to meet `region_allocate`'s
+    // redundancy requirements.
     let _test = DiskTestBuilder::new(&cptestctx)
         .on_specific_sled(cptestctx.first_sled())
         .with_zpool_count(4)

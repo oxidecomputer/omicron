@@ -829,16 +829,10 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
             WhichSledAgents::Specific(id) => {
                 vec![id]
             }
-            WhichSledAgents::All => {
-                vec![
-                    SledUuid::from_untyped_uuid(
-                        cptestctx.sled_agent.sled_agent.id,
-                    ),
-                    SledUuid::from_untyped_uuid(
-                        cptestctx.sled_agent2.sled_agent.id,
-                    ),
-                ]
-            }
+            WhichSledAgents::All => cptestctx
+                .all_sled_agents()
+                .map(|agent| SledUuid::from_untyped_uuid(agent.sled_agent.id))
+                .collect(),
         };
 
         let mut sleds = BTreeMap::new();
