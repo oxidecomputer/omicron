@@ -9344,6 +9344,39 @@
           }
         ]
       },
+      "AuthzScope": {
+        "description": "Authorization scope for a timeseries.\n\nThis describes the level at which a user must be authorized to read data from a timeseries. For example, fleet-scoping means the data is only visible to an operator or fleet reader. Project-scoped, on the other hand, indicates that a user will see data limited to the projects on which they have read permissions.",
+        "oneOf": [
+          {
+            "description": "Timeseries data is limited to fleet readers.",
+            "type": "string",
+            "enum": [
+              "fleet"
+            ]
+          },
+          {
+            "description": "Timeseries data is limited to the authorized silo for a user.",
+            "type": "string",
+            "enum": [
+              "silo"
+            ]
+          },
+          {
+            "description": "Timeseries data is limited to the authorized projects for a user.",
+            "type": "string",
+            "enum": [
+              "project"
+            ]
+          },
+          {
+            "description": "The timeseries is viewable to all without limitation.",
+            "type": "string",
+            "enum": [
+              "viewable_to_all"
+            ]
+          }
+        ]
+      },
       "Baseboard": {
         "description": "Properties that uniquely identify an Oxide hardware component",
         "type": "object",
@@ -12646,6 +12679,9 @@
         "description": "The name and type information for a field of a timeseries schema.",
         "type": "object",
         "properties": {
+          "description": {
+            "type": "string"
+          },
           "field_type": {
             "$ref": "#/components/schemas/FieldType"
           },
@@ -12657,6 +12693,7 @@
           }
         },
         "required": [
+          "description",
           "field_type",
           "name",
           "source"
@@ -16686,6 +16723,7 @@
           "signing_keypair": {
             "nullable": true,
             "description": "request signing key pair",
+            "default": null,
             "allOf": [
               {
                 "$ref": "#/components/schemas/DerEncodedKeyPair"
@@ -18546,6 +18584,22 @@
           "points"
         ]
       },
+      "TimeseriesDescription": {
+        "description": "Text descriptions for the target and metric of a timeseries.",
+        "type": "object",
+        "properties": {
+          "metric": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "metric",
+          "target"
+        ]
+      },
       "TimeseriesName": {
         "title": "The name of a timeseries",
         "description": "Names are constructed by concatenating the target and metric names with ':'. Target and metric names must be lowercase alphanumeric characters with '_' separating words.",
@@ -18569,12 +18623,18 @@
         "description": "The schema for a timeseries.\n\nThis includes the name of the timeseries, as well as the datum type of its metric and the schema for each field.",
         "type": "object",
         "properties": {
+          "authz_scope": {
+            "$ref": "#/components/schemas/AuthzScope"
+          },
           "created": {
             "type": "string",
             "format": "date-time"
           },
           "datum_type": {
             "$ref": "#/components/schemas/DatumType"
+          },
+          "description": {
+            "$ref": "#/components/schemas/TimeseriesDescription"
           },
           "field_schema": {
             "type": "array",
@@ -18585,13 +18645,25 @@
           },
           "timeseries_name": {
             "$ref": "#/components/schemas/TimeseriesName"
+          },
+          "units": {
+            "$ref": "#/components/schemas/Units"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 1
           }
         },
         "required": [
+          "authz_scope",
           "created",
           "datum_type",
+          "description",
           "field_schema",
-          "timeseries_name"
+          "timeseries_name",
+          "units",
+          "version"
         ]
       },
       "TimeseriesSchemaResultsPage": {
@@ -18673,6 +18745,14 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "Units": {
+        "description": "Measurement units for timeseries samples.",
+        "type": "string",
+        "enum": [
+          "count",
+          "bytes"
         ]
       },
       "User": {

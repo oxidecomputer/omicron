@@ -509,6 +509,9 @@ where
     /// Example
     /// -------
     /// ```rust
+    /// # // Rename the impl crate so the doctests can refer to the public
+    /// # // `oximeter` crate, not the private impl.
+    /// # use oximeter_impl as oximeter;
     /// use oximeter::histogram::Histogram;
     ///
     /// let hist = Histogram::with_bins(&[(0..10).into(), (10..100).into()]).unwrap();
@@ -905,6 +908,9 @@ where
     /// -------
     ///
     /// ```rust
+    /// # // Rename the impl crate so the doctests can refer to the public
+    /// # // `oximeter` crate, not the private impl.
+    /// # use oximeter_impl as oximeter;
     /// use oximeter::histogram::{Histogram, BinRange};
     /// use std::ops::{RangeBounds, Bound};
     ///

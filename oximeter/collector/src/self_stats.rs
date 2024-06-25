@@ -234,8 +234,11 @@ mod tests {
         let collections = collections();
         let failed = failed_collections();
         let mut set = SchemaSet::default();
-        assert!(set.insert_checked(&collector, &collections).is_none());
-        assert!(set.insert_checked(&collector, &failed).is_none());
+        assert!(set
+            .insert_checked(&collector, &collections)
+            .unwrap()
+            .is_none());
+        assert!(set.insert_checked(&collector, &failed).unwrap().is_none());
 
         const PATH: &'static str = concat!(
             env!("CARGO_MANIFEST_DIR"),

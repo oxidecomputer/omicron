@@ -78,6 +78,9 @@ impl Quantile {
     /// # Examples
     ///
     /// ```
+    /// # // Rename the impl crate so the doctests can refer to the public
+    /// # // `oximeter` crate, not the private impl.
+    /// # use oximeter_impl as oximeter;
     /// use oximeter::Quantile;
     /// let q = Quantile::new(0.5).unwrap();
     ///
@@ -113,6 +116,9 @@ impl Quantile {
     ///
     /// # Examples
     /// ```
+    /// # // Rename the impl crate so the doctests can refer to the public
+    /// # // `oximeter` crate, not the private impl.
+    /// # use oximeter_impl as oximeter;
     /// use oximeter::Quantile;
     /// let q = Quantile::from_parts(
     ///    0.5,
@@ -194,6 +200,9 @@ impl Quantile {
     /// # Examples
     ///
     /// ```
+    /// # // Rename the impl crate so the doctests can refer to the public
+    /// # // `oximeter` crate, not the private impl.
+    /// # use oximeter_impl as oximeter;
     /// use oximeter::Quantile;
     /// let mut q = Quantile::new(0.5).unwrap();
     /// for o in 1..=100 {
@@ -234,6 +243,9 @@ impl Quantile {
     /// # Examples
     ///
     /// ```
+    /// # // Rename the impl crate so the doctests can refer to the public
+    /// # // `oximeter` crate, not the private impl.
+    /// # use oximeter_impl as oximeter;
     /// use oximeter::Quantile;
     /// let mut q = Quantile::new(0.9).unwrap();
     /// q.append(10).unwrap();
