@@ -5,7 +5,7 @@
 //! Manages execution of background tasks
 
 use super::BackgroundTask;
-use super::TaskHandle;
+use super::TaskName;
 use assert_matches::assert_matches;
 use chrono::Utc;
 use futures::future::BoxFuture;
@@ -35,7 +35,7 @@ use tokio::time::MissedTickBehavior;
 /// provides interfaces for monitoring high-level state of each task (e.g., when
 /// it last ran, whether it's currently running, etc.).
 pub struct Driver {
-    tasks: BTreeMap<TaskHandle, Task>,
+    tasks: BTreeMap<TaskName, Task>,
 }
 
 /// Driver-side state of a background task
@@ -88,7 +88,7 @@ impl Driver {
         imp: Box<dyn BackgroundTask>,
         opctx: OpContext,
         watchers: Vec<Box<dyn GenericWatcher>>,
-    ) -> TaskHandle {
+    ) -> TaskName {
         // Activation of the background task happens in a separate tokio task.
         // Set up a channel so that tokio task can report status back to us.
         let (status_tx, status_rx) = watch::channel(TaskStatus {
@@ -115,13 +115,13 @@ impl Driver {
         // tokio task.
         let task =
             Task { description, period, status: status_rx, tokio_task, notify };
-        if self.tasks.insert(TaskHandle(name.clone()), task).is_some() {
+        if self.tasks.insert(TaskName(name.clone()), task).is_some() {
             panic!("started two background tasks called {:?}", name);
         }
 
         // Return a handle that the caller can use to activate the task or get
         // its status.
-        TaskHandle(name)
+        TaskName(name)
     }
 
     /// Enumerate all registered background tasks
@@ -129,11 +129,11 @@ impl Driver {
     /// This is aimed at callers that want to get the status of all background
     /// tasks.  You'd call [`Driver::task_status()`] with each of the items
     /// produced by the iterator.
-    pub fn tasks(&self) -> impl Iterator<Item = &TaskHandle> {
+    pub fn tasks(&self) -> impl Iterator<Item = &TaskName> {
         self.tasks.keys()
     }
 
-    fn task_required(&self, task: &TaskHandle) -> &Task {
+    fn task_required(&self, task: &TaskName) -> &Task {
         // It should be hard to hit this in practice, since you'd have to have
         // gotten a TaskHandle from somewhere.  It would have to be another
         // Driver instance.  But it's generally a singleton.
@@ -143,12 +143,12 @@ impl Driver {
     }
 
     /// Returns a summary of what this task does (for developers)
-    pub fn task_description(&self, task: &TaskHandle) -> &str {
+    pub fn task_description(&self, task: &TaskName) -> &str {
         &self.task_required(task).description
     }
 
     /// Returns the configured period of the task
-    pub fn task_period(&self, task: &TaskHandle) -> Duration {
+    pub fn task_period(&self, task: &TaskName) -> Duration {
         self.task_required(task).period
     }
 
@@ -156,12 +156,12 @@ impl Driver {
     ///
     /// If the task is currently running, it will be activated again when it
     /// finishes.
-    pub(super) fn activate(&self, task: &TaskHandle) {
+    pub(super) fn activate(&self, task: &TaskName) {
         self.task_required(task).notify.notify_one();
     }
 
     /// Returns the runtime status of the background task
-    pub fn task_status(&self, task: &TaskHandle) -> TaskStatus {
+    pub fn task_status(&self, task: &TaskName) -> TaskStatus {
         // Borrowing from a watch channel's receiver blocks the sender.  Clone
         // the status to avoid an errant caller gumming up the works by hanging
         // on to a reference.

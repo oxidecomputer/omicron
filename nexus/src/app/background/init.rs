@@ -25,7 +25,7 @@ use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
 use super::tasks::v2p_mappings::V2PManager;
 use super::Driver;
-use super::TaskHandle;
+use super::TaskName;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::sagas::SagaRequest;
 use nexus_config::BackgroundTaskConfig;
@@ -46,27 +46,27 @@ pub struct BackgroundTasks {
     /// status, etc.)
     pub driver: Driver,
 
-    pub task_internal_dns_config: TaskHandle,
-    pub task_internal_dns_servers: TaskHandle,
-    pub task_external_dns_config: TaskHandle,
-    pub task_external_dns_servers: TaskHandle,
-    pub task_metrics_producer_gc: TaskHandle,
-    pub task_external_endpoints: TaskHandle,
-    pub task_nat_cleanup: TaskHandle,
-    pub task_bfd_manager: TaskHandle,
-    pub task_inventory_collection: TaskHandle,
-    pub task_physical_disk_adoption: TaskHandle,
-    pub task_phantom_disks: TaskHandle,
-    pub task_blueprint_loader: TaskHandle,
-    pub task_blueprint_executor: TaskHandle,
-    pub task_crdb_node_id_collector: TaskHandle,
-    pub task_service_zone_nat_tracker: TaskHandle,
-    pub task_switch_port_settings_manager: TaskHandle,
-    pub task_v2p_manager: TaskHandle,
-    pub task_region_replacement: TaskHandle,
-    pub task_instance_watcher: TaskHandle,
-    pub task_service_firewall_propagation: TaskHandle,
-    pub task_abandoned_vmm_reaper: TaskHandle,
+    pub task_internal_dns_config: TaskName,
+    pub task_internal_dns_servers: TaskName,
+    pub task_external_dns_config: TaskName,
+    pub task_external_dns_servers: TaskName,
+    pub task_metrics_producer_gc: TaskName,
+    pub task_external_endpoints: TaskName,
+    pub task_nat_cleanup: TaskName,
+    pub task_bfd_manager: TaskName,
+    pub task_inventory_collection: TaskName,
+    pub task_physical_disk_adoption: TaskName,
+    pub task_phantom_disks: TaskName,
+    pub task_blueprint_loader: TaskName,
+    pub task_blueprint_executor: TaskName,
+    pub task_crdb_node_id_collector: TaskName,
+    pub task_service_zone_nat_tracker: TaskName,
+    pub task_switch_port_settings_manager: TaskName,
+    pub task_v2p_manager: TaskName,
+    pub task_region_replacement: TaskName,
+    pub task_instance_watcher: TaskName,
+    pub task_service_firewall_propagation: TaskName,
+    pub task_abandoned_vmm_reaper: TaskName,
 
     /// external endpoints read by the background task
     pub external_endpoints: tokio::sync::watch::Receiver<
@@ -434,7 +434,7 @@ impl BackgroundTasks {
     ///
     /// If the task is currently running, it will be activated again when it
     /// finishes.
-    pub fn activate(&self, task: &TaskHandle) {
+    pub fn activate(&self, task: &TaskName) {
         self.driver.activate(task);
     }
 }
@@ -446,7 +446,7 @@ fn init_dns(
     dns_group: DnsGroup,
     resolver: internal_dns::resolver::Resolver,
     config: &DnsTasksConfig,
-) -> (TaskHandle, TaskHandle) {
+) -> (TaskName, TaskName) {
     let dns_group_name = dns_group.to_string();
     let metadata = BTreeMap::from([("dns_group".to_string(), dns_group_name)]);
 
