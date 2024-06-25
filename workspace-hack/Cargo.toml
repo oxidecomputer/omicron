@@ -84,6 +84,7 @@ petgraph = { version = "0.6.5", features = ["serde-1"] }
 postgres-types = { version = "0.2.6", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 predicates = { version = "3.1.0" }
 proc-macro2 = { version = "1.0.86" }
+rand_core = { version = "0.5.1", default-features = false, features = ["std"] }
 regex = { version = "1.10.4" }
 regex-automata = { version = "0.4.6", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.3" }
@@ -188,6 +189,7 @@ petgraph = { version = "0.6.5", features = ["serde-1"] }
 postgres-types = { version = "0.2.6", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 predicates = { version = "3.1.0" }
 proc-macro2 = { version = "1.0.86" }
+rand_core = { version = "0.5.1", default-features = false, features = ["std"] }
 regex = { version = "1.10.4" }
 regex-automata = { version = "0.4.6", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.3" }
