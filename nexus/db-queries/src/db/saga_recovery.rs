@@ -163,9 +163,7 @@ where
 }
 
 // Creates new page params for querying sagas.
-fn new_page_params<T>(
-    marker: Option<&T>
-) -> DataPageParams<'_, T> {
+fn new_page_params<T>(marker: Option<&T>) -> DataPageParams<'_, T> {
     DataPageParams {
         marker,
         direction: dropshot::PaginationOrder::Ascending,
