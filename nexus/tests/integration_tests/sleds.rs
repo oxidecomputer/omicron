@@ -20,6 +20,7 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views::SledInstance;
 use nexus_types::external_api::views::{PhysicalDisk, Sled};
 use omicron_sled_agent::sim;
+use omicron_uuid_kinds::SledUuid;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -56,7 +57,7 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
     let nsleds = 3;
     let mut sas = Vec::with_capacity(nsleds);
     for _ in 0..nsleds {
-        let sa_id = Uuid::new_v4();
+        let sa_id = SledUuid::new_v4();
         let log =
             cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
         let addr = cptestctx.server.get_http_server_internal_address().await;

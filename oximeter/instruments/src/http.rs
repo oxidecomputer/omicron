@@ -12,8 +12,10 @@ use dropshot::{
 use futures::Future;
 use http::StatusCode;
 use http::Uri;
-use oximeter::histogram::Histogram;
-use oximeter::{Metric, MetricsError, Producer, Sample, Target};
+use oximeter::{
+    histogram::Histogram, histogram::Record, Metric, MetricsError, Producer,
+    Sample, Target,
+};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};

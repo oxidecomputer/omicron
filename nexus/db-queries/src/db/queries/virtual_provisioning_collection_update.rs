@@ -19,6 +19,8 @@ use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use omicron_common::api::external;
 use omicron_common::api::external::MessagePair;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 
 type AllColumnsOfVirtualResource =
     AllColumnsOf<virtual_provisioning_resource::table>;
@@ -458,13 +460,13 @@ FROM
     }
 
     pub fn new_insert_instance(
-        id: uuid::Uuid,
+        id: InstanceUuid,
         cpus_diff: i64,
         ram_diff: ByteCount,
         project_id: uuid::Uuid,
     ) -> TypedSqlQuery<SelectableSql<VirtualProvisioningCollection>> {
         let mut provision = VirtualProvisioningResource::new(
-            id,
+            id.into_untyped_uuid(),
             ResourceTypeProvisioned::Instance,
         );
         provision.cpus_provisioned = cpus_diff;
@@ -474,7 +476,7 @@ FROM
     }
 
     pub fn new_delete_instance(
-        id: uuid::Uuid,
+        id: InstanceUuid,
         max_instance_gen: i64,
         cpus_diff: i64,
         ram_diff: ByteCount,
@@ -482,7 +484,7 @@ FROM
     ) -> TypedSqlQuery<SelectableSql<VirtualProvisioningCollection>> {
         Self::apply_update(
             UpdateKind::DeleteInstance {
-                id,
+                id: id.into_untyped_uuid(),
                 max_instance_gen,
                 cpus_diff,
                 ram_diff,
@@ -544,7 +546,7 @@ mod test {
 
     #[tokio::test]
     async fn expectorate_query_insert_instance() {
-        let id = Uuid::nil();
+        let id = InstanceUuid::nil();
         let project_id = Uuid::nil();
         let cpus_diff = 4;
         let ram_diff = 2048.try_into().unwrap();
@@ -561,7 +563,7 @@ mod test {
 
     #[tokio::test]
     async fn expectorate_query_delete_instance() {
-        let id = Uuid::nil();
+        let id = InstanceUuid::nil();
         let project_id = Uuid::nil();
         let cpus_diff = 4;
         let ram_diff = 2048.try_into().unwrap();
@@ -649,7 +651,7 @@ mod test {
         let pool = crate::db::Pool::new_single_host(&logctx.log, &cfg);
         let conn = pool.claim().await.unwrap();
 
-        let id = Uuid::nil();
+        let id = InstanceUuid::nil();
         let project_id = Uuid::nil();
         let cpus_diff = 16.try_into().unwrap();
         let ram_diff = 2048.try_into().unwrap();
@@ -675,7 +677,7 @@ mod test {
         let pool = crate::db::Pool::new_single_host(&logctx.log, &cfg);
         let conn = pool.claim().await.unwrap();
 
-        let id = Uuid::nil();
+        let id = InstanceUuid::nil();
         let max_instance_gen = 0;
         let project_id = Uuid::nil();
         let cpus_diff = 16.try_into().unwrap();

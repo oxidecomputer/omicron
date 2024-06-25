@@ -150,7 +150,7 @@ impl Pinger4 {
                             "{:.3}",
                             (t.sum.as_micros() as f32
                                 / 1000.0
-                                / t.rx_count as f32)
+                                / f32::from(t.rx_count))
                         )
                     },
                     format!("{:.3}", (t.high.as_micros() as f32 / 1000.0)),

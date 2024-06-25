@@ -21,6 +21,7 @@ use nexus_db_model::{
 use omicron_common::api::internal::nexus::{
     MigrationRole, MigrationRuntimeState,
 };
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid};
 use uuid::Uuid;
 
 use crate::db::pool::DbConnection;
@@ -154,26 +155,28 @@ where
 
 impl InstanceAndVmmUpdate {
     pub fn new(
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         new_instance_runtime_state: InstanceRuntimeState,
-        vmm_id: Uuid,
+        vmm_id: PropolisUuid,
         new_vmm_runtime_state: VmmRuntimeState,
         migration: Option<MigrationRuntimeState>,
     ) -> Self {
         let instance_find = Box::new(
             instance_dsl::instance
-                .filter(instance_dsl::id.eq(instance_id))
+                .filter(instance_dsl::id.eq(instance_id.into_untyped_uuid()))
                 .select(instance_dsl::id),
         );
 
         let vmm_find = Box::new(
-            vmm_dsl::vmm.filter(vmm_dsl::id.eq(vmm_id)).select(vmm_dsl::id),
+            vmm_dsl::vmm
+                .filter(vmm_dsl::id.eq(vmm_id.into_untyped_uuid()))
+                .select(vmm_dsl::id),
         );
 
         let instance_update = Box::new(
             diesel::update(instance_dsl::instance)
                 .filter(instance_dsl::time_deleted.is_null())
-                .filter(instance_dsl::id.eq(instance_id))
+                .filter(instance_dsl::id.eq(instance_id.into_untyped_uuid()))
                 .filter(
                     instance_dsl::state_generation
                         .lt(new_instance_runtime_state.gen),
@@ -184,7 +187,7 @@ impl InstanceAndVmmUpdate {
         let vmm_update = Box::new(
             diesel::update(vmm_dsl::vmm)
                 .filter(vmm_dsl::time_deleted.is_null())
-                .filter(vmm_dsl::id.eq(vmm_id))
+                .filter(vmm_dsl::id.eq(vmm_id.into_untyped_uuid()))
                 .filter(vmm_dsl::state_generation.lt(new_vmm_runtime_state.gen))
                 .set(new_vmm_runtime_state),
         );
@@ -210,7 +213,8 @@ impl InstanceAndVmmUpdate {
                         diesel::update(migration_dsl::migration)
                             .filter(migration_dsl::id.eq(migration_id))
                             .filter(
-                                migration_dsl::target_propolis_id.eq(vmm_id),
+                                migration_dsl::target_propolis_id
+                                    .eq(vmm_id.into_untyped_uuid()),
                             )
                             .filter(migration_dsl::target_gen.lt(gen))
                             .set((
@@ -223,7 +227,8 @@ impl InstanceAndVmmUpdate {
                         diesel::update(migration_dsl::migration)
                             .filter(migration_dsl::id.eq(migration_id))
                             .filter(
-                                migration_dsl::source_propolis_id.eq(vmm_id),
+                                migration_dsl::source_propolis_id
+                                    .eq(vmm_id.into_untyped_uuid()),
                             )
                             .filter(migration_dsl::source_gen.lt(gen))
                             .set((

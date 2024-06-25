@@ -518,8 +518,9 @@ fn implicit_field_names(
                 MetricType::Gauge,
                 DataType::IntegerDistribution | DataType::DoubleDistribution,
             ) => {
-                out.insert(special_idents::BINS);
-                out.insert(special_idents::COUNTS);
+                special_idents::DISTRIBUTION_IDENTS.iter().for_each(|ident| {
+                    out.insert(ident);
+                });
             }
             // Scalars, either delta or cumulatives.
             (
@@ -534,8 +535,9 @@ fn implicit_field_names(
                 MetricType::Delta | MetricType::Cumulative,
                 DataType::IntegerDistribution | DataType::DoubleDistribution,
             ) => {
-                out.insert(special_idents::BINS);
-                out.insert(special_idents::COUNTS);
+                special_idents::DISTRIBUTION_IDENTS.iter().for_each(|ident| {
+                    out.insert(ident);
+                });
                 out.insert(special_idents::START_TIME);
             }
             // Impossible combinations

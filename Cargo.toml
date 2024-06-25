@@ -87,6 +87,7 @@ members = [
 ]
 
 default-members = [
+    "api_identity",
     "bootstore",
     "certificates",
     "clients/bootstrap-agent-client",
@@ -113,6 +114,8 @@ default-members = [
     # hakari to not work as well and build times to be longer.
     # See omicron#4392.
     "dns-server",
+    # Do not include end-to-end-tests in the list of default members, as its
+    # tests only work on a deployed control plane.
     "gateway-cli",
     "gateway-test-utils",
     "gateway",
@@ -128,18 +131,21 @@ default-members = [
     "nexus-config",
     "nexus/authz-macros",
     "nexus/auth",
-    "nexus/macros-common",
-    "nexus/metrics-producer-gc",
-    "nexus/networking",
     "nexus/db-fixed-data",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/defaults",
     "nexus/inventory",
+    "nexus/macros-common",
+    "nexus/metrics-producer-gc",
+    "nexus/networking",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
+    "nexus/test-interface",
+    "nexus/test-utils-macros",
+    "nexus/test-utils",
     "nexus/types",
     "oximeter/collector",
     "oximeter/db",
@@ -166,6 +172,7 @@ default-members = [
     "wicket-dbg",
     "wicket",
     "wicketd",
+    "workspace-hack",
     "zone-setup",
 ]
 resolver = "2"
@@ -272,6 +279,7 @@ expectorate = "1.1.0"
 fatfs = "0.3.6"
 filetime = "0.2.23"
 flate2 = "1.0.30"
+float-ord = "0.3.2"
 flume = "0.11.0"
 foreign-types = "0.3.2"
 fs-err = "2.11.0"
@@ -393,14 +401,15 @@ prettyplease = { version = "0.2.20", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "6d7ed9a033babc054db9eff5b59dee978d2b0d76" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "6d7ed9a033babc054db9eff5b59dee978d2b0d76" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "6d7ed9a033babc054db9eff5b59dee978d2b0d76" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "50cb28f586083fdb990e401bc6146e7dac9b2753" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "50cb28f586083fdb990e401bc6146e7dac9b2753" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "50cb28f586083fdb990e401bc6146e7dac9b2753" }
 proptest = "1.4.0"
 qorb = { git = "https://github.com/oxidecomputer/qorb", branch = "master" }
 quote = "1.0"
 rand = "0.8.5"
 rand_core = "0.6.4"
+rand_distr = "0.4.3"
 rand_seeder = "0.2.3"
 ratatui = "0.26.2"
 rayon = "1.10"
@@ -435,7 +444,12 @@ signal-hook = "0.3"
 signal-hook-tokio = { version = "0.3", features = [ "futures-v0_3" ] }
 sigpipe = "0.1.3"
 similar-asserts = "1.5.0"
-sled = "0.34"
+# Don't change sled's version on accident; sled's on-disk format is not yet
+# stable and requires manual migrations. In the limit this won't matter because
+# the upgrade system will replace the DNS server zones entirely, but while we
+# are still doing mupdate a change to the on-disk format will break existing DNS
+# server zones.
+sled = "=0.34.7"
 sled-agent-client = { path = "clients/sled-agent-client" }
 sled-hardware = { path = "sled-hardware" }
 sled-hardware-types = { path = "sled-hardware/types" }

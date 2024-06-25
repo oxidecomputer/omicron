@@ -44,7 +44,7 @@ pub struct SledSystemHardware {
 #[diesel(table_name = sled)]
 pub struct Sled {
     #[diesel(embed)]
-    identity: SledIdentity,
+    pub identity: SledIdentity,
     time_deleted: Option<DateTime<Utc>>,
     pub rcgen: Generation,
 

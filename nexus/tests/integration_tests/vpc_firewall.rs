@@ -5,7 +5,9 @@
 use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
-use nexus_test_utils::resource_helpers::{create_project, create_vpc};
+use nexus_test_utils::resource_helpers::{
+    create_project, create_vpc, object_get, object_put_error,
+};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views::Vpc;
 use omicron_common::api::external::{
@@ -42,7 +44,9 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
 
     let default_vpc_firewall =
         format!("/v1/vpc-firewall-rules?vpc=default&{}", project_selector,);
-    let rules = get_rules(client, &default_vpc_firewall).await;
+    let rules = object_get::<VpcFirewallRules>(client, &default_vpc_firewall)
+        .await
+        .rules;
     assert!(rules.iter().all(|r| r.vpc_id == default_vpc.identity.id));
     assert!(is_default_firewall_rules("default", &rules));
 
@@ -52,7 +56,8 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     let other_vpc_firewall =
         format!("/v1/vpc-firewall-rules?{}", other_vpc_selector);
     let vpc2 = create_vpc(&client, &project_name, &other_vpc).await;
-    let rules = get_rules(client, &other_vpc_firewall).await;
+    let rules =
+        object_get::<VpcFirewallRules>(client, &other_vpc_firewall).await.rules;
     assert!(rules.iter().all(|r| r.vpc_id == vpc2.identity.id));
     assert!(is_default_firewall_rules(other_vpc, &rules));
 
@@ -111,14 +116,17 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(updated_rules[1].identity.name, "deny-all-incoming");
 
     // Make sure the firewall is changed
-    let rules = get_rules(client, &default_vpc_firewall).await;
+    let rules = object_get::<VpcFirewallRules>(client, &default_vpc_firewall)
+        .await
+        .rules;
     assert!(!is_default_firewall_rules("default", &rules));
     assert_eq!(rules.len(), new_rules.len());
     assert_eq!(rules[0].identity.name, "allow-icmp");
     assert_eq!(rules[1].identity.name, "deny-all-incoming");
 
     // Make sure the other firewall is unchanged
-    let rules = get_rules(client, &other_vpc_firewall).await;
+    let rules =
+        object_get::<VpcFirewallRules>(client, &other_vpc_firewall).await.rules;
     assert!(is_default_firewall_rules(other_vpc, &rules));
 
     // DELETE is unsupported
@@ -160,20 +168,6 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .unwrap();
-}
-
-async fn get_rules(
-    client: &dropshot::test_util::ClientTestContext,
-    url: &str,
-) -> Vec<VpcFirewallRule> {
-    NexusRequest::object_get(client, url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap()
-        .parsed_body::<VpcFirewallRules>()
-        .unwrap()
-        .rules
 }
 
 fn is_default_firewall_rules(
@@ -291,4 +285,39 @@ fn is_default_firewall_rules(
         }
     }
     true
+}
+
+#[nexus_test]
+async fn test_firewall_rules_same_name(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    let project_name = "my-project";
+    create_project(&client, &project_name).await;
+
+    let rule = VpcFirewallRuleUpdate {
+        name: "dupe".parse().unwrap(),
+        description: "".to_string(),
+        status: VpcFirewallRuleStatus::Enabled,
+        direction: VpcFirewallRuleDirection::Inbound,
+        targets: vec![],
+        filters: VpcFirewallRuleFilter {
+            hosts: None,
+            protocols: None,
+            ports: None,
+        },
+        action: VpcFirewallRuleAction::Allow,
+        priority: VpcFirewallRulePriority(65534),
+    };
+
+    let error = object_put_error(
+        client,
+        &format!("/v1/vpc-firewall-rules?vpc=default&project={}", project_name),
+        &VpcFirewallRuleUpdateParams {
+            rules: vec![rule.clone(), rule.clone()],
+        },
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(error.error_code, Some("InvalidValue".to_string()));
+    assert_eq!(error.message, "unsupported value for \"rules\": Rule names must be unique. Duplicates: [\"dupe\"]");
 }

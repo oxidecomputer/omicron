@@ -38,6 +38,8 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use omicron_nexus::app::MIN_DISK_SIZE_BYTES;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -139,10 +141,11 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
         },
     )
     .await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // cannot snapshot attached disk for instance in state starting
     let nexus = &cptestctx.server.server_context().nexus;
-    instance_simulate(nexus, &instance.identity.id).await;
+    instance_simulate(nexus, &instance_id).await;
 
     // Issue snapshot request
     let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);

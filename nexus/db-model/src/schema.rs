@@ -286,17 +286,6 @@ table! {
 }
 
 table! {
-    v2p_mapping_view (nic_id) {
-        nic_id -> Uuid,
-        sled_id -> Uuid,
-        sled_ip -> Inet,
-        vni -> Int4,
-        mac -> Int8,
-        ip -> Inet,
-    }
-}
-
-table! {
     bgp_announce_set (id) {
         id -> Uuid,
         name -> Text,
@@ -430,9 +419,9 @@ table! {
         active_propolis_id -> Nullable<Uuid>,
         target_propolis_id -> Nullable<Uuid>,
         migration_id -> Nullable<Uuid>,
+        state -> crate::InstanceStateEnum,
         updater_id -> Nullable<Uuid>,
         updater_gen-> Int8,
-        state -> crate::InstanceStateEnum,
     }
 }
 
@@ -1842,6 +1831,7 @@ allow_tables_to_appear_in_same_query!(
     user_builtin,
     role_builtin,
     role_assignment,
+    probe,
 );
 
 allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);
@@ -1870,3 +1860,5 @@ joinable!(instance_ssh_key -> ssh_key (ssh_key_id));
 joinable!(instance_ssh_key -> instance (instance_id));
 
 allow_tables_to_appear_in_same_query!(sled, sled_instance);
+
+joinable!(network_interface -> probe (parent_id));

@@ -14,6 +14,7 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::HashSet;
 use std::io::Write;
 use uuid::Uuid;
 
@@ -253,13 +254,40 @@ impl VpcFirewallRule {
     pub fn vec_from_params(
         vpc_id: Uuid,
         params: external::VpcFirewallRuleUpdateParams,
-    ) -> Vec<VpcFirewallRule> {
-        params
+    ) -> Result<Vec<VpcFirewallRule>, external::Error> {
+        ensure_no_duplicates(&params)?;
+        Ok(params
             .rules
             .iter()
             .map(|rule| VpcFirewallRule::new(Uuid::new_v4(), vpc_id, rule))
-            .collect()
+            .collect())
     }
+}
+
+fn ensure_no_duplicates(
+    params: &external::VpcFirewallRuleUpdateParams,
+) -> Result<(), external::Error> {
+    // we could do this by comparing set(names).len() to names.len(), but this
+    // way we can say what the duplicate names are, and that's nice!
+    let mut names = HashSet::new();
+    let mut dupes = HashSet::new();
+    for r in params.rules.iter() {
+        if !names.insert(r.name.clone()) {
+            // insert returns false if already present
+            dupes.insert(r.name.clone());
+        }
+    }
+
+    if dupes.is_empty() {
+        return Ok(());
+    }
+
+    let dupes_str =
+        dupes.iter().map(|d| format!("\"{d}\"")).collect::<Vec<_>>().join(", ");
+    return Err(external::Error::invalid_value(
+        "rules",
+        format!("Rule names must be unique. Duplicates: [{}]", dupes_str),
+    ));
 }
 
 impl Into<external::VpcFirewallRule> for VpcFirewallRule {

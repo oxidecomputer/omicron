@@ -38,6 +38,8 @@ use omicron_common::api::internal::nexus::DownstairsClientStopRequest;
 use omicron_common::api::internal::nexus::DownstairsClientStopped;
 use omicron_common::api::internal::nexus::RepairProgress;
 use omicron_uuid_kinds::DownstairsKind;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsKind;
 use omicron_uuid_kinds::UpstairsRepairKind;
@@ -58,10 +60,10 @@ pub enum VolumeCheckoutReason {
     CopyAndModify,
 
     /// Check out a Volume to send to Propolis to start an instance.
-    InstanceStart { vmm_id: Uuid },
+    InstanceStart { vmm_id: PropolisUuid },
 
     /// Check out a Volume to send to a migration destination Propolis.
-    InstanceMigrate { vmm_id: Uuid, target_vmm_id: Uuid },
+    InstanceMigrate { vmm_id: PropolisUuid, target_vmm_id: PropolisUuid },
 
     /// Check out a Volume to send to a Pantry (for background maintenance
     /// operations).
@@ -312,7 +314,7 @@ impl DataStore {
                     }
 
                     (Some(propolis_id), None) => {
-                        if propolis_id != *vmm_id {
+                        if propolis_id != vmm_id.into_untyped_uuid() {
                             return Err(VolumeGetError::CheckoutConditionFailed(
                                 format!(
                                     "InstanceStart {}: instance {} propolis id {} mismatch",
@@ -356,7 +358,7 @@ impl DataStore {
                 let runtime = instance.runtime();
                 match (runtime.propolis_id, runtime.dst_propolis_id) {
                     (Some(propolis_id), Some(dst_propolis_id)) => {
-                        if propolis_id != *vmm_id || dst_propolis_id != *target_vmm_id {
+                        if propolis_id != vmm_id.into_untyped_uuid() || dst_propolis_id != target_vmm_id.into_untyped_uuid() {
                             return Err(VolumeGetError::CheckoutConditionFailed(
                                 format!(
                                     "InstanceMigrate {} {}: instance {} propolis id mismatches {} {}",
@@ -385,7 +387,7 @@ impl DataStore {
 
                     (Some(propolis_id), None) => {
                         // XXX is this right?
-                        if propolis_id != *vmm_id {
+                        if propolis_id != vmm_id.into_untyped_uuid() {
                             return Err(VolumeGetError::CheckoutConditionFailed(
                                 format!(
                                     "InstanceMigrate {} {}: instance {} propolis id {} mismatch",
