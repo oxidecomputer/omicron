@@ -39,81 +39,39 @@ use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
-/// Describes ongoing background tasks and provides interfaces for working with
-/// them
-///
-/// Most interaction happens through the `driver` field.  The rest of the fields
-/// are specific background tasks.
+/// Describes ongoing background tasks and provides interfaces for activating
+/// them and accessing any data that they expose to Nexus at-large
 pub struct BackgroundTasks {
     /// interface for working with background tasks (activation, checking
     /// status, etc.)
     pub driver: Driver,
 
-    /// task handle for the internal DNS config background task
     pub task_internal_dns_config: TaskHandle,
-    /// task handle for the internal DNS servers background task
     pub task_internal_dns_servers: TaskHandle,
-    /// task handle for the external DNS config background task
     pub task_external_dns_config: TaskHandle,
-    /// task handle for the external DNS servers background task
     pub task_external_dns_servers: TaskHandle,
-
-    /// task handle for pruning metrics producers with expired leases
     pub task_metrics_producer_gc: TaskHandle,
-
-    /// task handle for the task that keeps track of external endpoints
     pub task_external_endpoints: TaskHandle,
+    pub task_nat_cleanup: TaskHandle,
+    pub task_bfd_manager: TaskHandle,
+    pub task_inventory_collection: TaskHandle,
+    pub task_physical_disk_adoption: TaskHandle,
+    pub task_phantom_disks: TaskHandle,
+    pub task_blueprint_loader: TaskHandle,
+    pub task_blueprint_executor: TaskHandle,
+    pub task_crdb_node_id_collector: TaskHandle,
+    pub task_service_zone_nat_tracker: TaskHandle,
+    pub task_switch_port_settings_manager: TaskHandle,
+    pub task_v2p_manager: TaskHandle,
+    pub task_region_replacement: TaskHandle,
+    pub task_instance_watcher: TaskHandle,
+    pub task_service_firewall_propagation: TaskHandle,
+    pub task_abandoned_vmm_reaper: TaskHandle,
+
     /// external endpoints read by the background task
     pub external_endpoints: tokio::sync::watch::Receiver<
         Option<external_endpoints::ExternalEndpoints>,
     >,
-    /// task handle for the ipv4 nat entry garbage collector
-    pub task_nat_cleanup: TaskHandle,
-
-    /// task handle for the switch bfd manager
-    pub task_bfd_manager: TaskHandle,
-
-    /// task handle for the task that collects inventory
-    pub task_inventory_collection: TaskHandle,
-
-    /// task handle for the task that collects inventory
-    pub task_physical_disk_adoption: TaskHandle,
-
-    /// task handle for the task that detects phantom disks
-    pub task_phantom_disks: TaskHandle,
-
-    /// task handle for blueprint target loader
-    pub task_blueprint_loader: TaskHandle,
-
-    /// task handle for blueprint execution background task
-    pub task_blueprint_executor: TaskHandle,
-
-    /// task handle for collecting CockroachDB node IDs
-    pub task_crdb_node_id_collector: TaskHandle,
-
-    /// task handle for the service zone nat tracker
-    pub task_service_zone_nat_tracker: TaskHandle,
-
-    /// task handle for the switch port settings manager
-    pub task_switch_port_settings_manager: TaskHandle,
-
-    /// task handle for the opte v2p manager
-    pub task_v2p_manager: TaskHandle,
-
-    /// task handle for the task that detects if regions need replacement and
-    /// begins the process
-    pub task_region_replacement: TaskHandle,
-
-    /// task handle for the task that polls sled agents for instance states.
-    pub task_instance_watcher: TaskHandle,
-
-    /// task handle for propagation of VPC firewall rules for Omicron services
-    /// with external network connectivity,
-    pub task_service_firewall_propagation: TaskHandle,
-
-    /// task handle for deletion of database records for VMMs abandoned by their
-    /// instances.
-    pub task_abandoned_vmm_reaper: TaskHandle,
 }
 
 impl BackgroundTasks {
