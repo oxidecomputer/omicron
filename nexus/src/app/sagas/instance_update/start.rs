@@ -62,7 +62,6 @@ impl NexusSaga for SagaInstanceUpdate {
         start_instance_update_register_actions(registry);
         super::SagaDoActualInstanceUpdate::register_actions(registry);
         super::destroyed::SagaVmmDestroyed::register_actions(registry);
-        super::migration::SagaMigrationUpdate::register_actions(registry);
     }
 
     fn make_saga_dag(
