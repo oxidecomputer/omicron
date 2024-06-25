@@ -667,8 +667,8 @@ async fn common_nw_set_up(
                                 BackoffError::permanent(
                                     CmdError::Failure(anyhow!(err)),
                                 )
-                                }
                             }
+                        }
                     })
             },
         |err, delay| {

@@ -4018,6 +4018,35 @@ impl ServiceManager {
                     );
                 }
 
+                // When the request addresses have changed this means the underlay is
+                // available now as well.
+                if let Some(info) = self.inner.sled_info.get() {
+                    info!(
+                        self.inner.log,
+                        "Ensuring there is a default route";
+                        "gateway" => ?info.underlay_address,
+                    );
+                    match zone.add_default_route(info.underlay_address).map_err(
+                        |err| Error::ZoneCommand {
+                            intent: "Adding Route".to_string(),
+                            err,
+                        },
+                    ) {
+                        Ok(_) => (),
+                        Err(e) => {
+                            if e.to_string().contains("entry exists") {
+                                info!(
+                                    self.inner.log,
+                                    "Default route already exists";
+                                    "gateway" => ?info.underlay_address,
+                                )
+                            } else {
+                                return Err(e);
+                            }
+                        }
+                    };
+                }
+
                 for service in &request.services {
                     let smfh = SmfHelper::new(&zone, service);
 
