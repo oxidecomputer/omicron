@@ -2,10 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::ActionRegistry;
 use super::NexusActionContext;
-use super::NexusSaga;
-use crate::app::sagas::declare_saga_actions;
+use super::RealParams;
+use super::DESTROYED_VMM_ID;
 use crate::app::sagas::ActionError;
 use chrono::Utc;
 use nexus_db_model::Generation;
@@ -21,52 +20,9 @@ use omicron_uuid_kinds::PropolisUuid;
 use serde::{Deserialize, Serialize};
 use slog::info;
 
-// instance update (active VMM destroyed) subsaga: actions
-
-// This subsaga is responsible for handling an instance update where the
-// instance's active VMM has entered the `Destroyed` state. This requires
-// deallocating resources assigned to the instance, updating the instance's
-// records in the database, and marking the VMM as deleted.
-declare_saga_actions! {
-    instance_update_destroyed;
-
-    // Deallocate physical sled resources reserved for the destroyed VMM, as it
-    // is no longer using them.
-    RELEASE_SLED_RESOURCES -> "no_result1" {
-        + siud_release_sled_resources
-    }
-
-    // Deallocate virtual provisioning resources reserved by the instance, as it
-    // is no longer running.
-    RELEASE_VIRTUAL_PROVISIONING -> "no_result2" {
-        + siud_release_virtual_provisioning
-    }
-
-    // Unassign the instance's Oximeter producer.
-    UNASSIGN_OXIMETER_PRODUCER -> "no_result3" {
-        + siud_unassign_oximeter_producer
-    }
-
-    DELETE_V2P_MAPPINGS -> "no_result4" {
-        + siud_delete_v2p_mappings
-    }
-
-    DELETE_NAT_ENTRIES -> "no_result5" {
-        + siud_delete_nat_entries
-    }
-
-    UPDATE_INSTANCE -> "no_result6" {
-        + siud_update_instance
-    }
-
-    MARK_VMM_DELETED -> "no_result7" {
-        + siud_mark_vmm_deleted
-    }
-}
-
 /// Parameters to the instance update (active VMM destroyed) sub-saga.
 #[derive(Debug, Deserialize, Serialize)]
-pub(super) struct Params {
+pub(super) struct RealRealParams {
     /// Authentication context to use to fetch the instance's current state from
     /// the database.
     pub(super) serialized_authn: authn::saga::Serialized,
@@ -79,38 +35,13 @@ pub(super) struct Params {
     pub(super) instance: Instance,
 }
 
-#[derive(Debug)]
-pub(super) struct SagaVmmDestroyed;
-impl NexusSaga for SagaVmmDestroyed {
-    const NAME: &'static str = "instance-update-vmm-destroyed";
-    type Params = Params;
-
-    fn register_actions(registry: &mut ActionRegistry) {
-        instance_update_destroyed_register_actions(registry);
-    }
-
-    fn make_saga_dag(
-        _params: &Self::Params,
-        mut builder: steno::DagBuilder,
-    ) -> Result<steno::Dag, super::SagaInitError> {
-        builder.append(release_sled_resources_action());
-        builder.append(release_virtual_provisioning_action());
-        builder.append(unassign_oximeter_producer_action());
-        builder.append(delete_v2p_mappings_action());
-        builder.append(delete_nat_entries_action());
-        builder.append(update_instance_action());
-        builder.append(mark_vmm_deleted_action());
-
-        Ok(builder.build()?)
-    }
-}
-
-async fn siud_release_sled_resources(
+pub(super) async fn siu_destroyed_release_sled_resources(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let Params { ref serialized_authn, ref authz_instance, vmm_id, .. } =
-        sagactx.saga_params::<Params>()?;
+    let RealParams { ref serialized_authn, ref authz_instance, .. } =
+        sagactx.saga_params::<RealParams>()?;
+    let vmm_id = sagactx.lookup::<PropolisUuid>(DESTROYED_VMM_ID)?;
 
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
@@ -137,17 +68,16 @@ async fn siud_release_sled_resources(
         .map_err(ActionError::action_failed)
 }
 
-async fn siud_release_virtual_provisioning(
+pub(super) async fn siu_destroyed_release_virtual_provisioning(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let Params {
-        ref serialized_authn,
-        ref authz_instance,
-        vmm_id,
-        instance,
-        ..
-    } = sagactx.saga_params::<Params>()?;
+    let RealParams { ref serialized_authn, ref authz_instance, state, .. } =
+        sagactx.saga_params::<RealParams>()?;
+
+    let vmm_id = sagactx.lookup::<PropolisUuid>(DESTROYED_VMM_ID)?;
+    let instance = state.instance;
+    let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
@@ -172,7 +102,7 @@ async fn siud_release_virtual_provisioning(
         .datastore()
         .virtual_provisioning_collection_delete_instance(
             &opctx,
-            InstanceUuid::from_untyped_uuid(authz_instance.id()),
+            instance_id,
             instance.project_id,
             i64::from(instance.ncpus.0 .0),
             instance.memory,
@@ -185,7 +115,7 @@ async fn siud_release_virtual_provisioning(
                 osagactx.log(),
                 "instance update (VMM destroyed): deallocated virtual \
                  provisioning resources";
-                "instance_id" => %authz_instance.id(),
+                "instance_id" => %instance_id,
                 "propolis_id" => %vmm_id,
                 "records_deleted" => ?deleted,
                 "instance_update" => %"VMM destroyed",
@@ -203,7 +133,7 @@ async fn siud_release_virtual_provisioning(
                 osagactx.log(),
                 "instance update (VMM destroyed): virtual provisioning \
                  record not found; perhaps it has already been deleted?";
-                "instance_id" => %authz_instance.id(),
+                "instance_id" => %instance_id,
                 "propolis_id" => %vmm_id,
                 "instance_update" => %"VMM destroyed",
             );
@@ -214,12 +144,12 @@ async fn siud_release_virtual_provisioning(
     Ok(())
 }
 
-async fn siud_unassign_oximeter_producer(
+pub(super) async fn siu_destroyed_unassign_oximeter_producer(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let Params { ref serialized_authn, ref authz_instance, .. } =
-        sagactx.saga_params::<Params>()?;
+    let RealParams { ref serialized_authn, ref authz_instance, .. } =
+        sagactx.saga_params::<RealParams>()?;
 
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
@@ -234,11 +164,12 @@ async fn siud_unassign_oximeter_producer(
     .map_err(ActionError::action_failed)
 }
 
-async fn siud_delete_v2p_mappings(
+pub(super) async fn siu_destroyed_delete_v2p_mappings(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    let Params { ref authz_instance, vmm_id, .. } =
-        sagactx.saga_params::<Params>()?;
+    let RealParams { ref authz_instance, .. } =
+        sagactx.saga_params::<RealParams>()?;
+    let vmm_id = sagactx.lookup::<PropolisUuid>(DESTROYED_VMM_ID)?;
 
     let osagactx = sagactx.user_data();
     info!(
@@ -254,13 +185,13 @@ async fn siud_delete_v2p_mappings(
     Ok(())
 }
 
-async fn siud_delete_nat_entries(
+pub(super) async fn siu_destroyed_delete_nat_entries(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let Params { ref serialized_authn, ref authz_instance, vmm_id, .. } =
-        sagactx.saga_params::<Params>()?;
-
+    let RealParams { ref serialized_authn, ref authz_instance, .. } =
+        sagactx.saga_params::<RealParams>()?;
+    let vmm_id = sagactx.lookup::<PropolisUuid>(DESTROYED_VMM_ID)?;
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
 
@@ -280,11 +211,14 @@ async fn siud_delete_nat_entries(
     Ok(())
 }
 
-async fn siud_update_instance(
+pub(super) async fn siu_destroyed_update_instance(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    let Params { ref authz_instance, ref vmm_id, instance, .. } =
-        sagactx.saga_params::<Params>()?;
+    let RealParams { ref authz_instance, state, .. } =
+        sagactx.saga_params::<RealParams>()?;
+
+    let vmm_id = sagactx.lookup::<PropolisUuid>(DESTROYED_VMM_ID)?;
+    let instance = state.instance;
     let osagactx = sagactx.user_data();
     let new_runtime = InstanceRuntimeState {
         propolis_id: None,
@@ -325,12 +259,13 @@ async fn siud_update_instance(
     Ok(())
 }
 
-async fn siud_mark_vmm_deleted(
+pub(super) async fn siu_destroyed_mark_vmm_deleted(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let Params { ref authz_instance, ref vmm_id, ref serialized_authn, .. } =
-        sagactx.saga_params::<Params>()?;
+    let RealParams { ref authz_instance, ref serialized_authn, .. } =
+        sagactx.saga_params::<RealParams>()?;
+    let vmm_id = sagactx.lookup::<PropolisUuid>(DESTROYED_VMM_ID)?;
 
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
@@ -345,7 +280,7 @@ async fn siud_mark_vmm_deleted(
 
     osagactx
         .datastore()
-        .vmm_mark_deleted(&opctx, vmm_id)
+        .vmm_mark_deleted(&opctx, &vmm_id)
         .await
         .map(|_| ())
         .map_err(ActionError::action_failed)
