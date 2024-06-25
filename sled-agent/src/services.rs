@@ -1195,7 +1195,7 @@ impl ServiceManager {
                 dpd_client
                     .ensure_nat_entry(
                         &self.inner.log,
-                        target_ip.into(),
+                        target_ip,
                         dpd_client::types::MacAddr {
                             a: port.0.mac().into_array(),
                         },
