@@ -574,7 +574,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.region (
     /* Metadata describing the region */
     block_size INT NOT NULL,
     blocks_per_extent INT NOT NULL,
-    extent_count INT NOT NULL
+    extent_count INT NOT NULL,
+
+    port INT4
 );
 
 /*
@@ -592,6 +594,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_region_by_dataset on omicron.public.reg
     dataset_id,
     id
 );
+
+CREATE INDEX IF NOT EXISTS lookup_regions_missing_ports
+    on omicron.public.region (id)
+    WHERE port IS NULL;
 
 /*
  * A snapshot of a region, within a dataset.
@@ -4098,7 +4104,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '77.0.0', NULL)
+    (TRUE, NOW(), NOW(), '78.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

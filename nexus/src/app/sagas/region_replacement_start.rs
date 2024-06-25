@@ -48,7 +48,6 @@ use super::{
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
     ACTION_GENERATE_ID,
 };
-use crate::app::sagas::common_storage::get_region_from_agent;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::RegionAllocationStrategy;
 use crate::app::{authn, db};
@@ -450,76 +449,57 @@ async fn srrs_get_old_region_address(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
-    // It was a mistake not to record the port of a region in the Region record.
-    // However, we haven't needed it until now! If the Crucible agent is gone
-    // (which it will be if the disk is expunged), assume that the region in the
-    // read/write portion of the volume with the same dataset address (there
-    // should only be one due to the allocation strategy!) is the old region.
+    // Either retrieve the address from the database (because the port was
+    // previously recorded), or attempt grabbing the port from the corresponding
+    // Crucible agent: the sled or disk may not be physically gone, or we may be
+    // running in a test where the allocation strategy does not mandate distinct
+    // sleds.
 
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
-    let db_region = osagactx
-        .datastore()
-        .get_region(params.request.old_region_id)
+    let maybe_addr = osagactx
+        .nexus()
+        .region_addr(log, params.request.old_region_id)
         .await
         .map_err(ActionError::action_failed)?;
 
-    let targets = osagactx
-        .datastore()
-        .get_dataset_rw_regions_in_volume(
-            &opctx,
-            db_region.dataset_id(),
-            db_region.volume_id(),
-        )
-        .await
-        .map_err(ActionError::action_failed)?;
+    match maybe_addr {
+        Some(addr) => Ok(addr),
 
-    if targets.len() == 1 {
-        // If there's a single RW region in the volume that matches this
-        // region's dataset, then it must match. Return the target
-        Ok(targets[0])
-    } else {
-        // Otherwise, Nexus cannot know which region to target for replacement.
-        // Attempt grabbing the id from the corresponding Crucible agent: the
-        // sled or disk may not be physically gone, or we may be running in a
-        // test where the allocation strategy does not mandate distinct sleds.
+        None => {
+            // It was a mistake not to record the port of a region in the Region
+            // record.  However, we haven't needed it until now! If the Crucible
+            // agent is gone (which it will be if the disk is expunged), assume
+            // that the region in the read/write portion of the volume with the
+            // same dataset address (there should only be one due to the
+            // allocation strategy!) is the old region.
 
-        let db_dataset = osagactx
-            .datastore()
-            .dataset_get(db_region.dataset_id())
-            .await
-            .map_err(ActionError::action_failed)?;
+            let opctx = crate::context::op_context_for_saga_action(
+                &sagactx,
+                &params.serialized_authn,
+            );
 
-        match get_region_from_agent(
-            &db_dataset.address(),
-            params.request.old_region_id,
-        )
-        .await
-        {
-            Ok(region) => {
-                // If the Crucible agent is still answering (i.e. if a region
-                // replacement was requested and the sled is still there, or if
-                // this is running in a test), then we know the port number for
-                // the region.
-                Ok(SocketAddrV6::new(
-                    *db_dataset.address().ip(),
-                    region.port_number,
-                    0,
-                    0,
-                ))
-            }
+            let db_region = osagactx
+                .datastore()
+                .get_region(params.request.old_region_id)
+                .await
+                .map_err(ActionError::action_failed)?;
 
-            Err(e) => {
-                error!(
-                    log,
-                    "error contacting crucible agent: {e}";
-                    "address" => ?db_dataset.address(),
-                );
+            let targets = osagactx
+                .datastore()
+                .get_dataset_rw_regions_in_volume(
+                    &opctx,
+                    db_region.dataset_id(),
+                    db_region.volume_id(),
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
 
-                // Bail out here!
+            if targets.len() == 1 {
+                // If there's a single RW region in the volume that matches this
+                // region's dataset, then it must match. Return the target.
+                Ok(targets[0])
+            } else {
+                // Otherwise, Nexus cannot know the region's port. Return an
+                // error.
                 Err(ActionError::action_failed(format!(
                     "{} regions match dataset {} in volume {}",
                     targets.len(),
@@ -945,6 +925,7 @@ pub(crate) mod test {
                 512_i64.try_into().unwrap(),
                 10,
                 10,
+                1001,
             ),
             Region::new(
                 datasets[1].id(),
@@ -952,6 +933,7 @@ pub(crate) mod test {
                 512_i64.try_into().unwrap(),
                 10,
                 10,
+                1002,
             ),
             Region::new(
                 datasets[2].id(),
@@ -959,6 +941,7 @@ pub(crate) mod test {
                 512_i64.try_into().unwrap(),
                 10,
                 10,
+                1003,
             ),
             Region::new(
                 datasets[3].id(),
@@ -966,6 +949,7 @@ pub(crate) mod test {
                 512_i64.try_into().unwrap(),
                 10,
                 10,
+                1004,
             ),
         ];
 

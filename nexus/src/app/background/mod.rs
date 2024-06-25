@@ -17,6 +17,7 @@ mod external_endpoints;
 mod init;
 mod instance_watcher;
 mod inventory_collection;
+mod lookup_region_port;
 mod metrics_producer_gc;
 mod nat_cleanup;
 mod networking;

@@ -1042,6 +1042,8 @@ table! {
         block_size -> Int8,
         blocks_per_extent -> Int8,
         extent_count -> Int8,
+
+        port -> Nullable<Int4>,
     }
 }
 

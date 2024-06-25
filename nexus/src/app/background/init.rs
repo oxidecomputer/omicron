@@ -16,6 +16,7 @@ use super::dns_servers;
 use super::external_endpoints;
 use super::instance_watcher;
 use super::inventory_collection;
+use super::lookup_region_port;
 use super::metrics_producer_gc;
 use super::nat_cleanup;
 use super::phantom_disks;
@@ -117,6 +118,9 @@ pub struct BackgroundTasks {
     /// task handle for deletion of database records for VMMs abandoned by their
     /// instances.
     pub task_abandoned_vmm_reaper: common::TaskHandle,
+
+    /// task handle for looking up missing ports for region records
+    pub task_lookup_region_port: common::TaskHandle,
 }
 
 impl BackgroundTasks {
@@ -460,8 +464,17 @@ impl BackgroundTasks {
             ),
             config.abandoned_vmm_reaper.period_secs,
             Box::new(abandoned_vmm_reaper::AbandonedVmmReaper::new(
-                datastore,
+                datastore.clone(),
             )),
+            opctx.child(BTreeMap::new()),
+            vec![],
+        );
+
+        let task_lookup_region_port = driver.register(
+            String::from("lookup_region_port"),
+            String::from("fill in missing ports for region records"),
+            config.lookup_region_port.period_secs,
+            Box::new(lookup_region_port::LookupRegionPort::new(datastore)),
             opctx.child(BTreeMap::new()),
             vec![],
         );
@@ -491,6 +504,7 @@ impl BackgroundTasks {
             task_instance_watcher,
             task_service_firewall_propagation,
             task_abandoned_vmm_reaper,
+            task_lookup_region_port,
         }
     }
 
