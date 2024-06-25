@@ -188,6 +188,9 @@
 pub use oximeter_impl::*;
 pub use oximeter_timeseries_macro::use_timeseries;
 
+extern crate self as oximeter;
+include!(concat!(env!("OUT_DIR"), "/all_schema.rs"));
+
 #[cfg(test)]
 mod test {
     use oximeter_impl::schema::ir::load_schema;

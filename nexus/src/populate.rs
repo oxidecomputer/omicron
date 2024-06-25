@@ -334,7 +334,23 @@ impl Populator for PopulateRack {
     }
 }
 
-const ALL_POPULATORS: [&dyn Populator; 10] = [
+#[derive(Debug)]
+struct PopulateTimeseriesSchema;
+impl Populator for PopulateTimeseriesSchema {
+    fn populate<'a, 'b>(
+        &self,
+        opctx: &'a OpContext,
+        datastore: &'a DataStore,
+        _args: &'a PopulateArgs,
+    ) -> BoxFuture<'b, Result<(), Error>>
+    where
+        'a: 'b,
+    {
+        datastore.load_timeseries_schema(opctx).boxed()
+    }
+}
+
+const ALL_POPULATORS: [&dyn Populator; 11] = [
     &PopulateBuiltinUsers {},
     &PopulateBuiltinRoles {},
     &PopulateBuiltinRoleAssignments {},
@@ -345,6 +361,7 @@ const ALL_POPULATORS: [&dyn Populator; 10] = [
     &PopulateSiloUserRoleAssignments {},
     &PopulateFleet {},
     &PopulateRack {},
+    &PopulateTimeseriesSchema {},
 ];
 
 #[cfg(test)]

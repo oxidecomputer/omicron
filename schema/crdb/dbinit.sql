@@ -4132,6 +4132,154 @@ CREATE INDEX IF NOT EXISTS lookup_region_snapshot_by_snapshot_id on omicron.publ
     snapshot_id
 );
 
+
+/*
+ *Timeseries schema tables.
+ */
+
+-- The authorization scope indicates the level at which we check a user's
+-- authorization when running a timeseries query.
+CREATE TYPE IF NOT EXISTS omicron.public.timeseries_authz_scope AS ENUM (
+    -- Timeseries data is only visible to a fleet reader.
+    'fleet',
+    -- Timeseries data is limited to the silo of the user.
+    'silo',
+    -- Timeseries data is limited to the project of the user.
+    'project',
+    -- Timeseries data is viewable to all without limitation.
+    'viewable_to_all'
+);
+
+-- Indicates whether a field of a timeseries derives from the target or metric.
+CREATE TYPE IF NOT EXISTS omicron.public.timeseries_field_source AS ENUM (
+    'target',
+    'metric'
+);
+
+-- The data type of a timeseries field.
+CREATE TYPE IF NOT EXISTS omicron.public.timeseries_field_type AS ENUM (
+    'string',
+    'i8',
+    'u8',
+    'i16',
+    'u16',
+    'i32',
+    'u32',
+    'i64',
+    'u64',
+    'ip_addr',
+    'uuid',
+    'bool'
+);
+
+-- The data type of a timeseries's datum, the actual value it measures.
+CREATE TYPE IF NOT EXISTS omicron.public.timeseries_datum_type AS ENUM (
+    'bool'
+    'i8',
+    'u8',
+    'i16',
+    'u16',
+    'i32',
+    'u32',
+    'i64',
+    'u64',
+    'f32',
+    'f64',
+    'string',
+    'bytes',
+    'cumulative_i64',
+    'cumulative_u64',
+    'cumulative_f32',
+    'cumulative_f64',
+    'histogram_i8',
+    'histogram_u8',
+    'histogram_i16',
+    'histogram_u16',
+    'histogram_i32',
+    'histogram_u32',
+    'histogram_i64',
+    'histogram_u64',
+    'histogram_f32',
+    'histogram_f64'
+);
+
+-- Units of a timeseries's datum.
+CREATE TYPE IF NOT EXISTS omicron.public.timeseries_units AS ENUM (
+    'count',
+    'bytes'
+);
+
+-- Timeseries schema describe the structure of a timeseries.
+--
+-- These are defined in TOML in `oximeter/oximeter/schema`, and loaded into the
+-- database on startup.
+CREATE TABLE IF NOT EXISTS omicron.public.timeseries_schema (
+    -- The name of the timeseries.
+    --
+    -- Names are derived from the concatenation of the target and metric names,
+    -- joined with a colon (':').
+    timeseries_name STRING(128) PRIMARY KEY,
+    -- The authorization scope of the timeseries.
+    authz_scope omicron.public.timeseries_authz_scope NOT NULL,
+    -- Textual description of the timeseries's target.
+    target_description STRING(512) NOT NULL,
+    -- Textual description of the timeseries's metric.
+    metric_description STRING(512) NOT NULL,
+    -- Type of the actual datum the timeseries measures.
+    datum_type omicron.public.timeseries_datum_type NOT NULL,
+    -- Units of the timeseries's datum.
+    units omicron.public.timeseries_units NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    -- Generation number. This is shared by all records in the
+    -- `timeseries_schema`,  `timeseries_field`, and
+    -- `timeseries_field_by_version` tables, and is used for OCC.
+    generation INT8 NOT NULL
+);
+
+-- Fields for each timeseries schema.
+CREATE TABLE IF NOT EXISTS omicron.public.timeseries_field (
+    -- Name of the timeseries.
+    timeseries_name STRING(128) NOT NULL,
+    -- Name of the field.
+    name STRING(128) NOT NULL,
+    -- Source of the field, either 'target' or 'metric'.
+    source omicron.public.timeseries_field_source NOT NULL,
+    -- Data type of the field.
+    type_ omicron.public.timeseries_field_type NOT NULL,
+    -- Textual description for the timeseries field.
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    -- Generation number. This is shared by all records in the
+    -- `timeseries_schema`,  `timeseries_field`, and
+    -- `timeseries_field_by_version` tables, and is used for OCC.
+    generation INT8 NOT NULL,
+
+    -- This primary key enforces that there is exactly one field with a
+    -- particular name in _all_ versions of a timeseries schema. In the future,
+    -- this will likely need to be relaxed, to enforcing a unique name within a
+    -- single version of the timeseries only. At that point, we can inline the
+    -- `timeseries_fields_by_version` table as well.
+    PRIMARY KEY (timeseries_name, name)
+);
+
+-- List of fields by name on each version of the timeseries schema
+CREATE TABLE IF NOT EXISTS omicron.public.timeseries_field_by_version (
+    timeseries_name STRING(128) NOT NULL,
+    version INT2 NOT NULL CHECK (version BETWEEN 1 AND 256),
+    field_name STRING(128) NOT NULL,
+
+    -- Generation number. This is shared by all records in the
+    -- `timeseries_schema`,  `timeseries_field`, and
+    -- `timeseries_field_by_version` tables, and is used for OCC.
+    generation INT8 NOT NULL,
+
+    PRIMARY KEY (timeseries_name, version, field_name)
+);
+
 /*
  * Keep this at the end of file so that the database does not contain a version
  * until it is fully populated.
@@ -4143,7 +4291,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '82.0.0', NULL)
+    (TRUE, NOW(), NOW(), '83.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
