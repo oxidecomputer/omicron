@@ -108,12 +108,10 @@ declare_saga_actions! {
         + siu_destroyed_unassign_oximeter_producer
     }
 
-    DESTROYED_DELETE_V2P_MAPPINGS -> "destroyed_vmm_delete_v2p_mappings" {
-        + siu_destroyed_delete_v2p_mappings
-    }
-
-    DESTROYED_DELETE_NAT_ENTRIES -> "destroyed_vmm_delete_nat_entries" {
-        + siu_destroyed_delete_nat_entries
+    // Notify the V2P manager background task to delete the destroyed VMM's V2P
+    // mappings, and delete the destroyed VMM's NAT entries.
+    DESTROYED_UPDATE_NETWORK_CONFIG -> "destroyed_update_network_config" {
+        + siu_destroyed_update_network_config
     }
 
     DESTROYED_UPDATE_INSTANCE -> "destroyed_vmm_update_instance" {
@@ -174,8 +172,7 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
                 builder.append(destroyed_release_sled_resources_action());
                 builder.append(destroyed_release_virtual_provisioning_action());
                 builder.append(destroyed_unassign_oximeter_producer_action());
-                builder.append(destroyed_delete_v2p_mappings_action());
-                builder.append(destroyed_delete_nat_entries_action());
+                builder.append(destroyed_update_network_config_action());
                 builder.append(destroyed_update_instance_action());
                 builder.append(destroyed_mark_vmm_deleted_action());
             }
@@ -318,6 +315,9 @@ async fn siu_migration_update_instance(
     Ok(PropolisUuid::from_untyped_uuid(new_propolis_id))
 }
 
+// TODO(eliza): the `update_network_config` actions for migration and
+// destroyed-active-vmm *could* probably be combined...look into whether this is
+// a good idea or not.
 async fn siu_migration_update_network_config(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -344,7 +344,7 @@ async fn siu_migration_update_network_config(
     // Look up the ID of the sled that the instance now resides on, so that we
     // can look up its address.
     let active_propolis_id =
-        sagactx.lookup::<PropolisUuid>("update_instance_record")?;
+        sagactx.lookup::<PropolisUuid>("migration_update_instance")?;
     let new_sled_id = match osagactx
         .datastore()
         .vmm_fetch(&opctx, authz_instance, &active_propolis_id)
@@ -381,13 +381,8 @@ async fn siu_migration_update_network_config(
         "migration_failed" => migration.either_side_failed(),
     );
 
-    if let Err(e) = osagactx.nexus().v2p_notification_tx.send(()) {
-        error!(
-            osagactx.log(),
-            "error notifying background task of v2p change";
-            "error" => ?e
-        )
-    };
+    let nexus = osagactx.nexus();
+    nexus.background_tasks.activate(&nexus.background_tasks.task_v2p_manager);
 
     let (.., sled) = LookupPath::new(&opctx, osagactx.datastore())
         .sled_id(new_sled_id)
@@ -395,8 +390,7 @@ async fn siu_migration_update_network_config(
         .await
         .map_err(ActionError::action_failed)?;
 
-    osagactx
-        .nexus()
+    nexus
         .instance_ensure_dpd_config(&opctx, instance_id, &sled.address(), None)
         .await
         .map_err(ActionError::action_failed)?;
