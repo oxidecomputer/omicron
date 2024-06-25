@@ -402,6 +402,8 @@ pub struct SledResources {
     ///
     /// (used to allocate storage for control plane zones with persistent
     /// storage)
+    // NOTE: I'd really like to make this private, to make it harder to
+    // accidentally pick a zpool that is not in-service.
     pub zpools: BTreeMap<ZpoolUuid, SledDisk>,
 
     /// the IPv6 subnet of this sled on the underlay network

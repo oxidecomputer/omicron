@@ -944,8 +944,7 @@ impl<'a> BlueprintBuilder<'a> {
 
         // No durable dataset exists; pick one randomly.
         resources
-            .zpools
-            .keys()
+            .all_zpools(ZpoolFilter::InService)
             .map(|id| ZpoolName::new_external(*id))
             .choose(&mut rand::thread_rng())
             .ok_or_else(|| Error::NoAvailableZpool {
