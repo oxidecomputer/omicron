@@ -16749,7 +16749,7 @@
             "type": "string"
           },
           "destination": {
-            "description": "The set of destination IP addresses or subnets that this route will match packets against.",
+            "description": "Selects which traffic this routing rule will apply to.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/RouteDestination"
@@ -16821,7 +16821,7 @@
             "type": "string"
           },
           "destination": {
-            "description": "The set of destination IP addresses or subnets that this route will match packets against.",
+            "description": "Selects which traffic this routing rule will apply to.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/RouteDestination"
@@ -16910,7 +16910,12 @@
             "type": "string"
           },
           "destination": {
-            "$ref": "#/components/schemas/RouteDestination"
+            "description": "Selects which traffic this routing rule will apply to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouteDestination"
+              }
+            ]
           },
           "name": {
             "nullable": true,
@@ -16921,7 +16926,12 @@
             ]
           },
           "target": {
-            "$ref": "#/components/schemas/RouteTarget"
+            "description": "The location that matched packets should be forwarded to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouteTarget"
+              }
+            ]
           }
         },
         "required": [

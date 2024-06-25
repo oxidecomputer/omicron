@@ -1271,8 +1271,7 @@ pub struct RouterRouteCreate {
     pub identity: IdentityMetadataCreateParams,
     /// The location that matched packets should be forwarded to.
     pub target: RouteTarget,
-    /// The set of destination IP addresses or subnets that this route
-    /// will match packets against.
+    /// Selects which traffic this routing rule will apply to.
     pub destination: RouteDestination,
 }
 
@@ -1281,7 +1280,9 @@ pub struct RouterRouteCreate {
 pub struct RouterRouteUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
+    /// The location that matched packets should be forwarded to.
     pub target: RouteTarget,
+    /// Selects which traffic this routing rule will apply to.
     pub destination: RouteDestination,
 }
 
