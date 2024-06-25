@@ -451,20 +451,23 @@ async fn main() -> Result<()> {
         )
         .after("omicron-package");
 
-        // omicron-package package
-        jobs.push_command(
-            format!("{}-package", target),
-            Command::new(&omicron_package)
-                .args([
-                    "--target",
-                    target.as_str(),
-                    "--artifacts",
-                    artifacts_path.as_str(),
-                    "package",
-                ])
-                .env_remove("CARGO_MANIFEST_DIR"),
-        )
-        .after(format!("{}-target", target));
+        // omicron-package package. We limit this only to the packages necessary
+        // to build the proto area; the rest of the zones are built in the
+        // "zone-package" job.
+        let mut command = Command::new(&omicron_package)
+            .args([
+                "--target",
+                target.as_str(),
+                "--artifacts",
+                artifacts_path.as_str(),
+                "package",
+            ])
+            .env_remove("CARGO_MANIFEST_DIR");
+        for package in target.proto_package_names() {
+            command = command.arg("--only").arg(package);
+        }
+        jobs.push_command(format!("{}-package", target), command)
+            .after(format!("{}-target", target));
 
         // omicron-package stamp
         stamp_packages!(
@@ -529,11 +532,31 @@ async fn main() -> Result<()> {
         .after("helios-setup")
         .after(format!("{}-proto", target));
     }
-    // Build the recovery target after we build the host target. Only one
-    // of these will build at a time since Cargo locks its target directory;
-    // since host-package and host-image both take longer than their recovery
-    // counterparts, this should be the fastest option to go first.
+
+    // Build the recovery image packages after we build the host image packages.
+    // Only one of these will build at a time since Cargo locks its target
+    // directory; since host-package and host-image both take longer than their
+    // recovery counterparts, this should be the fastest option to go first.
     jobs.select("recovery-package").after("host-package");
+    // After that, build the remainder of the zones.
+    let mut command = Command::new(&omicron_package)
+        .args([
+            "--target",
+            Target::Host.as_str(),
+            "--artifacts",
+            Target::Host.artifacts_path(&args).as_str(),
+            "package",
+        ])
+        .env_remove("CARGO_MANIFEST_DIR");
+    for package in TUF_PACKAGES {
+        command = command.arg("--only").arg(package);
+    }
+    jobs.push_command("zone-package", command).after("recovery-package");
+    stamp_packages!("zone-stamp", Target::Host, TUF_PACKAGES)
+        .after("zone-package")
+        .after("host-stamp")
+        .after("recovery-stamp");
+
     if args.host_dataset == args.recovery_dataset {
         // If the datasets are the same, we can't parallelize these.
         jobs.select("recovery-image").after("host-image");
@@ -546,9 +569,6 @@ async fn main() -> Result<()> {
     )
     .after("host-proto");
     jobs.select("host-image").after("host-profile");
-
-    stamp_packages!("tuf-stamp", Target::Host, TUF_PACKAGES)
-        .after("host-stamp");
 
     for (name, base_url) in [
         ("staging", "https://permslip-staging.corp.oxide.computer"),
@@ -575,7 +595,7 @@ async fn main() -> Result<()> {
             manifest,
         ),
     )
-    .after("tuf-stamp")
+    .after("zone-stamp")
     .after("host-image")
     .after("recovery-image")
     .after("hubris-staging")
