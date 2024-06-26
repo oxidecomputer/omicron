@@ -173,7 +173,7 @@ Then install prerequisite software with the following script:
 
 [source,text]
 ----
-$ pfexec ./tools/install_prerequisites.sh
+$ ./tools/install_prerequisites.sh
 ----
 
 You need to do this step once per workspace and potentially again each time you fetch new changes.  If the script reports any PATH problems, you'll need to correct those before proceeding.
@@ -410,9 +410,9 @@ $ pfexec ./target/release/omicron-package install
 
 [WARNING]
 ====
-**Do not use `pfexec cargo run` directly**; it will cause files in `~/.cargo` and `target/` to be owned by root, which will cause problems down the road.
+**Do not use `pfexec cargo run` directly**; it will cause files in `~/.cargo`, `out/`, and `target/` to be owned by root, which will cause problems down the road.
 
-If you've done this already, and you wish to recover, run from the root of this repository `pfexec chown -R $USER:$(id -ng $USER) target ${CARGO_HOME:-~/.cargo}`.
+If you've done this already, and you wish to recover, run from the root of this repository `pfexec chown -R $USER:$(id -ng $USER) out target ${CARGO_HOME:-~/.cargo}`.
 ====
 
 This command installs an SMF service called `svc:/oxide/sled-agent:default`, which itself starts the other required services.  This will take a few minutes.  You can watch the progress by looking at the Sled Agent log:

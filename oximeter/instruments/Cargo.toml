@@ -13,6 +13,8 @@ chrono = { workspace = true, optional = true }
 dropshot = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
+kstat-rs = { workspace = true, optional = true }
+libc = { workspace = true, optional = true }
 oximeter = { workspace = true, optional = true }
 slog = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
@@ -35,6 +37,7 @@ kstat = [
     "dep:chrono",
     "dep:futures",
     "dep:kstat-rs",
+    "dep:libc",
     "dep:oximeter",
     "dep:slog",
     "dep:tokio",
@@ -48,6 +51,3 @@ rand.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
 oximeter.workspace = true
-
-[target.'cfg(target_os = "illumos")'.dependencies]
-kstat-rs = { workspace = true, optional = true }

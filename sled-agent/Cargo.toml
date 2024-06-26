@@ -127,14 +127,7 @@ name = "sled-agent"
 doc = false
 
 [features]
-image-standard = []
 image-trampoline = []
-machine-gimlet = []
-machine-gimlet-standalone = []
-machine-non-gimlet = []
 switch-asic = []
 switch-stub = []
 switch-softnpu = []
-switch-hypersoftnpu = []
-rack-topology-single-sled = []
-rack-topology-multi-sled = []
