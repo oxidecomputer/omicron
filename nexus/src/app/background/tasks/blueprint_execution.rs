@@ -4,7 +4,7 @@
 
 //! Background task for realizing a plan blueprint
 
-use super::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
@@ -111,7 +111,7 @@ impl BackgroundTask for BlueprintExecutor {
 #[cfg(test)]
 mod test {
     use super::BlueprintExecutor;
-    use crate::app::background::common::BackgroundTask;
+    use crate::app::background::BackgroundTask;
     use httptest::matchers::{all_of, request};
     use httptest::responders::status_code;
     use httptest::Expectation;

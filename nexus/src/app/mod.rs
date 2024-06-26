@@ -504,7 +504,7 @@ impl Nexus {
                         "populate complete; activating background tasks"
                     );
                     for task in task_nexus.background_tasks.driver.tasks() {
-                        task_nexus.background_tasks.driver.activate(task);
+                        task_nexus.background_tasks.activate(task);
                     }
                 }
                 Err(_) => {
@@ -943,12 +943,60 @@ impl Nexus {
                         Ok(_) => {
                             info!(
                                 nexus.log,
-                                "region replacement drive saga completed ok"
+                                "region replacement start saga completed ok"
                             );
                         }
 
                         Err(e) => {
                             warn!(nexus.log, "region replacement start saga returned an error: {e}");
+                        }
+                    }
+                });
+            }
+
+            SagaRequest::RegionReplacementDrive { params } => {
+                let nexus = self.clone();
+                tokio::spawn(async move {
+                    let saga_result = nexus
+                        .execute_saga::<sagas::region_replacement_drive::SagaRegionReplacementDrive>(
+                            params,
+                        )
+                        .await;
+
+                    match saga_result {
+                        Ok(_) => {
+                            info!(
+                                nexus.log,
+                                "region replacement drive saga completed ok"
+                            );
+                        }
+
+                        Err(e) => {
+                            warn!(nexus.log, "region replacement drive saga returned an error: {e}");
+                        }
+                    }
+                });
+            }
+
+            SagaRequest::RegionReplacementFinish { params } => {
+                let nexus = self.clone();
+                tokio::spawn(async move {
+                    let saga_result = nexus
+                        .execute_saga::<sagas::region_replacement_finish::SagaRegionReplacementFinish>(
+                            params,
+                        )
+                        .await;
+
+                    match saga_result {
+                        Ok(_) => {
+                            info!(
+                                nexus.log,
+                                "region replacement finish saga completed ok"
+                            );
+                        }
+
+                        Err(e) => {
+                            warn!(nexus.log, "region replacement finish saga returned an error: {e}");
                         }
                     }
                 });

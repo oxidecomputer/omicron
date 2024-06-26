@@ -31,7 +31,7 @@
 //! is handled elsewhere, by `notify_instance_updated` and (eventually) the
 //! `instance-update` saga.
 
-use super::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 use anyhow::Context;
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -135,7 +135,8 @@ impl AbandonedVmmReaper {
                     results.error_count += 1;
                     *last_err = Err(e).with_context(|| {
                         format!(
-                            "failed to delete sled reservation for VMM {vmm_id}"
+                            "failed to delete sled reservation for VMM \
+                             {vmm_id}"
                         )
                     });
                 }

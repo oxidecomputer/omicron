@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 //
 // TODO: remove
 // This code is only required at the moment because the source repo
@@ -15,6 +15,7 @@ use anyhow::Context;
 use anyhow::Result;
 use omicron_zone_package::config::Config;
 use omicron_zone_package::package::PackageSource;
+use progenitor::TypePatch;
 use quote::quote;
 use std::env;
 use std::fs;
@@ -73,7 +74,7 @@ fn main() -> Result<()> {
 
     let code = progenitor::Generator::new(
         progenitor::GenerationSettings::new()
-            .with_inner_type(quote!(ClientState))
+            .with_inner_type(quote!{ ClientState })
             .with_pre_hook(quote! {
                 |state: &crate::ClientState, request: &reqwest::Request| {
                     slog::debug!(state.log, "client request";
@@ -88,9 +89,22 @@ fn main() -> Result<()> {
                     slog::debug!(state.log, "client response"; "result" => ?result);
                 }
             })
-            .with_replacement("Ipv4Cidr", "crate::Ipv4Cidr", std::iter::empty())
-            .with_replacement("Ipv6Cidr", "crate::Ipv6Cidr", std::iter::empty())
-            .with_replacement("Cidr", "crate::Cidr", std::iter::empty()),
+            .with_patch("LinkId", &TypePatch::default()
+                .with_derive("Eq")
+                .with_derive("PartialEq")
+            )
+            .with_patch("LinkCreate", &TypePatch::default()
+                .with_derive("Eq")
+                .with_derive("PartialEq")
+            )
+            .with_patch("LinkSettings", &TypePatch::default()
+                .with_derive("Eq")
+                .with_derive("PartialEq")
+            )
+            .with_patch("PortSettings", &TypePatch::default()
+                .with_derive("Eq")
+                .with_derive("PartialEq")
+            )
     )
     .generate_tokens(&spec)
     .with_context(|| {

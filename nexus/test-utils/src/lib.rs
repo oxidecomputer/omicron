@@ -692,6 +692,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     slot: 0,
                     subnet: (*NEXUS_OPTE_IPV4_SUBNET).into(),
                     vni: Vni::SERVICES_VNI,
+                    transit_ips: vec![],
                 },
             }),
         });
@@ -1054,6 +1055,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         slot: 0,
                         subnet: (*DNS_OPTE_IPV4_SUBNET).into(),
                         vni: Vni::SERVICES_VNI,
+                        transit_ips: vec![],
                     },
                 },
             ),
