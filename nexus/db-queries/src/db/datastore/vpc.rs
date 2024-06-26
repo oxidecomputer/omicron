@@ -2562,7 +2562,7 @@ mod tests {
         .await;
 
         // Add another, and get another route.
-        let (_, sub1) = new_subnet_ez(
+        let (authz_sub1, sub1) = new_subnet_ez(
             &opctx,
             &datastore,
             &db_vpc,
@@ -2613,6 +2613,50 @@ mod tests {
             &datastore,
             db_router.id(),
             &[&sub1],
+        )
+        .await;
+
+        // If we use a reserved name, we should be able to update the table.
+        let sub1 = datastore
+            .vpc_update_subnet(
+                &opctx,
+                &authz_sub1,
+                VpcSubnetUpdate {
+                    name: Some(
+                        "default-v4".parse::<external::Name>().unwrap().into(),
+                    ),
+                    description: None,
+                    time_modified: Utc::now(),
+                },
+            )
+            .await
+            .unwrap();
+
+        verify_all_subnet_routes_in_router(
+            &opctx,
+            &datastore,
+            db_router.id(),
+            &[&sub1],
+        )
+        .await;
+
+        // Ditto for adding such a route.
+        let (_, sub0) = new_subnet_ez(
+            &opctx,
+            &datastore,
+            &db_vpc,
+            &authz_vpc,
+            "default-v6",
+            [172, 30, 0, 0],
+            22,
+        )
+        .await;
+
+        verify_all_subnet_routes_in_router(
+            &opctx,
+            &datastore,
+            db_router.id(),
+            &[&sub0, &sub1],
         )
         .await;
 
