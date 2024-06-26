@@ -166,7 +166,7 @@ dependencies = [
  "omicron-workspace-hack",
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -273,7 +273,7 @@ checksum = "3b43422f69d8ff38f95f1b2bb76517c91589a924d1559a0e935d7c8ce0274c11"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -295,7 +295,7 @@ checksum = "16e62a023e7c117e27523144c5d2459f4397fcc3cab0085af8e2224f643a0193"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -306,7 +306,7 @@ checksum = "c6fa2087f2753a7da8cc1c0dbfcf89579dd57458e36769de5ac750b4671737ca"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -359,7 +359,7 @@ dependencies = [
  "quote",
  "serde",
  "serde_tokenstream",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -464,9 +464,9 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753#50cb28f586083fdb990e401bc6146e7dac9b2753"
+source = "git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459#59868677c70f3cd03f03e12584ad1056da8b5459"
 dependencies = [
- "bhyve_api_sys 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753)",
+ "bhyve_api_sys 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459)",
  "libc",
  "strum",
 ]
@@ -484,7 +484,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753#50cb28f586083fdb990e401bc6146e7dac9b2753"
+source = "git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459#59868677c70f3cd03f03e12584ad1056da8b5459"
 dependencies = [
  "libc",
  "strum",
@@ -518,7 +518,7 @@ dependencies = [
  "regex",
  "rustc-hash",
  "shlex",
- "syn 2.0.64",
+ "syn 2.0.68",
  "which",
 ]
 
@@ -1038,7 +1038,7 @@ dependencies = [
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -1387,7 +1387,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=8c6d485110ecfae5409575246b986a145c386dc4#8c6d485110ecfae5409575246b986a145c386dc4"
+source = "git+https://github.com/oxidecomputer/crucible?rev=64e28cea69b427b05064defaf8800a4d678b4612#64e28cea69b427b05064defaf8800a4d678b4612"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1403,7 +1403,7 @@ dependencies = [
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=8c6d485110ecfae5409575246b986a145c386dc4#8c6d485110ecfae5409575246b986a145c386dc4"
+source = "git+https://github.com/oxidecomputer/crucible?rev=64e28cea69b427b05064defaf8800a4d678b4612#64e28cea69b427b05064defaf8800a4d678b4612"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1420,7 +1420,7 @@ dependencies = [
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=8c6d485110ecfae5409575246b986a145c386dc4#8c6d485110ecfae5409575246b986a145c386dc4"
+source = "git+https://github.com/oxidecomputer/crucible?rev=64e28cea69b427b05064defaf8800a4d678b4612#64e28cea69b427b05064defaf8800a4d678b4612"
 dependencies = [
  "crucible-workspace-hack",
  "libc",
@@ -1506,16 +1506,15 @@ dependencies = [
 
 [[package]]
 name = "curve25519-dalek"
-version = "4.1.2"
+version = "4.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a677b8922c94e01bdbb12126b0bc852f00447528dee1782229af9c720c3f348"
+checksum = "97fb8b7c4503de7d6ae7b42ab72a5a59857b4c937ec27a3d4539dba95b5ab2be"
 dependencies = [
  "cfg-if",
  "cpufeatures",
  "curve25519-dalek-derive",
  "digest",
  "fiat-crypto",
- "platforms",
  "rand_core 0.6.4",
  "rustc_version 0.4.0",
  "subtle",
@@ -1530,7 +1529,7 @@ checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -1554,7 +1553,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "strsim",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -1565,7 +1564,7 @@ checksum = "733cabb43482b1a1b53eee8583c2b9e8684d592215ea83efd305dd31bc2f0178"
 dependencies = [
  "darling_core",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -1599,7 +1598,7 @@ dependencies = [
  "quote",
  "serde",
  "serde_tokenstream",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -1642,7 +1641,7 @@ dependencies = [
  "proc-macro-error",
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -1675,7 +1674,7 @@ checksum = "5fe87ce4529967e0ba1dcf8450bab64d97dfd5010a6256187ffe2e43e6f0e049"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -1696,7 +1695,7 @@ checksum = "62d671cc41a825ebabc75757b62d3d168c577f9149b2d49ece1dad1f72119d25"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -1717,7 +1716,7 @@ dependencies = [
  "darling",
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -1727,7 +1726,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "206868b8242f27cecce124c19fd88157fbd0dd334df2587f36417bafbc85097b"
 dependencies = [
  "derive_builder_core",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -1804,7 +1803,7 @@ dependencies = [
  "diesel_table_macro_syntax",
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -1813,7 +1812,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc5557efc453706fed5e4fa85006fe9817c224c3f480a34c7e5959fd700921c5"
 dependencies = [
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -1998,7 +1997,6 @@ dependencies = [
  "chrono",
  "futures",
  "http 0.2.12",
- "ipnetwork",
  "omicron-workspace-hack",
  "omicron-zone-package",
  "progenitor",
@@ -2071,7 +2069,7 @@ dependencies = [
  "quote",
  "serde",
  "serde_tokenstream",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -2436,6 +2434,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "float-ord"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ce81f49ae8a0482e4c55ea62ebbd7e5a686af544c00b9d090bba3ff9be97b3d"
+
+[[package]]
 name = "flume"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2480,7 +2484,7 @@ checksum = "1a5c6c585bc94aaf2c7b51dd4c2ba22680844aba4c687be581871a6f518c5742"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -2592,7 +2596,7 @@ checksum = "87750cf4b7a4c0625b1529e4c543c2182106e4dedc60a2a6455e00d212c489ac"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -3472,7 +3476,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "bhyve_api 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753)",
+ "bhyve_api 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459)",
  "byteorder",
  "camino",
  "camino-tempfile",
@@ -3881,14 +3885,14 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/opte?rev=417f74e94978c23f3892ac328c3387f3ecd9bb29#417f74e94978c23f3892ac328c3387f3ecd9bb29"
 dependencies = [
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
 name = "kstat-rs"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcc713c7902f757cf0c04012dbad3864ea505f2660467b704847ea7ea2ff6d67"
+checksum = "27964e4632377753acb0898ce6f28770d50cbca1339200ae63d700cff97b5c2b"
 dependencies = [
  "libc",
  "thiserror",
@@ -4370,7 +4374,7 @@ dependencies = [
  "cfg-if",
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -4733,7 +4737,7 @@ dependencies = [
  "omicron-workspace-hack",
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -4929,7 +4933,7 @@ version = "0.1.0"
 dependencies = [
  "omicron-workspace-hack",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -5100,7 +5104,7 @@ checksum = "ed3955f1a9c7c0c15e092f9c887db08b1fc683305fdf6eb6684f22555355e202"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -5527,7 +5531,7 @@ dependencies = [
  "pq-sys",
  "pretty_assertions",
  "progenitor-client",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459)",
  "rand 0.8.5",
  "rcgen",
  "ref-cast",
@@ -5632,6 +5636,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
+ "cargo_metadata",
  "clap",
  "expectorate",
  "futures",
@@ -5653,7 +5658,6 @@ dependencies = [
  "slog-term",
  "smf",
  "strum",
- "swrite",
  "tar",
  "thiserror",
  "tokio",
@@ -5777,7 +5781,7 @@ dependencies = [
  "oximeter-producer",
  "oxnet",
  "pretty_assertions",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459)",
  "propolis-mock-server",
  "rand 0.8.5",
  "rcgen",
@@ -5956,7 +5960,7 @@ dependencies = [
  "string_cache",
  "subtle",
  "syn 1.0.109",
- "syn 2.0.64",
+ "syn 2.0.68",
  "time",
  "time-macros",
  "tokio",
@@ -6076,7 +6080,7 @@ checksum = "a948666b637a0f465e8564c73e89d4dde00d72d4d473cc972f390fc3dcee7d9c"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -6219,21 +6223,16 @@ dependencies = [
 name = "oximeter"
 version = "0.1.0"
 dependencies = [
- "approx",
- "bytes",
+ "anyhow",
  "chrono",
- "num",
- "omicron-common",
+ "clap",
  "omicron-workspace-hack",
+ "oximeter-impl",
  "oximeter-macro-impl",
- "regex",
- "rstest",
- "schemars",
- "serde",
- "serde_json",
- "strum",
- "thiserror",
- "trybuild",
+ "oximeter-timeseries-macro",
+ "prettyplease",
+ "syn 2.0.68",
+ "toml 0.8.13",
  "uuid",
 ]
 
@@ -6340,6 +6339,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "oximeter-impl"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "bytes",
+ "chrono",
+ "float-ord",
+ "heck 0.5.0",
+ "num",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "oximeter-macro-impl",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "rand 0.8.5",
+ "rand_distr",
+ "regex",
+ "rstest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog-error-chain",
+ "strum",
+ "syn 2.0.68",
+ "thiserror",
+ "toml 0.8.13",
+ "trybuild",
+ "uuid",
+]
+
+[[package]]
 name = "oximeter-instruments"
 version = "0.1.0"
 dependencies = [
@@ -6349,6 +6380,7 @@ dependencies = [
  "futures",
  "http 0.2.12",
  "kstat-rs",
+ "libc",
  "omicron-workspace-hack",
  "oximeter",
  "rand 0.8.5",
@@ -6367,7 +6399,7 @@ dependencies = [
  "omicron-workspace-hack",
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -6393,6 +6425,17 @@ dependencies = [
  "thiserror",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "oximeter-timeseries-macro"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "oximeter-impl",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -6548,7 +6591,7 @@ dependencies = [
  "regex",
  "regex-syntax 0.8.3",
  "structmeta 0.3.0",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -6716,7 +6759,7 @@ dependencies = [
  "pest_meta",
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -6786,7 +6829,7 @@ checksum = "2f38a4412a78282e09a2cf38d195ea5420d15ba0602cb375210efbc877243965"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -6833,12 +6876,6 @@ name = "plain"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
-
-[[package]]
-name = "platforms"
-version = "3.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db23d408679286588f4d4644f965003d056e3dd5abcaaa938116871d7ce2fee7"
 
 [[package]]
 name = "plotters"
@@ -7056,7 +7093,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f12335488a2f3b0a83b14edad48dca9879ce89b2edd10e80237e4e852dd645e"
 dependencies = [
  "proc-macro2",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -7104,9 +7141,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.82"
+version = "1.0.86"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ad3d49ab951a01fbaafe34f2ec74122942fe18a3f9814c3268f1bb72042131b"
+checksum = "5e719e8df665df0d1c8fbfd238015744736151d4445ec0836b8e628aae103b77"
 dependencies = [
  "unicode-ident",
 ]
@@ -7152,7 +7189,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "syn 2.0.64",
+ "syn 2.0.68",
  "thiserror",
  "typify",
  "unicode-ident",
@@ -7172,7 +7209,7 @@ dependencies = [
  "serde_json",
  "serde_tokenstream",
  "serde_yaml",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -7208,7 +7245,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753#50cb28f586083fdb990e401bc6146e7dac9b2753"
+source = "git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459#59868677c70f3cd03f03e12584ad1056da8b5459"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -7250,7 +7287,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753#50cb28f586083fdb990e401bc6146e7dac9b2753"
+source = "git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459#59868677c70f3cd03f03e12584ad1056da8b5459"
 dependencies = [
  "anyhow",
  "atty",
@@ -7260,7 +7297,7 @@ dependencies = [
  "futures",
  "hyper 0.14.28",
  "progenitor",
- "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753)",
+ "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459)",
  "rand 0.8.5",
  "reqwest",
  "schemars",
@@ -7292,7 +7329,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=50cb28f586083fdb990e401bc6146e7dac9b2753#50cb28f586083fdb990e401bc6146e7dac9b2753"
+source = "git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459#59868677c70f3cd03f03e12584ad1056da8b5459"
 dependencies = [
  "schemars",
  "serde",
@@ -7455,6 +7492,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom 0.2.14",
+]
+
+[[package]]
+name = "rand_distr"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32cb0b9bc82b0a0876c2dd994a7e7a2683d3e7390ca40e6886785ef0c7e3ee31"
+dependencies = [
+ "num-traits",
+ "rand 0.8.5",
 ]
 
 [[package]]
@@ -7652,7 +7699,7 @@ checksum = "bcc303e793d3734489387d205e9b186fac9c6cfacedd98cbb2e8a5943595f3e6"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -7906,7 +7953,7 @@ dependencies = [
  "regex",
  "relative-path",
  "rustc_version 0.4.0",
- "syn 2.0.64",
+ "syn 2.0.68",
  "unicode-ident",
 ]
 
@@ -8287,9 +8334,9 @@ dependencies = [
 
 [[package]]
 name = "schemars"
-version = "0.8.20"
+version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0218ceea14babe24a4a5836f86ade86c1effbc198164e619194cb5069187e29"
+checksum = "09c024468a378b7e36765cd36702b7a90cc3cba11654f6685c8f233408e89e92"
 dependencies = [
  "bytes",
  "chrono",
@@ -8302,14 +8349,14 @@ dependencies = [
 
 [[package]]
 name = "schemars_derive"
-version = "0.8.20"
+version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ed5a1ccce8ff962e31a165d41f6e2a2dd1245099dc4d594f5574a86cd90f4d3"
+checksum = "b1eee588578aff73f856ab961cd2f79e36bc45d7ded33a7562adba4667aecc0e"
 dependencies = [
  "proc-macro2",
  "quote",
  "serde_derive_internals",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -8335,7 +8382,7 @@ checksum = "7f81c2fde025af7e69b1d1420531c8a8811ca898919db177141a85313b1cb932"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -8464,7 +8511,7 @@ checksum = "500cbc0ebeb6f46627f50f3f5811ccf6bf00643be300b4c3eabc0ef55dc5b5ba"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -8475,7 +8522,7 @@ checksum = "18d26a20a969b9e3fdf2fc2d9f21eda6c40e2de84c9408bb5d3b05d499aae711"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -8525,7 +8572,7 @@ checksum = "6c64451ba24fc7a6a2d60fc75dd9c83c90903b19028d4eff35e88fc1e86564e9"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -8546,7 +8593,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -8588,7 +8635,7 @@ dependencies = [
  "darling",
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -8936,7 +8983,7 @@ source = "git+https://github.com/oxidecomputer/slog-error-chain?branch=main#15f6
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -9063,7 +9110,7 @@ dependencies = [
  "heck 0.4.1",
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -9190,7 +9237,7 @@ checksum = "01b2e185515564f15375f593fb966b5718bc624ba77fe49fa4616ad619690554"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -9200,7 +9247,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2ff9eaf853dec4c8802325d8b6d3dffa86cc707fd7a1a4cdbf416e13b061787a"
 dependencies = [
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -9286,7 +9333,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "structmeta-derive 0.2.0",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -9298,7 +9345,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "structmeta-derive 0.3.0",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -9309,7 +9356,7 @@ checksum = "a60bcaff7397072dca0017d1db428e30d5002e00b6847703e2e42005c95fbe00"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -9320,7 +9367,7 @@ checksum = "152a0b65a590ff6c3da95cabe2353ee04e6167c896b28e3b14478c2636c922fc"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -9355,7 +9402,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "rustversion",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -9368,7 +9415,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "rustversion",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -9415,9 +9462,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.64"
+version = "2.0.68"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ad3dee41f36859875573074334c200d1add8e4a87bb37113ebd31d926b7b11f"
+checksum = "901fa70d88b9d6c98022e23b4136f9f3e54e4662c3bc1bd1d84a42a9a0f0c1e9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9591,7 +9638,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "structmeta 0.2.0",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -9622,7 +9669,7 @@ checksum = "e2470041c06ec3ac1ab38d0356a6119054dedaea53e12fbefc0de730a1c08524"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -9759,7 +9806,7 @@ checksum = "8d9ef545650e79f30233c0003bcc2504d7efac6dad25fca40744de773fe2049c"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -9830,7 +9877,7 @@ checksum = "5b8a1e28f2deaa14e508979454cb3a223b10b938b45af148bc0986de36f1923b"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -10107,7 +10154,7 @@ checksum = "34704c8d6ebcbc939824180af020566b01a7c01f80641264eba0999f6c2b6be7"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -10384,7 +10431,7 @@ dependencies = [
  "semver 1.0.23",
  "serde",
  "serde_json",
- "syn 2.0.64",
+ "syn 2.0.68",
  "thiserror",
  "unicode-ident",
 ]
@@ -10401,7 +10448,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_tokenstream",
- "syn 2.0.64",
+ "syn 2.0.68",
  "typify-impl",
 ]
 
@@ -10608,7 +10655,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde_tokenstream",
- "syn 2.0.64",
+ "syn 2.0.68",
  "usdt-impl",
 ]
 
@@ -10626,7 +10673,7 @@ dependencies = [
  "quote",
  "serde",
  "serde_json",
- "syn 2.0.64",
+ "syn 2.0.68",
  "thiserror",
  "thread-id",
  "version_check",
@@ -10642,7 +10689,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde_tokenstream",
- "syn 2.0.64",
+ "syn 2.0.68",
  "usdt-impl",
 ]
 
@@ -10821,7 +10868,7 @@ dependencies = [
  "once_cell",
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
  "wasm-bindgen-shared",
 ]
 
@@ -10855,7 +10902,7 @@ checksum = "e94f17b526d0a461a191c78ea52bbce64071ed5c04c9ffe424dcb38f74171bb7"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
  "wasm-bindgen-backend",
  "wasm-bindgen-shared",
 ]
@@ -11437,7 +11484,7 @@ checksum = "125139de3f6b9d625c39e2efdd73d41bdac468ccd556556440e322be0e1bbd91"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -11448,7 +11495,7 @@ checksum = "15e934569e47891f7d9411f1a451d947a60e000ab3bd24fbb970f000387d1b3b"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -11468,7 +11515,7 @@ checksum = "ce36e65b0d2999d2aafac989fb249189a141aee1f53c612c1f37d72631959f69"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.64",
+ "syn 2.0.68",
 ]
 
 [[package]]

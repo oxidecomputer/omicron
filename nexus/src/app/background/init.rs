@@ -21,6 +21,7 @@ use super::tasks::nat_cleanup;
 use super::tasks::phantom_disks;
 use super::tasks::physical_disk_adoption;
 use super::tasks::region_replacement;
+use super::tasks::region_replacement_driver;
 use super::tasks::service_firewall_rules;
 use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
@@ -65,6 +66,7 @@ pub struct BackgroundTasks {
     pub task_switch_port_settings_manager: Activator,
     pub task_v2p_manager: Activator,
     pub task_region_replacement: Activator,
+    pub task_region_replacement_driver: Activator,
     pub task_instance_watcher: Activator,
     pub task_service_firewall_propagation: Activator,
     pub task_abandoned_vmm_reaper: Activator,
@@ -148,6 +150,7 @@ impl BackgroundTasksInitializer {
             task_switch_port_settings_manager: Activator::new_stub(),
             task_v2p_manager: Activator::new_stub(),
             task_region_replacement: Activator::new_stub(),
+            task_region_replacement_driver: Activator::new_stub(),
             task_instance_watcher: Activator::new_stub(),
             task_service_firewall_propagation: Activator::new_stub(),
             task_abandoned_vmm_reaper: Activator::new_stub(),
@@ -196,6 +199,7 @@ impl BackgroundTasksInitializer {
             task_switch_port_settings_manager,
             task_v2p_manager,
             task_region_replacement,
+            task_region_replacement_driver,
             task_instance_watcher,
             task_service_firewall_propagation,
             task_abandoned_vmm_reaper,
@@ -464,6 +468,25 @@ impl BackgroundTasksInitializer {
                 opctx.child(BTreeMap::new()),
                 vec![],
                 Some(task_region_replacement),
+            );
+        };
+
+        // Background task: drive region replacements forward to completion
+        {
+            let detector =
+                region_replacement_driver::RegionReplacementDriver::new(
+                    datastore.clone(),
+                    saga_request.clone(),
+                );
+
+            driver.register(
+                String::from("region_replacement_driver"),
+                String::from("drive region replacements forward to completion"),
+                config.region_replacement_driver.period_secs,
+                Box::new(detector),
+                opctx.child(BTreeMap::new()),
+                vec![],
+                Some(task_region_replacement_driver),
             );
         };
 
