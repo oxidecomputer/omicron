@@ -305,8 +305,8 @@ impl JsonSchema for Name {
                     "Names must begin with a lower case ASCII letter, be \
                      composed exclusively of lowercase ASCII, uppercase \
                      ASCII, numbers, and '-', and may not end with a '-'. \
-                     Names cannot be a UUID though they may contain a UUID."
-                        .to_string(),
+                     Names cannot be a UUID, but they may contain a UUID. \
+                     They can be at most 63 characters long.".to_string(),
                 ),
                 ..Default::default()
             })),

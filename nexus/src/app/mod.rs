@@ -504,7 +504,7 @@ impl Nexus {
                         "populate complete; activating background tasks"
                     );
                     for task in task_nexus.background_tasks.driver.tasks() {
-                        task_nexus.background_tasks.driver.activate(task);
+                        task_nexus.background_tasks.activate(task);
                     }
                 }
                 Err(_) => {

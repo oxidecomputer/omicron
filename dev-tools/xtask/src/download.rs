@@ -257,23 +257,6 @@ async fn streaming_download(url: &str, path: &Utf8Path) -> Result<()> {
     Ok(())
 }
 
-/// Returns the hex, lowercase md5 checksum of a file at `path`.
-async fn md5_checksum(path: &Utf8Path) -> Result<String> {
-    let mut buf = vec![0u8; 65536];
-    let mut file = tokio::fs::File::open(path).await?;
-    let mut ctx = md5::Context::new();
-    loop {
-        let n = file.read(&mut buf).await?;
-        if n == 0 {
-            break;
-        }
-        ctx.write_all(&buf[0..n])?;
-    }
-
-    let digest = ctx.compute();
-    Ok(format!("{digest:x}"))
-}
-
 /// Returns the hex, lowercase sha2 checksum of a file at `path`.
 async fn sha2_checksum(path: &Utf8Path) -> Result<String> {
     let mut buf = vec![0u8; 65536];
@@ -382,14 +365,12 @@ async fn set_permissions(path: &Utf8Path, mode: u32) -> Result<()> {
 }
 
 enum ChecksumAlgorithm {
-    Md5,
     Sha2,
 }
 
 impl ChecksumAlgorithm {
     async fn checksum(&self, path: &Utf8Path) -> Result<String> {
         match self {
-            ChecksumAlgorithm::Md5 => md5_checksum(path).await,
             ChecksumAlgorithm::Sha2 => sha2_checksum(path).await,
         }
     }
@@ -459,7 +440,7 @@ impl<'a> Downloader<'a> {
 
         let checksums_path = self.versions_dir.join("clickhouse_checksums");
         let [checksum] = get_values_from_file(
-            [&format!("CIDL_MD5_{}", os.env_name())],
+            [&format!("CIDL_SHA256_{}", os.env_name())],
             &checksums_path,
         )
         .await?;
@@ -491,7 +472,7 @@ impl<'a> Downloader<'a> {
             &self.log,
             &tarball_path,
             &tarball_url,
-            ChecksumAlgorithm::Md5,
+            ChecksumAlgorithm::Sha2,
             &checksum,
         )
         .await?;
