@@ -1462,6 +1462,7 @@
           "checker": {
             "nullable": true,
             "description": "Checker to apply to incoming messages.",
+            "default": null,
             "type": "string"
           },
           "originate": {
@@ -1474,6 +1475,7 @@
           "shaper": {
             "nullable": true,
             "description": "Shaper to apply to outgoing messages.",
+            "default": null,
             "type": "string"
           }
         },
@@ -1571,6 +1573,7 @@
           "local_pref": {
             "nullable": true,
             "description": "Apply a local preference to routes received from this peer.",
+            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -1578,11 +1581,13 @@
           "md5_auth_key": {
             "nullable": true,
             "description": "Use the given key for TCP-MD5 authentication with the peer.",
+            "default": null,
             "type": "string"
           },
           "min_ttl": {
             "nullable": true,
             "description": "Require messages from a peer have a minimum IP time to live field.",
+            "default": null,
             "type": "integer",
             "format": "uint8",
             "minimum": 0
@@ -1590,6 +1595,7 @@
           "multi_exit_discriminator": {
             "nullable": true,
             "description": "Apply the provided multi-exit discriminator (MED) updates sent to the peer.",
+            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -1601,6 +1607,7 @@
           "remote_asn": {
             "nullable": true,
             "description": "Require that a peer has a specified ASN.",
+            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -1608,6 +1615,7 @@
           "vlan_id": {
             "nullable": true,
             "description": "Associate a VLAN ID with a BGP peer session.",
+            "default": null,
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -3380,13 +3388,16 @@
         "enum": [
           "gimlet_sp",
           "gimlet_rot",
+          "gimlet_rot_bootloader",
           "host",
           "trampoline",
           "control_plane",
           "psc_sp",
           "psc_rot",
+          "psc_rot_bootloader",
           "switch_sp",
-          "switch_rot"
+          "switch_rot",
+          "switch_rot_bootloader"
         ]
       },
       "L4PortRange": {
@@ -4244,6 +4255,7 @@
           "vlan_id": {
             "nullable": true,
             "description": "The VLAN id associated with this route.",
+            "default": null,
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -4551,6 +4563,7 @@
           "vlan_id": {
             "nullable": true,
             "description": "The VLAN id (if any) associated with this address.",
+            "default": null,
             "type": "integer",
             "format": "uint16",
             "minimum": 0

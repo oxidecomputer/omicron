@@ -484,6 +484,15 @@ impl From<omicron_common::api::internal::nexus::KnownArtifactKind>
         use omicron_common::api::internal::nexus::KnownArtifactKind;
 
         match s {
+            KnownArtifactKind::GimletRotBootloader => {
+                types::KnownArtifactKind::GimletRotBootloader
+            }
+            KnownArtifactKind::PscRotBootloader => {
+                types::KnownArtifactKind::PscRotBootloader
+            }
+            KnownArtifactKind::SwitchRotBootloader => {
+                types::KnownArtifactKind::SwitchRotBootloader
+            }
             KnownArtifactKind::GimletSp => types::KnownArtifactKind::GimletSp,
             KnownArtifactKind::GimletRot => types::KnownArtifactKind::GimletRot,
             KnownArtifactKind::Host => types::KnownArtifactKind::Host,

@@ -8,29 +8,22 @@ use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use oximeter::types::MetricsError;
 use oximeter::types::ProducerRegistry;
+use oximeter_instruments::kstat::link;
+use oximeter_instruments::kstat::CollectionDetails;
+use oximeter_instruments::kstat::Error as KstatError;
+use oximeter_instruments::kstat::KstatSampler;
+use oximeter_instruments::kstat::TargetId;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use sled_hardware_types::Baseboard;
 use slog::Logger;
+use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 use uuid::Uuid;
-
-cfg_if::cfg_if! {
-    if #[cfg(target_os = "illumos")] {
-        use oximeter_instruments::kstat::link;
-        use oximeter_instruments::kstat::CollectionDetails;
-        use oximeter_instruments::kstat::Error as KstatError;
-        use oximeter_instruments::kstat::KstatSampler;
-        use oximeter_instruments::kstat::TargetId;
-        use std::collections::BTreeMap;
-        use std::sync::Mutex;
-    } else {
-        use anyhow::anyhow;
-    }
-}
 
 /// The interval on which we ask `oximeter` to poll us for metric data.
 pub(crate) const METRIC_COLLECTION_INTERVAL: Duration = Duration::from_secs(30);
@@ -44,13 +37,8 @@ const METRIC_REQUEST_MAX_SIZE: usize = 10 * 1024 * 1024;
 /// An error during sled-agent metric production.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[cfg(target_os = "illumos")]
     #[error("Kstat-based metric failure")]
     Kstat(#[source] KstatError),
-
-    #[cfg(not(target_os = "illumos"))]
-    #[error("Kstat-based metric failure")]
-    Kstat(#[source] anyhow::Error),
 
     #[error("Failed to insert metric producer into registry")]
     Registry(#[source] MetricsError),
@@ -70,7 +58,6 @@ pub enum Error {
 
 // Basic metadata about the sled agent used when publishing metrics.
 #[derive(Clone, Debug)]
-#[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
 struct SledIdentifiers {
     sled_id: Uuid,
     rack_id: Uuid,
@@ -86,13 +73,9 @@ struct SledIdentifiers {
 // pattern, but until we have more statistics, it's not clear whether that's
 // worth it right now.
 #[derive(Clone)]
-// NOTE: The ID fields aren't used on non-illumos systems, rather than changing
-// the name of fields that are not yet used.
-#[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
 pub struct MetricsManager {
     metadata: Arc<SledIdentifiers>,
     _log: Logger,
-    #[cfg(target_os = "illumos")]
     kstat_sampler: KstatSampler,
     // TODO-scalability: We may want to generalize this to store any kind of
     // tracked target, and use a naming scheme that allows us pick out which
@@ -103,7 +86,6 @@ pub struct MetricsManager {
     // for disks or memory. If we wanted to guarantee uniqueness, we could
     // namespace them internally, e.g., `"datalink:{link_name}"` would be the
     // real key.
-    #[cfg(target_os = "illumos")]
     tracked_links: Arc<Mutex<BTreeMap<String, TargetId>>>,
     producer_server: Arc<ProducerServer>,
 }
@@ -122,23 +104,16 @@ impl MetricsManager {
     ) -> Result<Self, Error> {
         let producer_server =
             start_producer_server(&log, sled_id, sled_address)?;
-
-        cfg_if::cfg_if! {
-            if #[cfg(target_os = "illumos")] {
-                let kstat_sampler = KstatSampler::new(&log).map_err(Error::Kstat)?;
-                producer_server
-                    .registry()
-                    .register_producer(kstat_sampler.clone())
-                    .map_err(Error::Registry)?;
-                let tracked_links = Arc::new(Mutex::new(BTreeMap::new()));
-            }
-        }
+        let kstat_sampler = KstatSampler::new(&log).map_err(Error::Kstat)?;
+        producer_server
+            .registry()
+            .register_producer(kstat_sampler.clone())
+            .map_err(Error::Registry)?;
+        let tracked_links = Arc::new(Mutex::new(BTreeMap::new()));
         Ok(Self {
             metadata: Arc::new(SledIdentifiers { sled_id, rack_id, baseboard }),
             _log: log,
-            #[cfg(target_os = "illumos")]
             kstat_sampler,
-            #[cfg(target_os = "illumos")]
             tracked_links,
             producer_server,
         })
@@ -178,7 +153,6 @@ fn start_producer_server(
     ProducerServer::start(&config).map(Arc::new).map_err(Error::ProducerServer)
 }
 
-#[cfg(target_os = "illumos")]
 impl MetricsManager {
     /// Track metrics for a physical datalink.
     pub async fn track_physical_link(
@@ -187,12 +161,12 @@ impl MetricsManager {
         interval: Duration,
     ) -> Result<(), Error> {
         let hostname = hostname()?;
-        let link = link::PhysicalDataLink {
+        let link = link::physical_data_link::PhysicalDataLink {
             rack_id: self.metadata.rack_id,
             sled_id: self.metadata.sled_id,
-            serial: self.serial_number(),
-            hostname,
-            link_name: link_name.as_ref().to_string(),
+            serial: self.serial_number().into(),
+            hostname: hostname.into(),
+            link_name: link_name.as_ref().to_string().into(),
         };
         let details = CollectionDetails::never(interval);
         let id = self
@@ -224,29 +198,6 @@ impl MetricsManager {
         }
     }
 
-    /// Track metrics for a virtual datalink.
-    #[allow(dead_code)]
-    pub async fn track_virtual_link(
-        &self,
-        link_name: impl AsRef<str>,
-        hostname: impl AsRef<str>,
-        interval: Duration,
-    ) -> Result<(), Error> {
-        let link = link::VirtualDataLink {
-            rack_id: self.metadata.rack_id,
-            sled_id: self.metadata.sled_id,
-            serial: self.serial_number(),
-            hostname: hostname.as_ref().to_string(),
-            link_name: link_name.as_ref().to_string(),
-        };
-        let details = CollectionDetails::never(interval);
-        self.kstat_sampler
-            .add_target(link, details)
-            .await
-            .map(|_| ())
-            .map_err(Error::Kstat)
-    }
-
     // Return the serial number out of the baseboard, if one exists.
     fn serial_number(&self) -> String {
         match &self.metadata.baseboard {
@@ -257,48 +208,7 @@ impl MetricsManager {
     }
 }
 
-#[cfg(not(target_os = "illumos"))]
-impl MetricsManager {
-    /// Track metrics for a physical datalink.
-    pub async fn track_physical_link(
-        &self,
-        _link_name: impl AsRef<str>,
-        _interval: Duration,
-    ) -> Result<(), Error> {
-        Err(Error::Kstat(anyhow!(
-            "kstat metrics are not supported on this platform"
-        )))
-    }
-
-    /// Stop tracking metrics for a datalink.
-    ///
-    /// This works for both physical and virtual links.
-    #[allow(dead_code)]
-    pub async fn stop_tracking_link(
-        &self,
-        _link_name: impl AsRef<str>,
-    ) -> Result<(), Error> {
-        Err(Error::Kstat(anyhow!(
-            "kstat metrics are not supported on this platform"
-        )))
-    }
-
-    /// Track metrics for a virtual datalink.
-    #[allow(dead_code)]
-    pub async fn track_virtual_link(
-        &self,
-        _link_name: impl AsRef<str>,
-        _hostname: impl AsRef<str>,
-        _interval: Duration,
-    ) -> Result<(), Error> {
-        Err(Error::Kstat(anyhow!(
-            "kstat metrics are not supported on this platform"
-        )))
-    }
-}
-
 // Return the current hostname if possible.
-#[cfg(target_os = "illumos")]
 fn hostname() -> Result<String, Error> {
     // See netdb.h
     const MAX_LEN: usize = 256;
