@@ -127,8 +127,8 @@ impl BackgroundTask for TargetBlueprintLoader {
                 // bugs further up the stack.
                 if *old_blueprint != new_blueprint {
                     let message = format!(
-                        "blueprint for id {} changed. \
-                             Blueprints are supposed to be immutable.",
+                        "blueprint for id {} changed. Blueprints are supposed \
+                         to be immutable.",
                         target_id
                     );
                     error!(&log, "{}", message);

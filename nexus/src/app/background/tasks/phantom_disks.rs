@@ -74,7 +74,8 @@ impl BackgroundTask for PhantomDiskDetector {
                 if let Err(e) = result {
                     error!(
                         &log,
-                        "error un-deleting disk {} and setting to faulted: {:#}",
+                        "error un-deleting disk {} and setting to faulted: \
+                         {:#}",
                         disk.id(),
                         e,
                     );

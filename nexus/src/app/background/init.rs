@@ -165,7 +165,7 @@ impl BackgroundTasks {
                 String::from("metrics_producer_gc"),
                 String::from(
                     "unregisters Oximeter metrics producers that have not \
-                    renewed their lease",
+                     renewed their lease",
                 ),
                 config.metrics_producer_gc.period_secs,
                 Box::new(gc),
@@ -184,8 +184,8 @@ impl BackgroundTasks {
                 String::from("external_endpoints"),
                 String::from(
                     "reads config for silos and TLS certificates to determine \
-                    the right set of HTTP endpoints, their HTTP server names, \
-                    and which TLS certificates to use on each one",
+                     the right set of HTTP endpoints, their HTTP server \
+                     names, and which TLS certificates to use on each one",
                 ),
                 config.external_endpoints.period_secs,
                 Box::new(watcher),
@@ -199,13 +199,13 @@ impl BackgroundTasks {
             driver.register(
                 "nat_v4_garbage_collector".to_string(),
                 String::from(
-                    "prunes soft-deleted IPV4 NAT entries from ipv4_nat_entry table \
-                     based on a predetermined retention policy",
+                    "prunes soft-deleted IPV4 NAT entries from ipv4_nat_entry \
+                     table based on a predetermined retention policy",
                 ),
                 config.nat_cleanup.period_secs,
                 Box::new(nat_cleanup::Ipv4NatGarbageCollector::new(
                     datastore.clone(),
-                    resolver.clone()
+                    resolver.clone(),
                 )),
                 opctx.child(BTreeMap::new()),
                 vec![],
@@ -217,7 +217,7 @@ impl BackgroundTasks {
                 "bfd_manager".to_string(),
                 String::from(
                     "Manages bidirectional fowarding detection (BFD) \
-                    configuration on rack switches",
+                     configuration on rack switches",
                 ),
                 config.bfd_manager.period_secs,
                 Box::new(bfd::BfdManager::new(
@@ -311,7 +311,7 @@ impl BackgroundTasks {
                 String::from("inventory_collection"),
                 String::from(
                     "collects hardware and software inventory data from the \
-                    whole system",
+                     whole system",
                 ),
                 config.inventory.period_secs,
                 Box::new(collector),
@@ -343,7 +343,8 @@ impl BackgroundTasks {
             driver.register(
                 "service_zone_nat_tracker".to_string(),
                 String::from(
-                    "ensures service zone nat records are recorded in NAT RPW table",
+                    "ensures service zone nat records are recorded in NAT RPW \
+                     table",
                 ),
                 config.sync_service_zone_nat.period_secs,
                 Box::new(ServiceZoneNatTracker::new(
@@ -390,7 +391,10 @@ impl BackgroundTasks {
 
             let task = driver.register(
                 String::from("region_replacement"),
-                String::from("detects if a region requires replacing and begins the process"),
+                String::from(
+                    "detects if a region requires replacing and begins the \
+                     process",
+                ),
                 config.region_replacement.period_secs,
                 Box::new(detector),
                 opctx.child(BTreeMap::new()),
@@ -442,8 +446,8 @@ impl BackgroundTasks {
         let task_service_firewall_propagation = driver.register(
             String::from("service_firewall_rule_propagation"),
             String::from(
-                "propagates VPC firewall rules for Omicron \
-                services with external network connectivity",
+                "propagates VPC firewall rules for Omicron services with \
+                 external network connectivity",
             ),
             config.service_firewall_propagation.period_secs,
             Box::new(service_firewall_rules::ServiceRulePropagator::new(
@@ -457,12 +461,11 @@ impl BackgroundTasks {
         let task_abandoned_vmm_reaper = driver.register(
             String::from("abandoned_vmm_reaper"),
             String::from(
-                "deletes sled reservations for VMMs that have been abandoned by their instances",
+                "deletes sled reservations for VMMs that have been abandoned \
+                 by their instances",
             ),
             config.abandoned_vmm_reaper.period_secs,
-            Box::new(abandoned_vmm_reaper::AbandonedVmmReaper::new(
-                datastore,
-            )),
+            Box::new(abandoned_vmm_reaper::AbandonedVmmReaper::new(datastore)),
             opctx.child(BTreeMap::new()),
             vec![],
         );
@@ -551,8 +554,8 @@ fn init_dns(
         format!("dns_propagation_{}", dns_group),
         format!(
             "propagates latest {} DNS configuration (from {:?} background \
-            task) to the latest list of DNS servers (from {:?} background \
-            task)",
+             task) to the latest list of DNS servers (from {:?} background \
+             task)",
             dns_group, task_name_config, task_name_servers,
         ),
         config.period_secs_propagation,
@@ -634,7 +637,10 @@ pub mod test {
             };
             match record.get(0) {
                 Some(dns_service_client::types::DnsRecord::Srv(srv)) => srv,
-                record => panic!("expected a SRV record for {internal_dns_srv_name}, found {record:?}"),
+                record => panic!(
+                    "expected a SRV record for {internal_dns_srv_name}, found \
+                     {record:?}"
+                ),
             }
         };
 
@@ -781,7 +787,7 @@ pub mod test {
     ) {
         println!(
             "waiting for propagation of generation {generation} to {label} \
-            DNS server ({addr})",
+             DNS server ({addr})",
         );
 
         let client = dns_service_client::Client::new(
@@ -812,13 +818,13 @@ pub mod test {
         .await;
         if let Err(err) = result {
             panic!(
-                "DNS generation {generation} not propagated to \
-                {label} DNS server ({addr}) within {poll_max:?}: {err}"
+                "DNS generation {generation} not propagated to {label} DNS \
+                 server ({addr}) within {poll_max:?}: {err}"
             );
         } else {
             println!(
-                "DNS generation {generation} propagated to {label} \
-                DNS server ({addr}) successfully."
+                "DNS generation {generation} propagated to {label} DNS server \
+                 ({addr}) successfully."
             );
         }
     }
