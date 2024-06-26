@@ -300,7 +300,10 @@ impl StorageManagerTestHarness {
             .expect("Failed to remove vdev");
     }
 
-    // XXX MTZ: Provide a vdev update aka new firmware.
+    // Update a vdev.
+    //
+    // Note: currently the only portion of a vdev that we update is the firmware
+    // metadata.
     pub async fn update_vdev(&mut self, raw: &RawDisk) {
         self.handle
             .detected_raw_disk_update(raw.clone())
