@@ -1049,6 +1049,7 @@
           "checker": {
             "nullable": true,
             "description": "Checker to apply to incoming messages.",
+            "default": null,
             "type": "string"
           },
           "originate": {
@@ -1061,6 +1062,7 @@
           "shaper": {
             "nullable": true,
             "description": "Shaper to apply to outgoing messages.",
+            "default": null,
             "type": "string"
           }
         },
@@ -2854,6 +2856,7 @@
           "vlan_id": {
             "nullable": true,
             "description": "The VLAN id associated with this route.",
+            "default": null,
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -5050,6 +5053,7 @@
           "vlan_id": {
             "nullable": true,
             "description": "The VLAN id (if any) associated with this address.",
+            "default": null,
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -5070,6 +5074,7 @@
           },
           "allowed_export": {
             "description": "Apply export policy to this peer with an allow list.",
+            "default": null,
             "allOf": [
               {
                 "$ref": "#/components/schemas/UserSpecifiedImportExportPolicy"
@@ -5078,6 +5083,7 @@
           },
           "allowed_import": {
             "description": "Apply import policy to this peer with an allow list.",
+            "default": null,
             "allOf": [
               {
                 "$ref": "#/components/schemas/UserSpecifiedImportExportPolicy"
@@ -5093,6 +5099,7 @@
           "auth_key_id": {
             "nullable": true,
             "description": "The key identifier for authentication to use with the peer.",
+            "default": null,
             "allOf": [
               {
                 "$ref": "#/components/schemas/BgpAuthKeyId"
@@ -5152,6 +5159,7 @@
           "local_pref": {
             "nullable": true,
             "description": "Apply a local preference to routes received from this peer.",
+            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -5159,6 +5167,7 @@
           "min_ttl": {
             "nullable": true,
             "description": "Require messages from a peer have a minimum IP time to live field.",
+            "default": null,
             "type": "integer",
             "format": "uint8",
             "minimum": 0
@@ -5166,6 +5175,7 @@
           "multi_exit_discriminator": {
             "nullable": true,
             "description": "Apply the provided multi-exit discriminator (MED) updates sent to the peer.",
+            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -5177,6 +5187,7 @@
           "remote_asn": {
             "nullable": true,
             "description": "Require that a peer has a specified ASN.",
+            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -5184,6 +5195,7 @@
           "vlan_id": {
             "nullable": true,
             "description": "Associate a VLAN ID with a BGP peer session.",
+            "default": null,
             "type": "integer",
             "format": "uint16",
             "minimum": 0

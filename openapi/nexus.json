@@ -16002,6 +16002,7 @@
           "signing_keypair": {
             "nullable": true,
             "description": "request signing key pair",
+            "default": null,
             "allOf": [
               {
                 "$ref": "#/components/schemas/DerEncodedKeyPair"

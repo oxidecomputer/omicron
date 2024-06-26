@@ -1605,8 +1605,9 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=e63f6d408908b3332d7cd89a4dd44a0f980d931d#e63f6d408908b3332d7cd89a4dd44a0f980d931d"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=3c3fa8482fe09a01da62fbd35efe124ea9cac9e7#3c3fa8482fe09a01da62fbd35efe124ea9cac9e7"
 dependencies = [
+ "oxnet",
  "percent-encoding",
  "progenitor",
  "reqwest",
@@ -4007,7 +4008,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.5",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -4290,7 +4291,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=e63f6d408908b3332d7cd89a4dd44a0f980d931d#e63f6d408908b3332d7cd89a4dd44a0f980d931d"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=3c3fa8482fe09a01da62fbd35efe124ea9cac9e7#3c3fa8482fe09a01da62fbd35efe124ea9cac9e7"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6411,7 +6412,7 @@ dependencies = [
 [[package]]
 name = "oxnet"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/oxnet?branch=main#42b4d3c77c7f5f2636cd6c4bbf37ac3eada047e0"
+source = "git+https://github.com/oxidecomputer/oxnet#2612d2203effcfdcbf83778a77f1bfd03fe6ed24"
 dependencies = [
  "ipnetwork",
  "schemars",
@@ -8287,9 +8288,9 @@ dependencies = [
 
 [[package]]
 name = "schemars"
-version = "0.8.20"
+version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0218ceea14babe24a4a5836f86ade86c1effbc198164e619194cb5069187e29"
+checksum = "09c024468a378b7e36765cd36702b7a90cc3cba11654f6685c8f233408e89e92"
 dependencies = [
  "bytes",
  "chrono",
@@ -8302,9 +8303,9 @@ dependencies = [
 
 [[package]]
 name = "schemars_derive"
-version = "0.8.20"
+version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ed5a1ccce8ff962e31a165d41f6e2a2dd1245099dc4d594f5574a86cd90f4d3"
+checksum = "b1eee588578aff73f856ab961cd2f79e36bc45d7ded33a7562adba4667aecc0e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8489,9 +8490,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.117"
+version = "1.0.118"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "455182ea6142b14f93f4bc5320a2b31c1f266b66a4a5c858b013302a5d8cbfc3"
+checksum = "d947f6b3163d8857ea16c4fa0dd4840d52f3041039a85decd46867eb1abef2e4"
 dependencies = [
  "itoa",
  "ryu",

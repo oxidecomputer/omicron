@@ -328,8 +328,8 @@ macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 mockall = "0.12"
 newtype_derive = "0.1.6"
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "e63f6d408908b3332d7cd89a4dd44a0f980d931d" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "e63f6d408908b3332d7cd89a4dd44a0f980d931d" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "3c3fa8482fe09a01da62fbd35efe124ea9cac9e7" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "3c3fa8482fe09a01da62fbd35efe124ea9cac9e7" }
 multimap = "0.10.0"
 nexus-auth = { path = "nexus/auth" }
 nexus-client = { path = "clients/nexus-client" }
@@ -349,7 +349,7 @@ omicron-certificates = { path = "certificates" }
 omicron-passwords = { path = "passwords" }
 omicron-workspace-hack = "0.1.0"
 oxlog = { path = "dev-tools/oxlog" }
-oxnet = { git = "https://github.com/oxidecomputer/oxnet", branch = "main" }
+oxnet = { git = "https://github.com/oxidecomputer/oxnet" }
 nexus-test-interface = { path = "nexus/test-interface" }
 nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
