@@ -92,7 +92,7 @@ pub fn ensure_links_have_global_zone_link_local_v6_addresses(
 
     for link in links {
         let addrobj = AddrObject::link_local(&link.0)?;
-        Zones::ensure_has_link_local_v6_address(None, None, &addrobj)?;
+        Zones::ensure_has_link_local_v6_address(None, &addrobj)?;
         addr_objs.push(addrobj);
     }
 

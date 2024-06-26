@@ -323,7 +323,6 @@ async fn switch_zone_setup(
         info!(&log, "Ensuring link local links"; "links" => ?links);
         for link in &links {
             Zones::ensure_has_link_local_v6_address(
-                Some(&log),
                 None,
                 &AddrObject::new(link, IPV6_LINK_LOCAL_NAME).unwrap(),
             )
@@ -353,16 +352,16 @@ async fn switch_zone_setup(
             ))
         })?;
 
-    let _ =
-        Zones::create_address_internal(Some(&log), None, &addrobj, addrtype)
-            .map_err(|err| {
-                CmdError::Failure(anyhow!(
-                    "Could not create bootstrap address {} {:?}: {}",
-                    addrobj,
-                    addrtype,
-                    err
-                ))
-            })?;
+    let _ = Zones::create_address_internal(None, &addrobj, addrtype).map_err(
+        |err| {
+            CmdError::Failure(anyhow!(
+                "Could not create bootstrap address {} {:?}: {}",
+                addrobj,
+                addrtype,
+                err
+            ))
+        },
+    )?;
 
     Ok(())
 }
