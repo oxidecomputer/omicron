@@ -6,6 +6,7 @@
 
 // Copyright 2024 Oxide Computer Company
 
+use super::oxql;
 use crate::make_client;
 use clap::Args;
 use dropshot::EmptyScanParams;
@@ -63,43 +64,7 @@ async fn describe_virtual_table(
         Err(_) => println!("Invalid timeseries name: {table}"),
         Ok(name) => {
             if let Some(schema) = client.schema_for_timeseries(&name).await? {
-                let mut cols =
-                    Vec::with_capacity(schema.field_schema.len() + 2);
-                let mut types = cols.clone();
-                for field in schema.field_schema.iter() {
-                    cols.push(field.name.clone());
-                    types.push(field.field_type.to_string());
-                }
-                cols.push("timestamp".into());
-                types.push("DateTime64".into());
-
-                if schema.datum_type.is_histogram() {
-                    cols.push("start_time".into());
-                    types.push("DateTime64".into());
-
-                    cols.push("bins".into());
-                    types.push(format!(
-                        "Array[{}]",
-                        schema
-                            .datum_type
-                            .to_string()
-                            .strip_prefix("Histogram")
-                            .unwrap()
-                            .to_lowercase(),
-                    ));
-
-                    cols.push("counts".into());
-                    types.push("Array[u64]".into());
-                } else if schema.datum_type.is_cumulative() {
-                    cols.push("start_time".into());
-                    types.push("DateTime64".into());
-                    cols.push("datum".into());
-                    types.push(schema.datum_type.to_string());
-                } else {
-                    cols.push("datum".into());
-                    types.push(schema.datum_type.to_string());
-                }
-
+                let (cols, types) = oxql::prepare_columns(&schema);
                 let mut builder = tabled::builder::Builder::default();
                 builder.push_record(cols); // first record is the header
                 builder.push_record(types);

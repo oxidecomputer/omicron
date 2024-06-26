@@ -20,6 +20,7 @@ use super::tasks::nat_cleanup;
 use super::tasks::phantom_disks;
 use super::tasks::physical_disk_adoption;
 use super::tasks::region_replacement;
+use super::tasks::region_replacement_driver;
 use super::tasks::service_firewall_rules;
 use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
@@ -103,6 +104,9 @@ pub struct BackgroundTasks {
     /// task handle for the task that detects if regions need replacement and
     /// begins the process
     pub task_region_replacement: TaskHandle,
+
+    /// task handle for the task that drives region replacements forward
+    pub task_region_replacement_driver: TaskHandle,
 
     /// task handle for the task that polls sled agents for instance states.
     pub task_instance_watcher: TaskHandle,
@@ -400,6 +404,26 @@ impl BackgroundTasks {
             task
         };
 
+        // Background task: drive region replacements forward to completion
+        let task_region_replacement_driver = {
+            let detector =
+                region_replacement_driver::RegionReplacementDriver::new(
+                    datastore.clone(),
+                    saga_request.clone(),
+                );
+
+            let task = driver.register(
+                String::from("region_replacement_driver"),
+                String::from("drive region replacements forward to completion"),
+                config.region_replacement_driver.period_secs,
+                Box::new(detector),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            );
+
+            task
+        };
+
         let task_instance_watcher = {
             let watcher = instance_watcher::InstanceWatcher::new(
                 datastore.clone(),
@@ -417,6 +441,7 @@ impl BackgroundTasks {
                 vec![],
             )
         };
+
         // Background task: service firewall rule propagation
         let task_service_firewall_propagation = driver.register(
             String::from("service_firewall_rule_propagation"),
@@ -466,6 +491,7 @@ impl BackgroundTasks {
             task_switch_port_settings_manager,
             task_v2p_manager,
             task_region_replacement,
+            task_region_replacement_driver,
             task_instance_watcher,
             task_service_firewall_propagation,
             task_abandoned_vmm_reaper,
