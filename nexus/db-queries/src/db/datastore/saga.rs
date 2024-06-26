@@ -9,17 +9,13 @@ use crate::db;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::Generation;
-use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
-use uuid::Uuid;
 
 impl DataStore {
     pub async fn saga_create(
@@ -102,55 +98,5 @@ impl DataStore {
                 )
             )),
         }
-    }
-
-    pub async fn saga_list_unfinished_by_id(
-        &self,
-        sec_id: &db::SecId,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::saga_types::Saga> {
-        use db::schema::saga::dsl;
-        paginated(dsl::saga, dsl::id, &pagparams)
-            .filter(dsl::saga_state.ne(db::saga_types::SagaCachedState(
-                steno::SagaCachedState::Done,
-            )))
-            .filter(dsl::current_sec.eq(*sec_id))
-            .load_async(&*self.pool_connection_unauthorized().await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::SagaDbg,
-                        LookupType::ById(sec_id.0),
-                    ),
-                )
-            })
-    }
-
-    pub async fn saga_node_event_list_by_id(
-        &self,
-        id: db::saga_types::SagaId,
-        pagparams: &DataPageParams<'_, db::saga_types::SagaNodeId>,
-    ) -> ListResultVec<steno::SagaNodeEvent> {
-        use db::schema::saga_node_event::dsl;
-        paginated(dsl::saga_node_event, dsl::node_id, &pagparams)
-            .filter(dsl::saga_id.eq(id))
-            .load_async::<db::saga_types::SagaNodeEvent>(
-                &*self.pool_connection_unauthorized().await?,
-            )
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::SagaDbg,
-                        LookupType::ById(id.0 .0),
-                    ),
-                )
-            })?
-            .into_iter()
-            .map(|db_event| steno::SagaNodeEvent::try_from(db_event))
-            .collect::<Result<_, Error>>()
     }
 }
