@@ -128,13 +128,32 @@ impl RouterRoute {
         }
     }
 
+    /// Create a subnet routing rule for a VPC's system router.
+    ///
+    /// This defaults to use the same name as the subnet. If this would conflict
+    /// with the internet gateway rules, then the UUID is used instead (alongside
+    /// notice that a name conflict has occurred).
     pub fn for_subnet(
         route_id: Uuid,
         system_router_id: Uuid,
         subnet: Name,
-    ) -> Result<Self, ()> {
-        let name = format!("sn-{}", subnet).parse().map_err(|_| ())?;
-        Ok(Self::new(
+    ) -> Self {
+        let forbidden_names = ["default-v4", "default-v6"];
+
+        let name = if forbidden_names.contains(&subnet.as_str()) {
+            // unwrap safety: a uuid is not by itself a valid name
+            // so prepend it with another string.
+            // - length constraint is <63 chars,
+            // - a UUID is 36 chars including hyphens,
+            // - "{subnet}-" is 11 chars
+            // - "conflict-" is 9 chars
+            //   = 56 chars
+            format!("conflict-{subnet}-{route_id}").parse().unwrap()
+        } else {
+            subnet.0.clone()
+        };
+
+        Self::new(
             route_id,
             system_router_id,
             external::RouterRouteKind::VpcSubnet,
@@ -146,7 +165,7 @@ impl RouterRoute {
                 target: external::RouteTarget::Subnet(subnet.0.clone()),
                 destination: external::RouteDestination::Subnet(subnet.0),
             },
-        ))
+        )
     }
 }
 

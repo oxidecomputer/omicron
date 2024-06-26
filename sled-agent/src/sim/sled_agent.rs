@@ -38,7 +38,7 @@ use omicron_common::api::internal::nexus::{
 };
 use omicron_common::api::internal::shared::{
     RackNetworkConfig, ResolvedVpcRoute, ResolvedVpcRouteSet,
-    ResolvedVpcRouteState, RouterId, RouterVersion,
+    ResolvedVpcRouteState, RouterId, RouterKind, RouterVersion,
 };
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, ZpoolUuid};
@@ -368,16 +368,8 @@ impl SledAgent {
         let mut routes = self.vpc_routes.lock().await;
         for nic in &hardware.nics {
             let my_routers = [
-                RouterId {
-                    // system
-                    vni: nic.vni,
-                    subnet: None,
-                },
-                RouterId {
-                    // custom
-                    vni: nic.vni,
-                    subnet: Some(nic.subnet),
-                },
+                RouterId { vni: nic.vni, kind: RouterKind::System },
+                RouterId { vni: nic.vni, kind: RouterKind::Custom(nic.subnet) },
             ];
 
             for router in my_routers {

@@ -11,6 +11,7 @@ use clap::Args;
 use crossterm::style::Stylize;
 use dropshot::EmptyScanParams;
 use dropshot::WhichPage;
+use oximeter::TimeseriesSchema;
 use oximeter_db::oxql::query::special_idents;
 use oximeter_db::oxql::Table;
 use oximeter_db::Client;
@@ -145,7 +146,70 @@ async fn list_timeseries(client: &Client) -> anyhow::Result<()> {
     }
 }
 
-// Describe a single timeseries.
+/// Prepare the columns for a timeseries or virtual table.
+pub(crate) fn prepare_columns(
+    schema: &TimeseriesSchema,
+) -> (Vec<String>, Vec<String>) {
+    let mut cols = Vec::with_capacity(schema.field_schema.len() + 2);
+    let mut types = cols.clone();
+
+    for field in schema.field_schema.iter() {
+        cols.push(field.name.clone());
+        types.push(field.field_type.to_string());
+    }
+
+    cols.push(special_idents::TIMESTAMP.into());
+    types.push(special_idents::DATETIME64.into());
+
+    if schema.datum_type.is_histogram() {
+        cols.push(special_idents::START_TIME.into());
+        types.push(special_idents::DATETIME64.into());
+
+        cols.push(special_idents::BINS.into());
+        types.push(
+            special_idents::array_type_name_from_histogram_type(
+                schema.datum_type,
+            )
+            .unwrap(),
+        );
+
+        cols.push(special_idents::COUNTS.into());
+        types.push(special_idents::ARRAYU64.into());
+
+        cols.push(special_idents::MIN.into());
+        types.push(special_idents::FLOAT64.into());
+
+        cols.push(special_idents::MAX.into());
+        types.push(special_idents::FLOAT64.into());
+
+        cols.push(special_idents::SUM_OF_SAMPLES.into());
+        types.push(special_idents::UINT64.into());
+
+        cols.push(special_idents::SQUARED_MEAN.into());
+        types.push(special_idents::UINT64.into());
+
+        for quantile in ["P50", "P90", "P99"].iter() {
+            cols.push(format!("{}_MARKER_HEIGHTS", quantile));
+            types.push(special_idents::ARRAYFLOAT64.into());
+            cols.push(format!("{}_MARKER_POSITIONS", quantile));
+            types.push(special_idents::ARRAYINT64.into());
+            cols.push(format!("{}_DESIRED_MARKER_POSITIONS", quantile));
+            types.push(special_idents::ARRAYFLOAT64.into());
+        }
+    } else if schema.datum_type.is_cumulative() {
+        cols.push(special_idents::START_TIME.into());
+        types.push(special_idents::DATETIME64.into());
+        cols.push(special_idents::DATUM.into());
+        types.push(schema.datum_type.to_string());
+    } else {
+        cols.push(special_idents::DATUM.into());
+        types.push(schema.datum_type.to_string());
+    }
+
+    (cols, types)
+}
+
+/// Describe a single timeseries.
 async fn describe_timeseries(
     client: &Client,
     timeseries: &str,
@@ -158,40 +222,7 @@ async fn describe_timeseries(
         ),
         Ok(name) => {
             if let Some(schema) = client.schema_for_timeseries(&name).await? {
-                let mut cols =
-                    Vec::with_capacity(schema.field_schema.len() + 2);
-                let mut types = cols.clone();
-                for field in schema.field_schema.iter() {
-                    cols.push(field.name.clone());
-                    types.push(field.field_type.to_string());
-                }
-                cols.push(special_idents::TIMESTAMP.into());
-                types.push(special_idents::DATETIME64.into());
-
-                if schema.datum_type.is_histogram() {
-                    cols.push(special_idents::START_TIME.into());
-                    types.push(special_idents::DATETIME64.into());
-
-                    cols.push(special_idents::BINS.into());
-                    types.push(
-                        special_idents::array_type_name_from_histogram_type(
-                            schema.datum_type,
-                        )
-                        .unwrap(),
-                    );
-
-                    cols.push(special_idents::COUNTS.into());
-                    types.push(special_idents::ARRAYU64.into());
-                } else if schema.datum_type.is_cumulative() {
-                    cols.push(special_idents::START_TIME.into());
-                    types.push(special_idents::DATETIME64.into());
-                    cols.push(special_idents::DATUM.into());
-                    types.push(schema.datum_type.to_string());
-                } else {
-                    cols.push(special_idents::DATUM.into());
-                    types.push(schema.datum_type.to_string());
-                }
-
+                let (cols, types) = prepare_columns(&schema);
                 let mut builder = tabled::builder::Builder::default();
                 builder.push_record(cols); // first record is the header
                 builder.push_record(types);
