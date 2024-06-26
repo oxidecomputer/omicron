@@ -52,7 +52,10 @@ rustc --version
 
 export CARGO_INCREMENTAL=0
 
-ptime -m ./tools/install_builder_prerequisites.sh -yp
+# Build xtask and omicron-releng simultaneously, since there's a good amount of overlap.
+cargo build --release --package xtask --package omicron-releng --bins
+
+XTASK_BIN=target/release/xtask ptime -m ./tools/install_builder_prerequisites.sh -yp
 source ./tools/include/force-git-over-https.sh
 
 rc=0
@@ -67,4 +70,4 @@ esac
 pfexec zfs create -p "rpool/images/$USER/host"
 pfexec zfs create -p "rpool/images/$USER/recovery"
 
-cargo xtask releng --output-dir /work
+cargo run --release --bin omicron-releng -- --output-dir /work
