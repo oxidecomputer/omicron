@@ -3285,7 +3285,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.7",
+ "socket2 0.4.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -9265,9 +9265,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "steno"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a1e7ccea133c197729abfd16dccf91a3c4d0da1e94bb0c0aa164c2b8a227481"
+version = "0.5.0-dev"
 dependencies = [
  "anyhow",
  "async-trait",

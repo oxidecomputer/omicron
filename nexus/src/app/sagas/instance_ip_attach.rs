@@ -10,13 +10,14 @@ use super::instance_common::{
 use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz};
+use anyhow::Context;
 use nexus_db_model::{IpAttachState, Ipv4NatEntry};
 use nexus_types::external_api::views;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, SledUuid};
 use serde::Deserialize;
 use serde::Serialize;
-use steno::ActionError;
+use steno::{ActionError, UndoActionPermanentError};
 use uuid::Uuid;
 
 // The IP attach/detach sagas do some resource locking -- because we
@@ -139,7 +140,7 @@ async fn siia_begin_attach_ip(
 
 async fn siia_begin_attach_ip_undo(
     sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), UndoActionPermanentError> {
     let log = sagactx.user_data().log();
     warn!(log, "siia_begin_attach_ip_undo: Reverting detached->attaching");
     let params = sagactx.saga_params::<Params>()?;
@@ -151,7 +152,8 @@ async fn siia_begin_attach_ip_undo(
         IpAttachState::Detached,
         &new_ip,
     )
-    .await?
+    .await
+    .context("instance_ip_move_state")?
     {
         error!(log, "siia_begin_attach_ip_undo: external IP was deleted")
     }
@@ -191,7 +193,7 @@ async fn siia_nat(
 
 async fn siia_nat_undo(
     sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), UndoActionPermanentError> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
@@ -234,7 +236,7 @@ async fn siia_nat_undo(
         .nexus()
         .delete_dpd_config_by_entry(&opctx, &nat_entry)
         .await
-        .map_err(ActionError::action_failed)
+        .context("delete_dpd_config_by_entry")
     {
         error!(log, "siia_nat_undo: failed to notify DPD: {e}");
     }
@@ -254,7 +256,7 @@ async fn siia_update_opte(
 
 async fn siia_update_opte_undo(
     sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), UndoActionPermanentError> {
     let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
     let sled_id = sagactx.lookup::<Option<SledUuid>>("instance_state")?;
@@ -266,6 +268,7 @@ async fn siia_update_opte_undo(
         target_ip,
     )
     .await
+    .context("instance_ip_remove_opte")
     {
         error!(log, "siia_update_opte_undo: failed to notify sled-agent: {e}");
     }

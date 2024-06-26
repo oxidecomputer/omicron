@@ -15,6 +15,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
 use steno::Node;
+use steno::UndoActionPermanentError;
 use uuid::Uuid;
 
 // disk delete saga: input parameters
@@ -117,7 +118,7 @@ async fn sdd_delete_disk_record(
 
 async fn sdd_delete_disk_record_undo(
     sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), UndoActionPermanentError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
@@ -156,7 +157,7 @@ async fn sdd_account_space(
 
 async fn sdd_account_space_undo(
     sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
+) -> Result<(), UndoActionPermanentError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
