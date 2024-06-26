@@ -51,7 +51,7 @@ INSERT INTO omicron.public.router_route
         target, destination
     )
 SELECT
-    gen_random_uuid(), 'sn-' || vpc_subnet.name,
+    gen_random_uuid(), vpc_subnet.name,
     'VPC Subnet route for ''' || vpc_subnet.name || '''',
     now(), now(),
     omicron.public.vpc_router.id, 'default',
@@ -76,15 +76,15 @@ WITH known_ids (new_id, new_name, new_description) AS (
             'Default internet gateway route for Oxide Services'
         ),
         (
-            '001de000-c470-4000-8000-000000000004', 'sn-external-dns',
+            '001de000-c470-4000-8000-000000000004', 'external-dns',
             'Built-in VPC Subnet for Oxide service (external-dns)'
         ),
         (
-            '001de000-c470-4000-8000-000000000005', 'sn-nexus',
+            '001de000-c470-4000-8000-000000000005', 'nexus',
             'Built-in VPC Subnet for Oxide service (nexus)'
         ),
         (
-            '001de000-c470-4000-8000-000000000006', 'sn-boundary-ntp',
+            '001de000-c470-4000-8000-000000000006', 'boundary-ntp',
             'Built-in VPC Subnet for Oxide service (boundary-ntp)'
         )
 )

@@ -296,8 +296,8 @@ impl DataStore {
                 route_id,
                 SERVICES_VPC.system_router_id,
                 vpc_subnet.name().clone().into(),
-            )
-            .expect("builtin service names are short enough for route naming");
+            );
+
             self.router_create_route(opctx, &authz_router, route)
                 .await
                 .map(|_| ())
@@ -1326,15 +1326,11 @@ impl DataStore {
         // modify other system routes like internet gateways (which are
         // `RouteKind::Default`).
         let conn = self.pool_connection_authorized(opctx).await?;
-        let log = opctx.log.clone();
         self.transaction_retry_wrapper("vpc_subnet_route_reconcile")
-            .transaction(&conn, |conn| {
-                let log = log.clone();
-                async move {
-
+            .transaction(&conn, |conn| async move {
                 use db::schema::router_route::dsl;
-                use db::schema::vpc_subnet::dsl as subnet;
                 use db::schema::vpc::dsl as vpc;
+                use db::schema::vpc_subnet::dsl as subnet;
 
                 let system_router_id = vpc::vpc
                     .filter(vpc::id.eq(vpc_id))
@@ -1352,7 +1348,10 @@ impl DataStore {
                     .await?;
 
                 let current_rules: Vec<RouterRoute> = dsl::router_route
-                    .filter(dsl::kind.eq(RouterRouteKind(ExternalRouteKind::VpcSubnet)))
+                    .filter(
+                        dsl::kind
+                            .eq(RouterRouteKind(ExternalRouteKind::VpcSubnet)),
+                    )
                     .filter(dsl::time_deleted.is_null())
                     .filter(dsl::vpc_router_id.eq(system_router_id))
                     .select(RouterRoute::as_select())
@@ -1360,18 +1359,28 @@ impl DataStore {
                     .await?;
 
                 // Build the add/delete sets.
-                let expected_names: HashSet<Name> = valid_subnets.iter()
+                let expected_names: HashSet<Name> = valid_subnets
+                    .iter()
                     .map(|v| v.identity.name.clone())
                     .collect();
 
+                // This checks that we have rules which *point to* the named
+                // subnets, rather than working with rule names (even if these
+                // are set to match the subnet where possible).
+                // Rule names are effectively randomised when someone, e.g.,
+                // names a subnet "default-v4"/"-v6", and this prevents us
+                // from repeatedly adding/deleting that route.
                 let mut found_names = HashSet::new();
                 let mut invalid = Vec::new();
                 for rule in current_rules {
                     let id = rule.id();
                     match (rule.kind.0, rule.target.0) {
-                        (ExternalRouteKind::VpcSubnet, RouteTarget::Subnet(n))
-                            if expected_names.contains(Name::ref_cast(&n)) =>
-                                {let _ = found_names.insert(n.into());},
+                        (
+                            ExternalRouteKind::VpcSubnet,
+                            RouteTarget::Subnet(n),
+                        ) if expected_names.contains(Name::ref_cast(&n)) => {
+                            let _ = found_names.insert(n.into());
+                        }
                         _ => invalid.push(id),
                     }
                 }
@@ -1394,34 +1403,34 @@ impl DataStore {
                 // Duplicate rules are caught here using the UNIQUE constraint
                 // on names in a router. Only nexus can alter the system router,
                 // so there is no risk of collision with user-specified names.
+                //
+                // Subnets named "default-v4" or "default-v6" have their rules renamed
+                // to include the rule UUID.
                 for subnet in expected_names.difference(&found_names) {
                     let route_id = Uuid::new_v4();
-                    // XXX this is fallible as it is based on subnet name.
-                    //     need to control this somewhere sane.
-                    let Ok(route) = db::model::RouterRoute::for_subnet(
+                    let route = db::model::RouterRoute::for_subnet(
                         route_id,
                         system_router_id,
                         subnet.clone(),
-                    ) else {
-                        error!(
-                            log,
-                            "Reconciling VPC routes: name {} in vpc {} is too long",
-                            subnet,
-                            vpc_id,
-                        );
-                        continue;
-                    };
+                    );
 
-                    match Self::router_create_route_on_connection(route, &conn).await {
-                        Err(Error::Conflict { .. }) => return Err(DieselError::RollbackTransaction),
+                    match Self::router_create_route_on_connection(route, &conn)
+                        .await
+                    {
+                        Err(Error::Conflict { .. }) => {
+                            return Err(DieselError::RollbackTransaction)
+                        }
                         Err(_) => return Err(DieselError::NotFound),
-                        _ => {},
+                        _ => {}
                     }
                 }
 
                 // Verify that route set is exactly as intended, and rollback otherwise.
                 let current_rules: Vec<RouterRoute> = dsl::router_route
-                    .filter(dsl::kind.eq(RouterRouteKind(ExternalRouteKind::VpcSubnet)))
+                    .filter(
+                        dsl::kind
+                            .eq(RouterRouteKind(ExternalRouteKind::VpcSubnet)),
+                    )
                     .filter(dsl::time_deleted.is_null())
                     .filter(dsl::vpc_router_id.eq(system_router_id))
                     .select(RouterRoute::as_select())
@@ -1429,19 +1438,22 @@ impl DataStore {
                     .await?;
 
                 if current_rules.len() != expected_names.len() {
-                    return Err(DieselError::RollbackTransaction)
+                    return Err(DieselError::RollbackTransaction);
                 }
 
                 for rule in current_rules {
                     match (rule.kind.0, rule.target.0) {
-                        (ExternalRouteKind::VpcSubnet, RouteTarget::Subnet(n))
-                            if expected_names.contains(Name::ref_cast(&n)) => {},
+                        (
+                            ExternalRouteKind::VpcSubnet,
+                            RouteTarget::Subnet(n),
+                        ) if expected_names.contains(Name::ref_cast(&n)) => {}
                         _ => return Err(DieselError::RollbackTransaction),
                     }
                 }
 
                 Ok(())
-            }}).await
+            })
+            .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         self.vpc_increment_rpw_version(opctx, vpc_id).await
