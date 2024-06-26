@@ -5704,7 +5704,7 @@ async fn vpc_router_route_view(
         .await
 }
 
-/// Create router
+/// Create route
 #[endpoint {
     method = POST,
     path = "/v1/vpc-router-routes",

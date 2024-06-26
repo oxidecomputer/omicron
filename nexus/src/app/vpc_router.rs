@@ -83,6 +83,10 @@ impl super::Nexus {
             .db_datastore
             .vpc_create_router(&opctx, &authz_vpc, router)
             .await?;
+
+        // Note: we don't trigger the route RPW here as it's impossible
+        //       for the router to be bound to a subnet at this point.
+
         Ok(router)
     }
 
@@ -114,9 +118,6 @@ impl super::Nexus {
             .await
     }
 
-    // TODO: When a router is deleted all its routes should be deleted
-    // TODO: When a router is deleted it should be unassociated w/ any subnets it may be associated with
-    //       or trigger an error
     pub(crate) async fn vpc_delete_router(
         &self,
         opctx: &OpContext,
@@ -131,7 +132,12 @@ impl super::Nexus {
         if db_router.kind == VpcRouterKind::System {
             return Err(Error::invalid_request("Cannot delete system router"));
         }
-        self.db_datastore.vpc_delete_router(opctx, &authz_router).await
+        let out =
+            self.db_datastore.vpc_delete_router(opctx, &authz_router).await?;
+
+        self.vpc_needed_notify_sleds();
+
+        Ok(out)
     }
 
     // Routes
@@ -198,6 +204,9 @@ impl super::Nexus {
             .db_datastore
             .router_create_route(&opctx, &authz_router, route)
             .await?;
+
+        self.vpc_router_increment_rpw_version(opctx, &authz_router).await?;
+
         Ok(route)
     }
 
@@ -220,7 +229,7 @@ impl super::Nexus {
         route_lookup: &lookup::RouterRoute<'_>,
         params: &params::RouterRouteUpdate,
     ) -> UpdateResult<RouterRoute> {
-        let (.., vpc, _, authz_route, db_route) =
+        let (.., vpc, authz_router, authz_route, db_route) =
             route_lookup.fetch_for(authz::Action::Modify).await?;
         // TODO: Write a test for this once there's a way to test it (i.e.
         // subnets automatically register to the system router table)
@@ -235,9 +244,14 @@ impl super::Nexus {
                 )));
             }
         }
-        self.db_datastore
+        let out = self
+            .db_datastore
             .router_update_route(&opctx, &authz_route, params.clone().into())
-            .await
+            .await?;
+
+        self.vpc_router_increment_rpw_version(opctx, &authz_router).await?;
+
+        Ok(out)
     }
 
     pub(crate) async fn router_delete_route(
@@ -245,7 +259,7 @@ impl super::Nexus {
         opctx: &OpContext,
         route_lookup: &lookup::RouterRoute<'_>,
     ) -> DeleteResult {
-        let (.., authz_route, db_route) =
+        let (.., authz_router, authz_route, db_route) =
             route_lookup.fetch_for(authz::Action::Delete).await?;
 
         // Only custom routes can be deleted
@@ -255,6 +269,37 @@ impl super::Nexus {
                 "DELETE not allowed on system routes",
             ));
         }
-        self.db_datastore.router_delete_route(opctx, &authz_route).await
+        let out =
+            self.db_datastore.router_delete_route(opctx, &authz_route).await?;
+
+        self.vpc_router_increment_rpw_version(opctx, &authz_router).await?;
+
+        Ok(out)
+    }
+
+    /// Trigger the VPC routing RPW in repsonse to a state change
+    /// or a new possible listener (e.g., instance/probe start, NIC
+    /// create).
+    pub(crate) fn vpc_needed_notify_sleds(&self) {
+        self.background_tasks
+            .activate(&self.background_tasks.task_vpc_route_manager)
+    }
+
+    /// Trigger an RPW version bump on a single VPC router in response
+    /// to CRUD operations on individual routes.
+    ///
+    /// This will also awaken the VPC Router RPW.
+    pub(crate) async fn vpc_router_increment_rpw_version(
+        &self,
+        opctx: &OpContext,
+        authz_router: &authz::VpcRouter,
+    ) -> UpdateResult<()> {
+        self.datastore()
+            .vpc_router_increment_rpw_version(opctx, authz_router.id())
+            .await?;
+
+        self.vpc_needed_notify_sleds();
+
+        Ok(())
     }
 }

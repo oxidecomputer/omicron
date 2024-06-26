@@ -19760,9 +19760,15 @@
         ]
       },
       "VpcSubnet": {
-        "description": "A VPC subnet represents a logical grouping for instances that allows network traffic between them, within a IPv4 subnetwork or optionall an IPv6 subnetwork.",
+        "description": "A VPC subnet represents a logical grouping for instances that allows network traffic between them, within a IPv4 subnetwork or optionally an IPv6 subnetwork.",
         "type": "object",
         "properties": {
+          "custom_router_id": {
+            "nullable": true,
+            "description": "ID for an attached custom router.",
+            "type": "string",
+            "format": "uuid"
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"

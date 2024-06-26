@@ -26,6 +26,7 @@ use super::tasks::service_firewall_rules;
 use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
 use super::tasks::v2p_mappings::V2PManager;
+use super::tasks::vpc_routes;
 use super::Driver;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::sagas::SagaRequest;
@@ -70,6 +71,7 @@ pub struct BackgroundTasks {
     pub task_instance_watcher: Activator,
     pub task_service_firewall_propagation: Activator,
     pub task_abandoned_vmm_reaper: Activator,
+    pub task_vpc_route_manager: Activator,
 
     // XXX-dap stuff that wasn't here before because it couldn't be externally
     // activated
@@ -154,6 +156,7 @@ impl BackgroundTasksInitializer {
             task_instance_watcher: Activator::new_stub(),
             task_service_firewall_propagation: Activator::new_stub(),
             task_abandoned_vmm_reaper: Activator::new_stub(),
+            task_vpc_route_manager: Activator::new_stub(),
 
             task_internal_dns_propagation: Activator::new_stub(),
             task_external_dns_propagation: Activator::new_stub(),
@@ -203,6 +206,7 @@ impl BackgroundTasksInitializer {
             task_instance_watcher,
             task_service_firewall_propagation,
             task_abandoned_vmm_reaper,
+            task_vpc_route_manager,
             external_endpoints: _external_endpoints,
         } = &background_tasks;
 
@@ -524,6 +528,20 @@ impl BackgroundTasksInitializer {
             vec![],
             Some(task_service_firewall_propagation),
         );
+
+        // Background task: OPTE port route propagation
+        {
+            let watcher = vpc_routes::VpcRouteManager::new(datastore.clone());
+            driver.register(
+                "vpc_route_manager".to_string(),
+                "propagates updated VPC routes to all OPTE ports".into(),
+                config.switch_port_settings_manager.period_secs,
+                Box::new(watcher),
+                opctx.child(BTreeMap::new()),
+                vec![],
+                Some(task_vpc_route_manager),
+            )
+        };
 
         // Background task: abandoned VMM reaping
         driver.register(

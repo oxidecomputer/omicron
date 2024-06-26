@@ -136,11 +136,27 @@ impl DataStore {
                 ),
             ));
         }
-        self.create_network_interface_raw(opctx, interface)
+
+        let out = self
+            .create_network_interface_raw(opctx, interface)
             .await
             // Convert to `InstanceNetworkInterface` before returning; we know
             // this is valid as we've checked the condition on-entry.
-            .map(NetworkInterface::as_instance)
+            .map(NetworkInterface::as_instance)?;
+
+        // `instance:xxx` targets in router rules resolve to the primary
+        // NIC of that instance. Accordingly, NIC create may cause dangling
+        // entries to re-resolve to a valid instance (even if it is not yet
+        // started).
+        // This will not trigger the route RPW directly, we still need to do
+        // so in e.g. the instance watcher task.
+        if out.primary {
+            self.vpc_increment_rpw_version(opctx, out.vpc_id)
+                .await
+                .map_err(|e| network_interface::InsertError::External(e))?;
+        }
+
+        Ok(out)
     }
 
     /// List network interfaces associated with a given service.
@@ -606,6 +622,28 @@ impl DataStore {
         )
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Retrieve the primary network interface for a given instance.
+    pub async fn instance_get_primary_network_interface(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+    ) -> LookupResult<InstanceNetworkInterface> {
+        opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
+
+        use db::schema::instance_network_interface::dsl;
+        dsl::instance_network_interface
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::instance_id.eq(authz_instance.id()))
+            .filter(dsl::is_primary.eq(true))
+            .select(InstanceNetworkInterface::as_select())
+            .limit(1)
+            .first_async::<InstanceNetworkInterface>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Get network interface associated with a given probe.

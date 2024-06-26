@@ -1406,7 +1406,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.vpc_subnet (
     /* Child resource creation generation number */
     rcgen INT8 NOT NULL,
     ipv4_block INET NOT NULL,
-    ipv6_block INET NOT NULL
+    ipv6_block INET NOT NULL,
+    /* nullable FK to the `vpc_router` table. */
+    custom_router_id UUID
 );
 
 /* Subnet and network interface names are unique per VPC, not project */
@@ -1636,7 +1638,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.vpc_router (
     time_deleted TIMESTAMPTZ,
     kind omicron.public.vpc_router_kind NOT NULL,
     vpc_id UUID NOT NULL,
-    rcgen INT NOT NULL
+    rcgen INT NOT NULL,
+    /*
+     * version information used to trigger VPC router RPW.
+     * this is sensitive to CRUD on named resources beyond
+     * routers e.g. instances, subnets, ...
+     */
+    resolved_version INT NOT NULL DEFAULT 0
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_router_by_vpc ON omicron.public.vpc_router (
@@ -1662,6 +1670,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.router_route (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
 
+    /* FK to the `vpc_router` table. */
     vpc_router_id UUID NOT NULL,
     kind omicron.public.router_route_kind NOT NULL,
     target STRING(128) NOT NULL,
@@ -4098,7 +4107,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '77.0.0', NULL)
+    (TRUE, NOW(), NOW(), '78.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -563,10 +563,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "c67f6ab49e0e8a49bcf84542500fceb6b9417ca4"
+source.commit = "3c3fa8482fe09a01da62fbd35efe124ea9cac9e7"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "33e3b09408551be860debac08de50a840909d4e6c6bed9aecaef63fe8bef2d69"
+source.sha256 = "63b6c74584e32f52893730e3a567da29c7f93934c38882614aad59034bdd980d"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -579,10 +579,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "c67f6ab49e0e8a49bcf84542500fceb6b9417ca4"
+source.commit = "3c3fa8482fe09a01da62fbd35efe124ea9cac9e7"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "81674afa17873f84bb49a800c8511938d1c2e871026cbb17e5eed2b645b1eb55"
+source.sha256 = "b9908b81fee00d71b750f5b9a0f866c807adb0f924ab635295d28753538836f5"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -594,10 +594,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "c67f6ab49e0e8a49bcf84542500fceb6b9417ca4"
+source.commit = "3c3fa8482fe09a01da62fbd35efe124ea9cac9e7"
 # The SHA256 digest is automatically posted to:
-# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "5e8bdd6774ef6041189621306577d0e0d174d596d216e53740ce6f035316c5af"
+# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
+source.sha256 = "51f446933f0d8c426b15ea0845b66664da9b9a129893d12b25d7912b52f07362"
 output.type = "zone"
 output.intermediate_only = true
 
