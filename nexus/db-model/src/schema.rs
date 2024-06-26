@@ -511,6 +511,7 @@ table! {
         ip -> Inet,
         slot -> Int2,
         is_primary -> Bool,
+        transit_ips -> Array<Inet>,
     }
 }
 
@@ -529,6 +530,7 @@ table! {
         ip -> Inet,
         slot -> Int2,
         is_primary -> Bool,
+        transit_ips -> Array<Inet>,
     }
 }
 joinable!(instance_network_interface -> instance (instance_id));

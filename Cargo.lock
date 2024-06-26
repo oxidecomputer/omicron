@@ -4917,6 +4917,7 @@ dependencies = [
  "oximeter",
  "oximeter-collector",
  "oximeter-producer",
+ "oxnet",
  "serde",
  "serde_json",
  "serde_urlencoded",

@@ -1407,14 +1407,13 @@ pub struct RouterRoute {
     /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-
     /// The ID of the VPC Router to which the route belongs
     pub vpc_router_id: Uuid,
-
     /// Describes the kind of router. Set at creation. `read-only`
     pub kind: RouterRouteKind,
-
+    /// The location that matched packets should be forwarded to.
     pub target: RouteTarget,
+    /// Selects which traffic this routing rule will apply to.
     pub destination: RouteDestination,
 }
 
@@ -1979,6 +1978,11 @@ pub struct InstanceNetworkInterface {
     /// True if this interface is the primary for the instance to which it's
     /// attached.
     pub primary: bool,
+
+    /// A set of additional networks that this interface may send and
+    /// receive traffic on.
+    #[serde(default)]
+    pub transit_ips: Vec<IpNet>,
 }
 
 #[derive(

@@ -57,6 +57,8 @@ pub struct NetworkInterface {
     pub vni: Vni,
     pub primary: bool,
     pub slot: u8,
+    #[serde(default)]
+    pub transit_ips: Vec<IpNet>,
 }
 
 /// An IP address and port range used for source NAT, i.e., making

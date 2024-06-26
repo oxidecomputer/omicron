@@ -9,6 +9,8 @@ use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::collection_attach::AttachError;
+use crate::db::collection_attach::DatastoreAttachTarget;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
@@ -936,6 +938,81 @@ impl DataStore {
         Ok(out)
     }
 
+    pub async fn vpc_subnet_set_custom_router(
+        &self,
+        opctx: &OpContext,
+        authz_subnet: &authz::VpcSubnet,
+        authz_router: &authz::VpcRouter,
+    ) -> Result<VpcSubnet, Error> {
+        opctx.authorize(authz::Action::Modify, authz_subnet).await?;
+        opctx.authorize(authz::Action::Read, authz_router).await?;
+
+        use db::schema::vpc_router::dsl as router_dsl;
+        use db::schema::vpc_subnet::dsl as subnet_dsl;
+
+        let query = VpcRouter::attach_resource(
+            authz_router.id(),
+            authz_subnet.id(),
+            router_dsl::vpc_router
+                .into_boxed()
+                .filter(router_dsl::kind.eq(VpcRouterKind::Custom)),
+            subnet_dsl::vpc_subnet.into_boxed(),
+            u32::MAX,
+            diesel::update(subnet_dsl::vpc_subnet).set((
+                subnet_dsl::time_modified.eq(Utc::now()),
+                subnet_dsl::custom_router_id.eq(authz_router.id()),
+            )),
+        );
+
+        query
+            .attach_and_get_result_async(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map(|(_, resource)| resource)
+            .map_err(|e| match e {
+                AttachError::CollectionNotFound => Error::not_found_by_id(
+                    ResourceType::VpcRouter,
+                    &authz_router.id(),
+                ),
+                AttachError::ResourceNotFound => Error::not_found_by_id(
+                    ResourceType::VpcSubnet,
+                    &authz_subnet.id(),
+                ),
+                // The only other failure reason can be an attempt to use a system router.
+                AttachError::NoUpdate { .. } => Error::invalid_request(
+                    "cannot attach a system router to a VPC subnet",
+                ),
+                AttachError::DatabaseError(e) => {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
+    }
+
+    pub async fn vpc_subnet_unset_custom_router(
+        &self,
+        opctx: &OpContext,
+        authz_subnet: &authz::VpcSubnet,
+    ) -> Result<VpcSubnet, Error> {
+        opctx.authorize(authz::Action::Modify, authz_subnet).await?;
+
+        use db::schema::vpc_subnet::dsl;
+
+        diesel::update(dsl::vpc_subnet)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(authz_subnet.id()))
+            .set(dsl::custom_router_id.eq(Option::<Uuid>::None))
+            .returning(VpcSubnet::as_returning())
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_subnet),
+                )
+            })
+    }
+
     pub async fn subnet_list_instance_network_interfaces(
         &self,
         opctx: &OpContext,
@@ -1065,7 +1142,10 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         // Unlink all subnets from this router.
-        // XXX: We might this want to error out before the delete fires.
+        // This will temporarily leave some hanging subnet attachments.
+        // `vpc_get_active_custom_routers` will join and then filter,
+        // so such rows will be treated as though they have no custom router
+        // by the RPW.
         use db::schema::vpc_subnet::dsl as vpc;
         diesel::update(vpc::vpc_subnet)
             .filter(vpc::time_deleted.is_null())

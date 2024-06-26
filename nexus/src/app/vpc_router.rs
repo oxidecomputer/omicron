@@ -20,8 +20,12 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::RouteDestination;
+use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::UpdateResult;
+use oxnet::IpNet;
+use std::net::IpAddr;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -130,7 +134,7 @@ impl super::Nexus {
         // router kind cannot be changed, but it might be able to save us a
         // database round-trip.
         if db_router.kind == VpcRouterKind::System {
-            return Err(Error::invalid_request("Cannot delete system router"));
+            return Err(Error::invalid_request("cannot delete system router"));
         }
         let out =
             self.db_datastore.vpc_delete_router(opctx, &authz_router).await?;
@@ -191,8 +195,47 @@ impl super::Nexus {
         kind: &RouterRouteKind,
         params: &params::RouterRouteCreate,
     ) -> CreateResult<db::model::RouterRoute> {
-        let (.., authz_router) =
-            router_lookup.lookup_for(authz::Action::CreateChild).await?;
+        let (.., authz_router, db_router) =
+            router_lookup.fetch_for(authz::Action::CreateChild).await?;
+
+        if db_router.kind == VpcRouterKind::System {
+            return Err(Error::invalid_request(
+                "user-provided routes cannot be added to a system router",
+            ));
+        }
+
+        // Validate route destinations/targets at this stage:
+        // - mixed explicit v4 and v6 are disallowed.
+        // - users cannot specify 'Vpc' as a custom router dest/target.
+        // - users cannot specify 'Subnet' as a custom router target.
+        // - the only internet gateway we support today is 'outbound'.
+        match (&params.destination, &params.target) {
+            (RouteDestination::Ip(IpAddr::V4(_)), RouteTarget::Ip(IpAddr::V4(_)))
+            | (RouteDestination::Ip(IpAddr::V6(_)), RouteTarget::Ip(IpAddr::V6(_)))
+            | (RouteDestination::IpNet(IpNet::V4(_)), RouteTarget::Ip(IpAddr::V4(_)))
+            | (RouteDestination::IpNet(IpNet::V6(_)), RouteTarget::Ip(IpAddr::V6(_))) => {},
+
+            (RouteDestination::Ip(_), RouteTarget::Ip(_))
+            | (RouteDestination::IpNet(_), RouteTarget::Ip(_))
+                => return Err(Error::invalid_request(
+                    "cannot mix explicit IPv4 and IPv6 addresses between destination and target"
+                )),
+
+            (RouteDestination::Vpc(_), _) | (_, RouteTarget::Vpc(_)) => return Err(Error::invalid_request(
+                "VPCs cannot be used as a destination or target in custom routers"
+                )),
+
+            (_, RouteTarget::Subnet(_)) => return Err(Error::invalid_request(
+                "subnets cannot be used as a target in custom routers"
+                )),
+
+            (_, RouteTarget::InternetGateway(n)) if n.as_str() != "outbound" => return Err(Error::invalid_request(
+                "'outbound' is currently the only valid internet gateway"
+                )),
+
+            _ => {},
+        };
+
         let id = Uuid::new_v4();
         let route = db::model::RouterRoute::new(
             id,
@@ -229,21 +272,31 @@ impl super::Nexus {
         route_lookup: &lookup::RouterRoute<'_>,
         params: &params::RouterRouteUpdate,
     ) -> UpdateResult<RouterRoute> {
-        let (.., vpc, authz_router, authz_route, db_route) =
+        let (.., authz_router, authz_route, db_route) =
             route_lookup.fetch_for(authz::Action::Modify).await?;
-        // TODO: Write a test for this once there's a way to test it (i.e.
-        // subnets automatically register to the system router table)
+
         match db_route.kind.0 {
-            RouterRouteKind::Custom | RouterRouteKind::Default => (),
+            // Default routes allow a constrained form of modification:
+            // only the target may change.
+            RouterRouteKind::Default if
+                    params.identity.name.is_some()
+                    || params.identity.description.is_some()
+                    || params.destination != db_route.destination.0 => {
+                return Err(Error::invalid_request(
+                    "the destination and metadata of a Default route cannot be changed",
+                ))},
+
+            RouterRouteKind::Custom | RouterRouteKind::Default => {},
+
             _ => {
                 return Err(Error::invalid_request(format!(
-                    "routes of type {} from the system table of VPC {:?} \
+                    "routes of type {} within the system router \
                         are not modifiable",
                     db_route.kind.0,
-                    vpc.id()
                 )));
             }
         }
+
         let out = self
             .db_datastore
             .router_update_route(&opctx, &authz_route, params.clone().into())
