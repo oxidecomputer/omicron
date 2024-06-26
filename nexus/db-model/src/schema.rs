@@ -286,17 +286,6 @@ table! {
 }
 
 table! {
-    v2p_mapping_view (nic_id) {
-        nic_id -> Uuid,
-        sled_id -> Uuid,
-        sled_ip -> Inet,
-        vni -> Int4,
-        mac -> Int8,
-        ip -> Inet,
-    }
-}
-
-table! {
     bgp_announce_set (id) {
         id -> Uuid,
         name -> Text,
@@ -322,6 +311,7 @@ table! {
         rsvd_address_lot_block_id -> Uuid,
         address -> Inet,
         interface_name -> Text,
+        vlan_id -> Nullable<Int4>,
     }
 }
 
@@ -429,9 +419,9 @@ table! {
         active_propolis_id -> Nullable<Uuid>,
         target_propolis_id -> Nullable<Uuid>,
         migration_id -> Nullable<Uuid>,
+        state -> crate::InstanceStateEnum,
         updater_id -> Nullable<Uuid>,
         updater_gen-> Int8,
-        state -> crate::InstanceStateEnum,
     }
 }
 
@@ -1616,6 +1606,13 @@ table! {
 }
 
 table! {
+    cockroachdb_zone_id_to_node_id (omicron_zone_id, crdb_node_id) {
+        omicron_zone_id -> Uuid,
+        crdb_node_id -> Text,
+    }
+}
+
+table! {
     bootstore_keys (key, generation) {
         key -> Text,
         generation -> Int8,
@@ -1758,6 +1755,26 @@ table! {
     }
 }
 
+table! {
+    migration (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        source_state -> crate::MigrationStateEnum,
+        source_propolis_id -> Uuid,
+        source_gen -> Int8,
+        time_source_updated -> Nullable<Timestamptz>,
+        target_state -> crate::MigrationStateEnum,
+        target_propolis_id -> Uuid,
+        target_gen -> Int8,
+        time_target_updated -> Nullable<Timestamptz>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(instance, migration);
+allow_tables_to_appear_in_same_query!(migration, vmm);
+joinable!(instance -> migration (migration_id));
+
 allow_tables_to_appear_in_same_query!(
     ip_pool_range,
     ip_pool,
@@ -1814,6 +1831,7 @@ allow_tables_to_appear_in_same_query!(
     user_builtin,
     role_builtin,
     role_assignment,
+    probe,
 );
 
 allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);
@@ -1842,3 +1860,5 @@ joinable!(instance_ssh_key -> ssh_key (ssh_key_id));
 joinable!(instance_ssh_key -> instance (instance_id));
 
 allow_tables_to_appear_in_same_query!(sled, sled_instance);
+
+joinable!(network_interface -> probe (parent_id));

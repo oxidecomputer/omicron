@@ -244,6 +244,10 @@ task: "blueprint_loader"
     Loads the current target blueprint from the DB
 
 
+task: "crdb_node_id_collector"
+    Collects node IDs of running CockroachDB zones
+
+
 task: "dns_config_external"
     watches external DNS data stored in CockroachDB
 
@@ -429,6 +433,13 @@ task: "bfd_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+
+task: "crdb_node_id_collector"
+  configured period: every 10m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: no blueprint
 
 task: "external_endpoints"
   configured period: every 1m

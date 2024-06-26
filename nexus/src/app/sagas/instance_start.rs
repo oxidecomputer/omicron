@@ -8,7 +8,7 @@ use std::net::Ipv6Addr;
 
 use super::{
     instance_common::allocate_vmm_ipv6, NexusActionContext, NexusSaga,
-    SagaInitError, ACTION_GENERATE_ID,
+    SagaInitError,
 };
 use crate::app::instance::InstanceRegisterReason;
 use crate::app::instance::InstanceStateChangeError;
@@ -17,10 +17,10 @@ use chrono::Utc;
 use nexus_db_queries::db::{identity::Resource, lookup::LookupPath};
 use nexus_db_queries::{authn, authz, db};
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::{Deserialize, Serialize};
 use slog::info;
-use steno::{ActionError, Node};
-use uuid::Uuid;
+use steno::ActionError;
 
 /// Parameters to the instance start saga.
 #[derive(Debug, Deserialize, Serialize)]
@@ -34,6 +34,10 @@ pub(crate) struct Params {
 
 declare_saga_actions! {
     instance_start;
+
+    GENERATE_PROPOLIS_ID -> "propolis_id" {
+        + sis_generate_propolis_id
+    }
 
     ALLOC_SERVER -> "sled_id" {
         + sis_alloc_server
@@ -101,12 +105,7 @@ impl NexusSaga for SagaInstanceStart {
         _params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError> {
-        builder.append(Node::action(
-            "propolis_id",
-            "GeneratePropolisId",
-            ACTION_GENERATE_ID.as_ref(),
-        ));
-
+        builder.append(generate_propolis_id_action());
         builder.append(alloc_server_action());
         builder.append(alloc_propolis_ip_action());
         builder.append(create_vmm_record_action());
@@ -120,14 +119,20 @@ impl NexusSaga for SagaInstanceStart {
     }
 }
 
+async fn sis_generate_propolis_id(
+    _sagactx: NexusActionContext,
+) -> Result<PropolisUuid, ActionError> {
+    Ok(PropolisUuid::new_v4())
+}
+
 async fn sis_alloc_server(
     sagactx: NexusActionContext,
-) -> Result<Uuid, ActionError> {
+) -> Result<SledUuid, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let hardware_threads = params.db_instance.ncpus.0;
     let reservoir_ram = params.db_instance.memory;
-    let propolis_id = sagactx.lookup::<Uuid>("propolis_id")?;
+    let propolis_id = sagactx.lookup::<PropolisUuid>("propolis_id")?;
 
     let resource = super::instance_common::reserve_vmm_resources(
         osagactx.nexus(),
@@ -138,16 +143,19 @@ async fn sis_alloc_server(
     )
     .await?;
 
-    Ok(resource.sled_id)
+    Ok(SledUuid::from_untyped_uuid(resource.sled_id))
 }
 
 async fn sis_alloc_server_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
-    let propolis_id = sagactx.lookup::<Uuid>("propolis_id")?;
+    let propolis_id = sagactx.lookup::<PropolisUuid>("propolis_id")?;
 
-    osagactx.nexus().delete_sled_reservation(propolis_id).await?;
+    osagactx
+        .nexus()
+        .delete_sled_reservation(propolis_id.into_untyped_uuid())
+        .await?;
     Ok(())
 }
 
@@ -159,7 +167,7 @@ async fn sis_alloc_propolis_ip(
         &sagactx,
         &params.serialized_authn,
     );
-    let sled_uuid = sagactx.lookup::<Uuid>("sled_id")?;
+    let sled_uuid = sagactx.lookup::<SledUuid>("sled_id")?;
     allocate_vmm_ipv6(&opctx, sagactx.user_data().datastore(), sled_uuid).await
 }
 
@@ -172,9 +180,9 @@ async fn sis_create_vmm_record(
         &sagactx,
         &params.serialized_authn,
     );
-    let instance_id = params.db_instance.id();
-    let propolis_id = sagactx.lookup::<Uuid>("propolis_id")?;
-    let sled_id = sagactx.lookup::<Uuid>("sled_id")?;
+    let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
+    let propolis_id = sagactx.lookup::<PropolisUuid>("propolis_id")?;
+    let sled_id = sagactx.lookup::<SledUuid>("sled_id")?;
     let propolis_ip = sagactx.lookup::<Ipv6Addr>("propolis_ip")?;
 
     super::instance_common::create_and_insert_vmm_record(
@@ -214,8 +222,8 @@ async fn sis_move_to_starting(
     let params = sagactx.saga_params::<Params>()?;
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
-    let instance_id = params.db_instance.id();
-    let propolis_id = sagactx.lookup::<Uuid>("propolis_id")?;
+    let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
+    let propolis_id = sagactx.lookup::<PropolisUuid>("propolis_id")?;
     info!(osagactx.log(), "moving instance to Starting state via saga";
           "instance_id" => %instance_id,
           "propolis_id" => %propolis_id);
@@ -228,7 +236,7 @@ async fn sis_move_to_starting(
     // For idempotency, refetch the instance to see if this step already applied
     // its desired update.
     let (.., db_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(instance_id)
+        .instance_id(instance_id.into_untyped_uuid())
         .fetch_for(authz::Action::Modify)
         .await
         .map_err(ActionError::action_failed)?;
@@ -237,7 +245,7 @@ async fn sis_move_to_starting(
         // If this saga's Propolis ID is already written to the record, then
         // this step must have completed already and is being retried, so
         // proceed.
-        Some(db_id) if db_id == propolis_id => {
+        Some(db_id) if db_id == propolis_id.into_untyped_uuid() => {
             info!(osagactx.log(), "start saga: Propolis ID already set";
                   "instance_id" => %instance_id);
 
@@ -261,7 +269,7 @@ async fn sis_move_to_starting(
         None => {
             let new_runtime = db::model::InstanceRuntimeState {
                 nexus_state: db::model::InstanceState::Vmm,
-                propolis_id: Some(propolis_id),
+                propolis_id: Some(propolis_id.into_untyped_uuid()),
                 time_updated: Utc::now(),
                 gen: db_instance.runtime().gen.next().into(),
                 ..db_instance.runtime_state
@@ -293,7 +301,7 @@ async fn sis_move_to_starting_undo(
     let osagactx = sagactx.user_data();
     let db_instance =
         sagactx.lookup::<db::model::Instance>("started_record")?;
-    let instance_id = db_instance.id();
+    let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
     info!(osagactx.log(), "start saga failed; returning instance to Stopped";
           "instance_id" => %instance_id);
 
@@ -322,7 +330,7 @@ async fn sis_account_virtual_resources(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let instance_id = params.db_instance.id();
+    let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
 
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
@@ -348,7 +356,7 @@ async fn sis_account_virtual_resources_undo(
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let instance_id = params.db_instance.id();
+    let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
 
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
@@ -384,7 +392,7 @@ async fn sis_dpd_ensure(
     let osagactx = sagactx.user_data();
     let db_instance =
         sagactx.lookup::<db::model::Instance>("started_record")?;
-    let instance_id = db_instance.id();
+    let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
 
     info!(osagactx.log(), "start saga: ensuring instance dpd configuration";
           "instance_id" => %instance_id);
@@ -397,9 +405,9 @@ async fn sis_dpd_ensure(
 
     // Querying sleds requires fleet access; use the instance allocator context
     // for this.
-    let sled_uuid = sagactx.lookup::<Uuid>("sled_id")?;
+    let sled_uuid = sagactx.lookup::<SledUuid>("sled_id")?;
     let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, &datastore)
-        .sled_id(sled_uuid)
+        .sled_id(sled_uuid.into_untyped_uuid())
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
@@ -472,9 +480,9 @@ async fn sis_ensure_registered(
     let db_instance =
         sagactx.lookup::<db::model::Instance>("started_record")?;
     let instance_id = db_instance.id();
-    let sled_id = sagactx.lookup::<Uuid>("sled_id")?;
+    let sled_id = sagactx.lookup::<SledUuid>("sled_id")?;
     let vmm_record = sagactx.lookup::<db::model::Vmm>("vmm_record")?;
-    let propolis_id = sagactx.lookup::<Uuid>("propolis_id")?;
+    let propolis_id = sagactx.lookup::<PropolisUuid>("propolis_id")?;
 
     info!(osagactx.log(), "start saga: ensuring instance is registered on sled";
           "instance_id" => %instance_id,
@@ -508,8 +516,8 @@ async fn sis_ensure_registered_undo(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let datastore = osagactx.datastore();
-    let instance_id = params.db_instance.id();
-    let sled_id = sagactx.lookup::<Uuid>("sled_id")?;
+    let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
+    let sled_id = sagactx.lookup::<SledUuid>("sled_id")?;
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &params.serialized_authn,
@@ -522,7 +530,7 @@ async fn sis_ensure_registered_undo(
     // Fetch the latest record so that this callee can drive the instance into
     // a Failed state if the unregister call fails.
     let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(instance_id)
+        .instance_id(instance_id.into_untyped_uuid())
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
@@ -624,14 +632,14 @@ async fn sis_ensure_running(
     let db_instance =
         sagactx.lookup::<db::model::Instance>("started_record")?;
     let db_vmm = sagactx.lookup::<db::model::Vmm>("vmm_record")?;
-    let instance_id = params.db_instance.id();
-    let sled_id = sagactx.lookup::<Uuid>("sled_id")?;
+    let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
+    let sled_id = sagactx.lookup::<SledUuid>("sled_id")?;
     info!(osagactx.log(), "start saga: ensuring instance is running";
           "instance_id" => %instance_id,
           "sled_id" => %sled_id);
 
     let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(instance_id)
+        .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::Modify)
         .await
         .map_err(ActionError::action_failed)?;
@@ -737,11 +745,11 @@ mod test {
         let _project_id = setup_test_project(&client).await;
         let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
-        let db_instance =
-            test_helpers::instance_fetch(cptestctx, instance.identity.id)
-                .await
-                .instance()
-                .clone();
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+        let db_instance = test_helpers::instance_fetch(cptestctx, instance_id)
+            .await
+            .instance()
+            .clone();
 
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
@@ -752,15 +760,14 @@ mod test {
         let saga = nexus.create_runnable_saga(dag).await.unwrap();
         nexus.run_saga(saga).await.expect("Start saga should succeed");
 
-        test_helpers::instance_simulate(cptestctx, &instance.identity.id).await;
-        let vmm_state =
-            test_helpers::instance_fetch(cptestctx, instance.identity.id)
-                .await
-                .vmm()
-                .as_ref()
-                .expect("running instance should have a vmm")
-                .runtime
-                .state;
+        test_helpers::instance_simulate(cptestctx, &instance_id).await;
+        let vmm_state = test_helpers::instance_fetch(cptestctx, instance_id)
+            .await
+            .vmm()
+            .as_ref()
+            .expect("running instance should have a vmm")
+            .runtime
+            .state;
 
         assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
     }
@@ -775,6 +782,7 @@ mod test {
         let _project_id = setup_test_project(&client).await;
         let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
         test_helpers::action_failure_can_unwind::<
             SagaInstanceStart,
@@ -787,7 +795,7 @@ mod test {
                     async {
                         let db_instance = test_helpers::instance_fetch(
                             cptestctx,
-                            instance.identity.id,
+                            instance_id,
                         )
                         .await.instance().clone();
 
@@ -804,7 +812,7 @@ mod test {
                     async {
                         let new_db_instance = test_helpers::instance_fetch(
                             cptestctx,
-                            instance.identity.id,
+                            instance_id,
                         )
                         .await.instance().clone();
 
@@ -837,11 +845,11 @@ mod test {
         let _project_id = setup_test_project(&client).await;
         let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
-        let db_instance =
-            test_helpers::instance_fetch(cptestctx, instance.identity.id)
-                .await
-                .instance()
-                .clone();
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+        let db_instance = test_helpers::instance_fetch(cptestctx, instance_id)
+            .await
+            .instance()
+            .clone();
 
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
@@ -850,15 +858,14 @@ mod test {
 
         let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
         test_helpers::actions_succeed_idempotently(nexus, dag).await;
-        test_helpers::instance_simulate(cptestctx, &instance.identity.id).await;
-        let vmm_state =
-            test_helpers::instance_fetch(cptestctx, instance.identity.id)
-                .await
-                .vmm()
-                .as_ref()
-                .expect("running instance should have a vmm")
-                .runtime
-                .state;
+        test_helpers::instance_simulate(cptestctx, &instance_id).await;
+        let vmm_state = test_helpers::instance_fetch(cptestctx, instance_id)
+            .await
+            .vmm()
+            .as_ref()
+            .expect("running instance should have a vmm")
+            .runtime
+            .state;
 
         assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
     }
@@ -878,11 +885,11 @@ mod test {
         let _project_id = setup_test_project(&client).await;
         let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
-        let db_instance =
-            test_helpers::instance_fetch(cptestctx, instance.identity.id)
-                .await
-                .instance()
-                .clone();
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+        let db_instance = test_helpers::instance_fetch(cptestctx, instance_id)
+            .await
+            .instance()
+            .clone();
 
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
@@ -922,7 +929,7 @@ mod test {
         assert_eq!(saga_error.error_node_name, last_node_name);
 
         let db_instance =
-            test_helpers::instance_fetch(cptestctx, instance.identity.id).await;
+            test_helpers::instance_fetch(cptestctx, instance_id).await;
 
         assert_eq!(
             db_instance.instance().runtime_state.nexus_state,

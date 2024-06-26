@@ -33,7 +33,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::OmicronPhysicalDisksConfig;
-use sled_agent_client::ZoneKind;
 use slog_error_chain::SlogInlineError;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -75,6 +74,7 @@ pub use planning_input::SledDisk;
 pub use planning_input::SledFilter;
 pub use planning_input::SledResources;
 pub use planning_input::ZpoolFilter;
+pub use sled_agent_client::ZoneKind;
 pub use zone_type::blueprint_zone_type;
 pub use zone_type::BlueprintZoneType;
 

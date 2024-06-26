@@ -332,8 +332,9 @@ async fn svd_delete_crucible_snapshot_records(
 /// It's insufficient to rely on the struct of CrucibleResources to clean up
 /// that is returned as part of svd_decrease_crucible_resource_count. Imagine a
 /// disk that is composed of three regions (a subset of
-/// [`VolumeConstructionRequest`] is shown here):
+/// [`sled_agent_client::types::VolumeConstructionRequest`] is shown here):
 ///
+/// ```json
 /// {
 ///   "type": "volume",
 ///   "id": "6b353c87-afac-4ee2-b71a-6fe35fcf9e46",
@@ -352,9 +353,11 @@ async fn svd_delete_crucible_snapshot_records(
 ///   ],
 ///   "read_only_parent": null,
 /// }
+/// ```
 ///
 /// Taking a snapshot of this will produce the following volume:
 ///
+/// ```json
 /// {
 ///   "type": "volume",
 ///   "id": "1ef7282e-a3fb-4222-85a8-b16d3fbfd738",   <-- new UUID
@@ -373,6 +376,7 @@ async fn svd_delete_crucible_snapshot_records(
 ///   ],
 ///   "read_only_parent": null,
 /// }
+/// ```
 ///
 /// The snapshot targets will use the same IP but different port: snapshots are
 /// initially located on the same filesystem as their region.

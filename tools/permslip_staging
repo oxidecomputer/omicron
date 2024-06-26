@@ -1,4 +1,5 @@
-466a81d267c45355a3018dd57d61b5ae3ba281a54c804a1c0a6d6e4b4367ac3f manifest-gimlet-v1.0.20.toml
-b973cc9feb20f7bba447e7f5291c4070387fa9992deab81301f67f0a3844cd0c manifest-oxide-rot-1-v1.0.11.toml
-cc126931c09bb3c697b35255b438aac7dd93c98add8c7fcaffd1ee68e6317d24 manifest-psc-v1.0.19.toml
-0a11a2e15f0b45b11ce8b0a539c1db848a5054a46d3efc6bd95178a896afabc4 manifest-sidecar-v1.0.20.toml
+c28eaa13638f55100a42916727227242ee02d18cebecb1412d6af5c8aa945b99 manifest-gimlet-v1.0.22.toml
+201ff5580bb4b0b01419d7c5e580af9926103e2b6d3024e6b49cee6fab415519 manifest-oxide-rot-1-v1.0.12.toml
+6d53bfbfdd6baa3fc150153a003abfac6d4b46c34f61fa7a8ec2af8af19a7d5a manifest-psc-v1.0.21.toml
+d608dba3fa5a1fce3592ff3f643319787218b84706134147e5918f5bd1c0345d manifest-sidecar-v1.0.22.toml
+c0fecaefac7674138337f3bd4ce4ce5b884053dead5ec27b575701471631ea2f manifest-bootleby-v1.3.0.toml

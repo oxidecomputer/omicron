@@ -24,6 +24,8 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 
 impl super::Nexus {
     pub(crate) async fn instance_list_external_ips(
@@ -35,7 +37,10 @@ impl super::Nexus {
             instance_lookup.lookup_for(authz::Action::Read).await?;
         Ok(self
             .db_datastore
-            .instance_lookup_external_ips(opctx, authz_instance.id())
+            .instance_lookup_external_ips(
+                opctx,
+                InstanceUuid::from_untyped_uuid(authz_instance.id()),
+            )
             .await?
             .into_iter()
             .filter_map(|ip| {

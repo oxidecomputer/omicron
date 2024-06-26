@@ -328,6 +328,7 @@
           "checker": {
             "nullable": true,
             "description": "Checker to apply to incoming messages.",
+            "default": null,
             "type": "string"
           },
           "originate": {
@@ -340,6 +341,7 @@
           "shaper": {
             "nullable": true,
             "description": "Shaper to apply to outgoing messages.",
+            "default": null,
             "type": "string"
           }
         },
@@ -437,6 +439,7 @@
           "local_pref": {
             "nullable": true,
             "description": "Apply a local preference to routes received from this peer.",
+            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -444,11 +447,13 @@
           "md5_auth_key": {
             "nullable": true,
             "description": "Use the given key for TCP-MD5 authentication with the peer.",
+            "default": null,
             "type": "string"
           },
           "min_ttl": {
             "nullable": true,
             "description": "Require messages from a peer have a minimum IP time to live field.",
+            "default": null,
             "type": "integer",
             "format": "uint8",
             "minimum": 0
@@ -456,6 +461,7 @@
           "multi_exit_discriminator": {
             "nullable": true,
             "description": "Apply the provided multi-exit discriminator (MED) updates sent to the peer.",
+            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -467,6 +473,7 @@
           "remote_asn": {
             "nullable": true,
             "description": "Require that a peer has a specified ASN.",
+            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -474,6 +481,7 @@
           "vlan_id": {
             "nullable": true,
             "description": "Associate a VLAN ID with a BGP peer session.",
+            "default": null,
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -737,14 +745,14 @@
         "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
         "type": "string"
       },
-      "PortConfigV1": {
+      "PortConfigV2": {
         "type": "object",
         "properties": {
           "addresses": {
-            "description": "This port's addresses.",
+            "description": "This port's addresses and optional vlan IDs",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/IpNet"
+              "$ref": "#/components/schemas/UplinkAddressConfig"
             }
           },
           "autoneg": {
@@ -901,7 +909,7 @@
             "description": "Initial rack network configuration",
             "allOf": [
               {
-                "$ref": "#/components/schemas/RackNetworkConfigV1"
+                "$ref": "#/components/schemas/RackNetworkConfigV2"
               }
             ]
           },
@@ -934,7 +942,7 @@
           "recovery_silo"
         ]
       },
-      "RackNetworkConfigV1": {
+      "RackNetworkConfigV2": {
         "description": "Initial network configuration",
         "type": "object",
         "properties": {
@@ -967,7 +975,7 @@
             "description": "Uplinks for connecting the rack to external networks",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/PortConfigV1"
+              "$ref": "#/components/schemas/PortConfigV2"
             }
           },
           "rack_subnet": {
@@ -1192,6 +1200,7 @@
           "vlan_id": {
             "nullable": true,
             "description": "The VLAN id associated with this route.",
+            "default": null,
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -1223,6 +1232,25 @@
               "switch1"
             ]
           }
+        ]
+      },
+      "UplinkAddressConfig": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "$ref": "#/components/schemas/IpNet"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id (if any) associated with this address.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "address"
         ]
       },
       "UserId": {

@@ -427,12 +427,12 @@ mod test {
     use omicron_common::api::internal::nexus::VmmRuntimeState;
     use omicron_common::api::internal::nexus::VmmState;
     use omicron_test_utils::dev::test_setup_log;
-    use uuid::Uuid;
+    use omicron_uuid_kinds::PropolisUuid;
 
     fn make_instance(
         logctx: &LogContext,
     ) -> (SimObject<SimInstance>, Receiver<()>) {
-        let propolis_id = Uuid::new_v4();
+        let propolis_id = PropolisUuid::new_v4();
         let instance_vmm = InstanceRuntimeState {
             propolis_id: Some(propolis_id),
             dst_propolis_id: None,
@@ -451,6 +451,7 @@ mod test {
             instance_state: instance_vmm,
             vmm_state,
             propolis_id,
+            migration_state: None,
         };
 
         SimObject::new_simulated_auto(&state, logctx.log.new(o!()))

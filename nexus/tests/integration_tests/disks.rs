@@ -13,6 +13,8 @@ use http::StatusCode;
 use nexus_config::RegionAllocationStrategy;
 use nexus_db_model::PhysicalDiskPolicy;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::RegionAllocationFor;
+use nexus_db_queries::db::datastore::RegionAllocationParameters;
 use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use nexus_db_queries::db::fixed_data::{silo::DEFAULT_SILO_ID, FLEET_ID};
 use nexus_db_queries::db::lookup::LookupPath;
@@ -41,7 +43,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_nexus::app::{MAX_DISK_SIZE_BYTES, MIN_DISK_SIZE_BYTES};
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
-use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use oximeter::types::Datum;
 use oximeter::types::Measurement;
 use sled_agent_client::TestInterfaces as _;
@@ -178,13 +180,13 @@ async fn set_instance_state(
     .unwrap()
 }
 
-async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
+async fn instance_simulate(nexus: &Arc<Nexus>, id: &InstanceUuid) {
     let sa = nexus
         .instance_sled_by_id(id)
         .await
         .unwrap()
         .expect("instance must be on a sled to simulate a state change");
-    sa.instance_finish_transition(*id).await;
+    sa.instance_finish_transition(id.into_untyped_uuid()).await;
 }
 
 #[nexus_test]
@@ -236,7 +238,11 @@ async fn test_disk_create_attach_detach_delete(
     // is an artificial limitation without hotplug support.
     let instance_next =
         set_instance_state(&client, INSTANCE_NAME, "stop").await;
-    instance_simulate(nexus, &instance_next.identity.id).await;
+    instance_simulate(
+        nexus,
+        &InstanceUuid::from_untyped_uuid(instance_next.identity.id),
+    )
+    .await;
 
     // Verify that there are no disks attached to the instance, and specifically
     // that our disk is not attached to this instance.
@@ -381,10 +387,9 @@ async fn test_disk_slot_assignment(cptestctx: &ControlPlaneTestContext) {
     // to allow disks to be attached. There should be no disks attached
     // initially.
     let instance = create_instance(&client, PROJECT_NAME, INSTANCE_NAME).await;
-    let instance_id = &instance.identity.id;
-    let instance_next =
-        set_instance_state(&client, INSTANCE_NAME, "stop").await;
-    instance_simulate(nexus, &instance_next.identity.id).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    set_instance_state(&client, INSTANCE_NAME, "stop").await;
+    instance_simulate(nexus, &instance_id).await;
     let url_instance_disks =
         get_instance_disks_url(instance.identity.name.as_str());
     let listed_disks = disks_list(&client, &url_instance_disks).await;
@@ -420,7 +425,10 @@ async fn test_disk_slot_assignment(cptestctx: &ControlPlaneTestContext) {
 
         assert_eq!(attached_disk.identity.name, disk.identity.name);
         assert_eq!(attached_disk.identity.id, disk.identity.id);
-        assert_eq!(attached_disk.state, DiskState::Attached(*instance_id));
+        assert_eq!(
+            attached_disk.state,
+            DiskState::Attached(instance_id.into_untyped_uuid())
+        );
 
         assert_eq!(
             get_disk_slot(cptestctx, attached_disk.identity.id).await,
@@ -483,13 +491,14 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
 
     // Create an instance to attach the disk.
     let instance = create_instance(&client, PROJECT_NAME, INSTANCE_NAME).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
     // TODO(https://github.com/oxidecomputer/omicron/issues/811):
     //
     // Instances must be stopped before disks can be attached - this
     // is an artificial limitation without hotplug support.
-    let instance_next =
-        set_instance_state(&client, INSTANCE_NAME, "stop").await;
-    instance_simulate(nexus, &instance_next.identity.id).await;
+    set_instance_state(&client, INSTANCE_NAME, "stop").await;
+    instance_simulate(nexus, &instance_id).await;
 
     // Verify that there are no disks attached to the instance, and specifically
     // that our disk is not attached to this instance.
@@ -524,8 +533,9 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     // Create a second instance and try to attach the disk to that.  This should
     // fail and the disk should remain attached to the first instance.
     let instance2 = create_instance(&client, PROJECT_NAME, "instance2").await;
-    let instance_next = set_instance_state(&client, "instance2", "stop").await;
-    instance_simulate(nexus, &instance_next.identity.id).await;
+    let instance2_id = InstanceUuid::from_untyped_uuid(instance2.identity.id);
+    set_instance_state(&client, "instance2", "stop").await;
+    instance_simulate(nexus, &instance2_id).await;
 
     let url_instance2_attach_disk =
         get_disk_attach_url(&instance2.identity.id.into());
@@ -554,7 +564,10 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     );
 
     let attached_disk = disk_get(&client, &disk_url).await;
-    assert_eq!(attached_disk.state, DiskState::Attached(*instance_id));
+    assert_eq!(
+        attached_disk.state,
+        DiskState::Attached(instance_id.into_untyped_uuid())
+    );
 
     // Begin detaching the disk.
     let disk =
@@ -581,10 +594,12 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
         disk.identity.name.clone(),
     )
     .await;
-    let instance2_id = &instance2.identity.id;
     assert_eq!(attached_disk.identity.name, disk.identity.name);
     assert_eq!(attached_disk.identity.id, disk.identity.id);
-    assert_eq!(attached_disk.state, DiskState::Attached(*instance2_id));
+    assert_eq!(
+        attached_disk.state,
+        DiskState::Attached(instance2_id.into_untyped_uuid())
+    );
 
     // At this point, it's not legal to attempt to attach it to a different
     // instance (the first one).
@@ -616,7 +631,10 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
         disk.identity.name.clone(),
     )
     .await;
-    assert_eq!(disk.state, DiskState::Attached(*instance2_id));
+    assert_eq!(
+        disk.state,
+        DiskState::Attached(instance2_id.into_untyped_uuid())
+    );
 
     // It's not allowed to delete a disk that's attached.
     let error = NexusRequest::expect_failure(
@@ -2033,11 +2051,13 @@ async fn test_single_region_allocate(cptestctx: &ControlPlaneTestContext) {
     let datasets_and_regions = datastore
         .arbitrary_region_allocate(
             &opctx,
-            volume_id,
-            &params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+            RegionAllocationFor::DiskVolume { volume_id },
+            RegionAllocationParameters::FromDiskSource {
+                disk_source: &params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
+                size: ByteCount::from_gibibytes_u32(1),
             },
-            ByteCount::from_gibibytes_u32(1),
             &RegionAllocationStrategy::Random { seed: None },
             1,
         )
@@ -2173,11 +2193,13 @@ async fn test_region_allocation_strategy_random_is_idempotent_arbitrary(
     let datasets_and_regions = datastore
         .arbitrary_region_allocate(
             &opctx,
-            volume_id,
-            &params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+            RegionAllocationFor::DiskVolume { volume_id },
+            RegionAllocationParameters::FromDiskSource {
+                disk_source: &params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
+                size: ByteCount::from_gibibytes_u32(1),
             },
-            ByteCount::from_gibibytes_u32(1),
             &RegionAllocationStrategy::Random { seed: None },
             REGION_REDUNDANCY_THRESHOLD,
         )
@@ -2191,11 +2213,13 @@ async fn test_region_allocation_strategy_random_is_idempotent_arbitrary(
     let datasets_and_regions = datastore
         .arbitrary_region_allocate(
             &opctx,
-            volume_id,
-            &params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+            RegionAllocationFor::DiskVolume { volume_id },
+            RegionAllocationParameters::FromDiskSource {
+                disk_source: &params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
+                size: ByteCount::from_gibibytes_u32(1),
             },
-            ByteCount::from_gibibytes_u32(1),
             &RegionAllocationStrategy::Random { seed: None },
             REGION_REDUNDANCY_THRESHOLD + 1,
         )
@@ -2262,14 +2286,16 @@ async fn test_single_region_allocate_for_replace(
     let datasets_and_regions = datastore
         .arbitrary_region_allocate(
             &opctx,
-            db_disk.volume_id,
-            &params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(
-                    region_to_replace.block_size().to_bytes() as u32,
-                )
-                .unwrap(),
+            RegionAllocationFor::DiskVolume { volume_id: db_disk.volume_id },
+            RegionAllocationParameters::FromDiskSource {
+                disk_source: &params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(
+                        region_to_replace.block_size().to_bytes() as u32,
+                    )
+                    .unwrap(),
+                },
+                size: region_total_size,
             },
-            region_total_size,
             &RegionAllocationStrategy::Random { seed: None },
             one_more,
         )
@@ -2348,14 +2374,16 @@ async fn test_single_region_allocate_for_replace_not_enough_zpools(
     let result = datastore
         .arbitrary_region_allocate(
             &opctx,
-            db_disk.volume_id,
-            &params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(
-                    region_to_replace.block_size().to_bytes() as u32,
-                )
-                .unwrap(),
+            RegionAllocationFor::DiskVolume { volume_id: db_disk.volume_id },
+            RegionAllocationParameters::FromDiskSource {
+                disk_source: &params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(
+                        region_to_replace.block_size().to_bytes() as u32,
+                    )
+                    .unwrap(),
+                },
+                size: region_total_size,
             },
-            region_total_size,
             &RegionAllocationStrategy::Random { seed: None },
             one_more,
         )
@@ -2367,14 +2395,16 @@ async fn test_single_region_allocate_for_replace_not_enough_zpools(
     let datasets_and_regions = datastore
         .arbitrary_region_allocate(
             &opctx,
-            db_disk.volume_id,
-            &params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(
-                    region_to_replace.block_size().to_bytes() as u32,
-                )
-                .unwrap(),
+            RegionAllocationFor::DiskVolume { volume_id: db_disk.volume_id },
+            RegionAllocationParameters::FromDiskSource {
+                disk_source: &params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(
+                        region_to_replace.block_size().to_bytes() as u32,
+                    )
+                    .unwrap(),
+                },
+                size: region_total_size,
             },
-            region_total_size,
             &RegionAllocationStrategy::Random { seed: None },
             allocated_regions.len(),
         )

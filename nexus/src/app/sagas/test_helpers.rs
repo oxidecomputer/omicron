@@ -22,11 +22,11 @@ use nexus_db_queries::{
 };
 use nexus_types::identity::Resource;
 use omicron_common::api::external::NameOrId;
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use sled_agent_client::TestInterfaces as _;
 use slog::{info, warn, Logger};
 use std::{num::NonZeroU32, sync::Arc};
 use steno::SagaDag;
-use uuid::Uuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -40,14 +40,14 @@ pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
 
 pub(crate) async fn instance_start(
     cptestctx: &ControlPlaneTestContext,
-    id: &Uuid,
+    id: &InstanceUuid,
 ) {
     let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
         nexus_types::external_api::params::InstanceSelector {
             project: None,
-            instance: NameOrId::from(*id),
+            instance: NameOrId::from(id.into_untyped_uuid()),
         };
 
     let instance_lookup =
@@ -60,14 +60,14 @@ pub(crate) async fn instance_start(
 
 pub(crate) async fn instance_stop(
     cptestctx: &ControlPlaneTestContext,
-    id: &Uuid,
+    id: &InstanceUuid,
 ) {
     let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
         nexus_types::external_api::params::InstanceSelector {
             project: None,
-            instance: NameOrId::from(*id),
+            instance: NameOrId::from(id.into_untyped_uuid()),
         };
 
     let instance_lookup =
@@ -122,7 +122,7 @@ pub(crate) async fn instance_delete_by_name(
 
 pub(crate) async fn instance_simulate(
     cptestctx: &ControlPlaneTestContext,
-    instance_id: &Uuid,
+    instance_id: &InstanceUuid,
 ) {
     info!(&cptestctx.logctx.log, "Poking simulated instance";
           "instance_id" => %instance_id);
@@ -133,7 +133,7 @@ pub(crate) async fn instance_simulate(
         .unwrap()
         .expect("instance must be on a sled to simulate a state change");
 
-    sa.instance_finish_transition(*instance_id).await;
+    sa.instance_finish_transition(instance_id.into_untyped_uuid()).await;
 }
 
 pub(crate) async fn instance_simulate_by_name(
@@ -157,7 +157,7 @@ pub(crate) async fn instance_simulate_by_name(
         nexus.instance_lookup(&opctx, instance_selector).unwrap();
     let (.., instance) = instance_lookup.fetch().await.unwrap();
     let sa = nexus
-        .instance_sled_by_id(&instance.id())
+        .instance_sled_by_id(&InstanceUuid::from_untyped_uuid(instance.id()))
         .await
         .unwrap()
         .expect("instance must be on a sled to simulate a state change");
@@ -166,12 +166,12 @@ pub(crate) async fn instance_simulate_by_name(
 
 pub async fn instance_fetch(
     cptestctx: &ControlPlaneTestContext,
-    instance_id: Uuid,
+    instance_id: InstanceUuid,
 ) -> InstanceAndActiveVmm {
     let datastore = cptestctx.server.server_context().nexus.datastore().clone();
     let opctx = test_opctx(&cptestctx);
     let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(instance_id)
+        .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::Read)
         .await
         .expect("test instance should be present in datastore");

@@ -18,6 +18,7 @@ use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::{external, internal};
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::VnicUuid;
 use sled_agent_client::ZoneKind;
@@ -391,7 +392,7 @@ impl IncompleteNetworkInterface {
 
     pub fn new_instance(
         interface_id: Uuid,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         subnet: VpcSubnet,
         identity: external::IdentityMetadataCreateParams,
         ip: Option<std::net::IpAddr>,
@@ -399,7 +400,7 @@ impl IncompleteNetworkInterface {
         Self::new(
             interface_id,
             NetworkInterfaceKind::Instance,
-            instance_id,
+            instance_id.into_untyped_uuid(),
             subnet,
             identity,
             ip,

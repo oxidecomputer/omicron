@@ -9,6 +9,7 @@ use omicron_common::address::IpRange;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::internal::shared::BgpConfig;
 use omicron_common::api::internal::shared::RouteConfig;
+use omicron_common::api::internal::shared::UplinkAddressConfig;
 use serde::Serialize;
 use sled_hardware_types::Baseboard;
 use std::borrow::Cow;
@@ -340,7 +341,13 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
     // addresses = []
     let mut addresses_out = Array::new();
     for a in addresses {
-        addresses_out.push(string_value(a));
+        let UplinkAddressConfig { address, vlan_id } = a;
+        let mut x = InlineTable::new();
+        x.insert("address", string_value(address));
+        if let Some(vlan_id) = vlan_id {
+            x.insert("vlan_id", i64_value(i64::from(*vlan_id)));
+        }
+        addresses_out.push(Value::InlineTable(x));
     }
     uplink.insert("addresses", Item::Value(Value::Array(addresses_out)));
 

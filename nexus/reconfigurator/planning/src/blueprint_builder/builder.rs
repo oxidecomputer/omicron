@@ -6,6 +6,7 @@
 
 use crate::ip_allocator::IpAllocator;
 use crate::planner::zone_needs_expungement;
+use crate::planner::DiscretionaryOmicronZone;
 use crate::planner::ZoneExpungeReason;
 use anyhow::anyhow;
 use internal_dns::config::Host;
@@ -29,6 +30,7 @@ use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
+use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_internal_dns_server_addresses;
@@ -50,6 +52,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
+use sled_agent_client::ZoneKind;
 use slog::debug;
 use slog::error;
 use slog::info;
@@ -78,6 +81,10 @@ use super::zones::BuilderZonesConfig;
 pub enum Error {
     #[error("sled {sled_id}: ran out of available addresses for sled")]
     OutOfAddresses { sled_id: SledUuid },
+    #[error(
+        "sled {sled_id}: no available zpools for additional {kind:?} zones"
+    )]
+    NoAvailableZpool { sled_id: SledUuid, kind: ZoneKind },
     #[error("no Nexus zones exist in parent blueprint")]
     NoNexusZonesInParentBlueprint,
     #[error("no external service IP addresses are available")]
@@ -722,15 +729,19 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(Ensure::Added)
     }
 
-    /// Return the number of Nexus zones that would be configured to run on the
-    /// given sled if this builder generated a blueprint
+    /// Return the number of zones of a given kind that would be configured to
+    /// run on the given sled if this builder generated a blueprint.
     ///
     /// This value may change before a blueprint is actually generated if
     /// further changes are made to the builder.
-    pub fn sled_num_nexus_zones(&self, sled_id: SledUuid) -> usize {
+    pub fn sled_num_zones_of_kind(
+        &self,
+        sled_id: SledUuid,
+        kind: ZoneKind,
+    ) -> usize {
         self.zones
             .current_sled_zones(sled_id)
-            .filter(|(z, _)| z.zone_type.is_nexus())
+            .filter(|(z, _)| z.zone_type.kind() == kind)
             .count()
     }
 
@@ -777,7 +788,7 @@ impl<'a> BlueprintBuilder<'a> {
         external_dns_servers: Vec<IpAddr>,
     ) -> Result<EnsureMultiple, Error> {
         // How many Nexus zones do we need to add?
-        let nexus_count = self.sled_num_nexus_zones(sled_id);
+        let nexus_count = self.sled_num_zones_of_kind(sled_id, ZoneKind::Nexus);
         let num_nexus_to_add = match desired_zone_count.checked_sub(nexus_count)
         {
             Some(0) => return Ok(EnsureMultiple::NotNeeded),
@@ -850,6 +861,51 @@ impl<'a> BlueprintBuilder<'a> {
         self.cockroachdb_setting_preserve_downgrade = version;
     }
 
+    pub fn sled_ensure_zone_multiple_cockroachdb(
+        &mut self,
+        sled_id: SledUuid,
+        desired_zone_count: usize,
+    ) -> Result<EnsureMultiple, Error> {
+        // How many CRDB zones do we need to add?
+        let crdb_count =
+            self.sled_num_zones_of_kind(sled_id, ZoneKind::CockroachDb);
+        let num_crdb_to_add = match desired_zone_count.checked_sub(crdb_count) {
+            Some(0) => return Ok(EnsureMultiple::NotNeeded),
+            Some(n) => n,
+            None => {
+                return Err(Error::Planner(anyhow!(
+                    "removing a CockroachDb zone not yet supported \
+                     (sled {sled_id} has {crdb_count}; \
+                     planner wants {desired_zone_count})"
+                )));
+            }
+        };
+        for _ in 0..num_crdb_to_add {
+            let zone_id = self.rng.zone_rng.next();
+            let underlay_ip = self.sled_alloc_ip(sled_id)?;
+            let pool_name = self.sled_alloc_zpool(
+                sled_id,
+                DiscretionaryOmicronZone::CockroachDb,
+            )?;
+            let port = omicron_common::address::COCKROACH_PORT;
+            let address = SocketAddrV6::new(underlay_ip, port, 0, 0);
+            let zone = BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id: zone_id,
+                underlay_address: underlay_ip,
+                zone_type: BlueprintZoneType::CockroachDb(
+                    blueprint_zone_type::CockroachDb {
+                        address,
+                        dataset: OmicronZoneDataset { pool_name },
+                    },
+                ),
+            };
+            self.sled_add_zone(sled_id, zone)?;
+        }
+
+        Ok(EnsureMultiple::Changed { added: num_crdb_to_add, removed: 0 })
+    }
+
     fn sled_add_zone(
         &mut self,
         sled_id: SledUuid,
@@ -904,6 +960,46 @@ impl<'a> BlueprintBuilder<'a> {
             });
 
         allocator.alloc().ok_or(Error::OutOfAddresses { sled_id })
+    }
+
+    fn sled_alloc_zpool(
+        &mut self,
+        sled_id: SledUuid,
+        kind: DiscretionaryOmicronZone,
+    ) -> Result<ZpoolName, Error> {
+        let resources = self.sled_resources(sled_id)?;
+
+        // We refuse to choose a zpool for a zone of a given `kind` if this
+        // sled already has a zone of that kind on the same zpool. Build up a
+        // set of invalid zpools for this sled/kind pair.
+        let mut skip_zpools = BTreeSet::new();
+        for zone_config in self.current_sled_zones(sled_id) {
+            match (kind, &zone_config.zone_type) {
+                (
+                    DiscretionaryOmicronZone::Nexus,
+                    BlueprintZoneType::Nexus(_),
+                ) => {
+                    // TODO handle this case once we track transient datasets
+                }
+                (
+                    DiscretionaryOmicronZone::CockroachDb,
+                    BlueprintZoneType::CockroachDb(crdb),
+                ) => {
+                    skip_zpools.insert(&crdb.dataset.pool_name);
+                }
+                (DiscretionaryOmicronZone::Nexus, _)
+                | (DiscretionaryOmicronZone::CockroachDb, _) => (),
+            }
+        }
+
+        for &zpool_id in resources.all_zpools(ZpoolFilter::InService) {
+            let zpool_name = ZpoolName::new_external(zpool_id);
+            if !skip_zpools.contains(&zpool_name) {
+                return Ok(zpool_name);
+            }
+        }
+
+        Err(Error::NoAvailableZpool { sled_id, kind: kind.into() })
     }
 
     fn sled_resources(
@@ -1068,12 +1164,13 @@ impl<'a> BlueprintZonesBuilder<'a> {
 
 /// Helper for working with sets of disks on each sled
 ///
-/// Tracking the set of disks is slightly non-trivial because we need to bump
-/// the per-sled generation number iff the disks are changed.  So we need to
-/// keep track of whether we've changed the disks relative to the parent
-/// blueprint.  We do this by keeping a copy of any [`BlueprintDisksConfig`]
-/// that we've changed and a _reference_ to the parent blueprint's disks.  This
-/// struct makes it easy for callers iterate over the right set of disks.
+/// Tracking the set of disks is slightly non-trivial because we need to
+/// bump the per-sled generation number iff the disks are changed.  So
+/// we need to keep track of whether we've changed the disks relative
+/// to the parent blueprint.  We do this by keeping a copy of any
+/// [`BlueprintPhysicalDisksConfig`] that we've changed and a _reference_ to
+/// the parent blueprint's disks.  This struct makes it easy for callers iterate
+/// over the right set of disks.
 struct BlueprintDisksBuilder<'a> {
     changed_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
     parent_disks: &'a BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
@@ -1179,6 +1276,7 @@ pub mod test {
 
     /// Checks various conditions that should be true for all blueprints
     pub fn verify_blueprint(blueprint: &Blueprint) {
+        // There should be no duplicate underlay IPs.
         let mut underlay_ips: BTreeMap<Ipv6Addr, &BlueprintZoneConfig> =
             BTreeMap::new();
         for (_, zone) in blueprint.all_omicron_zones(BlueprintZoneFilter::All) {
@@ -1194,6 +1292,33 @@ pub mod test {
                     previous.id,
                     blueprint.display(),
                 );
+            }
+        }
+
+        // On any given zpool, we should have at most one zone of any given
+        // kind.
+        let mut kinds_by_zpool: BTreeMap<
+            ZpoolUuid,
+            BTreeMap<ZoneKind, OmicronZoneUuid>,
+        > = BTreeMap::new();
+        for (_, zone) in blueprint.all_omicron_zones(BlueprintZoneFilter::All) {
+            if let Some(dataset) = zone.zone_type.dataset() {
+                let kind = zone.zone_type.kind();
+                if let Some(previous) = kinds_by_zpool
+                    .entry(dataset.pool_name.id())
+                    .or_default()
+                    .insert(kind, zone.id)
+                {
+                    panic!(
+                        "zpool {} has two zones of kind {kind:?}: {} and {}\
+                            \n\n\
+                            blueprint: {}",
+                        dataset.pool_name,
+                        zone.id,
+                        previous,
+                        blueprint.display(),
+                    );
+                }
             }
         }
     }
@@ -1878,6 +2003,98 @@ pub mod test {
                 "unexpected error: {err:#}"
             ),
         };
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_ensure_cockroachdb() {
+        static TEST_NAME: &str = "blueprint_builder_test_ensure_cockroachdb";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Discard the example blueprint and start with an empty one.
+        let (_, input, _) = example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let input = {
+            // Clear out the external networking records from `input`, since
+            // we're building an empty blueprint.
+            let mut builder = input.into_builder();
+            *builder.network_resources_mut() =
+                OmicronZoneNetworkResources::new();
+            builder.build()
+        };
+        let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
+            input.all_sled_ids(SledFilter::Commissioned),
+            "test",
+            TEST_NAME,
+        );
+
+        // Pick an arbitrary sled.
+        let (target_sled_id, sled_resources) = input
+            .all_sled_resources(SledFilter::InService)
+            .next()
+            .expect("at least one sled");
+
+        // It should have multiple zpools.
+        let num_sled_zpools = sled_resources.zpools.len();
+        assert!(
+            num_sled_zpools > 1,
+            "expected more than 1 zpool, got {num_sled_zpools}"
+        );
+
+        // We should be able to ask for a CRDB zone per zpool.
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &parent,
+            &input,
+            "test",
+        )
+        .expect("constructed builder");
+        let ensure_result = builder
+            .sled_ensure_zone_multiple_cockroachdb(
+                target_sled_id,
+                num_sled_zpools,
+            )
+            .expect("ensured multiple CRDB zones");
+        assert_eq!(
+            ensure_result,
+            EnsureMultiple::Changed { added: num_sled_zpools, removed: 0 }
+        );
+
+        let blueprint = builder.build();
+        verify_blueprint(&blueprint);
+        assert_eq!(
+            blueprint
+                .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+                .filter(|(sled_id, z)| {
+                    *sled_id == target_sled_id
+                        && z.zone_type.kind() == ZoneKind::CockroachDb
+                })
+                .count(),
+            num_sled_zpools
+        );
+
+        // If we instead ask for one more zone than there are zpools, we should
+        // get a zpool allocation error.
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &parent,
+            &input,
+            "test",
+        )
+        .expect("constructed builder");
+        let ensure_error = builder
+            .sled_ensure_zone_multiple_cockroachdb(
+                target_sled_id,
+                num_sled_zpools + 1,
+            )
+            .expect_err("failed to create too many CRDB zones");
+        match ensure_error {
+            Error::NoAvailableZpool { sled_id, kind } => {
+                assert_eq!(target_sled_id, sled_id);
+                assert_eq!(kind, ZoneKind::CockroachDb);
+            }
+            _ => panic!("unexpected error {ensure_error}"),
+        }
 
         logctx.cleanup_successful();
     }

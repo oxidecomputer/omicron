@@ -153,6 +153,10 @@ fn build_shared_methods(item_name: &Ident, fields: &[&Field]) -> TokenStream {
             #name
         }
 
+        fn version(&self) -> ::std::num::NonZeroU8 {
+            unsafe { ::std::num::NonZeroU8::new_unchecked(1) }
+        }
+
         fn field_names(&self) -> &'static [&'static str] {
             &[#(#names),*]
         }

@@ -16,12 +16,20 @@ use super::{Generation, VmmState};
 use crate::schema::vmm;
 use crate::SqlU16;
 use chrono::{DateTime, Utc};
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// An individual VMM process that incarnates a specific instance.
 #[derive(
-    Clone, Queryable, Debug, Selectable, Serialize, Deserialize, Insertable,
+    Clone,
+    Queryable,
+    Debug,
+    Selectable,
+    Serialize,
+    Deserialize,
+    Insertable,
+    PartialEq,
 )]
 #[diesel(table_name = vmm)]
 pub struct Vmm {
@@ -61,9 +69,9 @@ pub enum VmmInitialState {
 impl Vmm {
     /// Creates a new VMM record.
     pub fn new(
-        id: Uuid,
-        instance_id: Uuid,
-        sled_id: Uuid,
+        id: PropolisUuid,
+        instance_id: InstanceUuid,
+        sled_id: SledUuid,
         propolis_ip: ipnetwork::IpNetwork,
         propolis_port: u16,
         initial_state: VmmInitialState,
@@ -75,11 +83,11 @@ impl Vmm {
         };
 
         Self {
-            id,
+            id: id.into_untyped_uuid(),
             time_created: now,
             time_deleted: None,
-            instance_id,
-            sled_id,
+            instance_id: instance_id.into_untyped_uuid(),
+            sled_id: sled_id.into_untyped_uuid(),
             propolis_ip,
             propolis_port: SqlU16(propolis_port),
             runtime: VmmRuntimeState {
@@ -101,6 +109,7 @@ impl Vmm {
     Queryable,
     Serialize,
     Deserialize,
+    PartialEq,
 )]
 #[diesel(table_name = vmm)]
 pub struct VmmRuntimeState {

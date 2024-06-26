@@ -9,6 +9,7 @@ mod bfd;
 mod blueprint_execution;
 mod blueprint_load;
 mod common;
+mod crdb_node_id_collector;
 mod dns_config;
 mod dns_propagation;
 mod dns_servers;

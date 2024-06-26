@@ -75,6 +75,10 @@ impl CockroachCli {
         Self { path_to_cockroach_binary, cockroach_address }
     }
 
+    pub fn cockroach_address(&self) -> SocketAddrV6 {
+        self.cockroach_address
+    }
+
     pub async fn node_status(
         &self,
     ) -> Result<Vec<NodeStatus>, CockroachCliError> {

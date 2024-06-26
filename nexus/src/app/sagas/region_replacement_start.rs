@@ -257,12 +257,16 @@ async fn srrs_alloc_new_region(
     // agent could reuse the allocated port and cause trouble.
     let datasets_and_regions = osagactx
         .datastore()
-        .arbitrary_region_allocate_direct(
+        .arbitrary_region_allocate(
             &opctx,
-            db_region.volume_id(),
-            db_region.block_size().to_bytes(),
-            db_region.blocks_per_extent(),
-            db_region.extent_count(),
+            db::datastore::RegionAllocationFor::DiskVolume {
+                volume_id: db_region.volume_id(),
+            },
+            db::datastore::RegionAllocationParameters::FromRaw {
+                block_size: db_region.block_size().to_bytes(),
+                blocks_per_extent: db_region.blocks_per_extent(),
+                extent_count: db_region.extent_count(),
+            },
             &params.allocation_strategy,
             // Note: this assumes that previous redundancy is
             // REGION_REDUNDANCY_THRESHOLD, and that region replacement will

@@ -39,6 +39,7 @@ use omicron_common::api::internal::shared::{
     NetworkInterface, SourceNatConfig,
 };
 use omicron_common::backoff;
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid};
 use propolis_client::Client as PropolisClient;
 use rand::prelude::SliceRandom;
 use rand::SeedableRng;
@@ -108,10 +109,10 @@ pub enum Error {
     ResolveError(#[from] internal_dns::resolver::ResolveError),
 
     #[error("Instance {0} not running!")]
-    InstanceNotRunning(Uuid),
+    InstanceNotRunning(InstanceUuid),
 
     #[error("Instance already registered with Propolis ID {0}")]
-    InstanceAlreadyRegistered(Uuid),
+    InstanceAlreadyRegistered(PropolisUuid),
 
     #[error("No U.2 devices found")]
     U2NotFound,
@@ -182,7 +183,7 @@ fn fmri_name() -> String {
 
 /// Return the expected name of a Propolis zone managing an instance with the
 /// provided ID.
-pub fn propolis_zone_name(id: &Uuid) -> String {
+pub fn propolis_zone_name(id: &PropolisUuid) -> String {
     format!("{}{}", PROPOLIS_ZONE_PREFIX, id)
 }
 
@@ -316,7 +317,7 @@ struct InstanceRunner {
     properties: propolis_client::types::InstanceProperties,
 
     // The ID of the Propolis server (and zone) running this instance
-    propolis_id: Uuid,
+    propolis_id: PropolisUuid,
 
     // The socket address of the Propolis server running this instance
     propolis_addr: SocketAddr,
@@ -470,12 +471,12 @@ impl InstanceRunner {
     }
 
     /// Yields this instance's ID.
-    fn id(&self) -> &Uuid {
-        &self.properties.id
+    fn id(&self) -> InstanceUuid {
+        InstanceUuid::from_untyped_uuid(self.properties.id)
     }
 
     /// Yields this instance's Propolis's ID.
-    fn propolis_id(&self) -> &Uuid {
+    fn propolis_id(&self) -> &PropolisUuid {
         &self.propolis_id
     }
 
@@ -495,7 +496,10 @@ impl InstanceRunner {
 
                 self.nexus_client
                     .client()
-                    .cpapi_instances_put(self.id(), &state.into())
+                    .cpapi_instances_put(
+                        &self.id().into_untyped_uuid(),
+                        &state.into(),
+                    )
                     .await
                     .map_err(|err| -> backoff::BackoffError<Error> {
                         match &err {
@@ -928,8 +932,8 @@ impl Instance {
     /// * `metadata`: Instance-related metadata used to track statistics.
     pub(crate) fn new(
         log: Logger,
-        id: Uuid,
-        propolis_id: Uuid,
+        id: InstanceUuid,
+        propolis_id: PropolisUuid,
         ticket: InstanceTicket,
         state: InstanceInitialState,
         services: InstanceManagerServices,
@@ -1000,7 +1004,7 @@ impl Instance {
             monitor_handle: None,
             // NOTE: Mostly lies.
             properties: propolis_client::types::InstanceProperties {
-                id,
+                id: id.into_untyped_uuid(),
                 name: hardware.properties.hostname.to_string(),
                 description: "Test description".to_string(),
                 image_id: Uuid::nil(),
@@ -1262,7 +1266,7 @@ impl InstanceRunner {
             }
             InstanceStateRequested::Reboot => {
                 if self.running_state.is_none() {
-                    return Err(Error::InstanceNotRunning(*self.id()));
+                    return Err(Error::InstanceNotRunning(self.id()));
                 }
                 (
                     Some(PropolisRequest::Reboot),
@@ -1354,7 +1358,7 @@ impl InstanceRunner {
             .with_zone_root_path(&root)
             .with_zone_image_paths(&["/opt/oxide".into()])
             .with_zone_type("propolis-server")
-            .with_unique_name(*self.propolis_id())
+            .with_unique_name(self.propolis_id().into_untyped_uuid())
             .with_datasets(&[])
             .with_filesystems(&[])
             .with_data_links(&[])
@@ -1473,7 +1477,9 @@ impl InstanceRunner {
 
             Ok(())
         } else {
-            Err(Error::InstanceNotRunning(self.properties.id))
+            Err(Error::InstanceNotRunning(InstanceUuid::from_untyped_uuid(
+                self.properties.id,
+            )))
         }
     }
 
@@ -1710,8 +1716,8 @@ mod tests {
         storage_handle: StorageHandle,
         temp_dir: &String,
     ) -> Instance {
-        let id = Uuid::new_v4();
-        let propolis_id = Uuid::new_v4();
+        let id = InstanceUuid::new_v4();
+        let propolis_id = PropolisUuid::new_v4();
 
         let ticket = InstanceTicket::new_without_manager_for_test(id);
 
@@ -1743,7 +1749,7 @@ mod tests {
     }
 
     fn fake_instance_initial_state(
-        propolis_id: Uuid,
+        propolis_id: PropolisUuid,
         propolis_addr: SocketAddr,
     ) -> InstanceInitialState {
         let hardware = InstanceHardware {
@@ -2104,8 +2110,8 @@ mod tests {
             propolis_mock_server(&logctx.log);
         let propolis_addr = propolis_server.local_addr();
 
-        let instance_id = Uuid::new_v4();
-        let propolis_id = Uuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
+        let propolis_id = PropolisUuid::new_v4();
         let InstanceInitialState {
             hardware,
             instance_runtime,
