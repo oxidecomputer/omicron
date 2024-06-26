@@ -54,7 +54,7 @@ SELECT
     gen_random_uuid(), vpc_subnet.name,
     'VPC Subnet route for ''' || vpc_subnet.name || '''',
     now(), now(),
-    omicron.public.vpc_router.id, 'default',
+    omicron.public.vpc_router.id, 'vpc_subnet',
     'subnet:' || vpc_subnet.name, 'subnet:' || vpc_subnet.name
 FROM
     (omicron.public.vpc_subnet JOIN omicron.public.vpc
