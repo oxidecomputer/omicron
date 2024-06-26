@@ -89,9 +89,7 @@ async fn main() -> Result<()> {
         Cmds::CheckWorkspaceDeps => check_workspace_deps::run_cmd(),
         Cmds::Download(args) => download::run_cmd(args).await,
         #[cfg(target_os = "illumos")]
-        Cmds::Releng(external) => {
-            external.cargo_args(["--release"]).exec_bin("omicron-releng")
-        }
+        Cmds::Releng(external) => external.exec_bin("omicron-releng"),
         #[cfg(target_os = "illumos")]
         Cmds::VerifyLibraries => verify_libraries::run_cmd(),
         #[cfg(target_os = "illumos")]
