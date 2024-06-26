@@ -474,7 +474,12 @@ async fn check_from_previous_propolis_step(
     // If this saga does not wait, it will interleave with the instance
     // migration saga. Depending on Nexus' view of what stage the migration is
     // in, volume replacement requests could be sent to the source propolis or
-    // destination propolis.
+    // destination propolis. This is because any call to
+    // `instance_fetch_with_vmm` will always return a VMM that is either a
+    // migration source or not migrating. If this saga calls
+    // `instance_fetch_with_vmm` multiple times during a migration, it will
+    // return the source propolis until the migration is done, where then it
+    // will return the destination propolis.
     //
     // Processing a replacement request does _not_ cause an activation, so
     // sending a replacement request to the source propolis will not cause the
