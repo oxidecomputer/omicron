@@ -464,9 +464,9 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=4a6b4c7fdeae979ab5c6648b828b5c7256954235#4a6b4c7fdeae979ab5c6648b828b5c7256954235"
+source = "git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459#59868677c70f3cd03f03e12584ad1056da8b5459"
 dependencies = [
- "bhyve_api_sys 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=4a6b4c7fdeae979ab5c6648b828b5c7256954235)",
+ "bhyve_api_sys 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459)",
  "libc",
  "strum",
 ]
@@ -484,7 +484,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=4a6b4c7fdeae979ab5c6648b828b5c7256954235#4a6b4c7fdeae979ab5c6648b828b5c7256954235"
+source = "git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459#59868677c70f3cd03f03e12584ad1056da8b5459"
 dependencies = [
  "libc",
  "strum",
@@ -3477,7 +3477,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "bhyve_api 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=4a6b4c7fdeae979ab5c6648b828b5c7256954235)",
+ "bhyve_api 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459)",
  "byteorder",
  "camino",
  "camino-tempfile",
@@ -5532,7 +5532,7 @@ dependencies = [
  "pq-sys",
  "pretty_assertions",
  "progenitor-client",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=4a6b4c7fdeae979ab5c6648b828b5c7256954235)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459)",
  "rand 0.8.5",
  "rcgen",
  "ref-cast",
@@ -5782,7 +5782,7 @@ dependencies = [
  "oximeter-producer",
  "oxnet",
  "pretty_assertions",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=4a6b4c7fdeae979ab5c6648b828b5c7256954235)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459)",
  "propolis-mock-server",
  "rand 0.8.5",
  "rcgen",
@@ -7246,7 +7246,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=4a6b4c7fdeae979ab5c6648b828b5c7256954235#4a6b4c7fdeae979ab5c6648b828b5c7256954235"
+source = "git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459#59868677c70f3cd03f03e12584ad1056da8b5459"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -7288,7 +7288,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=4a6b4c7fdeae979ab5c6648b828b5c7256954235#4a6b4c7fdeae979ab5c6648b828b5c7256954235"
+source = "git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459#59868677c70f3cd03f03e12584ad1056da8b5459"
 dependencies = [
  "anyhow",
  "atty",
@@ -7298,7 +7298,7 @@ dependencies = [
  "futures",
  "hyper 0.14.28",
  "progenitor",
- "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=4a6b4c7fdeae979ab5c6648b828b5c7256954235)",
+ "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459)",
  "rand 0.8.5",
  "reqwest",
  "schemars",
@@ -7330,7 +7330,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=4a6b4c7fdeae979ab5c6648b828b5c7256954235#4a6b4c7fdeae979ab5c6648b828b5c7256954235"
+source = "git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459#59868677c70f3cd03f03e12584ad1056da8b5459"
 dependencies = [
  "schemars",
  "serde",

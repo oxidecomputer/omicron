@@ -408,9 +408,9 @@ prettyplease = { version = "0.2.20", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "4a6b4c7fdeae979ab5c6648b828b5c7256954235" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "4a6b4c7fdeae979ab5c6648b828b5c7256954235" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "4a6b4c7fdeae979ab5c6648b828b5c7256954235" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "59868677c70f3cd03f03e12584ad1056da8b5459" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "59868677c70f3cd03f03e12584ad1056da8b5459" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "59868677c70f3cd03f03e12584ad1056da8b5459" }
 proptest = "1.4.0"
 quote = "1.0"
 rand = "0.8.5"
