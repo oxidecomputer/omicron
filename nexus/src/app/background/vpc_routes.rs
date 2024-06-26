@@ -15,7 +15,7 @@ use nexus_types::{
     identity::Resource,
 };
 use omicron_common::api::internal::shared::{
-    ResolvedVpcRoute, ResolvedVpcRouteSet, RouterId, RouterVersion,
+    ResolvedVpcRoute, ResolvedVpcRouteSet, RouterId, RouterKind, RouterVersion,
 };
 use serde_json::json;
 use std::collections::hash_map::Entry;
@@ -164,7 +164,7 @@ impl BackgroundTask for VpcRouteManager {
                     };
 
                     db_routers.insert(
-                        RouterId { vni: set.id.vni, subnet: None },
+                        RouterId { vni: set.id.vni, kind: RouterKind::System },
                         system_router,
                     );
                     db_routers.extend(custom_routers.iter().map(
@@ -172,7 +172,9 @@ impl BackgroundTask for VpcRouteManager {
                             (
                                 RouterId {
                                     vni: set.id.vni,
-                                    subnet: Some(subnet.ipv4_block.0.into()),
+                                    kind: RouterKind::Custom(
+                                        subnet.ipv4_block.0.into(),
+                                    ),
                                 },
                                 router.clone(),
                             )
@@ -183,7 +185,9 @@ impl BackgroundTask for VpcRouteManager {
                             (
                                 RouterId {
                                     vni: set.id.vni,
-                                    subnet: Some(subnet.ipv6_block.0.into()),
+                                    kind: RouterKind::Custom(
+                                        subnet.ipv6_block.0.into(),
+                                    ),
                                 },
                                 router,
                             )

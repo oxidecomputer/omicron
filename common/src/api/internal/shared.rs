@@ -672,7 +672,17 @@ impl RouterVersion {
 )]
 pub struct RouterId {
     pub vni: Vni,
-    pub subnet: Option<IpNet>,
+    pub kind: RouterKind,
+}
+
+/// The scope of a set of VPC router rules.
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+#[serde(tag = "type", rename_all = "snake_case", content = "subnet")]
+pub enum RouterKind {
+    System,
+    Custom(IpNet),
 }
 
 /// Version information for routes on a given VPC subnet.

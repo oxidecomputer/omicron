@@ -62,6 +62,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterId;
+use omicron_common::api::internal::shared::RouterKind;
 use omicron_nexus::app::MAX_MEMORY_BYTES_PER_INSTANCE;
 use omicron_nexus::app::MAX_VCPU_PER_INSTANCE;
 use omicron_nexus::app::MIN_MEMORY_BYTES_PER_INSTANCE;
@@ -4850,11 +4851,14 @@ pub async fn assert_sled_vpc_routes(
     let condition = || async {
         let vpc_routes = sled_agent.vpc_routes.lock().await;
         let sys_routes_found = vpc_routes.iter().any(|(id, set)| {
-            *id == RouterId { vni, subnet: None } && set.routes == system_routes
+            *id == RouterId { vni, kind: RouterKind::System }
+                && set.routes == system_routes
         });
         let custom_routes_found = vpc_routes.iter().any(|(id, set)| {
-            *id == RouterId { vni, subnet: Some(db_subnet.ipv4_block.0.into()) }
-                && set.routes == custom_routes
+            *id == RouterId {
+                vni,
+                kind: RouterKind::Custom(db_subnet.ipv4_block.0.into()),
+            } && set.routes == custom_routes
         });
 
         if sys_routes_found && custom_routes_found {

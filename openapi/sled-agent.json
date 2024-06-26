@@ -4382,20 +4382,53 @@
         "description": "Identifier for a VPC and/or subnet.",
         "type": "object",
         "properties": {
-          "subnet": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IpNet"
-              }
-            ]
+          "kind": {
+            "$ref": "#/components/schemas/RouterKind"
           },
           "vni": {
             "$ref": "#/components/schemas/Vni"
           }
         },
         "required": [
+          "kind",
           "vni"
+        ]
+      },
+      "RouterKind": {
+        "description": "The scope of a set of VPC router rules.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "system"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "subnet": {
+                "$ref": "#/components/schemas/IpNet"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "custom"
+                ]
+              }
+            },
+            "required": [
+              "subnet",
+              "type"
+            ]
+          }
         ]
       },
       "RouterTarget": {
