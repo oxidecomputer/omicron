@@ -497,31 +497,68 @@ impl Zones {
     /// If `None` is supplied, the address is queried from the Global Zone.
     #[allow(clippy::needless_lifetimes)]
     pub fn ensure_address<'a>(
+        log: Option<&'a Logger>,
         zone: Option<&'a str>,
         addrobj: &AddrObject,
         addrtype: AddressRequest,
     ) -> Result<IpNetwork, EnsureAddressError> {
         |zone, addrobj, addrtype| -> Result<IpNetwork, anyhow::Error> {
+            if let Some(l) = log {
+                info!(l, "DEBUG Zones::ensure_address: Get IP address of interface";
+                    "zone" => #?zone,
+                    "addrobj" => #?addrobj,
+                );
+            }
             match Self::get_address_impl(zone, addrobj) {
                 Ok(addr) => {
                     if let AddressRequest::Static(expected_addr) = addrtype {
                         // If the address is static, we need to validate that it
                         // matches the value we asked for.
                         if addr != expected_addr {
+                            if let Some(log) = log {
+                                info!(log, "DEBUG Zones::ensure_address: IP address of interface is not the expected one";
+                                    "addr" => #?addr,
+                                    "expected_addr" => #?expected_addr,
+                                );
+                            }
                             // If the address doesn't match, try removing the old
                             // value before using the new one.
+                            if let Some(l) = log {
+                                info!(l, "DEBUG Zones::ensure_address: Deleting old addrobj";
+                                    "zone" => #?zone,
+                                    "addrobj" => #?addrobj,
+                                );
+                            }
                             Self::delete_address(zone, addrobj)
                                 .map_err(|e| anyhow!(e))?;
+
+                            if let Some(l) = log {
+                                info!(l, "DEBUG Zones::ensure_address: Creating new addrobj";
+                                    "zone" => #?zone,
+                                    "addrobj" => #?addrobj,
+                                    "addrtype" => #?addrtype,
+                                );
+                            }
                             return Self::create_address(
-                                zone, addrobj, addrtype,
+                                log, zone, addrobj, addrtype,
                             )
                             .map_err(|e| anyhow!(e));
                         }
                     }
                     Ok(addr)
                 }
-                Err(_) => Self::create_address(zone, addrobj, addrtype)
-                    .map_err(|e| anyhow!(e)),
+                Err(err) => {
+                    if let Some(log) = log {
+                        info!(log, "DEBUG Zones::ensure_address: Creating new addrobj due to error when retrieving IP address of interface";
+                            "error" => #?err,
+                            "zone" => #?zone,
+                            "addrobj" => #?addrobj,
+                            "addrtype" => #?addrtype,
+                        );
+                    }
+                    Self::create_address(log, zone, addrobj, addrtype)
+                    .map_err(|e| anyhow!(e))
+                }
             }
         }(zone, addrobj, addrtype)
         .map_err(|err| EnsureAddressError {
@@ -641,6 +678,7 @@ impl Zones {
     // Does NOT check if the address already exists.
     #[allow(clippy::needless_lifetimes)]
     fn create_address_internal<'a>(
+        log: Option<&'a Logger>,
         zone: Option<&'a str>,
         addrobj: &AddrObject,
         addrtype: AddressRequest,
@@ -671,6 +709,14 @@ impl Zones {
         args.push(addrobj.to_string());
 
         let cmd = command.args(args);
+        if let Some(l) = log {
+            info!(l, "DEBUG Zones::create_address_internal: Attempt to create the requested address";
+                "zone" => #?zone,
+                "addrobj" => #?addrobj,
+                "addrtype" => #?addrtype,
+                "cmd" => #?cmd,
+            );
+        }
         execute(cmd)?;
 
         Ok(())
@@ -710,10 +756,18 @@ impl Zones {
     /// <https://ry.goodwu.net/tinkering/a-day-in-the-life-of-an-ipv6-address-on-illumos/>
     #[allow(clippy::needless_lifetimes)]
     pub fn ensure_has_link_local_v6_address<'a>(
+        log: Option<&'a Logger>,
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<(), crate::ExecutionError> {
         if let Ok(()) = Self::has_link_local_v6_address(zone, &addrobj) {
+            if let Some(l) = log {
+                info!(l, "DEBUG Zones::ensure_has_link_local_v6_address: addrobj Already has
+                corresponding link-local IPv6 address";
+                    "zone" => #?zone,
+                    "addrobj" => #?addrobj,
+                );
+            }
             return Ok(());
         }
 
@@ -734,6 +788,12 @@ impl Zones {
         let args = prefix.iter().chain(create_addr_args);
 
         let cmd = command.args(args);
+        if let Some(l) = log {
+            info!(l, "DEBUG Zones::ensure_has_link_local_v6_address: No link-local address was found,
+            attempt to make one.";
+                "cmd" => #?cmd,
+            );
+        }
         execute(cmd)?;
         Ok(())
     }
@@ -755,6 +815,7 @@ impl Zones {
                 .map_err(|err| anyhow!(err))?;
             Self::ensure_has_link_local_v6_address(
                 None,
+                None,
                 &gz_link_local_addrobj,
             )
             .map_err(|err| anyhow!(err))?;
@@ -766,6 +827,7 @@ impl Zones {
             // this sled itself are within the underlay or bootstrap prefix.
             // Anything else must be routed through Sidecar.
             Self::ensure_address(
+                None,
                 None,
                 &gz_link_local_addrobj
                     .on_same_interface(name)
@@ -806,6 +868,7 @@ impl Zones {
     // Creates an IP address within a Zone.
     #[allow(clippy::needless_lifetimes)]
     fn create_address<'a>(
+        log: Option<&'a Logger>,
         zone: Option<&'a str>,
         addrobj: &AddrObject,
         addrtype: AddressRequest,
@@ -820,11 +883,35 @@ impl Zones {
                 AddressRequest::Dhcp => {}
                 AddressRequest::Static(addr) => {
                     if addr.is_ipv6() {
+                        if let Some(l) = log {
+                            info!(l, "DEBUG Zones::create_address: Address is static and IPv6.
+                            Also, we are allocating it in a non-global zone.
+                            Doing prep work before allocating address";
+                                "zone" => #?zone,
+                                "addr" => #?addr,
+                                "addrtype" => #?addrtype,
+                            );
+                        }
+
                         // Finally, actually ensure that the v6 address we want
                         // exists within the zone.
                         let link_local_addrobj =
                             addrobj.link_local_on_same_interface()?;
+                        if let Some(l) = log {
+                            info!(l, "DEBUG Zones::create_address: Create a new addrobj
+                            on the same interface with the IPv6 link-local name.";
+                                "link_local_addrobj" => #?link_local_addrobj,
+                            );
+                        }
+                        if let Some(l) = log {
+                            info!(l, "DEBUG Zones::create_address: Ensure a link-local
+                            IPv6 exists with the name provided in addrobj";
+                                "zone" => #?zone,
+                                "link_local_addrobj" => #?link_local_addrobj,
+                            );
+                        }
                         Self::ensure_has_link_local_v6_address(
+                            log,
                             Some(zone),
                             &link_local_addrobj,
                         )?;
@@ -834,7 +921,14 @@ impl Zones {
         };
 
         // Actually perform address allocation.
-        Self::create_address_internal(zone, addrobj, addrtype)?;
+        if let Some(l) = log {
+            info!(l, "DEBUG Zones::create_address: Actually perform address allocation.";
+                "zone" => #?zone,
+                "addrobj" => #?addrobj,
+                "addrtype" => #?addrtype,
+            );
+        }
+        Self::create_address_internal(log, zone, addrobj, addrtype)?;
 
         Self::get_address_impl(zone, addrobj)
     }

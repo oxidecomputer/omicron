@@ -617,7 +617,7 @@ impl RunningZone {
                 err,
             })?;
         let network =
-            Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
+            Zones::ensure_address(None, Some(&self.inner.name), &addrobj, addrtype)?;
         Ok(network)
     }
 
@@ -626,7 +626,7 @@ impl RunningZone {
         &self,
         address: Ipv6Addr,
     ) -> Result<(), EnsureAddressError> {
-        info!(self.inner.log, "Adding bootstrap address");
+        info!(self.inner.log, "DEBUG RunningZone::ensure_bootstrap_address: Adding bootstrap address");
         let vnic = self.inner.bootstrap_vnic.as_ref().ok_or_else(|| {
             EnsureAddressError::MissingBootstrapVnic {
                 address: address.to_string(),
@@ -643,8 +643,13 @@ impl RunningZone {
                     err,
                 }
             })?;
+        info!(self.inner.log, "DEBUG RunningZone::ensure_bootstrap_address: Ensuring address";
+            "zone" => ?self.inner.name,
+            "addrobj" => #?addrobj,
+            "addrtype" => #?addrtype,
+        );
         let _ =
-            Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
+            Zones::ensure_address(Some(&self.inner.log), Some(&self.inner.name), &addrobj, addrtype)?;
         Ok(())
     }
 
@@ -672,7 +677,7 @@ impl RunningZone {
         let zone = Some(self.inner.name.as_ref());
         if let IpAddr::V4(gateway) = port.gateway().ip() {
             let addr =
-                Zones::ensure_address(zone, &addrobj, AddressRequest::Dhcp)?;
+                Zones::ensure_address(None, zone, &addrobj, AddressRequest::Dhcp)?;
             // TODO-remove(#2931): OPTE's DHCP "server" returns the list of routes
             // to add via option 121 (Classless Static Route). The illumos DHCP
             // client currently does not support this option, so we add the routes
@@ -700,7 +705,7 @@ impl RunningZone {
         } else {
             // If the port is using IPv6 addressing we still want it to use
             // DHCP(v6) which requires first creating a link-local address.
-            Zones::ensure_has_link_local_v6_address(zone, &addrobj).map_err(
+            Zones::ensure_has_link_local_v6_address(None, zone, &addrobj).map_err(
                 |err| EnsureAddressError::LinkLocal {
                     zone: self.inner.name.clone(),
                     err,
@@ -788,7 +793,7 @@ impl RunningZone {
         gz_bootstrap_addr: Ipv6Addr,
         zone_vnic_name: &str,
     ) -> Result<(), RunCommandError> {
-        self.run_cmd([
+        let args = [
             "/usr/sbin/route",
             "add",
             "-inet6",
@@ -796,7 +801,14 @@ impl RunningZone {
             &gz_bootstrap_addr.to_string(),
             "-ifp",
             zone_vnic_name,
-        ])?;
+        ];
+        info!(self.inner.log, "DEBUG RunningZone::add_bootstrap_route: Adding bootstrap route";
+            "bootstrap_prefix" => #?bootstrap_prefix,
+            "gz_bootstrap_addr" => #?gz_bootstrap_addr,
+            "zone_vnic_name" => #?zone_vnic_name,
+            "cmd" => #?args,
+        );
+        self.run_cmd(args)?;
         Ok(())
     }
 
@@ -845,7 +857,7 @@ impl RunningZone {
         let addrobj = AddrObject::new_control(&vnic_name).map_err(|err| {
             GetZoneError::AddrObject { name: zone_name.to_string(), err }
         })?;
-        Zones::ensure_address(Some(zone_name), &addrobj, addrtype).map_err(
+        Zones::ensure_address(None, Some(zone_name), &addrobj, addrtype).map_err(
             |err| GetZoneError::EnsureAddress {
                 name: zone_name.to_string(),
                 err,

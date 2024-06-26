@@ -309,6 +309,7 @@ async fn switch_zone_setup(
         for link in &links {
             Zones::ensure_has_link_local_v6_address(
                 None,
+                None,
                 &AddrObject::new(link, IPV6_LINK_LOCAL_NAME).unwrap(),
             )
             .map_err(|err| {

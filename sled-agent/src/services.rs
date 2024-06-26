@@ -3011,14 +3011,14 @@ impl ServiceManager {
         {
             info!(
                 self.inner.log,
-                "Ensuring bootstrap address {} exists in {} zone",
+                "DEBUG ServiceManager::initialize_zone: Ensuring bootstrap address {} exists in {} zone",
                 bootstrap_address.to_string(),
                 &zone_type_str,
             );
             running_zone.ensure_bootstrap_address(*bootstrap_address).await?;
             info!(
                 self.inner.log,
-                "Forwarding bootstrap traffic via {} to {}",
+                "DEBUG ServiceManager::initialize_zone: Forwarding bootstrap traffic via {} to {}",
                 bootstrap_name,
                 self.inner.global_zone_bootstrap_link_local_address,
             );
