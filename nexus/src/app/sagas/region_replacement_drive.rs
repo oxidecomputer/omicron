@@ -465,17 +465,69 @@ async fn check_from_previous_propolis_step(
         return Ok(DriveCheck::ActionRequired);
     };
 
+    // `migration_id` is set at the beginning of an instance migration (before
+    // anything has happened), and is cleared at the end (after the migration is
+    // finished but before the migration target activates disk Volumes). For
+    // now, return `DriveCheck::Wait`, and pick up driving the region
+    // replacement forward after the migration has completed.
+    //
+    // If this saga does not wait, it will interleave with the instance
+    // migration saga. Depending on Nexus' view of what stage the migration is
+    // in, volume replacement requests could be sent to the source propolis or
+    // destination propolis.
+    //
+    // Processing a replacement request does _not_ cause an activation, so
+    // sending a replacement request to the source propolis will not cause the
+    // destination to be unable to activate (even though the destination _could_
+    // be using a VCR with a lower generation number than what the replacement
+    // request has!). It will probably cause live repair to start on the source,
+    // which is alright because it can be cancelled at any time (and will be
+    // when the destination propolis activates the Volume).
+    //
+    // Until crucible#871 is addressed, sending the replacement request to the
+    // destination propolis could cause a panic if activation hasn't occurred
+    // yet. Even if this saga does wait, this same potential exists because the
+    // migration is considered complete before propolis activates disk Volumes.
+    //
+    // If the destination propolis' Volume activated, the Upstairs will return a
+    // `ReplacementResult`: either `VcrMatches` (if the destination is using the
+    // updated VCR) or `Started` (if the destination is using the pre-update VCR
+    // and the replacement result triggers live repair).
+    //
+    // Also note: if the migration target was sent a Volume that refers to a
+    // region that is no longer responding, it will hang trying to activate, but
+    // the migration itself will succeed (clearing the migration ID!). This is
+    // especially bad because it's easy to hit: if a region goes away and a
+    // migration is triggered before the region replacement start saga can swap
+    // out the region that's gone, the migration saga will checkout the
+    // pre-update Volume and the destination propolis will hit this scenario.
+
+    if instance_and_vmm.instance().runtime().migration_id.is_some() {
+        info!(
+            log,
+            "instance is undergoing migration, wait for it to finish";
+            "region replacement id" => ?request_id,
+            "last replacement drive time" => ?step_time,
+            "last replacement drive step" => "propolis",
+            "instance id" => ?step_instance_id,
+        );
+
+        return Ok(DriveCheck::Wait);
+    }
+
     // Check if the VMM has changed.
 
     if current_vmm.id != step_vmm_id {
         // The VMM has changed! This can be due to a stop and start of the
         // instance, or a migration. If this is the case, then the new VMM
-        // (propolis server) will be performing reconcilation as part of the
+        // (propolis server) could be performing reconcilation as part of the
         // Volume activation. Nexus should be receiving notifications from the
         // Upstairs there.
         //
-        // If the new vmm is in the right state, this drive saga can re-send the
-        // target replacement request to poll if the replacement is done yet.
+        // If this is the result of a stop/start, then the new vmm will be using
+        // the updated VCR. If the new vmm is in the right state, this drive
+        // saga can re-send the target replacement request to poll if the
+        // replacement is done yet.
 
         info!(
             log,
@@ -530,9 +582,18 @@ async fn check_from_previous_propolis_step(
                 )));
             }
 
+            VmmState::Migrating => {
+                // This state is unexpected because we should have already
+                // returned `DriveCheck::Wait` above.
+
+                return Err(ActionError::action_failed(format!(
+                    "vmm {} propolis is Migrating!",
+                    step_vmm_id,
+                )));
+            }
+
             VmmState::Stopping
             | VmmState::Stopped
-            | VmmState::Migrating
             | VmmState::Failed
             | VmmState::Destroyed
             | VmmState::SagaUnwound => {
@@ -802,6 +863,30 @@ async fn srrd_drive_region_replacement_prepare(
                     .instance_fetch_with_vmm(&opctx, &authz_instance)
                     .await
                     .map_err(ActionError::action_failed)?;
+
+                if let Some(migration_id) =
+                    instance_and_vmm.instance().runtime().migration_id
+                {
+                    // If the check node did not observe migration_id as Some,
+                    // it will not have returned `Wait`, but here in the prepare
+                    // node we are observing that migration_id is Some: this
+                    // means an instance migration was triggered in the middle
+                    // of the region replacement.
+                    //
+                    // Log a message and bail out.
+
+                    info!(
+                        log,
+                        "instance migration_id is {migration_id}";
+                        "region replacement id" => %params.request.id,
+                        "disk id" => ?disk.id(),
+                        "instance id" => ?instance_id,
+                    );
+
+                    return Err(ActionError::action_failed(
+                        "instance is undergoing migration".to_string(),
+                    ));
+                }
 
                 match instance_and_vmm.vmm() {
                     Some(vmm) => {
@@ -1080,6 +1165,44 @@ async fn srrd_drive_region_replacement_execute(
                     "propolis step does not have instance and vmm ids",
                 )));
             };
+
+            let (.., authz_instance) =
+                LookupPath::new(&opctx, &osagactx.datastore())
+                    .instance_id(instance_id)
+                    .lookup_for(authz::Action::Read)
+                    .await
+                    .map_err(ActionError::action_failed)?;
+
+            let instance_and_vmm = osagactx
+                .datastore()
+                .instance_fetch_with_vmm(&opctx, &authz_instance)
+                .await
+                .map_err(ActionError::action_failed)?;
+
+            if let Some(migration_id) =
+                instance_and_vmm.instance().runtime().migration_id
+            {
+                // An indefinite amount of time can occur between saga nodes: if
+                // both the check node and prepare node both observed
+                // `migration_id` as None, but this node observes Some, this
+                // still means an instance migration was triggered in the middle
+                // of the region replacement.
+                //
+                // Log a message and bail out. This is still best effort: a
+                // migration could be triggered after this check!
+
+                info!(
+                    log,
+                    "instance migration_id is {migration_id}";
+                    "region replacement id" => %params.request.id,
+                    "disk id" => ?disk.id(),
+                    "instance id" => ?instance_id,
+                );
+
+                return Err(ActionError::action_failed(
+                    "instance is undergoing migration".to_string(),
+                ));
+            }
 
             // The disk is attached to an instance and there's an active
             // propolis server. Send a volume replacement request to the running
