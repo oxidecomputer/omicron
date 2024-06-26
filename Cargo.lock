@@ -1997,7 +1997,6 @@ dependencies = [
  "chrono",
  "futures",
  "http 0.2.12",
- "ipnetwork",
  "omicron-workspace-hack",
  "omicron-zone-package",
  "progenitor",
