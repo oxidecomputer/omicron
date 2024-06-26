@@ -677,7 +677,7 @@ impl Zones {
     //
     // Does NOT check if the address already exists.
     #[allow(clippy::needless_lifetimes)]
-    fn create_address_internal<'a>(
+    pub fn create_address_internal<'a>(
         log: Option<&'a Logger>,
         zone: Option<&'a str>,
         addrobj: &AddrObject,

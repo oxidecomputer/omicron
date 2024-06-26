@@ -57,6 +57,7 @@ use illumos_utils::running_zone::{
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zpool::ZpoolName;
+use illumos_utils::ExecutionError;
 use illumos_utils::{execute, PFEXEC};
 use internal_dns::resolver::Resolver;
 use itertools::Itertools;
@@ -83,7 +84,8 @@ use omicron_common::api::internal::shared::{
     HostPortConfig, RackNetworkConfig,
 };
 use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+    retry_notify, retry_policy_internal_service_aggressive, retry_policy_local,
+    BackoffError,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
@@ -2385,6 +2387,38 @@ impl ServiceManager {
                     }
                 }
 
+                // TODO: Make this prettier
+                //          let (bootstrap_vnic, bootstrap_name_and_address) =
+                //      match self.bootstrap_address_needed(&request)? {
+                //          Some((vnic, address)) => {
+                //              let name = vnic.name().to_string();
+                //              (Some(vnic), Some((name, address)))
+                //          }
+                //          None => (None, None),
+                //      };
+
+                if let Some((bootstrap_name, bootstrap_address)) =
+                    bootstrap_name_and_address.as_ref()
+                {
+                    // Add link_local for bootstrap address
+                    switch_zone_setup_config = switch_zone_setup_config
+                        .add_property(
+                            "link_local_links",
+                            "astring",
+                            bootstrap_name,
+                        )
+                        .add_property(
+                            "bootstrap_addr",
+                            "astring",
+                            &format!("{bootstrap_address}"),
+                        )
+                        .add_property(
+                            "bootstrap_vnic",
+                            "astring",
+                            bootstrap_name,
+                        );
+                }
+
                 // Set properties for each service
                 for service in services {
                     match service {
@@ -3006,33 +3040,109 @@ impl ServiceManager {
         // an IPv6 address within the Global Zone.
         // This means we cannot run bootstrap setup via a service running on
         // the switch zone itself.
-        if let Some((bootstrap_name, bootstrap_address)) =
+        if let Some((bootstrap_name, _bootstrap_address)) =
             bootstrap_name_and_address.as_ref()
         {
-            info!(
-                self.inner.log,
-                "DEBUG ServiceManager::initialize_zone: Ensuring bootstrap address {} exists in {} zone",
-                bootstrap_address.to_string(),
-                &zone_type_str,
-            );
-            running_zone.ensure_bootstrap_address(*bootstrap_address).await?;
-            info!(
-                self.inner.log,
-                "DEBUG ServiceManager::initialize_zone: Forwarding bootstrap traffic via {} to {}",
-                bootstrap_name,
-                self.inner.global_zone_bootstrap_link_local_address,
-            );
-            running_zone
+            //    info!(
+            //        self.inner.log,
+            //        "DEBUG ServiceManager::initialize_zone: Ensuring bootstrap address {} exists in {} zone",
+            //        bootstrap_address.to_string(),
+            //        &zone_type_str,
+            //    );
+            //    running_zone.ensure_bootstrap_address(*bootstrap_address).await?;
+
+            retry_notify(
+            retry_policy_local(),
+            || async {
+                info!(
+                    self.inner.log,
+                    "DEBUG ServiceManager::initialize_zone: Forwarding bootstrap traffic via {} to {}",
+                    bootstrap_name,
+                    self.inner.global_zone_bootstrap_link_local_address,
+                );
+                running_zone
                 .add_bootstrap_route(
                     BOOTSTRAP_PREFIX,
                     self.inner.global_zone_bootstrap_link_local_address,
                     bootstrap_name,
                 )
-                .map_err(|err| Error::ZoneCommand {
-                    intent: "add bootstrap network route".to_string(),
-                    err,
-                })?;
+                .map_err(|err| {
+                   match err.err {
+                       ExecutionError::CommandFailure(ref e) => {
+                           if e.stderr.contains("no such interface") {
+                               BackoffError::transient(
+                                Error::ZoneCommand{
+                                                intent: "add bootstrap network route".to_string(),
+                                                err,
+                                            }
+                               )
+                           } else {
+                               BackoffError::permanent(
+                               Error::ZoneCommand{
+                                                intent: "add bootstrap network route".to_string(),
+                                                err,
+                                            }
+                               )
+                           }
+                       }
+                       _ => {
+                           BackoffError::permanent(
+                           Error::ZoneCommand{
+                                                intent: "add bootstrap network route".to_string(),
+                                                err,
+                                            }
+                           )
+                       }
+                   }
+                })
+          },
+      |err, delay| {
+          info!(
+            &self.inner.log,
+              "Cannot forward bootstrap traffic via {} to {} yet (retrying in {:?})",
+              bootstrap_name,
+              self.inner.global_zone_bootstrap_link_local_address,
+              delay;
+              "error" => ?err
+          );
+      },
+    )
+    .await?;
+
+            //    .map_err(|err| Error::ZoneCommand {
+            //            intent: "add bootstrap network route".to_string(),
+            //            err,
+            //        })?;
         }
+
+        // if let Some((bootstrap_name, _bootstrap_address)) =
+        //     bootstrap_name_and_address.as_ref()
+        // {
+        //     info!(
+        //         self.inner.log,
+        //         "DEBUG ServiceManager::initialize_zone: Ensuring bootstrap address {} exists in {} zone",
+        //         bootstrap_address.to_string(),
+        //         &zone_type_str,
+        //     );
+        //     running_zone.ensure_bootstrap_address(*bootstrap_address).await?;
+        //     info!(
+        //         self.inner.log,
+        //         "DEBUG ServiceManager::initialize_zone: Forwarding bootstrap traffic via {} to {}",
+        //         bootstrap_name,
+        //         self.inner.global_zone_bootstrap_link_local_address,
+        //     );
+        //     running_zone
+        //         .add_bootstrap_route(
+        //             BOOTSTRAP_PREFIX,
+        //             self.inner.global_zone_bootstrap_link_local_address,
+        //             bootstrap_name,
+        //         )
+        //         .map_err(|err| Error::ZoneCommand {
+        //             intent: "add bootstrap network route".to_string(),
+        //             err,
+        //         })?;
+        // }
+
         Ok(running_zone)
     }
 

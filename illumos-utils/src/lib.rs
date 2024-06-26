@@ -37,7 +37,7 @@ pub struct CommandFailureInfo {
     command: String,
     status: std::process::ExitStatus,
     pub stdout: String,
-    stderr: String,
+    pub stderr: String,
 }
 
 impl std::fmt::Display for CommandFailureInfo {

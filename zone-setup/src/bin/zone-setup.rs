@@ -10,7 +10,7 @@ use illumos_utils::addrobj::{AddrObject, IPV6_LINK_LOCAL_NAME};
 use illumos_utils::ipadm::Ipadm;
 use illumos_utils::route::{Gateway, Route};
 use illumos_utils::svcadm::Svcadm;
-use illumos_utils::zone::Zones;
+use illumos_utils::zone::{AddressRequest, Zones};
 use illumos_utils::ExecutionError;
 use omicron_common::backoff::{retry_notify, retry_policy_local, BackoffError};
 use omicron_common::cmd::fatal;
@@ -206,6 +206,19 @@ async fn do_run() -> Result<(), CmdError> {
                     .value_parser(parse_baseboard_info),
                 )
                 .arg(
+                    arg!(
+                        -a --bootstrap_addr <Ipv6Addr> "bootstrap_addr"
+                    )
+                    .required(true)
+                    .value_parser(parse_ipv6),
+                )
+                .arg(
+                    arg!(
+                        -v --bootstrap_vnic <String> "bootstrap_vnic"
+                    )
+                    .required(true),
+                )
+                .arg(
                     Arg::new("link_local_links")
                     .short('l')
                     .long("link_local_links")
@@ -270,6 +283,8 @@ async fn switch_zone_setup(
 ) -> Result<(), CmdError> {
     let file: &String = matches.get_one("baseboard_file").unwrap();
     let info: &String = matches.get_one("baseboard_info").unwrap();
+    let bootstrap_addr: &Ipv6Addr = matches.get_one("bootstrap_addr").unwrap();
+    let bootstrap_vnic: &String = matches.get_one("bootstrap_vnic").unwrap();
     let links = if let Some(l) = matches.get_many::<String>("link_local_links")
     {
         Some(l.collect::<Vec<_>>())
@@ -308,7 +323,7 @@ async fn switch_zone_setup(
         info!(&log, "Ensuring link local links"; "links" => ?links);
         for link in &links {
             Zones::ensure_has_link_local_v6_address(
-                None,
+                Some(&log),
                 None,
                 &AddrObject::new(link, IPV6_LINK_LOCAL_NAME).unwrap(),
             )
@@ -323,6 +338,31 @@ async fn switch_zone_setup(
     } else {
         info!(&log, "No link local links to be configured");
     };
+
+    info!(&log, "Ensuring bootstrap address exists in zone";
+    "bootstrap address" => ?bootstrap_addr, "bootstrap vnic" => ?bootstrap_vnic);
+    let addrtype =
+        AddressRequest::new_static(std::net::IpAddr::V6(*bootstrap_addr), None);
+    let addrobj_name = "bootstrap6";
+    let addrobj =
+        AddrObject::new(&bootstrap_vnic, addrobj_name).map_err(|err| {
+            CmdError::Failure(anyhow!(
+                "Could not create new addrobj {:?}: {}",
+                addrobj_name,
+                err
+            ))
+        })?;
+
+    let _ =
+        Zones::create_address_internal(Some(&log), None, &addrobj, addrtype)
+            .map_err(|err| {
+                CmdError::Failure(anyhow!(
+                    "Could not create bootstrap address {} {:?}: {}",
+                    addrobj,
+                    addrtype,
+                    err
+                ))
+            })?;
 
     Ok(())
 }
