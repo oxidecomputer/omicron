@@ -9344,6 +9344,39 @@
           }
         ]
       },
+      "AuthzScope": {
+        "description": "Authorization scope for a timeseries.\n\nThis describes the level at which a user must be authorized to read data from a timeseries. For example, fleet-scoping means the data is only visible to an operator or fleet reader. Project-scoped, on the other hand, indicates that a user will see data limited to the projects on which they have read permissions.",
+        "oneOf": [
+          {
+            "description": "Timeseries data is limited to fleet readers.",
+            "type": "string",
+            "enum": [
+              "fleet"
+            ]
+          },
+          {
+            "description": "Timeseries data is limited to the authorized silo for a user.",
+            "type": "string",
+            "enum": [
+              "silo"
+            ]
+          },
+          {
+            "description": "Timeseries data is limited to the authorized projects for a user.",
+            "type": "string",
+            "enum": [
+              "project"
+            ]
+          },
+          {
+            "description": "The timeseries is viewable to all without limitation.",
+            "type": "string",
+            "enum": [
+              "viewable_to_all"
+            ]
+          }
+        ]
+      },
       "Baseboard": {
         "description": "Properties that uniquely identify an Oxide hardware component",
         "type": "object",
@@ -12309,7 +12342,7 @@
         ]
       },
       "Distributiondouble": {
-        "description": "A distribution is a sequence of bins and counts in those bins.",
+        "description": "A distribution is a sequence of bins and counts in those bins, and some statistical information tracked to compute the mean, standard deviation, and quantile estimates.\n\nMin, max, and the p-* quantiles are treated as optional due to the possibility of distribution operations, like subtraction.",
         "type": "object",
         "properties": {
           "bins": {
@@ -12326,15 +12359,59 @@
               "format": "uint64",
               "minimum": 0
             }
+          },
+          "max": {
+            "nullable": true,
+            "type": "number",
+            "format": "double"
+          },
+          "min": {
+            "nullable": true,
+            "type": "number",
+            "format": "double"
+          },
+          "p50": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "type": "number",
+            "format": "double"
+          },
+          "sum_of_samples": {
+            "type": "number",
+            "format": "double"
           }
         },
         "required": [
           "bins",
-          "counts"
+          "counts",
+          "squared_mean",
+          "sum_of_samples"
         ]
       },
       "Distributionint64": {
-        "description": "A distribution is a sequence of bins and counts in those bins.",
+        "description": "A distribution is a sequence of bins and counts in those bins, and some statistical information tracked to compute the mean, standard deviation, and quantile estimates.\n\nMin, max, and the p-* quantiles are treated as optional due to the possibility of distribution operations, like subtraction.",
         "type": "object",
         "properties": {
           "bins": {
@@ -12351,11 +12428,55 @@
               "format": "uint64",
               "minimum": 0
             }
+          },
+          "max": {
+            "nullable": true,
+            "type": "integer",
+            "format": "int64"
+          },
+          "min": {
+            "nullable": true,
+            "type": "integer",
+            "format": "int64"
+          },
+          "p50": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "type": "number",
+            "format": "double"
+          },
+          "sum_of_samples": {
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
-          "counts"
+          "counts",
+          "squared_mean",
+          "sum_of_samples"
         ]
       },
       "EphemeralIpCreate": {
@@ -12558,6 +12679,9 @@
         "description": "The name and type information for a field of a timeseries schema.",
         "type": "object",
         "properties": {
+          "description": {
+            "type": "string"
+          },
           "field_type": {
             "$ref": "#/components/schemas/FieldType"
           },
@@ -12569,6 +12693,7 @@
           }
         },
         "required": [
+          "description",
           "field_type",
           "name",
           "source"
@@ -13112,25 +13237,79 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Bindouble"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "number",
+            "format": "double"
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "number",
+            "format": "double"
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "number",
+            "format": "double"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "squared_mean",
+          "start_time",
+          "sum_of_samples"
         ]
       },
       "Histogramfloat": {
@@ -13138,25 +13317,79 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binfloat"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "number",
+            "format": "float"
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "number",
+            "format": "float"
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "number",
+            "format": "double"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "squared_mean",
+          "start_time",
+          "sum_of_samples"
         ]
       },
       "Histogramint16": {
@@ -13164,25 +13397,79 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binint16"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int16"
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int16"
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "squared_mean",
+          "start_time",
+          "sum_of_samples"
         ]
       },
       "Histogramint32": {
@@ -13190,25 +13477,79 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binint32"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int32"
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "squared_mean",
+          "start_time",
+          "sum_of_samples"
         ]
       },
       "Histogramint64": {
@@ -13216,25 +13557,79 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binint64"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "squared_mean",
+          "start_time",
+          "sum_of_samples"
         ]
       },
       "Histogramint8": {
@@ -13242,25 +13637,79 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binint8"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int8"
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int8"
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "squared_mean",
+          "start_time",
+          "sum_of_samples"
         ]
       },
       "Histogramuint16": {
@@ -13268,25 +13717,81 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binuint16"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "squared_mean",
+          "start_time",
+          "sum_of_samples"
         ]
       },
       "Histogramuint32": {
@@ -13294,25 +13799,81 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binuint32"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "squared_mean",
+          "start_time",
+          "sum_of_samples"
         ]
       },
       "Histogramuint64": {
@@ -13320,25 +13881,81 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binuint64"
             }
           },
-          "n_samples": {
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "n_samples": {
+            "description": "The total number of samples in the histogram.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "squared_mean",
+          "start_time",
+          "sum_of_samples"
         ]
       },
       "Histogramuint8": {
@@ -13346,25 +13963,81 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binuint8"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "squared_mean",
+          "start_time",
+          "sum_of_samples"
         ]
       },
       "Hostname": {
@@ -15756,6 +16429,54 @@
           }
         }
       },
+      "Quantile": {
+        "description": "Structure for estimating the p-quantile of a population.\n\nThis is based on the P² algorithm for estimating quantiles using constant space.\n\nThe algorithm consists of maintaining five markers: the minimum, the p/2-, p-, and (1 + p)/2 quantiles, and the maximum.",
+        "type": "object",
+        "properties": {
+          "desired_marker_positions": {
+            "description": "The desired marker positions.",
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "minItems": 5,
+            "maxItems": 5
+          },
+          "marker_heights": {
+            "description": "The heights of the markers.",
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "minItems": 5,
+            "maxItems": 5
+          },
+          "marker_positions": {
+            "description": "The positions of the markers.\n\nWe track sample size in the 5th position, as useful observations won't start until we've filled the heights at the 6th sample anyway This does deviate from the paper, but it's a more useful representation that works according to the paper's algorithm.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "minItems": 5,
+            "maxItems": 5
+          },
+          "p": {
+            "description": "The p value for the quantile.",
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "required": [
+          "desired_marker_positions",
+          "marker_heights",
+          "marker_positions",
+          "p"
+        ]
+      },
       "Rack": {
         "description": "View of an Rack",
         "type": "object",
@@ -17863,6 +18584,22 @@
           "points"
         ]
       },
+      "TimeseriesDescription": {
+        "description": "Text descriptions for the target and metric of a timeseries.",
+        "type": "object",
+        "properties": {
+          "metric": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "metric",
+          "target"
+        ]
+      },
       "TimeseriesName": {
         "title": "The name of a timeseries",
         "description": "Names are constructed by concatenating the target and metric names with ':'. Target and metric names must be lowercase alphanumeric characters with '_' separating words.",
@@ -17886,12 +18623,18 @@
         "description": "The schema for a timeseries.\n\nThis includes the name of the timeseries, as well as the datum type of its metric and the schema for each field.",
         "type": "object",
         "properties": {
+          "authz_scope": {
+            "$ref": "#/components/schemas/AuthzScope"
+          },
           "created": {
             "type": "string",
             "format": "date-time"
           },
           "datum_type": {
             "$ref": "#/components/schemas/DatumType"
+          },
+          "description": {
+            "$ref": "#/components/schemas/TimeseriesDescription"
           },
           "field_schema": {
             "type": "array",
@@ -17902,13 +18645,25 @@
           },
           "timeseries_name": {
             "$ref": "#/components/schemas/TimeseriesName"
+          },
+          "units": {
+            "$ref": "#/components/schemas/Units"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 1
           }
         },
         "required": [
+          "authz_scope",
           "created",
           "datum_type",
+          "description",
           "field_schema",
-          "timeseries_name"
+          "timeseries_name",
+          "units",
+          "version"
         ]
       },
       "TimeseriesSchemaResultsPage": {
@@ -17990,6 +18745,14 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "Units": {
+        "description": "Measurement units for timeseries samples.",
+        "type": "string",
+        "enum": [
+          "count",
+          "bytes"
         ]
       },
       "User": {

@@ -311,6 +311,10 @@ task: "region_replacement"
     detects if a region requires replacing and begins the process
 
 
+task: "region_replacement_driver"
+    drive region replacements forward to completion
+
+
 task: "service_firewall_rule_propagation"
     propagates VPC firewall rules for Omicron services with external network
     connectivity
@@ -508,6 +512,15 @@ task: "region_replacement"
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     number of region replacements started ok: 0
     number of region replacement start errors: 0
+
+task: "region_replacement_driver"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    number of region replacement drive sagas started ok: 0
+    number of region replacement finish sagas started ok: 0
+    number of errors: 0
 
 task: "service_firewall_rule_propagation"
   configured period: every 5m
