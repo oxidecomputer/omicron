@@ -25,6 +25,7 @@ use super::tasks::service_firewall_rules;
 use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
 use super::tasks::v2p_mappings::V2PManager;
+use super::tasks::vpc_routes;
 use super::Driver;
 use super::TaskHandle;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
@@ -118,6 +119,9 @@ pub struct BackgroundTasks {
     /// task handle for deletion of database records for VMMs abandoned by their
     /// instances.
     pub task_abandoned_vmm_reaper: TaskHandle,
+
+    /// task handle for propagation of VPC router rules to all OPTE ports
+    pub task_vpc_route_manager: TaskHandle,
 }
 
 impl BackgroundTasks {
@@ -457,6 +461,19 @@ impl BackgroundTasks {
             vec![],
         );
 
+        // Background task: OPTE port route propagation
+        let task_vpc_route_manager = {
+            let watcher = vpc_routes::VpcRouteManager::new(datastore.clone());
+            driver.register(
+                "vpc_route_manager".to_string(),
+                "propagates updated VPC routes to all OPTE ports".into(),
+                config.switch_port_settings_manager.period_secs,
+                Box::new(watcher),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            )
+        };
+
         // Background task: abandoned VMM reaping
         let task_abandoned_vmm_reaper = driver.register(
             String::from("abandoned_vmm_reaper"),
@@ -495,6 +512,7 @@ impl BackgroundTasks {
             task_instance_watcher,
             task_service_firewall_propagation,
             task_abandoned_vmm_reaper,
+            task_vpc_route_manager,
         }
     }
 

@@ -6,13 +6,13 @@
 
 use crate::{
     address::NUM_SOURCE_NAT_PORTS,
-    api::external::{self, BfdMode, ImportExportPolicy, Name},
+    api::external::{self, BfdMode, ImportExportPolicy, Name, Vni},
 };
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
@@ -50,11 +50,11 @@ pub enum NetworkInterfaceKind {
 pub struct NetworkInterface {
     pub id: Uuid,
     pub kind: NetworkInterfaceKind,
-    pub name: external::Name,
+    pub name: Name,
     pub ip: IpAddr,
     pub mac: external::MacAddr,
     pub subnet: IpNet,
-    pub vni: external::Vni,
+    pub vni: Vni,
     pub primary: bool,
     pub slot: u8,
 }
@@ -622,6 +622,82 @@ impl TryFrom<&[ipnetwork::IpNetwork]> for IpAllowList {
         }
         Ok(Self(list.into_iter().map(|net| (*net).into()).collect()))
     }
+}
+
+/// A VPC route resolved into a concrete target.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct ResolvedVpcRoute {
+    pub dest: IpNet,
+    pub target: RouterTarget,
+}
+
+/// The target for a given router entry.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+#[serde(tag = "type", rename_all = "snake_case", content = "value")]
+pub enum RouterTarget {
+    Drop,
+    InternetGateway,
+    Ip(IpAddr),
+    VpcSubnet(IpNet),
+}
+
+/// Information on the current parent router (and version) of a route set
+/// according to the control plane.
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct RouterVersion {
+    pub router_id: Uuid,
+    pub version: u64,
+}
+
+impl RouterVersion {
+    /// Return whether a new route set should be applied over the current
+    /// values.
+    ///
+    /// This will occur when seeing a new version and a matching parent,
+    /// or a new parent router on the control plane.
+    pub fn is_replaced_by(&self, other: &Self) -> bool {
+        (self.router_id != other.router_id) || self.version < other.version
+    }
+}
+
+/// Identifier for a VPC and/or subnet.
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct RouterId {
+    pub vni: Vni,
+    pub kind: RouterKind,
+}
+
+/// The scope of a set of VPC router rules.
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+#[serde(tag = "type", rename_all = "snake_case", content = "subnet")]
+pub enum RouterKind {
+    System,
+    Custom(IpNet),
+}
+
+/// Version information for routes on a given VPC subnet.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct ResolvedVpcRouteState {
+    pub id: RouterId,
+    pub version: Option<RouterVersion>,
+}
+
+/// An updated set of routes for a given VPC and/or subnet.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct ResolvedVpcRouteSet {
+    pub id: RouterId,
+    pub version: Option<RouterVersion>,
+    pub routes: HashSet<ResolvedVpcRoute>,
 }
 
 #[cfg(test)]

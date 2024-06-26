@@ -1551,6 +1551,7 @@ impl super::Nexus {
             self.v2p_notification_tx.clone(),
         )
         .await?;
+        self.vpc_needed_notify_sleds();
         Ok(())
     }
 

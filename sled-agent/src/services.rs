@@ -48,7 +48,9 @@ use illumos_utils::dladm::{
     Dladm, Etherstub, EtherstubVnic, GetSimnetError, PhysicalLink,
 };
 use illumos_utils::link::{Link, VnicAllocator};
-use illumos_utils::opte::{DhcpCfg, Port, PortManager, PortTicket};
+use illumos_utils::opte::{
+    DhcpCfg, Port, PortCreateParams, PortManager, PortTicket,
+};
 use illumos_utils::running_zone::{
     EnsureAddressError, InstalledZone, RunCommandError, RunningZone,
     ZoneBuilderFactory,
@@ -1162,11 +1164,19 @@ impl ServiceManager {
 
         // Create the OPTE port for the service.
         // Note we don't plumb any firewall rules at this point,
-        // Nexus will plumb them down later but the default OPTE
+        // Nexus will plumb them down later but services' default OPTE
         // config allows outbound access which is enough for
         // Boundary NTP which needs to come up before Nexus.
         let port = port_manager
-            .create_port(nic, snat, None, floating_ips, &[], DhcpCfg::default())
+            .create_port(PortCreateParams {
+                nic,
+                source_nat: snat,
+                ephemeral_ip: None,
+                floating_ips,
+                firewall_rules: &[],
+                dhcp_config: DhcpCfg::default(),
+                is_service: true,
+            })
             .map_err(|err| Error::ServicePortCreation {
                 service: zone_type_str.clone(),
                 err: Box::new(err),

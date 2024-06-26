@@ -1604,8 +1604,9 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=5630887d0373857f77cb264f84aa19bdec720ce3#5630887d0373857f77cb264f84aa19bdec720ce3"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=3c3fa8482fe09a01da62fbd35efe124ea9cac9e7#3c3fa8482fe09a01da62fbd35efe124ea9cac9e7"
 dependencies = [
+ "oxnet",
  "percent-encoding",
  "progenitor",
  "reqwest",
@@ -3468,7 +3469,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=417f74e94978c23f3892ac328c3387f3ecd9bb29#417f74e94978c23f3892ac328c3387f3ecd9bb29"
+source = "git+https://github.com/oxidecomputer/opte?rev=915975f6d1729db95619f752148974016912412f#915975f6d1729db95619f752148974016912412f"
 
 [[package]]
 name = "illumos-utils"
@@ -3882,7 +3883,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=417f74e94978c23f3892ac328c3387f3ecd9bb29#417f74e94978c23f3892ac328c3387f3ecd9bb29"
+source = "git+https://github.com/oxidecomputer/opte?rev=915975f6d1729db95619f752148974016912412f#915975f6d1729db95619f752148974016912412f"
 dependencies = [
  "quote",
  "syn 2.0.68",
@@ -4011,7 +4012,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.5",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -4294,7 +4295,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=5630887d0373857f77cb264f84aa19bdec720ce3#5630887d0373857f77cb264f84aa19bdec720ce3"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=3c3fa8482fe09a01da62fbd35efe124ea9cac9e7#3c3fa8482fe09a01da62fbd35efe124ea9cac9e7"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6104,7 +6105,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=417f74e94978c23f3892ac328c3387f3ecd9bb29#417f74e94978c23f3892ac328c3387f3ecd9bb29"
+source = "git+https://github.com/oxidecomputer/opte?rev=915975f6d1729db95619f752148974016912412f#915975f6d1729db95619f752148974016912412f"
 dependencies = [
  "cfg-if",
  "dyn-clone",
@@ -6121,7 +6122,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=417f74e94978c23f3892ac328c3387f3ecd9bb29#417f74e94978c23f3892ac328c3387f3ecd9bb29"
+source = "git+https://github.com/oxidecomputer/opte?rev=915975f6d1729db95619f752148974016912412f#915975f6d1729db95619f752148974016912412f"
 dependencies = [
  "illumos-sys-hdrs",
  "ipnetwork",
@@ -6133,7 +6134,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=417f74e94978c23f3892ac328c3387f3ecd9bb29#417f74e94978c23f3892ac328c3387f3ecd9bb29"
+source = "git+https://github.com/oxidecomputer/opte?rev=915975f6d1729db95619f752148974016912412f#915975f6d1729db95619f752148974016912412f"
 dependencies = [
  "libc",
  "libnet 0.1.0 (git+https://github.com/oxidecomputer/netadm-sys)",
@@ -6207,7 +6208,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=417f74e94978c23f3892ac328c3387f3ecd9bb29#417f74e94978c23f3892ac328c3387f3ecd9bb29"
+source = "git+https://github.com/oxidecomputer/opte?rev=915975f6d1729db95619f752148974016912412f#915975f6d1729db95619f752148974016912412f"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",
@@ -6454,7 +6455,7 @@ dependencies = [
 [[package]]
 name = "oxnet"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/oxnet?branch=main#42b4d3c77c7f5f2636cd6c4bbf37ac3eada047e0"
+source = "git+https://github.com/oxidecomputer/oxnet#2612d2203effcfdcbf83778a77f1bfd03fe6ed24"
 dependencies = [
  "ipnetwork",
  "schemars",
@@ -8536,9 +8537,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.117"
+version = "1.0.118"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "455182ea6142b14f93f4bc5320a2b31c1f266b66a4a5c858b013302a5d8cbfc3"
+checksum = "d947f6b3163d8857ea16c4fa0dd4840d52f3041039a85decd46867eb1abef2e4"
 dependencies = [
  "itoa",
  "ryu",
