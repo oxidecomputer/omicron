@@ -196,7 +196,11 @@ pub struct Nexus {
     // https://github.com/oxidecomputer/omicron/issues/3732
     external_dns_servers: Vec<IpAddr>,
 
-    /// Background tasks
+    /// Background task driver
+    // XXX-dap
+    background_tasks_driver: std::sync::Mutex<Option<background::Driver>>,
+
+    /// Handles to various specific tasks
     background_tasks: background::BackgroundTasks,
 
     /// Default Crucible region allocation strategy
@@ -398,17 +402,18 @@ impl Nexus {
 
         let (saga_request, mut saga_request_recv) = SagaRequest::channel();
 
-        let background_tasks = background::BackgroundTasks::start(
-            &background_ctx,
-            Arc::clone(&db_datastore),
-            &config.pkg.background_tasks,
-            rack_id,
-            config.deployment.id,
-            resolver.clone(),
-            saga_request,
-            v2p_watcher_channel.clone(),
-            producer_registry,
-        );
+        let (background_tasks_initializer, background_tasks) =
+            background::BackgroundTasksInitializer::new(
+                background_ctx,
+                Arc::clone(&db_datastore),
+                config.pkg.background_tasks.clone(),
+                rack_id,
+                config.deployment.id,
+                resolver.clone(),
+                saga_request,
+                v2p_watcher_channel.clone(),
+                producer_registry.clone(),
+            );
 
         let external_resolver = {
             if config.deployment.external_dns_servers.is_empty() {
@@ -457,6 +462,7 @@ impl Nexus {
                 .deployment
                 .external_dns_servers
                 .clone(),
+            background_tasks_driver: std::sync::Mutex::new(None),
             background_tasks,
             default_region_allocation_strategy: config
                 .pkg
@@ -503,9 +509,12 @@ impl Nexus {
                         task_log,
                         "populate complete; activating background tasks"
                     );
-                    for task in task_nexus.background_tasks.driver.tasks() {
-                        task_nexus.background_tasks.activate(task);
-                    }
+
+                    let driver = background_tasks_initializer
+                        .start(&task_nexus.background_tasks);
+
+                    *task_nexus.background_tasks_driver.lock().unwrap() =
+                        Some(driver);
                 }
                 Err(_) => {
                     error!(task_log, "populate failed");

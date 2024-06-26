@@ -21,7 +21,9 @@ impl Nexus {
         opctx: &OpContext,
     ) -> Result<BTreeMap<String, BackgroundTask>, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        let driver = &self.background_tasks.driver;
+        // XXX-dap
+        let driver_wrapper = self.background_tasks_driver.lock().unwrap();
+        let driver = driver_wrapper.as_ref().unwrap();
         Ok(driver
             .tasks()
             .map(|t| {
@@ -43,7 +45,9 @@ impl Nexus {
         name: &str,
     ) -> LookupResult<BackgroundTask> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        let driver = &self.background_tasks.driver;
+        // XXX-dap
+        let driver_wrapper = self.background_tasks_driver.lock().unwrap();
+        let driver = driver_wrapper.as_ref().unwrap();
         let task =
             driver.tasks().find(|t| t.as_str() == name).ok_or_else(|| {
                 LookupType::ByName(name.to_owned())
@@ -61,7 +65,9 @@ impl Nexus {
         mut names: BTreeSet<String>,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        let driver = &self.background_tasks.driver;
+        // XXX-dap
+        let driver_wrapper = self.background_tasks_driver.lock().unwrap();
+        let driver = driver_wrapper.as_ref().unwrap();
 
         // Ensure all task names are valid by removing them from the set of
         // names as we find them.

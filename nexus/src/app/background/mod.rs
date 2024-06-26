@@ -135,6 +135,7 @@ mod tasks;
 
 pub use driver::Driver;
 pub use init::BackgroundTasks;
+pub use init::BackgroundTasksInitializer;
 
 use futures::future::BoxFuture;
 use nexus_auth::context::OpContext;
