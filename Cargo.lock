@@ -11422,7 +11422,6 @@ dependencies = [
  "fs-err",
  "futures",
  "macaddr",
- "md5",
  "reqwest",
  "serde",
  "sha2",
