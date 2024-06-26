@@ -4,6 +4,7 @@
 
 //! View status of background tasks (for support and debugging)
 
+use super::Driver;
 use crate::Nexus;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -21,9 +22,7 @@ impl Nexus {
         opctx: &OpContext,
     ) -> Result<BTreeMap<String, BackgroundTask>, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        // XXX-dap
-        let driver_wrapper = self.background_tasks_driver.lock().unwrap();
-        let driver = driver_wrapper.as_ref().unwrap();
+        let driver = self.driver()?;
         Ok(driver
             .tasks()
             .map(|t| {
@@ -45,9 +44,7 @@ impl Nexus {
         name: &str,
     ) -> LookupResult<BackgroundTask> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        // XXX-dap
-        let driver_wrapper = self.background_tasks_driver.lock().unwrap();
-        let driver = driver_wrapper.as_ref().unwrap();
+        let driver = self.driver()?;
         let task =
             driver.tasks().find(|t| t.as_str() == name).ok_or_else(|| {
                 LookupType::ByName(name.to_owned())
@@ -65,9 +62,7 @@ impl Nexus {
         mut names: BTreeSet<String>,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        // XXX-dap
-        let driver_wrapper = self.background_tasks_driver.lock().unwrap();
-        let driver = driver_wrapper.as_ref().unwrap();
+        let driver = self.driver()?;
 
         // Ensure all task names are valid by removing them from the set of
         // names as we find them.
@@ -93,5 +88,11 @@ impl Nexus {
         }
 
         Ok(())
+    }
+
+    fn driver(&self) -> Result<&Driver, Error> {
+        self.background_tasks_driver.get().ok_or_else(|| {
+            Error::internal_error("background tasks not yet initialized")
+        })
     }
 }

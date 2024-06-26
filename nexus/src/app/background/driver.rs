@@ -84,6 +84,7 @@ impl Driver {
     /// another one.
     // XXX-dap TODO-doc activator
     // XXX-dap TODO-coverage activator
+    #[allow(clippy::too_many_arguments)]
     pub fn register(
         &mut self,
         name: String,

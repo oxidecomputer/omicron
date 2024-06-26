@@ -86,53 +86,19 @@ pub struct BackgroundTasks {
 
 pub struct BackgroundTasksInitializer {
     driver: Driver,
-
     external_endpoints_tx:
         watch::Sender<Option<external_endpoints::ExternalEndpoints>>,
-
-    opctx: OpContext,
-    datastore: Arc<DataStore>,
-    config: BackgroundTaskConfig,
-    rack_id: Uuid,
-    nexus_id: Uuid,
-    resolver: internal_dns::resolver::Resolver,
-    saga_request: Sender<SagaRequest>,
-    v2p_watcher: (watch::Sender<()>, watch::Receiver<()>),
-    producer_registry: ProducerRegistry,
 }
 
 impl BackgroundTasksInitializer {
-    // XXX-dap now that we're accepting owned copies of these, there's no need
-    // for them to be in `new()` or the struct
-    pub fn new(
-        opctx: OpContext,
-        datastore: Arc<DataStore>,
-        config: BackgroundTaskConfig,
-        rack_id: Uuid,
-        nexus_id: Uuid,
-        resolver: internal_dns::resolver::Resolver,
-        saga_request: Sender<SagaRequest>,
-        v2p_watcher: (watch::Sender<()>, watch::Receiver<()>),
-        producer_registry: ProducerRegistry,
-    ) -> (BackgroundTasksInitializer, BackgroundTasks) {
+    pub fn new() -> (BackgroundTasksInitializer, BackgroundTasks) {
         let (external_endpoints_tx, external_endpoints_rx) =
             watch::channel(None);
 
         let initializer = BackgroundTasksInitializer {
             driver: Driver::new(),
             external_endpoints_tx,
-
-            opctx,
-            datastore,
-            config,
-            rack_id,
-            nexus_id,
-            resolver,
-            saga_request,
-            v2p_watcher,
-            producer_registry,
         };
-
         let background_tasks = BackgroundTasks {
             task_internal_dns_config: Activator::new_stub(),
             task_internal_dns_servers: Activator::new_stub(),
@@ -167,17 +133,23 @@ impl BackgroundTasksInitializer {
         (initializer, background_tasks)
     }
 
-    pub fn start(self, background_tasks: &'_ BackgroundTasks) -> Driver {
+    #[allow(clippy::too_many_arguments)]
+    pub fn start(
+        self,
+        background_tasks: &'_ BackgroundTasks,
+        opctx: OpContext,
+        datastore: Arc<DataStore>,
+        config: BackgroundTaskConfig,
+        rack_id: Uuid,
+        nexus_id: Uuid,
+        resolver: internal_dns::resolver::Resolver,
+        saga_request: Sender<SagaRequest>,
+        v2p_watcher: (watch::Sender<()>, watch::Receiver<()>),
+        producer_registry: ProducerRegistry,
+    ) -> Driver {
         let mut driver = self.driver;
-        let opctx = &self.opctx;
-        let datastore = self.datastore;
-        let config = self.config;
-        let rack_id = self.rack_id;
-        let nexus_id = self.nexus_id;
-        let resolver = self.resolver;
-        let saga_request = self.saga_request;
-        let v2p_watcher = self.v2p_watcher;
-        let producer_registry = &self.producer_registry;
+        let opctx = &opctx;
+        let producer_registry = &producer_registry;
 
         // XXX-dap TODO-doc this construction helps ensure we don't miss
         // anything
@@ -591,6 +563,7 @@ impl BackgroundTasks {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn init_dns(
     driver: &mut Driver,
     opctx: &OpContext,

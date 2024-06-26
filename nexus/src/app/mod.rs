@@ -34,6 +34,7 @@ use std::collections::HashMap;
 use std::net::SocketAddrV6;
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
+use std::sync::OnceLock;
 use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
@@ -197,8 +198,7 @@ pub struct Nexus {
     external_dns_servers: Vec<IpAddr>,
 
     /// Background task driver
-    // XXX-dap
-    background_tasks_driver: std::sync::Mutex<Option<background::Driver>>,
+    background_tasks_driver: OnceLock<background::Driver>,
 
     /// Handles to various specific tasks
     background_tasks: background::BackgroundTasks,
@@ -403,17 +403,7 @@ impl Nexus {
         let (saga_request, mut saga_request_recv) = SagaRequest::channel();
 
         let (background_tasks_initializer, background_tasks) =
-            background::BackgroundTasksInitializer::new(
-                background_ctx,
-                Arc::clone(&db_datastore),
-                config.pkg.background_tasks.clone(),
-                rack_id,
-                config.deployment.id,
-                resolver.clone(),
-                saga_request,
-                v2p_watcher_channel.clone(),
-                producer_registry.clone(),
-            );
+            background::BackgroundTasksInitializer::new();
 
         let external_resolver = {
             if config.deployment.external_dns_servers.is_empty() {
@@ -456,19 +446,19 @@ impl Nexus {
                     as Arc<dyn nexus_auth::storage::Storage>,
             ),
             samael_max_issue_delay: std::sync::Mutex::new(None),
-            internal_resolver: resolver,
+            internal_resolver: resolver.clone(),
             external_resolver,
             external_dns_servers: config
                 .deployment
                 .external_dns_servers
                 .clone(),
-            background_tasks_driver: std::sync::Mutex::new(None),
+            background_tasks_driver: OnceLock::new(),
             background_tasks,
             default_region_allocation_strategy: config
                 .pkg
                 .default_region_allocation_strategy
                 .clone(),
-            v2p_notification_tx: v2p_watcher_channel.0,
+            v2p_notification_tx: v2p_watcher_channel.0.clone(),
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -488,7 +478,7 @@ impl Nexus {
                 saga_logger,
                 Arc::clone(&authz),
             ))),
-            db_datastore,
+            Arc::clone(&db_datastore),
             Arc::clone(&sec_client),
             sagas::ACTION_REGISTRY.clone(),
         );
@@ -502,6 +492,8 @@ impl Nexus {
         // not be retried for a while.
         let task_nexus = nexus.clone();
         let task_log = nexus.log.clone();
+        let task_registry = producer_registry.clone();
+        let task_config = config.clone();
         tokio::spawn(async move {
             match task_nexus.wait_for_populate().await {
                 Ok(_) => {
@@ -510,11 +502,27 @@ impl Nexus {
                         "populate complete; activating background tasks"
                     );
 
-                    let driver = background_tasks_initializer
-                        .start(&task_nexus.background_tasks);
+                    let driver = background_tasks_initializer.start(
+                        &task_nexus.background_tasks,
+                        background_ctx,
+                        db_datastore,
+                        task_config.pkg.background_tasks,
+                        rack_id,
+                        task_config.deployment.id,
+                        resolver,
+                        saga_request,
+                        v2p_watcher_channel.clone(),
+                        task_registry,
+                    );
 
-                    *task_nexus.background_tasks_driver.lock().unwrap() =
-                        Some(driver);
+                    if let Err(_) =
+                        task_nexus.background_tasks_driver.set(driver)
+                    {
+                        panic!(
+                            "concurrent initialization of \
+                             background_tasks_driver?!"
+                        )
+                    }
                 }
                 Err(_) => {
                     error!(task_log, "populate failed");
