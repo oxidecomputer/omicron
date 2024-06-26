@@ -146,6 +146,23 @@ pub fn run_cmd() -> Result<()> {
         }
     }
 
+    let mut seen_bins = BTreeSet::new();
+    for package in &workspace.packages {
+        if workspace.workspace_members.contains(&package.id) {
+            for target in &package.targets {
+                if target.is_bin() {
+                    if !seen_bins.insert(&target.name) {
+                        eprintln!(
+                            "error: bin target {:?} seen multiple times",
+                            target.name
+                        );
+                        nerrors += 1;
+                    }
+                }
+            }
+        }
+    }
+
     eprintln!(
         "check-workspace-deps: errors: {}, warnings: {}",
         nerrors, nwarnings

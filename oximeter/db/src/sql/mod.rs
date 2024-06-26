@@ -610,12 +610,31 @@ impl RestrictedQuery {
     // Return the required measurement columns for a specific datum type.
     //
     // Scalar measurements have only a timestamp and datum. Cumulative counters
-    // have those plus a start_time. And histograms have those plus the bins.
+    // have those plus a start_time. And histograms have those plus the bins,
+    // counts, min, max, sum of samples, sum of squares, and quantile arrays.
     fn datum_type_to_columns(
         datum_type: &DatumType,
     ) -> &'static [&'static str] {
         if datum_type.is_histogram() {
-            &["start_time", "timestamp", "bins", "counts"]
+            &[
+                "start_time",
+                "timestamp",
+                "bins",
+                "counts",
+                "min",
+                "max",
+                "sum_of_samples",
+                "squared_mean",
+                "p50_marker_heights",
+                "p50_marker_positions",
+                "p50_desired_marker_positions",
+                "p90_marker_heights",
+                "p90_marker_positions",
+                "p90_desired_marker_positions",
+                "p99_marker_heights",
+                "p99_marker_positions",
+                "p99_desired_marker_positions",
+            ]
         } else if datum_type.is_cumulative() {
             &["start_time", "timestamp", "datum"]
         } else {

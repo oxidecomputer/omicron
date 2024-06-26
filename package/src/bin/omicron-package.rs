@@ -4,7 +4,7 @@
 
 //! Utility for bundling target binaries as tarfiles.
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Parser, Subcommand};
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -12,7 +12,7 @@ use illumos_utils::{zfs, zone};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use omicron_package::target::KnownTarget;
 use omicron_package::{parse, BuildCommand, DeployCommand, TargetCommand};
-use omicron_zone_package::config::Config as PackageConfig;
+use omicron_zone_package::config::{Config as PackageConfig, PackageMap};
 use omicron_zone_package::package::{Package, PackageOutput, PackageSource};
 use omicron_zone_package::progress::Progress;
 use omicron_zone_package::target::Target;
@@ -24,12 +24,13 @@ use slog::o;
 use slog::Drain;
 use slog::Logger;
 use slog::{info, warn};
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs::create_dir_all;
 use std::io::Write;
 use std::str::FromStr;
-use std::sync::Arc;
-use swrite::{swrite, SWrite};
+use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
@@ -104,82 +105,117 @@ struct Args {
     subcommand: SubCommand,
 }
 
-async fn run_cargo_on_packages<I, S>(
-    subcmd: &str,
-    packages: I,
+#[derive(Debug, Default)]
+struct CargoPlan<'a> {
+    command: &'a str,
+    bins: BTreeSet<&'a String>,
+    features: BTreeSet<&'a String>,
     release: bool,
-    features: &str,
-) -> Result<()>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<std::ffi::OsStr>,
-{
-    let mut cmd = Command::new("cargo");
-    // We rely on the rust-toolchain.toml file for toolchain information,
-    // rather than specifying one within the packaging tool.
-    cmd.arg(subcmd);
-    for package in packages {
-        cmd.arg("-p").arg(package);
-    }
-    cmd.arg("--features").arg(features);
-    if release {
-        cmd.arg("--release");
-    }
-    let status = cmd
-        .status()
-        .await
-        .context(format!("Failed to run command: ({:?})", cmd))?;
-    if !status.success() {
-        bail!("Failed to build packages");
-    }
+}
 
-    Ok(())
+impl<'a> CargoPlan<'a> {
+    async fn run(&self, log: &Logger) -> Result<()> {
+        if self.bins.is_empty() {
+            return Ok(());
+        }
+
+        let mut cmd = Command::new("cargo");
+        // We rely on the rust-toolchain.toml file for toolchain information,
+        // rather than specifying one within the packaging tool.
+        cmd.arg(self.command);
+        for bin in &self.bins {
+            cmd.arg("--bin").arg(bin);
+        }
+        if !self.features.is_empty() {
+            cmd.arg("--features").arg(self.features.iter().fold(
+                String::new(),
+                |mut acc, s| {
+                    if !acc.is_empty() {
+                        acc.push(' ');
+                    }
+                    acc.push_str(s);
+                    acc
+                },
+            ));
+        }
+        if self.release {
+            cmd.arg("--release");
+        }
+        info!(log, "running: {:?}", cmd.as_std());
+        let status = cmd
+            .status()
+            .await
+            .context(format!("Failed to run command: ({:?})", cmd))?;
+        if !status.success() {
+            bail!("Failed to build packages");
+        }
+
+        Ok(())
+    }
 }
 
 async fn do_for_all_rust_packages(
     config: &Config,
     command: &str,
 ) -> Result<()> {
-    // First, filter out all Rust packages from the configuration that should be
-    // built, and partition them into "release" and "debug" categories.
-    let (release_pkgs, debug_pkgs): (Vec<_>, _) = config
-        .package_config
-        .packages_to_build(&config.target)
-        .0
+    // Collect a map of all of the workspace packages
+    let workspace = cargo_metadata::MetadataCommand::new().no_deps().exec()?;
+    let workspace_pkgs = workspace
+        .packages
         .into_iter()
-        .filter_map(|(name, pkg)| match &pkg.source {
-            PackageSource::Local { rust: Some(rust_pkg), .. } => {
-                Some((name, rust_pkg.release))
-            }
-            _ => None,
+        .filter_map(|package| {
+            workspace
+                .workspace_members
+                .contains(&package.id)
+                .then_some((package.name.clone(), package))
         })
-        .partition(|(_, release)| *release);
+        .collect::<BTreeMap<_, _>>();
 
-    let features =
-        config.target.0.iter().fold(String::new(), |mut acc, (name, value)| {
-            swrite!(acc, "{}-{} ", name, value);
-            acc
-        });
+    // Generate a list of all features we might want to request
+    let features = config
+        .target
+        .0
+        .iter()
+        .map(|(name, value)| format!("{name}-{value}"))
+        .collect::<Vec<_>>();
 
-    // Execute all the release / debug packages at the same time.
-    if !release_pkgs.is_empty() {
-        run_cargo_on_packages(
-            command,
-            release_pkgs.iter().map(|(name, _)| name),
-            true,
-            &features,
-        )
-        .await?;
+    // We split the packages to be built into "release" and "debug" lists
+    let mut release =
+        CargoPlan { command, release: true, ..Default::default() };
+    let mut debug = CargoPlan { command, release: false, ..Default::default() };
+
+    for (name, pkg) in config.packages_to_build().0 {
+        // If this is a Rust package...
+        if let PackageSource::Local { rust: Some(rust_pkg), .. } = &pkg.source {
+            let plan = if rust_pkg.release { &mut release } else { &mut debug };
+            // Get the package metadata
+            let metadata = workspace_pkgs.get(name).with_context(|| {
+                format!("package '{name}' is not a workspace package")
+            })?;
+            // Add the binaries we want to build to the plan
+            let bins = metadata
+                .targets
+                .iter()
+                .filter_map(|target| target.is_bin().then_some(&target.name))
+                .collect::<BTreeSet<_>>();
+            for bin in &rust_pkg.binary_names {
+                ensure!(
+                    bins.contains(bin),
+                    "bin target '{bin}' does not belong to package '{name}'"
+                );
+                plan.bins.insert(bin);
+            }
+            // Add all features we want to request to the plan
+            plan.features.extend(
+                features
+                    .iter()
+                    .filter(|feature| metadata.features.contains_key(*feature)),
+            );
+        }
     }
-    if !debug_pkgs.is_empty() {
-        run_cargo_on_packages(
-            command,
-            debug_pkgs.iter().map(|(name, _)| name),
-            false,
-            &features,
-        )
-        .await?;
-    }
+
+    release.run(&config.log).await?;
+    debug.run(&config.log).await?;
     Ok(())
 }
 
@@ -204,9 +240,7 @@ async fn do_list_outputs(
     output_directory: &Utf8Path,
     intermediate: bool,
 ) -> Result<()> {
-    for (name, package) in
-        config.package_config.packages_to_build(&config.target).0
-    {
+    for (name, package) in config.packages_to_build().0 {
         if !intermediate
             && package.output
                 == (PackageOutput::Zone { intermediate_only: true })
@@ -350,6 +384,8 @@ async fn download_prebuilt(
     expected_digest: &Vec<u8>,
     path: &Utf8Path,
 ) -> Result<()> {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
     progress.set_message("downloading prebuilt".into());
     let url = format!(
         "https://buildomat.eng.oxide.computer/public/file/oxidecomputer/{}/image/{}/{}",
@@ -357,7 +393,15 @@ async fn download_prebuilt(
         commit,
         path.file_name().unwrap(),
     );
-    let response = reqwest::Client::new()
+    let client = CLIENT.get_or_init(|| {
+        reqwest::ClientBuilder::new()
+            .timeout(Duration::from_secs(3600))
+            .tcp_keepalive(Duration::from_secs(60))
+            .connect_timeout(Duration::from_secs(15))
+            .build()
+            .unwrap()
+    });
+    let response = client
         .get(&url)
         .send()
         .await
@@ -497,7 +541,7 @@ async fn do_package(
 
     do_build(&config).await?;
 
-    let packages = config.package_config.packages_to_build(&config.target);
+    let packages = config.packages_to_build();
 
     let package_iter = packages.build_order();
     for batch in package_iter {
@@ -901,6 +945,8 @@ struct Config {
     package_config: PackageConfig,
     // Description of the target we're trying to operate on.
     target: Target,
+    // The list of packages the user wants us to build (all, if empty)
+    only: Vec<String>,
     // True if we should skip confirmations for destructive operations.
     force: bool,
     // Number of times to retry failed downloads.
@@ -925,6 +971,67 @@ impl Config {
             "y" | "Y" => Ok(()),
             _ => bail!("Aborting"),
         }
+    }
+
+    /// Returns target packages to be assembled on the builder machine, limited
+    /// to those specified in `only` (if set).
+    fn packages_to_build(&self) -> PackageMap<'_> {
+        let packages = self.package_config.packages_to_build(&self.target);
+        if self.only.is_empty() {
+            return packages;
+        }
+
+        let mut filtered_packages = PackageMap(BTreeMap::new());
+        let mut to_walk = PackageMap(BTreeMap::new());
+        // add the requested packages to `to_walk`
+        for package_name in &self.only {
+            to_walk.0.insert(
+                package_name,
+                packages.0.get(package_name).unwrap_or_else(|| {
+                    panic!(
+                        "Explicitly-requested package '{}' does not exist",
+                        package_name
+                    )
+                }),
+            );
+        }
+        // dependencies are listed by output name, so create a lookup table to
+        // get a package by its output name.
+        let lookup_by_output = packages
+            .0
+            .iter()
+            .map(|(name, package)| {
+                (package.get_output_file(name), (*name, *package))
+            })
+            .collect::<BTreeMap<_, _>>();
+        // packages yet to be walked are added to `to_walk`. pop each entry and
+        // add its dependencies to `to_walk`, then add the package we finished
+        // walking to `filtered_packages`.
+        while let Some((package_name, package)) = to_walk.0.pop_first() {
+            if let PackageSource::Composite { packages } = &package.source {
+                for output in packages {
+                    // find the package by output name
+                    let (dep_name, dep_package) =
+                        lookup_by_output.get(output).unwrap_or_else(|| {
+                            panic!(
+                                "Could not find a package which creates '{}'",
+                                output
+                            )
+                        });
+                    if dep_name.as_str() == package_name {
+                        panic!("'{}' depends on itself", package_name);
+                    }
+                    // if we've seen this package already, it will be in
+                    // `filtered_packages`. otherwise, add it to `to_walk`.
+                    if !filtered_packages.0.contains_key(dep_name) {
+                        to_walk.0.insert(dep_name, dep_package);
+                    }
+                }
+            }
+            // we're done looking at this package's deps
+            filtered_packages.0.insert(package_name, package);
+        }
+        filtered_packages
     }
 }
 
@@ -978,6 +1085,7 @@ async fn main() -> Result<()> {
             log: log.clone(),
             package_config,
             target,
+            only: Vec::new(),
             force: args.force,
             retry_count: args.retry_count,
             retry_duration: args.retry_duration,
@@ -993,7 +1101,7 @@ async fn main() -> Result<()> {
         })?;
     }
 
-    match &args.subcommand {
+    match args.subcommand {
         SubCommand::Build(BuildCommand::Target { subcommand }) => {
             do_target(&args.artifact_dir, &args.target, &subcommand).await?;
         }
@@ -1001,16 +1109,22 @@ async fn main() -> Result<()> {
             do_dot(&get_config()?).await?;
         }
         SubCommand::Build(BuildCommand::ListOutputs { intermediate }) => {
-            do_list_outputs(&get_config()?, &args.artifact_dir, *intermediate)
+            do_list_outputs(&get_config()?, &args.artifact_dir, intermediate)
                 .await?;
         }
-        SubCommand::Build(BuildCommand::Package { disable_cache }) => {
-            do_package(&get_config()?, &args.artifact_dir, *disable_cache)
-                .await?;
+        SubCommand::Build(BuildCommand::Package { disable_cache, only }) => {
+            let mut config = get_config()?;
+            config.only = only;
+            do_package(&config, &args.artifact_dir, disable_cache).await?;
         }
         SubCommand::Build(BuildCommand::Stamp { package_name, version }) => {
-            do_stamp(&get_config()?, &args.artifact_dir, package_name, version)
-                .await?;
+            do_stamp(
+                &get_config()?,
+                &args.artifact_dir,
+                &package_name,
+                &version,
+            )
+            .await?;
         }
         SubCommand::Build(BuildCommand::Check) => {
             do_check(&get_config()?).await?
