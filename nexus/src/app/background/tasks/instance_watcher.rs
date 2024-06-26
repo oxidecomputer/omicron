@@ -4,7 +4,7 @@
 
 //! Background task for pulling instance state from sled-agents.
 
-use super::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 use futures::{future::BoxFuture, FutureExt};
 use http::StatusCode;
 use nexus_db_model::Instance;

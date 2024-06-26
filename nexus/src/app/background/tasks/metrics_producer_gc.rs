@@ -5,7 +5,7 @@
 //! Background task for garbage collecting metrics producers that have not
 //! renewed their lease
 
-use super::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 use chrono::TimeDelta;
 use chrono::Utc;
 use futures::future::BoxFuture;

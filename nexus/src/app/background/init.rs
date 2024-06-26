@@ -2,30 +2,31 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Background task initialization
+//! Specific background task initialization
 
-use super::abandoned_vmm_reaper;
-use super::bfd;
-use super::blueprint_execution;
-use super::blueprint_load;
-use super::common;
-use super::crdb_node_id_collector;
-use super::dns_config;
-use super::dns_propagation;
-use super::dns_servers;
-use super::external_endpoints;
-use super::instance_watcher;
-use super::inventory_collection;
-use super::metrics_producer_gc;
-use super::nat_cleanup;
-use super::phantom_disks;
-use super::physical_disk_adoption;
-use super::region_replacement;
-use super::region_replacement_driver;
-use super::service_firewall_rules;
-use super::sync_service_zone_nat::ServiceZoneNatTracker;
-use super::sync_switch_configuration::SwitchPortSettingsManager;
-use super::v2p_mappings::V2PManager;
+use super::tasks::abandoned_vmm_reaper;
+use super::tasks::bfd;
+use super::tasks::blueprint_execution;
+use super::tasks::blueprint_load;
+use super::tasks::crdb_node_id_collector;
+use super::tasks::dns_config;
+use super::tasks::dns_propagation;
+use super::tasks::dns_servers;
+use super::tasks::external_endpoints;
+use super::tasks::instance_watcher;
+use super::tasks::inventory_collection;
+use super::tasks::metrics_producer_gc;
+use super::tasks::nat_cleanup;
+use super::tasks::phantom_disks;
+use super::tasks::physical_disk_adoption;
+use super::tasks::region_replacement;
+use super::tasks::region_replacement_driver;
+use super::tasks::service_firewall_rules;
+use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
+use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
+use super::tasks::v2p_mappings::V2PManager;
+use super::Driver;
+use super::TaskHandle;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::sagas::SagaRequest;
 use nexus_config::BackgroundTaskConfig;
@@ -47,76 +48,76 @@ use uuid::Uuid;
 pub struct BackgroundTasks {
     /// interface for working with background tasks (activation, checking
     /// status, etc.)
-    pub driver: common::Driver,
+    pub driver: Driver,
 
     /// task handle for the internal DNS config background task
-    pub task_internal_dns_config: common::TaskHandle,
+    pub task_internal_dns_config: TaskHandle,
     /// task handle for the internal DNS servers background task
-    pub task_internal_dns_servers: common::TaskHandle,
+    pub task_internal_dns_servers: TaskHandle,
     /// task handle for the external DNS config background task
-    pub task_external_dns_config: common::TaskHandle,
+    pub task_external_dns_config: TaskHandle,
     /// task handle for the external DNS servers background task
-    pub task_external_dns_servers: common::TaskHandle,
+    pub task_external_dns_servers: TaskHandle,
 
     /// task handle for pruning metrics producers with expired leases
-    pub task_metrics_producer_gc: common::TaskHandle,
+    pub task_metrics_producer_gc: TaskHandle,
 
     /// task handle for the task that keeps track of external endpoints
-    pub task_external_endpoints: common::TaskHandle,
+    pub task_external_endpoints: TaskHandle,
     /// external endpoints read by the background task
     pub external_endpoints: tokio::sync::watch::Receiver<
         Option<external_endpoints::ExternalEndpoints>,
     >,
     /// task handle for the ipv4 nat entry garbage collector
-    pub nat_cleanup: common::TaskHandle,
+    pub nat_cleanup: TaskHandle,
 
     /// task handle for the switch bfd manager
-    pub bfd_manager: common::TaskHandle,
+    pub bfd_manager: TaskHandle,
 
     /// task handle for the task that collects inventory
-    pub task_inventory_collection: common::TaskHandle,
+    pub task_inventory_collection: TaskHandle,
 
     /// task handle for the task that collects inventory
-    pub task_physical_disk_adoption: common::TaskHandle,
+    pub task_physical_disk_adoption: TaskHandle,
 
     /// task handle for the task that detects phantom disks
-    pub task_phantom_disks: common::TaskHandle,
+    pub task_phantom_disks: TaskHandle,
 
     /// task handle for blueprint target loader
-    pub task_blueprint_loader: common::TaskHandle,
+    pub task_blueprint_loader: TaskHandle,
 
     /// task handle for blueprint execution background task
-    pub task_blueprint_executor: common::TaskHandle,
+    pub task_blueprint_executor: TaskHandle,
 
     /// task handle for collecting CockroachDB node IDs
-    pub task_crdb_node_id_collector: common::TaskHandle,
+    pub task_crdb_node_id_collector: TaskHandle,
 
     /// task handle for the service zone nat tracker
-    pub task_service_zone_nat_tracker: common::TaskHandle,
+    pub task_service_zone_nat_tracker: TaskHandle,
 
     /// task handle for the switch port settings manager
-    pub task_switch_port_settings_manager: common::TaskHandle,
+    pub task_switch_port_settings_manager: TaskHandle,
 
     /// task handle for the opte v2p manager
-    pub task_v2p_manager: common::TaskHandle,
+    pub task_v2p_manager: TaskHandle,
 
     /// task handle for the task that detects if regions need replacement and
     /// begins the process
-    pub task_region_replacement: common::TaskHandle,
+    pub task_region_replacement: TaskHandle,
 
     /// task handle for the task that drives region replacements forward
-    pub task_region_replacement_driver: common::TaskHandle,
+    pub task_region_replacement_driver: TaskHandle,
 
     /// task handle for the task that polls sled agents for instance states.
-    pub task_instance_watcher: common::TaskHandle,
+    pub task_instance_watcher: TaskHandle,
 
     /// task handle for propagation of VPC firewall rules for Omicron services
     /// with external network connectivity,
-    pub task_service_firewall_propagation: common::TaskHandle,
+    pub task_service_firewall_propagation: TaskHandle,
 
     /// task handle for deletion of database records for VMMs abandoned by their
     /// instances.
-    pub task_abandoned_vmm_reaper: common::TaskHandle,
+    pub task_abandoned_vmm_reaper: TaskHandle,
 }
 
 impl BackgroundTasks {
@@ -136,7 +137,7 @@ impl BackgroundTasks {
         ),
         producer_registry: &ProducerRegistry,
     ) -> BackgroundTasks {
-        let mut driver = common::Driver::new();
+        let mut driver = Driver::new();
 
         let (task_internal_dns_config, task_internal_dns_servers) = init_dns(
             &mut driver,
@@ -494,19 +495,19 @@ impl BackgroundTasks {
         }
     }
 
-    pub fn activate(&self, task: &common::TaskHandle) {
+    pub fn activate(&self, task: &TaskHandle) {
         self.driver.activate(task);
     }
 }
 
 fn init_dns(
-    driver: &mut common::Driver,
+    driver: &mut Driver,
     opctx: &OpContext,
     datastore: Arc<DataStore>,
     dns_group: DnsGroup,
     resolver: internal_dns::resolver::Resolver,
     config: &DnsTasksConfig,
-) -> (common::TaskHandle, common::TaskHandle) {
+) -> (TaskHandle, TaskHandle) {
     let dns_group_name = dns_group.to_string();
     let metadata = BTreeMap::from([("dns_group".to_string(), dns_group_name)]);
 

@@ -4,7 +4,7 @@
 
 //! Background task for keeping track of DNS configuration
 
-use super::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 use dns_service_client::types::DnsConfigParams;
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -157,9 +157,9 @@ impl BackgroundTask for DnsConfigWatcher {
 
 #[cfg(test)]
 mod test {
-    use crate::app::background::common::BackgroundTask;
-    use crate::app::background::dns_config::DnsConfigWatcher;
+    use super::DnsConfigWatcher;
     use crate::app::background::init::test::write_test_dns_generation;
+    use crate::app::background::BackgroundTask;
     use assert_matches::assert_matches;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;

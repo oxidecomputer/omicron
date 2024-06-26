@@ -7,7 +7,7 @@
 //! This task triggers the `blueprint_execution` background task when the
 //! blueprint changes.
 
-use super::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
@@ -185,7 +185,7 @@ impl BackgroundTask for TargetBlueprintLoader {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::app::background::common::BackgroundTask;
+    use crate::app::background::BackgroundTask;
     use nexus_inventory::now_db_precision;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{

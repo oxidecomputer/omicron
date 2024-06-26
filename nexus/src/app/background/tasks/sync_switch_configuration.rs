@@ -6,7 +6,7 @@
 //! to relevant management daemons (dendrite, mgd, sled-agent, etc.)
 
 use crate::app::{
-    background::networking::{
+    background::tasks::networking::{
         api_to_dpd_port_settings, build_dpd_clients, build_mgd_clients,
     },
     map_switch_zone_addrs,
@@ -23,7 +23,7 @@ use nexus_db_model::{
 };
 use uuid::Uuid;
 
-use super::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 use display_error_chain::DisplayErrorChain;
 use dpd_client::types::PortId;
 use futures::future::BoxFuture;
