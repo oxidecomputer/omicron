@@ -57,7 +57,6 @@ impl super::Nexus {
 
         // eagerly propagate changes via rpw
         self.background_tasks
-            .driver
             .activate(&self.background_tasks.task_switch_port_settings_manager);
 
         Ok(value)
@@ -86,7 +85,6 @@ impl super::Nexus {
 
         // eagerly propagate changes via rpw
         self.background_tasks
-            .driver
             .activate(&self.background_tasks.task_switch_port_settings_manager);
 
         Ok(())
