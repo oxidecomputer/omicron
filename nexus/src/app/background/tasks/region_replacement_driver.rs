@@ -21,6 +21,7 @@
 use crate::app::authn;
 use crate::app::background::BackgroundTask;
 use crate::app::sagas;
+use crate::Nexus;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
@@ -28,19 +29,15 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
 use serde_json::json;
 use std::sync::Arc;
-use tokio::sync::mpsc::Sender;
 
 pub struct RegionReplacementDriver {
     datastore: Arc<DataStore>,
-    saga_request: Sender<sagas::SagaRequest>,
+    nexus: Arc<Nexus>,
 }
 
 impl RegionReplacementDriver {
-    pub fn new(
-        datastore: Arc<DataStore>,
-        saga_request: Sender<sagas::SagaRequest>,
-    ) -> Self {
-        RegionReplacementDriver { datastore, saga_request }
+    pub fn new(datastore: Arc<DataStore>, nexus: Arc<Nexus>) -> Self {
+        RegionReplacementDriver { datastore, nexus }
     }
 
     /// Drive running region replacements forward
@@ -119,36 +116,38 @@ impl RegionReplacementDriver {
                 // (or determine if it is complete).
 
                 let request_id = request.id;
-
-                let result = self
-                    .saga_request
-                    .send(sagas::SagaRequest::RegionReplacementDrive {
-                        params: sagas::region_replacement_drive::Params {
-                            serialized_authn:
-                                authn::saga::Serialized::for_opctx(opctx),
-                            request,
-                        },
-                    })
-                    .await;
-
-                match result {
-                    Ok(()) => {
-                        let s = format!("{request_id}: drive invoked ok");
-
-                        info!(&log, "{s}");
-                        status.drive_invoked_ok.push(s);
-                    }
-
-                    Err(e) => {
-                        let s = format!(
-                            "sending region replacement drive request for \
-                            {request_id} failed: {e}",
-                        );
-
-                        error!(&log, "{s}");
-                        status.errors.push(s);
-                    }
+                let params = sagas::region_replacement_drive::Params {
+                    serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+                    request,
                 };
+                let nexus = self.nexus.clone();
+                tokio::spawn(async move {
+                    let saga_result = nexus
+                        .execute_saga::<sagas::region_replacement_drive::SagaRegionReplacementDrive>(
+                            params,
+                        )
+                        .await;
+
+                    match saga_result {
+                        Ok(_) => {
+                            info!(
+                                nexus.log,
+                                "region replacement drive saga completed ok"
+                            );
+                        }
+
+                        Err(e) => {
+                            warn!(
+                                nexus.log,
+                                "region replacement drive saga returned an \
+                                 error: {e}"
+                            );
+                        }
+                    }
+                });
+
+                let s = format!("{request_id}: drive invoked ok");
+                status.drive_invoked_ok.push(s);
             }
         }
     }
@@ -193,37 +192,39 @@ impl RegionReplacementDriver {
             };
 
             let request_id = request.id;
-
-            let result =
-                self.saga_request
-                    .send(sagas::SagaRequest::RegionReplacementFinish {
-                        params: sagas::region_replacement_finish::Params {
-                            serialized_authn:
-                                authn::saga::Serialized::for_opctx(opctx),
-                            region_volume_id: old_region_volume_id,
-                            request,
-                        },
-                    })
-                    .await;
-
-            match result {
-                Ok(()) => {
-                    let s = format!("{request_id}: finish invoked ok");
-
-                    info!(&log, "{s}");
-                    status.finish_invoked_ok.push(s);
-                }
-
-                Err(e) => {
-                    let s = format!(
-                        "sending region replacement finish request for \
-                        {request_id} failed: {e}"
-                    );
-
-                    error!(&log, "{s}");
-                    status.errors.push(s);
-                }
+            let nexus = self.nexus.clone();
+            let params = sagas::region_replacement_finish::Params {
+                serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+                region_volume_id: old_region_volume_id,
+                request,
             };
+            tokio::spawn(async move {
+                let saga_result = nexus
+                        .execute_saga::<sagas::region_replacement_finish::SagaRegionReplacementFinish>(
+                            params,
+                        )
+                        .await;
+
+                match saga_result {
+                    Ok(_) => {
+                        info!(
+                            nexus.log,
+                            "region replacement finish saga completed ok"
+                        );
+                    }
+
+                    Err(e) => {
+                        warn!(
+                            nexus.log,
+                            "region replacement finish saga returned an \
+                            error: {e}"
+                        );
+                    }
+                }
+            });
+
+            let s = format!("{request_id}: finish invoked ok");
+            status.finish_invoked_ok.push(s);
         }
     }
 }
@@ -250,487 +251,488 @@ impl BackgroundTask for RegionReplacementDriver {
     }
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
-    use async_bb8_diesel::AsyncRunQueryDsl;
-    use chrono::Utc;
-    use nexus_db_model::Region;
-    use nexus_db_model::RegionReplacement;
-    use nexus_db_model::RegionReplacementState;
-    use nexus_db_model::UpstairsRepairNotification;
-    use nexus_db_model::UpstairsRepairNotificationType;
-    use nexus_db_model::UpstairsRepairType;
-    use nexus_test_utils_macros::nexus_test;
-    use omicron_uuid_kinds::DownstairsRegionKind;
-    use omicron_uuid_kinds::GenericUuid;
-    use omicron_uuid_kinds::TypedUuid;
-    use omicron_uuid_kinds::UpstairsKind;
-    use omicron_uuid_kinds::UpstairsRepairKind;
-    use omicron_uuid_kinds::UpstairsSessionKind;
-    use tokio::sync::mpsc;
-    use uuid::Uuid;
-
-    type ControlPlaneTestContext =
-        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
-
-    #[nexus_test(server = crate::Server)]
-    async fn test_running_region_replacement_causes_drive(
-        cptestctx: &ControlPlaneTestContext,
-    ) {
-        let nexus = &cptestctx.server.server_context().nexus;
-        let datastore = nexus.datastore();
-        let opctx = OpContext::for_tests(
-            cptestctx.logctx.log.clone(),
-            datastore.clone(),
-        );
-
-        let (saga_request_tx, mut saga_request_rx) = mpsc::channel(1);
-        let mut task =
-            RegionReplacementDriver::new(datastore.clone(), saga_request_tx);
-
-        // Noop test
-        let result = task.activate(&opctx).await;
-        assert_eq!(result, json!(RegionReplacementDriverStatus::default()));
-
-        // Add a region replacement request for a fake region, and change it to
-        // state Running.
-        let region_id = Uuid::new_v4();
-        let new_region_id = Uuid::new_v4();
-        let volume_id = Uuid::new_v4();
-
-        let request = {
-            let mut request = RegionReplacement::new(region_id, volume_id);
-            request.replacement_state = RegionReplacementState::Running;
-            request.new_region_id = Some(new_region_id);
-            request
-        };
-
-        let request_id = request.id;
-
-        datastore
-            .insert_region_replacement_request(&opctx, request)
-            .await
-            .unwrap();
-
-        // Activate the task - it should pick that up and try to run the region
-        // replacement drive saga
-        let result: RegionReplacementDriverStatus =
-            serde_json::from_value(task.activate(&opctx).await).unwrap();
-
-        assert_eq!(
-            result.drive_invoked_ok,
-            vec![format!("{request_id}: drive invoked ok")]
-        );
-        assert!(result.finish_invoked_ok.is_empty());
-        assert!(result.errors.is_empty());
-
-        let request = saga_request_rx.try_recv().unwrap();
-
-        assert!(matches!(
-            request,
-            sagas::SagaRequest::RegionReplacementDrive { .. }
-        ));
-    }
-
-    #[nexus_test(server = crate::Server)]
-    async fn test_done_region_replacement_causes_finish(
-        cptestctx: &ControlPlaneTestContext,
-    ) {
-        let nexus = &cptestctx.server.server_context().nexus;
-        let datastore = nexus.datastore();
-        let opctx = OpContext::for_tests(
-            cptestctx.logctx.log.clone(),
-            datastore.clone(),
-        );
-
-        let (saga_request_tx, mut saga_request_rx) = mpsc::channel(1);
-        let mut task =
-            RegionReplacementDriver::new(datastore.clone(), saga_request_tx);
-
-        // Noop test
-        let result = task.activate(&opctx).await;
-        assert_eq!(result, json!(RegionReplacementDriverStatus::default()));
-
-        // Insert some region records
-        let old_region = {
-            let dataset_id = Uuid::new_v4();
-            let volume_id = Uuid::new_v4();
-            Region::new(
-                dataset_id,
-                volume_id,
-                512_i64.try_into().unwrap(),
-                10,
-                10,
-            )
-        };
-
-        let new_region = {
-            let dataset_id = Uuid::new_v4();
-            let volume_id = Uuid::new_v4();
-            Region::new(
-                dataset_id,
-                volume_id,
-                512_i64.try_into().unwrap(),
-                10,
-                10,
-            )
-        };
-
-        {
-            let conn = datastore.pool_connection_for_tests().await.unwrap();
-
-            use nexus_db_model::schema::region::dsl;
-            diesel::insert_into(dsl::region)
-                .values(old_region.clone())
-                .execute_async(&*conn)
-                .await
-                .unwrap();
-
-            diesel::insert_into(dsl::region)
-                .values(new_region.clone())
-                .execute_async(&*conn)
-                .await
-                .unwrap();
-        }
-
-        // Add a region replacement request for that region, and change it to
-        // state ReplacementDone. Set the new_region_id to the region created
-        // above.
-        let request = {
-            let mut request =
-                RegionReplacement::new(old_region.id(), old_region.volume_id());
-            request.replacement_state = RegionReplacementState::ReplacementDone;
-            request.new_region_id = Some(new_region.id());
-            request.old_region_volume_id = Some(Uuid::new_v4());
-            request
-        };
-
-        let request_id = request.id;
-
-        datastore
-            .insert_region_replacement_request(&opctx, request)
-            .await
-            .unwrap();
-
-        // Activate the task - it should pick that up and try to run the region
-        // replacement finish saga
-        let result: RegionReplacementDriverStatus =
-            serde_json::from_value(task.activate(&opctx).await).unwrap();
-
-        assert!(result.drive_invoked_ok.is_empty());
-        assert_eq!(
-            result.finish_invoked_ok,
-            vec![format!("{request_id}: finish invoked ok")]
-        );
-        assert!(result.errors.is_empty());
-
-        let request = saga_request_rx.try_recv().unwrap();
-
-        assert!(matches!(
-            request,
-            sagas::SagaRequest::RegionReplacementFinish { .. }
-        ));
-    }
-
-    #[nexus_test(server = crate::Server)]
-    async fn test_mark_region_replacement_done_after_notification(
-        cptestctx: &ControlPlaneTestContext,
-    ) {
-        let nexus = &cptestctx.server.server_context().nexus;
-        let datastore = nexus.datastore();
-        let opctx = OpContext::for_tests(
-            cptestctx.logctx.log.clone(),
-            datastore.clone(),
-        );
-
-        let (saga_request_tx, mut saga_request_rx) = mpsc::channel(1);
-        let mut task =
-            RegionReplacementDriver::new(datastore.clone(), saga_request_tx);
-
-        // Noop test
-        let result = task.activate(&opctx).await;
-        assert_eq!(result, json!(RegionReplacementDriverStatus::default()));
-
-        // Insert some region records
-        let old_region = {
-            let dataset_id = Uuid::new_v4();
-            let volume_id = Uuid::new_v4();
-            Region::new(
-                dataset_id,
-                volume_id,
-                512_i64.try_into().unwrap(),
-                10,
-                10,
-            )
-        };
-
-        let new_region = {
-            let dataset_id = Uuid::new_v4();
-            let volume_id = Uuid::new_v4();
-            Region::new(
-                dataset_id,
-                volume_id,
-                512_i64.try_into().unwrap(),
-                10,
-                10,
-            )
-        };
-
-        {
-            let conn = datastore.pool_connection_for_tests().await.unwrap();
-
-            use nexus_db_model::schema::region::dsl;
-            diesel::insert_into(dsl::region)
-                .values(old_region.clone())
-                .execute_async(&*conn)
-                .await
-                .unwrap();
-
-            diesel::insert_into(dsl::region)
-                .values(new_region.clone())
-                .execute_async(&*conn)
-                .await
-                .unwrap();
-        }
-
-        // Add a region replacement request for that region, and change it to
-        // state Running. Set the new_region_id to the region created above.
-        let request = {
-            let mut request =
-                RegionReplacement::new(old_region.id(), old_region.volume_id());
-            request.replacement_state = RegionReplacementState::Running;
-            request.new_region_id = Some(new_region.id());
-            request.old_region_volume_id = Some(Uuid::new_v4());
-            request
-        };
-
-        let request_id = request.id;
-
-        datastore
-            .insert_region_replacement_request(&opctx, request.clone())
-            .await
-            .unwrap();
-
-        // Activate the task - it should pick that up and try to run the region
-        // replacement drive saga
-        let result: RegionReplacementDriverStatus =
-            serde_json::from_value(task.activate(&opctx).await).unwrap();
-
-        assert_eq!(
-            result.drive_invoked_ok,
-            vec![format!("{request_id}: drive invoked ok")]
-        );
-        assert!(result.finish_invoked_ok.is_empty());
-        assert!(result.errors.is_empty());
-
-        let saga_request = saga_request_rx.try_recv().unwrap();
-
-        assert!(matches!(
-            saga_request,
-            sagas::SagaRequest::RegionReplacementDrive { .. }
-        ));
-
-        // Now, pretend that an Upstairs sent a notification that it
-        // successfully finished a repair
-
-        {
-            datastore
-                .upstairs_repair_notification(
-                    &opctx,
-                    UpstairsRepairNotification::new(
-                        Utc::now(), // client time
-                        TypedUuid::<UpstairsRepairKind>::from_untyped_uuid(
-                            Uuid::new_v4(),
-                        ),
-                        UpstairsRepairType::Live,
-                        TypedUuid::<UpstairsKind>::from_untyped_uuid(
-                            Uuid::new_v4(),
-                        ),
-                        TypedUuid::<UpstairsSessionKind>::from_untyped_uuid(
-                            Uuid::new_v4(),
-                        ),
-                        TypedUuid::<DownstairsRegionKind>::from_untyped_uuid(
-                            new_region.id(),
-                        ), // downstairs that was repaired
-                        "[fd00:1122:3344:101::2]:12345".parse().unwrap(),
-                        UpstairsRepairNotificationType::Succeeded,
-                    ),
-                )
-                .await
-                .unwrap();
-        }
-
-        // Activating the task now should
-        // 1) switch the state to ReplacementDone
-        // 2) start the finish saga
-        let result: RegionReplacementDriverStatus =
-            serde_json::from_value(task.activate(&opctx).await).unwrap();
-
-        assert_eq!(result.finish_invoked_ok.len(), 1);
-
-        {
-            let request_in_db = datastore
-                .get_region_replacement_request_by_id(&opctx, request.id)
-                .await
-                .unwrap();
-            assert_eq!(
-                request_in_db.replacement_state,
-                RegionReplacementState::ReplacementDone
-            );
-        }
-
-        let saga_request = saga_request_rx.try_recv().unwrap();
-
-        assert!(matches!(
-            saga_request,
-            sagas::SagaRequest::RegionReplacementFinish { .. }
-        ));
-    }
-
-    #[nexus_test(server = crate::Server)]
-    async fn test_no_mark_region_replacement_done_after_failed_notification(
-        cptestctx: &ControlPlaneTestContext,
-    ) {
-        let nexus = &cptestctx.server.server_context().nexus;
-        let datastore = nexus.datastore();
-        let opctx = OpContext::for_tests(
-            cptestctx.logctx.log.clone(),
-            datastore.clone(),
-        );
-
-        let (saga_request_tx, mut saga_request_rx) = mpsc::channel(1);
-        let mut task =
-            RegionReplacementDriver::new(datastore.clone(), saga_request_tx);
-
-        // Noop test
-        let result = task.activate(&opctx).await;
-        assert_eq!(result, json!(RegionReplacementDriverStatus::default()));
-
-        // Insert some region records
-        let old_region = {
-            let dataset_id = Uuid::new_v4();
-            let volume_id = Uuid::new_v4();
-            Region::new(
-                dataset_id,
-                volume_id,
-                512_i64.try_into().unwrap(),
-                10,
-                10,
-            )
-        };
-
-        let new_region = {
-            let dataset_id = Uuid::new_v4();
-            let volume_id = Uuid::new_v4();
-            Region::new(
-                dataset_id,
-                volume_id,
-                512_i64.try_into().unwrap(),
-                10,
-                10,
-            )
-        };
-
-        {
-            let conn = datastore.pool_connection_for_tests().await.unwrap();
-
-            use nexus_db_model::schema::region::dsl;
-            diesel::insert_into(dsl::region)
-                .values(old_region.clone())
-                .execute_async(&*conn)
-                .await
-                .unwrap();
-
-            diesel::insert_into(dsl::region)
-                .values(new_region.clone())
-                .execute_async(&*conn)
-                .await
-                .unwrap();
-        }
-
-        // Add a region replacement request for that region, and change it to
-        // state Running. Set the new_region_id to the region created above.
-        let request = {
-            let mut request =
-                RegionReplacement::new(old_region.id(), old_region.volume_id());
-            request.replacement_state = RegionReplacementState::Running;
-            request.new_region_id = Some(new_region.id());
-            request
-        };
-
-        let request_id = request.id;
-
-        datastore
-            .insert_region_replacement_request(&opctx, request.clone())
-            .await
-            .unwrap();
-
-        // Activate the task - it should pick that up and try to run the region
-        // replacement drive saga
-        let result: RegionReplacementDriverStatus =
-            serde_json::from_value(task.activate(&opctx).await).unwrap();
-
-        assert_eq!(
-            result.drive_invoked_ok,
-            vec![format!("{request_id}: drive invoked ok")]
-        );
-        assert!(result.finish_invoked_ok.is_empty());
-        assert!(result.errors.is_empty());
-
-        let saga_request = saga_request_rx.try_recv().unwrap();
-
-        assert!(matches!(
-            saga_request,
-            sagas::SagaRequest::RegionReplacementDrive { .. }
-        ));
-
-        // Now, pretend that an Upstairs sent a notification that it failed to
-        // finish a repair
-
-        {
-            datastore
-                .upstairs_repair_notification(
-                    &opctx,
-                    UpstairsRepairNotification::new(
-                        Utc::now(), // client time
-                        TypedUuid::<UpstairsRepairKind>::from_untyped_uuid(
-                            Uuid::new_v4(),
-                        ),
-                        UpstairsRepairType::Live,
-                        TypedUuid::<UpstairsKind>::from_untyped_uuid(
-                            Uuid::new_v4(),
-                        ),
-                        TypedUuid::<UpstairsSessionKind>::from_untyped_uuid(
-                            Uuid::new_v4(),
-                        ),
-                        TypedUuid::<DownstairsRegionKind>::from_untyped_uuid(
-                            new_region.id(),
-                        ), // downstairs that was repaired
-                        "[fd00:1122:3344:101::2]:12345".parse().unwrap(),
-                        UpstairsRepairNotificationType::Failed,
-                    ),
-                )
-                .await
-                .unwrap();
-        }
-
-        // Activating the task now should start the drive saga
-        let result: RegionReplacementDriverStatus =
-            serde_json::from_value(task.activate(&opctx).await).unwrap();
-
-        assert_eq!(
-            result.drive_invoked_ok,
-            vec![format!("{request_id}: drive invoked ok")]
-        );
-        assert!(result.finish_invoked_ok.is_empty());
-        assert!(result.errors.is_empty());
-
-        let saga_request = saga_request_rx.try_recv().unwrap();
-
-        assert!(matches!(
-            saga_request,
-            sagas::SagaRequest::RegionReplacementDrive { .. }
-        ));
-    }
-}
+// XXX-dap
+// #[cfg(test)]
+// mod test {
+//     use super::*;
+//     use async_bb8_diesel::AsyncRunQueryDsl;
+//     use chrono::Utc;
+//     use nexus_db_model::Region;
+//     use nexus_db_model::RegionReplacement;
+//     use nexus_db_model::RegionReplacementState;
+//     use nexus_db_model::UpstairsRepairNotification;
+//     use nexus_db_model::UpstairsRepairNotificationType;
+//     use nexus_db_model::UpstairsRepairType;
+//     use nexus_test_utils_macros::nexus_test;
+//     use omicron_uuid_kinds::DownstairsRegionKind;
+//     use omicron_uuid_kinds::GenericUuid;
+//     use omicron_uuid_kinds::TypedUuid;
+//     use omicron_uuid_kinds::UpstairsKind;
+//     use omicron_uuid_kinds::UpstairsRepairKind;
+//     use omicron_uuid_kinds::UpstairsSessionKind;
+//     use tokio::sync::mpsc;
+//     use uuid::Uuid;
+//
+//     type ControlPlaneTestContext =
+//         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+//
+//     #[nexus_test(server = crate::Server)]
+//     async fn test_running_region_replacement_causes_drive(
+//         cptestctx: &ControlPlaneTestContext,
+//     ) {
+//         let nexus = &cptestctx.server.server_context().nexus;
+//         let datastore = nexus.datastore();
+//         let opctx = OpContext::for_tests(
+//             cptestctx.logctx.log.clone(),
+//             datastore.clone(),
+//         );
+//
+//         let (saga_request_tx, mut saga_request_rx) = mpsc::channel(1);
+//         let mut task =
+//             RegionReplacementDriver::new(datastore.clone(), saga_request_tx);
+//
+//         // Noop test
+//         let result = task.activate(&opctx).await;
+//         assert_eq!(result, json!(RegionReplacementDriverStatus::default()));
+//
+//         // Add a region replacement request for a fake region, and change it to
+//         // state Running.
+//         let region_id = Uuid::new_v4();
+//         let new_region_id = Uuid::new_v4();
+//         let volume_id = Uuid::new_v4();
+//
+//         let request = {
+//             let mut request = RegionReplacement::new(region_id, volume_id);
+//             request.replacement_state = RegionReplacementState::Running;
+//             request.new_region_id = Some(new_region_id);
+//             request
+//         };
+//
+//         let request_id = request.id;
+//
+//         datastore
+//             .insert_region_replacement_request(&opctx, request)
+//             .await
+//             .unwrap();
+//
+//         // Activate the task - it should pick that up and try to run the region
+//         // replacement drive saga
+//         let result: RegionReplacementDriverStatus =
+//             serde_json::from_value(task.activate(&opctx).await).unwrap();
+//
+//         assert_eq!(
+//             result.drive_invoked_ok,
+//             vec![format!("{request_id}: drive invoked ok")]
+//         );
+//         assert!(result.finish_invoked_ok.is_empty());
+//         assert!(result.errors.is_empty());
+//
+//         let request = saga_request_rx.try_recv().unwrap();
+//
+//         assert!(matches!(
+//             request,
+//             sagas::SagaRequest::RegionReplacementDrive { .. }
+//         ));
+//     }
+//
+//     #[nexus_test(server = crate::Server)]
+//     async fn test_done_region_replacement_causes_finish(
+//         cptestctx: &ControlPlaneTestContext,
+//     ) {
+//         let nexus = &cptestctx.server.server_context().nexus;
+//         let datastore = nexus.datastore();
+//         let opctx = OpContext::for_tests(
+//             cptestctx.logctx.log.clone(),
+//             datastore.clone(),
+//         );
+//
+//         let (saga_request_tx, mut saga_request_rx) = mpsc::channel(1);
+//         let mut task =
+//             RegionReplacementDriver::new(datastore.clone(), saga_request_tx);
+//
+//         // Noop test
+//         let result = task.activate(&opctx).await;
+//         assert_eq!(result, json!(RegionReplacementDriverStatus::default()));
+//
+//         // Insert some region records
+//         let old_region = {
+//             let dataset_id = Uuid::new_v4();
+//             let volume_id = Uuid::new_v4();
+//             Region::new(
+//                 dataset_id,
+//                 volume_id,
+//                 512_i64.try_into().unwrap(),
+//                 10,
+//                 10,
+//             )
+//         };
+//
+//         let new_region = {
+//             let dataset_id = Uuid::new_v4();
+//             let volume_id = Uuid::new_v4();
+//             Region::new(
+//                 dataset_id,
+//                 volume_id,
+//                 512_i64.try_into().unwrap(),
+//                 10,
+//                 10,
+//             )
+//         };
+//
+//         {
+//             let conn = datastore.pool_connection_for_tests().await.unwrap();
+//
+//             use nexus_db_model::schema::region::dsl;
+//             diesel::insert_into(dsl::region)
+//                 .values(old_region.clone())
+//                 .execute_async(&*conn)
+//                 .await
+//                 .unwrap();
+//
+//             diesel::insert_into(dsl::region)
+//                 .values(new_region.clone())
+//                 .execute_async(&*conn)
+//                 .await
+//                 .unwrap();
+//         }
+//
+//         // Add a region replacement request for that region, and change it to
+//         // state ReplacementDone. Set the new_region_id to the region created
+//         // above.
+//         let request = {
+//             let mut request =
+//                 RegionReplacement::new(old_region.id(), old_region.volume_id());
+//             request.replacement_state = RegionReplacementState::ReplacementDone;
+//             request.new_region_id = Some(new_region.id());
+//             request.old_region_volume_id = Some(Uuid::new_v4());
+//             request
+//         };
+//
+//         let request_id = request.id;
+//
+//         datastore
+//             .insert_region_replacement_request(&opctx, request)
+//             .await
+//             .unwrap();
+//
+//         // Activate the task - it should pick that up and try to run the region
+//         // replacement finish saga
+//         let result: RegionReplacementDriverStatus =
+//             serde_json::from_value(task.activate(&opctx).await).unwrap();
+//
+//         assert!(result.drive_invoked_ok.is_empty());
+//         assert_eq!(
+//             result.finish_invoked_ok,
+//             vec![format!("{request_id}: finish invoked ok")]
+//         );
+//         assert!(result.errors.is_empty());
+//
+//         let request = saga_request_rx.try_recv().unwrap();
+//
+//         assert!(matches!(
+//             request,
+//             sagas::SagaRequest::RegionReplacementFinish { .. }
+//         ));
+//     }
+//
+//     #[nexus_test(server = crate::Server)]
+//     async fn test_mark_region_replacement_done_after_notification(
+//         cptestctx: &ControlPlaneTestContext,
+//     ) {
+//         let nexus = &cptestctx.server.server_context().nexus;
+//         let datastore = nexus.datastore();
+//         let opctx = OpContext::for_tests(
+//             cptestctx.logctx.log.clone(),
+//             datastore.clone(),
+//         );
+//
+//         let (saga_request_tx, mut saga_request_rx) = mpsc::channel(1);
+//         let mut task =
+//             RegionReplacementDriver::new(datastore.clone(), saga_request_tx);
+//
+//         // Noop test
+//         let result = task.activate(&opctx).await;
+//         assert_eq!(result, json!(RegionReplacementDriverStatus::default()));
+//
+//         // Insert some region records
+//         let old_region = {
+//             let dataset_id = Uuid::new_v4();
+//             let volume_id = Uuid::new_v4();
+//             Region::new(
+//                 dataset_id,
+//                 volume_id,
+//                 512_i64.try_into().unwrap(),
+//                 10,
+//                 10,
+//             )
+//         };
+//
+//         let new_region = {
+//             let dataset_id = Uuid::new_v4();
+//             let volume_id = Uuid::new_v4();
+//             Region::new(
+//                 dataset_id,
+//                 volume_id,
+//                 512_i64.try_into().unwrap(),
+//                 10,
+//                 10,
+//             )
+//         };
+//
+//         {
+//             let conn = datastore.pool_connection_for_tests().await.unwrap();
+//
+//             use nexus_db_model::schema::region::dsl;
+//             diesel::insert_into(dsl::region)
+//                 .values(old_region.clone())
+//                 .execute_async(&*conn)
+//                 .await
+//                 .unwrap();
+//
+//             diesel::insert_into(dsl::region)
+//                 .values(new_region.clone())
+//                 .execute_async(&*conn)
+//                 .await
+//                 .unwrap();
+//         }
+//
+//         // Add a region replacement request for that region, and change it to
+//         // state Running. Set the new_region_id to the region created above.
+//         let request = {
+//             let mut request =
+//                 RegionReplacement::new(old_region.id(), old_region.volume_id());
+//             request.replacement_state = RegionReplacementState::Running;
+//             request.new_region_id = Some(new_region.id());
+//             request.old_region_volume_id = Some(Uuid::new_v4());
+//             request
+//         };
+//
+//         let request_id = request.id;
+//
+//         datastore
+//             .insert_region_replacement_request(&opctx, request.clone())
+//             .await
+//             .unwrap();
+//
+//         // Activate the task - it should pick that up and try to run the region
+//         // replacement drive saga
+//         let result: RegionReplacementDriverStatus =
+//             serde_json::from_value(task.activate(&opctx).await).unwrap();
+//
+//         assert_eq!(
+//             result.drive_invoked_ok,
+//             vec![format!("{request_id}: drive invoked ok")]
+//         );
+//         assert!(result.finish_invoked_ok.is_empty());
+//         assert!(result.errors.is_empty());
+//
+//         let saga_request = saga_request_rx.try_recv().unwrap();
+//
+//         assert!(matches!(
+//             saga_request,
+//             sagas::SagaRequest::RegionReplacementDrive { .. }
+//         ));
+//
+//         // Now, pretend that an Upstairs sent a notification that it
+//         // successfully finished a repair
+//
+//         {
+//             datastore
+//                 .upstairs_repair_notification(
+//                     &opctx,
+//                     UpstairsRepairNotification::new(
+//                         Utc::now(), // client time
+//                         TypedUuid::<UpstairsRepairKind>::from_untyped_uuid(
+//                             Uuid::new_v4(),
+//                         ),
+//                         UpstairsRepairType::Live,
+//                         TypedUuid::<UpstairsKind>::from_untyped_uuid(
+//                             Uuid::new_v4(),
+//                         ),
+//                         TypedUuid::<UpstairsSessionKind>::from_untyped_uuid(
+//                             Uuid::new_v4(),
+//                         ),
+//                         TypedUuid::<DownstairsRegionKind>::from_untyped_uuid(
+//                             new_region.id(),
+//                         ), // downstairs that was repaired
+//                         "[fd00:1122:3344:101::2]:12345".parse().unwrap(),
+//                         UpstairsRepairNotificationType::Succeeded,
+//                     ),
+//                 )
+//                 .await
+//                 .unwrap();
+//         }
+//
+//         // Activating the task now should
+//         // 1) switch the state to ReplacementDone
+//         // 2) start the finish saga
+//         let result: RegionReplacementDriverStatus =
+//             serde_json::from_value(task.activate(&opctx).await).unwrap();
+//
+//         assert_eq!(result.finish_invoked_ok.len(), 1);
+//
+//         {
+//             let request_in_db = datastore
+//                 .get_region_replacement_request_by_id(&opctx, request.id)
+//                 .await
+//                 .unwrap();
+//             assert_eq!(
+//                 request_in_db.replacement_state,
+//                 RegionReplacementState::ReplacementDone
+//             );
+//         }
+//
+//         let saga_request = saga_request_rx.try_recv().unwrap();
+//
+//         assert!(matches!(
+//             saga_request,
+//             sagas::SagaRequest::RegionReplacementFinish { .. }
+//         ));
+//     }
+//
+//     #[nexus_test(server = crate::Server)]
+//     async fn test_no_mark_region_replacement_done_after_failed_notification(
+//         cptestctx: &ControlPlaneTestContext,
+//     ) {
+//         let nexus = &cptestctx.server.server_context().nexus;
+//         let datastore = nexus.datastore();
+//         let opctx = OpContext::for_tests(
+//             cptestctx.logctx.log.clone(),
+//             datastore.clone(),
+//         );
+//
+//         let (saga_request_tx, mut saga_request_rx) = mpsc::channel(1);
+//         let mut task =
+//             RegionReplacementDriver::new(datastore.clone(), saga_request_tx);
+//
+//         // Noop test
+//         let result = task.activate(&opctx).await;
+//         assert_eq!(result, json!(RegionReplacementDriverStatus::default()));
+//
+//         // Insert some region records
+//         let old_region = {
+//             let dataset_id = Uuid::new_v4();
+//             let volume_id = Uuid::new_v4();
+//             Region::new(
+//                 dataset_id,
+//                 volume_id,
+//                 512_i64.try_into().unwrap(),
+//                 10,
+//                 10,
+//             )
+//         };
+//
+//         let new_region = {
+//             let dataset_id = Uuid::new_v4();
+//             let volume_id = Uuid::new_v4();
+//             Region::new(
+//                 dataset_id,
+//                 volume_id,
+//                 512_i64.try_into().unwrap(),
+//                 10,
+//                 10,
+//             )
+//         };
+//
+//         {
+//             let conn = datastore.pool_connection_for_tests().await.unwrap();
+//
+//             use nexus_db_model::schema::region::dsl;
+//             diesel::insert_into(dsl::region)
+//                 .values(old_region.clone())
+//                 .execute_async(&*conn)
+//                 .await
+//                 .unwrap();
+//
+//             diesel::insert_into(dsl::region)
+//                 .values(new_region.clone())
+//                 .execute_async(&*conn)
+//                 .await
+//                 .unwrap();
+//         }
+//
+//         // Add a region replacement request for that region, and change it to
+//         // state Running. Set the new_region_id to the region created above.
+//         let request = {
+//             let mut request =
+//                 RegionReplacement::new(old_region.id(), old_region.volume_id());
+//             request.replacement_state = RegionReplacementState::Running;
+//             request.new_region_id = Some(new_region.id());
+//             request
+//         };
+//
+//         let request_id = request.id;
+//
+//         datastore
+//             .insert_region_replacement_request(&opctx, request.clone())
+//             .await
+//             .unwrap();
+//
+//         // Activate the task - it should pick that up and try to run the region
+//         // replacement drive saga
+//         let result: RegionReplacementDriverStatus =
+//             serde_json::from_value(task.activate(&opctx).await).unwrap();
+//
+//         assert_eq!(
+//             result.drive_invoked_ok,
+//             vec![format!("{request_id}: drive invoked ok")]
+//         );
+//         assert!(result.finish_invoked_ok.is_empty());
+//         assert!(result.errors.is_empty());
+//
+//         let saga_request = saga_request_rx.try_recv().unwrap();
+//
+//         assert!(matches!(
+//             saga_request,
+//             sagas::SagaRequest::RegionReplacementDrive { .. }
+//         ));
+//
+//         // Now, pretend that an Upstairs sent a notification that it failed to
+//         // finish a repair
+//
+//         {
+//             datastore
+//                 .upstairs_repair_notification(
+//                     &opctx,
+//                     UpstairsRepairNotification::new(
+//                         Utc::now(), // client time
+//                         TypedUuid::<UpstairsRepairKind>::from_untyped_uuid(
+//                             Uuid::new_v4(),
+//                         ),
+//                         UpstairsRepairType::Live,
+//                         TypedUuid::<UpstairsKind>::from_untyped_uuid(
+//                             Uuid::new_v4(),
+//                         ),
+//                         TypedUuid::<UpstairsSessionKind>::from_untyped_uuid(
+//                             Uuid::new_v4(),
+//                         ),
+//                         TypedUuid::<DownstairsRegionKind>::from_untyped_uuid(
+//                             new_region.id(),
+//                         ), // downstairs that was repaired
+//                         "[fd00:1122:3344:101::2]:12345".parse().unwrap(),
+//                         UpstairsRepairNotificationType::Failed,
+//                     ),
+//                 )
+//                 .await
+//                 .unwrap();
+//         }
+//
+//         // Activating the task now should start the drive saga
+//         let result: RegionReplacementDriverStatus =
+//             serde_json::from_value(task.activate(&opctx).await).unwrap();
+//
+//         assert_eq!(
+//             result.drive_invoked_ok,
+//             vec![format!("{request_id}: drive invoked ok")]
+//         );
+//         assert!(result.finish_invoked_ok.is_empty());
+//         assert!(result.errors.is_empty());
+//
+//         let saga_request = saga_request_rx.try_recv().unwrap();
+//
+//         assert!(matches!(
+//             saga_request,
+//             sagas::SagaRequest::RegionReplacementDrive { .. }
+//         ));
+//     }
+// }

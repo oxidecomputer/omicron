@@ -112,7 +112,7 @@ use super::tasks::vpc_routes;
 use super::Activator;
 use super::Driver;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
-use crate::app::sagas::SagaRequest;
+use crate::Nexus;
 use nexus_config::BackgroundTaskConfig;
 use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
@@ -121,7 +121,6 @@ use nexus_db_queries::db::DataStore;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use tokio::sync::mpsc::Sender;
 use tokio::sync::watch;
 use uuid::Uuid;
 
@@ -253,9 +252,9 @@ impl BackgroundTasksInitializer {
         rack_id: Uuid,
         nexus_id: Uuid,
         resolver: internal_dns::resolver::Resolver,
-        saga_request: Sender<SagaRequest>,
         v2p_watcher: (watch::Sender<()>, watch::Receiver<()>),
         producer_registry: ProducerRegistry,
+        nexus: Arc<Nexus>,
     ) -> Driver {
         let mut driver = self.driver;
         let opctx = &opctx;
@@ -548,7 +547,7 @@ impl BackgroundTasksInitializer {
         {
             let detector = region_replacement::RegionReplacementDetector::new(
                 datastore.clone(),
-                saga_request.clone(),
+                nexus.clone(),
             );
 
             driver.register(
@@ -570,7 +569,7 @@ impl BackgroundTasksInitializer {
             let detector =
                 region_replacement_driver::RegionReplacementDriver::new(
                     datastore.clone(),
-                    saga_request.clone(),
+                    nexus.clone(),
                 );
 
             driver.register(

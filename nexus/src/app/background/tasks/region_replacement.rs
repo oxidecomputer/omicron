@@ -14,6 +14,7 @@ use crate::app::authn;
 use crate::app::background::BackgroundTask;
 use crate::app::sagas;
 use crate::app::RegionAllocationStrategy;
+use crate::Nexus;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_model::RegionReplacement;
@@ -23,39 +24,53 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TypedUuid;
 use serde_json::json;
 use std::sync::Arc;
-use tokio::sync::mpsc::error::SendError;
-use tokio::sync::mpsc::Sender;
 
 pub struct RegionReplacementDetector {
     datastore: Arc<DataStore>,
-    saga_request: Sender<sagas::SagaRequest>,
+    nexus: Arc<Nexus>,
 }
 
 impl RegionReplacementDetector {
-    pub fn new(
-        datastore: Arc<DataStore>,
-        saga_request: Sender<sagas::SagaRequest>,
-    ) -> Self {
-        RegionReplacementDetector { datastore, saga_request }
+    pub fn new(datastore: Arc<DataStore>, nexus: Arc<Nexus>) -> Self {
+        RegionReplacementDetector { datastore, nexus }
     }
 
     async fn send_start_request(
         &self,
         serialized_authn: authn::saga::Serialized,
         request: RegionReplacement,
-    ) -> Result<(), SendError<sagas::SagaRequest>> {
-        let saga_request = sagas::SagaRequest::RegionReplacementStart {
-            params: sagas::region_replacement_start::Params {
-                serialized_authn,
-                request,
-                allocation_strategy:
-                    RegionAllocationStrategy::RandomWithDistinctSleds {
-                        seed: None,
-                    },
-            },
+    ) {
+        let params = sagas::region_replacement_start::Params {
+            serialized_authn,
+            request,
+            allocation_strategy:
+                RegionAllocationStrategy::RandomWithDistinctSleds { seed: None },
         };
 
-        self.saga_request.send(saga_request).await
+        let nexus = self.nexus.clone();
+        tokio::spawn(async move {
+            let saga_result = nexus
+                        .execute_saga::<sagas::region_replacement_start::SagaRegionReplacementStart>(
+                            params,
+                        )
+                        .await;
+
+            match saga_result {
+                Ok(_) => {
+                    info!(
+                        nexus.log,
+                        "region replacement start saga completed ok"
+                    );
+                }
+
+                Err(e) => {
+                    warn!(
+                        nexus.log,
+                        "region replacement start saga returned an error: {e}"
+                    );
+                }
+            }
+        });
     }
 }
 
@@ -155,27 +170,12 @@ impl BackgroundTask for RegionReplacementDetector {
             {
                 Ok(requests) => {
                     for request in requests {
-                        let result = self
-                            .send_start_request(
-                                authn::saga::Serialized::for_opctx(opctx),
-                                request,
-                            )
-                            .await;
-
-                        match result {
-                            Ok(()) => {
-                                ok += 1;
-                            }
-
-                            Err(e) => {
-                                error!(
-                                    &log,
-                                    "sending region replacement start request \
-                                     failed: {e}",
-                                );
-                                err += 1;
-                            }
-                        };
+                        self.send_start_request(
+                            authn::saga::Serialized::for_opctx(opctx),
+                            request,
+                        )
+                        .await;
+                        ok += 1;
                     }
                 }
 
@@ -203,7 +203,6 @@ mod test {
     use super::*;
     use nexus_db_model::RegionReplacement;
     use nexus_test_utils_macros::nexus_test;
-    use tokio::sync::mpsc;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -220,9 +219,8 @@ mod test {
             datastore.clone(),
         );
 
-        let (saga_request_tx, mut saga_request_rx) = mpsc::channel(1);
         let mut task =
-            RegionReplacementDetector::new(datastore.clone(), saga_request_tx);
+            RegionReplacementDetector::new(datastore.clone(), nexus.clone());
 
         // Noop test
         let result = task.activate(&opctx).await;
@@ -253,6 +251,8 @@ mod test {
             })
         );
 
-        saga_request_rx.try_recv().unwrap();
+        // XXX-dap
+        // saga_request_rx.try_recv().unwrap();
+        todo!();
     }
 }

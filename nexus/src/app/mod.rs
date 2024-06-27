@@ -6,7 +6,6 @@
 
 use self::external_endpoints::NexusCertResolver;
 use crate::app::oximeter::LazyTimeseriesClient;
-use crate::app::sagas::SagaRequest;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
@@ -400,8 +399,6 @@ impl Nexus {
 
         let v2p_watcher_channel = tokio::sync::watch::channel(());
 
-        let (saga_request, mut saga_request_recv) = SagaRequest::channel();
-
         let (background_tasks_initializer, background_tasks) =
             background::BackgroundTasksInitializer::new();
 
@@ -510,9 +507,9 @@ impl Nexus {
                         rack_id,
                         task_config.deployment.id,
                         resolver,
-                        saga_request,
                         v2p_watcher_channel.clone(),
                         task_registry,
+                        task_nexus.clone(),
                     );
 
                     if let Err(_) =
@@ -529,29 +526,6 @@ impl Nexus {
                 }
             }
         });
-
-        // Spawn a task to receive SagaRequests from RPWs, and execute them
-        {
-            let nexus = nexus.clone();
-            tokio::spawn(async move {
-                loop {
-                    match saga_request_recv.recv().await {
-                        None => {
-                            // If this channel is closed, then RPWs will not be
-                            // able to request that sagas be run. This will
-                            // likely only occur when Nexus itself is shutting
-                            // down, so emit an error and exit the task.
-                            error!(&nexus.log, "saga request channel closed!");
-                            break;
-                        }
-
-                        Some(saga_request) => {
-                            nexus.handle_saga_request(saga_request).await;
-                        }
-                    }
-                }
-            });
-        }
 
         Ok(nexus)
     }
@@ -933,92 +907,6 @@ impl Nexus {
 
     pub(crate) async fn resolver(&self) -> internal_dns::resolver::Resolver {
         self.internal_resolver.clone()
-    }
-
-    /// Reliable persistent workflows can request that sagas be executed by
-    /// sending a SagaRequest to a supplied channel. Execute those here.
-    pub(crate) async fn handle_saga_request(
-        self: &Arc<Self>,
-        saga_request: SagaRequest,
-    ) {
-        match saga_request {
-            #[cfg(test)]
-            SagaRequest::TestOnly => {
-                unimplemented!();
-            }
-
-            SagaRequest::RegionReplacementStart { params } => {
-                let nexus = self.clone();
-                tokio::spawn(async move {
-                    let saga_result = nexus
-                        .execute_saga::<sagas::region_replacement_start::SagaRegionReplacementStart>(
-                            params,
-                        )
-                        .await;
-
-                    match saga_result {
-                        Ok(_) => {
-                            info!(
-                                nexus.log,
-                                "region replacement start saga completed ok"
-                            );
-                        }
-
-                        Err(e) => {
-                            warn!(nexus.log, "region replacement start saga returned an error: {e}");
-                        }
-                    }
-                });
-            }
-
-            SagaRequest::RegionReplacementDrive { params } => {
-                let nexus = self.clone();
-                tokio::spawn(async move {
-                    let saga_result = nexus
-                        .execute_saga::<sagas::region_replacement_drive::SagaRegionReplacementDrive>(
-                            params,
-                        )
-                        .await;
-
-                    match saga_result {
-                        Ok(_) => {
-                            info!(
-                                nexus.log,
-                                "region replacement drive saga completed ok"
-                            );
-                        }
-
-                        Err(e) => {
-                            warn!(nexus.log, "region replacement drive saga returned an error: {e}");
-                        }
-                    }
-                });
-            }
-
-            SagaRequest::RegionReplacementFinish { params } => {
-                let nexus = self.clone();
-                tokio::spawn(async move {
-                    let saga_result = nexus
-                        .execute_saga::<sagas::region_replacement_finish::SagaRegionReplacementFinish>(
-                            params,
-                        )
-                        .await;
-
-                    match saga_result {
-                        Ok(_) => {
-                            info!(
-                                nexus.log,
-                                "region replacement finish saga completed ok"
-                            );
-                        }
-
-                        Err(e) => {
-                            warn!(nexus.log, "region replacement finish saga returned an error: {e}");
-                        }
-                    }
-                });
-            }
-        }
     }
 
     pub(crate) async fn dpd_clients(
