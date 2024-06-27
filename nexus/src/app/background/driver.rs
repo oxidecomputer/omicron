@@ -89,7 +89,6 @@ impl Driver {
     /// `activator` is an [`Activator`] that has not previously been used in a
     /// call to this function.  It will be wired up so that using it will
     /// activate this newly-registered background task.
-    // XXX-dap TODO-coverage activator
     #[allow(clippy::too_many_arguments)]
     pub fn register(
         &mut self,
@@ -99,9 +98,6 @@ impl Driver {
         imp: Box<dyn BackgroundTask>,
         opctx: OpContext,
         watchers: Vec<Box<dyn GenericWatcher>>,
-        // XXX-dap can we do something about TaskName?  It's only used by the
-        // tests, too.  It's nice to have it for sure but is it really
-        // necessary?
         activator: &Activator,
     ) -> TaskName {
         // Activation of the background task happens in a separate tokio task.
@@ -583,6 +579,17 @@ mod test {
         let status = driver.task_status(&h2);
         let last = status.last.unwrap_completion();
         assert_eq!(last.iteration, 2);
+        let status = driver.task_status(&h3);
+        let last = status.last.unwrap_completion();
+        assert_eq!(last.iteration, 4);
+
+        // Explicitly activate just "t2", this time using its Activator.
+        act2.activate();
+        wait_until_count(rx2.clone(), 3).await;
+        assert_eq!(*rx3.borrow(), 4);
+        let status = driver.task_status(&h2);
+        let last = status.last.unwrap_completion();
+        assert_eq!(last.iteration, 3);
         let status = driver.task_status(&h3);
         let last = status.last.unwrap_completion();
         assert_eq!(last.iteration, 4);
