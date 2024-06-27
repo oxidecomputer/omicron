@@ -293,7 +293,8 @@ async fn switch_zone_setup(
     let info: &String = matches.get_one("baseboard_info").unwrap();
     let bootstrap_addr: &Ipv6Addr = matches.get_one("bootstrap_addr").unwrap();
     let bootstrap_vnic: &String = matches.get_one("bootstrap_vnic").unwrap();
-    let gz_local_link_addr: &Ipv6Addr = matches.get_one("gz_local_link_addr").unwrap();
+    let gz_local_link_addr: &Ipv6Addr =
+        matches.get_one("gz_local_link_addr").unwrap();
     let links = if let Some(l) = matches.get_many::<String>("link_local_links")
     {
         Some(l.collect::<Vec<_>>())
