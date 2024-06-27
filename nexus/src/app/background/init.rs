@@ -30,6 +30,62 @@
 //! tasks.  We'd also have trouble allowing background tasks to use other
 //! subsystems in Nexus (e.g., sagas), especially if those subsystems wanted to
 //! activate background tasks.
+//!
+//! Why do we do things this way?  We're trying to satisfy a few different
+//! goals:
+//!
+//! - Background tasks should be able to activate other background tasks.
+//! - Background tasks should be able to use other subsystems in Nexus (like
+//!   sagas) that themselves can activate background tasks.
+//! - It should be hard to mess any of this up when adding or removing
+//!   background tasks.  This means:
+//!     - We should be able to tell at compile-time which code activates what
+//!       specific background tasks.
+//!     - We should be able to tell at compile-time if code is attempting to
+//!       activate a background task that doesn't exist.
+//!     - It should be hard to add an Activator for a background task that is
+//!       not wired up to that task or is wired up to a different task.
+//!
+//! Ultimately, tasks are activated via the `Driver` which keeps track of tasks
+//! by name.  So how can we have code paths in Nexus refer to tasks in a way
+//! that satisfies these goals?  A conventional approach would be to have
+//! `Driver::register()` return a handle that could be used to activate the
+//! task, but then we wouldn't have the handle available until the task was
+//! running, which is too late -- see the note above about the circular
+//! dependency during initialization.  We could make the task identifiers global
+//! constants, but this is easy to mess up: someone could remove the task
+//! without removing its constant.  Then code paths could appear to activate the
+//! task but fail at _runtime_ (rather than compile-time) because the task
+//! actually doesn't exist.
+//!
+//! Instead, we assemble the `BackgroundTasks` struct, whose fields correspond
+//! to specific tasks.  This makes it super explicit what code paths are using
+//! which tasks.  And since the Activators in the struct can be created before
+//! the tasks are created, we can create this whole struct and pass it to all
+//! the background tasks (and anybody else that wants to activate background
+//! tasks), even though the actual tasks aren't wired up yet.  Then we can wire
+//! it up behind the scenes.  If someone uses the activators ahead of time,
+//! they'll get the expected behavior: the task will be activated shortly.
+//!
+//! There remain several ways someone could get this wrong when adding or
+//! reworking background tasks:
+//!
+//! - Forgetting to put an Activator for a background task into
+//!   `BackgroundTasks`.  If you make this mistake, you won't get far because
+//!   you won't have the argument you need for `Driver::register()`.
+//! - Forgetting to wire up an Activator by passing it to `Driver::register()`.
+//!   We attempt to avoid this with an exhaustive match inside
+//!   `BackgroundTasksInitializer::start()`.  If you forget to wire something
+//!   up, rustc should report an unused variable.
+//! - Wiring the Activator up to the wrong task (e.g., by copying and pasting a
+//!   `Driver::register()` call and forgetting to update the activator
+//!   argument).  If this happens, it's likely that either one Activator gets
+//!   used more than once (which is caught with a panic only at runtime, but
+//!   it _is_ during Nexus initialization, so it should definitely be caught in
+//!   testing) or else some Activator is unused (see the previous bullet).
+//!
+//! It's not foolproof but hopefully these mechanisms will catch the easy
+//! mistakes.
 
 use super::tasks::abandoned_vmm_reaper;
 use super::tasks::bfd;
@@ -593,93 +649,6 @@ impl BackgroundTasksInitializer {
         );
 
         driver
-    }
-}
-
-/// Activates a background task
-///
-/// See [`nexus::app::background`] module-level documentation for more on what
-/// that means.
-///
-/// Activators are created with [`Activator::new()`] and then wired up to
-/// specific background tasks using [`Driver::register()`].  If you call
-/// `Activator::activate()` before the activator is wired up to a background
-/// task, then once the activator _is_ wired up to a task, that task will
-/// immediately be activated.
-///
-/// Activators are designed specifically so they can be created before the
-/// corresponding task has been created and then wired up with just an
-/// `&Activator` (not a `&mut Activator`).  That's so that we can construct
-/// `BackgroundTasks`, a static list of activators for all background tasks in
-/// Nexus, before we've actually set up all the tasks.  This in turn breaks what
-/// would otherwise be a circular initialization, if background tasks ever need
-/// to activate other background tasks or if background tasks need to use other
-/// subsystems (like sagas) that themselves want to activate background tasks.
-// More straightforward approaches are available (e.g., register a task, get
-// back a handle and use that to activate it) so it's worth explaining why it
-// works this way.  We're trying to satisfy a few different constraints:
-//
-// - background tasks can activate other background tasks
-// - background tasks can use other subsystems in Nexus (like sagas) that
-//   themselves can activate background tasks
-// - we should be able to tell at compile-time which code activates what specific
-//   background tasks
-// - we should be able to tell at compile-time if code is attempting to activate
-//   a background task that doesn't exist (this would be a risk if tasks were
-//   identified by names)
-//
-// Our compile-time goals suggest an approach where tasks are identified either
-// by global constants or by methods or fields in a struct, with one method or
-// field for each task.  With constants, it's still possible that one of these
-// might not be wired up to anything.  So we opt for fields in a struct, called
-// `BackgroundTasks`.  But that struct then needs to be available to anything
-// that wants to activate background tasks -- including other background tasks.
-// By allowing these Activators to be created before the tasks are created, we
-// can create this struct and pass it to all the background tasks (and anybody
-// else that wants to activate background tasks), even though the actual tasks
-// aren't wired up yet.  Then we can wire it up behind the scenes.  If someone
-// uses them ahead of time, they'll get the expected behavior: the task will be
-// activated shortly.
-//
-// There remain several ways someone could get this wrong when adding or
-// reworking background task:
-//
-// - Forgetting to put an activator for a background task into
-//   `BackgroundTasks`.  If you do this, you likely won't have the argument you
-//   need for `Driver::register()`.
-// - Forgetting to wire up an Activator by passing it to `Driver::register()`.
-//   We attempt to avoid this with an exhaustive match in
-//   `BackgroundTasksInitializer::start()`.  If you forget to wire something up,
-//   rustc should report an unused variable.
-// - Wiring the activator up to the wrong task (e.g., by copying and pasting a
-//   `Driver::register()` call and forgetting to update the activator argument).
-//   If this happens, it's likely that either one Activator gets used more than
-//   once (which is caught with a panic only at runtime, but during Nexus
-//   initialization, so it should definitely be caught in testing) or else some
-//   Activator is unused (see the previous bullet).
-//
-// It's not foolproof but hopefully these mechanisms will catch the easy
-// mistakes.
-pub struct Activator {
-    pub(super) notify: Arc<Notify>,
-    pub(super) wired_up: AtomicBool,
-}
-
-impl Activator {
-    /// Create an activator that is not yet wired up to any background task
-    pub fn new() -> Activator {
-        Activator {
-            notify: Arc::new(Notify::new()),
-            wired_up: AtomicBool::new(false),
-        }
-    }
-
-    /// Activate the background task that this Activator has been wired up to
-    ///
-    /// If this Activator has not yet been wired up with [`Driver::register()`],
-    /// then whenever it _is_ wired up, that task will be immediately activated.
-    pub fn activate(&self) {
-        self.notify.notify_one();
     }
 }
 
