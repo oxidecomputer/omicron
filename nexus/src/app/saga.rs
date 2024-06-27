@@ -37,7 +37,7 @@
 //!
 //! * A common case is that some code in Nexus wants to do all of this: create
 //!   the saga DAG, run it, wait for it to finish, and get the result.
-//!   [`Nexus::execute_saga()`] does all this using these lower-level
+//!   [`SagaExecutor::saga_execute()`] does all this using these lower-level
 //!   interfaces.
 //! * An expected use case is that some code in Nexus wants to kick off a saga
 //!   but not wait for it to finish.  In this case, they can just stop after
@@ -62,6 +62,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use steno::DagBuilder;
 use steno::SagaDag;
 use steno::SagaId;
@@ -91,6 +92,7 @@ pub(crate) fn create_saga_dag<N: NexusSaga>(
 pub struct SagaExecutor {
     sec_client: Arc<steno::SecClient>,
     log: slog::Logger,
+    nexus: OnceLock<Arc<Nexus>>,
 }
 
 impl SagaExecutor {
@@ -98,18 +100,45 @@ impl SagaExecutor {
         sec_client: Arc<steno::SecClient>,
         log: slog::Logger,
     ) -> SagaExecutor {
-        SagaExecutor { sec_client, log }
+        SagaExecutor { sec_client, log, nexus: OnceLock::new() }
     }
+
+    // This is a little gross.  We want to hang the SagaExecutor off of Nexus,
+    // but we also need to refer to Nexus, which thus can't exist when
+    // SagaExecutor is constructed.  So we have the caller hand it to us after
+    // initialization.
+    //
+    // This isn't as statically verifiable as we'd normally like.  But it's only
+    // one call site, it does fail cleanly if someone tries to use
+    // `SagaExecutor` before this has been set, and the result is much cleaner
+    // for all the other users of `SagaExecutor`.
+    pub fn set_nexus(&self, nexus: Arc<Nexus>) {
+        self.nexus.set(nexus).unwrap_or_else(|_| {
+            panic!("concurrent initialization of SagaExecutor")
+        })
+    }
+
+    fn nexus(&self) -> Result<&Arc<Nexus>, Error> {
+        self.nexus
+            .get()
+            .ok_or_else(|| Error::unavail("saga are not available yet"))
+    }
+
+    // Low-level interface
+    //
+    // The low-level interface for running sagas starts with `saga_prepare()`
+    // and then uses the `RunnableSaga`, `RunningSaga`, and `StoppedSaga` types
+    // to drive execution forward.
 
     /// Given a DAG (which has generally been specifically created for a
     /// particular saga and includes the saga's parameters), prepare to start
     /// running the saga.  This does not actually start the saga running.
     pub(crate) async fn saga_prepare(
         &self,
-        nexus: Arc<Nexus>,
         dag: SagaDag,
     ) -> Result<RunnableSaga, Error> {
         // Construct the context necessary to execute this saga.
+        let nexus = self.nexus()?;
         let saga_id = SagaId(Uuid::new_v4());
         let saga_logger = self.log.new(o!(
             "saga_name" => dag.saga_name().to_string(),
@@ -144,6 +173,57 @@ impl SagaExecutor {
             log: saga_logger,
             sec_client: self.sec_client.clone(),
         })
+    }
+
+    // Convenience functions
+
+    /// Create a new saga (of type `N` with parameters `params`), start it
+    /// running, wait for it to finish, and report the result
+    ///
+    /// Note that this can take a long time and may not complete while parts of
+    /// the system are not functioning.  Care should be taken when waiting on
+    /// this in a latency-sensitive context.
+    ///
+    ///
+    /// ## Async cancellation
+    ///
+    /// This function isn't really cancel-safe, in that if the Future returned
+    /// by this function is cancelled, one of three things may be true:
+    ///
+    /// * Nothing has happened; it's as though this function was never called.
+    /// * The saga has been created, but not started.  If this happens, the saga
+    ///   will likely start running the next time saga recovery happens (e.g.,
+    ///   the next time Nexus starts up) and then run to completion.
+    /// * The saga has already been started and will eventually run to
+    ///   completion (even though this Future has been cancelled).
+    ///
+    /// It's not clear what the caller would _want_ if they cancelled this
+    /// future, but whatever it is, clearly it's not guaranteed to be true.
+    /// You're better off avoiding cancellation.  Fortunately, we currently
+    /// execute sagas either from API calls and background tasks, neither of
+    /// which can be cancelled.  **This function should not be used in a
+    /// `tokio::select!` with a `timeout` or the like.**
+    ///
+    /// Say you _do_ want to kick off a saga and wait only a little while before
+    /// it completes.  In that case, you can use the lower-level interface to
+    /// first create the saga (a process which still should not be cancelled,
+    /// but would generally be quick) and then wait for it to finish.  The
+    /// waiting part is cancellable.
+    ///
+    /// Note that none of this affects _crash safety_.  In terms of a crash: the
+    /// crash will either happen before the saga has been created (in which
+    /// case it's as though we didn't even call this function) or after (in
+    /// which case the saga will run to completion).
+    pub async fn saga_execute<N: NexusSaga>(
+        &self,
+        params: N::Params,
+    ) -> Result<SagaResultOk, Error> {
+        // Construct the DAG specific to this saga.
+        let dag = create_saga_dag::<N>(params)?;
+        let runnable_saga = self.saga_prepare(dag).await?;
+        let running_saga = runnable_saga.start().await?;
+        let stopped_saga = running_saga.wait_until_stopped().await;
+        stopped_saga.into_omicron_result()
     }
 }
 
@@ -204,12 +284,18 @@ pub(crate) struct StoppedSaga {
 }
 
 impl StoppedSaga {
+    /// Fetches the raw Steno result for the saga's execution
+    ///
+    /// This is a test-only routine meant for use in tests that need to examine
+    /// the details of a saga's final state (e.g., examining the exact point at
+    /// which it failed).  Non-test callers should use `into_omicron_result`
+    /// instead.
     #[cfg(test)]
-    pub(crate) fn to_raw_result(self) -> SagaResult {
+    pub(crate) fn into_raw_result(self) -> SagaResult {
         self.result
     }
 
-    pub(crate) fn to_omicron_result(self) -> Result<SagaResultOk, Error> {
+    pub(crate) fn into_omicron_result(self) -> Result<SagaResultOk, Error> {
         self.result.kind.map_err(|saga_error| {
             let mut error = saga_error
                 .error_source
@@ -225,8 +311,10 @@ impl StoppedSaga {
                     undo_node, undo_error
                 ));
 
-                // XXX-dap this does not belong here because if the caller isn't
-                // checking this then we won't log it.
+                // TODO this log message does not belong here because if the
+                // caller isn't checking this then we won't log it.  We should
+                // probably make Steno log this since there may be no place in
+                // Nexus that's waiting for a given saga to finish.
                 error!(self.log, "saga stuck";
                     "saga_id" => self.id.to_string(),
                     "error" => #%error,
@@ -281,75 +369,8 @@ impl super::Nexus {
             })?
     }
 
-    // XXX-dap convert callers?
-    /// Legacy interface -- see [`SagaExecutor::saga_prepare()`]
-    pub(crate) async fn create_runnable_saga(
-        self: &Arc<Self>,
-        dag: SagaDag,
-    ) -> Result<RunnableSaga, Error> {
-        self.sagas.saga_prepare(self.clone(), dag).await
-    }
-
-    // XXX-dap convert callers?
-    /// Legacy interface -- see [`SagaExecutor::saga_start()`] and methods on
-    /// `RunnableSaga` and `StoppedSaga`.
-    pub(crate) async fn run_saga(
-        &self,
-        runnable_saga: RunnableSaga,
-    ) -> Result<SagaResultOk, Error> {
-        let running_saga = runnable_saga.start().await?;
-        let done_saga = running_saga.wait_until_stopped().await;
-        done_saga.to_omicron_result()
-    }
-
-    // XXX-dap convert callers?
-    /// Starts the supplied `runnable_saga` and, if that succeeded, awaits its
-    /// completion and returns the raw `SagaResult`.
-    ///
-    /// This is a test-only routine meant for use in tests that need to examine
-    /// the details of a saga's final state (e.g., examining the exact point at
-    /// which it failed). Non-test callers should use `run_saga` instead (it
-    /// logs messages on error conditions and has a standard mechanism for
-    /// converting saga errors to generic Omicron errors).
-    #[cfg(test)]
-    pub(crate) async fn run_saga_raw_result(
-        &self,
-        runnable_saga: RunnableSaga,
-    ) -> Result<SagaResult, Error> {
-        let running_saga = runnable_saga.start().await?;
-        let done_saga = running_saga.wait_until_stopped().await;
-        Ok(done_saga.to_raw_result())
-    }
-
-    // XXX-dap convert callers?
-    /// Legacy interface: given a saga type and parameters, create a new saga
-    /// and execute it.
-    pub(crate) async fn execute_saga<N: NexusSaga>(
-        self: &Arc<Self>,
-        params: N::Params,
-    ) -> Result<SagaResultOk, Error> {
-        // Construct the DAG specific to this saga.
-        let dag = create_saga_dag::<N>(params)?;
-
-        // Register the saga with the saga executor.
-        let runnable_saga = self.create_runnable_saga(dag).await?;
-
-        // Actually run the saga to completion.
-        // XXX-dap
-        //
-        // XXX: This may loop forever in case `SecStore::record_event` fails.
-        // Ideally, `run_saga` wouldn't both start the saga and wait for it to
-        // be finished -- instead, it would start off the saga, and then return
-        // a notification channel that the caller could use to decide:
-        //
-        // - either to .await until completion
-        // - or to stop waiting after a certain period, while still letting the
-        //   saga run in the background.
-        //
-        // For more, see https://github.com/oxidecomputer/omicron/issues/5406
-        // and the note in `sec_store.rs`'s `record_event`.
-        self.run_saga(runnable_saga).await
-    }
+    // XXX-dap this PR fixes
+    // https://github.com/oxidecomputer/omicron/issues/5406 too
 
     /// For testing only: provides direct access to the underlying SecClient so
     /// that tests can inject errors

@@ -756,9 +756,11 @@ mod test {
             db_instance,
         };
 
-        let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
-        let saga = nexus.create_runnable_saga(dag).await.unwrap();
-        nexus.run_saga(saga).await.expect("Start saga should succeed");
+        nexus
+            .sagas
+            .saga_execute::<SagaInstanceStart>(params)
+            .await
+            .expect("Start saga should succeed");
 
         test_helpers::instance_simulate(cptestctx, &instance_id).await;
         let vmm_state = test_helpers::instance_fetch(cptestctx, instance_id)
@@ -918,11 +920,15 @@ mod test {
             )))
             .await;
 
-        let saga = nexus.create_runnable_saga(dag).await.unwrap();
-        let saga_error = nexus
-            .run_saga_raw_result(saga)
+        let runnable_saga = nexus.sagas.saga_prepare(dag).await.unwrap();
+        let saga_result = runnable_saga
+            .start()
             .await
             .expect("saga execution should have started")
+            .wait_until_stopped()
+            .await
+            .into_raw_result();
+        let saga_error = saga_result
             .kind
             .expect_err("saga should fail due to injected error");
 

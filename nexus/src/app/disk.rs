@@ -203,7 +203,8 @@ impl super::Nexus {
             create_params: params.clone(),
         };
         let saga_outputs = self
-            .execute_saga::<sagas::disk_create::SagaDiskCreate>(saga_params)
+            .sagas
+            .saga_execute::<sagas::disk_create::SagaDiskCreate>(saga_params)
             .await?;
         let disk_created = saga_outputs
             .lookup_node_output::<db::model::Disk>("created_disk")
@@ -342,7 +343,8 @@ impl super::Nexus {
             disk_id: authz_disk.id(),
             volume_id: db_disk.volume_id,
         };
-        self.execute_saga::<sagas::disk_delete::SagaDiskDelete>(saga_params)
+        self.sagas
+            .saga_execute::<sagas::disk_delete::SagaDiskDelete>(saga_params)
             .await?;
         Ok(())
     }
@@ -585,10 +587,9 @@ impl super::Nexus {
             snapshot_name: finalize_params.snapshot_name.clone(),
         };
 
-        self.execute_saga::<sagas::finalize_disk::SagaFinalizeDisk>(
-            saga_params,
-        )
-        .await?;
+        self.sagas
+            .saga_execute::<sagas::finalize_disk::SagaFinalizeDisk>(saga_params)
+            .await?;
 
         Ok(())
     }

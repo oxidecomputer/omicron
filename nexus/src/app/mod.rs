@@ -5,6 +5,7 @@
 //! Nexus, the service that operates much of the control plane in an Oxide fleet
 
 use self::external_endpoints::NexusCertResolver;
+use self::saga::SagaExecutor;
 use crate::app::oximeter::LazyTimeseriesClient;
 use crate::app::sagas::SagaRequest;
 use crate::populate::populate_start;
@@ -90,7 +91,6 @@ pub(crate) mod sagas;
 
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 
-use self::saga::SagaExecutor;
 use nexus_db_model::AllSchemaVersions;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 
@@ -475,6 +475,7 @@ impl Nexus {
 
         // TODO-cleanup all the extra Arcs here seems wrong
         let nexus = Arc::new(nexus);
+        nexus.sagas.set_nexus(nexus.clone());
         let opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
             Arc::clone(&authz),
@@ -941,7 +942,8 @@ impl Nexus {
                 let nexus = self.clone();
                 tokio::spawn(async move {
                     let saga_result = nexus
-                        .execute_saga::<sagas::region_replacement_start::SagaRegionReplacementStart>(
+                        .sagas
+                        .saga_execute::<sagas::region_replacement_start::SagaRegionReplacementStart>(
                             params,
                         )
                         .await;
@@ -965,7 +967,8 @@ impl Nexus {
                 let nexus = self.clone();
                 tokio::spawn(async move {
                     let saga_result = nexus
-                        .execute_saga::<sagas::region_replacement_drive::SagaRegionReplacementDrive>(
+                        .sagas
+                        .saga_execute::<sagas::region_replacement_drive::SagaRegionReplacementDrive>(
                             params,
                         )
                         .await;
@@ -989,7 +992,8 @@ impl Nexus {
                 let nexus = self.clone();
                 tokio::spawn(async move {
                     let saga_result = nexus
-                        .execute_saga::<sagas::region_replacement_finish::SagaRegionReplacementFinish>(
+                        .sagas
+                        .saga_execute::<sagas::region_replacement_finish::SagaRegionReplacementFinish>(
                             params,
                         )
                         .await;

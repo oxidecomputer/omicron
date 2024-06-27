@@ -78,7 +78,7 @@ async fn test_saga_stuck(cptestctx: &ControlPlaneTestContext) {
     let nexus = &cptestctx.server.server_context().nexus;
     let params = Params {};
     let dag = create_saga_dag::<SagaTest>(params).unwrap();
-    let runnable_saga = nexus.create_runnable_saga(dag.clone()).await.unwrap();
+    let runnable_saga = nexus.sagas.saga_prepare(dag.clone()).await.unwrap();
     let saga_id = runnable_saga.id();
 
     // Inject an error into the second node's action and the first node's undo
@@ -87,9 +87,13 @@ async fn test_saga_stuck(cptestctx: &ControlPlaneTestContext) {
     let n2 = dag.get_index("n2").unwrap();
     nexus.sec().saga_inject_error(saga_id, n2).await.unwrap();
     nexus.sec().saga_inject_error_undo(saga_id, n1).await.unwrap();
-    let result = nexus
-        .run_saga(runnable_saga)
+    let result = runnable_saga
+        .start()
         .await
+        .expect("expected saga to start")
+        .wait_until_stopped()
+        .await
+        .into_omicron_result()
         .expect_err("expected saga to finish stuck");
 
     match result {
