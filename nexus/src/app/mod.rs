@@ -90,6 +90,7 @@ pub(crate) mod sagas;
 
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 
+use self::saga::SagaExecutor;
 use nexus_db_model::AllSchemaVersions;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 
@@ -129,10 +130,11 @@ pub struct Nexus {
     db_datastore: Arc<db::DataStore>,
 
     /// handle to global authz information
-    authz: Arc<authz::Authz>,
+    // XXX-dap
+    pub(super) authz: Arc<authz::Authz>,
 
     /// saga execution coordinator
-    sec_client: Arc<steno::SecClient>,
+    sagas: SagaExecutor,
 
     /// Task representing completion of recovered Sagas
     recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
@@ -238,6 +240,7 @@ impl Nexus {
             Arc::clone(&db_datastore),
             log.new(o!("component" => "SecStore")),
         )) as Arc<dyn steno::SecStore>;
+
         let sec_client = Arc::new(steno::sec(
             log.new(o!(
                 "component" => "SEC",
@@ -245,6 +248,11 @@ impl Nexus {
             )),
             sec_store,
         ));
+
+        let sagas = SagaExecutor::new(
+            Arc::clone(&sec_client),
+            log.new(o!("component" => "SagaExecutor")),
+        );
 
         let client_state = dpd_client::ClientState {
             tag: String::from("nexus"),
@@ -425,7 +433,7 @@ impl Nexus {
             log: log.new(o!()),
             db_datastore: Arc::clone(&db_datastore),
             authz: Arc::clone(&authz),
-            sec_client: Arc::clone(&sec_client),
+            sagas,
             recovery_task: std::sync::Mutex::new(None),
             external_server: std::sync::Mutex::new(None),
             techport_external_server: std::sync::Mutex::new(None),
@@ -480,7 +488,6 @@ impl Nexus {
             Arc::new(Arc::new(SagaContext::new(
                 Arc::clone(&nexus),
                 saga_logger,
-                Arc::clone(&authz),
             ))),
             db_datastore,
             Arc::clone(&sec_client),

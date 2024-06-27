@@ -2,12 +2,54 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Saga management and execution
+//! Nexus-level saga management and execution
+//!
+//! Steno provides its own interfaces for managing sagas.  The interface here is
+//! a thin wrapper aimed at the mini framework we've built at the Nexus level
+//! that makes it easier to define and manage sagas in a uniform way.
+//!
+//! The basic lifecycle at the Nexus level is:
+//!
+//!       input: saga type (impls [`NexusSaga`])
+//!              parameters (specific to the saga's type)
+//!           |
+//!           |  [`create_saga_dag()`]
+//!           v
+//!        SagaDag
+//!           |
+//!           |  [`SagaExecutor::saga_prepare()`]
+//!           v
+//!      RunnableSaga
+//!           |
+//!           |  [`RunnableSaga::start()`]
+//!           v
+//!      RunningSaga
+//!           |
+//!           |  [`RunningSaga::wait_until_stopped()`]
+//!           v
+//!      StoppedSaga
+//!
+//! At the end, you can use [`StoppedSaga::to_omicron_result()`] to get at the
+//! success output of the saga or convert any saga failure along the way to an
+//! Omicron [`Error`].
+//!
+//! This interface allows a few different use cases:
+//!
+//! * A common case is that some code in Nexus wants to do all of this: create
+//!   the saga DAG, run it, wait for it to finish, and get the result.
+//!   [`Nexus::execute_saga()`] does all this using these lower-level
+//!   interfaces.
+//! * An expected use case is that some code in Nexus wants to kick off a saga
+//!   but not wait for it to finish.  In this case, they can just stop after
+//!   calling [`RunnableSaga::start()`].  The saga will continue running; they
+//!   just won't be able to directly wait for it to finish or get the result.
+//! * Tests can use any of the lower-level pieces to examine intermediate state.
 
 use super::sagas::NexusSaga;
 use super::sagas::SagaInitError;
 use super::sagas::ACTION_REGISTRY;
 use crate::saga_interface::SagaContext;
+use crate::Nexus;
 use anyhow::Context;
 use futures::future::BoxFuture;
 use futures::StreamExt;
@@ -28,23 +70,8 @@ use steno::SagaResult;
 use steno::SagaResultOk;
 use uuid::Uuid;
 
-/// Encapsulates a saga to be run before we actually start running it
-///
-/// At this point, we've built the DAG, loaded it into the SEC, etc. but haven't
-/// started it running.  This is a useful point to inject errors, inspect the
-/// DAG, etc.
-pub(crate) struct RunnableSaga {
-    id: SagaId,
-    fut: BoxFuture<'static, SagaResult>,
-}
-
-impl RunnableSaga {
-    #[cfg(test)]
-    pub(crate) fn id(&self) -> SagaId {
-        self.id
-    }
-}
-
+/// Given a particular kind of Nexus saga (the type parameter `N`) and
+/// parameters for that saga, construct a [`SagaDag`] for it
 pub(crate) fn create_saga_dag<N: NexusSaga>(
     params: N::Params,
 ) -> Result<SagaDag, Error> {
@@ -56,70 +83,46 @@ pub(crate) fn create_saga_dag<N: NexusSaga>(
     Ok(SagaDag::new(dag, params))
 }
 
-impl super::Nexus {
-    pub(crate) async fn sagas_list(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<nexus_types::internal_api::views::Saga> {
-        // The endpoint we're serving only supports `ScanById`, which only
-        // supports an ascending scan.
-        bail_unless!(
-            pagparams.direction == dropshot::PaginationOrder::Ascending
-        );
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        let marker = pagparams.marker.map(|s| SagaId::from(*s));
-        let saga_list = self
-            .sec_client
-            .saga_list(marker, pagparams.limit)
-            .await
-            .into_iter()
-            .map(nexus_types::internal_api::views::Saga::from)
-            .map(Ok);
-        Ok(futures::stream::iter(saga_list).boxed())
+/// External handle to a self-contained subsystem for kicking off sagas
+///
+/// Note that Steno provides its own interface for kicking off sagas.  This one
+/// is a thin wrapper around it.  This one exists to layer Nexus-specific
+/// behavior on top of Steno's (e.g., error conversion).
+pub struct SagaExecutor {
+    sec_client: Arc<steno::SecClient>,
+    log: slog::Logger,
+}
+
+impl SagaExecutor {
+    pub fn new(
+        sec_client: Arc<steno::SecClient>,
+        log: slog::Logger,
+    ) -> SagaExecutor {
+        SagaExecutor { sec_client, log }
     }
 
-    pub(crate) async fn saga_get(
+    /// Given a DAG (which has generally been specifically created for a
+    /// particular saga and includes the saga's parameters), prepare to start
+    /// running the saga.  This does not actually start the saga running.
+    pub(crate) async fn saga_prepare(
         &self,
-        opctx: &OpContext,
-        id: Uuid,
-    ) -> LookupResult<nexus_types::internal_api::views::Saga> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        self.sec_client
-            .saga_get(SagaId::from(id))
-            .await
-            .map(nexus_types::internal_api::views::Saga::from)
-            .map(Ok)
-            .map_err(|_: ()| {
-                Error::not_found_by_id(ResourceType::SagaDbg, &id)
-            })?
-    }
-
-    pub(crate) async fn create_runnable_saga(
-        self: &Arc<Self>,
+        nexus: Arc<Nexus>,
         dag: SagaDag,
     ) -> Result<RunnableSaga, Error> {
         // Construct the context necessary to execute this saga.
         let saga_id = SagaId(Uuid::new_v4());
-
-        self.create_runnable_saga_with_id(dag, saga_id).await
-    }
-
-    pub(crate) async fn create_runnable_saga_with_id(
-        self: &Arc<Self>,
-        dag: SagaDag,
-        saga_id: SagaId,
-    ) -> Result<RunnableSaga, Error> {
         let saga_logger = self.log.new(o!(
             "saga_name" => dag.saga_name().to_string(),
             "saga_id" => saga_id.to_string()
         ));
         let saga_context = Arc::new(Arc::new(SagaContext::new(
-            self.clone(),
-            saga_logger,
-            Arc::clone(&self.authz),
+            nexus.clone(),
+            saga_logger.clone(),
         )));
-        let future = self
+
+        // Tell Steno about it.  This does not start it running yet.
+        info!(saga_logger, "preparing saga");
+        let saga_completion_future = self
             .sec_client
             .saga_create(
                 saga_id,
@@ -135,22 +138,79 @@ impl super::Nexus {
                 // Steno.
                 Error::internal_error(&format!("{:#}", error))
             })?;
-        Ok(RunnableSaga { id: saga_id, fut: future })
+        Ok(RunnableSaga {
+            id: saga_id,
+            saga_completion_future,
+            log: saga_logger,
+            sec_client: self.sec_client.clone(),
+        })
+    }
+}
+
+/// Encapsulates a saga to be run before we actually start running it
+///
+/// At this point, we've built the DAG, loaded it into the SEC, etc. but haven't
+/// started it running.  This is a useful point to inject errors, inspect the
+/// DAG, etc.
+pub(crate) struct RunnableSaga {
+    id: SagaId,
+    saga_completion_future: BoxFuture<'static, SagaResult>,
+    log: slog::Logger,
+    sec_client: Arc<steno::SecClient>,
+}
+
+impl RunnableSaga {
+    #[cfg(test)]
+    pub(crate) fn id(&self) -> SagaId {
+        self.id
     }
 
-    pub(crate) async fn run_saga(
-        &self,
-        runnable_saga: RunnableSaga,
-    ) -> Result<SagaResultOk, Error> {
-        let log = &self.log;
+    pub(crate) async fn start(self) -> Result<RunningSaga, Error> {
+        info!(self.log, "starting saga");
         self.sec_client
-            .saga_start(runnable_saga.id)
+            .saga_start(self.id)
             .await
             .context("starting saga")
             .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
 
-        let result = runnable_saga.fut.await;
-        result.kind.map_err(|saga_error| {
+        Ok(RunningSaga {
+            id: self.id,
+            saga_completion_future: self.saga_completion_future,
+            log: self.log,
+        })
+    }
+}
+
+/// Describes a saga that's been started running
+pub(crate) struct RunningSaga {
+    id: SagaId,
+    saga_completion_future: BoxFuture<'static, SagaResult>,
+    log: slog::Logger,
+}
+
+impl RunningSaga {
+    pub(crate) async fn wait_until_stopped(self) -> StoppedSaga {
+        let result = self.saga_completion_future.await;
+        info!(self.log, "saga finished"; "saga_result" => ?result);
+        StoppedSaga { id: self.id, result, log: self.log }
+    }
+}
+
+/// Describes a saga that's finished
+pub(crate) struct StoppedSaga {
+    id: SagaId,
+    result: SagaResult,
+    log: slog::Logger,
+}
+
+impl StoppedSaga {
+    #[cfg(test)]
+    pub(crate) fn to_raw_result(self) -> SagaResult {
+        self.result
+    }
+
+    pub(crate) fn to_omicron_result(self) -> Result<SagaResultOk, Error> {
+        self.result.kind.map_err(|saga_error| {
             let mut error = saga_error
                 .error_source
                 .convert::<Error>()
@@ -165,8 +225,10 @@ impl super::Nexus {
                     undo_node, undo_error
                 ));
 
-                error!(log, "saga stuck";
-                    "saga_id" => runnable_saga.id.to_string(),
+                // XXX-dap this does not belong here because if the caller isn't
+                // checking this then we won't log it.
+                error!(self.log, "saga stuck";
+                    "saga_id" => self.id.to_string(),
                     "error" => #%error,
                 );
             }
@@ -174,7 +236,73 @@ impl super::Nexus {
             error
         })
     }
+}
 
+impl super::Nexus {
+    /// Lists sagas currently managed by this Nexus instance
+    pub(crate) async fn sagas_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResult<nexus_types::internal_api::views::Saga> {
+        // The endpoint we're serving only supports `ScanById`, which only
+        // supports an ascending scan.
+        bail_unless!(
+            pagparams.direction == dropshot::PaginationOrder::Ascending
+        );
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let marker = pagparams.marker.map(|s| SagaId::from(*s));
+        let saga_list = self
+            .sagas
+            .sec_client
+            .saga_list(marker, pagparams.limit)
+            .await
+            .into_iter()
+            .map(nexus_types::internal_api::views::Saga::from)
+            .map(Ok);
+        Ok(futures::stream::iter(saga_list).boxed())
+    }
+
+    /// Fetch information about a saga currently managed by this Nexus instance
+    pub(crate) async fn saga_get(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+    ) -> LookupResult<nexus_types::internal_api::views::Saga> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.sagas
+            .sec_client
+            .saga_get(SagaId::from(id))
+            .await
+            .map(nexus_types::internal_api::views::Saga::from)
+            .map(Ok)
+            .map_err(|_: ()| {
+                Error::not_found_by_id(ResourceType::SagaDbg, &id)
+            })?
+    }
+
+    // XXX-dap convert callers?
+    /// Legacy interface -- see [`SagaExecutor::saga_prepare()`]
+    pub(crate) async fn create_runnable_saga(
+        self: &Arc<Self>,
+        dag: SagaDag,
+    ) -> Result<RunnableSaga, Error> {
+        self.sagas.saga_prepare(self.clone(), dag).await
+    }
+
+    // XXX-dap convert callers?
+    /// Legacy interface -- see [`SagaExecutor::saga_start()`] and methods on
+    /// `RunnableSaga` and `StoppedSaga`.
+    pub(crate) async fn run_saga(
+        &self,
+        runnable_saga: RunnableSaga,
+    ) -> Result<SagaResultOk, Error> {
+        let running_saga = runnable_saga.start().await?;
+        let done_saga = running_saga.wait_until_stopped().await;
+        done_saga.to_omicron_result()
+    }
+
+    // XXX-dap convert callers?
     /// Starts the supplied `runnable_saga` and, if that succeeded, awaits its
     /// completion and returns the raw `SagaResult`.
     ///
@@ -188,20 +316,14 @@ impl super::Nexus {
         &self,
         runnable_saga: RunnableSaga,
     ) -> Result<SagaResult, Error> {
-        self.sec_client
-            .saga_start(runnable_saga.id)
-            .await
-            .context("starting saga")
-            .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
-
-        Ok(runnable_saga.fut.await)
+        let running_saga = runnable_saga.start().await?;
+        let done_saga = running_saga.wait_until_stopped().await;
+        Ok(done_saga.to_raw_result())
     }
 
-    pub fn sec(&self) -> &steno::SecClient {
-        &self.sec_client
-    }
-
-    /// Given a saga type and parameters, create a new saga and execute it.
+    // XXX-dap convert callers?
+    /// Legacy interface: given a saga type and parameters, create a new saga
+    /// and execute it.
     pub(crate) async fn execute_saga<N: NexusSaga>(
         self: &Arc<Self>,
         params: N::Params,
@@ -213,6 +335,7 @@ impl super::Nexus {
         let runnable_saga = self.create_runnable_saga(dag).await?;
 
         // Actually run the saga to completion.
+        // XXX-dap
         //
         // XXX: This may loop forever in case `SecStore::record_event` fails.
         // Ideally, `run_saga` wouldn't both start the saga and wait for it to
@@ -226,5 +349,12 @@ impl super::Nexus {
         // For more, see https://github.com/oxidecomputer/omicron/issues/5406
         // and the note in `sec_store.rs`'s `record_event`.
         self.run_saga(runnable_saga).await
+    }
+
+    /// For testing only: provides direct access to the underlying SecClient so
+    /// that tests can inject errors
+    #[cfg(test)]
+    pub fn sec(&self) -> &steno::SecClient {
+        &self.sagas.sec_client
     }
 }
