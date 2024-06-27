@@ -708,6 +708,7 @@ async fn common_nw_set_up(
             } else {
                 // We can safely retrieve the first address only as the CLI only accepts a single item. 
                 let gw = gw.first().unwrap();
+
                 // Ensuring default route with gateway must happen after peer agents have been initialized.
                 // Omicron zones will be able ensure a default route with gateway immediately, but the 
                 // switch zone on the secondary scrimlet might need a few tries while it waits.
