@@ -10,7 +10,7 @@ use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_hardware_types::Baseboard;
 use slog::Logger;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use tokio::sync::broadcast;
 
 #[derive(Debug, thiserror::Error)]
@@ -51,7 +51,7 @@ impl HardwareManager {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 
-    pub fn disks(&self) -> HashSet<UnparsedDisk> {
+    pub fn disks(&self) -> HashMap<DiskIdentity, UnparsedDisk> {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 

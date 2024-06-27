@@ -262,7 +262,7 @@ pub struct Vpc {
 }
 
 /// A VPC subnet represents a logical grouping for instances that allows network traffic between
-/// them, within a IPv4 subnetwork or optionall an IPv6 subnetwork.
+/// them, within a IPv4 subnetwork or optionally an IPv6 subnetwork.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnet {
     /// common identifying metadata
@@ -277,6 +277,9 @@ pub struct VpcSubnet {
 
     /// The IPv6 subnet CIDR block.
     pub ipv6_block: Ipv6Net,
+
+    /// ID for an attached custom router.
+    pub custom_router_id: Option<Uuid>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]

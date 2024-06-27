@@ -232,12 +232,26 @@ pub trait DatastoreAttachTarget<ResourceType>:
                 .filter(collection_table().primary_key().eq(collection_id))
                 .filter(Self::CollectionTimeDeletedColumn::default().is_null()),
         );
-        let resource_query = Box::new(
-            resource_query
-                .filter(resource_table().primary_key().eq(resource_id))
-                .filter(Self::ResourceTimeDeletedColumn::default().is_null())
-                .filter(Self::ResourceCollectionIdColumn::default().is_null()),
-        );
+        let resource_query = if Self::ALLOW_FROM_ATTACHED {
+            Box::new(
+                resource_query
+                    .filter(resource_table().primary_key().eq(resource_id))
+                    .filter(
+                        Self::ResourceTimeDeletedColumn::default().is_null(),
+                    ),
+            )
+        } else {
+            Box::new(
+                resource_query
+                    .filter(resource_table().primary_key().eq(resource_id))
+                    .filter(
+                        Self::ResourceTimeDeletedColumn::default().is_null(),
+                    )
+                    .filter(
+                        Self::ResourceCollectionIdColumn::default().is_null(),
+                    ),
+            )
+        };
 
         let update_resource_statement = update
             .into_boxed()

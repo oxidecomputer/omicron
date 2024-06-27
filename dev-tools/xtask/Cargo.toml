@@ -17,7 +17,6 @@ flate2.workspace = true
 futures.workspace = true
 fs-err.workspace = true
 macaddr.workspace = true
-md5 = "0.7.0"
 reqwest = { workspace = true, features = [ "default-tls" ] }
 serde.workspace = true
 sha2.workspace = true

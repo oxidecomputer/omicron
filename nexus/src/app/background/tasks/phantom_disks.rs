@@ -18,7 +18,7 @@
 //! this background task is required to apply the same fix for disks that are
 //! already in this phantom state.
 
-use super::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
@@ -74,7 +74,8 @@ impl BackgroundTask for PhantomDiskDetector {
                 if let Err(e) = result {
                     error!(
                         &log,
-                        "error un-deleting disk {} and setting to faulted: {:#}",
+                        "error un-deleting disk {} and setting to faulted: \
+                         {:#}",
                         disk.id(),
                         e,
                     );
