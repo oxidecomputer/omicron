@@ -2,7 +2,34 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Specific background task initialization
+//! Initialize Nexus background tasks
+//!
+//! This file contains entirely Nexus-specific initialization (as opposed to
+//! driver.rs, which doesn't really know much about Nexus).
+//!
+//! The design here is oriented around being able to initialize background tasks
+//! in two phases:
+//!
+//! 1. Phase 1 assembles a `BackgroundTasks` struct containing `Activator`
+//!    objects that will be used by any part of Nexus (including background
+//!    tasks) to activate any background task or read data provided by another
+//!    background task.  This is the interface between this subsystem and the
+//!    rest of Nexus.  At this point in startup, none of the background tasks
+//!    themselves have been started yet.
+//!
+//! 2. Phase 2 starts all of the individual background tasks and then wires up
+//!    the Activators created in phase 1.
+//!
+//! This allows us to break what would otherwise be a circular dependency during
+//! initialization.  Concretely: Nexus startup does phase 1, stores the
+//! `BackgroundTasks` into the `Arc<Nexus>` to which all of Nexus has a
+//! reference, and _then_ starts the background tasks.  If we didn't break it up
+//! like this, then we couldn't make the `Arc<Nexus>` available to background
+//! tasks during _their_ initialization (because it couldn't be constructed
+//! yet), which means background tasks could not activate other background
+//! tasks.  We'd also have trouble allowing background tasks to use other
+//! subsystems in Nexus (e.g., sagas), especially if those subsystems wanted to
+//! activate background tasks.
 
 use super::tasks::abandoned_vmm_reaper;
 use super::tasks::bfd;
@@ -96,29 +123,8 @@ impl BackgroundTasks {
 
 /// Initializes the background task subsystem
 ///
-/// The background task subsystem is initialized in two phases:
-///
-/// 1. First, the caller invokes [`BackgroundTasksInitializer::new()`] and gets
-///    back both a [`BackgroundTasksInitializer`] object and a
-///    [`BackgroundTasks`] object.  As the name suggests, the initializer is a
-///    transient object that's just used to finish setting up the subsystem.
-///    The `BackgroundTasks` object will provide a handle for the consumer to
-///    activate background tasks and read data provided by those tasks after the
-///    subsystem is up and running.
-///
-/// 2. Some time later, the caller resumes initialization by invoking
-///    [`BackgroundTasksInitializer::start()`] to actually start all the
-///    specific background tasks that are part of Nexus.
-///
-/// These two steps are separate so that the `BackgroundTasks` object can be
-/// stored into Nexus and used by other subsystems, _including_ other background
-/// tasks, to activate background tasks.  In other words: if `BackgroundTasks`
-/// was created _with_ all the individual tasks, then it wouldn't be possible to
-/// _provide_ it to the tasks and allow them to activate each other.  (It's less
-/// obvious why, but it also wouldn't be possible to provide this to subsystems
-/// like sagas that want to activate background tasks that also want to kick off
-/// sagas.)
-///
+/// See the module-level documentation for more on the two-phase initialization
+/// of this subsystem.
 // See the definition of `Activator` for more design notes about this interface.
 pub struct BackgroundTasksInitializer {
     driver: Driver,
@@ -134,7 +140,7 @@ impl BackgroundTasksInitializer {
     /// * a short-lived `BackgroundTasksInitializer` object, on which you can
     ///   call `start()` to actually start the tasks
     /// * a long-lived `BackgroundTasks` object that you can use to activate any
-    ///   of the tasks that will be started
+    ///   of the tasks that will be started and read data that they provide
     pub fn new() -> (BackgroundTasksInitializer, BackgroundTasks) {
         let (external_endpoints_tx, external_endpoints_rx) =
             watch::channel(None);

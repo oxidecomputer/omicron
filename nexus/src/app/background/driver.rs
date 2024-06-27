@@ -2,7 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Manages execution of background tasks
+//! Generic system for managing execution of background tasks
+//!
+//! None of this file is specific to Nexus or any of the specific background
+//! tasks in Nexus, although the design is pretty bespoke for what Nexus needs.
 
 use super::init::Activator;
 use super::BackgroundTask;
