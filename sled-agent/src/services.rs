@@ -1424,17 +1424,19 @@ impl ServiceManager {
     ) -> Result<ServiceBuilder, Error> {
         let datalink = zone.get_control_vnic_name();
 
+        let mut config_builder = PropertyGroupBuilder::new("config");
+        config_builder =
+            config_builder.add_property("datalink", "astring", datalink);
+
         // The switch zone is the only zone that will sometimes have an
         // unknown underlay address at zone boot on the first scrimlet.
-        let gateway = match gw_addr {
-            Some(addr) => addr.to_string(),
-            None => "unknown".to_string(),
-        };
-
-        let mut config_builder = PropertyGroupBuilder::new("config");
-        config_builder = config_builder
-            .add_property("datalink", "astring", datalink)
-            .add_property("gateway", "astring", gateway);
+        if let Some(gateway) = gw_addr {
+            config_builder = config_builder.add_property(
+                "gateway",
+                "astring",
+                gateway.to_string(),
+            );
+        }
 
         for s in static_addrs {
             config_builder = config_builder.add_property(

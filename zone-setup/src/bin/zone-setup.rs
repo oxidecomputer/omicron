@@ -24,7 +24,6 @@ use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::unix::fs::chown;
 use std::path::Path;
-use std::str::FromStr;
 use uzers::{get_group_by_name, get_user_by_name};
 use zone_setup::switch_zone_user::SwitchZoneUser;
 
@@ -58,16 +57,6 @@ fn parse_ipv6(s: &str) -> anyhow::Result<Ipv6Addr> {
         return Err(anyhow!("ERROR: Missing input value"));
     };
     s.parse().map_err(|_| anyhow!("ERROR: Invalid IPv6 address"))
-}
-
-fn parse_gateway(s: &str) -> anyhow::Result<Option<Ipv6Addr>> {
-    if s == "unknown" || s == "" {
-        return Ok(None);
-    };
-
-    let gw = Ipv6Addr::from_str(s)
-        .map_err(|_| anyhow!("ERROR: Invalid IPv6 address"))?;
-    Ok(Some(gw))
 }
 
 fn parse_datalink(s: &str) -> anyhow::Result<String> {
@@ -147,11 +136,16 @@ async fn do_run() -> Result<(), CmdError> {
                     .value_parser(parse_datalink),
                 )
                 .arg(
-                    arg!(
-                        -g --gateway <Ipv6Addr> "gateway"
-                    )
-                    .required(true)
-                    .value_parser(parse_gateway),
+                    // We are taking a list of values so that clap
+                    // allows us to set a flag without values in the
+                    // SMF manifest. This will happen with the switch
+                    // zone when the underlay isn't up yet.
+                    Arg::new("gateway")
+                    .short('g')
+                    .long("gateway")
+                    .num_args(0..=1)
+                    .value_parser(value_parser!(Ipv6Addr))
+                    .help("Underlay address")
                 )
                 .arg(
                     Arg::new("static_addrs")
@@ -658,7 +652,11 @@ async fn common_nw_set_up(
         .get_many::<Ipv6Addr>("static_addrs")
         .unwrap()
         .collect::<Vec<_>>();
-    let gateway: Option<Ipv6Addr> = *matches.get_one("gateway").unwrap();
+    let gateway = if let Some(g) = matches.get_many::<Ipv6Addr>("gateway") {
+        Some(g.collect::<Vec<_>>())
+    } else {
+        None
+    };
     let zonename = zone::current().await.map_err(|err| {
         CmdError::Failure(anyhow!(
             "Could not determine local zone name: {}",
@@ -705,45 +703,51 @@ async fn common_nw_set_up(
         // Only the switch zone will sometimes have an unknown underlay address at zone boot.
         None => info!(&log, "Underlay is not available yet. Not ensuring there is a default route"),
         Some(gw) => {
-            // Ensuring default route with gateway must happen after peer agents have been initialized.
-            // Omicron zones will be able ensure a default route with gateway immediately, but the 
-            // switch zone on the secondary scrimlet might need a few tries while it waits.
-            retry_notify(
-              retry_policy_local(),
-              || async {
-                    info!(&log, "Ensuring there is a default route"; "gateway" => ?gw);
-                    Route::ensure_default_route_with_gateway(Gateway::Ipv6(gw))
-                    .map_err(|err| {
-                        match err {
-                            ExecutionError::CommandFailure(ref e) => {
-                                if e.stdout.contains("Network is unreachable") {
-                                    BackoffError::transient(
-                                        CmdError::Failure(anyhow!(err)),
-                                    )
-                                } else {
+            if gw.is_empty() {
+                info!(&log, "Underlay is not available yet. Not ensuring there is a default route");
+            } else {
+                // We can safely retrieve the first address only as the CLI only accepts a single item. 
+                let gw = gw.first().unwrap();
+                // Ensuring default route with gateway must happen after peer agents have been initialized.
+                // Omicron zones will be able ensure a default route with gateway immediately, but the 
+                // switch zone on the secondary scrimlet might need a few tries while it waits.
+                retry_notify(
+                  retry_policy_local(),
+                  || async {
+                        info!(&log, "Ensuring there is a default route"; "gateway" => ?gw);
+                        Route::ensure_default_route_with_gateway(Gateway::Ipv6(**gw))
+                        .map_err(|err| {
+                            match err {
+                                ExecutionError::CommandFailure(ref e) => {
+                                    if e.stdout.contains("Network is unreachable") {
+                                        BackoffError::transient(
+                                            CmdError::Failure(anyhow!(err)),
+                                        )
+                                    } else {
+                                        BackoffError::permanent(
+                                            CmdError::Failure(anyhow!(err)),
+                                        )
+                                    }
+                                }
+                                _ => {
                                     BackoffError::permanent(
                                         CmdError::Failure(anyhow!(err)),
                                     )
                                 }
                             }
-                            _ => {
-                                BackoffError::permanent(
-                                    CmdError::Failure(anyhow!(err)),
-                                )
-                            }
-                        }
-                    })
-            },
-        |err, delay| {
-            info!(
-                &log,
-                "Cannot ensure there is a default route yet (retrying in {:?})",
-                delay;
-                "error" => ?err
-            );
-        },
-    )
-    .await?;
+                        })
+                },
+                |err, delay| {
+                    info!(
+                        &log,
+                        "Cannot ensure there is a default route yet (retrying in {:?})",
+                        delay;
+                        "error" => ?err
+                    );
+                },
+                )
+                .await?;
+            }
         }
     }
 
