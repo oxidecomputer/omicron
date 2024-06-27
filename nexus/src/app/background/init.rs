@@ -109,6 +109,7 @@ use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
 use super::tasks::v2p_mappings::V2PManager;
 use super::tasks::vpc_routes;
+use super::Activator;
 use super::Driver;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::sagas::SagaRequest;
@@ -119,11 +120,9 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::watch;
-use tokio::sync::Notify;
 use uuid::Uuid;
 
 /// Interface for activating various background tasks and read data that they

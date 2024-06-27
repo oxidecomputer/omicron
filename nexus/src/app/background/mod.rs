@@ -133,6 +133,7 @@ mod init;
 mod status;
 mod tasks;
 
+pub use driver::Activator;
 pub use driver::Driver;
 pub use init::BackgroundTasks;
 pub use init::BackgroundTasksInitializer;

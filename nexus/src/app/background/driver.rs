@@ -7,7 +7,6 @@
 //! None of this file is specific to Nexus or any of the specific background
 //! tasks in Nexus, although the design is pretty bespoke for what Nexus needs.
 
-use super::init::Activator;
 use super::BackgroundTask;
 use super::TaskName;
 use assert_matches::assert_matches;
@@ -24,6 +23,7 @@ use nexus_types::internal_api::views::LastResult;
 use nexus_types::internal_api::views::LastResultCompleted;
 use nexus_types::internal_api::views::TaskStatus;
 use std::collections::BTreeMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
@@ -123,8 +123,8 @@ impl Driver {
         ) {
             panic!(
                 "attempted to wire up the same background task handle \
-                     twice (previous \"wired_up\" = {}): currently attempting \
-                     to wire it up to task {:?}",
+                 twice (previous \"wired_up\" = {}): currently attempting \
+                 to wire it up to task {:?}",
                 previous, name
             );
         }
@@ -387,7 +387,7 @@ impl<T: Send + Sync> GenericWatcher for watch::Receiver<T> {
 mod test {
     use super::BackgroundTask;
     use super::Driver;
-    use crate::app::background::init::Activator;
+    use crate::app::background::Activator;
     use crate::app::sagas::SagaRequest;
     use assert_matches::assert_matches;
     use chrono::Utc;
