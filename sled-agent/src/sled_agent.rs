@@ -27,6 +27,7 @@ use crate::params::{
 };
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
+use crate::storage_monitor::StorageMonitorHandle;
 use crate::updates::{ConfigUpdates, UpdateManager};
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
 use crate::zone_bundle;
@@ -122,6 +123,9 @@ pub enum Error {
 
     #[error("Error managing storage: {0}")]
     Storage(#[from] sled_storage::error::Error),
+
+    #[error("Error monitoring storage: {0}")]
+    StorageMonitor(#[from] crate::storage_monitor::Error),
 
     #[error("Error updating: {0}")]
     Download(#[from] crate::updates::Error),
@@ -276,6 +280,10 @@ struct SledAgentInner {
 
     // Component of Sled Agent responsible for storage and dataset management.
     storage: StorageHandle,
+
+    // Component of Sled Agent responsible for monitoring storage and updating
+    // dump devices.
+    storage_monitor: StorageMonitorHandle,
 
     // Component of Sled Agent responsible for managing Propolis instances.
     instances: InstanceManager,
@@ -562,6 +570,9 @@ impl SledAgent {
                 subnet: request.body.subnet,
                 start_request: request,
                 storage: long_running_task_handles.storage_manager.clone(),
+                storage_monitor: long_running_task_handles
+                    .storage_monitor_handle
+                    .clone(),
                 instances,
                 probes,
                 hardware: long_running_task_handles.hardware_manager.clone(),
@@ -808,7 +819,28 @@ impl SledAgent {
         &self,
         config: OmicronPhysicalDisksConfig,
     ) -> Result<DisksManagementResult, Error> {
-        Ok(self.storage().omicron_physical_disks_ensure(config).await?)
+        // First, tell the storage subsystem which disks should be managed.
+        let disk_result =
+            self.storage().omicron_physical_disks_ensure(config).await?;
+
+        // This generation is at LEAST as high as our last call through
+        // omicron_physical_disks_ensure. It may actually be higher, if a
+        // concurrent operation occurred.
+        //
+        // Now: Monitor downstream subsystems which use physical disks, and
+        // ensure they're at least using "our_gen".
+        let latest_disks = self.storage().get_latest_disks().await;
+        let our_gen = latest_disks.generation();
+
+        // Ensure that the StorageMonitor, and the dump devices, have committed
+        // to start using new disks and stop using old ones.
+        self.inner.storage_monitor.await_generation(*our_gen).await?;
+
+        // - TODO: Update Zone bundles?
+        // - TODO: Mark probes failed?
+        // - TODO: Mark instances failed?
+
+        Ok(disk_result)
     }
 
     /// List the Omicron zone configuration that's currently running

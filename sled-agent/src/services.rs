@@ -1436,7 +1436,7 @@ impl ServiceManager {
         let all_disks = self.inner.storage.get_latest_disks().await;
         if let Some((_, boot_zpool)) = all_disks.boot_disk() {
             zone_image_paths.push(boot_zpool.dataset_mountpoint(
-                &all_disks.mount_config.root,
+                &all_disks.mount_config().root,
                 INSTALL_DATASET,
             ));
         }
@@ -3172,7 +3172,7 @@ impl ServiceManager {
 
         // Collect information that's necessary to start new zones
         let storage = self.inner.storage.get_latest_disks().await;
-        let mount_config = &storage.mount_config;
+        let mount_config = storage.mount_config();
         let all_u2_pools = storage.all_u2_zpools();
         let time_is_synchronized =
             match self.timesync_get_locked(&existing_zones).await {

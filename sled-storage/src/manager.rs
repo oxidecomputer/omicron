@@ -583,7 +583,7 @@ impl StorageManager {
         synthetic_config: &mut Vec<OmicronPhysicalDiskConfig>,
     ) -> Result<bool, Error> {
         let mut changed = false;
-        for (identity, disk) in self.resources.disks().values.iter() {
+        for (identity, disk) in self.resources.disks().iter_all_inner() {
             match disk {
                 crate::resources::ManagedDisk::Unmanaged(raw) => {
                     let zpool_path = match raw.u2_zpool_path() {

@@ -20,7 +20,7 @@ use crate::config::Config;
 use crate::hardware_monitor::HardwareMonitor;
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
-use crate::storage_monitor::StorageMonitor;
+use crate::storage_monitor::{StorageMonitor, StorageMonitorHandle};
 use crate::zone_bundle::{CleanupContext, ZoneBundler};
 use bootstore::schemes::v0 as bootstore;
 use key_manager::{KeyManager, StorageKeyRequester};
@@ -45,6 +45,10 @@ pub struct LongRunningTaskHandles {
     /// A mechanism for talking to the [`StorageManager`] which is responsible
     /// for establishing zpools on disks and managing their datasets.
     pub storage_manager: StorageHandle,
+
+    /// A mehcanism for talking to the [`StorageMonitor`], which reacts to disk
+    /// changes and updates the dump devices.
+    pub storage_monitor_handle: StorageMonitorHandle,
 
     /// A mechanism for interacting with the hardware device tree
     pub hardware_manager: HardwareManager,
@@ -71,7 +75,8 @@ pub async fn spawn_all_longrunning_tasks(
     let mut storage_manager =
         spawn_storage_manager(log, storage_key_requester.clone());
 
-    spawn_storage_monitor(log, storage_manager.clone());
+    let storage_monitor_handle =
+        spawn_storage_monitor(log, storage_manager.clone());
 
     let nongimlet_observed_disks =
         config.nongimlet_observed_disks.clone().unwrap_or(vec![]);
@@ -106,6 +111,7 @@ pub async fn spawn_all_longrunning_tasks(
         LongRunningTaskHandles {
             storage_key_requester,
             storage_manager,
+            storage_monitor_handle,
             hardware_manager,
             bootstore,
             zone_bundler,
@@ -137,13 +143,17 @@ fn spawn_storage_manager(
     handle
 }
 
-fn spawn_storage_monitor(log: &Logger, storage_handle: StorageHandle) {
+fn spawn_storage_monitor(
+    log: &Logger,
+    storage_handle: StorageHandle,
+) -> StorageMonitorHandle {
     info!(log, "Starting StorageMonitor");
-    let storage_monitor =
+    let (storage_monitor, handle) =
         StorageMonitor::new(log, MountConfig::default(), storage_handle);
     tokio::spawn(async move {
         storage_monitor.run().await;
     });
+    handle
 }
 
 async fn spawn_hardware_manager(

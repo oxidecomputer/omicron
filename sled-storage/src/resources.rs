@@ -12,6 +12,7 @@ use camino::Utf8PathBuf;
 use cfg_if::cfg_if;
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
+use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
@@ -102,7 +103,7 @@ impl DisksManagementResult {
 // the request of the broader control plane. This enum encompasses that duality,
 // by representing all disks that can exist, managed or not.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ManagedDisk {
+pub(crate) enum ManagedDisk {
     // A disk explicitly managed by the control plane.
     //
     // This includes U.2s which Nexus has told us to format and use.
@@ -119,6 +120,12 @@ pub enum ManagedDisk {
     // This disk should be treated as "read-only" until we're explicitly told to
     // use it.
     Unmanaged(RawDisk),
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct AllDisksInner {
+    generation: Generation,
+    values: BTreeMap<DiskIdentity, ManagedDisk>,
 }
 
 /// The disks, keyed by their identity, managed by the sled agent.
@@ -139,16 +146,25 @@ pub enum ManagedDisk {
 /// gets cloned or dropped.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct AllDisks {
-    pub values: Arc<BTreeMap<DiskIdentity, ManagedDisk>>,
-    pub mount_config: MountConfig,
+    inner: Arc<AllDisksInner>,
+    mount_config: MountConfig,
 }
 
 impl AllDisks {
+    /// Returns the latest generation number of this set of disks.
+    pub fn generation(&self) -> &Generation {
+        &self.inner.generation
+    }
+
+    pub fn mount_config(&self) -> &MountConfig {
+        &self.mount_config
+    }
+
     /// Returns the identity of the boot disk.
     ///
     /// If this returns `None`, we have not processed the boot disk yet.
     pub fn boot_disk(&self) -> Option<(DiskIdentity, ZpoolName)> {
-        for (id, disk) in self.values.iter() {
+        for (id, disk) in self.inner.values.iter() {
             if let ManagedDisk::ImplicitlyManaged(disk) = disk {
                 if disk.is_boot_disk() {
                     return Some((id.clone(), disk.zpool_name().clone()));
@@ -190,7 +206,8 @@ impl AllDisks {
 
     /// Returns all zpools managed by the control plane
     pub fn get_all_zpools(&self) -> Vec<(ZpoolName, DiskVariant)> {
-        self.values
+        self.inner
+            .values
             .values()
             .filter_map(|disk| match disk {
                 ManagedDisk::ExplicitlyManaged(disk)
@@ -206,7 +223,8 @@ impl AllDisks {
     //
     // Only returns zpools from disks actively being managed.
     fn all_zpools(&self, variant: DiskVariant) -> Vec<ZpoolName> {
-        self.values
+        self.inner
+            .values
             .values()
             .filter_map(|disk| match disk {
                 ManagedDisk::ExplicitlyManaged(disk)
@@ -231,7 +249,7 @@ impl AllDisks {
 
     /// Returns an iterator over all managed disks.
     pub fn iter_managed(&self) -> impl Iterator<Item = (&DiskIdentity, &Disk)> {
-        self.values.iter().filter_map(|(identity, disk)| match disk {
+        self.inner.values.iter().filter_map(|(identity, disk)| match disk {
             ManagedDisk::ExplicitlyManaged(disk) => Some((identity, disk)),
             ManagedDisk::ImplicitlyManaged(disk) => Some((identity, disk)),
             _ => None,
@@ -239,10 +257,24 @@ impl AllDisks {
     }
 
     /// Returns an iterator over all disks, managed or not.
+    ///
+    /// Additionally identifies details of "how the disk is managed".
+    pub(crate) fn iter_all_inner(
+        &self,
+    ) -> impl Iterator<Item = (&DiskIdentity, &ManagedDisk)> {
+        self.inner.values.iter()
+    }
+
+    /// Returns an iterator over all disks, managed or not.
+    // Intentionally avoids returning the "ManagedDisk" structure to callers, to
+    // hide the details of management.
+    //
+    // If this is important to the caller, they should use
+    // [Self::iter_all_inner].
     pub fn iter_all(
         &self,
     ) -> impl Iterator<Item = (&DiskIdentity, DiskVariant, i64)> {
-        self.values.iter().map(|(identity, disk)| match disk {
+        self.inner.values.iter().map(|(identity, disk)| match disk {
             ManagedDisk::ExplicitlyManaged(disk) => {
                 (identity, disk.variant(), disk.slot())
             }
@@ -283,8 +315,17 @@ impl StorageResources {
         mount_config: MountConfig,
         key_requester: StorageKeyRequester,
     ) -> Self {
-        let disks =
-            AllDisks { values: Arc::new(BTreeMap::new()), mount_config };
+        let disks = AllDisks {
+            inner: Arc::new(AllDisksInner {
+                // TODO: UPDATE THIS GENERATION NUMBER
+                //
+                // TODO: READ THIS GENERATION NUMBER TO SEE
+                // IF UPDATES HAVE PROPAGATED
+                generation: Generation::new(),
+                values: BTreeMap::new(),
+            }),
+            mount_config,
+        };
         Self {
             log: log.new(o!("component" => "StorageResources")),
             key_requester,
@@ -335,14 +376,14 @@ impl StorageResources {
         &mut self,
     ) -> DisksManagementResult {
         let mut updated = false;
-        let disks = Arc::make_mut(&mut self.disks.values);
+        let disks = Arc::make_mut(&mut self.disks.inner);
         info!(self.log, "Synchronizing disk managment");
 
         // "Unmanage" all disks no longer requested by the control plane.
         //
         // This updates the reported sets of "managed" disks, and performs no
         // other modifications to the underlying storage.
-        for (identity, managed_disk) in &mut *disks {
+        for (identity, managed_disk) in &mut disks.values {
             match managed_disk {
                 // This leaves the presence of the disk still in "Self", but
                 // downgrades the disk to an unmanaged status.
@@ -364,7 +405,7 @@ impl StorageResources {
         // configuration.
         let mut result = DisksManagementResult::default();
         for (identity, config) in &self.control_plane_disks {
-            let Some(managed_disk) = disks.get_mut(identity) else {
+            let Some(managed_disk) = disks.values.get_mut(identity) else {
                 warn!(
                     self.log,
                     "Control plane disk requested, but not detected within sled";
@@ -438,6 +479,7 @@ impl StorageResources {
         }
 
         if updated {
+            disks.generation = disks.generation.next();
             self.disk_updates.send_replace(self.disks.clone());
         }
 
@@ -492,15 +534,17 @@ impl StorageResources {
     ) -> Result<(), Error> {
         let disk_identity = disk.identity().clone();
         info!(self.log, "Inserting disk"; "identity" => ?disk_identity);
-        if self.disks.values.contains_key(&disk_identity) {
+        if self.disks.inner.values.contains_key(&disk_identity) {
             info!(self.log, "Disk already exists"; "identity" => ?disk_identity);
             return Ok(());
         }
 
-        let disks = Arc::make_mut(&mut self.disks.values);
+        let disks = Arc::make_mut(&mut self.disks.inner);
         match disk.variant() {
             DiskVariant::U2 => {
-                disks.insert(disk_identity, ManagedDisk::Unmanaged(disk));
+                disks
+                    .values
+                    .insert(disk_identity, ManagedDisk::Unmanaged(disk));
             }
             DiskVariant::M2 => {
                 let managed_disk = Disk::new(
@@ -511,12 +555,14 @@ impl StorageResources {
                     Some(&self.key_requester),
                 )
                 .await?;
-                disks.insert(
+                disks.values.insert(
                     disk_identity,
                     ManagedDisk::ImplicitlyManaged(managed_disk),
                 );
             }
         }
+
+        disks.generation = disks.generation.next();
         self.disk_updates.send_replace(self.disks.clone());
 
         Ok(())
@@ -530,7 +576,7 @@ impl StorageResources {
     /// are only added once.
     pub(crate) fn remove_disk(&mut self, id: &DiskIdentity) {
         info!(self.log, "Removing disk"; "identity" => ?id);
-        let Some(entry) = self.disks.values.get(id) else {
+        let Some(entry) = self.disks.inner.values.get(id) else {
             info!(self.log, "Disk not found by id, exiting"; "identity" => ?id);
             return;
         };
@@ -557,7 +603,10 @@ impl StorageResources {
         }
 
         // Safe to unwrap as we just checked the key existed above
-        Arc::make_mut(&mut self.disks.values).remove(id).unwrap();
+        let disks = Arc::make_mut(&mut self.disks.inner);
+        disks.values.remove(id).unwrap();
+
+        disks.generation = disks.generation.next();
         self.disk_updates.send_replace(self.disks.clone());
     }
 }
