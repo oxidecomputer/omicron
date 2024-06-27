@@ -544,6 +544,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d7e60934ceec538daadb9d8432424ed043a904d8e0243f3c6446bce549a46ac"
 
 [[package]]
+name = "bitfield-struct"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1657dce144574f921af10a92876a96f0ca05dd830900598d21d91c8e4cf78f74"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.68",
+]
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4061,17 +4072,21 @@ dependencies = [
 
 [[package]]
 name = "libnvme"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/libnvme?rev=6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe#6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe"
+version = "0.1.1"
+source = "git+https://github.com/oxidecomputer/libnvme?rev=dd5bb221d327a1bc9287961718c3c10d6bd37da0#dd5bb221d327a1bc9287961718c3c10d6bd37da0"
 dependencies = [
  "libnvme-sys",
+ "nvme",
  "thiserror",
 ]
 
 [[package]]
 name = "libnvme-sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/libnvme?rev=6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe#6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe"
+source = "git+https://github.com/oxidecomputer/libnvme?rev=dd5bb221d327a1bc9287961718c3c10d6bd37da0#dd5bb221d327a1bc9287961718c3c10d6bd37da0"
+dependencies = [
+ "bitfield-struct",
+]
 
 [[package]]
 name = "libredox"
@@ -5194,6 +5209,11 @@ name = "number_prefix"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "830b246a0e5f20af87141b25c173cd1b609bd7779a4617d6ec582abaf90870f3"
+
+[[package]]
+name = "nvme"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/libnvme?rev=dd5bb221d327a1bc9287961718c3c10d6bd37da0#dd5bb221d327a1bc9287961718c3c10d6bd37da0"
 
 [[package]]
 name = "nvpair"
