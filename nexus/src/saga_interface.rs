@@ -34,7 +34,7 @@ impl SagaContext {
     }
 
     pub(crate) fn authz(&self) -> &Arc<authz::Authz> {
-        &self.nexus.authz
+        &self.nexus.authz()
     }
 
     pub(crate) fn nexus(&self) -> &Arc<Nexus> {

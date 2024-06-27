@@ -130,8 +130,7 @@ pub struct Nexus {
     db_datastore: Arc<db::DataStore>,
 
     /// handle to global authz information
-    // XXX-dap
-    pub(super) authz: Arc<authz::Authz>,
+    authz: Arc<authz::Authz>,
 
     /// saga execution coordinator
     sagas: SagaExecutor,
@@ -560,6 +559,10 @@ impl Nexus {
     /// Return the tunable configuration parameters, e.g. for use in tests.
     pub fn tunables(&self) -> &Tunables {
         &self.tunables
+    }
+
+    pub fn authz(&self) -> &Arc<authz::Authz> {
+        &self.authz
     }
 
     pub(crate) async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
