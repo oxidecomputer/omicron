@@ -1217,7 +1217,8 @@ mod tests {
 
         let expected: HashSet<_> =
             disks.iter().skip(1).take(3).map(|d| d.identity()).collect();
-        let actual: HashSet<_> = all_disks.values.keys().collect();
+        let actual: HashSet<_> =
+            all_disks.iter_all().map(|(identity, _, _)| identity).collect();
         assert_eq!(expected, actual);
 
         // Ensure the same set of disks and make sure no change occurs
@@ -1232,7 +1233,10 @@ mod tests {
             .await
             .unwrap();
         let all_disks2 = harness.handle().get_latest_disks().await;
-        assert_eq!(all_disks.values, all_disks2.values);
+        assert_eq!(
+            all_disks.iter_all().collect::<Vec<_>>(),
+            all_disks2.iter_all().collect::<Vec<_>>()
+        );
 
         // Add a disjoint set of disks and see that only they come through
         harness
@@ -1247,7 +1251,8 @@ mod tests {
         let all_disks = harness.handle().get_latest_disks().await;
         let expected: HashSet<_> =
             disks.iter().skip(4).take(5).map(|d| d.identity()).collect();
-        let actual: HashSet<_> = all_disks.values.keys().collect();
+        let actual: HashSet<_> =
+            all_disks.iter_all().map(|(identity, _, _)| identity).collect();
         assert_eq!(expected, actual);
 
         harness.cleanup().await;

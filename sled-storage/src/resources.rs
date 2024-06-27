@@ -124,6 +124,14 @@ pub(crate) enum ManagedDisk {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct AllDisksInner {
+    // NOTE: When the set of "omicron physical disks" are set through the API,
+    // a generation number is actually passed via [OmicronPhysicalDisksConfig].
+    //
+    // This is *not* that same generation number, but probably could be?
+    //
+    // Technically, this number also bumps up any time the set of
+    // locally-detected disks has changed, but it's just treated as an opaque
+    // value to track when changes have propagated throughout the system.
     generation: Generation,
     values: BTreeMap<DiskIdentity, ManagedDisk>,
 }
@@ -317,10 +325,6 @@ impl StorageResources {
     ) -> Self {
         let disks = AllDisks {
             inner: Arc::new(AllDisksInner {
-                // TODO: UPDATE THIS GENERATION NUMBER
-                //
-                // TODO: READ THIS GENERATION NUMBER TO SEE
-                // IF UPDATES HAVE PROPAGATED
                 generation: Generation::new(),
                 values: BTreeMap::new(),
             }),
