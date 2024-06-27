@@ -92,7 +92,7 @@ impl Nexus {
 
     fn driver(&self) -> Result<&Driver, Error> {
         self.background_tasks_driver.get().ok_or_else(|| {
-            Error::internal_error("background tasks not yet initialized")
+            Error::unavail("background tasks not yet initialized")
         })
     }
 }
