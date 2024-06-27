@@ -211,7 +211,7 @@ impl Drop for Driver {
 
 /// Activates a background task
 ///
-/// See [`nexus::app::background`] module-level documentation for more on what
+/// See [`crate::app::background`] module-level documentation for more on what
 /// that means.
 ///
 /// Activators are created with [`Activator::new()`] and then wired up to
@@ -222,7 +222,7 @@ impl Drop for Driver {
 ///
 /// Activators are designed specifically so they can be created before the
 /// corresponding task has been created and then wired up with just an
-/// `&Activator` (not a `&mut Activator`).  See the [`init`] module-level
+/// `&Activator` (not a `&mut Activator`).  See the [`super::init`] module-level
 /// documentation for more on why.
 pub struct Activator {
     pub(super) notify: Arc<Notify>,
