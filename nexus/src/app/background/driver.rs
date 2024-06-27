@@ -82,7 +82,10 @@ impl Driver {
     /// changed.  This can be used to create dependencies between background
     /// tasks, so that when one of them finishes doing something, it kicks off
     /// another one.
-    // XXX-dap TODO-doc activator
+    ///
+    /// `activator` is an [`Activator`] that has not previously been used in a
+    /// call to this function.  It will be wired up so that using it will
+    /// activate this newly-registered background task.
     // XXX-dap TODO-coverage activator
     #[allow(clippy::too_many_arguments)]
     pub fn register(

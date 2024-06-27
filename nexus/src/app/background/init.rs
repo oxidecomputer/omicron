@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Specific background task initialization
-// XXX-dap TODO-doc this whole file
 
 use super::tasks::abandoned_vmm_reaper;
 use super::tasks::bfd;
@@ -44,11 +43,10 @@ use tokio::sync::watch;
 use tokio::sync::Notify;
 use uuid::Uuid;
 
-/// Describes ongoing background tasks and provides interfaces for activating
-/// them and accessing any data that they expose to Nexus at-large
-// XXX-dap TODO-doc describe two-phase initialization
+/// Interface for activating various background tasks and read data that they
+/// expose to Nexus at-large
 pub struct BackgroundTasks {
-    // handles to individual background tasks, used to activate them
+    // Handles to activate specific background tasks
     pub task_internal_dns_config: Activator,
     pub task_internal_dns_servers: Activator,
     pub task_external_dns_config: Activator,
@@ -73,17 +71,55 @@ pub struct BackgroundTasks {
     pub task_abandoned_vmm_reaper: Activator,
     pub task_vpc_route_manager: Activator,
 
-    // XXX-dap stuff that wasn't here before because it couldn't be externally
-    // activated
+    // Handles to activate background tasks that do not get used by Nexus
+    // at-large.  These background tasks are implementation details as far as
+    // the rest of Nexus is concerned.  These handles don't even really need to
+    // be here, but it's convenient.
     task_internal_dns_propagation: Activator,
     task_external_dns_propagation: Activator,
 
-    // data exposed by various background tasks to Nexus at-large
-    /// external endpoints read by the background task
+    // Data exposed by various background tasks to the rest of Nexus
+    /// list of currently configured external endpoints
     pub external_endpoints:
         watch::Receiver<Option<external_endpoints::ExternalEndpoints>>,
 }
 
+impl BackgroundTasks {
+    /// Activate the specified background task
+    ///
+    /// If the task is currently running, it will be activated again when it
+    /// finishes.
+    pub fn activate(&self, task: &Activator) {
+        task.activate();
+    }
+}
+
+/// Initializes the background task subsystem
+///
+/// The background task subsystem is initialized in two phases:
+///
+/// 1. First, the caller invokes [`BackgroundTasksInitializer::new()`] and gets
+///    back both a [`BackgroundTasksInitializer`] object and a
+///    [`BackgroundTasks`] object.  As the name suggests, the initializer is a
+///    transient object that's just used to finish setting up the subsystem.
+///    The `BackgroundTasks` object will provide a handle for the consumer to
+///    activate background tasks and read data provided by those tasks after the
+///    subsystem is up and running.
+///
+/// 2. Some time later, the caller resumes initialization by invoking
+///    [`BackgroundTasksInitializer::start()`] to actually start all the
+///    specific background tasks that are part of Nexus.
+///
+/// These two steps are separate so that the `BackgroundTasks` object can be
+/// stored into Nexus and used by other subsystems, _including_ other background
+/// tasks, to activate background tasks.  In other words: if `BackgroundTasks`
+/// was created _with_ all the individual tasks, then it wouldn't be possible to
+/// _provide_ it to the tasks and allow them to activate each other.  (It's less
+/// obvious why, but it also wouldn't be possible to provide this to subsystems
+/// like sagas that want to activate background tasks that also want to kick off
+/// sagas.)
+///
+// See the definition of `Activator` for more design notes about this interface.
 pub struct BackgroundTasksInitializer {
     driver: Driver,
     external_endpoints_tx:
@@ -91,6 +127,14 @@ pub struct BackgroundTasksInitializer {
 }
 
 impl BackgroundTasksInitializer {
+    /// Begin initializing the Nexus background task subsystem
+    ///
+    /// This step does not start any background tasks.  It just returns:
+    ///
+    /// * a short-lived `BackgroundTasksInitializer` object, on which you can
+    ///   call `start()` to actually start the tasks
+    /// * a long-lived `BackgroundTasks` object that you can use to activate any
+    ///   of the tasks that will be started
     pub fn new() -> (BackgroundTasksInitializer, BackgroundTasks) {
         let (external_endpoints_tx, external_endpoints_rx) =
             watch::channel(None);
@@ -99,6 +143,7 @@ impl BackgroundTasksInitializer {
             driver: Driver::new(),
             external_endpoints_tx,
         };
+
         let background_tasks = BackgroundTasks {
             task_internal_dns_config: Activator::new(),
             task_internal_dns_servers: Activator::new(),
@@ -133,6 +178,10 @@ impl BackgroundTasksInitializer {
         (initializer, background_tasks)
     }
 
+    /// Starts all the Nexus background tasks
+    ///
+    /// This function will wire up the `Activator`s in `background_tasks` to the
+    /// corresponding tasks once they've been started.
     #[allow(clippy::too_many_arguments)]
     pub fn start(
         self,
@@ -151,8 +200,8 @@ impl BackgroundTasksInitializer {
         let opctx = &opctx;
         let producer_registry = &producer_registry;
 
-        // XXX-dap TODO-doc this construction helps ensure we don't miss
-        // anything
+        // This "let" construction helps catch mistakes where someone forgets to
+        // wire up an activator to its corresponding background task.
         let BackgroundTasks {
             task_internal_dns_config,
             task_internal_dns_servers,
@@ -179,7 +228,14 @@ impl BackgroundTasksInitializer {
             task_service_firewall_propagation,
             task_abandoned_vmm_reaper,
             task_vpc_route_manager,
+            // Add new background tasks here.  Be sure to use this binding in a
+            // call to `Driver::register()` below.  That's what actually wires
+            // up the Activator to the corresponding background task.
+
+            // The following fields can be safely ignored here because they're
+            // already wired up as needed.
             external_endpoints: _external_endpoints,
+            // Do NOT add a `..` catch-all here!  See above.
         } = &background_tasks;
 
         init_dns(
@@ -343,8 +399,9 @@ impl BackgroundTasksInitializer {
         // order to automatically trigger inventory collection whenever the
         // blueprint executor runs.  In the limit, this could become a problem
         // because the blueprint executor might also depend indirectly on the
-        // inventory collector.  In that case, we may need to do something more
-        // complicated.  But for now, this works.
+        // inventory collector.  In that case, we could expose `Activator`s to
+        // one or both of these tasks to directly activate the other precisely
+        // when needed.  But for now, this works.
         let inventory_watcher = {
             let collector = inventory_collection::InventoryCollector::new(
                 datastore.clone(),
@@ -529,18 +586,81 @@ impl BackgroundTasksInitializer {
             task_abandoned_vmm_reaper,
         );
 
-        // XXX-dap consider checking all the bools inside BackgroundTasks
-
         driver
     }
 }
 
+/// Activates a background task
+///
+/// See [`nexus::app::background`] module-level documentation for more on what
+/// that means.
+///
+/// Activators are created with [`Activator::new()`] and then wired up to
+/// specific background tasks using [`Driver::register()`].  If you call
+/// `Activator::activate()` before the activator is wired up to a background
+/// task, then once the activator _is_ wired up to a task, that task will
+/// immediately be activated.
+///
+/// Activators are designed specifically so they can be created before the
+/// corresponding task has been created and then wired up with just an
+/// `&Activator` (not a `&mut Activator`).  That's so that we can construct
+/// `BackgroundTasks`, a static list of activators for all background tasks in
+/// Nexus, before we've actually set up all the tasks.  This in turn breaks what
+/// would otherwise be a circular initialization, if background tasks ever need
+/// to activate other background tasks or if background tasks need to use other
+/// subsystems (like sagas) that themselves want to activate background tasks.
+// More straightforward approaches are available (e.g., register a task, get
+// back a handle and use that to activate it) so it's worth explaining why it
+// works this way.  We're trying to satisfy a few different constraints:
+//
+// - background tasks can activate other background tasks
+// - background tasks can use other subsystems in Nexus (like sagas) that
+//   themselves can activate background tasks
+// - we should be able to tell at compile-time which code activates what specific
+//   background tasks
+// - we should be able to tell at compile-time if code is attempting to activate
+//   a background task that doesn't exist (this would be a risk if tasks were
+//   identified by names)
+//
+// Our compile-time goals suggest an approach where tasks are identified either
+// by global constants or by methods or fields in a struct, with one method or
+// field for each task.  With constants, it's still possible that one of these
+// might not be wired up to anything.  So we opt for fields in a struct, called
+// `BackgroundTasks`.  But that struct then needs to be available to anything
+// that wants to activate background tasks -- including other background tasks.
+// By allowing these Activators to be created before the tasks are created, we
+// can create this struct and pass it to all the background tasks (and anybody
+// else that wants to activate background tasks), even though the actual tasks
+// aren't wired up yet.  Then we can wire it up behind the scenes.  If someone
+// uses them ahead of time, they'll get the expected behavior: the task will be
+// activated shortly.
+//
+// There remain several ways someone could get this wrong when adding or
+// reworking background task:
+//
+// - Forgetting to put an activator for a background task into
+//   `BackgroundTasks`.  If you do this, you likely won't have the argument you
+//   need for `Driver::register()`.
+// - Forgetting to wire up an Activator by passing it to `Driver::register()`.
+//   We attempt to avoid this with an exhaustive match in
+//   `BackgroundTasksInitializer::start()`.  If you forget to wire something up,
+//   rustc should report an unused variable.
+// - Wiring the activator up to the wrong task (e.g., by copying and pasting a
+//   `Driver::register()` call and forgetting to update the activator argument).
+//   If this happens, it's likely that either one Activator gets used more than
+//   once (which is caught with a panic only at runtime, but during Nexus
+//   initialization, so it should definitely be caught in testing) or else some
+//   Activator is unused (see the previous bullet).
+//
+// It's not foolproof but hopefully these mechanisms will catch the easy
+// mistakes.
 pub struct Activator {
     pub(super) notify: Arc<Notify>,
     pub(super) wired_up: AtomicBool,
 }
 
 impl Activator {
+    /// Create an activator that is not yet wired up to any background task
     pub fn new() -> Activator {
         Activator {
             notify: Arc::new(Notify::new()),
@@ -548,21 +668,17 @@ impl Activator {
         }
     }
 
+    /// Activate the background task that this Activator has been wired up to
+    ///
+    /// If this Activator has not yet been wired up with [`Driver::register()`],
+    /// then whenever it _is_ wired up, that task will be immediately activated.
     pub fn activate(&self) {
         self.notify.notify_one();
     }
 }
 
-impl BackgroundTasks {
-    /// Activate the specified background task
-    ///
-    /// If the task is currently running, it will be activated again when it
-    /// finishes.
-    pub fn activate(&self, task: &Activator) {
-        task.activate();
-    }
-}
-
+/// Starts the three DNS-propagation-related background tasks for either
+/// internal or external DNS (depending on the arguments)
 #[allow(clippy::too_many_arguments)]
 fn init_dns(
     driver: &mut Driver,
