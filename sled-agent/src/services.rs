@@ -57,7 +57,7 @@ use illumos_utils::running_zone::{
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zpool::ZpoolName;
-use illumos_utils::ExecutionError;
+// use illumos_utils::ExecutionError;
 use illumos_utils::{execute, PFEXEC};
 use internal_dns::resolver::Resolver;
 use itertools::Itertools;
@@ -84,7 +84,7 @@ use omicron_common::api::internal::shared::{
     HostPortConfig, RackNetworkConfig,
 };
 use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service_aggressive, retry_policy_local,
+    retry_notify, retry_policy_internal_service_aggressive, //retry_policy_local,
     BackoffError,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
@@ -94,7 +94,7 @@ use rand::prelude::SliceRandom;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
 use sled_hardware::SledMode;
-use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
+//use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
 use sled_hardware_types::Baseboard;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::{
@@ -2372,7 +2372,15 @@ impl ServiceManager {
                 let mut uplink_service = ServiceBuilder::new("oxide/uplink");
 
                 let mut switch_zone_setup_config =
-                    PropertyGroupBuilder::new("config");
+                    PropertyGroupBuilder::new("config")
+                    .add_property(
+                        "gz_local_link_addr",
+                        "astring",
+                        &format!(
+                            "{}",
+                            self.inner.global_zone_bootstrap_link_local_address
+                        ),
+                    );
 
                 for (link, needs_link_local) in
                     installed_zone.links().iter().zip(links_need_link_local)
@@ -3025,67 +3033,67 @@ impl ServiceManager {
 
         let running_zone = RunningZone::boot(installed_zone).await?;
 
-        if let Some((bootstrap_name, _)) = bootstrap_name_and_address.as_ref() {
-            // Forwarding bootstrap traffic requires the bootstrap interface to exist.
-            // We need to wait for it.
-            retry_notify(
-              retry_policy_local(),
-              || async {
-                    info!(
-                        self.inner.log,
-                        "Forwarding bootstrap traffic via {} to {}",
-                        bootstrap_name,
-                        self.inner.global_zone_bootstrap_link_local_address,
-                    );
-                    running_zone
-                    .add_bootstrap_route(
-                        BOOTSTRAP_PREFIX,
-                        self.inner.global_zone_bootstrap_link_local_address,
-                        bootstrap_name,
-                    )
-                    .map_err(|err| {
-                       match err.err {
-                           ExecutionError::CommandFailure(ref e) => {
-                               if e.stderr.contains("no such interface") {
-                                   BackoffError::transient(
-                                    Error::ZoneCommand{
-                                            intent: "add bootstrap network route".to_string(),
-                                            err,
-                                        }
-                                   )
-                               } else {
-                                   BackoffError::permanent(
-                                   Error::ZoneCommand{
-                                            intent: "add bootstrap network route".to_string(),
-                                            err,
-                                        }
-                                   )
-                               }
-                           }
-                           _ => {
-                               BackoffError::permanent(
-                               Error::ZoneCommand{
-                                        intent: "add bootstrap network route".to_string(),
-                                        err,
-                                    }
-                               )
-                           }
-                       }
-                    })
-                },
-              |err, delay| {
-                    info!(
-                        &self.inner.log,
-                          "Cannot forward bootstrap traffic via {} to {} yet (retrying in {:?})",
-                          bootstrap_name,
-                          self.inner.global_zone_bootstrap_link_local_address,
-                          delay;
-                          "error" => ?err
-                    );
-                },
-            )
-            .await?;
-        }
+    //    if let Some((bootstrap_name, _)) = bootstrap_name_and_address.as_ref() {
+    //        // Forwarding bootstrap traffic requires the bootstrap interface to exist.
+    //        // We need to wait for it.
+    //        retry_notify(
+    //          retry_policy_local(),
+    //          || async {
+    //                info!(
+    //                    self.inner.log,
+    //                    "Forwarding bootstrap traffic via {} to {}",
+    //                    bootstrap_name,
+    //                    self.inner.global_zone_bootstrap_link_local_address,
+    //                );
+    //                running_zone
+    //                .add_bootstrap_route(
+    //                    BOOTSTRAP_PREFIX,
+    //                    self.inner.global_zone_bootstrap_link_local_address,
+    //                    bootstrap_name,
+    //                )
+    //                .map_err(|err| {
+    //                   match err.err {
+    //                       ExecutionError::CommandFailure(ref e) => {
+    //                           if e.stderr.contains("no such interface") {
+    //                               BackoffError::transient(
+    //                                Error::ZoneCommand{
+    //                                        intent: "add bootstrap network route".to_string(),
+    //                                        err,
+    //                                    }
+    //                               )
+    //                           } else {
+    //                               BackoffError::permanent(
+    //                               Error::ZoneCommand{
+    //                                        intent: "add bootstrap network route".to_string(),
+    //                                        err,
+    //                                    }
+    //                               )
+    //                           }
+    //                       }
+    //                       _ => {
+    //                           BackoffError::permanent(
+    //                           Error::ZoneCommand{
+    //                                    intent: "add bootstrap network route".to_string(),
+    //                                    err,
+    //                                }
+    //                           )
+    //                       }
+    //                   }
+    //                })
+    //            },
+    //          |err, delay| {
+    //                info!(
+    //                    &self.inner.log,
+    //                      "Cannot forward bootstrap traffic via {} to {} yet (retrying in {:?})",
+    //                      bootstrap_name,
+    //                      self.inner.global_zone_bootstrap_link_local_address,
+    //                      delay;
+    //                      "error" => ?err
+    //                );
+    //            },
+    //        )
+    //        .await?;
+    //    }
         Ok(running_zone)
     }
 

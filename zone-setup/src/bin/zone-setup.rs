@@ -17,6 +17,7 @@ use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::services::SWITCH_ZONE_BASEBOARD_FILE;
 use serde_json::Value;
+use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
 use slog::{info, Logger};
 use std::fs::{metadata, read_to_string, set_permissions, write, OpenOptions};
 use std::io::Write;
@@ -219,6 +220,13 @@ async fn do_run() -> Result<(), CmdError> {
                     .required(true),
                 )
                 .arg(
+                    arg!(
+                        -g --gz_local_link_addr <Ipv6Addr> "gz_local_link_addr"
+                    )
+                    .required(true)
+                    .value_parser(parse_ipv6),
+                )
+                .arg(
                     Arg::new("link_local_links")
                     .short('l')
                     .long("link_local_links")
@@ -285,6 +293,7 @@ async fn switch_zone_setup(
     let info: &String = matches.get_one("baseboard_info").unwrap();
     let bootstrap_addr: &Ipv6Addr = matches.get_one("bootstrap_addr").unwrap();
     let bootstrap_vnic: &String = matches.get_one("bootstrap_vnic").unwrap();
+    let gz_local_link_addr: &Ipv6Addr = matches.get_one("gz_local_link_addr").unwrap();
     let links = if let Some(l) = matches.get_many::<String>("link_local_links")
     {
         Some(l.collect::<Vec<_>>())
@@ -362,6 +371,19 @@ async fn switch_zone_setup(
             ))
         },
     )?;
+
+    info!(
+        &log,
+        "Forwarding bootstrap traffic via {} to {}",
+        bootstrap_vnic,
+        gz_local_link_addr
+    );
+    Route::add_bootstrap_route(
+        BOOTSTRAP_PREFIX,
+        *gz_local_link_addr,
+        &bootstrap_vnic,
+    )
+    .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     Ok(())
 }
