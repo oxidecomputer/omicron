@@ -100,32 +100,32 @@ impl BackgroundTasksInitializer {
             external_endpoints_tx,
         };
         let background_tasks = BackgroundTasks {
-            task_internal_dns_config: Activator::new_stub(),
-            task_internal_dns_servers: Activator::new_stub(),
-            task_external_dns_config: Activator::new_stub(),
-            task_external_dns_servers: Activator::new_stub(),
-            task_metrics_producer_gc: Activator::new_stub(),
-            task_external_endpoints: Activator::new_stub(),
-            task_nat_cleanup: Activator::new_stub(),
-            task_bfd_manager: Activator::new_stub(),
-            task_inventory_collection: Activator::new_stub(),
-            task_physical_disk_adoption: Activator::new_stub(),
-            task_phantom_disks: Activator::new_stub(),
-            task_blueprint_loader: Activator::new_stub(),
-            task_blueprint_executor: Activator::new_stub(),
-            task_crdb_node_id_collector: Activator::new_stub(),
-            task_service_zone_nat_tracker: Activator::new_stub(),
-            task_switch_port_settings_manager: Activator::new_stub(),
-            task_v2p_manager: Activator::new_stub(),
-            task_region_replacement: Activator::new_stub(),
-            task_region_replacement_driver: Activator::new_stub(),
-            task_instance_watcher: Activator::new_stub(),
-            task_service_firewall_propagation: Activator::new_stub(),
-            task_abandoned_vmm_reaper: Activator::new_stub(),
-            task_vpc_route_manager: Activator::new_stub(),
+            task_internal_dns_config: Activator::new(),
+            task_internal_dns_servers: Activator::new(),
+            task_external_dns_config: Activator::new(),
+            task_external_dns_servers: Activator::new(),
+            task_metrics_producer_gc: Activator::new(),
+            task_external_endpoints: Activator::new(),
+            task_nat_cleanup: Activator::new(),
+            task_bfd_manager: Activator::new(),
+            task_inventory_collection: Activator::new(),
+            task_physical_disk_adoption: Activator::new(),
+            task_phantom_disks: Activator::new(),
+            task_blueprint_loader: Activator::new(),
+            task_blueprint_executor: Activator::new(),
+            task_crdb_node_id_collector: Activator::new(),
+            task_service_zone_nat_tracker: Activator::new(),
+            task_switch_port_settings_manager: Activator::new(),
+            task_v2p_manager: Activator::new(),
+            task_region_replacement: Activator::new(),
+            task_region_replacement_driver: Activator::new(),
+            task_instance_watcher: Activator::new(),
+            task_service_firewall_propagation: Activator::new(),
+            task_abandoned_vmm_reaper: Activator::new(),
+            task_vpc_route_manager: Activator::new(),
 
-            task_internal_dns_propagation: Activator::new_stub(),
-            task_external_dns_propagation: Activator::new_stub(),
+            task_internal_dns_propagation: Activator::new(),
+            task_external_dns_propagation: Activator::new(),
 
             external_endpoints: external_endpoints_rx,
         };
@@ -221,7 +221,7 @@ impl BackgroundTasksInitializer {
                 Box::new(gc),
                 opctx.child(BTreeMap::new()),
                 vec![],
-                Some(task_metrics_producer_gc),
+                task_metrics_producer_gc,
             )
         };
 
@@ -242,7 +242,7 @@ impl BackgroundTasksInitializer {
                 Box::new(watcher),
                 opctx.child(BTreeMap::new()),
                 vec![],
-                Some(task_external_endpoints),
+                task_external_endpoints,
             );
         }
 
@@ -259,7 +259,7 @@ impl BackgroundTasksInitializer {
             )),
             opctx.child(BTreeMap::new()),
             vec![],
-            Some(task_nat_cleanup),
+            task_nat_cleanup,
         );
 
         driver.register(
@@ -272,7 +272,7 @@ impl BackgroundTasksInitializer {
             Box::new(bfd::BfdManager::new(datastore.clone(), resolver.clone())),
             opctx.child(BTreeMap::new()),
             vec![],
-            Some(task_bfd_manager),
+            task_bfd_manager,
         );
 
         // Background task: phantom disk detection
@@ -286,7 +286,7 @@ impl BackgroundTasksInitializer {
                 Box::new(detector),
                 opctx.child(BTreeMap::new()),
                 vec![],
-                Some(task_phantom_disks),
+                task_phantom_disks,
             );
         };
 
@@ -301,7 +301,7 @@ impl BackgroundTasksInitializer {
             Box::new(blueprint_loader),
             opctx.child(BTreeMap::new()),
             vec![],
-            Some(task_blueprint_loader),
+            task_blueprint_loader,
         );
 
         // Background task: blueprint executor
@@ -318,7 +318,7 @@ impl BackgroundTasksInitializer {
             Box::new(blueprint_executor),
             opctx.child(BTreeMap::new()),
             vec![Box::new(rx_blueprint.clone())],
-            Some(task_blueprint_executor),
+            task_blueprint_executor,
         );
 
         // Background task: CockroachDB node ID collector
@@ -334,7 +334,7 @@ impl BackgroundTasksInitializer {
             Box::new(crdb_node_id_collector),
             opctx.child(BTreeMap::new()),
             vec![Box::new(rx_blueprint)],
-            Some(task_crdb_node_id_collector),
+            task_crdb_node_id_collector,
         );
 
         // Background task: inventory collector
@@ -364,7 +364,7 @@ impl BackgroundTasksInitializer {
                 Box::new(collector),
                 opctx.child(BTreeMap::new()),
                 vec![Box::new(rx_blueprint_exec)],
-                Some(task_inventory_collection),
+                task_inventory_collection,
             );
 
             inventory_watcher
@@ -383,7 +383,7 @@ impl BackgroundTasksInitializer {
             )),
             opctx.child(BTreeMap::new()),
             vec![Box::new(inventory_watcher)],
-            Some(task_physical_disk_adoption),
+            task_physical_disk_adoption,
         );
 
         driver.register(
@@ -399,7 +399,7 @@ impl BackgroundTasksInitializer {
             )),
             opctx.child(BTreeMap::new()),
             vec![],
-            Some(task_service_zone_nat_tracker),
+            task_service_zone_nat_tracker,
         );
 
         driver.register(
@@ -412,7 +412,7 @@ impl BackgroundTasksInitializer {
             )),
             opctx.child(BTreeMap::new()),
             vec![],
-            Some(task_switch_port_settings_manager),
+            task_switch_port_settings_manager,
         );
 
         driver.register(
@@ -422,7 +422,7 @@ impl BackgroundTasksInitializer {
             Box::new(V2PManager::new(datastore.clone())),
             opctx.child(BTreeMap::new()),
             vec![Box::new(v2p_watcher.1)],
-            Some(task_v2p_manager),
+            task_v2p_manager,
         );
 
         // Background task: detect if a region needs replacement and begin the
@@ -443,7 +443,7 @@ impl BackgroundTasksInitializer {
                 Box::new(detector),
                 opctx.child(BTreeMap::new()),
                 vec![],
-                Some(task_region_replacement),
+                task_region_replacement,
             );
         };
 
@@ -462,7 +462,7 @@ impl BackgroundTasksInitializer {
                 Box::new(detector),
                 opctx.child(BTreeMap::new()),
                 vec![],
-                Some(task_region_replacement_driver),
+                task_region_replacement_driver,
             );
         };
 
@@ -481,7 +481,7 @@ impl BackgroundTasksInitializer {
                 Box::new(watcher),
                 opctx.child(BTreeMap::new()),
                 vec![],
-                Some(task_instance_watcher),
+                task_instance_watcher,
             )
         };
 
@@ -498,7 +498,7 @@ impl BackgroundTasksInitializer {
             )),
             opctx.child(BTreeMap::new()),
             vec![],
-            Some(task_service_firewall_propagation),
+            task_service_firewall_propagation,
         );
 
         // Background task: OPTE port route propagation
@@ -511,7 +511,7 @@ impl BackgroundTasksInitializer {
                 Box::new(watcher),
                 opctx.child(BTreeMap::new()),
                 vec![],
-                Some(task_vpc_route_manager),
+                task_vpc_route_manager,
             )
         };
 
@@ -526,7 +526,7 @@ impl BackgroundTasksInitializer {
             Box::new(abandoned_vmm_reaper::AbandonedVmmReaper::new(datastore)),
             opctx.child(BTreeMap::new()),
             vec![],
-            Some(task_abandoned_vmm_reaper),
+            task_abandoned_vmm_reaper,
         );
 
         // XXX-dap consider checking all the bools inside BackgroundTasks
@@ -541,7 +541,7 @@ pub struct Activator {
 }
 
 impl Activator {
-    fn new_stub() -> Activator {
+    pub fn new() -> Activator {
         Activator {
             notify: Arc::new(Notify::new()),
             wired_up: AtomicBool::new(false),
@@ -590,7 +590,7 @@ fn init_dns(
         Box::new(dns_config),
         opctx.child(metadata.clone()),
         vec![],
-        Some(task_config),
+        task_config,
     );
 
     // Background task: DNS server list watcher
@@ -607,7 +607,7 @@ fn init_dns(
         Box::new(dns_servers),
         opctx.child(metadata.clone()),
         vec![],
-        Some(task_servers),
+        task_servers,
     );
 
     // Background task: DNS propagation
@@ -628,7 +628,7 @@ fn init_dns(
         Box::new(dns_propagate),
         opctx.child(metadata),
         vec![Box::new(dns_config_watcher), Box::new(dns_servers_watcher)],
-        Some(task_propagation),
+        task_propagation,
     );
 }
 

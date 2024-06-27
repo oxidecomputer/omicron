@@ -93,12 +93,10 @@ impl Driver {
         imp: Box<dyn BackgroundTask>,
         opctx: OpContext,
         watchers: Vec<Box<dyn GenericWatcher>>,
-        // XXX-dap consider making this non-optional?  If it's just for the
-        // tests, we can have them create an Activator.
         // XXX-dap can we do something about TaskName?  It's only used by the
         // tests, too.  It's nice to have it for sure but is it really
         // necessary?
-        activator: Option<&Activator>,
+        activator: &Activator,
     ) -> TaskName {
         // Activation of the background task happens in a separate tokio task.
         // Set up a channel so that tokio task can report status back to us.
@@ -108,30 +106,23 @@ impl Driver {
         });
 
         // We'll use a `Notify` to wake up that tokio task when an activation is
-        // requested.  The caller may provide their own Activator, which
-        // just provides a specific Notify for us to use here.  This allows them
-        // to have set up the activator before the task is actually created.
-        // They can also choose not to bother with this, in which case we'll
-        // just create our own.
-        let notify = if let Some(activator) = activator {
-            if let Err(previous) = activator.wired_up.compare_exchange(
-                false,
-                true,
-                Ordering::SeqCst,
-                Ordering::SeqCst,
-            ) {
-                panic!(
-                    "attempted to wire up the same background task handle \
+        // requested.  The caller provides their own Activator, which just
+        // provides a specific Notify for us to use here.  This allows them to
+        // have set up the activator before the task is actually created.
+        if let Err(previous) = activator.wired_up.compare_exchange(
+            false,
+            true,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            panic!(
+                "attempted to wire up the same background task handle \
                      twice (previous \"wired_up\" = {}): currently attempting \
                      to wire it up to task {:?}",
-                    previous, name
-                );
-            }
-
-            Arc::clone(&activator.notify)
-        } else {
-            Arc::new(Notify::new())
-        };
+                previous, name
+            );
+        }
+        let notify = Arc::clone(&activator.notify);
 
         // Spawn the tokio task that will manage activation of the background
         // task.
@@ -352,6 +343,7 @@ impl<T: Send + Sync> GenericWatcher for watch::Receiver<T> {
 mod test {
     use super::BackgroundTask;
     use super::Driver;
+    use crate::app::background::init::Activator;
     use crate::app::sagas::SagaRequest;
     use assert_matches::assert_matches;
     use chrono::Utc;
@@ -436,6 +428,9 @@ mod test {
         let (t3, rx3) = ReportingTask::new();
         let (dep_tx1, dep_rx1) = watch::channel(0);
         let (dep_tx2, dep_rx2) = watch::channel(0);
+        let act1 = Activator::new();
+        let act2 = Activator::new();
+        let act3 = Activator::new();
         let mut driver = Driver::new();
 
         assert_eq!(*rx1.borrow(), 0);
@@ -446,7 +441,7 @@ mod test {
             Box::new(t1),
             opctx.child(std::collections::BTreeMap::new()),
             vec![Box::new(dep_rx1.clone()), Box::new(dep_rx2.clone())],
-            None,
+            &act1,
         );
 
         let h2 = driver.register(
@@ -456,7 +451,7 @@ mod test {
             Box::new(t2),
             opctx.child(std::collections::BTreeMap::new()),
             vec![Box::new(dep_rx1.clone())],
-            None,
+            &act2,
         );
 
         let h3 = driver.register(
@@ -466,7 +461,7 @@ mod test {
             Box::new(t3),
             opctx,
             vec![Box::new(dep_rx1), Box::new(dep_rx2)],
-            None,
+            &act3,
         );
 
         // Wait for four activations of our task.  (This is three periods.) That
@@ -600,6 +595,7 @@ mod test {
         let (dep_tx1, dep_rx1) = watch::channel(0);
         let before_wall = Utc::now();
         let before_instant = Instant::now();
+        let act1 = Activator::new();
         let h1 = driver.register(
             "t1".to_string(),
             "test task".to_string(),
@@ -607,7 +603,7 @@ mod test {
             Box::new(t1),
             opctx.child(std::collections::BTreeMap::new()),
             vec![Box::new(dep_rx1.clone())],
-            None,
+            &act1,
         );
 
         // Wait to enter the first activation.
@@ -745,6 +741,7 @@ mod test {
 
         let mut driver = Driver::new();
         let (_dep_tx1, dep_rx1) = watch::channel(0);
+        let act1 = Activator::new();
 
         let h1 = driver.register(
             "t1".to_string(),
@@ -753,7 +750,7 @@ mod test {
             Box::new(t1),
             opctx.child(std::collections::BTreeMap::new()),
             vec![Box::new(dep_rx1.clone())],
-            None,
+            &act1,
         );
 
         assert!(matches!(
