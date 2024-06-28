@@ -88,7 +88,15 @@ impl Driver {
     ///
     /// `activator` is an [`Activator`] that has not previously been used in a
     /// call to this function.  It will be wired up so that using it will
-    /// activate this newly-registered background task.
+    /// activate this newly-registered background task.  This is an argument
+    /// rather than a returned value because it's useful for consumers to create
+    /// these ahead of time, before tasks have been set up.  See [`super::init`]
+    /// module-level docs for more on this.
+    ///
+    /// # Panics
+    ///
+    /// This function panics if the `name` or `activator` has previously been
+    /// passed to a call to this function.
     #[allow(clippy::too_many_arguments)]
     pub fn register(
         &mut self,
@@ -109,8 +117,7 @@ impl Driver {
 
         // We'll use a `Notify` to wake up that tokio task when an activation is
         // requested.  The caller provides their own Activator, which just
-        // provides a specific Notify for us to use here.  This allows them to
-        // have set up the activator before the task is actually created.
+        // provides a specific Notify for us to use here.
         if let Err(previous) = activator.wired_up.compare_exchange(
             false,
             true,

@@ -18,7 +18,7 @@
 //!    themselves have been started yet.
 //!
 //! 2. Phase 2 starts all of the individual background tasks and then wires up
-//!    the Activators created in phase 1.
+//!    the `Activator`s created in phase 1.
 //!
 //! This allows us to break what would otherwise be a circular dependency during
 //! initialization.  Concretely: Nexus startup does phase 1, stores the
@@ -43,7 +43,7 @@
 //!       specific background tasks.
 //!     - We should be able to tell at compile-time if code is attempting to
 //!       activate a background task that doesn't exist.
-//!     - It should be hard to add an Activator for a background task that is
+//!     - It should be hard to add an `Activator` for a background task that is
 //!       not wired up to that task or is wired up to a different task.
 //!
 //! Ultimately, tasks are activated via the `Driver` which keeps track of tasks
@@ -60,7 +60,7 @@
 //!
 //! Instead, we assemble the `BackgroundTasks` struct, whose fields correspond
 //! to specific tasks.  This makes it super explicit what code paths are using
-//! which tasks.  And since the Activators in the struct can be created before
+//! which tasks.  And since the `Activator`s in the struct can be created before
 //! the tasks are created, we can create this whole struct and pass it to all
 //! the background tasks (and anybody else that wants to activate background
 //! tasks), even though the actual tasks aren't wired up yet.  Then we can wire
@@ -70,19 +70,19 @@
 //! There remain several ways someone could get this wrong when adding or
 //! reworking background tasks:
 //!
-//! - Forgetting to put an Activator for a background task into
+//! - Forgetting to put an `Activator` for a background task into
 //!   `BackgroundTasks`.  If you make this mistake, you won't get far because
 //!   you won't have the argument you need for `Driver::register()`.
-//! - Forgetting to wire up an Activator by passing it to `Driver::register()`.
-//!   We attempt to avoid this with an exhaustive match inside
-//!   `BackgroundTasksInitializer::start()`.  If you forget to wire something
-//!   up, rustc should report an unused variable.
-//! - Wiring the Activator up to the wrong task (e.g., by copying and pasting a
-//!   `Driver::register()` call and forgetting to update the activator
-//!   argument).  If this happens, it's likely that either one Activator gets
+//! - Forgetting to wire up an `Activator` by passing it to
+//!   `Driver::register()`.  We attempt to avoid this with an exhaustive match
+//!   inside `BackgroundTasksInitializer::start()`.  If you forget to wire
+//!   something up, rustc should report an unused variable.
+//! - Wiring the `Activator` up to the wrong task (e.g., by copying and pasting
+//!   a `Driver::register()` call and forgetting to update the activator
+//!   argument).  If this happens, it's likely that either one `Activator` gets
 //!   used more than once (which is caught with a panic only at runtime, but
 //!   it _is_ during Nexus initialization, so it should definitely be caught in
-//!   testing) or else some Activator is unused (see the previous bullet).
+//!   testing) or else some `Activator` is unused (see the previous bullet).
 //!
 //! It's not foolproof but hopefully these mechanisms will catch the easy
 //! mistakes.
@@ -295,7 +295,7 @@ impl BackgroundTasksInitializer {
 
             // The following fields can be safely ignored here because they're
             // already wired up as needed.
-            external_endpoints: _external_endpoints,
+            external_endpoints: _,
             // Do NOT add a `..` catch-all here!  See above.
         } = &background_tasks;
 
