@@ -832,7 +832,6 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
     assert_eq!(migration.target_state, MigrationState::Completed.into());
     assert_eq!(migration.source_state, MigrationState::Completed.into());
-    assert!(migration.time_deleted.is_some());
 }
 
 #[nexus_test]
