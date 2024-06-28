@@ -290,6 +290,7 @@ Options:
             for discretionary services)
           - query-during-inventory: Sleds whose sled agents should be queried for inventory
           - reservation-create:     Sleds on which reservations can be created
+          - v2p-mapping:            Sleds which should be sent OPTE V2P mappings
           - vpc-firewall:           Sleds which should be sent VPC firewall rules
 
       --log-level <LOG_LEVEL>

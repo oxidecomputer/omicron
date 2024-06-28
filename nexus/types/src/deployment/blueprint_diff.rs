@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Types helpful for diffing [`Blueprints`].
+//! Types helpful for diffing blueprints.
 
 use super::blueprint_display::{
     constants::*, linear_table_modified, linear_table_unchanged, BpDiffState,

@@ -34,6 +34,7 @@ pub enum HardwareUpdate {
     TofinoUnloaded,
     DiskAdded(UnparsedDisk),
     DiskRemoved(UnparsedDisk),
+    DiskUpdated(UnparsedDisk),
 }
 
 // The type of networking 'ASIC' the Dendrite service is expected to manage

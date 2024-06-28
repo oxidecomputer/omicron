@@ -31,6 +31,27 @@ pub static NTP_VPC_SUBNET_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
         .expect("invalid uuid for builtin boundary ntp vpc subnet id")
 });
 
+/// UUID of built-in subnet route VPC Subnet route for External DNS.
+pub static DNS_VPC_SUBNET_ROUTE_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
+    "001de000-c470-4000-8000-000000000004"
+        .parse()
+        .expect("invalid uuid for builtin services vpc default route id")
+});
+
+/// UUID of built-in subnet route VPC Subnet route for Nexus.
+pub static NEXUS_VPC_SUBNET_ROUTE_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
+    "001de000-c470-4000-8000-000000000005"
+        .parse()
+        .expect("invalid uuid for builtin services vpc default route id")
+});
+
+/// UUID of built-in subnet route VPC Subnet route for Boundary NTP.
+pub static NTP_VPC_SUBNET_ROUTE_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
+    "001de000-c470-4000-8000-000000000006"
+        .parse()
+        .expect("invalid uuid for builtin services vpc default route id")
+});
+
 /// Built-in VPC Subnet for External DNS.
 pub static DNS_VPC_SUBNET: Lazy<VpcSubnet> = Lazy::new(|| {
     VpcSubnet::new(

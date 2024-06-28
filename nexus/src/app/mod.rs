@@ -5,6 +5,7 @@
 //! Nexus, the service that operates much of the control plane in an Oxide fleet
 
 use self::external_endpoints::NexusCertResolver;
+use self::saga::SagaExecutor;
 use crate::app::oximeter::LazyTimeseriesClient;
 use crate::app::sagas::SagaRequest;
 use crate::populate::populate_start;
@@ -132,7 +133,7 @@ pub struct Nexus {
     authz: Arc<authz::Authz>,
 
     /// saga execution coordinator
-    sec_client: Arc<steno::SecClient>,
+    sagas: SagaExecutor,
 
     /// Task representing completion of recovered Sagas
     recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
@@ -238,6 +239,7 @@ impl Nexus {
             Arc::clone(&db_datastore),
             log.new(o!("component" => "SecStore")),
         )) as Arc<dyn steno::SecStore>;
+
         let sec_client = Arc::new(steno::sec(
             log.new(o!(
                 "component" => "SEC",
@@ -245,6 +247,11 @@ impl Nexus {
             )),
             sec_store,
         ));
+
+        let sagas = SagaExecutor::new(
+            Arc::clone(&sec_client),
+            log.new(o!("component" => "SagaExecutor")),
+        );
 
         let client_state = dpd_client::ClientState {
             tag: String::from("nexus"),
@@ -425,7 +432,7 @@ impl Nexus {
             log: log.new(o!()),
             db_datastore: Arc::clone(&db_datastore),
             authz: Arc::clone(&authz),
-            sec_client: Arc::clone(&sec_client),
+            sagas,
             recovery_task: std::sync::Mutex::new(None),
             external_server: std::sync::Mutex::new(None),
             techport_external_server: std::sync::Mutex::new(None),
@@ -467,6 +474,7 @@ impl Nexus {
 
         // TODO-cleanup all the extra Arcs here seems wrong
         let nexus = Arc::new(nexus);
+        nexus.sagas.set_nexus(nexus.clone());
         let opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
             Arc::clone(&authz),
@@ -480,7 +488,6 @@ impl Nexus {
             Arc::new(Arc::new(SagaContext::new(
                 Arc::clone(&nexus),
                 saga_logger,
-                Arc::clone(&authz),
             ))),
             db_datastore,
             Arc::clone(&sec_client),
@@ -504,7 +511,7 @@ impl Nexus {
                         "populate complete; activating background tasks"
                     );
                     for task in task_nexus.background_tasks.driver.tasks() {
-                        task_nexus.background_tasks.driver.activate(task);
+                        task_nexus.background_tasks.activate(task);
                     }
                 }
                 Err(_) => {
@@ -552,6 +559,10 @@ impl Nexus {
     /// Return the tunable configuration parameters, e.g. for use in tests.
     pub fn tunables(&self) -> &Tunables {
         &self.tunables
+    }
+
+    pub fn authz(&self) -> &Arc<authz::Authz> {
+        &self.authz
     }
 
     pub(crate) async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
@@ -934,7 +945,33 @@ impl Nexus {
                 let nexus = self.clone();
                 tokio::spawn(async move {
                     let saga_result = nexus
-                        .execute_saga::<sagas::region_replacement_start::SagaRegionReplacementStart>(
+                        .sagas
+                        .saga_execute::<sagas::region_replacement_start::SagaRegionReplacementStart>(
+                            params,
+                        )
+                        .await;
+
+                    match saga_result {
+                        Ok(_) => {
+                            info!(
+                                nexus.log,
+                                "region replacement start saga completed ok"
+                            );
+                        }
+
+                        Err(e) => {
+                            warn!(nexus.log, "region replacement start saga returned an error: {e}");
+                        }
+                    }
+                });
+            }
+
+            SagaRequest::RegionReplacementDrive { params } => {
+                let nexus = self.clone();
+                tokio::spawn(async move {
+                    let saga_result = nexus
+                        .sagas
+                        .saga_execute::<sagas::region_replacement_drive::SagaRegionReplacementDrive>(
                             params,
                         )
                         .await;
@@ -948,7 +985,32 @@ impl Nexus {
                         }
 
                         Err(e) => {
-                            warn!(nexus.log, "region replacement start saga returned an error: {e}");
+                            warn!(nexus.log, "region replacement drive saga returned an error: {e}");
+                        }
+                    }
+                });
+            }
+
+            SagaRequest::RegionReplacementFinish { params } => {
+                let nexus = self.clone();
+                tokio::spawn(async move {
+                    let saga_result = nexus
+                        .sagas
+                        .saga_execute::<sagas::region_replacement_finish::SagaRegionReplacementFinish>(
+                            params,
+                        )
+                        .await;
+
+                    match saga_result {
+                        Ok(_) => {
+                            info!(
+                                nexus.log,
+                                "region replacement finish saga completed ok"
+                            );
+                        }
+
+                        Err(e) => {
+                            warn!(nexus.log, "region replacement finish saga returned an error: {e}");
                         }
                     }
                 });

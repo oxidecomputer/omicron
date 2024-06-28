@@ -51,6 +51,11 @@ progenitor::generate_api!(
         NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
         PortFec = omicron_common::api::internal::shared::PortFec,
         PortSpeed = omicron_common::api::internal::shared::PortSpeed,
+        RouterId = omicron_common::api::internal::shared::RouterId,
+        ResolvedVpcRoute = omicron_common::api::internal::shared::ResolvedVpcRoute,
+        ResolvedVpcRouteSet = omicron_common::api::internal::shared::ResolvedVpcRouteSet,
+        RouterTarget = omicron_common::api::internal::shared::RouterTarget,
+        RouterVersion = omicron_common::api::internal::shared::RouterVersion,
         SourceNatConfig = omicron_common::api::internal::shared::SourceNatConfig,
         SwitchLocation = omicron_common::api::external::SwitchLocation,
         TypedUuidForInstanceKind = omicron_uuid_kinds::InstanceUuid,
@@ -484,6 +489,15 @@ impl From<omicron_common::api::internal::nexus::KnownArtifactKind>
         use omicron_common::api::internal::nexus::KnownArtifactKind;
 
         match s {
+            KnownArtifactKind::GimletRotBootloader => {
+                types::KnownArtifactKind::GimletRotBootloader
+            }
+            KnownArtifactKind::PscRotBootloader => {
+                types::KnownArtifactKind::PscRotBootloader
+            }
+            KnownArtifactKind::SwitchRotBootloader => {
+                types::KnownArtifactKind::SwitchRotBootloader
+            }
             KnownArtifactKind::GimletSp => types::KnownArtifactKind::GimletSp,
             KnownArtifactKind::GimletRot => types::KnownArtifactKind::GimletRot,
             KnownArtifactKind::Host => types::KnownArtifactKind::Host,
