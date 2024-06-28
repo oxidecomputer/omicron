@@ -836,7 +836,10 @@ impl SledAgent {
         // to start using new disks and stop using old ones.
         self.inner.storage_monitor.await_generation(*our_gen).await?;
 
-        // - TODO: Update Zone bundles?
+        // Ensure that the ZoneBundler, if it was creating a bundle referencing
+        // the old U.2s, has stopped using them.
+        self.inner.zone_bundler.await_completion_of_prior_bundles().await;
+
         // - TODO: Mark probes failed?
         // - TODO: Mark instances failed?
 

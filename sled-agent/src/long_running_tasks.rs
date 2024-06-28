@@ -46,7 +46,7 @@ pub struct LongRunningTaskHandles {
     /// for establishing zpools on disks and managing their datasets.
     pub storage_manager: StorageHandle,
 
-    /// A mehcanism for talking to the [`StorageMonitor`], which reacts to disk
+    /// A mechanism for talking to the [`StorageMonitor`], which reacts to disk
     /// changes and updates the dump devices.
     pub storage_monitor_handle: StorageMonitorHandle,
 
