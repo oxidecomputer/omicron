@@ -307,10 +307,21 @@ pub(crate) struct RunningSaga {
 }
 
 impl RunningSaga {
-    /// Waits until this saga stops executing
+    /// Waits until the saga stops executing
     ///
-    /// Normally, the saga will have finished successfully or failed and unwound
-    /// completely.  If unwinding fails, it will be _stuck_ instead.
+    /// This function waits until the saga stops executing because one of the
+    /// following three things happens:
+    ///
+    /// 1. The saga completes successfully ([`SagaState::Success`]).
+    /// 2. The saga fails and unwinding completes without errors
+    ///    ([`SagaState::Failed`]).
+    /// 3. The saga fails and then an error is encountered during unwinding
+    ///    ([`SagaState::Stuck`]).
+    ///
+    /// Steno continues running the saga (and this function continues waiting)
+    /// until one of those three things happens.  Once any of those things
+    /// happens, the saga is no longer running and this function returns a
+    /// `StoppedSaga` that you can use to inspect more precisely what happened.
     pub(crate) async fn wait_until_stopped(self) -> StoppedSaga {
         let result = self.saga_completion_future.await;
         info!(self.log, "saga finished"; "saga_result" => ?result);
