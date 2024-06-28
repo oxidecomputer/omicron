@@ -511,6 +511,7 @@ table! {
         ip -> Inet,
         slot -> Int2,
         is_primary -> Bool,
+        transit_ips -> Array<Inet>,
     }
 }
 
@@ -529,6 +530,7 @@ table! {
         ip -> Inet,
         slot -> Int2,
         is_primary -> Bool,
+        transit_ips -> Array<Inet>,
     }
 }
 joinable!(instance_network_interface -> instance (instance_id));
@@ -1108,6 +1110,7 @@ table! {
         rcgen -> Int8,
         ipv4_block -> Inet,
         ipv6_block -> Inet,
+        custom_router_id -> Nullable<Uuid>,
     }
 }
 
@@ -1122,6 +1125,7 @@ table! {
         kind -> crate::VpcRouterKindEnum,
         vpc_id -> Uuid,
         rcgen -> Int8,
+        resolved_version -> Int8,
     }
 }
 

@@ -34,10 +34,11 @@ impl super::Nexus {
             volume_id,
         };
 
-        self.execute_saga::<sagas::volume_remove_rop::SagaVolumeRemoveROP>(
-            saga_params,
-        )
-        .await?;
+        self.sagas
+            .saga_execute::<sagas::volume_remove_rop::SagaVolumeRemoveROP>(
+                saga_params,
+            )
+            .await?;
 
         Ok(())
     }

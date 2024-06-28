@@ -56,13 +56,14 @@ enum InstallMethod {
 }
 
 /// Packages to install or bundle in the host OS image.
-const HOST_IMAGE_PACKAGES: [(&str, InstallMethod); 7] = [
+const HOST_IMAGE_PACKAGES: [(&str, InstallMethod); 8] = [
     ("mg-ddm-gz", InstallMethod::Install),
     ("omicron-sled-agent", InstallMethod::Install),
     ("overlay", InstallMethod::Bundle),
     ("oxlog", InstallMethod::Install),
     ("propolis-server", InstallMethod::Bundle),
     ("pumpkind-gz", InstallMethod::Install),
+    ("crucible-dtrace", InstallMethod::Install),
     ("switch-asic", InstallMethod::Bundle),
 ];
 /// Packages to install or bundle in the recovery (trampoline) OS image.

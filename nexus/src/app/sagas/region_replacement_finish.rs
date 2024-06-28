@@ -206,7 +206,6 @@ async fn srrf_update_request_record(
 #[cfg(test)]
 pub(crate) mod test {
     use crate::{
-        app::saga::create_saga_dag,
         app::sagas::region_replacement_finish::Params,
         app::sagas::region_replacement_finish::SagaRegionReplacementFinish,
     };
@@ -316,17 +315,16 @@ pub(crate) mod test {
             .unwrap();
 
         // Run the region replacement finish saga
-        let dag = create_saga_dag::<SagaRegionReplacementFinish>(Params {
+        let params = Params {
             serialized_authn: Serialized::for_opctx(&opctx),
             region_volume_id: old_region_volume_id,
             request: request.clone(),
-        })
-        .unwrap();
-
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-
-        // Actually run the saga
-        let _output = nexus.run_saga(runnable_saga).await.unwrap();
+        };
+        let _output = nexus
+            .sagas
+            .saga_execute::<SagaRegionReplacementFinish>(params)
+            .await
+            .unwrap();
 
         // Validate the state transition
         let result = datastore

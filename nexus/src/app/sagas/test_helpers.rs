@@ -261,7 +261,7 @@ pub(crate) async fn actions_succeed_idempotently(
     nexus: &Arc<Nexus>,
     dag: SagaDag,
 ) {
-    let runnable_saga = nexus.create_runnable_saga(dag.clone()).await.unwrap();
+    let runnable_saga = nexus.sagas.saga_prepare(dag.clone()).await.unwrap();
     for node in dag.get_nodes() {
         nexus
             .sec()
@@ -277,7 +277,12 @@ pub(crate) async fn actions_succeed_idempotently(
             .unwrap();
     }
 
-    nexus.run_saga(runnable_saga).await.expect("Saga should have succeeded");
+    runnable_saga
+        .run_to_completion()
+        .await
+        .expect("Saga should have started")
+        .into_omicron_result()
+        .expect("Saga should have succeeded");
 }
 
 /// Tests that a saga `S` functions properly when any of its nodes fails and
@@ -346,7 +351,7 @@ pub(crate) async fn action_failure_can_unwind<'a, S, B, A>(
         );
 
         let runnable_saga =
-            nexus.create_runnable_saga(dag.clone()).await.unwrap();
+            nexus.sagas.saga_prepare(dag.clone()).await.unwrap();
 
         nexus
             .sec()
@@ -354,12 +359,14 @@ pub(crate) async fn action_failure_can_unwind<'a, S, B, A>(
             .await
             .unwrap();
 
-        let saga_error = nexus
-            .run_saga_raw_result(runnable_saga)
+        let saga_result = runnable_saga
+            .run_to_completion()
             .await
             .expect("saga should have started successfully")
-            .kind
-            .expect_err("saga execution should have failed");
+            .into_raw_result();
+
+        let saga_error =
+            saga_result.kind.expect_err("saga execution should have failed");
 
         assert_eq!(saga_error.error_node_name, *node.name());
 
@@ -447,7 +454,7 @@ pub(crate) async fn action_failure_can_unwind_idempotently<'a, S, B, A>(
         );
 
         let runnable_saga =
-            nexus.create_runnable_saga(dag.clone()).await.unwrap();
+            nexus.sagas.saga_prepare(dag.clone()).await.unwrap();
 
         nexus
             .sec()
@@ -468,10 +475,11 @@ pub(crate) async fn action_failure_can_unwind_idempotently<'a, S, B, A>(
             .await
             .unwrap();
 
-        let saga_error = nexus
-            .run_saga_raw_result(runnable_saga)
+        let saga_error = runnable_saga
+            .run_to_completion()
             .await
             .expect("saga should have started successfully")
+            .into_raw_result()
             .kind
             .expect_err("saga execution should have failed");
 

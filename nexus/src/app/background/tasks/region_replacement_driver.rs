@@ -18,8 +18,8 @@
 //! Basically, keep starting either repair or reconcilation until they complete
 //! successfully, then "finish" the region replacement.
 
-use super::common::BackgroundTask;
 use crate::app::authn;
+use crate::app::background::BackgroundTask;
 use crate::app::sagas;
 use futures::future::BoxFuture;
 use futures::FutureExt;

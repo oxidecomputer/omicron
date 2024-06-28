@@ -4,7 +4,7 @@
 
 //! Background task for reading inventory for the rack
 
-use super::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 use anyhow::ensure;
 use anyhow::Context;
 use futures::future::BoxFuture;
@@ -186,10 +186,10 @@ impl<'a> nexus_inventory::SledAgentEnumerator for DbSledAgentEnumerator<'a> {
 
 #[cfg(test)]
 mod test {
+    use super::DbSledAgentEnumerator;
+    use super::InventoryCollector;
     use crate::app::authz;
-    use crate::app::background::common::BackgroundTask;
-    use crate::app::background::inventory_collection::DbSledAgentEnumerator;
-    use crate::app::background::inventory_collection::InventoryCollector;
+    use crate::app::background::BackgroundTask;
     use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledSystemHardware;
@@ -270,8 +270,8 @@ mod test {
             // has pushed us out.
             if our_collections.is_empty() {
                 println!(
-                    "iter {i}: no test collections \
-                    ({num_collections} Nexus collections)",
+                    "iter {i}: no test collections ({num_collections} Nexus \
+                     collections)",
                 );
                 continue;
             }
@@ -285,8 +285,8 @@ mod test {
             // tail of all IDs we've seen matches the ones we saw in this
             // iteration (i.e., we're pushing out old collections in order).
             println!(
-                "iter {i}: saw {our_collections:?}; \
-                 should match tail of {all_our_collection_ids:?}"
+                "iter {i}: saw {our_collections:?}; should match tail of \
+                 {all_our_collection_ids:?}"
             );
             assert_eq!(
                 all_our_collection_ids
@@ -398,8 +398,8 @@ mod test {
         assert_eq!(
             removed_urls.len(),
             1,
-            "expected to find exactly one sled URL matching our \
-            expunged sled's URL"
+            "expected to find exactly one sled URL matching our expunged \
+             sled's URL"
         );
         let mut found_urls = db_enum.list_sled_agents().await.unwrap();
         found_urls.sort();

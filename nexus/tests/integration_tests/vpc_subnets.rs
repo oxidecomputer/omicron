@@ -179,6 +179,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
         },
         ipv4_block,
         ipv6_block: Some(ipv6_block),
+        custom_router: None,
     };
     let subnet: VpcSubnet =
         NexusRequest::objects_post(client, &subnets_url, &new_subnet)
@@ -230,6 +231,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
         },
         ipv4_block,
         ipv6_block: Some(ipv6_block),
+        custom_router: None,
     };
     let expected_error = format!(
         "IP address range '{}' conflicts with an existing subnet",
@@ -257,6 +259,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
         },
         ipv4_block: other_ipv4_block,
         ipv6_block: other_ipv6_block,
+        custom_router: None,
     };
     let error: dropshot::HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &subnets_url)
@@ -301,6 +304,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
         },
         ipv4_block,
         ipv6_block: None,
+        custom_router: None,
     };
     let subnet2: VpcSubnet =
         NexusRequest::objects_post(client, &subnets_url, &new_subnet)
@@ -329,6 +333,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
             name: Some("new-name".parse().unwrap()),
             description: Some("another description".to_string()),
         },
+        custom_router: None,
     };
     NexusRequest::object_put(client, &subnet_url, Some(&update_params))
         .authn_as(AuthnMode::PrivilegedUser)
