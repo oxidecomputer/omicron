@@ -8,6 +8,7 @@ use crate::MigrationState;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::internal::nexus;
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
@@ -31,6 +32,9 @@ pub struct Migration {
     /// This is the primary key of the migration table and is referenced by the
     /// `instance` table's `migration_id` field.
     pub id: Uuid,
+
+    /// The instance that was migrated.
+    pub instance_id: Uuid,
 
     /// The time at which this migration record was created.
     pub time_created: DateTime<Utc>,
@@ -66,11 +70,13 @@ pub struct Migration {
 impl Migration {
     pub fn new(
         migration_id: Uuid,
+        instance_id: InstanceUuid,
         source_propolis_id: Uuid,
         target_propolis_id: Uuid,
     ) -> Self {
         Self {
             id: migration_id,
+            instance_id: instance_id.into_untyped_uuid(),
             time_created: Utc::now(),
             time_deleted: None,
             source_state: nexus::MigrationState::Pending.into(),
