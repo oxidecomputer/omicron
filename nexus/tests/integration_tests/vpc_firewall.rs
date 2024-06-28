@@ -353,23 +353,23 @@ async fn test_firewall_rules_max_lengths(cptestctx: &ControlPlaneTestContext) {
         format!("/v1/vpc-firewall-rules?vpc=default&project={}", project_name);
 
     // fine with max count
-    let max: usize = 512;
+    let max_rules: usize = 1024;
     let rules: VpcFirewallRules = object_put(
         client,
         &url,
         &VpcFirewallRuleUpdateParams {
-            rules: (0..max).map(rule_n).collect::<Vec<_>>(),
+            rules: (0..max_rules).map(rule_n).collect::<Vec<_>>(),
         },
     )
     .await;
-    assert_eq!(rules.rules.len(), max);
+    assert_eq!(rules.rules.len(), max_rules);
 
     // fails with max + 1
     let error = object_put_error(
         client,
         &url,
         &VpcFirewallRuleUpdateParams {
-            rules: (0..max + 1).map(rule_n).collect::<Vec<_>>(),
+            rules: (0..max_rules + 1).map(rule_n).collect::<Vec<_>>(),
         },
         StatusCode::BAD_REQUEST,
     )
@@ -377,12 +377,14 @@ async fn test_firewall_rules_max_lengths(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.error_code, Some("InvalidValue".to_string()));
     assert_eq!(
         error.message,
-        format!("unsupported value for \"rules\": max length {max}")
+        format!("unsupported value for \"rules\": max length {max_rules}")
     );
 
     ///////////////////////
     // TARGETS
     ///////////////////////
+
+    let max_parts: usize = 128;
 
     let target = VpcFirewallRuleTarget::Vpc("default".parse().unwrap());
 
@@ -392,13 +394,13 @@ async fn test_firewall_rules_max_lengths(cptestctx: &ControlPlaneTestContext) {
         &url,
         &VpcFirewallRuleUpdateParams {
             rules: vec![VpcFirewallRuleUpdate {
-                targets: (0..max).map(|_i| target.clone()).collect(),
+                targets: (0..max_parts).map(|_i| target.clone()).collect(),
                 ..base_rule.clone()
             }],
         },
     )
     .await;
-    assert_eq!(rules.rules[0].targets.len(), max);
+    assert_eq!(rules.rules[0].targets.len(), max_parts);
 
     // fails with max + 1
     let error = object_put_error(
@@ -406,7 +408,7 @@ async fn test_firewall_rules_max_lengths(cptestctx: &ControlPlaneTestContext) {
         &url,
         &VpcFirewallRuleUpdateParams {
             rules: vec![VpcFirewallRuleUpdate {
-                targets: (0..max + 1).map(|_i| target.clone()).collect(),
+                targets: (0..max_parts + 1).map(|_i| target.clone()).collect(),
                 ..base_rule.clone()
             }],
         },
@@ -416,7 +418,7 @@ async fn test_firewall_rules_max_lengths(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.error_code, Some("InvalidValue".to_string()));
     assert_eq!(
         error.message,
-        format!("unsupported value for \"targets\": max length {max}")
+        format!("unsupported value for \"targets\": max length {max_parts}")
     );
 
     ///////////////////////
@@ -432,7 +434,9 @@ async fn test_firewall_rules_max_lengths(cptestctx: &ControlPlaneTestContext) {
         &VpcFirewallRuleUpdateParams {
             rules: vec![VpcFirewallRuleUpdate {
                 filters: VpcFirewallRuleFilter {
-                    hosts: Some((0..max).map(|_i| host.clone()).collect()),
+                    hosts: Some(
+                        (0..max_parts).map(|_i| host.clone()).collect(),
+                    ),
                     protocols: None,
                     ports: None,
                 },
@@ -441,7 +445,7 @@ async fn test_firewall_rules_max_lengths(cptestctx: &ControlPlaneTestContext) {
         },
     )
     .await;
-    assert_eq!(rules.rules[0].filters.hosts.as_ref().unwrap().len(), max);
+    assert_eq!(rules.rules[0].filters.hosts.as_ref().unwrap().len(), max_parts);
 
     // fails with max + 1
     let error = object_put_error(
@@ -450,7 +454,9 @@ async fn test_firewall_rules_max_lengths(cptestctx: &ControlPlaneTestContext) {
         &VpcFirewallRuleUpdateParams {
             rules: vec![VpcFirewallRuleUpdate {
                 filters: VpcFirewallRuleFilter {
-                    hosts: Some((0..max + 1).map(|_i| host.clone()).collect()),
+                    hosts: Some(
+                        (0..max_parts + 1).map(|_i| host.clone()).collect(),
+                    ),
                     protocols: None,
                     ports: None,
                 },
@@ -463,7 +469,9 @@ async fn test_firewall_rules_max_lengths(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.error_code, Some("InvalidValue".to_string()));
     assert_eq!(
         error.message,
-        format!("unsupported value for \"filters.hosts\": max length {max}")
+        format!(
+            "unsupported value for \"filters.hosts\": max length {max_parts}"
+        )
     );
 
     ///////////////////////
@@ -479,7 +487,7 @@ async fn test_firewall_rules_max_lengths(cptestctx: &ControlPlaneTestContext) {
         &VpcFirewallRuleUpdateParams {
             rules: vec![VpcFirewallRuleUpdate {
                 filters: VpcFirewallRuleFilter {
-                    ports: Some((0..max).map(|_i| port).collect()),
+                    ports: Some((0..max_parts).map(|_i| port).collect()),
                     protocols: None,
                     hosts: None,
                 },
@@ -488,7 +496,7 @@ async fn test_firewall_rules_max_lengths(cptestctx: &ControlPlaneTestContext) {
         },
     )
     .await;
-    assert_eq!(rules.rules[0].filters.ports.as_ref().unwrap().len(), max);
+    assert_eq!(rules.rules[0].filters.ports.as_ref().unwrap().len(), max_parts);
 
     // fails with max + 1
     let error = object_put_error(
@@ -497,7 +505,7 @@ async fn test_firewall_rules_max_lengths(cptestctx: &ControlPlaneTestContext) {
         &VpcFirewallRuleUpdateParams {
             rules: vec![VpcFirewallRuleUpdate {
                 filters: VpcFirewallRuleFilter {
-                    ports: Some((0..max + 1).map(|_i| port).collect()),
+                    ports: Some((0..max_parts + 1).map(|_i| port).collect()),
                     protocols: None,
                     hosts: None,
                 },
@@ -510,7 +518,9 @@ async fn test_firewall_rules_max_lengths(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.error_code, Some("InvalidValue".to_string()));
     assert_eq!(
         error.message,
-        format!("unsupported value for \"filters.ports\": max length {max}")
+        format!(
+            "unsupported value for \"filters.ports\": max length {max_parts}"
+        )
     );
 
     ///////////////////////
@@ -526,7 +536,9 @@ async fn test_firewall_rules_max_lengths(cptestctx: &ControlPlaneTestContext) {
         &VpcFirewallRuleUpdateParams {
             rules: vec![VpcFirewallRuleUpdate {
                 filters: VpcFirewallRuleFilter {
-                    protocols: Some((0..max).map(|_i| protocol).collect()),
+                    protocols: Some(
+                        (0..max_parts).map(|_i| protocol).collect(),
+                    ),
                     ports: None,
                     hosts: None,
                 },
@@ -535,7 +547,10 @@ async fn test_firewall_rules_max_lengths(cptestctx: &ControlPlaneTestContext) {
         },
     )
     .await;
-    assert_eq!(rules.rules[0].filters.protocols.as_ref().unwrap().len(), max);
+    assert_eq!(
+        rules.rules[0].filters.protocols.as_ref().unwrap().len(),
+        max_parts
+    );
 
     // fails with max + 1
     let error = object_put_error(
@@ -544,7 +559,9 @@ async fn test_firewall_rules_max_lengths(cptestctx: &ControlPlaneTestContext) {
         &VpcFirewallRuleUpdateParams {
             rules: vec![VpcFirewallRuleUpdate {
                 filters: VpcFirewallRuleFilter {
-                    protocols: Some((0..max + 1).map(|_i| protocol).collect()),
+                    protocols: Some(
+                        (0..max_parts + 1).map(|_i| protocol).collect(),
+                    ),
                     ports: None,
                     hosts: None,
                 },
@@ -558,7 +575,7 @@ async fn test_firewall_rules_max_lengths(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(
         error.message,
         format!(
-            "unsupported value for \"filters.protocols\": max length {max}"
+            "unsupported value for \"filters.protocols\": max length {max_parts}"
         )
     );
 }

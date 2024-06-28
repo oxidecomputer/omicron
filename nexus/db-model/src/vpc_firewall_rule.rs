@@ -211,24 +211,24 @@ pub struct VpcFirewallRule {
     pub priority: VpcFirewallRulePriority,
 }
 
-/// Cap on the number of rules in a VPC. Also used as a max length on other vecs
-/// in the rule body.
+/// Cap on the number of rules in a VPC
 ///
-/// We could have 5 constants, but why bother? The value is meant to be big
-/// enough that customers will rarely run into it in practice. We just want to
-/// prevent a single request from being able to write tons of rows to the DB or
-/// blow up OPTE.
-const MAX_FW_RULES_PER_VPC: usize = 512;
+/// The choice of value is somewhat arbitrary, but the goal is to have a
+/// large number that customers are unlikely to actually hit, but which still
+/// meaningfully limits the ability to overload the DB with a single request.
+const MAX_FW_RULES_PER_VPC: usize = 1024;
 
-fn ensure_max_length<T>(
+/// Cap on targets and on each type of filter
+const MAX_FW_RULE_PARTS: usize = 128;
+
+fn ensure_max_len<T>(
     items: &Vec<T>,
     label: &str,
+    max: usize,
 ) -> Result<(), external::Error> {
-    if items.len() > MAX_FW_RULES_PER_VPC {
-        return Err(external::Error::invalid_value(
-            label,
-            format!("max length {}", MAX_FW_RULES_PER_VPC),
-        ));
+    if items.len() > max {
+        let msg = format!("max length {}", max);
+        return Err(external::Error::invalid_value(label, msg));
     }
     Ok(())
 }
@@ -247,16 +247,16 @@ impl VpcFirewallRule {
             },
         );
 
-        ensure_max_length(&rule.targets, "targets")?;
+        ensure_max_len(&rule.targets, "targets", MAX_FW_RULE_PARTS)?;
 
         if let Some(hosts) = rule.filters.hosts.as_ref() {
-            ensure_max_length(&hosts, "filters.hosts")?;
+            ensure_max_len(&hosts, "filters.hosts", MAX_FW_RULE_PARTS)?;
         }
         if let Some(ports) = rule.filters.ports.as_ref() {
-            ensure_max_length(&ports, "filters.ports")?;
+            ensure_max_len(&ports, "filters.ports", MAX_FW_RULE_PARTS)?;
         }
         if let Some(protocols) = rule.filters.protocols.as_ref() {
-            ensure_max_length(&protocols, "filters.protocols")?;
+            ensure_max_len(&protocols, "filters.protocols", MAX_FW_RULE_PARTS)?;
         }
 
         Ok(Self {
@@ -291,7 +291,7 @@ impl VpcFirewallRule {
         params: external::VpcFirewallRuleUpdateParams,
     ) -> Result<Vec<VpcFirewallRule>, external::Error> {
         ensure_no_duplicates(&params)?;
-        ensure_max_length(&params.rules, "rules")?;
+        ensure_max_len(&params.rules, "rules", MAX_FW_RULES_PER_VPC)?;
         params
             .rules
             .into_iter()
