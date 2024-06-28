@@ -87,7 +87,7 @@ pub(crate) fn create_saga_dag<N: NexusSaga>(
     Ok(SagaDag::new(dag, params))
 }
 
-/// External handle to a self-contained subsystem for kicking off sagas
+/// Handle to a self-contained subsystem for kicking off sagas
 ///
 /// See the module-level documentation for details.
 pub(crate) struct SagaExecutor {
@@ -113,9 +113,15 @@ impl SagaExecutor {
     // one call site, it does fail cleanly if someone tries to use
     // `SagaExecutor` before this has been set, and the result is much cleaner
     // for all the other users of `SagaExecutor`.
+    //
+    // # Panics
+    //
+    // This function should be called exactly once in the lifetime of any
+    // `SagaExecutor` object.  If it gets called more than once, concurrently or
+    // not, it panics.
     pub(crate) fn set_nexus(&self, nexus: Arc<Nexus>) {
         self.nexus.set(nexus).unwrap_or_else(|_| {
-            panic!("concurrent initialization of SagaExecutor")
+            panic!("multiple initialization of SagaExecutor")
         })
     }
 
@@ -293,7 +299,7 @@ impl RunnableSaga {
     }
 }
 
-/// Describes a saga that's been started running
+/// Describes a saga that's started running
 pub(crate) struct RunningSaga {
     id: SagaId,
     saga_completion_future: BoxFuture<'static, SagaResult>,
