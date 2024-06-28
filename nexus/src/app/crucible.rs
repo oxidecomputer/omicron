@@ -91,17 +91,17 @@ impl super::Nexus {
         Ok(!on_in_service_physical_disk)
     }
 
-    /// Return a region's associated address, or None if it can't be retrieved.
+    /// Return a region's associated address
     pub async fn region_addr(
         &self,
         log: &Logger,
         region_id: Uuid,
-    ) -> Result<Option<SocketAddrV6>, Error> {
+    ) -> Result<SocketAddrV6, Error> {
         // If a region port was previously recorded, return the address right
         // away
 
         if let Some(addr) = self.datastore().region_addr(region_id).await? {
-            return Ok(Some(addr));
+            return Ok(addr);
         }
 
         // Otherwise, ask the appropriate Crucible agent
@@ -114,11 +114,10 @@ impl super::Nexus {
         let Some(returned_region) =
             self.maybe_get_crucible_region(log, &dataset, region_id).await?
         else {
-            // The Crucible agent didn't think the region exists?
-            // XXX bail! ?
-            warn!(log, "no region for id {region_id}");
-
-            return Ok(None);
+            // The Crucible agent didn't think the region exists? It could have
+            // been concurrently deleted, or otherwise garbage collected.
+            warn!(log, "no region for id {region_id} from Crucible Agent");
+            return Err(Error::Gone);
         };
 
         // Record the returned port
@@ -126,7 +125,19 @@ impl super::Nexus {
             .region_set_port(region_id, returned_region.port_number)
             .await?;
 
-        self.datastore().region_addr(region_id).await
+        // Return the address with the port that was just recorded - guard again
+        // against the cast where the region record could have been concurrently
+        // deleted
+        match self.datastore().region_addr(region_id).await {
+            Ok(Some(addr)) => Ok(addr),
+
+            Ok(None) => {
+                warn!(log, "region {region_id} deleted");
+                Err(Error::Gone)
+            }
+
+            Err(e) => Err(e),
+        }
     }
 
     /// Call out to Crucible agent and perform region creation.

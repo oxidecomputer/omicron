@@ -455,16 +455,13 @@ async fn srrs_get_old_region_address(
     // running in a test where the allocation strategy does not mandate distinct
     // sleds.
 
-    let maybe_addr = osagactx
-        .nexus()
-        .region_addr(log, params.request.old_region_id)
-        .await
-        .map_err(ActionError::action_failed)?;
+    let maybe_addr =
+        osagactx.nexus().region_addr(log, params.request.old_region_id).await;
 
     match maybe_addr {
-        Some(addr) => Ok(addr),
+        Ok(addr) => Ok(addr),
 
-        None => {
+        Err(Error::Gone) => {
             // It was a mistake not to record the port of a region in the Region
             // record.  However, we haven't needed it until now! If the Crucible
             // agent is gone (which it will be if the disk is expunged), assume
@@ -508,6 +505,8 @@ async fn srrs_get_old_region_address(
                 )))
             }
         }
+
+        Err(e) => Err(ActionError::action_failed(e)),
     }
 }
 
