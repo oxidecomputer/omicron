@@ -126,7 +126,7 @@ impl super::Nexus {
             .await?;
 
         // Return the address with the port that was just recorded - guard again
-        // against the cast where the region record could have been concurrently
+        // against the case where the region record could have been concurrently
         // deleted
         match self.datastore().region_addr(region_id).await {
             Ok(Some(addr)) => Ok(addr),
