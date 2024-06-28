@@ -123,7 +123,8 @@ impl RegionReplacementDriver {
                 let nexus = self.nexus.clone();
                 tokio::spawn(async move {
                     let saga_result = nexus
-                        .execute_saga::<sagas::region_replacement_drive::SagaRegionReplacementDrive>(
+                        .sagas
+                        .saga_execute::<sagas::region_replacement_drive::SagaRegionReplacementDrive>(
                             params,
                         )
                         .await;
@@ -200,10 +201,11 @@ impl RegionReplacementDriver {
             };
             tokio::spawn(async move {
                 let saga_result = nexus
-                        .execute_saga::<sagas::region_replacement_finish::SagaRegionReplacementFinish>(
-                            params,
-                        )
-                        .await;
+                    .sagas
+                    .saga_execute::<sagas::region_replacement_finish::SagaRegionReplacementFinish>(
+                        params,
+                    )
+                    .await;
 
                 match saga_result {
                     Ok(_) => {

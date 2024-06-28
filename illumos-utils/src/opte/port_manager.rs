@@ -440,6 +440,41 @@ impl PortManager {
             }
         }
 
+        // If there are any transit IPs set, allow them through.
+        // TODO: Currently set only in initial state.
+        //       This, external IPs, and cfg'able state
+        //       (DHCP?) are probably worth being managed by an RPW.
+        for block in &nic.transit_ips {
+            #[cfg(target_os = "illumos")]
+            {
+                use oxide_vpc::api::Direction;
+
+                // In principle if this were an operation on an existing
+                // port, we would explicitly undo the In addition if the
+                // Out addition fails.
+                // However, failure here will just destroy the port
+                // outright -- this should only happen if an excessive
+                // number of rules are specified.
+                hdl.allow_cidr(
+                    &port_name,
+                    super::net_to_cidr(*block),
+                    Direction::In,
+                )?;
+                hdl.allow_cidr(
+                    &port_name,
+                    super::net_to_cidr(*block),
+                    Direction::Out,
+                )?;
+            }
+
+            debug!(
+                self.inner.log,
+                "Added CIDR to in/out allowlist";
+                "port_name" => &port_name,
+                "cidr" => ?block,
+            );
+        }
+
         info!(
             self.inner.log,
             "Created OPTE port";

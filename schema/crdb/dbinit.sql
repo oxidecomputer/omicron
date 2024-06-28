@@ -1473,7 +1473,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.network_interface (
      * The primary interface appears in DNS and its address is used for external
      * connectivity.
      */
-    is_primary BOOL NOT NULL
+    is_primary BOOL NOT NULL,
+
+    /*
+     * A supplementary list of addresses/CIDR blocks which a NIC is
+     * *allowed* to send/receive traffic on, in addition to its
+     * assigned address.
+     */
+    transit_ips INET[] NOT NULL DEFAULT ARRAY[]
 );
 
 /* A view of the network_interface table for just instance-kind records. */
@@ -1491,7 +1498,8 @@ SELECT
     mac,
     ip,
     slot,
-    is_primary
+    is_primary,
+    transit_ips
 FROM
     omicron.public.network_interface
 WHERE
@@ -4107,7 +4115,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '78.0.0', NULL)
+    (TRUE, NOW(), NOW(), '79.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -379,7 +379,8 @@ impl super::Nexus {
         };
 
         let saga_outputs = self
-            .execute_saga::<sagas::instance_create::SagaInstanceCreate>(
+            .sagas
+            .saga_execute::<sagas::instance_create::SagaInstanceCreate>(
                 saga_params,
             )
             .await?;
@@ -462,10 +463,11 @@ impl super::Nexus {
             instance,
             boundary_switches,
         };
-        self.execute_saga::<sagas::instance_delete::SagaInstanceDelete>(
-            saga_params,
-        )
-        .await?;
+        self.sagas
+            .saga_execute::<sagas::instance_delete::SagaInstanceDelete>(
+                saga_params,
+            )
+            .await?;
         Ok(())
     }
 
@@ -510,10 +512,11 @@ impl super::Nexus {
             src_vmm: vmm.clone(),
             migrate_params: params,
         };
-        self.execute_saga::<sagas::instance_migrate::SagaInstanceMigrate>(
-            saga_params,
-        )
-        .await?;
+        self.sagas
+            .saga_execute::<sagas::instance_migrate::SagaInstanceMigrate>(
+                saga_params,
+            )
+            .await?;
 
         // TODO correctness TODO robustness TODO design
         // Should we lookup the instance again here?
@@ -757,10 +760,11 @@ impl super::Nexus {
             db_instance: instance.clone(),
         };
 
-        self.execute_saga::<sagas::instance_start::SagaInstanceStart>(
-            saga_params,
-        )
-        .await?;
+        self.sagas
+            .saga_execute::<sagas::instance_start::SagaInstanceStart>(
+                saga_params,
+            )
+            .await?;
 
         self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
     }
@@ -1938,7 +1942,8 @@ impl super::Nexus {
         };
 
         let saga_outputs = self
-            .execute_saga::<sagas::instance_ip_attach::SagaInstanceIpAttach>(
+            .sagas
+            .saga_execute::<sagas::instance_ip_attach::SagaInstanceIpAttach>(
                 saga_params,
             )
             .await?;
@@ -1967,7 +1972,8 @@ impl super::Nexus {
         };
 
         let saga_outputs = self
-            .execute_saga::<sagas::instance_ip_detach::SagaInstanceIpDetach>(
+            .sagas
+            .saga_execute::<sagas::instance_ip_detach::SagaInstanceIpDetach>(
                 saga_params,
             )
             .await?;

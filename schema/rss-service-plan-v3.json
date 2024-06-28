@@ -268,6 +268,13 @@
         "subnet": {
           "$ref": "#/definitions/IpNet"
         },
+        "transit_ips": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IpNet"
+          }
+        },
         "vni": {
           "$ref": "#/definitions/Vni"
         }

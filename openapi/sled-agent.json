@@ -3597,6 +3597,13 @@
           "subnet": {
             "$ref": "#/components/schemas/IpNet"
           },
+          "transit_ips": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNet"
+            }
+          },
           "vni": {
             "$ref": "#/components/schemas/Vni"
           }

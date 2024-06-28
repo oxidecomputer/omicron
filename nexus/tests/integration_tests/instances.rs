@@ -1801,6 +1801,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         },
         ipv4_block: "172.31.0.0/24".parse().unwrap(),
         ipv6_block: None,
+        custom_router: None,
     };
     let _response = NexusRequest::objects_post(
         client,
@@ -1947,6 +1948,7 @@ async fn test_instance_create_delete_network_interface(
         },
         ipv4_block: "172.31.0.0/24".parse().unwrap(),
         ipv6_block: None,
+        custom_router: None,
     };
     let _response = NexusRequest::objects_post(
         client,
@@ -2188,6 +2190,7 @@ async fn test_instance_update_network_interfaces(
         },
         ipv4_block: "172.31.0.0/24".parse().unwrap(),
         ipv6_block: None,
+        custom_router: None,
     };
     let _response = NexusRequest::objects_post(
         client,
@@ -2287,6 +2290,7 @@ async fn test_instance_update_network_interfaces(
             description: Some(new_description.clone()),
         },
         primary: false,
+        transit_ips: vec![],
     };
 
     // Verify we fail to update the NIC when the instance is running
@@ -2363,6 +2367,7 @@ async fn test_instance_update_network_interfaces(
             description: None,
         },
         primary: true,
+        transit_ips: vec![],
     };
     let updated_primary_iface1 = NexusRequest::object_put(
         client,
@@ -2456,6 +2461,7 @@ async fn test_instance_update_network_interfaces(
             description: None,
         },
         primary: true,
+        transit_ips: vec![],
     };
     let new_primary_iface = NexusRequest::object_put(
         client,
@@ -4812,7 +4818,7 @@ pub async fn assert_sled_vpc_routes(
     datastore: &DataStore,
     subnet_id: Uuid,
     vni: Vni,
-) {
+) -> (HashSet<ResolvedVpcRoute>, HashSet<ResolvedVpcRoute>) {
     let (.., authz_vpc, _, db_subnet) = LookupPath::new(opctx, datastore)
         .vpc_subnet_id(subnet_id)
         .fetch()
@@ -4874,6 +4880,8 @@ pub async fn assert_sled_vpc_routes(
     )
     .await
     .expect("matching vpc routes should be present");
+
+    (system_routes, custom_routes)
 }
 
 /// Simulate completion of an ongoing instance state transition.  To do this, we

@@ -50,10 +50,11 @@ impl RegionReplacementDetector {
         let nexus = self.nexus.clone();
         tokio::spawn(async move {
             let saga_result = nexus
-                        .execute_saga::<sagas::region_replacement_start::SagaRegionReplacementStart>(
-                            params,
-                        )
-                        .await;
+                .sagas
+                .saga_execute::<sagas::region_replacement_start::SagaRegionReplacementStart>(
+                    params,
+                )
+                .await;
 
             match saga_result {
                 Ok(_) => {
