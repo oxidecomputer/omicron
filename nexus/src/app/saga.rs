@@ -312,11 +312,12 @@ impl RunningSaga {
     /// This function waits until the saga stops executing because one of the
     /// following three things happens:
     ///
-    /// 1. The saga completes successfully ([`SagaState::Success`]).
+    /// 1. The saga completes successfully
+    ///    ([`nexus_types::internal_api::views::SagaState::Succeeded`]).
     /// 2. The saga fails and unwinding completes without errors
-    ///    ([`SagaState::Failed`]).
+    ///    ([`nexus_types::internal_api::views::SagaState::Failed`]).
     /// 3. The saga fails and then an error is encountered during unwinding
-    ///    ([`SagaState::Stuck`]).
+    ///    ([`nexus_types::internal_api::views::SagaState::Stuck`]).
     ///
     /// Steno continues running the saga (and this function continues waiting)
     /// until one of those three things happens.  Once any of those things
