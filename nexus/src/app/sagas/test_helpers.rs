@@ -278,11 +278,9 @@ pub(crate) async fn actions_succeed_idempotently(
     }
 
     runnable_saga
-        .start()
+        .run_to_completion()
         .await
         .expect("Saga should have started")
-        .wait_until_stopped()
-        .await
         .into_omicron_result()
         .expect("Saga should have succeeded");
 }
@@ -362,11 +360,9 @@ pub(crate) async fn action_failure_can_unwind<'a, S, B, A>(
             .unwrap();
 
         let saga_result = runnable_saga
-            .start()
+            .run_to_completion()
             .await
             .expect("saga should have started successfully")
-            .wait_until_stopped()
-            .await
             .into_raw_result();
 
         let saga_error =
@@ -480,11 +476,9 @@ pub(crate) async fn action_failure_can_unwind_idempotently<'a, S, B, A>(
             .unwrap();
 
         let saga_error = runnable_saga
-            .start()
+            .run_to_completion()
             .await
             .expect("saga should have started successfully")
-            .wait_until_stopped()
-            .await
             .into_raw_result()
             .kind
             .expect_err("saga execution should have failed");

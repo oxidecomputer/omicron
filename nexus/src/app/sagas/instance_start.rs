@@ -922,11 +922,9 @@ mod test {
 
         let runnable_saga = nexus.sagas.saga_prepare(dag).await.unwrap();
         let saga_result = runnable_saga
-            .start()
+            .run_to_completion()
             .await
             .expect("saga execution should have started")
-            .wait_until_stopped()
-            .await
             .into_raw_result();
         let saga_error = saga_result
             .kind

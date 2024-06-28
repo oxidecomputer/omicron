@@ -88,11 +88,9 @@ async fn test_saga_stuck(cptestctx: &ControlPlaneTestContext) {
     nexus.sec().saga_inject_error(saga_id, n2).await.unwrap();
     nexus.sec().saga_inject_error_undo(saga_id, n1).await.unwrap();
     let result = runnable_saga
-        .start()
+        .run_to_completion()
         .await
         .expect("expected saga to start")
-        .wait_until_stopped()
-        .await
         .into_omicron_result()
         .expect_err("expected saga to finish stuck");
 

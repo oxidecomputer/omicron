@@ -2254,11 +2254,9 @@ mod test {
 
         // Actually run the saga
         let output = runnable_saga
-            .start()
+            .run_to_completion()
             .await
             .unwrap()
-            .wait_until_stopped()
-            .await
             .into_omicron_result();
 
         // Expect to see 409
@@ -2377,11 +2375,9 @@ mod test {
 
         // Actually run the saga. This should fail.
         let output = runnable_saga
-            .start()
+            .run_to_completion()
             .await
             .unwrap()
-            .wait_until_stopped()
-            .await
             .into_omicron_result();
 
         assert!(output.is_err());

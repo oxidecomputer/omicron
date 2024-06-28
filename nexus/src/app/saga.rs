@@ -10,6 +10,7 @@
 //!
 //! The basic lifecycle at the Nexus level is:
 //!
+//! ```text
 //!       input: saga type (impls [`NexusSaga`]),
 //!              saga parameters (specific to the saga's type)
 //!           |
@@ -28,8 +29,9 @@
 //!           |  [`RunningSaga::wait_until_stopped()`]
 //!           v
 //!      StoppedSaga
+//! ```
 //!
-//! At the end, you can use [`StoppedSaga::to_omicron_result()`] to get at the
+//! At the end, you can use [`StoppedSaga::into_omicron_result()`] to get at the
 //! success output of the saga or convert any saga failure along the way to an
 //! Omicron [`Error`].
 //!
@@ -87,9 +89,7 @@ pub(crate) fn create_saga_dag<N: NexusSaga>(
 
 /// External handle to a self-contained subsystem for kicking off sagas
 ///
-/// Note that Steno provides its own interface for kicking off sagas.  This one
-/// is a thin wrapper around it.  This one exists to layer Nexus-specific
-/// behavior on top of Steno's (e.g., error conversion).
+/// See the module-level documentation for details.
 pub(crate) struct SagaExecutor {
     sec_client: Arc<steno::SecClient>,
     log: slog::Logger,
@@ -264,6 +264,9 @@ impl RunnableSaga {
     }
 
     /// Start this saga running.
+    ///
+    /// Once this completes, even if you drop the returned `RunningSaga`, the
+    /// saga will still run to completion.
     pub(crate) async fn start(self) -> Result<RunningSaga, Error> {
         info!(self.log, "starting saga");
         self.sec_client
@@ -277,6 +280,16 @@ impl RunnableSaga {
             saga_completion_future: self.saga_completion_future,
             log: self.log,
         })
+    }
+
+    /// Start the saga running and wait for it to complete.
+    ///
+    /// This is a shorthand for `start().await?.wait_until_stopped().await`.
+    // There is no reason this needs to be limited to tests, but it's only used
+    // by the tests today.
+    #[cfg(test)]
+    pub(crate) async fn run_to_completion(self) -> Result<StoppedSaga, Error> {
+        Ok(self.start().await?.wait_until_stopped().await)
     }
 }
 
