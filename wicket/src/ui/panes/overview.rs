@@ -770,12 +770,12 @@ fn inventory_description(component: &Component) -> Text {
                         .into(),
                     );
                 }
-                if let Some(_) = slot_a_error {
+                if let Some(e) = slot_a_error {
                     spans.push(
                         vec![
                             nest_bullet(),
                             Span::styled("Image status: ", label_style),
-                            Span::styled("Error: ", bad_style),
+                            Span::styled(format!("Error: {e:?}"), bad_style),
                         ]
                         .into(),
                     );
@@ -813,12 +813,12 @@ fn inventory_description(component: &Component) -> Text {
                         .into(),
                     );
                 }
-                if let Some(_) = slot_b_error {
+                if let Some(e) = slot_b_error {
                     spans.push(
                         vec![
                             nest_bullet(),
                             Span::styled("Image status: ", label_style),
-                            Span::styled("Error: ", bad_style),
+                            Span::styled(format!("Error: {e:?}"), bad_style),
                         ]
                         .into(),
                     );
@@ -857,12 +857,12 @@ fn inventory_description(component: &Component) -> Text {
                         .into(),
                     );
                 }
-                if let Some(_) = stage0_error {
+                if let Some(e) = stage0_error {
                     spans.push(
                         vec![
                             nest_bullet(),
                             Span::styled("Image status: ", label_style),
-                            Span::styled("Error: ", bad_style),
+                            Span::styled(format!("Error: {e:?}"), bad_style),
                         ]
                         .into(),
                     );
@@ -902,12 +902,12 @@ fn inventory_description(component: &Component) -> Text {
                         .into(),
                     );
                 }
-                if let Some(_) = stage0next_error {
+                if let Some(e) = stage0next_error {
                     spans.push(
                         vec![
                             nest_bullet(),
                             Span::styled("Image status: ", label_style),
-                            Span::styled("Error: ", bad_style),
+                            Span::styled(format!("Error: {e:?}"), bad_style),
                         ]
                         .into(),
                     );

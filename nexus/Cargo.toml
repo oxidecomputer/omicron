@@ -135,7 +135,7 @@ rcgen.workspace = true
 regex.workspace = true
 similar-asserts.workspace = true
 sp-sim.workspace = true
-rustls = { workspace = true }
+rustls.workspace = true
 subprocess.workspace = true
 term.workspace = true
 trust-dns-resolver.workspace = true

@@ -27,7 +27,7 @@ use backoff::BackoffError;
 use chrono::Utc;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
-use illumos_utils::opte::{DhcpCfg, PortManager};
+use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::svc::wait_for_service;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
@@ -1327,14 +1327,15 @@ impl InstanceRunner {
             } else {
                 (None, None, &[][..])
             };
-            let port = self.port_manager.create_port(
+            let port = self.port_manager.create_port(PortCreateParams {
                 nic,
-                snat,
+                source_nat: snat,
                 ephemeral_ip,
                 floating_ips,
-                &self.firewall_rules,
-                self.dhcp_config.clone(),
-            )?;
+                firewall_rules: &self.firewall_rules,
+                dhcp_config: self.dhcp_config.clone(),
+                is_service: false,
+            })?;
             opte_ports.push(port);
         }
 

@@ -43,11 +43,11 @@ enum MonitorChange {
 /// integration tests.
 ///
 /// The simulated instance contains a fake instance state stored as a
-/// [`propolis_client::api::InstanceStateMonitorResponse`]. Transition requests
-/// enqueue changes to either the instance state or the migration status fields
-/// of this response. When poked, the simulated instance applies the next
-/// transition, translates this to an observed Propolis state, and sends it
-/// off for processing.
+/// [`propolis_client::types::InstanceStateMonitorResponse`]. Transition
+/// requests enqueue changes to either the instance state or the migration
+/// status fields of this response. When poked, the simulated instance applies
+/// the next transition, translates this to an observed Propolis state, and
+/// sends it off for processing.
 #[derive(Debug)]
 struct SimInstanceInner {
     /// The current simulated instance state.

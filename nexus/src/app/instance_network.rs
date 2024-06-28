@@ -29,8 +29,9 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 use super::background::BackgroundTasks;
+use super::Nexus;
 
-impl super::Nexus {
+impl Nexus {
     /// Returns the set of switches with uplinks configured and boundary
     /// services enabled.
     pub(crate) async fn boundary_switches(

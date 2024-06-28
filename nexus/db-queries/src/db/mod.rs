@@ -29,7 +29,6 @@ pub mod queries;
 mod raw_query_builder;
 mod saga_recovery;
 mod sec_store;
-pub mod subquery;
 pub(crate) mod true_or_cast_error;
 mod update_and_check;
 
