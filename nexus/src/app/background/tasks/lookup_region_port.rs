@@ -9,7 +9,7 @@
 //! and this background task is responsible for filling in Regions that don't
 //! have a recorded port.
 
-use super::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 use anyhow::Result;
 use crucible_agent_client::types::Region;
 use crucible_agent_client::types::RegionId;
