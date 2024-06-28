@@ -112,7 +112,7 @@ use super::tasks::vpc_routes;
 use super::Activator;
 use super::Driver;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
-use crate::Nexus;
+use crate::app::saga::SagaExecutor;
 use nexus_config::BackgroundTaskConfig;
 use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
@@ -254,7 +254,7 @@ impl BackgroundTasksInitializer {
         resolver: internal_dns::resolver::Resolver,
         v2p_watcher: (watch::Sender<()>, watch::Receiver<()>),
         producer_registry: ProducerRegistry,
-        nexus: Arc<Nexus>,
+        sagas: Arc<SagaExecutor>,
     ) -> Driver {
         let mut driver = self.driver;
         let opctx = &opctx;
@@ -547,7 +547,7 @@ impl BackgroundTasksInitializer {
         {
             let detector = region_replacement::RegionReplacementDetector::new(
                 datastore.clone(),
-                nexus.clone(),
+                sagas.clone(),
             );
 
             driver.register(
@@ -569,7 +569,7 @@ impl BackgroundTasksInitializer {
             let detector =
                 region_replacement_driver::RegionReplacementDriver::new(
                     datastore.clone(),
-                    nexus.clone(),
+                    sagas.clone(),
                 );
 
             driver.register(

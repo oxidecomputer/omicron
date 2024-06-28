@@ -20,8 +20,8 @@
 
 use crate::app::authn;
 use crate::app::background::BackgroundTask;
+use crate::app::saga::SagaExecutor;
 use crate::app::sagas;
-use crate::Nexus;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
@@ -32,12 +32,12 @@ use std::sync::Arc;
 
 pub struct RegionReplacementDriver {
     datastore: Arc<DataStore>,
-    nexus: Arc<Nexus>,
+    sagas: Arc<SagaExecutor>,
 }
 
 impl RegionReplacementDriver {
-    pub fn new(datastore: Arc<DataStore>, nexus: Arc<Nexus>) -> Self {
-        RegionReplacementDriver { datastore, nexus }
+    pub fn new(datastore: Arc<DataStore>, sagas: Arc<SagaExecutor>) -> Self {
+        RegionReplacementDriver { datastore, sagas }
     }
 
     /// Drive running region replacements forward
@@ -120,35 +120,24 @@ impl RegionReplacementDriver {
                     serialized_authn: authn::saga::Serialized::for_opctx(opctx),
                     request,
                 };
-                let nexus = self.nexus.clone();
-                tokio::spawn(async move {
-                    let saga_result = nexus
-                        .sagas
-                        .saga_execute::<sagas::region_replacement_drive::SagaRegionReplacementDrive>(
-                            params,
-                        )
-                        .await;
+                let sagas = self.sagas.clone();
+                match sagas.saga_start::<sagas::region_replacement_drive::SagaRegionReplacementDrive>(params).await {
+                    Ok(_) => {
+                        let s = format!("{request_id}: drive invoked ok");
+                        info!(&log, "{s}");
+                        status.drive_invoked_ok.push(s);
+                    },
+                    Err(e) => {
+                        warn!(&log, "failed to start region replacement drive saga: {e}");
+                       let s = format!(
+                            "starting region replacement drive saga for \
+                            {request_id} failed: {e}",
+                        );
 
-                    match saga_result {
-                        Ok(_) => {
-                            info!(
-                                nexus.log,
-                                "region replacement drive saga completed ok"
-                            );
-                        }
-
-                        Err(e) => {
-                            warn!(
-                                nexus.log,
-                                "region replacement drive saga returned an \
-                                 error: {e}"
-                            );
-                        }
-                    }
-                });
-
-                let s = format!("{request_id}: drive invoked ok");
-                status.drive_invoked_ok.push(s);
+                        error!(&log, "{s}");
+                        status.errors.push(s);
+                    },
+                }
             }
         }
     }
@@ -193,40 +182,35 @@ impl RegionReplacementDriver {
             };
 
             let request_id = request.id;
-            let nexus = self.nexus.clone();
+            let sagas = self.sagas.clone();
             let params = sagas::region_replacement_finish::Params {
                 serialized_authn: authn::saga::Serialized::for_opctx(opctx),
                 region_volume_id: old_region_volume_id,
                 request,
             };
-            tokio::spawn(async move {
-                let saga_result = nexus
-                    .sagas
-                    .saga_execute::<sagas::region_replacement_finish::SagaRegionReplacementFinish>(
+            let result = sagas
+                .saga_start::<sagas::region_replacement_finish::SagaRegionReplacementFinish>(
                         params,
                     )
                     .await;
+            match result {
+                Ok(_) => {
+                    let s = format!("{request_id}: finish saga started ok");
 
-                match saga_result {
-                    Ok(_) => {
-                        info!(
-                            nexus.log,
-                            "region replacement finish saga completed ok"
-                        );
-                    }
-
-                    Err(e) => {
-                        warn!(
-                            nexus.log,
-                            "region replacement finish saga returned an \
-                            error: {e}"
-                        );
-                    }
+                    info!(&log, "{s}");
+                    status.finish_invoked_ok.push(s);
                 }
-            });
 
-            let s = format!("{request_id}: finish invoked ok");
-            status.finish_invoked_ok.push(s);
+                Err(e) => {
+                    let s = format!(
+                        "starting region replacement finish saga for \
+                        {request_id} failed: {e}"
+                    );
+
+                    error!(&log, "{s}");
+                    status.errors.push(s);
+                }
+            }
         }
     }
 }

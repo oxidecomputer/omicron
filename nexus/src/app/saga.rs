@@ -202,6 +202,17 @@ impl SagaExecutor {
     // Convenience functions
 
     /// Create a new saga (of type `N` with parameters `params`), start it
+    /// running, but do not wait for it to finish.
+    pub(crate) async fn saga_start<N: NexusSaga>(
+        &self,
+        params: N::Params,
+    ) -> Result<RunningSaga, Error> {
+        let dag = create_saga_dag::<N>(params)?;
+        let runnable_saga = self.saga_prepare(dag).await?;
+        runnable_saga.start().await
+    }
+
+    /// Create a new saga (of type `N` with parameters `params`), start it
     /// running, wait for it to finish, and report the result
     ///
     /// Note that this can take a long time and may not complete while parts of
@@ -242,7 +253,6 @@ impl SagaExecutor {
         &self,
         params: N::Params,
     ) -> Result<SagaResultOk, Error> {
-        // Construct the DAG specific to this saga.
         let dag = create_saga_dag::<N>(params)?;
         let runnable_saga = self.saga_prepare(dag).await?;
         let running_saga = runnable_saga.start().await?;

@@ -133,7 +133,7 @@ pub struct Nexus {
     authz: Arc<authz::Authz>,
 
     /// saga execution coordinator
-    sagas: SagaExecutor,
+    sagas: Arc<SagaExecutor>,
 
     /// Task representing completion of recovered Sagas
     recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
@@ -251,10 +251,10 @@ impl Nexus {
             sec_store,
         ));
 
-        let sagas = SagaExecutor::new(
+        let sagas = Arc::new(SagaExecutor::new(
             Arc::clone(&sec_client),
             log.new(o!("component" => "SagaExecutor")),
-        );
+        ));
 
         let client_state = dpd_client::ClientState {
             tag: String::from("nexus"),
@@ -516,7 +516,7 @@ impl Nexus {
                         resolver,
                         v2p_watcher_channel.clone(),
                         task_registry,
-                        task_nexus.clone(),
+                        task_nexus.sagas.clone(),
                     );
 
                     if let Err(_) =
@@ -554,6 +554,11 @@ impl Nexus {
 
     pub fn authz(&self) -> &Arc<authz::Authz> {
         &self.authz
+    }
+
+    #[cfg(test)]
+    pub(crate) fn saga_executor(&self) -> &Arc<SagaExecutor> {
+        &self.sagas
     }
 
     pub(crate) async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
