@@ -81,7 +81,8 @@ impl super::Nexus {
         };
 
         let saga_outputs = self
-            .execute_saga::<sagas::vpc_create::SagaVpcCreate>(saga_params)
+            .sagas
+            .saga_execute::<sagas::vpc_create::SagaVpcCreate>(saga_params)
             .await?;
 
         let (_, db_vpc) = saga_outputs
