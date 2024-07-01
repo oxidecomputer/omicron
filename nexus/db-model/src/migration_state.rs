@@ -37,6 +37,9 @@ impl MigrationState {
     pub const IN_PROGRESS: MigrationState =
         MigrationState(nexus::MigrationState::InProgress);
 
+    pub const TERMINAL_STATES: &'static [MigrationState] =
+        &[Self::COMPLETED, Self::FAILED];
+
     /// Returns `true` if this migration state means that the migration is no
     /// longer in progress (it has either succeeded or failed).
     #[must_use]
