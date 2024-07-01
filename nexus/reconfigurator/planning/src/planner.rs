@@ -1332,7 +1332,7 @@ mod test {
             .expect("No NTP zone pool?");
 
         // This is mostly for test stability across "example system" changes:
-        // Find how many other zones are using this same zone.
+        // Find how many other zones are using this same zpool.
         let zones_using_zpool = blueprint1.blueprint_zones.iter().fold(
             0,
             |acc, (_, zones_config)| {
