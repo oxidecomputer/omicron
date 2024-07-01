@@ -698,11 +698,9 @@ impl DataStore {
                 }
             })?;
 
-        self.instance_ssh_keys_delete(
-            opctx,
-            InstanceUuid::from_untyped_uuid(authz_instance.id()),
-        )
-        .await?;
+        let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
+        self.instance_ssh_keys_delete(opctx, instance_id).await?;
+        self.instance_mark_migrations_deleted(opctx, instance_id).await?;
 
         Ok(())
     }
@@ -1343,7 +1341,12 @@ mod tests {
         let migration = datastore
             .migration_insert(
                 &opctx,
-                Migration::new(Uuid::new_v4(), active_vmm.id, target_vmm.id),
+                Migration::new(
+                    Uuid::new_v4(),
+                    instance_id,
+                    active_vmm.id,
+                    target_vmm.id,
+                ),
             )
             .await
             .expect("migration should be inserted successfully!");

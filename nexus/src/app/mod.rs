@@ -5,6 +5,7 @@
 //! Nexus, the service that operates much of the control plane in an Oxide fleet
 
 use self::external_endpoints::NexusCertResolver;
+use self::saga::SagaExecutor;
 use crate::app::oximeter::LazyTimeseriesClient;
 use crate::app::sagas::SagaRequest;
 use crate::populate::populate_start;
@@ -34,6 +35,7 @@ use std::collections::HashMap;
 use std::net::SocketAddrV6;
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
+use std::sync::OnceLock;
 use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
@@ -132,7 +134,7 @@ pub struct Nexus {
     authz: Arc<authz::Authz>,
 
     /// saga execution coordinator
-    sec_client: Arc<steno::SecClient>,
+    sagas: SagaExecutor,
 
     /// Task representing completion of recovered Sagas
     recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
@@ -196,7 +198,10 @@ pub struct Nexus {
     // https://github.com/oxidecomputer/omicron/issues/3732
     external_dns_servers: Vec<IpAddr>,
 
-    /// Background tasks
+    /// Background task driver
+    background_tasks_driver: OnceLock<background::Driver>,
+
+    /// Handles to various specific tasks
     background_tasks: background::BackgroundTasks,
 
     /// Default Crucible region allocation strategy
@@ -238,6 +243,7 @@ impl Nexus {
             Arc::clone(&db_datastore),
             log.new(o!("component" => "SecStore")),
         )) as Arc<dyn steno::SecStore>;
+
         let sec_client = Arc::new(steno::sec(
             log.new(o!(
                 "component" => "SEC",
@@ -245,6 +251,11 @@ impl Nexus {
             )),
             sec_store,
         ));
+
+        let sagas = SagaExecutor::new(
+            Arc::clone(&sec_client),
+            log.new(o!("component" => "SagaExecutor")),
+        );
 
         let client_state = dpd_client::ClientState {
             tag: String::from("nexus"),
@@ -398,17 +409,8 @@ impl Nexus {
 
         let (saga_request, mut saga_request_recv) = SagaRequest::channel();
 
-        let background_tasks = background::BackgroundTasks::start(
-            &background_ctx,
-            Arc::clone(&db_datastore),
-            &config.pkg.background_tasks,
-            rack_id,
-            config.deployment.id,
-            resolver.clone(),
-            saga_request,
-            v2p_watcher_channel.clone(),
-            producer_registry,
-        );
+        let (background_tasks_initializer, background_tasks) =
+            background::BackgroundTasksInitializer::new();
 
         let external_resolver = {
             if config.deployment.external_dns_servers.is_empty() {
@@ -425,7 +427,7 @@ impl Nexus {
             log: log.new(o!()),
             db_datastore: Arc::clone(&db_datastore),
             authz: Arc::clone(&authz),
-            sec_client: Arc::clone(&sec_client),
+            sagas,
             recovery_task: std::sync::Mutex::new(None),
             external_server: std::sync::Mutex::new(None),
             techport_external_server: std::sync::Mutex::new(None),
@@ -451,22 +453,24 @@ impl Nexus {
                     as Arc<dyn nexus_auth::storage::Storage>,
             ),
             samael_max_issue_delay: std::sync::Mutex::new(None),
-            internal_resolver: resolver,
+            internal_resolver: resolver.clone(),
             external_resolver,
             external_dns_servers: config
                 .deployment
                 .external_dns_servers
                 .clone(),
+            background_tasks_driver: OnceLock::new(),
             background_tasks,
             default_region_allocation_strategy: config
                 .pkg
                 .default_region_allocation_strategy
                 .clone(),
-            v2p_notification_tx: v2p_watcher_channel.0,
+            v2p_notification_tx: v2p_watcher_channel.0.clone(),
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
         let nexus = Arc::new(nexus);
+        nexus.sagas.set_nexus(nexus.clone());
         let opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
             Arc::clone(&authz),
@@ -480,36 +484,55 @@ impl Nexus {
             Arc::new(Arc::new(SagaContext::new(
                 Arc::clone(&nexus),
                 saga_logger,
-                Arc::clone(&authz),
             ))),
-            db_datastore,
+            Arc::clone(&db_datastore),
             Arc::clone(&sec_client),
             sagas::ACTION_REGISTRY.clone(),
         );
 
         *nexus.recovery_task.lock().unwrap() = Some(recovery_task);
 
-        // Kick all background tasks once the populate step finishes.  Among
-        // other things, the populate step installs role assignments for
-        // internal identities that are used by the background tasks.  If we
-        // don't do this here, those tasks might fail spuriously on startup and
-        // not be retried for a while.
+        // Wait to start background tasks until after the populate step
+        // finishes.  Among other things, the populate step installs role
+        // assignments for internal identities that are used by the background
+        // tasks.  If we don't do this here, those tasks would fail spuriously
+        // on startup and not be retried for a while.
         let task_nexus = nexus.clone();
         let task_log = nexus.log.clone();
+        let task_registry = producer_registry.clone();
+        let task_config = config.clone();
         tokio::spawn(async move {
             match task_nexus.wait_for_populate().await {
                 Ok(_) => {
-                    info!(
-                        task_log,
-                        "populate complete; activating background tasks"
-                    );
-                    for task in task_nexus.background_tasks.driver.tasks() {
-                        task_nexus.background_tasks.driver.activate(task);
-                    }
+                    info!(task_log, "populate complete");
                 }
                 Err(_) => {
                     error!(task_log, "populate failed");
                 }
+            };
+
+            // That said, even if the populate step fails, we may as well try to
+            // start the background tasks so that whatever can work will work.
+            info!(task_log, "activating background tasks");
+
+            let driver = background_tasks_initializer.start(
+                &task_nexus.background_tasks,
+                background_ctx,
+                db_datastore,
+                task_config.pkg.background_tasks,
+                rack_id,
+                task_config.deployment.id,
+                resolver,
+                saga_request,
+                v2p_watcher_channel.clone(),
+                task_registry,
+            );
+
+            if let Err(_) = task_nexus.background_tasks_driver.set(driver) {
+                panic!(
+                    "concurrent initialization of \
+                             background_tasks_driver?!"
+                )
             }
         });
 
@@ -552,6 +575,10 @@ impl Nexus {
     /// Return the tunable configuration parameters, e.g. for use in tests.
     pub fn tunables(&self) -> &Tunables {
         &self.tunables
+    }
+
+    pub fn authz(&self) -> &Arc<authz::Authz> {
+        &self.authz
     }
 
     pub(crate) async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
@@ -934,7 +961,33 @@ impl Nexus {
                 let nexus = self.clone();
                 tokio::spawn(async move {
                     let saga_result = nexus
-                        .execute_saga::<sagas::region_replacement_start::SagaRegionReplacementStart>(
+                        .sagas
+                        .saga_execute::<sagas::region_replacement_start::SagaRegionReplacementStart>(
+                            params,
+                        )
+                        .await;
+
+                    match saga_result {
+                        Ok(_) => {
+                            info!(
+                                nexus.log,
+                                "region replacement start saga completed ok"
+                            );
+                        }
+
+                        Err(e) => {
+                            warn!(nexus.log, "region replacement start saga returned an error: {e}");
+                        }
+                    }
+                });
+            }
+
+            SagaRequest::RegionReplacementDrive { params } => {
+                let nexus = self.clone();
+                tokio::spawn(async move {
+                    let saga_result = nexus
+                        .sagas
+                        .saga_execute::<sagas::region_replacement_drive::SagaRegionReplacementDrive>(
                             params,
                         )
                         .await;
@@ -948,7 +1001,32 @@ impl Nexus {
                         }
 
                         Err(e) => {
-                            warn!(nexus.log, "region replacement start saga returned an error: {e}");
+                            warn!(nexus.log, "region replacement drive saga returned an error: {e}");
+                        }
+                    }
+                });
+            }
+
+            SagaRequest::RegionReplacementFinish { params } => {
+                let nexus = self.clone();
+                tokio::spawn(async move {
+                    let saga_result = nexus
+                        .sagas
+                        .saga_execute::<sagas::region_replacement_finish::SagaRegionReplacementFinish>(
+                            params,
+                        )
+                        .await;
+
+                    match saga_result {
+                        Ok(_) => {
+                            info!(
+                                nexus.log,
+                                "region replacement finish saga completed ok"
+                            );
+                        }
+
+                        Err(e) => {
+                            warn!(nexus.log, "region replacement finish saga returned an error: {e}");
                         }
                     }
                 });

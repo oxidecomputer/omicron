@@ -26,6 +26,7 @@ use nexus_types::external_api::views::FloatingIp;
 use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::User;
+use nexus_types::external_api::views::VpcSubnet;
 use nexus_types::external_api::views::{Project, Silo, Vpc, VpcRouter};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
@@ -36,6 +37,9 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::RouteDestination;
+use omicron_common::api::external::RouteTarget;
+use omicron_common::api::external::RouterRoute;
 use omicron_common::disk::DiskIdentity;
 use omicron_sled_agent::sim::SledAgent;
 use omicron_test_utils::dev::poll::wait_for_condition;
@@ -43,6 +47,8 @@ use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use oxnet::Ipv4Net;
+use oxnet::Ipv6Net;
 use slog::debug;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
@@ -561,6 +567,32 @@ pub async fn create_vpc_with_error(
     .unwrap()
 }
 
+pub async fn create_vpc_subnet(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    subnet_name: &str,
+    ipv4_block: Ipv4Net,
+    ipv6_block: Option<Ipv6Net>,
+    custom_router: Option<&str>,
+) -> VpcSubnet {
+    object_create(
+        &client,
+        &format!("/v1/vpc-subnets?project={project_name}&vpc={vpc_name}"),
+        &params::VpcSubnetCreate {
+            identity: IdentityMetadataCreateParams {
+                name: subnet_name.parse().unwrap(),
+                description: "vpc description".to_string(),
+            },
+            ipv4_block,
+            ipv6_block,
+            custom_router: custom_router
+                .map(|n| NameOrId::Name(n.parse().unwrap())),
+        },
+    )
+    .await
+}
+
 pub async fn create_router(
     client: &ClientTestContext,
     project_name: &str,
@@ -577,6 +609,78 @@ pub async fn create_router(
                 description: String::from("router description"),
             },
         },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
+}
+
+pub async fn create_route(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    router_name: &str,
+    route_name: &str,
+    destination: RouteDestination,
+    target: RouteTarget,
+) -> RouterRoute {
+    NexusRequest::objects_post(
+        &client,
+        format!(
+            "/v1/vpc-router-routes?project={}&vpc={}&router={}",
+            &project_name, &vpc_name, &router_name
+        )
+        .as_str(),
+        &params::RouterRouteCreate {
+            identity: IdentityMetadataCreateParams {
+                name: route_name.parse().unwrap(),
+                description: String::from("route description"),
+            },
+            target,
+            destination,
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn create_route_with_error(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    router_name: &str,
+    route_name: &str,
+    destination: RouteDestination,
+    target: RouteTarget,
+    status: StatusCode,
+) -> HttpErrorResponseBody {
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            format!(
+                "/v1/vpc-router-routes?project={}&vpc={}&router={}",
+                &project_name, &vpc_name, &router_name
+            )
+            .as_str(),
+        )
+        .body(Some(&params::RouterRouteCreate {
+            identity: IdentityMetadataCreateParams {
+                name: route_name.parse().unwrap(),
+                description: String::from("route description"),
+            },
+            target,
+            destination,
+        }))
+        .expect_status(Some(status)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()

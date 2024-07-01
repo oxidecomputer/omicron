@@ -361,7 +361,7 @@ async fn test_snapshot_prevents_other_disk(
     // The Crucible snapshots still remain
     assert!(!disk_test.crucible_resources_deleted().await);
 
-    // Attempt disk allocation, which will fail - the presense of the snapshot
+    // Attempt disk allocation, which will fail - the presence of the snapshot
     // means the region wasn't deleted.
     let disk_size = ByteCount::from_gibibytes_u32(10);
     let next_disk_name: Name = "next-disk".parse().unwrap();

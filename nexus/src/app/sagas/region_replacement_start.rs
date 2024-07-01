@@ -865,19 +865,18 @@ pub(crate) mod test {
             .unwrap();
 
         // Run the region replacement start saga
-        let dag = create_saga_dag::<SagaRegionReplacementStart>(Params {
+        let params = Params {
             serialized_authn: Serialized::for_opctx(&opctx),
             request: request.clone(),
             allocation_strategy: RegionAllocationStrategy::Random {
                 seed: None,
             },
-        })
-        .unwrap();
-
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-
-        // Actually run the saga
-        let output = nexus.run_saga(runnable_saga).await.unwrap();
+        };
+        let output = nexus
+            .sagas
+            .saga_execute::<SagaRegionReplacementStart>(params)
+            .await
+            .unwrap();
 
         // Validate the state transition
         let result = datastore

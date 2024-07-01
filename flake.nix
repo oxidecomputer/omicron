@@ -255,12 +255,12 @@
         let
           name = "clickhouse";
           version = readVersionFile "${name}_version";
-          # N.B. that unlike maghemite and dendrite, the Clickhouse hashes
-          # in `tools/clickhouse_checksums` are MD5 rather than SHA256, so we
-          # can't give Nix those hashes and must instead determine it ourselves.
-          # this means that we will have to update this SHA if the clickhouse
-          # version changes.
-          sha256 = "0wx8w9sdms5hsc9f835ivsissf15wjzdb9cvxr65xdi384i9pkzx";
+          sha256 =
+            let
+              shaFile = builtins.readFile  ./tools/${name}_checksums;
+              shas = lib.strings.splitString "\n" shaFile;
+            in
+            findSha shas "CIDL_SHA256_LINUX";
           src = builtins.fetchurl
             {
               inherit sha256;

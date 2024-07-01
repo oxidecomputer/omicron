@@ -67,7 +67,7 @@ ipnetwork = { version = "0.20.0", features = ["schemars"] }
 itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
-lazy_static = { version = "1.4.0", default-features = false, features = ["spin_no_std"] }
+lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
 libc = { version = "0.2.155", features = ["extra_traits"] }
 log = { version = "0.4.21", default-features = false, features = ["std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
@@ -93,7 +93,7 @@ schemars = { version = "0.8.21", features = ["bytes", "chrono", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.23", features = ["serde"] }
 serde = { version = "1.0.203", features = ["alloc", "derive", "rc"] }
-serde_json = { version = "1.0.117", features = ["raw_value", "unbounded_depth"] }
+serde_json = { version = "1.0.118", features = ["raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.5.0", features = ["inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
@@ -171,7 +171,7 @@ ipnetwork = { version = "0.20.0", features = ["schemars"] }
 itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
-lazy_static = { version = "1.4.0", default-features = false, features = ["spin_no_std"] }
+lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
 libc = { version = "0.2.155", features = ["extra_traits"] }
 log = { version = "0.4.21", default-features = false, features = ["std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
@@ -197,7 +197,7 @@ schemars = { version = "0.8.21", features = ["bytes", "chrono", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.23", features = ["serde"] }
 serde = { version = "1.0.203", features = ["alloc", "derive", "rc"] }
-serde_json = { version = "1.0.117", features = ["raw_value", "unbounded_depth"] }
+serde_json = { version = "1.0.118", features = ["raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.5.0", features = ["inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }

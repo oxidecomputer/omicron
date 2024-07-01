@@ -6,7 +6,7 @@
 //! all Silos, their externally-visible DNS names, and the TLS certificates
 //! associated with those names
 
-use super::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 use crate::app::external_endpoints::read_all_endpoints;
 pub use crate::app::external_endpoints::ExternalEndpoints;
 use futures::future::BoxFuture;
@@ -23,21 +23,14 @@ pub struct ExternalEndpointsWatcher {
     datastore: Arc<DataStore>,
     last: Option<ExternalEndpoints>,
     tx: watch::Sender<Option<ExternalEndpoints>>,
-    rx: watch::Receiver<Option<ExternalEndpoints>>,
 }
 
 impl ExternalEndpointsWatcher {
-    pub fn new(datastore: Arc<DataStore>) -> ExternalEndpointsWatcher {
-        let (tx, rx) = watch::channel(None);
-        ExternalEndpointsWatcher { datastore, last: None, tx, rx }
-    }
-
-    /// Exposes the latest set of TLS certificates
-    ///
-    /// You can use the returned [`watch::Receiver`] to look at the latest
-    /// configuration or to be notified when it changes.
-    pub fn watcher(&self) -> watch::Receiver<Option<ExternalEndpoints>> {
-        self.rx.clone()
+    pub fn new(
+        datastore: Arc<DataStore>,
+        tx: watch::Sender<Option<ExternalEndpoints>>,
+    ) -> ExternalEndpointsWatcher {
+        ExternalEndpointsWatcher { datastore, last: None, tx }
     }
 }
 
@@ -117,14 +110,15 @@ impl BackgroundTask for ExternalEndpointsWatcher {
 
 #[cfg(test)]
 mod test {
-    use crate::app::background::common::BackgroundTask;
-    use crate::app::background::external_endpoints::ExternalEndpointsWatcher;
+    use super::ExternalEndpointsWatcher;
+    use crate::app::background::BackgroundTask;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
     use nexus_test_utils::resource_helpers::create_silo;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::identity::Resource;
+    use tokio::sync::watch;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -139,8 +133,8 @@ mod test {
         );
 
         // Verify the initial state.
-        let mut task = ExternalEndpointsWatcher::new(datastore.clone());
-        let watcher = task.watcher();
+        let (tx, watcher) = watch::channel(None);
+        let mut task = ExternalEndpointsWatcher::new(datastore.clone(), tx);
         assert!(watcher.borrow().is_none());
 
         // The datastore from the ControlPlaneTestContext is initialized with
