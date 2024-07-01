@@ -1083,8 +1083,16 @@ mod tests {
 
         // Now let's verify we saw the correct firmware update.
         for rd in &raw_disks {
-            let managed =
-                all_disks_gen2.values.get(rd.identity()).expect("disk exists");
+            let managed = all_disks_gen2
+                .iter_all_inner()
+                .find_map(|(identity, disk)| {
+                    if identity == rd.identity() {
+                        Some(disk)
+                    } else {
+                        None
+                    }
+                })
+                .expect("disk exists");
             match managed {
                 ManagedDisk::ExplicitlyManaged(disk)
                 | ManagedDisk::ImplicitlyManaged(disk) => {
@@ -1321,7 +1329,7 @@ mod tests {
         let expected: HashSet<_> =
             disks.iter().skip(1).take(3).map(|d| d.identity()).collect();
         let actual: HashSet<_> =
-            all_disks.iter_all().map(|(identity, _, _)| identity).collect();
+            all_disks.iter_all().map(|(identity, _, _, _)| identity).collect();
         assert_eq!(expected, actual);
 
         // Ensure the same set of disks and make sure no change occurs
@@ -1355,7 +1363,7 @@ mod tests {
         let expected: HashSet<_> =
             disks.iter().skip(4).take(5).map(|d| d.identity()).collect();
         let actual: HashSet<_> =
-            all_disks.iter_all().map(|(identity, _, _)| identity).collect();
+            all_disks.iter_all().map(|(identity, _, _, _)| identity).collect();
         assert_eq!(expected, actual);
 
         harness.cleanup().await;
