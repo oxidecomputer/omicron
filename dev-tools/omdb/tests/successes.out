@@ -489,9 +489,12 @@ task: "external_endpoints"
 task: "instance_updater"
   configured period: every 30s
   currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "instance_updater" (don't know how to interpret details: Object {"destroyed_active_vmms": Number(0), "error": Null, "sagas_started": Number(0)})
+    total instances in need of updates: 0
+      instances with destroyed active VMMs: 0
+      instances with terminated active migrations: 0
+    update sagas queued: 0
 
 task: "instance_watcher"
   configured period: every <REDACTED_DURATION>s

@@ -1243,11 +1243,6 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
     } else if name == "lookup_region_port" {
         match serde_json::from_value::<LookupRegionPortStatus>(details.clone())
         {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
-
             Ok(LookupRegionPortStatus { found_port_ok, errors }) => {
                 println!("    total filled in ports: {}", found_port_ok.len());
                 for line in &found_port_ok {
@@ -1258,6 +1253,57 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 for line in &errors {
                     println!("    > {line}");
                 }
+            }
+
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details,
+            ),
+        }
+    } else if name == "instance_updater" {
+        #[derive(Deserialize)]
+        struct UpdaterStatus {
+            /// number of instances found with destroyed active VMMs
+            destroyed_active_vmms: usize,
+
+            /// number of instances found with terminated active migrations
+            terminated_active_migrations: usize,
+
+            /// number of update sagas queued.
+            update_sagas_queued: usize,
+
+            /// the last error that occurred during execution.
+            error: Option<String>,
+        }
+        match serde_json::from_value::<UpdaterStatus>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(UpdaterStatus {
+                destroyed_active_vmms,
+                terminated_active_migrations,
+                update_sagas_queued,
+                error,
+            }) => {
+                if let Some(error) = error {
+                    println!("    task did not complete successfully!");
+                    println!("      most recent error: {error}");
+                }
+
+                println!(
+                    "    total instances in need of updates: {}",
+                    destroyed_active_vmms + terminated_active_migrations
+                );
+                println!(
+                    "      instances with destroyed active VMMs: {}",
+                    destroyed_active_vmms,
+                );
+                println!(
+                    "      instances with terminated active migrations: {}",
+                    terminated_active_migrations,
+                );
+                println!("    update sagas queued: {update_sagas_queued}");
             }
         };
     } else {
