@@ -151,11 +151,6 @@ impl Driver {
         // This just provides the handles we need to read status and wake up the
         // tokio task.
         let task = Task {
-            description,
-            period,
-            status: status_rx,
-            tokio_task,
-            activator: activator.clone(),
             description: taskdef.description.to_string(),
             period: taskdef.period,
             status: status_rx,
