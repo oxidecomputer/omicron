@@ -540,7 +540,7 @@ mod test {
             description: "test task".to_string(),
             period: Duration::from_secs(300), // should never fire in this test
             task_impl: Box::new(t3),
-            opctx: opctx,
+            opctx,
             watchers: vec![Box::new(dep_rx1), Box::new(dep_rx2)],
             activator: &act3,
         });
