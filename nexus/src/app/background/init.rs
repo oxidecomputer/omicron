@@ -254,7 +254,6 @@ impl BackgroundTasksInitializer {
         nexus_id: Uuid,
         resolver: internal_dns::resolver::Resolver,
         saga_request: Sender<SagaRequest>,
-        v2p_watcher: (watch::Sender<()>, watch::Receiver<()>),
         producer_registry: ProducerRegistry,
     ) -> Driver {
         let mut driver = self.driver;
@@ -539,7 +538,7 @@ impl BackgroundTasksInitializer {
             config.v2p_mapping_propagation.period_secs,
             Box::new(V2PManager::new(datastore.clone())),
             opctx.child(BTreeMap::new()),
-            vec![Box::new(v2p_watcher.1)],
+            vec![],
             task_v2p_manager,
         );
 
@@ -590,7 +589,7 @@ impl BackgroundTasksInitializer {
                 resolver.clone(),
                 producer_registry,
                 instance_watcher::WatcherIdentity { nexus_id, rack_id },
-                v2p_watcher.0,
+                task_v2p_manager.clone(),
             );
             driver.register(
                 "instance_watcher".to_string(),
