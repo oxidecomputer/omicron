@@ -39,6 +39,7 @@ use omicron_common::api::internal::shared::{
     NetworkInterface, SourceNatConfig,
 };
 use omicron_common::backoff;
+use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid};
 use propolis_client::Client as PropolisClient;
 use rand::prelude::IteratorRandom;
@@ -213,6 +214,9 @@ struct PropolisSetup {
 enum InstanceRequest {
     RequestZoneBundle {
         tx: oneshot::Sender<Result<ZoneBundleMetadata, BundleError>>,
+    },
+    GetFilesystemPool {
+        tx: oneshot::Sender<Option<ZpoolName>>,
     },
     CurrentState {
         tx: oneshot::Sender<SledInstanceState>,
@@ -403,6 +407,10 @@ impl InstanceRunner {
                     let result = match request {
                         Some(RequestZoneBundle { tx }) => {
                             tx.send(self.request_zone_bundle().await)
+                                .map_err(|_| Error::FailedSendClientClosed)
+                        },
+                        Some(GetFilesystemPool { tx } ) => {
+                            tx.send(self.get_filesystem_zpool())
                                 .map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(CurrentState{ tx }) => {
@@ -1059,6 +1067,17 @@ impl Instance {
         Ok(())
     }
 
+    pub async fn get_filesystem_zpool(
+        &self,
+    ) -> Result<Option<ZpoolName>, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(InstanceRequest::GetFilesystemPool { tx })
+            .await
+            .map_err(|_| Error::FailedSendChannelClosed)?;
+        Ok(rx.await?)
+    }
+
     pub async fn current_state(&self) -> Result<SledInstanceState, Error> {
         let (tx, rx) = oneshot::channel();
         self.tx
@@ -1178,6 +1197,13 @@ impl InstanceRunner {
                     .await
             }
         }
+    }
+
+    fn get_filesystem_zpool(&self) -> Option<ZpoolName> {
+        let Some(run_state) = &self.running_state else {
+            return None;
+        };
+        run_state.running_zone.root_zpool().map(|p| p.clone())
     }
 
     fn current_state(&self) -> SledInstanceState {

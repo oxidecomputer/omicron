@@ -840,8 +840,14 @@ impl SledAgent {
         // the old U.2s, has stopped using them.
         self.inner.zone_bundler.await_completion_of_prior_bundles().await;
 
-        // - TODO: Mark probes failed?
-        // - TODO: Mark instances failed?
+        // Ensure that all probes, at least after our call to
+        // "omicron_physical_disks_ensure", stop using any disks that
+        // may have been in-service from before that request.
+        self.inner.probes.only_use_disks(&latest_disks).await;
+
+        // Do the same for instances - mark them failed if they were using
+        // expunged disks.
+        self.inner.instances.only_use_disks(latest_disks).await?;
 
         Ok(disk_result)
     }

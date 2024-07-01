@@ -10,7 +10,7 @@ use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
 use crate::zone::{AddressRequest, IPADM, ZONE_PREFIX};
-use crate::zpool::PathInPool;
+use crate::zpool::{PathInPool, ZpoolName};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use ipnetwork::IpNetwork;
@@ -406,6 +406,11 @@ impl RunningZone {
     /// Returns the filesystem path to the zone's root in the GZ.
     pub fn root(&self) -> Utf8PathBuf {
         self.inner.root()
+    }
+
+    /// Returns the zpool on which the filesystem path has been placed.
+    pub fn root_zpool(&self) -> Option<&ZpoolName> {
+        self.inner.zonepath.pool.as_ref()
     }
 
     pub fn control_interface(&self) -> AddrObject {

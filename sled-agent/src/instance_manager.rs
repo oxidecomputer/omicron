@@ -30,8 +30,9 @@ use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use sled_storage::manager::StorageHandle;
+use sled_storage::resources::AllDisks;
 use slog::Logger;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
@@ -325,6 +326,20 @@ impl InstanceManager {
             .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
         rx.await?
     }
+
+    /// Marks instances failed unless they're using "disks".
+    ///
+    /// This function looks for transient zone filesystem usage on expunged
+    /// zpools.
+    pub async fn only_use_disks(&self, disks: AllDisks) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::OnlyUseDisks { disks, tx })
+            .await
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
+        rx.await?
+    }
 }
 
 // Most requests that can be sent to the "InstanceManagerRunner" task.
@@ -383,6 +398,10 @@ enum InstanceManagerRequest {
     GetState {
         instance_id: InstanceUuid,
         tx: oneshot::Sender<Result<SledInstanceState, Error>>,
+    },
+    OnlyUseDisks {
+        disks: AllDisks,
+        tx: oneshot::Sender<Result<(), Error>>,
     },
 }
 
@@ -493,6 +512,9 @@ impl InstanceManagerRunner {
                             // serialize with the requests that actually update
                             // the state...
                             self.get_instance_state(tx, instance_id).await
+                        },
+                        Some(OnlyUseDisks { disks, tx } ) => {
+                            self.only_use_disks(tx, disks).await
                         },
                         None => {
                             warn!(self.log, "InstanceManager's request channel closed; shutting down");
@@ -773,6 +795,35 @@ impl InstanceManagerRunner {
 
         let state = instance.current_state().await?;
         tx.send(Ok(state)).map_err(|_| Error::FailedSendClientClosed)?;
+        Ok(())
+    }
+
+    async fn only_use_disks(
+        &mut self,
+        tx: oneshot::Sender<Result<(), Error>>,
+        disks: AllDisks,
+    ) -> Result<(), Error> {
+        let u2_set: HashSet<_> = disks.all_u2_zpools().into_iter().collect();
+
+        let mut to_remove = vec![];
+        for (id, (_, instance)) in self.instances.iter() {
+            // If we can read the filesystem pool, consider it. Otherwise, move
+            // on, to prevent blocking the cleanup of other instances.
+            let Ok(Some(filesystem_pool)) =
+                instance.get_filesystem_zpool().await
+            else {
+                continue;
+            };
+            if !u2_set.contains(&filesystem_pool) {
+                to_remove.push(*id);
+            }
+        }
+
+        for id in to_remove {
+            self.instances.remove(&id);
+        }
+
+        tx.send(Ok(())).map_err(|_| Error::FailedSendClientClosed)?;
         Ok(())
     }
 }

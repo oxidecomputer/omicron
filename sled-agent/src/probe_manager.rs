@@ -18,12 +18,13 @@ use rand::prelude::IteratorRandom;
 use rand::SeedableRng;
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::manager::StorageHandle;
+use sled_storage::resources::AllDisks;
 use slog::{error, warn, Logger};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, MutexGuard};
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use uuid::Uuid;
@@ -84,6 +85,33 @@ impl ProbeManager {
 
     pub(crate) async fn run(&self) {
         self.inner.run().await;
+    }
+
+    /// Removes any probes using filesystem roots on zpools that are not
+    /// contained in the set of "disks".
+    pub(crate) async fn only_use_disks(&self, disks: &AllDisks) {
+        let u2_set: HashSet<_> = disks.all_u2_zpools().into_iter().collect();
+        let mut probes = self.inner.running_probes.lock().await;
+
+        let to_remove = probes
+            .iter()
+            .filter_map(|(id, probe)| {
+                let Some(probe_pool) = probe.root_zpool() else {
+                    // No known pool for this probe
+                    return None;
+                };
+
+                if !u2_set.contains(probe_pool) {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        for probe_id in to_remove {
+            self.inner.remove_probe_locked(&mut probes, probe_id).await;
+        }
     }
 }
 
@@ -297,7 +325,7 @@ impl ProbeManagerInner {
     }
 
     /// Remove a set of probes from this sled.
-    async fn remove<'a, I>(self: &Arc<Self>, probes: I)
+    async fn remove<'a, I>(&self, probes: I)
     where
         I: Iterator<Item = &'a ProbeState>,
     {
@@ -309,8 +337,17 @@ impl ProbeManagerInner {
 
     /// Remove a probe from this sled. This tears down the zone and it's
     /// network resources.
-    async fn remove_probe(self: &Arc<Self>, id: Uuid) {
-        match self.running_probes.lock().await.remove(&id) {
+    async fn remove_probe(&self, id: Uuid) {
+        let mut probes = self.running_probes.lock().await;
+        self.remove_probe_locked(&mut probes, id).await
+    }
+
+    async fn remove_probe_locked(
+        &self,
+        probes: &mut MutexGuard<'_, HashMap<Uuid, RunningZone>>,
+        id: Uuid,
+    ) {
+        match probes.remove(&id) {
             Some(mut running_zone) => {
                 for l in running_zone.links_mut() {
                     if let Err(e) = l.delete() {
