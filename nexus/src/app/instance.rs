@@ -1440,10 +1440,11 @@ impl super::Nexus {
                 serialized_authn: authn::saga::Serialized::for_opctx(opctx),
                 authz_instance,
             };
-            self.execute_saga::<sagas::instance_update::SagaInstanceUpdate>(
-                saga_params,
-            )
-            .await?;
+            self.sagas
+                .saga_execute::<sagas::instance_update::SagaInstanceUpdate>(
+                    saga_params,
+                )
+                .await?;
         }
         Ok(())
     }

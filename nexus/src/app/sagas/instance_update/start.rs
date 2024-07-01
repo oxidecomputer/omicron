@@ -153,7 +153,8 @@ async fn siu_fetch_state_and_start_real_saga(
         .map_err(ActionError::action_failed)?;
     osagactx
         .nexus()
-        .execute_saga::<super::SagaDoActualInstanceUpdate>(super::RealParams {
+        .sagas
+        .saga_execute::<super::SagaDoActualInstanceUpdate>(super::RealParams {
             serialized_authn,
             authz_instance,
             state,

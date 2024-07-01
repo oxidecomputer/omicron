@@ -647,7 +647,7 @@ impl BackgroundTasksInitializer {
                 Box::new(updater),
                 opctx.child(BTreeMap::new()),
                 vec![],
-                task_instance_updaterm,
+                task_instance_updater,
             );
         }
 
