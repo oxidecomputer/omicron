@@ -6,7 +6,7 @@
 //!
 //! TODO this is currently a placeholder for a future PR
 
-use super::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 use crate::app::sagas::instance_update;
 use crate::app::sagas::SagaRequest;
 use anyhow::Context;
