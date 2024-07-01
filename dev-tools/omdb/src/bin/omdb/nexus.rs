@@ -28,6 +28,7 @@ use nexus_client::types::SledSelector;
 use nexus_client::types::UninitializedSledId;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::deployment::Blueprint;
+use nexus_types::internal_api::background::RegionReplacementDriverStatus;
 use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -1047,6 +1048,38 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     "    sled resource reservations deleted: {}",
                     sled_reservations_deleted,
                 );
+            }
+        };
+    } else if name == "region_replacement_driver" {
+        match serde_json::from_value::<RegionReplacementDriverStatus>(
+            details.clone(),
+        ) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+
+            Ok(status) => {
+                println!(
+                    "    number of region replacement drive sagas started ok: {}",
+                    status.drive_invoked_ok.len()
+                );
+                for line in &status.drive_invoked_ok {
+                    println!("    > {line}");
+                }
+
+                println!(
+                    "    number of region replacement finish sagas started ok: {}",
+                    status.finish_invoked_ok.len()
+                );
+                for line in &status.finish_invoked_ok {
+                    println!("    > {line}");
+                }
+
+                println!("    number of errors: {}", status.errors.len());
+                for line in &status.errors {
+                    println!("    > {line}");
+                }
             }
         };
     } else {

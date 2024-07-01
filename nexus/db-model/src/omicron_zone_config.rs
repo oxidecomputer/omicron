@@ -671,6 +671,7 @@ impl OmicronZoneNic {
             vni: omicron_common::api::external::Vni::try_from(*self.vni)
                 .context("parsing VNI")?,
             subnet: self.subnet.into(),
+            transit_ips: vec![],
         })
     }
 }

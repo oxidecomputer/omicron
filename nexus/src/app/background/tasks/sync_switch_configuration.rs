@@ -6,7 +6,7 @@
 //! to relevant management daemons (dendrite, mgd, sled-agent, etc.)
 
 use crate::app::{
-    background::networking::{
+    background::tasks::networking::{
         api_to_dpd_port_settings, build_dpd_clients, build_mgd_clients,
     },
     map_switch_zone_addrs,
@@ -23,7 +23,7 @@ use nexus_db_model::{
 };
 use uuid::Uuid;
 
-use super::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 use display_error_chain::DisplayErrorChain;
 use dpd_client::types::PortId;
 use futures::future::BoxFuture;
@@ -235,14 +235,19 @@ impl SwitchPortSettingsManager {
             let config = sled_agent_client::types::BfdPeerConfig {
                 local: spec.local.map(|x| x.ip()),
                 remote: spec.remote.ip(),
-                detection_threshold: spec.detection_threshold.0.try_into().map_err(|_| {
-                    omicron_common::api::external::Error::InternalError {
-                        internal_message: format!(
-                            "db_bfd_peer_configs: detection threshold overflow: {}",
-                            spec.detection_threshold.0,
-                        ),
-                    }
-                })?,
+                detection_threshold: spec
+                    .detection_threshold
+                    .0
+                    .try_into()
+                    .map_err(|_| {
+                        omicron_common::api::external::Error::InternalError {
+                            internal_message: format!(
+                                "db_bfd_peer_configs: detection threshold \
+                                 overflow: {}",
+                                spec.detection_threshold.0,
+                            ),
+                        }
+                    })?,
                 required_rx: spec.required_rx.0.into(),
                 mode: match spec.mode {
                     nexus_db_model::BfdMode::SingleHop => {
@@ -252,15 +257,17 @@ impl SwitchPortSettingsManager {
                         sled_agent_client::types::BfdMode::MultiHop
                     }
                 },
-                switch: spec.switch.parse().map_err(|e: ParseSwitchLocationError| {
-                    omicron_common::api::external::Error::InternalError {
-                        internal_message: format!(
-                            "db_bfd_peer_configs: failed to parse switch name: {}: {:?}",
-                            spec.switch,
-                            e,
-                        ),
-                    }
-                })?,
+                switch: spec.switch.parse().map_err(
+                    |e: ParseSwitchLocationError| {
+                        omicron_common::api::external::Error::InternalError {
+                            internal_message: format!(
+                                "db_bfd_peer_configs: failed to parse switch \
+                                 name: {}: {:?}",
+                                spec.switch, e,
+                            ),
+                        }
+                    },
+                )?,
             };
             result.push(config);
         }
@@ -1760,45 +1767,44 @@ async fn static_routes_on_switch<'a>(
     let mut routes_on_switch = HashMap::new();
 
     for (location, client) in mgd_clients {
-        let static_routes: SwitchStaticRoutes = match client
-            .static_list_v4_routes()
-            .await
-        {
-            Ok(routes) => {
-                let mut flattened = HashSet::new();
-                for (destination, paths) in routes.iter() {
-                    let Ok(dst) = destination.parse() else {
-                        error!(
+        let static_routes: SwitchStaticRoutes =
+            match client.static_list_v4_routes().await {
+                Ok(routes) => {
+                    let mut flattened = HashSet::new();
+                    for (destination, paths) in routes.iter() {
+                        let Ok(dst) = destination.parse() else {
+                            error!(
                                 log,
-                                "failed to parse static route destination: {destination}"
+                                "failed to parse static route destination: \
+                                 {destination}"
                             );
-                        continue;
-                    };
-                    for p in paths.iter() {
-                        let nh = match p.nexthop {
-                            IpAddr::V4(addr) => addr,
-                            IpAddr::V6(addr) => {
-                                error!(
-                                    log,
-                                    "ipv6 nexthops not supported: {addr}"
-                                );
-                                continue;
-                            }
+                            continue;
                         };
-                        flattened.insert((nh, dst, p.vlan_id));
+                        for p in paths.iter() {
+                            let nh = match p.nexthop {
+                                IpAddr::V4(addr) => addr,
+                                IpAddr::V6(addr) => {
+                                    error!(
+                                        log,
+                                        "ipv6 nexthops not supported: {addr}"
+                                    );
+                                    continue;
+                                }
+                            };
+                            flattened.insert((nh, dst, p.vlan_id));
+                        }
                     }
+                    flattened
                 }
-                flattened
-            }
-            Err(_) => {
-                error!(
-                    &log,
-                    "unable to retrieve routes from switch";
-                    "switch_location" => ?location,
-                );
-                continue;
-            }
-        };
+                Err(_) => {
+                    error!(
+                        &log,
+                        "unable to retrieve routes from switch";
+                        "switch_location" => ?location,
+                    );
+                    continue;
+                }
+            };
         routes_on_switch.insert(*location, static_routes);
     }
     routes_on_switch

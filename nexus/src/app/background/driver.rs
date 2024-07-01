@@ -2,132 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! # Nexus Background Tasks
+//! Generic system for managing execution of background tasks
 //!
-//! A **background task** in Nexus is any operation that can be activated both
-//! periodically and by an explicit signal.  This is aimed at RFD 373-style
-//! "reliable persistent workflows", also called "reconcilers" or "controllers".
-//! These are a kind of automation that examines some _current_ state, compares
-//! it to some _intended_ state, and potentially takes action to try to bring
-//! the current state in sync with the intended state.  Our canonical example is
-//! that we want to have Nexus monitor the intended DNS configuration.  When it
-//! changes, we want to propagate the new configuration to all DNS servers.  We
-//! implement this with three different background tasks:
-//!
-//! 1. `DnsConfigWatcher` reads the DNS configuration from the database, stores
-//!    it in memory, and makes it available via a `tokio::sync::watch` channel.
-//! 2. `DnsServersWatcher` reads the list of DNS servers from the database,
-//!    stores it in memory, and makes it available via a `tokio::sync::watch`
-//!    channel.
-//! 3. `DnsPropagator` uses the the watch channels provided by the other two
-//!    background tasks to notice when either the DNS configuration or the list
-//!    of DNS servers has changed.  It uses the latest values to make a request
-//!    to each server to update its configuration.
-//!
-//! When Nexus changes the DNS configuration, it will update the database with
-//! the new configuration and then explicitly activate the `DnsConfigWatcher`.
-//! When it reads the new config, it will send it to its watch channel, and that
-//! will activate the `DnsPropagator`.  If any of this fails, or if Nexus
-//! crashes at any point, then the periodic activation of every background task
-//! will eventually cause the latest config to be propagated to all of the
-//! current servers.
-//!
-//! The background task framework here is pretty minimal: essentially what it
-//! gives you is that you just write an idempotent function that you want to
-//! happen periodically or on-demand, wrap it in an impl of `BackgroundTask`,
-//! register that with the `Driver`, and you're done.  The framework will take
-//! care of:
-//!
-//! * providing a way for Nexus at-large to activate your task
-//! * activating your task periodically
-//! * ensuring that the task is activated only once at a time in this Nexus
-//!   (but note that it may always be running concurrently in other Nexus
-//!   instances)
-//! * providing basic visibility into whether the task is running, when the task
-//!   last ran, etc.
-//!
-//! We may well want to extend the framework as we build more tasks in general
-//! and reconcilers specifically.  But we should be mindful not to create
-//! footguns for ourselves!  See "Design notes" below.
-//!
-//! ## Notes for background task implementors
-//!
-//! Background tasks are not necessarily just for reconcilers.  That's just the
-//! design center.  The first two DNS background tasks above aren't reconcilers
-//! in any non-trivial sense.
-//!
-//! Background task activations do not accept input, by design.  See "Design
-//! notes" below.
-//!
-//! Generally, you probably don't want to have your background task do retries.
-//! If things fail, you rely on the periodic reactivation to try again.
-//!
-//! ## Design notes
-//!
-//! The underlying design for RFD 373-style reconcilers is inspired by a few
-//! related principles:
-//!
-//! * the principle in distributed systems of having exactly one code path to
-//!   achieve a thing, and then always using that path to do that thing (as
-//!   opposed to having separate paths for, say, the happy path vs. failover,
-//!   and having one of those paths rarely used)
-//! * the [constant-work pattern][1], which basically suggests that a system can
-//!   be more robust and scalable if it's constructed in a way that always does
-//!   the same amount of work.  Imagine if we made requests to the DNS servers
-//!   to incrementally update their config every time the DNS data changed.
-//!   This system does more work as users make more requests.  During overloads,
-//!   things can fall over.  Compare with a system whose frontend merely updates
-//!   the DNS configuration that _should_ exist and whose backend periodically
-//!   scans the complete intended state and then sets its own state accordingly.
-//!   The backend does the same amount of work no matter how many requests were
-//!   made, making it more resistant to overload.  A big downside of this
-//!   approach is increased latency from the user making a request to seeing it
-//!   applied.  This can be mitigated (sacrificing some, but not all, of the
-//!   "constant work" property) by triggering a backend scan operation when user
-//!   requests complete.
-//! * the design pattern in distributed systems of keeping two copies of data in
-//!   sync using both event notifications (like a changelog) _and_ periodic full
-//!   scans.  The hope is that a full scan never finds a change that wasn't
-//!   correctly sync'd, but incorporating an occasional full scan into the
-//!   design ensures that such bugs are found and their impact repaired
-//!   automatically.
-//!
-//! [1]: https://aws.amazon.com/builders-library/reliability-and-constant-work/
-//!
-//! Combining these, we get a design pattern for a "reconciler" where:
-//!
-//! * The reconciler is activated by explicit request (when we know it has work
-//!   to do) _and_ periodically (to deal with all manner of transient failures)
-//! * The reconciler's activity is idempotent: given the same underlying state
-//!   (e.g., database state), it always attempts to do the same thing.
-//! * Each activation of the reconciler accepts no input.  That is, even when we
-//!   think we know what changed, we do not use that information.  This ensures
-//!   that the reconciler really is idempotent and its actions are based solely
-//!   on the state that it's watching.  Put differently: having reconcilers
-//!   accept an explicit hint about what changed (and then doing something
-//!   differently based on that) bifurcates the code: there's the common case
-//!   where that hint is available and the rarely-exercised case when it's not
-//!   (e.g., because Nexus crashed and it's the subsequent periodic activation
-//!   that's propagating this change).  This is what we're trying to avoid.
-//! * We do allow reconcilers to be triggered by a `tokio::sync::watch` channel
-//!   -- but again, not using the _data_ from that channel.  There are two big
-//!   advantages here: (1) reduced latency from when a change is made to when
-//!   the reconciler applies it, and (2) (arguably another way to say the same
-//!   thing) we can space out the periodic activations much further, knowing
-//!   that most of the time we're not increasing latency by doing this.  This
-//!   compromises the "constant-work" pattern a bit: we might wind up running
-//!   the reconciler more often during busy times than during idle times, and we
-//!   could find that overloads something.  However, the _operation_ of the
-//!   reconciler can still be constant work, and there's no more than that
-//!   amount of work going on at any given time.
-//!
-//!   `watch` channels are a convenient primitive here because they only store
-//!   one value.  With a little care, we can ensure that the writer never blocks
-//!   and the readers can all see the latest value.  (By design, reconcilers
-//!   generally only care about the latest state of something, not any
-//!   intermediate states.)  We don't have to worry about an unbounded queue, or
-//!   handling a full queue, or other forms of backpressure.
+//! None of this file is specific to Nexus or any of the specific background
+//! tasks in Nexus, although the design is pretty bespoke for what Nexus needs.
 
+use super::BackgroundTask;
+use super::TaskName;
 use assert_matches::assert_matches;
 use chrono::Utc;
 use futures::future::BoxFuture;
@@ -142,22 +23,14 @@ use nexus_types::internal_api::views::LastResult;
 use nexus_types::internal_api::views::LastResultCompleted;
 use nexus_types::internal_api::views::TaskStatus;
 use std::collections::BTreeMap;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::watch;
 use tokio::sync::Notify;
 use tokio::time::MissedTickBehavior;
-
-/// An operation activated both periodically and by an explicit signal
-///
-/// See module-level documentation for details.
-pub trait BackgroundTask: Send + Sync {
-    fn activate<'a>(
-        &'a mut self,
-        opctx: &'a OpContext,
-    ) -> BoxFuture<'a, serde_json::Value>;
-}
 
 /// Drives the execution of background tasks
 ///
@@ -167,22 +40,7 @@ pub trait BackgroundTask: Send + Sync {
 /// provides interfaces for monitoring high-level state of each task (e.g., when
 /// it last ran, whether it's currently running, etc.).
 pub struct Driver {
-    tasks: BTreeMap<TaskHandle, Task>,
-}
-
-/// Identifies a background task
-///
-/// This is returned by [`Driver::register()`] to identify the corresponding
-/// background task.  It's then accepted by functions like
-/// [`Driver::activate()`] and [`Driver::task_status()`] to identify the task.
-#[derive(Clone, Debug, Ord, PartialOrd, PartialEq, Eq)]
-pub struct TaskHandle(String);
-
-impl TaskHandle {
-    /// Returns the unique name of this background task
-    pub fn name(&self) -> &str {
-        &self.0
-    }
+    tasks: BTreeMap<TaskName, Task>,
 }
 
 /// Driver-side state of a background task
@@ -227,15 +85,28 @@ impl Driver {
     /// changed.  This can be used to create dependencies between background
     /// tasks, so that when one of them finishes doing something, it kicks off
     /// another one.
-    pub fn register(
+    ///
+    /// `activator` is an [`Activator`] that has not previously been used in a
+    /// call to this function.  It will be wired up so that using it will
+    /// activate this newly-registered background task.  This is an argument
+    /// rather than a returned value because it's useful for consumers to create
+    /// these ahead of time, before tasks have been set up.  See [`super::init`]
+    /// module-level docs for more on this.
+    ///
+    /// # Panics
+    ///
+    /// This function panics if the `name` or `activator` has previously been
+    /// passed to a call to this function.
+    pub fn register<N, D>(
         &mut self,
-        name: String,
-        description: String,
-        period: Duration,
-        imp: Box<dyn BackgroundTask>,
-        opctx: OpContext,
-        watchers: Vec<Box<dyn GenericWatcher>>,
-    ) -> TaskHandle {
+        taskdef: TaskDefinition<'_, N, D>,
+    ) -> TaskName
+    where
+        N: ToString,
+        D: ToString,
+    {
+        let name = taskdef.name.to_string();
+
         // Activation of the background task happens in a separate tokio task.
         // Set up a channel so that tokio task can report status back to us.
         let (status_tx, status_rx) = watch::channel(TaskStatus {
@@ -243,32 +114,57 @@ impl Driver {
             last: LastResult::NeverCompleted,
         });
 
-        // Set up a channel so that we can wake up the tokio task if somebody
-        // requests an explicit activation.
-        let notify = Arc::new(Notify::new());
+        // We'll use a `Notify` to wake up that tokio task when an activation is
+        // requested.  The caller provides their own Activator, which just
+        // provides a specific Notify for us to use here.
+        let activator = taskdef.activator;
+        if let Err(previous) = activator.wired_up.compare_exchange(
+            false,
+            true,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            panic!(
+                "attempted to wire up the same background task handle \
+                 twice (previous \"wired_up\" = {}): currently attempting \
+                 to wire it up to task {:?}",
+                previous, name
+            );
+        }
+        let notify = Arc::clone(&activator.notify);
 
         // Spawn the tokio task that will manage activation of the background
         // task.
-        let opctx = opctx.child(BTreeMap::from([(
+        let opctx = taskdef.opctx.child(BTreeMap::from([(
             "background_task".to_string(),
             name.clone(),
         )]));
-        let task_exec =
-            TaskExec::new(period, imp, Arc::clone(&notify), opctx, status_tx);
-        let tokio_task = tokio::task::spawn(task_exec.run(watchers));
+        let task_exec = TaskExec::new(
+            taskdef.period,
+            taskdef.task_impl,
+            Arc::clone(&notify),
+            opctx,
+            status_tx,
+        );
+        let tokio_task = tokio::task::spawn(task_exec.run(taskdef.watchers));
 
         // Create an object to track our side of the background task's state.
         // This just provides the handles we need to read status and wake up the
         // tokio task.
-        let task =
-            Task { description, period, status: status_rx, tokio_task, notify };
-        if self.tasks.insert(TaskHandle(name.clone()), task).is_some() {
+        let task = Task {
+            description: taskdef.description.to_string(),
+            period: taskdef.period,
+            status: status_rx,
+            tokio_task,
+            notify,
+        };
+        if self.tasks.insert(TaskName(name.clone()), task).is_some() {
             panic!("started two background tasks called {:?}", name);
         }
 
         // Return a handle that the caller can use to activate the task or get
         // its status.
-        TaskHandle(name)
+        TaskName(name)
     }
 
     /// Enumerate all registered background tasks
@@ -276,11 +172,11 @@ impl Driver {
     /// This is aimed at callers that want to get the status of all background
     /// tasks.  You'd call [`Driver::task_status()`] with each of the items
     /// produced by the iterator.
-    pub fn tasks(&self) -> impl Iterator<Item = &TaskHandle> {
+    pub fn tasks(&self) -> impl Iterator<Item = &TaskName> {
         self.tasks.keys()
     }
 
-    fn task_required(&self, task: &TaskHandle) -> &Task {
+    fn task_required(&self, task: &TaskName) -> &Task {
         // It should be hard to hit this in practice, since you'd have to have
         // gotten a TaskHandle from somewhere.  It would have to be another
         // Driver instance.  But it's generally a singleton.
@@ -290,12 +186,12 @@ impl Driver {
     }
 
     /// Returns a summary of what this task does (for developers)
-    pub fn task_description(&self, task: &TaskHandle) -> &str {
+    pub fn task_description(&self, task: &TaskName) -> &str {
         &self.task_required(task).description
     }
 
     /// Returns the configured period of the task
-    pub fn task_period(&self, task: &TaskHandle) -> Duration {
+    pub fn task_period(&self, task: &TaskName) -> Duration {
         self.task_required(task).period
     }
 
@@ -303,12 +199,12 @@ impl Driver {
     ///
     /// If the task is currently running, it will be activated again when it
     /// finishes.
-    pub fn activate(&self, task: &TaskHandle) {
+    pub(super) fn activate(&self, task: &TaskName) {
         self.task_required(task).notify.notify_one();
     }
 
     /// Returns the runtime status of the background task
-    pub fn task_status(&self, task: &TaskHandle) -> TaskStatus {
+    pub fn task_status(&self, task: &TaskName) -> TaskStatus {
         // Borrowing from a watch channel's receiver blocks the sender.  Clone
         // the status to avoid an errant caller gumming up the works by hanging
         // on to a reference.
@@ -323,6 +219,64 @@ impl Drop for Driver {
         for (_, t) in &self.tasks {
             t.tokio_task.abort();
         }
+    }
+}
+
+/// Describes a background task to be registered with [`Driver::register()`]
+///
+/// See [`Driver::register()`] for more on how these fields get used.
+pub struct TaskDefinition<'a, N: ToString, D: ToString> {
+    /// identifier for this task
+    pub name: N,
+    /// short human-readable summary of this task
+    pub description: D,
+    /// driver should activate the task if it hasn't run in this long
+    pub period: Duration,
+    /// impl of [`BackgroundTask`] that represents the work of the task
+    pub task_impl: Box<dyn BackgroundTask>,
+    /// `OpContext` used for task activations
+    pub opctx: OpContext,
+    /// list of watchers that will trigger activation of this task
+    pub watchers: Vec<Box<dyn GenericWatcher>>,
+    /// an [`Activator]` that will be wired up to activate this task
+    pub activator: &'a Activator,
+}
+
+/// Activates a background task
+///
+/// See [`crate::app::background`] module-level documentation for more on what
+/// that means.
+///
+/// Activators are created with [`Activator::new()`] and then wired up to
+/// specific background tasks using [`Driver::register()`].  If you call
+/// `Activator::activate()` before the activator is wired up to a background
+/// task, then once the Activator _is_ wired up to a task, that task will
+/// immediately be activated.
+///
+/// Activators are designed specifically so they can be created before the
+/// corresponding task has been created and then wired up with just an
+/// `&Activator` (not a `&mut Activator`).  See the [`super::init`] module-level
+/// documentation for more on why.
+pub struct Activator {
+    pub(super) notify: Arc<Notify>,
+    pub(super) wired_up: AtomicBool,
+}
+
+impl Activator {
+    /// Create an activator that is not yet wired up to any background task
+    pub fn new() -> Activator {
+        Activator {
+            notify: Arc::new(Notify::new()),
+            wired_up: AtomicBool::new(false),
+        }
+    }
+
+    /// Activate the background task that this Activator has been wired up to
+    ///
+    /// If this Activator has not yet been wired up with [`Driver::register()`],
+    /// then whenever it _is_ wired up, that task will be immediately activated.
+    pub fn activate(&self) {
+        self.notify.notify_one();
     }
 }
 
@@ -466,7 +420,8 @@ impl<T: Send + Sync> GenericWatcher for watch::Receiver<T> {
 mod test {
     use super::BackgroundTask;
     use super::Driver;
-    use crate::app::background::common::ActivationReason;
+    use crate::app::background::driver::TaskDefinition;
+    use crate::app::background::Activator;
     use crate::app::sagas::SagaRequest;
     use assert_matches::assert_matches;
     use chrono::Utc;
@@ -474,6 +429,7 @@ mod test {
     use futures::FutureExt;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::internal_api::views::ActivationReason;
     use std::time::Duration;
     use std::time::Instant;
     use tokio::sync::mpsc;
@@ -550,35 +506,44 @@ mod test {
         let (t3, rx3) = ReportingTask::new();
         let (dep_tx1, dep_rx1) = watch::channel(0);
         let (dep_tx2, dep_rx2) = watch::channel(0);
+        let act1 = Activator::new();
+        let act2 = Activator::new();
+        let act3 = Activator::new();
         let mut driver = Driver::new();
 
         assert_eq!(*rx1.borrow(), 0);
-        let h1 = driver.register(
-            "t1".to_string(),
-            "test task".to_string(),
-            Duration::from_millis(100),
-            Box::new(t1),
-            opctx.child(std::collections::BTreeMap::new()),
-            vec![Box::new(dep_rx1.clone()), Box::new(dep_rx2.clone())],
-        );
+        let h1 = driver.register(TaskDefinition {
+            name: "t1",
+            description: "test task",
+            period: Duration::from_millis(100),
+            task_impl: Box::new(t1),
+            opctx: opctx.child(std::collections::BTreeMap::new()),
+            watchers: vec![
+                Box::new(dep_rx1.clone()),
+                Box::new(dep_rx2.clone()),
+            ],
+            activator: &act1,
+        });
 
-        let h2 = driver.register(
-            "t2".to_string(),
-            "test task".to_string(),
-            Duration::from_secs(300), // should never fire in this test
-            Box::new(t2),
-            opctx.child(std::collections::BTreeMap::new()),
-            vec![Box::new(dep_rx1.clone())],
-        );
+        let h2 = driver.register(TaskDefinition {
+            name: "t2",
+            description: "test task",
+            period: Duration::from_secs(300), // should never fire in this test
+            task_impl: Box::new(t2),
+            opctx: opctx.child(std::collections::BTreeMap::new()),
+            watchers: vec![Box::new(dep_rx1.clone())],
+            activator: &act2,
+        });
 
-        let h3 = driver.register(
-            "t3".to_string(),
-            "test task".to_string(),
-            Duration::from_secs(300), // should never fire in this test
-            Box::new(t3),
+        let h3 = driver.register(TaskDefinition {
+            name: "t3",
+            description: "test task",
+            period: Duration::from_secs(300), // should never fire in this test
+            task_impl: Box::new(t3),
             opctx,
-            vec![Box::new(dep_rx1), Box::new(dep_rx2)],
-        );
+            watchers: vec![Box::new(dep_rx1), Box::new(dep_rx2)],
+            activator: &act3,
+        });
 
         // Wait for four activations of our task.  (This is three periods.) That
         // should take between 300ms and 400ms.  Allow extra time for a busy
@@ -658,6 +623,17 @@ mod test {
         let status = driver.task_status(&h3);
         let last = status.last.unwrap_completion();
         assert_eq!(last.iteration, 4);
+
+        // Explicitly activate just "t2", this time using its Activator.
+        act2.activate();
+        wait_until_count(rx2.clone(), 3).await;
+        assert_eq!(*rx3.borrow(), 4);
+        let status = driver.task_status(&h2);
+        let last = status.last.unwrap_completion();
+        assert_eq!(last.iteration, 3);
+        let status = driver.task_status(&h3);
+        let last = status.last.unwrap_completion();
+        assert_eq!(last.iteration, 4);
     }
 
     /// Simple background task that moves in lockstep with a consumer, allowing
@@ -711,14 +687,16 @@ mod test {
         let (dep_tx1, dep_rx1) = watch::channel(0);
         let before_wall = Utc::now();
         let before_instant = Instant::now();
-        let h1 = driver.register(
-            "t1".to_string(),
-            "test task".to_string(),
-            Duration::from_secs(300), // should not elapse during test
-            Box::new(t1),
-            opctx.child(std::collections::BTreeMap::new()),
-            vec![Box::new(dep_rx1.clone())],
-        );
+        let act1 = Activator::new();
+        let h1 = driver.register(TaskDefinition {
+            name: "t1",
+            description: "test task",
+            period: Duration::from_secs(300), // should not elapse during test
+            task_impl: Box::new(t1),
+            opctx: opctx.child(std::collections::BTreeMap::new()),
+            watchers: vec![Box::new(dep_rx1.clone())],
+            activator: &act1,
+        });
 
         // Wait to enter the first activation.
         let which = ready_rx1.recv().await.unwrap();
@@ -855,15 +833,17 @@ mod test {
 
         let mut driver = Driver::new();
         let (_dep_tx1, dep_rx1) = watch::channel(0);
+        let act1 = Activator::new();
 
-        let h1 = driver.register(
-            "t1".to_string(),
-            "test saga request flow task".to_string(),
-            Duration::from_secs(300), // should not fire in this test
-            Box::new(t1),
-            opctx.child(std::collections::BTreeMap::new()),
-            vec![Box::new(dep_rx1.clone())],
-        );
+        let h1 = driver.register(TaskDefinition {
+            name: "t1",
+            description: "test saga request flow task",
+            period: Duration::from_secs(300), // should not fire in this test
+            task_impl: Box::new(t1),
+            opctx: opctx.child(std::collections::BTreeMap::new()),
+            watchers: vec![Box::new(dep_rx1.clone())],
+            activator: &act1,
+        });
 
         assert!(matches!(
             saga_request_recv.try_recv(),

@@ -10,7 +10,7 @@
 //! handle general changes to customer-visible VPC firewalls, and is mostly in
 //! place to propagate changes in the IP allowlist for user-facing services.
 
-use super::common::BackgroundTask;
+use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
@@ -38,8 +38,8 @@ impl BackgroundTask for ServiceRulePropagator {
                 .new(slog::o!("component" => "service-firewall-rule-progator"));
             debug!(
                 log,
-                "starting background task for service \
-                firewall rule propagation"
+                "starting background task for service firewall rule \
+                 propagation"
             );
             let start = std::time::Instant::now();
             let res = nexus_networking::plumb_service_firewall_rules(

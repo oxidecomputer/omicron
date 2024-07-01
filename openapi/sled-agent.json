@@ -950,6 +950,63 @@
         }
       }
     },
+    "/vpc-routes": {
+      "get": {
+        "summary": "Get the current versions of VPC routing rules.",
+        "operationId": "list_vpc_routes",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_ResolvedVpcRouteState",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ResolvedVpcRouteState"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update VPC routing rules.",
+        "operationId": "set_vpc_routes",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "Array_of_ResolvedVpcRouteSet",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ResolvedVpcRouteSet"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/zones": {
       "get": {
         "summary": "List the zones that are currently managed by the sled agent.",
@@ -3502,7 +3559,7 @@
       },
       "Name": {
         "title": "A name unique within the parent collection",
-        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
+        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
         "type": "string",
         "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,
@@ -3539,6 +3596,13 @@
           },
           "subnet": {
             "$ref": "#/components/schemas/IpNet"
+          },
+          "transit_ips": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNet"
+            }
           },
           "vni": {
             "$ref": "#/components/schemas/Vni"
@@ -4245,6 +4309,70 @@
           "rack_subnet"
         ]
       },
+      "ResolvedVpcRoute": {
+        "description": "A VPC route resolved into a concrete target.",
+        "type": "object",
+        "properties": {
+          "dest": {
+            "$ref": "#/components/schemas/IpNet"
+          },
+          "target": {
+            "$ref": "#/components/schemas/RouterTarget"
+          }
+        },
+        "required": [
+          "dest",
+          "target"
+        ]
+      },
+      "ResolvedVpcRouteSet": {
+        "description": "An updated set of routes for a given VPC and/or subnet.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/RouterId"
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ResolvedVpcRoute"
+            },
+            "uniqueItems": true
+          },
+          "version": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterVersion"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "routes"
+        ]
+      },
+      "ResolvedVpcRouteState": {
+        "description": "Version information for routes on a given VPC subnet.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/RouterId"
+          },
+          "version": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterVersion"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
       "RouteConfig": {
         "type": "object",
         "properties": {
@@ -4273,6 +4401,148 @@
         "required": [
           "destination",
           "nexthop"
+        ]
+      },
+      "RouterId": {
+        "description": "Identifier for a VPC and/or subnet.",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/RouterKind"
+          },
+          "vni": {
+            "$ref": "#/components/schemas/Vni"
+          }
+        },
+        "required": [
+          "kind",
+          "vni"
+        ]
+      },
+      "RouterKind": {
+        "description": "The scope of a set of VPC router rules.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "system"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "subnet": {
+                "$ref": "#/components/schemas/IpNet"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "custom"
+                ]
+              }
+            },
+            "required": [
+              "subnet",
+              "type"
+            ]
+          }
+        ]
+      },
+      "RouterTarget": {
+        "description": "The target for a given router entry.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "drop"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internet_gateway"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ip"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "ip"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vpc_subnet"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
+      "RouterVersion": {
+        "description": "Information on the current parent router (and version) of a route set according to the control plane.",
+        "type": "object",
+        "properties": {
+          "router_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "router_id",
+          "version"
         ]
       },
       "SemverVersion": {

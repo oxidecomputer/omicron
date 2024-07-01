@@ -1910,11 +1910,12 @@ mod test {
             None, // not attached to an instance
             true, // use the pantry
         );
-        let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-
         // Actually run the saga
-        let output = nexus.run_saga(runnable_saga).await.unwrap();
+        let output = nexus
+            .sagas
+            .saga_execute::<SagaSnapshotCreate>(params)
+            .await
+            .unwrap();
 
         let snapshot = output
             .lookup_node_output::<nexus_db_queries::db::model::Snapshot>(
@@ -2239,7 +2240,7 @@ mod test {
         );
 
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+        let runnable_saga = nexus.sagas.saga_prepare(dag).await.unwrap();
 
         // Before running the saga, attach the disk to an instance!
         let _instance_and_vmm = setup_test_instance(
@@ -2254,7 +2255,11 @@ mod test {
         .await;
 
         // Actually run the saga
-        let output = nexus.run_saga(runnable_saga).await;
+        let output = runnable_saga
+            .run_to_completion()
+            .await
+            .unwrap()
+            .into_omicron_result();
 
         // Expect to see 409
         match output {
@@ -2297,9 +2302,8 @@ mod test {
             true, // use the pantry
         );
 
-        let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-        let output = nexus.run_saga(runnable_saga).await;
+        let output =
+            nexus.sagas.saga_execute::<SagaSnapshotCreate>(params).await;
 
         // Expect 200
         assert!(output.is_ok());
@@ -2351,7 +2355,7 @@ mod test {
         );
 
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+        let runnable_saga = nexus.sagas.saga_prepare(dag).await.unwrap();
 
         // Before running the saga, detach the disk!
         let (.., authz_disk, db_disk) =
@@ -2372,7 +2376,11 @@ mod test {
             .expect("failed to detach disk"));
 
         // Actually run the saga. This should fail.
-        let output = nexus.run_saga(runnable_saga).await;
+        let output = runnable_saga
+            .run_to_completion()
+            .await
+            .unwrap()
+            .into_omicron_result();
 
         assert!(output.is_err());
 
@@ -2399,9 +2407,8 @@ mod test {
             false, // use the pantry
         );
 
-        let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-        let output = nexus.run_saga(runnable_saga).await;
+        let output =
+            nexus.sagas.saga_execute::<SagaSnapshotCreate>(params).await;
 
         // Expect 200
         assert!(output.is_ok());

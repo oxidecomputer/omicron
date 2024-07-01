@@ -110,6 +110,11 @@ blueprints.period_secs_collect_crdb_node_ids = 600
 sync_service_zone_nat.period_secs = 30
 switch_port_settings_manager.period_secs = 30
 region_replacement.period_secs = 30
+# The driver task should wake up frequently, something like every 10 seconds.
+# however, if it's this low it affects the test_omdb_success_cases test output.
+# keep this 30 seconds, so that the test shows "triggered by an explicit
+# signal" instead of "triggered by a periodic timer firing"
+region_replacement_driver.period_secs = 30
 instance_watcher.period_secs = 30
 service_firewall_propagation.period_secs = 300
 v2p_mapping_propagation.period_secs = 30
