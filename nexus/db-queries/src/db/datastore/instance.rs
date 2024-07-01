@@ -299,15 +299,17 @@ impl DataStore {
 
     /// List all instances with active VMMs in the `Destroyed` state that don't
     /// have currently-running instance-updater sagas.
+    ///
+    /// This is used by the `instance_updater` background task to ensure that
+    /// update sagas are scheduled for these instances.
     pub async fn find_instances_with_destroyed_active_vmms(
         &self,
         opctx: &OpContext,
-    ) -> ListResultVec<InstanceAndActiveVmm> {
+    ) -> ListResultVec<Instance> {
         use db::model::VmmState;
         use db::schema::instance::dsl;
         use db::schema::vmm::dsl as vmm_dsl;
         Ok(vmm_dsl::vmm
-            .filter(vmm_dsl::time_deleted.is_not_null())
             .filter(vmm_dsl::state.eq(VmmState::Destroyed))
             .inner_join(
                 dsl::instance.on(dsl::active_propolis_id
@@ -315,18 +317,48 @@ impl DataStore {
                     .and(dsl::time_deleted.is_null())
                     .and(dsl::updater_id.is_null())),
             )
-            .select((Instance::as_select(), Vmm::as_select()))
-            .load_async::<(Instance, Vmm)>(
+            .select(Instance::as_select())
+            .load_async::<Instance>(
                 &*self.pool_connection_authorized(opctx).await?,
             )
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-            .into_iter()
-            .map(|(instance, vmm)| InstanceAndActiveVmm {
-                instance,
-                vmm: Some(vmm),
-            })
-            .collect())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?)
+    }
+
+    /// List all instances with active migrations that have terminated (either
+    /// completed or failed) and don't have currently-running instance-updater
+    /// sagas.
+    ///
+    /// This is used by the `instance_updater` background task to ensure that
+    /// update sagas are scheduled for these instances.
+    pub async fn find_instances_with_terminated_active_migrations(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<Instance> {
+        use db::model::MigrationState;
+        use db::schema::instance::dsl;
+        use db::schema::migration::dsl as migration_dsl;
+
+        Ok(dsl::instance
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::migration_id.is_not_null())
+            .filter(dsl::updater_id.is_null())
+            .inner_join(
+                migration_dsl::migration.on(dsl::migration_id
+                    .eq(migration_dsl::id.nullable())
+                    .and(
+                        migration_dsl::target_state
+                            .eq_any(MigrationState::TERMINAL_STATES)
+                            .or(migration_dsl::source_state
+                                .eq_any(MigrationState::TERMINAL_STATES)),
+                    )),
+            )
+            .select(Instance::as_select())
+            .load_async::<Instance>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?)
     }
 
     /// Fetches information about an Instance that the caller has previously
