@@ -820,6 +820,17 @@ impl SledAgent {
         config: OmicronPhysicalDisksConfig,
     ) -> Result<DisksManagementResult, Error> {
         // First, tell the storage subsystem which disks should be managed.
+        //
+        // TODO: Do we want to prevent future calls to
+        // "omicron_physical_disks_ensure" until we finish flushing?
+        //
+        // Otherwise, we the following could occur:
+        //
+        // - Ensure Disks {A, B, C}
+        // - ... try to remove all non-conforming disks
+        // - Ensure Disks {A, B, C, D} concurrently
+        // - ... we remove an instance on disk "D" because the old flush is
+        // still happening?
         let disk_result =
             self.storage().omicron_physical_disks_ensure(config).await?;
 
