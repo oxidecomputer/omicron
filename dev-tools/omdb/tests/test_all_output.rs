@@ -8,6 +8,7 @@
 //! sure you're only breaking what you intend.
 
 use expectorate::assert_contents;
+use nexus_test_utils::{OXIMETER_UUID, PRODUCER_UUID};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
@@ -25,6 +26,14 @@ const CMD_OMDB: &str = env!("CARGO_BIN_EXE_omdb");
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
+
+fn assert_oximeter_list_producers_output(output: &str, ox_url: &str) {
+    assert!(
+        output.contains(format!("Collector ID: {}", OXIMETER_UUID).as_str())
+    );
+    assert!(output.contains(PRODUCER_UUID));
+    assert!(output.contains(ox_url));
+}
 
 #[tokio::test]
 async fn test_omdb_usage_errors() {
@@ -57,6 +66,10 @@ async fn test_omdb_usage_errors() {
         &["sled-agent"],
         &["sled-agent", "zones"],
         &["sled-agent", "zpools"],
+        &["oximeter", "--help"],
+        &["oxql", "--help"],
+        // Mispelled argument
+        &["oxql", "--summarizes"],
     ];
 
     for args in invocations {
@@ -74,10 +87,14 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
     let cmd_path = path_to_executable(CMD_OMDB);
+
     let postgres_url = cptestctx.database.listen_url();
     let nexus_internal_url =
         format!("http://{}/", cptestctx.internal_client.bind_address);
     let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
+    let ox_url = format!("http://{}/", cptestctx.oximeter.server_address());
+    let ch_url = format!("http://{}/", cptestctx.clickhouse.address);
+
     let tmpdir = camino_tempfile::tempdir()
         .expect("failed to create temporary directory");
     let tmppath = tmpdir.path().join("reconfigurator-save.out");
@@ -124,18 +141,24 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         let p = postgres_url.to_string();
         let u = nexus_internal_url.clone();
         let g = mgs_url.clone();
+        let ox = ox_url.clone();
+        let ch = ch_url.clone();
         do_run_extra(
             &mut output,
             move |exec| {
                 exec.env("OMDB_DB_URL", &p)
                     .env("OMDB_NEXUS_URL", &u)
                     .env("OMDB_MGS_URL", &g)
+                    .env("OMDB_OXIMETER_URL", &ox)
+                    .env("OMDB_CLICKHOUSE_URL", &ch)
             },
             &cmd_path,
             args,
-            ExtraRedactions::new()
-                .variable_length("tmp_path", tmppath.as_str())
-                .fixed_length("blueprint_id", &initial_blueprint_id),
+            Some(
+                ExtraRedactions::new()
+                    .variable_length("tmp_path", tmppath.as_str())
+                    .fixed_length("blueprint_id", &initial_blueprint_id),
+            ),
         )
         .await;
     }
@@ -170,6 +193,23 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         .is_some());
     assert!(!parsed.collections.is_empty());
 
+    // The `oximeter` list-producers command output is not easy to compare as a
+    // string directly because the timing of registrations with both our test
+    // producer and the one nexus registers. But, let's find our test producer
+    // in the list.
+    let ox_invocation = &["oximeter", "list-producers"];
+    let mut ox_output = String::new();
+    let ox = ox_url.clone();
+
+    do_run_no_redactions(
+        &mut ox_output,
+        move |exec| exec.env("OMDB_OXIMETER_URL", &ox),
+        &cmd_path,
+        ox_invocation,
+    )
+    .await;
+    assert_oximeter_list_producers_output(&ox_output, &ox_url);
+
     gwtestctx.teardown().await;
 }
 
@@ -188,6 +228,8 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     let postgres_url = cptestctx.database.listen_url().to_string();
     let nexus_internal_url =
         format!("http://{}", cptestctx.internal_client.bind_address);
+    let ox_url = format!("http://{}/", cptestctx.oximeter.server_address());
+    let ch_url = format!("http://{}/", cptestctx.clickhouse.address);
     let dns_sockaddr = cptestctx.internal_dns.dns_server.local_address();
     let mut output = String::new();
 
@@ -263,7 +305,47 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     let args = &["--dns-server", &dns_sockaddr.to_string(), "db", "sleds"];
     do_run(&mut output, move |exec| exec, &cmd_path, args).await;
 
+    // Case: specified in multiple places (command-line argument wins)
+    let args = &["oximeter", "--oximeter-url", "junk", "list-producers"];
+    let ox = ox_url.clone();
+    do_run(
+        &mut output,
+        move |exec| exec.env("OMDB_OXIMETER_URL", &ox),
+        &cmd_path,
+        args,
+    )
+    .await;
+
+    // Case: specified in multiple places (command-line argument wins)
+    let args = &["oxql", "--metrics-db-url", "junk"];
+    do_run(
+        &mut output,
+        move |exec| exec.env("OMDB_CLICKHOUSE_URL", &ch_url),
+        &cmd_path,
+        args,
+    )
+    .await;
+
     assert_contents("tests/env.out", &output);
+
+    // The `oximeter` list-producers command output is not easy to compare as a
+    // string directly because the timing of registrations with both our test
+    // producer and the one nexus registers. But, let's find our test producer
+    // in the list.
+
+    // Oximeter URL
+    // Case 1: specified on the command line.
+    // Case 2: is covered by the success tests above.
+    let ox_args1 = &["oximeter", "--oximeter-url", &ox_url, "list-producers"];
+    let mut ox_output1 = String::new();
+    do_run_no_redactions(
+        &mut ox_output1,
+        move |exec| exec,
+        &cmd_path,
+        ox_args1,
+    )
+    .await;
+    assert_oximeter_list_producers_output(&ox_output1, &ox_url);
 }
 
 async fn do_run<F>(
@@ -274,8 +356,25 @@ async fn do_run<F>(
 ) where
     F: FnOnce(Exec) -> Exec + Send + 'static,
 {
-    do_run_extra(output, modexec, cmd_path, args, &ExtraRedactions::new())
-        .await;
+    do_run_extra(
+        output,
+        modexec,
+        cmd_path,
+        args,
+        Some(&ExtraRedactions::new()),
+    )
+    .await;
+}
+
+async fn do_run_no_redactions<F>(
+    output: &mut String,
+    modexec: F,
+    cmd_path: &Path,
+    args: &[&str],
+) where
+    F: FnOnce(Exec) -> Exec + Send + 'static,
+{
+    do_run_extra(output, modexec, cmd_path, args, None).await;
 }
 
 async fn do_run_extra<F>(
@@ -283,18 +382,22 @@ async fn do_run_extra<F>(
     modexec: F,
     cmd_path: &Path,
     args: &[&str],
-    extra_redactions: &ExtraRedactions<'_>,
+    extra_redactions: Option<&ExtraRedactions<'_>>,
 ) where
     F: FnOnce(Exec) -> Exec + Send + 'static,
 {
-    println!("running command with args: {:?}", args);
     write!(
         output,
         "EXECUTING COMMAND: {} {:?}\n",
         cmd_path.file_name().expect("missing command").to_string_lossy(),
         args.iter()
-            .map(|r| redact_extra(r, extra_redactions))
-            .collect::<Vec<_>>(),
+            .map(|r| {
+                extra_redactions.map_or_else(
+                    || r.to_string(),
+                    |redactions| redact_extra(r, redactions),
+                )
+            })
+            .collect::<Vec<_>>()
     )
     .unwrap();
 
@@ -326,9 +429,21 @@ async fn do_run_extra<F>(
     write!(output, "termination: {:?}\n", exit_status).unwrap();
     write!(output, "---------------------------------------------\n").unwrap();
     write!(output, "stdout:\n").unwrap();
-    output.push_str(&redact_extra(&stdout_text, extra_redactions));
+
+    if let Some(extra_redactions) = extra_redactions {
+        output.push_str(&redact_extra(&stdout_text, extra_redactions));
+    } else {
+        output.push_str(&stdout_text);
+    }
+
     write!(output, "---------------------------------------------\n").unwrap();
     write!(output, "stderr:\n").unwrap();
-    output.push_str(&redact_extra(&stderr_text, extra_redactions));
+
+    if let Some(extra_redactions) = extra_redactions {
+        output.push_str(&redact_extra(&stderr_text, extra_redactions));
+    } else {
+        output.push_str(&stderr_text);
+    }
+
     write!(output, "=============================================\n").unwrap();
 }

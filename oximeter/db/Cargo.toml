@@ -77,13 +77,13 @@ optional = true
 workspace = true
 optional = true
 
-[dependencies.tokio]
-workspace = true
-features = [ "rt-multi-thread", "macros" ]
-
 [dependencies.tabled]
 workspace = true
 optional = true
+
+[dependencies.tokio]
+workspace = true
+features = [ "rt-multi-thread", "macros" ]
 
 [dev-dependencies]
 expectorate.workspace = true

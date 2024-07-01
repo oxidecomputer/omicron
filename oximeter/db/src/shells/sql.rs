@@ -2,20 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! SQL shell subcommand for `oxdb`.
+//! SQL shell implementation.
 
 // Copyright 2024 Oxide Computer Company
 
-use super::oxql;
-use crate::make_client;
+use super::{make_client, prepare_columns};
+use crate::sql::{function_allow_list, QueryResult, Table};
+use crate::{Client, QuerySummary};
 use clap::Args;
 use dropshot::EmptyScanParams;
 use dropshot::WhichPage;
-use oximeter_db::sql::function_allow_list;
-use oximeter_db::sql::QueryResult;
-use oximeter_db::sql::Table;
-use oximeter_db::Client;
-use oximeter_db::QuerySummary;
 use reedline::DefaultPrompt;
 use reedline::DefaultPromptSegment;
 use reedline::Reedline;
@@ -23,63 +19,7 @@ use reedline::Signal;
 use slog::Logger;
 use std::net::IpAddr;
 
-fn print_basic_commands() {
-    println!("Basic commands:");
-    println!("  \\?, \\h, help      - Print this help");
-    println!("  \\q, quit, exit, ^D - Exit the shell");
-    println!("  \\l                 - List tables");
-    println!("  \\d <table>         - Describe a table");
-    println!(
-        "  \\f <function>      - List or describe ClickHouse SQL functions"
-    );
-    println!();
-    println!("Or try entering a SQL `SELECT` statement");
-}
-
-async fn list_virtual_tables(client: &Client) -> anyhow::Result<()> {
-    let mut page = WhichPage::First(EmptyScanParams {});
-    let limit = 100.try_into().unwrap();
-    loop {
-        let results = client.timeseries_schema_list(&page, limit).await?;
-        for schema in results.items.iter() {
-            println!("{}", schema.timeseries_name);
-        }
-        if results.next_page.is_some() {
-            if let Some(last) = results.items.last() {
-                page = WhichPage::Next(last.timeseries_name.clone());
-            } else {
-                return Ok(());
-            }
-        } else {
-            return Ok(());
-        }
-    }
-}
-
-async fn describe_virtual_table(
-    client: &Client,
-    table: &str,
-) -> anyhow::Result<()> {
-    match table.parse() {
-        Err(_) => println!("Invalid timeseries name: {table}"),
-        Ok(name) => {
-            if let Some(schema) = client.schema_for_timeseries(&name).await? {
-                let (cols, types) = oxql::prepare_columns(&schema);
-                let mut builder = tabled::builder::Builder::default();
-                builder.push_record(cols); // first record is the header
-                builder.push_record(types);
-                println!(
-                    "{}",
-                    builder.build().with(tabled::settings::Style::psql())
-                );
-            } else {
-                println!("No such timeseries: {table}");
-            }
-        }
-    }
-    Ok(())
-}
-
+/// Options for the SQL shell.
 #[derive(Clone, Debug, Args)]
 pub struct ShellOptions {
     /// Print query metadata.
@@ -107,48 +47,8 @@ impl Default for ShellOptions {
     }
 }
 
-fn list_supported_functions() {
-    println!("Subset of ClickHouse SQL functions currently supported");
-    println!(
-        "See https://clickhouse.com/docs/en/sql-reference/functions for more"
-    );
-    println!();
-    for func in function_allow_list().iter() {
-        println!(" {func}");
-    }
-}
-
-fn show_supported_function(name: &str) {
-    if let Some(func) = function_allow_list().iter().find(|f| f.name == name) {
-        println!("{}", func.name);
-        println!("  {}", func.usage);
-        println!("  {}", func.description);
-    } else {
-        println!("No supported function '{name}'");
-    }
-}
-
-fn print_sql_query(query: &str) {
-    println!(
-        "{}",
-        sqlformat::format(
-            &query,
-            &sqlformat::QueryParams::None,
-            sqlformat::FormatOptions { uppercase: true, ..Default::default() }
-        )
-    );
-    println!();
-}
-
-fn print_query_summary(table: &Table, summary: &QuerySummary) {
-    println!("Summary");
-    println!(" Query ID:    {}", summary.id);
-    println!(" Result rows: {}", table.rows.len());
-    println!(" Time:        {:?}", summary.elapsed);
-    println!(" Read:        {}\n", summary.io_summary.read);
-}
-
-pub async fn sql_shell(
+/// Run/execute the SQL shell.
+pub async fn shell(
     address: IpAddr,
     port: u16,
     log: Logger,
@@ -260,4 +160,102 @@ pub async fn sql_shell(
             err => eprintln!("err: {err:?}"),
         }
     }
+}
+
+fn print_basic_commands() {
+    println!("Basic commands:");
+    println!("  \\?, \\h, help      - Print this help");
+    println!("  \\q, quit, exit, ^D - Exit the shell");
+    println!("  \\l                 - List tables");
+    println!("  \\d <table>         - Describe a table");
+    println!(
+        "  \\f <function>      - List or describe ClickHouse SQL functions"
+    );
+    println!();
+    println!("Or try entering a SQL `SELECT` statement");
+}
+
+async fn list_virtual_tables(client: &Client) -> anyhow::Result<()> {
+    let mut page = WhichPage::First(EmptyScanParams {});
+    let limit = 100.try_into().unwrap();
+    loop {
+        let results = client.timeseries_schema_list(&page, limit).await?;
+        for schema in results.items.iter() {
+            println!("{}", schema.timeseries_name);
+        }
+        if results.next_page.is_some() {
+            if let Some(last) = results.items.last() {
+                page = WhichPage::Next(last.timeseries_name.clone());
+            } else {
+                return Ok(());
+            }
+        } else {
+            return Ok(());
+        }
+    }
+}
+
+async fn describe_virtual_table(
+    client: &Client,
+    table: &str,
+) -> anyhow::Result<()> {
+    match table.parse() {
+        Err(_) => println!("Invalid timeseries name: {table}"),
+        Ok(name) => {
+            if let Some(schema) = client.schema_for_timeseries(&name).await? {
+                let (cols, types) = prepare_columns(&schema);
+                let mut builder = tabled::builder::Builder::default();
+                builder.push_record(cols); // first record is the header
+                builder.push_record(types);
+                println!(
+                    "{}",
+                    builder.build().with(tabled::settings::Style::psql())
+                );
+            } else {
+                println!("No such timeseries: {table}");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn list_supported_functions() {
+    println!("Subset of ClickHouse SQL functions currently supported");
+    println!(
+        "See https://clickhouse.com/docs/en/sql-reference/functions for more"
+    );
+    println!();
+    for func in function_allow_list().iter() {
+        println!(" {func}");
+    }
+}
+
+fn show_supported_function(name: &str) {
+    if let Some(func) = function_allow_list().iter().find(|f| f.name == name) {
+        println!("{}", func.name);
+        println!("  {}", func.usage);
+        println!("  {}", func.description);
+    } else {
+        println!("No supported function '{name}'");
+    }
+}
+
+fn print_sql_query(query: &str) {
+    println!(
+        "{}",
+        sqlformat::format(
+            &query,
+            &sqlformat::QueryParams::None,
+            sqlformat::FormatOptions { uppercase: true, ..Default::default() }
+        )
+    );
+    println!();
+}
+
+fn print_query_summary(table: &Table, summary: &QuerySummary) {
+    println!("Summary");
+    println!(" Query ID:    {}", summary.id);
+    println!(" Result rows: {}", table.rows.len());
+    println!(" Time:        {:?}", summary.elapsed);
+    println!(" Read:        {}\n", summary.io_summary.read);
 }
