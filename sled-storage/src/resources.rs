@@ -10,7 +10,7 @@ use crate::disk::{Disk, DiskError, OmicronPhysicalDiskConfig, RawDisk};
 use crate::error::Error;
 use camino::Utf8PathBuf;
 use cfg_if::cfg_if;
-use illumos_utils::zpool::ZpoolName;
+use illumos_utils::zpool::{PathInPool, ZpoolName};
 use key_manager::StorageKeyRequester;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
@@ -203,11 +203,13 @@ impl AllDisks {
     }
 
     /// Returns all mountpoints within all U.2s for a particular dataset.
-    pub fn all_u2_mountpoints(&self, dataset: &str) -> Vec<Utf8PathBuf> {
+    pub fn all_u2_mountpoints(&self, dataset: &str) -> Vec<PathInPool> {
         self.all_u2_zpools()
-            .iter()
-            .map(|zpool| {
-                zpool.dataset_mountpoint(&self.mount_config.root, dataset)
+            .into_iter()
+            .map(|pool| {
+                let path =
+                    pool.dataset_mountpoint(&self.mount_config.root, dataset);
+                PathInPool { pool: Some(pool), path }
             })
             .collect()
     }

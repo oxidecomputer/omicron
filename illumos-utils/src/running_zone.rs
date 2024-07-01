@@ -10,6 +10,7 @@ use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
 use crate::zone::{AddressRequest, IPADM, ZONE_PREFIX};
+use crate::zpool::PathInPool;
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use ipnetwork::IpNetwork;
@@ -806,85 +807,85 @@ impl RunningZone {
     /// returned.
     /// - Other errors may be returned attempting to look up and accessing an
     /// address on the zone.
-    pub async fn get(
-        log: &Logger,
-        vnic_allocator: &VnicAllocator<Etherstub>,
-        zone_prefix: &str,
-        addrtype: AddressRequest,
-    ) -> Result<Self, GetZoneError> {
-        let zone_info = Zones::get()
-            .await
-            .map_err(|err| GetZoneError::GetZones {
-                prefix: zone_prefix.to_string(),
-                err,
-            })?
-            .into_iter()
-            .find(|zone_info| zone_info.name().starts_with(&zone_prefix))
-            .ok_or_else(|| GetZoneError::NotFound {
-                prefix: zone_prefix.to_string(),
-            })?;
-
-        if zone_info.state() != zone::State::Running {
-            return Err(GetZoneError::NotRunning {
-                name: zone_info.name().to_string(),
-                state: zone_info.state(),
-            });
-        }
-
-        let zone_name = zone_info.name();
-        let vnic_name =
-            Zones::get_control_interface(zone_name).map_err(|err| {
-                GetZoneError::ControlInterface {
-                    name: zone_name.to_string(),
-                    err,
-                }
-            })?;
-        let addrobj = AddrObject::new_control(&vnic_name).map_err(|err| {
-            GetZoneError::AddrObject { name: zone_name.to_string(), err }
-        })?;
-        Zones::ensure_address(Some(zone_name), &addrobj, addrtype).map_err(
-            |err| GetZoneError::EnsureAddress {
-                name: zone_name.to_string(),
-                err,
-            },
-        )?;
-
-        let control_vnic = vnic_allocator
-            .wrap_existing(vnic_name)
-            .expect("Failed to wrap valid control VNIC");
-
-        // The bootstrap address for a running zone never changes,
-        // so there's no need to call `Zones::ensure_address`.
-        // Currently, only the switch zone has a bootstrap interface.
-        let bootstrap_vnic = Zones::get_bootstrap_interface(zone_name)
-            .map_err(|err| GetZoneError::BootstrapInterface {
-                name: zone_name.to_string(),
-                err,
-            })?
-            .map(|name| {
-                vnic_allocator
-                    .wrap_existing(name)
-                    .expect("Failed to wrap valid bootstrap VNIC")
-            });
-
-        Ok(Self {
-            id: zone_info.id().map(|x| {
-                x.try_into().expect("zoneid_t is expected to be an i32")
-            }),
-            inner: InstalledZone {
-                log: log.new(o!("zone" => zone_name.to_string())),
-                zonepath: zone_info.path().to_path_buf().try_into()?,
-                name: zone_name.to_string(),
-                control_vnic,
-                // TODO(https://github.com/oxidecomputer/omicron/issues/725)
-                //
-                // Re-initialize guest_vnic state by inspecting the zone.
-                opte_ports: vec![],
-                links: vec![],
-                bootstrap_vnic,
-            },
-        })
-    }
+    //    pub async fn get(
+    //        log: &Logger,
+    //        vnic_allocator: &VnicAllocator<Etherstub>,
+    //        zone_prefix: &str,
+    //        addrtype: AddressRequest,
+    //    ) -> Result<Self, GetZoneError> {
+    //        let zone_info = Zones::get()
+    //            .await
+    //            .map_err(|err| GetZoneError::GetZones {
+    //                prefix: zone_prefix.to_string(),
+    //                err,
+    //            })?
+    //            .into_iter()
+    //            .find(|zone_info| zone_info.name().starts_with(&zone_prefix))
+    //            .ok_or_else(|| GetZoneError::NotFound {
+    //                prefix: zone_prefix.to_string(),
+    //            })?;
+    //
+    //        if zone_info.state() != zone::State::Running {
+    //            return Err(GetZoneError::NotRunning {
+    //                name: zone_info.name().to_string(),
+    //                state: zone_info.state(),
+    //            });
+    //        }
+    //
+    //        let zone_name = zone_info.name();
+    //        let vnic_name =
+    //            Zones::get_control_interface(zone_name).map_err(|err| {
+    //                GetZoneError::ControlInterface {
+    //                    name: zone_name.to_string(),
+    //                    err,
+    //                }
+    //            })?;
+    //        let addrobj = AddrObject::new_control(&vnic_name).map_err(|err| {
+    //            GetZoneError::AddrObject { name: zone_name.to_string(), err }
+    //        })?;
+    //        Zones::ensure_address(Some(zone_name), &addrobj, addrtype).map_err(
+    //            |err| GetZoneError::EnsureAddress {
+    //                name: zone_name.to_string(),
+    //                err,
+    //            },
+    //        )?;
+    //
+    //        let control_vnic = vnic_allocator
+    //            .wrap_existing(vnic_name)
+    //            .expect("Failed to wrap valid control VNIC");
+    //
+    //        // The bootstrap address for a running zone never changes,
+    //        // so there's no need to call `Zones::ensure_address`.
+    //        // Currently, only the switch zone has a bootstrap interface.
+    //        let bootstrap_vnic = Zones::get_bootstrap_interface(zone_name)
+    //            .map_err(|err| GetZoneError::BootstrapInterface {
+    //                name: zone_name.to_string(),
+    //                err,
+    //            })?
+    //            .map(|name| {
+    //                vnic_allocator
+    //                    .wrap_existing(name)
+    //                    .expect("Failed to wrap valid bootstrap VNIC")
+    //            });
+    //
+    //        Ok(Self {
+    //            id: zone_info.id().map(|x| {
+    //                x.try_into().expect("zoneid_t is expected to be an i32")
+    //            }),
+    //            inner: InstalledZone {
+    //                log: log.new(o!("zone" => zone_name.to_string())),
+    //                zonepath: zone_info.path().to_path_buf().try_into()?,
+    //                name: zone_name.to_string(),
+    //                control_vnic,
+    //                // TODO(https://github.com/oxidecomputer/omicron/issues/725)
+    //                //
+    //                // Re-initialize guest_vnic state by inspecting the zone.
+    //                opte_ports: vec![],
+    //                links: vec![],
+    //                bootstrap_vnic,
+    //            },
+    //        })
+    //    }
 
     /// Return references to the OPTE ports for this zone.
     pub fn opte_ports(&self) -> impl Iterator<Item = &Port> {
@@ -1081,7 +1082,7 @@ pub struct InstalledZone {
     log: Logger,
 
     // Filesystem path of the zone
-    zonepath: Utf8PathBuf,
+    zonepath: PathInPool,
 
     // Name of the Zone.
     name: String,
@@ -1131,7 +1132,7 @@ impl InstalledZone {
 
     /// Returns the filesystem path to the zonepath
     pub fn zonepath(&self) -> &Utf8Path {
-        &self.zonepath
+        &self.zonepath.path
     }
 
     pub fn site_profile_xml_path(&self) -> Utf8PathBuf {
@@ -1147,7 +1148,7 @@ impl InstalledZone {
 
     /// Returns the filesystem path to the zone's root in the GZ.
     pub fn root(&self) -> Utf8PathBuf {
-        self.zonepath.join(Self::ROOT_FS_PATH)
+        self.zonepath.path.join(Self::ROOT_FS_PATH)
     }
 }
 
@@ -1198,7 +1199,7 @@ pub struct ZoneBuilder<'a> {
     /// Allocates the NIC used for control plane communication.
     underlay_vnic_allocator: Option<&'a VnicAllocator<Etherstub>>,
     /// Filesystem path at which the installed zone will reside.
-    zone_root_path: Option<&'a Utf8Path>,
+    zone_root_path: Option<PathInPool>,
     /// The directories that will be searched for the image tarball for the
     /// provided zone type ([`Self::with_zone_type`]).
     zone_image_paths: Option<&'a [Utf8PathBuf]>,
@@ -1251,7 +1252,7 @@ impl<'a> ZoneBuilder<'a> {
     }
 
     /// Filesystem path at which the installed zone will reside.
-    pub fn with_zone_root_path(mut self, root_path: &'a Utf8Path) -> Self {
+    pub fn with_zone_root_path(mut self, root_path: PathInPool) -> Self {
         self.zone_root_path = Some(root_path);
         self
     }
@@ -1345,8 +1346,11 @@ impl<'a> ZoneBuilder<'a> {
                 self.zone_type?,
                 self.unique_name,
             );
-            let zonepath = temp_dir
-                .join(self.zone_root_path?.strip_prefix("/").unwrap())
+            let mut zonepath = self.zone_root_path?;
+            zonepath.path = temp_dir
+                .join(
+                    zonepath.path.strip_prefix("/").unwrap()
+                )
                 .join(&full_zone_name);
             let iz = InstalledZone {
                 log: self.log?,
@@ -1376,7 +1380,7 @@ impl<'a> ZoneBuilder<'a> {
         let Self {
             log: Some(log),
             underlay_vnic_allocator: Some(underlay_vnic_allocator),
-            zone_root_path: Some(zone_root_path),
+            zone_root_path: Some(mut zone_root_path),
             zone_image_paths: Some(zone_image_paths),
             zone_type: Some(zone_type),
             unique_name,
@@ -1440,6 +1444,7 @@ impl<'a> ZoneBuilder<'a> {
         net_device_names.sort();
         net_device_names.dedup();
 
+        zone_root_path.path = zone_root_path.path.join(&full_zone_name);
         Zones::install_omicron_zone(
             &log,
             &zone_root_path,
@@ -1460,7 +1465,7 @@ impl<'a> ZoneBuilder<'a> {
 
         Ok(InstalledZone {
             log: log.new(o!("zone" => full_zone_name.clone())),
-            zonepath: zone_root_path.join(&full_zone_name),
+            zonepath: zone_root_path,
             name: full_zone_name,
             control_vnic,
             bootstrap_vnic,

@@ -41,7 +41,7 @@ use omicron_common::api::internal::shared::{
 use omicron_common::backoff;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid};
 use propolis_client::Client as PropolisClient;
-use rand::prelude::SliceRandom;
+use rand::prelude::IteratorRandom;
 use rand::SeedableRng;
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::manager::StorageHandle;
@@ -1343,20 +1343,22 @@ impl InstanceRunner {
         // configured VNICs.
         let zname = propolis_zone_name(self.propolis_id());
         let mut rng = rand::rngs::StdRng::from_entropy();
-        let root = self
+        let latest_disks = self
             .storage
             .get_latest_disks()
             .await
-            .all_u2_mountpoints(ZONE_DATASET)
+            .all_u2_mountpoints(ZONE_DATASET);
+
+        let root = latest_disks
+            .into_iter()
             .choose(&mut rng)
-            .ok_or_else(|| Error::U2NotFound)?
-            .clone();
+            .ok_or_else(|| Error::U2NotFound)?;
         let installed_zone = self
             .zone_builder_factory
             .builder()
             .with_log(self.log.clone())
             .with_underlay_vnic_allocator(&self.vnic_allocator)
-            .with_zone_root_path(&root)
+            .with_zone_root_path(root)
             .with_zone_image_paths(&["/opt/oxide".into()])
             .with_zone_type("propolis-server")
             .with_unique_name(self.propolis_id().into_untyped_uuid())

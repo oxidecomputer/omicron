@@ -439,6 +439,7 @@ impl ZoneBundler {
         let extra_log_dirs = resources
             .all_u2_mountpoints(U2_DEBUG_DATASET)
             .into_iter()
+            .map(|pool_path| pool_path.path)
             .collect();
         let context = ZoneBundleContext { cause, storage_dirs, extra_log_dirs };
         info!(

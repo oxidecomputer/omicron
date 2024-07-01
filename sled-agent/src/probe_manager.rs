@@ -14,7 +14,7 @@ use omicron_common::api::external::{
     VpcFirewallRuleStatus,
 };
 use omicron_common::api::internal::shared::NetworkInterface;
-use rand::prelude::SliceRandom;
+use rand::prelude::IteratorRandom;
 use rand::SeedableRng;
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::manager::StorageHandle;
@@ -226,14 +226,15 @@ impl ProbeManagerInner {
     /// boots the probe zone.
     async fn add_probe(self: &Arc<Self>, probe: &ProbeState) -> Result<()> {
         let mut rng = rand::rngs::StdRng::from_entropy();
-        let root = self
+        let current_disks = self
             .storage
             .get_latest_disks()
             .await
-            .all_u2_mountpoints(ZONE_DATASET)
+            .all_u2_mountpoints(ZONE_DATASET);
+        let zone_root_path = current_disks
+            .into_iter()
             .choose(&mut rng)
-            .ok_or_else(|| anyhow!("u2 not found"))?
-            .clone();
+            .ok_or_else(|| anyhow!("u2 not found"))?;
 
         let nic = probe
             .interface
@@ -268,7 +269,7 @@ impl ProbeManagerInner {
             .builder()
             .with_log(self.log.clone())
             .with_underlay_vnic_allocator(&self.vnic_allocator)
-            .with_zone_root_path(&root)
+            .with_zone_root_path(zone_root_path)
             .with_zone_image_paths(&["/opt/oxide".into()])
             .with_zone_type("probe")
             .with_unique_name(probe.id)
