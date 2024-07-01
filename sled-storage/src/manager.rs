@@ -101,6 +101,10 @@ pub(crate) enum StorageRequest {
         raw_disk: RawDisk,
         tx: DebugIgnore<oneshot::Sender<Result<(), Error>>>,
     },
+    DetectedRawDiskUpdate {
+        raw_disk: RawDisk,
+        tx: DebugIgnore<oneshot::Sender<Result<(), Error>>>,
+    },
     DetectedRawDiskRemoval {
         raw_disk: RawDisk,
         tx: DebugIgnore<oneshot::Sender<Result<(), Error>>>,
@@ -178,6 +182,27 @@ impl StorageHandle {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(StorageRequest::DetectedRawDiskRemoval {
+                raw_disk,
+                tx: tx.into(),
+            })
+            .await
+            .unwrap();
+
+        rx.map(|result| result.unwrap())
+    }
+
+    /// Updates a disk, if it's tracked by the storage manager, as well
+    /// as any associated zpools.
+    ///
+    /// Returns a future which completes once the notification has been
+    /// processed. Awaiting this future is optional.
+    pub async fn detected_raw_disk_update(
+        &self,
+        raw_disk: RawDisk,
+    ) -> impl Future<Output = Result<(), Error>> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(StorageRequest::DetectedRawDiskUpdate {
                 raw_disk,
                 tx: tx.into(),
             })
@@ -388,6 +413,13 @@ impl StorageManager {
                 }
                 let _ = tx.0.send(result);
             }
+            StorageRequest::DetectedRawDiskUpdate { raw_disk, tx } => {
+                let result = self.detected_raw_disk_update(raw_disk).await;
+                if let Err(ref err) = &result {
+                    warn!(self.log, "Failed to apply raw disk update"; "err" => ?err);
+                }
+                let _ = tx.0.send(result);
+            }
             StorageRequest::DetectedRawDiskRemoval { raw_disk, tx } => {
                 self.detected_raw_disk_removal(raw_disk);
                 let _ = tx.0.send(Ok(()));
@@ -475,7 +507,7 @@ impl StorageManager {
         // coordination with the control plane at large.
         let needs_synchronization =
             matches!(raw_disk.variant(), DiskVariant::U2);
-        self.resources.insert_disk(raw_disk).await?;
+        self.resources.insert_or_update_disk(raw_disk).await?;
 
         if needs_synchronization {
             match self.state {
@@ -499,6 +531,18 @@ impl StorageManager {
         }
 
         Ok(())
+    }
+
+    /// Updates some information about the underlying disk within this sled.
+    ///
+    /// Things that can currently be updated:
+    /// - DiskFirmware
+    async fn detected_raw_disk_update(
+        &mut self,
+        raw_disk: RawDisk,
+    ) -> Result<(), Error> {
+        // We aren't worried about synchronizing as the disk should already be managed.
+        self.resources.insert_or_update_disk(raw_disk).await
     }
 
     async fn load_ledger(&self) -> Option<Ledger<OmicronPhysicalDisksConfig>> {
@@ -776,7 +820,7 @@ impl StorageManager {
             .resources
             .disks()
             .iter_all()
-            .filter_map(|(id, _variant, _slot)| {
+            .filter_map(|(id, _variant, _slot, _firmware)| {
                 if !all_ids.contains(id) {
                     Some(id.clone())
                 } else {
@@ -863,7 +907,7 @@ mod tests {
     use crate::dataset::DatasetKind;
     use crate::disk::RawSyntheticDisk;
     use crate::manager_test_harness::StorageManagerTestHarness;
-    use crate::resources::DiskManagementError;
+    use crate::resources::{DiskManagementError, ManagedDisk};
 
     use super::*;
     use camino_tempfile::tempdir_in;
@@ -871,6 +915,7 @@ mod tests {
     use omicron_common::ledger;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_hardware::DiskFirmware;
     use std::sync::atomic::Ordering;
     use uuid::Uuid;
 
@@ -996,6 +1041,64 @@ mod tests {
         assert_eq!(2, all_disks.iter_all().collect::<Vec<_>>().len());
         assert_eq!(0, all_disks.all_u2_zpools().len());
         assert_eq!(1, all_disks.all_m2_zpools().len());
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn update_rawdisk_firmware() {
+        const FW_REV: &str = "firmware-2.0";
+        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
+        let logctx = test_setup_log("update_u2_firmware");
+        let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
+        harness.handle().key_manager_ready().await;
+
+        // Add a representative scenario for a small sled: a U.2 and M.2.
+        let mut raw_disks =
+            harness.add_vdevs(&["u2_under_test.vdev", "m2_helping.vdev"]).await;
+
+        // This disks should exist, but only the M.2 should have a zpool.
+        let all_disks_gen1 = harness.handle().get_latest_disks().await;
+
+        for rd in &mut raw_disks {
+            if let RawDisk::Synthetic(ref mut disk) = rd {
+                let mut slots = disk.firmware.slots().to_vec();
+                // "Install" a new firmware version into slot2
+                slots.push(Some(FW_REV.to_string()));
+                disk.firmware = DiskFirmware::new(
+                    disk.firmware.active_slot(),
+                    disk.firmware.next_active_slot(),
+                    disk.firmware.slot1_read_only(),
+                    slots,
+                );
+            }
+            harness.update_vdev(rd).await;
+        }
+
+        let all_disks_gen2 = harness.handle().get_latest_disks().await;
+
+        // Disks should now be different due to the mock firmware update.
+        assert_ne!(all_disks_gen1, all_disks_gen2);
+
+        // Now let's verify we saw the correct firmware update.
+        for rd in &raw_disks {
+            let managed =
+                all_disks_gen2.values.get(rd.identity()).expect("disk exists");
+            match managed {
+                ManagedDisk::ExplicitlyManaged(disk)
+                | ManagedDisk::ImplicitlyManaged(disk) => {
+                    assert_eq!(
+                        disk.firmware(),
+                        rd.firmware(),
+                        "didn't see firmware update"
+                    );
+                }
+                ManagedDisk::Unmanaged(disk) => {
+                    assert_eq!(disk, rd, "didn't see firmware update");
+                }
+            }
+        }
 
         harness.cleanup().await;
         logctx.cleanup_successful();

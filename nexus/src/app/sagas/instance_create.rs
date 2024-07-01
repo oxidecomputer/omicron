@@ -1140,15 +1140,12 @@ pub mod test {
         let nexus = &cptestctx.server.server_context().nexus;
         let project_id = create_org_project_and_disk(&client).await;
 
-        // Build the saga DAG with the provided test parameters
+        // Build the saga DAG with the provided test parameters and run it
         let opctx = test_helpers::test_opctx(&cptestctx);
         let params = new_test_params(&opctx, project_id);
-        let dag = create_saga_dag::<SagaInstanceCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-
-        // Actually run the saga
         nexus
-            .run_saga(runnable_saga)
+            .sagas
+            .saga_execute::<SagaInstanceCreate>(params)
             .await
             .expect("Saga should have succeeded");
     }

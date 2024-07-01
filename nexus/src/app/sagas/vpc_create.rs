@@ -485,8 +485,8 @@ async fn svc_notify_sleds(
 #[cfg(test)]
 pub(crate) mod test {
     use crate::{
-        app::saga::create_saga_dag, app::sagas::vpc_create::Params,
-        app::sagas::vpc_create::SagaVpcCreate, external_api::params,
+        app::sagas::vpc_create::Params, app::sagas::vpc_create::SagaVpcCreate,
+        external_api::params,
     };
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{
@@ -782,11 +782,7 @@ pub(crate) mod test {
         )
         .await;
         let params = new_test_params(&opctx, authz_project);
-        let dag = create_saga_dag::<SagaVpcCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-
-        // Actually run the saga
-        nexus.run_saga(runnable_saga).await.unwrap();
+        nexus.sagas.saga_execute::<SagaVpcCreate>(params).await.unwrap();
     }
 
     #[nexus_test(server = crate::Server)]

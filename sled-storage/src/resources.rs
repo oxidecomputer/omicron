@@ -17,7 +17,7 @@ use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_hardware::DiskVariant;
+use sled_hardware::{DiskFirmware, DiskVariant};
 use slog::{info, o, warn, Logger};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -283,16 +283,17 @@ impl AllDisks {
     // [Self::iter_all_inner].
     pub fn iter_all(
         &self,
-    ) -> impl Iterator<Item = (&DiskIdentity, DiskVariant, i64)> {
+    ) -> impl Iterator<Item = (&DiskIdentity, DiskVariant, i64, &DiskFirmware)>
+    {
         self.inner.values.iter().map(|(identity, disk)| match disk {
             ManagedDisk::ExplicitlyManaged(disk) => {
-                (identity, disk.variant(), disk.slot())
+                (identity, disk.variant(), disk.slot(), disk.firmware())
             }
             ManagedDisk::ImplicitlyManaged(disk) => {
-                (identity, disk.variant(), disk.slot())
+                (identity, disk.variant(), disk.slot(), disk.firmware())
             }
             ManagedDisk::Unmanaged(raw) => {
-                (identity, raw.variant(), raw.slot())
+                (identity, raw.variant(), raw.slot(), raw.firmware())
             }
         })
     }
@@ -526,7 +527,7 @@ impl StorageResources {
         Ok(ManagedDisk::ExplicitlyManaged(disk))
     }
 
-    /// Tracks a new disk.
+    /// Tracks a new disk, or updates an existing disk.
     ///
     /// For U.2s: Does not automatically attempt to manage disks -- for this,
     /// the caller will need to also invoke
@@ -534,18 +535,49 @@ impl StorageResources {
     ///
     /// For M.2s: As no additional control plane guidance is necessary to adopt
     /// M.2s, these are automatically managed.
-    pub(crate) async fn insert_disk(
+    pub(crate) async fn insert_or_update_disk(
         &mut self,
         disk: RawDisk,
     ) -> Result<(), Error> {
         let disk_identity = disk.identity().clone();
         info!(self.log, "Inserting disk"; "identity" => ?disk_identity);
-        if self.disks.inner.values.contains_key(&disk_identity) {
-            info!(self.log, "Disk already exists"; "identity" => ?disk_identity);
+
+        // This is a trade-off for simplicity even though we may be potentially
+        // cloning data before we know if there is a write action to perform.
+        let disks = Arc::make_mut(&mut self.disks.inner);
+
+        // First check if there are any updates we need to apply to existing
+        // managed disks.
+        if let Some(managed) = disks.values.get_mut(&disk_identity) {
+            let mut updated = false;
+            match managed {
+                ManagedDisk::ExplicitlyManaged(mdisk)
+                | ManagedDisk::ImplicitlyManaged(mdisk) => {
+                    let old = RawDisk::from(mdisk.clone());
+                    if old != disk {
+                        mdisk.update_firmware_metadata(&disk);
+                        updated = true;
+                    }
+                }
+                ManagedDisk::Unmanaged(raw) => {
+                    if raw != &disk {
+                        *raw = disk;
+                        updated = true;
+                    }
+                }
+            };
+
+            if updated {
+                self.disk_updates.send_replace(self.disks.clone());
+            } else {
+                info!(self.log, "Disk already exists and has no updates";
+                    "identity" => ?disk_identity);
+            }
+
             return Ok(());
         }
 
-        let disks = Arc::make_mut(&mut self.disks.inner);
+        // If there's no update then we are inserting a new disk.
         match disk.variant() {
             DiskVariant::U2 => {
                 disks

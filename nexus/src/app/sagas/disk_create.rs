@@ -883,15 +883,11 @@ pub(crate) mod test {
         let project_id =
             create_project(&client, PROJECT_NAME).await.identity.id;
 
-        // Build the saga DAG with the provided test parameters
+        // Build the saga DAG with the provided test parameters and run it.
         let opctx = test_opctx(cptestctx);
         let params = new_test_params(&opctx, project_id);
-        let dag = create_saga_dag::<SagaDiskCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-
-        // Actually run the saga
-        let output = nexus.run_saga(runnable_saga).await.unwrap();
-
+        let output =
+            nexus.sagas.saga_execute::<SagaDiskCreate>(params).await.unwrap();
         let disk = output
             .lookup_node_output::<nexus_db_queries::db::model::Disk>(
                 "created_disk",

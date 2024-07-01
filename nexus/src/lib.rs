@@ -57,7 +57,7 @@ extern crate slog;
 /// to stdout.
 pub fn run_openapi_external() -> Result<(), String> {
     external_api()
-        .openapi("Oxide Region API", "20240502.0")
+        .openapi("Oxide Region API", "20240710.0")
         .description("API for interacting with the Oxide control plane")
         .contact_url("https://oxide.computer")
         .contact_email("api@oxide.computer")
