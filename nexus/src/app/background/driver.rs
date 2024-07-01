@@ -291,11 +291,11 @@ impl Activator {
 impl ActivatorInner {
     async fn activated(&self) {
         debug_assert!(
-            self.0.wired_up.load(Ordering::SeqCst),
+            self.wired_up.load(Ordering::SeqCst),
             "nothing should await activation from an activator that hasn't \
              been wired up"
         );
-        self.0.notify.notified().await
+        self.notify.notified().await
     }
 }
 
