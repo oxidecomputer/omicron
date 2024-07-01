@@ -97,7 +97,14 @@ impl Driver {
     ///
     /// This function panics if the `name` or `activator` has previously been
     /// passed to a call to this function.
-    pub fn register(&mut self, taskdef: TaskDefinition) -> TaskName {
+    pub fn register<N, D>(
+        &mut self,
+        taskdef: TaskDefinition<'_, N, D>,
+    ) -> TaskName
+    where
+        N: ToString,
+        D: ToString,
+    {
         let name = taskdef.name.to_string();
 
         // Activation of the background task happens in a separate tokio task.
@@ -220,19 +227,19 @@ impl Drop for Driver {
 /// See [`Driver::register()`] for more on how these fields get used.
 pub struct TaskDefinition<'a, N: ToString, D: ToString> {
     /// identifier for this task
-    name: N,
+    pub name: N,
     /// short human-readable summary of this task
-    description: D,
+    pub description: D,
     /// driver should activate the task if it hasn't run in this long
-    period: Duration,
+    pub period: Duration,
     /// impl of [`BackgroundTask`] that represents the work of the task
-    task_impl: Box<dyn BackgroundTask>,
+    pub task_impl: Box<dyn BackgroundTask>,
     /// `OpContext` used for task activations
-    opctx: OpContext,
+    pub opctx: OpContext,
     /// list of watchers that will trigger activation of this task
-    watchers: Vec<Box<dyn GenericWatcher>>,
+    pub watchers: Vec<Box<dyn GenericWatcher>>,
     /// an [`Activator]` that will be wired up to activate this task
-    activator: &'a Activator,
+    pub activator: &'a Activator,
 }
 
 /// Activates a background task
