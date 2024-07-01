@@ -70,8 +70,6 @@ impl steno::SecStore for CockroachDbSecStore {
             // This is an internal service query to CockroachDB.
             backoff::retry_policy_internal_service(),
             || {
-                // An interesting question is how to handle errors.
-                //
                 // In general, there are some kinds of database errors that are
                 // temporary/server errors (e.g. network failures), and some
                 // that are permanent/client errors (e.g. conflict during
@@ -85,10 +83,9 @@ impl steno::SecStore for CockroachDbSecStore {
                 // errors that likely require operator intervention.)
                 //
                 // At a higher level, callers should plan for the fact that
-                // record_event could potentially loop forever. See
-                // https://github.com/oxidecomputer/omicron/issues/5406 and the
-                // note in `nexus/src/app/saga.rs`'s `execute_saga` for more
-                // details.
+                // record_event (and, so, saga execution) could potentially loop
+                // indefinitely while the datastore (or other dependent
+                // services) are down.
                 self.datastore
                     .saga_create_event(&our_event)
                     .map_err(backoff::BackoffError::transient)

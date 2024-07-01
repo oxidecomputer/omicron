@@ -230,6 +230,7 @@ async fn sim_create_migration_record(
             &opctx,
             db::model::Migration::new(
                 migration_id,
+                InstanceUuid::from_untyped_uuid(params.instance.id()),
                 source_propolis_id,
                 target_propolis_id,
             ),
@@ -574,7 +575,7 @@ async fn sim_instance_migrate(
 
 #[cfg(test)]
 mod tests {
-    use crate::app::{saga::create_saga_dag, sagas::test_helpers};
+    use crate::app::sagas::test_helpers;
     use camino::Utf8Path;
     use dropshot::test_util::ClientTestContext;
     use nexus_test_interface::NexusServer;
@@ -707,9 +708,11 @@ mod tests {
             },
         };
 
-        let dag = create_saga_dag::<SagaInstanceMigrate>(params).unwrap();
-        let saga = nexus.create_runnable_saga(dag).await.unwrap();
-        nexus.run_saga(saga).await.expect("Migration saga should succeed");
+        nexus
+            .sagas
+            .saga_execute::<SagaInstanceMigrate>(params)
+            .await
+            .expect("Migration saga should succeed");
 
         // Merely running the migration saga (without simulating any completion
         // steps in the simulated agents) should not change where the instance

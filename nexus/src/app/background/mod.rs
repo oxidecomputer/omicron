@@ -133,8 +133,10 @@ mod init;
 mod status;
 mod tasks;
 
+pub use driver::Activator;
 pub use driver::Driver;
 pub use init::BackgroundTasks;
+pub use init::BackgroundTasksInitializer;
 
 use futures::future::BoxFuture;
 use nexus_auth::context::OpContext;
@@ -155,11 +157,10 @@ pub trait BackgroundTask: Send + Sync {
 /// background task.  It's then accepted by functions like
 /// [`Driver::activate()`] and [`Driver::task_status()`] to identify the task.
 #[derive(Clone, Debug, Ord, PartialOrd, PartialEq, Eq)]
-pub struct TaskHandle(String);
+pub struct TaskName(String);
 
-impl TaskHandle {
-    /// Returns the unique name of this background task
-    pub fn name(&self) -> &str {
+impl TaskName {
+    pub fn as_str(&self) -> &str {
         &self.0
     }
 }
