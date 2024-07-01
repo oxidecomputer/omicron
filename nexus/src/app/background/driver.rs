@@ -236,7 +236,7 @@ pub struct Activator(Arc<ActivatorInner>);
 
 /// Shared state for an `Activator`.
 struct ActivatorInner {
-    pub(super) notify: Arc<Notify>,
+    pub(super) notify: Notify,
     pub(super) wired_up: AtomicBool,
 }
 
@@ -244,7 +244,7 @@ impl Activator {
     /// Create an activator that is not yet wired up to any background task
     pub fn new() -> Activator {
         Self(Arc::new(ActivatorInner {
-            notify: Arc::new(Notify::new()),
+            notify: Notify::new(),
             wired_up: AtomicBool::new(false),
         }))
     }
