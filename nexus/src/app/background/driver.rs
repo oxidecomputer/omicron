@@ -536,8 +536,8 @@ mod test {
         });
 
         let h3 = driver.register(TaskDefinition {
-            name: "t3".to_string(),
-            description: "test task".to_string(),
+            name: "t3",
+            description: "test task",
             period: Duration::from_secs(300), // should never fire in this test
             task_impl: Box::new(t3),
             opctx,
@@ -689,8 +689,8 @@ mod test {
         let before_instant = Instant::now();
         let act1 = Activator::new();
         let h1 = driver.register(TaskDefinition {
-            name: "t1".to_string(),
-            description: "test task".to_string(),
+            name: "t1",
+            description: "test task",
             period: Duration::from_secs(300), // should not elapse during test
             task_impl: Box::new(t1),
             opctx: opctx.child(std::collections::BTreeMap::new()),
@@ -836,8 +836,8 @@ mod test {
         let act1 = Activator::new();
 
         let h1 = driver.register(TaskDefinition {
-            name: "t1".to_string(),
-            description: "test saga request flow task".to_string(),
+            name: "t1",
+            description: "test saga request flow task",
             period: Duration::from_secs(300), // should not fire in this test
             task_impl: Box::new(t1),
             opctx: opctx.child(std::collections::BTreeMap::new()),

@@ -592,8 +592,8 @@ impl BackgroundTasksInitializer {
                 v2p_watcher.0,
             );
             driver.register(TaskDefinition {
-                name: "instance_watcher".to_string(),
-                description: "periodically checks instance states".to_string(),
+                name: "instance_watcher",
+                description: "periodically checks instance states",
                 period: config.instance_watcher.period_secs,
                 task_impl: Box::new(watcher),
                 opctx: opctx.child(BTreeMap::new()),
