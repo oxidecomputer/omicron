@@ -139,7 +139,7 @@ impl Driver {
             name.clone(),
         )]));
         let task_exec =
-            TaskExec::new(period, imp, activator.clone(), opctx, status_tx);
+            TaskExec::new(period, imp, activator.0.clone(), opctx, status_tx);
         let tokio_task = tokio::task::spawn(task_exec.run(watchers));
 
         // Create an object to track our side of the background task's state.
@@ -256,7 +256,9 @@ impl Activator {
     pub fn activate(&self) {
         self.0.notify.notify_one();
     }
+}
 
+impl ActivatorInner {
     async fn activated(&self) {
         debug_assert!(
             self.0.wired_up.load(Ordering::SeqCst),
@@ -276,7 +278,7 @@ struct TaskExec {
     imp: Box<dyn BackgroundTask>,
     /// used to receive notifications from the Driver that someone has requested
     /// explicit activation
-    activator: Activator,
+    activation: Arc<ActivatorInner>,
     /// passed through to the background task impl when activated
     opctx: OpContext,
     /// used to send current status back to the Driver
@@ -289,11 +291,11 @@ impl TaskExec {
     fn new(
         period: Duration,
         imp: Box<dyn BackgroundTask>,
-        activator: Activator,
+        activation: Arc<ActivatorInner>,
         opctx: OpContext,
         status_tx: watch::Sender<TaskStatus>,
     ) -> TaskExec {
-        TaskExec { period, imp, activator, opctx, status_tx, iteration: 0 }
+        TaskExec { period, imp, activation, opctx, status_tx, iteration: 0 }
     }
 
     /// Body of the tokio task that manages activation of this background task
@@ -313,7 +315,7 @@ impl TaskExec {
                     self.activate(ActivationReason::Timeout).await;
                 },
 
-                _ = self.activator.activated() => {
+                _ = self.activation.activated() => {
                     self.activate(ActivationReason::Signaled).await;
                 }
 
