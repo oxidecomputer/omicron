@@ -397,6 +397,17 @@
         "zone_type"
       ],
       "properties": {
+        "filesystem_pool": {
+          "description": "The pool on which we'll place this zone's filesystem.\n\nNote that this is transient -- the sled agent is permitted to destroy the zone's dataset on this pool each time the zone is initialized.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ZpoolName"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "id": {
           "type": "string",
           "format": "uuid"

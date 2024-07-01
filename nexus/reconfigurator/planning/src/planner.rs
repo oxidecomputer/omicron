@@ -672,7 +672,7 @@ pub(crate) fn zone_needs_expungement(
     }
 
     // Should we expunge the zone because durable storage is gone?
-    if let Some(durable_storage_zpool) = zone_config.zone_type.zpool() {
+    if let Some(durable_storage_zpool) = zone_config.zone_type.durable_zpool() {
         let zpool_id = durable_storage_zpool.id();
         if !sled_details.resources.zpool_is_provisionable(&zpool_id) {
             return Some(ZoneExpungeReason::DiskExpunged);
