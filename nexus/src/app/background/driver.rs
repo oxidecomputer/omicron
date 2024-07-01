@@ -54,9 +54,9 @@ struct Task {
     status: watch::Receiver<TaskStatus>,
     /// join handle for the tokio task that's executing this background task
     tokio_task: tokio::task::JoinHandle<()>,
-    /// `Notify` used to wake up the tokio task when a caller explicit wants to
+    /// `Activator` used to wake up the tokio task when a caller explicit wants to
     /// activate the background task
-    notify: Arc<Notify>,
+    activator: Activator,
 }
 
 impl Driver {
@@ -118,7 +118,7 @@ impl Driver {
         // requested.  The caller provides their own Activator, which just
         // provides a specific Notify for us to use here.
         let activator = taskdef.activator;
-        if let Err(previous) = activator.wired_up.compare_exchange(
+        if let Err(previous) = activator.0.wired_up.compare_exchange(
             false,
             true,
             Ordering::SeqCst,
@@ -131,7 +131,6 @@ impl Driver {
                 previous, name
             );
         }
-        let notify = Arc::clone(&activator.notify);
 
         // Spawn the tokio task that will manage activation of the background
         // task.
@@ -142,7 +141,7 @@ impl Driver {
         let task_exec = TaskExec::new(
             taskdef.period,
             taskdef.task_impl,
-            Arc::clone(&notify),
+            Arc::clone(&activator.0),
             opctx,
             status_tx,
         );
@@ -156,7 +155,7 @@ impl Driver {
             period: taskdef.period,
             status: status_rx,
             tokio_task,
-            notify,
+            activator: activator.clone(),
         };
         if self.tasks.insert(TaskName(name.clone()), task).is_some() {
             panic!("started two background tasks called {:?}", name);
@@ -200,7 +199,7 @@ impl Driver {
     /// If the task is currently running, it will be activated again when it
     /// finishes.
     pub(super) fn activate(&self, task: &TaskName) {
-        self.task_required(task).notify.notify_one();
+        self.task_required(task).activator.activate();
     }
 
     /// Returns the runtime status of the background task
@@ -257,18 +256,22 @@ pub struct TaskDefinition<'a, N: ToString, D: ToString> {
 /// corresponding task has been created and then wired up with just an
 /// `&Activator` (not a `&mut Activator`).  See the [`super::init`] module-level
 /// documentation for more on why.
-pub struct Activator {
-    pub(super) notify: Arc<Notify>,
+#[derive(Clone)]
+pub struct Activator(Arc<ActivatorInner>);
+
+/// Shared state for an `Activator`.
+struct ActivatorInner {
+    pub(super) notify: Notify,
     pub(super) wired_up: AtomicBool,
 }
 
 impl Activator {
     /// Create an activator that is not yet wired up to any background task
     pub fn new() -> Activator {
-        Activator {
-            notify: Arc::new(Notify::new()),
+        Self(Arc::new(ActivatorInner {
+            notify: Notify::new(),
             wired_up: AtomicBool::new(false),
-        }
+        }))
     }
 
     /// Activate the background task that this Activator has been wired up to
@@ -276,7 +279,18 @@ impl Activator {
     /// If this Activator has not yet been wired up with [`Driver::register()`],
     /// then whenever it _is_ wired up, that task will be immediately activated.
     pub fn activate(&self) {
-        self.notify.notify_one();
+        self.0.notify.notify_one();
+    }
+}
+
+impl ActivatorInner {
+    async fn activated(&self) {
+        debug_assert!(
+            self.wired_up.load(Ordering::SeqCst),
+            "nothing should await activation from an activator that hasn't \
+             been wired up"
+        );
+        self.notify.notified().await
     }
 }
 
@@ -289,7 +303,7 @@ struct TaskExec {
     imp: Box<dyn BackgroundTask>,
     /// used to receive notifications from the Driver that someone has requested
     /// explicit activation
-    notify: Arc<Notify>,
+    activation: Arc<ActivatorInner>,
     /// passed through to the background task impl when activated
     opctx: OpContext,
     /// used to send current status back to the Driver
@@ -302,11 +316,11 @@ impl TaskExec {
     fn new(
         period: Duration,
         imp: Box<dyn BackgroundTask>,
-        notify: Arc<Notify>,
+        activation: Arc<ActivatorInner>,
         opctx: OpContext,
         status_tx: watch::Sender<TaskStatus>,
     ) -> TaskExec {
-        TaskExec { period, imp, notify, opctx, status_tx, iteration: 0 }
+        TaskExec { period, imp, activation, opctx, status_tx, iteration: 0 }
     }
 
     /// Body of the tokio task that manages activation of this background task
@@ -326,7 +340,7 @@ impl TaskExec {
                     self.activate(ActivationReason::Timeout).await;
                 },
 
-                _ = self.notify.notified() => {
+                _ = self.activation.activated() => {
                     self.activate(ActivationReason::Signaled).await;
                 }
 
