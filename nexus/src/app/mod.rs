@@ -5,7 +5,7 @@
 //! Nexus, the service that operates much of the control plane in an Oxide fleet
 
 use self::external_endpoints::NexusCertResolver;
-use self::saga::SagaExecutor;
+use self::saga::{SagaExecutor, SagaStarter};
 use crate::app::oximeter::LazyTimeseriesClient;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
@@ -546,7 +546,7 @@ impl Nexus {
     }
 
     #[cfg(test)]
-    pub(crate) fn saga_executor(&self) -> &Arc<SagaExecutor> {
+    pub(crate) fn saga_starter(&self) -> &Arc<dyn SagaStarter> {
         &self.sagas
     }
 

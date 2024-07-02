@@ -12,7 +12,7 @@
 
 use crate::app::authn;
 use crate::app::background::BackgroundTask;
-use crate::app::saga::SagaExecutor;
+use crate::app::saga::SagaStarter;
 use crate::app::sagas;
 use crate::app::sagas::region_replacement_start::SagaRegionReplacementStart;
 use crate::app::RegionAllocationStrategy;
@@ -28,11 +28,11 @@ use std::sync::Arc;
 
 pub struct RegionReplacementDetector {
     datastore: Arc<DataStore>,
-    sagas: Arc<SagaExecutor>,
+    sagas: Arc<dyn SagaStarter>,
 }
 
 impl RegionReplacementDetector {
-    pub fn new(datastore: Arc<DataStore>, sagas: Arc<SagaExecutor>) -> Self {
+    pub fn new(datastore: Arc<DataStore>, sagas: Arc<dyn SagaStarter>) -> Self {
         RegionReplacementDetector { datastore, sagas }
     }
 

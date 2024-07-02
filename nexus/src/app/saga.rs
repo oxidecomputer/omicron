@@ -55,6 +55,7 @@ use crate::saga_interface::SagaContext;
 use crate::Nexus;
 use anyhow::Context;
 use futures::future::BoxFuture;
+use futures::FutureExt;
 use futures::StreamExt;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -85,6 +86,27 @@ pub(crate) fn create_saga_dag<N: NexusSaga>(
         SagaInitError::SerializeError(String::from("saga params"), e)
     })?;
     Ok(SagaDag::new(dag, params))
+}
+
+/// Interface for kicking off sagas
+///
+/// See [`NexusSagaStarter`] for the implementation within Nexus.  Some tests
+/// use alternate implementations that don't actually run the sagas.
+pub(crate) trait SagaStarter {
+    /// Create a new saga (of type `N` with parameters `params`), start it
+    /// running, but do not wait for it to finish.
+    fn saga_start(&self, dag: SagaDag) -> BoxFuture<'_, Result<(), Error>>;
+}
+
+impl SagaStarter for SagaExecutor {
+    fn saga_start(&self, dag: SagaDag) -> BoxFuture<'_, Result<(), Error>> {
+        async move {
+            let runnable_saga = self.saga_prepare(dag).await?;
+            let _ = runnable_saga.start().await?;
+            Ok(())
+        }
+        .boxed()
+    }
 }
 
 /// Handle to a self-contained subsystem for kicking off sagas
@@ -200,17 +222,6 @@ impl SagaExecutor {
     }
 
     // Convenience functions
-
-    /// Create a new saga (of type `N` with parameters `params`), start it
-    /// running, but do not wait for it to finish.
-    pub(crate) async fn saga_start<N: NexusSaga>(
-        &self,
-        params: N::Params,
-    ) -> Result<RunningSaga, Error> {
-        let dag = create_saga_dag::<N>(params)?;
-        let runnable_saga = self.saga_prepare(dag).await?;
-        runnable_saga.start().await
-    }
 
     /// Create a new saga (of type `N` with parameters `params`), start it
     /// running, wait for it to finish, and report the result

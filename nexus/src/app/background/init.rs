@@ -113,7 +113,7 @@ use super::tasks::vpc_routes;
 use super::Activator;
 use super::Driver;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
-use crate::app::saga::SagaExecutor;
+use crate::app::saga::SagaStarter;
 use nexus_config::BackgroundTaskConfig;
 use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
@@ -253,7 +253,7 @@ impl BackgroundTasksInitializer {
         rack_id: Uuid,
         nexus_id: Uuid,
         resolver: internal_dns::resolver::Resolver,
-        sagas: Arc<SagaExecutor>,
+        sagas: Arc<dyn SagaStarter>,
         producer_registry: ProducerRegistry,
     ) -> Driver {
         let mut driver = self.driver;
