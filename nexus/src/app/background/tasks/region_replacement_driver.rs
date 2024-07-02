@@ -22,6 +22,8 @@ use crate::app::authn;
 use crate::app::background::BackgroundTask;
 use crate::app::saga::SagaExecutor;
 use crate::app::sagas;
+use crate::app::sagas::region_replacement_drive::SagaRegionReplacementDrive;
+use crate::app::sagas::region_replacement_finish::SagaRegionReplacementFinish;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
@@ -120,23 +122,25 @@ impl RegionReplacementDriver {
                     serialized_authn: authn::saga::Serialized::for_opctx(opctx),
                     request,
                 };
-                let sagas = self.sagas.clone();
-                match sagas.saga_start::<sagas::region_replacement_drive::SagaRegionReplacementDrive>(params).await {
+                match self
+                    .sagas
+                    .saga_start::<SagaRegionReplacementDrive>(params)
+                    .await
+                {
                     Ok(_) => {
                         let s = format!("{request_id}: drive invoked ok");
                         info!(&log, "{s}");
                         status.drive_invoked_ok.push(s);
-                    },
+                    }
                     Err(e) => {
-                        warn!(&log, "failed to start region replacement drive saga: {e}");
-                       let s = format!(
+                        let s = format!(
                             "starting region replacement drive saga for \
                             {request_id} failed: {e}",
                         );
 
                         error!(&log, "{s}");
                         status.errors.push(s);
-                    },
+                    }
                 }
             }
         }
@@ -182,17 +186,15 @@ impl RegionReplacementDriver {
             };
 
             let request_id = request.id;
-            let sagas = self.sagas.clone();
             let params = sagas::region_replacement_finish::Params {
                 serialized_authn: authn::saga::Serialized::for_opctx(opctx),
                 region_volume_id: old_region_volume_id,
                 request,
             };
-            let result = sagas
-                .saga_start::<sagas::region_replacement_finish::SagaRegionReplacementFinish>(
-                        params,
-                    )
-                    .await;
+            let result = self
+                .sagas
+                .saga_start::<SagaRegionReplacementFinish>(params)
+                .await;
             match result {
                 Ok(_) => {
                     let s = format!("{request_id}: finish saga started ok");

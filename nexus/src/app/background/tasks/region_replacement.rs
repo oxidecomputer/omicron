@@ -14,6 +14,7 @@ use crate::app::authn;
 use crate::app::background::BackgroundTask;
 use crate::app::saga::SagaExecutor;
 use crate::app::sagas;
+use crate::app::sagas::region_replacement_start::SagaRegionReplacementStart;
 use crate::app::RegionAllocationStrategy;
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -47,12 +48,7 @@ impl RegionReplacementDetector {
                 RegionAllocationStrategy::RandomWithDistinctSleds { seed: None },
         };
 
-        let sagas = self.sagas.clone();
-        sagas
-            .saga_start::<sagas::region_replacement_start::SagaRegionReplacementStart>(
-                params,
-            )
-            .await?;
+        self.sagas.saga_start::<SagaRegionReplacementStart>(params).await?;
         Ok(())
     }
 }
