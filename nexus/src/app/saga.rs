@@ -84,16 +84,19 @@ pub(crate) fn create_saga_dag<N: NexusSaga>(
 ///
 /// See [`SagaExecutor`] for the implementation within Nexus.  Some tests use
 /// alternate implementations that don't actually run the sagas.
-pub(crate) trait SagaStarter: Send + Sync {
+pub(crate) trait StartSaga: Send + Sync {
     /// Create a new saga (of type `N` with parameters `params`), start it
     /// running, but do not wait for it to finish.
     fn saga_start(&self, dag: SagaDag) -> BoxFuture<'_, Result<(), Error>>;
 }
 
-impl SagaStarter for SagaExecutor {
+impl StartSaga for SagaExecutor {
     fn saga_start(&self, dag: SagaDag) -> BoxFuture<'_, Result<(), Error>> {
         async move {
             let runnable_saga = self.saga_prepare(dag).await?;
+            // start() returns a future that can be used to wait for the saga to
+            // complete.  We don't need that here.  (Cancelling this has no
+            // effect on the running saga.)
             let _ = runnable_saga.start().await?;
             Ok(())
         }

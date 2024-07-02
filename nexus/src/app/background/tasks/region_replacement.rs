@@ -12,7 +12,7 @@
 
 use crate::app::authn;
 use crate::app::background::BackgroundTask;
-use crate::app::saga::SagaStarter;
+use crate::app::saga::StartSaga;
 use crate::app::sagas;
 use crate::app::sagas::region_replacement_start::SagaRegionReplacementStart;
 use crate::app::sagas::NexusSaga;
@@ -30,11 +30,11 @@ use std::sync::Arc;
 
 pub struct RegionReplacementDetector {
     datastore: Arc<DataStore>,
-    sagas: Arc<dyn SagaStarter>,
+    sagas: Arc<dyn StartSaga>,
 }
 
 impl RegionReplacementDetector {
-    pub fn new(datastore: Arc<DataStore>, sagas: Arc<dyn SagaStarter>) -> Self {
+    pub fn new(datastore: Arc<DataStore>, sagas: Arc<dyn StartSaga>) -> Self {
         RegionReplacementDetector { datastore, sagas }
     }
 
@@ -198,7 +198,7 @@ impl BackgroundTask for RegionReplacementDetector {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::app::background::init::test::NoopSagaStarter;
+    use crate::app::background::init::test::NoopStartSaga;
     use nexus_db_model::RegionReplacement;
     use nexus_test_utils_macros::nexus_test;
     use uuid::Uuid;
@@ -217,7 +217,7 @@ mod test {
             datastore.clone(),
         );
 
-        let starter = Arc::new(NoopSagaStarter::new());
+        let starter = Arc::new(NoopStartSaga::new());
         let mut task =
             RegionReplacementDetector::new(datastore.clone(), starter.clone());
 

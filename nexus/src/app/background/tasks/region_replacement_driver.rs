@@ -20,7 +20,7 @@
 
 use crate::app::authn;
 use crate::app::background::BackgroundTask;
-use crate::app::saga::SagaStarter;
+use crate::app::saga::StartSaga;
 use crate::app::sagas;
 use crate::app::sagas::region_replacement_drive::SagaRegionReplacementDrive;
 use crate::app::sagas::region_replacement_finish::SagaRegionReplacementFinish;
@@ -36,11 +36,11 @@ use std::sync::Arc;
 
 pub struct RegionReplacementDriver {
     datastore: Arc<DataStore>,
-    sagas: Arc<dyn SagaStarter>,
+    sagas: Arc<dyn StartSaga>,
 }
 
 impl RegionReplacementDriver {
-    pub fn new(datastore: Arc<DataStore>, sagas: Arc<dyn SagaStarter>) -> Self {
+    pub fn new(datastore: Arc<DataStore>, sagas: Arc<dyn StartSaga>) -> Self {
         RegionReplacementDriver { datastore, sagas }
     }
 
@@ -246,7 +246,7 @@ impl BackgroundTask for RegionReplacementDriver {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::app::background::init::test::NoopSagaStarter;
+    use crate::app::background::init::test::NoopStartSaga;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use chrono::Utc;
     use nexus_db_model::Region;
@@ -278,7 +278,7 @@ mod test {
             datastore.clone(),
         );
 
-        let starter = Arc::new(NoopSagaStarter::new());
+        let starter = Arc::new(NoopStartSaga::new());
         let mut task =
             RegionReplacementDriver::new(datastore.clone(), starter.clone());
 
@@ -332,7 +332,7 @@ mod test {
             datastore.clone(),
         );
 
-        let starter = Arc::new(NoopSagaStarter::new());
+        let starter = Arc::new(NoopStartSaga::new());
         let mut task =
             RegionReplacementDriver::new(datastore.clone(), starter.clone());
 
@@ -427,7 +427,7 @@ mod test {
             datastore.clone(),
         );
 
-        let starter = Arc::new(NoopSagaStarter::new());
+        let starter = Arc::new(NoopStartSaga::new());
         let mut task =
             RegionReplacementDriver::new(datastore.clone(), starter.clone());
 
@@ -572,7 +572,7 @@ mod test {
             datastore.clone(),
         );
 
-        let starter = Arc::new(NoopSagaStarter::new());
+        let starter = Arc::new(NoopStartSaga::new());
         let mut task =
             RegionReplacementDriver::new(datastore.clone(), starter.clone());
 

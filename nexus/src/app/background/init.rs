@@ -113,7 +113,7 @@ use super::tasks::vpc_routes;
 use super::Activator;
 use super::Driver;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
-use crate::app::saga::SagaStarter;
+use crate::app::saga::StartSaga;
 use nexus_config::BackgroundTaskConfig;
 use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
@@ -253,7 +253,7 @@ impl BackgroundTasksInitializer {
         rack_id: Uuid,
         nexus_id: Uuid,
         resolver: internal_dns::resolver::Resolver,
-        sagas: Arc<dyn SagaStarter>,
+        sagas: Arc<dyn StartSaga>,
         producer_registry: ProducerRegistry,
     ) -> Driver {
         let mut driver = self.driver;
@@ -729,7 +729,7 @@ fn init_dns(
 
 #[cfg(test)]
 pub mod test {
-    use crate::app::saga::SagaStarter;
+    use crate::app::saga::StartSaga;
     use dropshot::HandlerTaskMode;
     use futures::FutureExt;
     use nexus_db_model::DnsGroup;
@@ -746,11 +746,11 @@ pub mod test {
     use tempfile::TempDir;
 
     /// Used by various tests of tasks that kick off sagas
-    pub(crate) struct NoopSagaStarter {
+    pub(crate) struct NoopStartSaga {
         count: AtomicU64,
     }
 
-    impl NoopSagaStarter {
+    impl NoopStartSaga {
         pub(crate) fn new() -> Self {
             Self { count: AtomicU64::new(0) }
         }
@@ -760,7 +760,7 @@ pub mod test {
         }
     }
 
-    impl SagaStarter for NoopSagaStarter {
+    impl StartSaga for NoopStartSaga {
         fn saga_start(
             &self,
             _: steno::SagaDag,
