@@ -7,6 +7,7 @@
 //! See `nexus_reconfigurator_planning` crate-level docs for background.
 
 use anyhow::{anyhow, Context};
+use internal_dns::resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
@@ -76,6 +77,7 @@ impl From<nexus_db_model::Sled> for Sled {
 pub async fn realize_blueprint<S>(
     opctx: &OpContext,
     datastore: &DataStore,
+    resolver: &Resolver,
     blueprint: &Blueprint,
     nexus_label: S,
 ) -> Result<(), Vec<anyhow::Error>>
@@ -85,6 +87,7 @@ where
     realize_blueprint_with_overrides(
         opctx,
         datastore,
+        resolver,
         blueprint,
         nexus_label,
         &Default::default(),
@@ -95,6 +98,7 @@ where
 pub async fn realize_blueprint_with_overrides<S>(
     opctx: &OpContext,
     datastore: &DataStore,
+    resolver: &Resolver,
     blueprint: &Blueprint,
     nexus_label: S,
     overrides: &Overridables,
@@ -203,6 +207,14 @@ where
     )
     .await
     .map_err(|e| vec![anyhow!("{}", InlineErrorChain::new(&e))])?;
+
+    omicron_zones::clean_up_expunged_zones(
+        &opctx,
+        datastore,
+        resolver,
+        blueprint.all_omicron_zones(BlueprintZoneFilter::Expunged),
+    )
+    .await?;
 
     sled_state::decommission_sleds(
         &opctx,
