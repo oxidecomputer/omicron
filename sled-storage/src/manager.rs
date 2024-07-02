@@ -586,7 +586,7 @@ impl StorageManager {
             // Identify which disks should be managed by the control
             // plane, and adopt all requested disks into the control plane
             // in a background task (see: [Self::manage_disks]).
-            self.resources.set_config(&ledger.data().disks);
+            self.resources.set_config(&ledger.data());
         } else {
             info!(self.log, "KeyManager ready, but no ledger detected");
             let mut synthetic_config =
@@ -763,7 +763,7 @@ impl StorageManager {
 
         // Identify which disks should be managed by the control
         // plane, and adopt all requested disks into the control plane.
-        self.resources.set_config(&config.disks);
+        self.resources.set_config(&config);
 
         // Actually try to "manage" those disks, which may involve formatting
         // zpools and conforming partitions to those expected by the control

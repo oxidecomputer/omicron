@@ -6,7 +6,7 @@
 
 use crate::config::MountConfig;
 use crate::dataset::{DatasetError, M2_DEBUG_DATASET};
-use crate::disk::{Disk, DiskError, OmicronPhysicalDiskConfig, RawDisk};
+use crate::disk::{Disk, DiskError, OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig, RawDisk};
 use crate::error::Error;
 use camino::Utf8PathBuf;
 use cfg_if::cfg_if;
@@ -124,14 +124,8 @@ pub(crate) enum ManagedDisk {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct AllDisksInner {
-    // NOTE: When the set of "omicron physical disks" are set through the API,
-    // a generation number is actually passed via [OmicronPhysicalDisksConfig].
-    //
-    // This is *not* that same generation number, but probably could be?
-    //
-    // Technically, this number also bumps up any time the set of
-    // locally-detected disks has changed, but it's just treated as an opaque
-    // value to track when changes have propagated throughout the system.
+    // This generation corresponds to the generation supplied in
+    // [OmicronPhysicalDisksConfig].
     generation: Generation,
     values: BTreeMap<DiskIdentity, ManagedDisk>,
 }
@@ -357,8 +351,9 @@ impl StorageResources {
     /// Does not attempt to manage any of the physical disks previously
     /// observed. To synchronize the "set of requested disks" with the "set of
     /// observed disks", call [Self::synchronize_disk_management].
-    pub fn set_config(&mut self, config: &Vec<OmicronPhysicalDiskConfig>) {
+    pub fn set_config(&mut self, config: &OmicronPhysicalDisksConfig) {
         self.control_plane_disks = config
+            .disks
             .iter()
             .map(|disk| (disk.identity.clone(), disk.clone()))
             .collect();
@@ -486,7 +481,7 @@ impl StorageResources {
         }
 
         if updated {
-            disks.generation = disks.generation.next();
+//            disks.generation = disks.generation.next();
             self.disk_updates.send_replace(self.disks.clone());
         }
 
@@ -600,7 +595,7 @@ impl StorageResources {
             }
         }
 
-        disks.generation = disks.generation.next();
+//        disks.generation = disks.generation.next();
         self.disk_updates.send_replace(self.disks.clone());
 
         Ok(())
@@ -644,7 +639,7 @@ impl StorageResources {
         let disks = Arc::make_mut(&mut self.disks.inner);
         disks.values.remove(id).unwrap();
 
-        disks.generation = disks.generation.next();
+//        disks.generation = disks.generation.next();
         self.disk_updates.send_replace(self.disks.clone());
     }
 }
