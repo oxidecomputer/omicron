@@ -79,7 +79,7 @@ pub(crate) trait NexusSaga {
         let builder = DagBuilder::new(SagaName::new(Self::NAME));
         let dag = Self::make_saga_dag(&params, builder)?;
         let params = serde_json::to_value(&params).map_err(|e| {
-            SagaInitError::SerializeError(String::from("saga params"), e)
+            SagaInitError::SerializeError(format!("saga params: {params:?}"), e)
         })?;
         Ok(SagaDag::new(dag, params))
     }
