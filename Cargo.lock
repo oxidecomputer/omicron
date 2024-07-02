@@ -544,6 +544,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d7e60934ceec538daadb9d8432424ed043a904d8e0243f3c6446bce549a46ac"
 
 [[package]]
+name = "bitfield-struct"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1657dce144574f921af10a92876a96f0ca05dd830900598d21d91c8e4cf78f74"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.68",
+]
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -843,9 +854,9 @@ dependencies = [
 
 [[package]]
 name = "cargo_toml"
-version = "0.20.2"
+version = "0.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8cb1d556b8b8f36e5ca74938008be3ac102f5dcb5b68a0477e4249ae2291cd3"
+checksum = "4895c018bb228aa6b3ba1a0285543fcb4b704734c3fb1f72afaa75aa769500c1"
 dependencies = [
  "serde",
  "toml 0.8.13",
@@ -1604,8 +1615,9 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=5630887d0373857f77cb264f84aa19bdec720ce3#5630887d0373857f77cb264f84aa19bdec720ce3"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=6e0a232fd0b443c19f61f94bf02b7695505aa8e3#6e0a232fd0b443c19f61f94bf02b7695505aa8e3"
 dependencies = [
+ "oxnet",
  "percent-encoding",
  "progenitor",
  "reqwest",
@@ -3468,7 +3480,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=417f74e94978c23f3892ac328c3387f3ecd9bb29#417f74e94978c23f3892ac328c3387f3ecd9bb29"
+source = "git+https://github.com/oxidecomputer/opte?rev=915975f6d1729db95619f752148974016912412f#915975f6d1729db95619f752148974016912412f"
 
 [[package]]
 name = "illumos-utils"
@@ -3882,7 +3894,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=417f74e94978c23f3892ac328c3387f3ecd9bb29#417f74e94978c23f3892ac328c3387f3ecd9bb29"
+source = "git+https://github.com/oxidecomputer/opte?rev=915975f6d1729db95619f752148974016912412f#915975f6d1729db95619f752148974016912412f"
 dependencies = [
  "quote",
  "syn 2.0.68",
@@ -3928,11 +3940,11 @@ checksum = "d3c48237b9604c5a4702de6b824e02006c3214327564636aef27c1028a8fa0ed"
 
 [[package]]
 name = "lazy_static"
-version = "1.4.0"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
+checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 dependencies = [
- "spin 0.5.2",
+ "spin 0.9.8",
 ]
 
 [[package]]
@@ -4060,17 +4072,21 @@ dependencies = [
 
 [[package]]
 name = "libnvme"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/libnvme?rev=6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe#6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe"
+version = "0.1.1"
+source = "git+https://github.com/oxidecomputer/libnvme?rev=dd5bb221d327a1bc9287961718c3c10d6bd37da0#dd5bb221d327a1bc9287961718c3c10d6bd37da0"
 dependencies = [
  "libnvme-sys",
+ "nvme",
  "thiserror",
 ]
 
 [[package]]
 name = "libnvme-sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/libnvme?rev=6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe#6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe"
+source = "git+https://github.com/oxidecomputer/libnvme?rev=dd5bb221d327a1bc9287961718c3c10d6bd37da0#dd5bb221d327a1bc9287961718c3c10d6bd37da0"
+dependencies = [
+ "bitfield-struct",
+]
 
 [[package]]
 name = "libredox"
@@ -4294,7 +4310,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=5630887d0373857f77cb264f84aa19bdec720ce3#5630887d0373857f77cb264f84aa19bdec720ce3"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=6e0a232fd0b443c19f61f94bf02b7695505aa8e3#6e0a232fd0b443c19f61f94bf02b7695505aa8e3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4790,6 +4806,7 @@ dependencies = [
  "anyhow",
  "async-bb8-diesel",
  "chrono",
+ "cockroach-admin-client",
  "diesel",
  "dns-service-client",
  "futures",
@@ -4916,6 +4933,7 @@ dependencies = [
  "oximeter",
  "oximeter-collector",
  "oximeter-producer",
+ "oxnet",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -5194,6 +5212,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "830b246a0e5f20af87141b25c173cd1b609bd7779a4617d6ec582abaf90870f3"
 
 [[package]]
+name = "nvme"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/libnvme?rev=dd5bb221d327a1bc9287961718c3c10d6bd37da0#dd5bb221d327a1bc9287961718c3c10d6bd37da0"
+
+[[package]]
 name = "nvpair"
 version = "0.5.0"
 source = "git+https://github.com/jmesmon/rust-libzfs?branch=master#ecd5a922247a6c5acef55d76c5b8d115572bc850"
@@ -5278,6 +5301,7 @@ dependencies = [
  "openapi-lint",
  "openapiv3",
  "pq-sys",
+ "proptest",
  "schemars",
  "serde",
  "serde_json",
@@ -5286,6 +5310,7 @@ dependencies = [
  "slog-dtrace",
  "slog-error-chain",
  "subprocess",
+ "test-strategy",
  "thiserror",
  "tokio",
  "tokio-postgres",
@@ -6104,7 +6129,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=417f74e94978c23f3892ac328c3387f3ecd9bb29#417f74e94978c23f3892ac328c3387f3ecd9bb29"
+source = "git+https://github.com/oxidecomputer/opte?rev=915975f6d1729db95619f752148974016912412f#915975f6d1729db95619f752148974016912412f"
 dependencies = [
  "cfg-if",
  "dyn-clone",
@@ -6121,7 +6146,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=417f74e94978c23f3892ac328c3387f3ecd9bb29#417f74e94978c23f3892ac328c3387f3ecd9bb29"
+source = "git+https://github.com/oxidecomputer/opte?rev=915975f6d1729db95619f752148974016912412f#915975f6d1729db95619f752148974016912412f"
 dependencies = [
  "illumos-sys-hdrs",
  "ipnetwork",
@@ -6133,7 +6158,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=417f74e94978c23f3892ac328c3387f3ecd9bb29#417f74e94978c23f3892ac328c3387f3ecd9bb29"
+source = "git+https://github.com/oxidecomputer/opte?rev=915975f6d1729db95619f752148974016912412f#915975f6d1729db95619f752148974016912412f"
 dependencies = [
  "libc",
  "libnet 0.1.0 (git+https://github.com/oxidecomputer/netadm-sys)",
@@ -6207,7 +6232,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=417f74e94978c23f3892ac328c3387f3ecd9bb29#417f74e94978c23f3892ac328c3387f3ecd9bb29"
+source = "git+https://github.com/oxidecomputer/opte?rev=915975f6d1729db95619f752148974016912412f#915975f6d1729db95619f752148974016912412f"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",
@@ -6454,7 +6479,7 @@ dependencies = [
 [[package]]
 name = "oxnet"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/oxnet?branch=main#42b4d3c77c7f5f2636cd6c4bbf37ac3eada047e0"
+source = "git+https://github.com/oxidecomputer/oxnet#2612d2203effcfdcbf83778a77f1bfd03fe6ed24"
 dependencies = [
  "ipnetwork",
  "schemars",
@@ -8528,7 +8553,7 @@ dependencies = [
 [[package]]
 name = "serde_human_bytes"
 version = "0.1.0"
-source = "git+http://github.com/oxidecomputer/serde_human_bytes?branch=main#0a09794501b6208120528c3b457d5f3a8cb17424"
+source = "git+https://github.com/oxidecomputer/serde_human_bytes?branch=main#0a09794501b6208120528c3b457d5f3a8cb17424"
 dependencies = [
  "hex",
  "serde",
@@ -8536,9 +8561,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.117"
+version = "1.0.118"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "455182ea6142b14f93f4bc5320a2b31c1f266b66a4a5c858b013302a5d8cbfc3"
+checksum = "d947f6b3163d8857ea16c4fa0dd4840d52f3041039a85decd46867eb1abef2e4"
 dependencies = [
  "itoa",
  "ryu",
@@ -9184,7 +9209,7 @@ dependencies = [
 [[package]]
 name = "sprockets-common"
 version = "0.1.0"
-source = "git+http://github.com/oxidecomputer/sprockets?rev=77df31efa5619d0767ffc837ef7468101608aee9#77df31efa5619d0767ffc837ef7468101608aee9"
+source = "git+https://github.com/oxidecomputer/sprockets?rev=77df31efa5619d0767ffc837ef7468101608aee9#77df31efa5619d0767ffc837ef7468101608aee9"
 dependencies = [
  "derive_more",
  "hubpack 0.1.0",
@@ -9196,7 +9221,7 @@ dependencies = [
 [[package]]
 name = "sprockets-rot"
 version = "0.1.0"
-source = "git+http://github.com/oxidecomputer/sprockets?rev=77df31efa5619d0767ffc837ef7468101608aee9#77df31efa5619d0767ffc837ef7468101608aee9"
+source = "git+https://github.com/oxidecomputer/sprockets?rev=77df31efa5619d0767ffc837ef7468101608aee9#77df31efa5619d0767ffc837ef7468101608aee9"
 dependencies = [
  "corncobs",
  "derive_more",
@@ -9264,9 +9289,9 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "steno"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a1e7ccea133c197729abfd16dccf91a3c4d0da1e94bb0c0aa164c2b8a227481"
+checksum = "a77bea0b19d52c04783569b87bb3e8d47c85e285be239a9b0428241bdbb95460"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9843,7 +9868,7 @@ dependencies = [
 [[package]]
 name = "tofino"
 version = "0.1.0"
-source = "git+http://github.com/oxidecomputer/tofino?branch=main#1b66b89c3727d2191082df057b068ec52560e334"
+source = "git+https://github.com/oxidecomputer/tofino?branch=main#1b66b89c3727d2191082df057b068ec52560e334"
 dependencies = [
  "anyhow",
  "cc",

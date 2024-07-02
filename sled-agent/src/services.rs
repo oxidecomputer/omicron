@@ -48,7 +48,9 @@ use illumos_utils::dladm::{
     Dladm, Etherstub, EtherstubVnic, GetSimnetError, PhysicalLink,
 };
 use illumos_utils::link::{Link, VnicAllocator};
-use illumos_utils::opte::{DhcpCfg, Port, PortManager, PortTicket};
+use illumos_utils::opte::{
+    DhcpCfg, Port, PortCreateParams, PortManager, PortTicket,
+};
 use illumos_utils::running_zone::{
     EnsureAddressError, InstalledZone, RunCommandError, RunningZone,
     ZoneBuilderFactory,
@@ -1162,11 +1164,19 @@ impl ServiceManager {
 
         // Create the OPTE port for the service.
         // Note we don't plumb any firewall rules at this point,
-        // Nexus will plumb them down later but the default OPTE
+        // Nexus will plumb them down later but services' default OPTE
         // config allows outbound access which is enough for
         // Boundary NTP which needs to come up before Nexus.
         let port = port_manager
-            .create_port(nic, snat, None, floating_ips, &[], DhcpCfg::default())
+            .create_port(PortCreateParams {
+                nic,
+                source_nat: snat,
+                ephemeral_ip: None,
+                floating_ips,
+                firewall_rules: &[],
+                dhcp_config: DhcpCfg::default(),
+                is_service: true,
+            })
             .map_err(|err| Error::ServicePortCreation {
                 service: zone_type_str.clone(),
                 err: Box::new(err),
@@ -2088,6 +2098,7 @@ impl ServiceManager {
                             },
                         underlay_address,
                         id,
+                        ..
                     },
                 ..
             }) => {
@@ -3281,13 +3292,13 @@ impl ServiceManager {
     ) -> Result<Utf8PathBuf, Error> {
         let name = zone.zone_name();
 
-        // For each new zone request, we pick a U.2 to store the zone
-        // filesystem. Note: This isn't known to Nexus right now, so it's a
-        // local-to-sled decision.
+        // If the caller has requested a specific durable dataset,
+        // ensure that it is encrypted and that it exists.
         //
-        // Currently, the zone filesystem should be destroyed between
-        // reboots, so it's fine to make this decision locally.
-        let root = if let Some(dataset) = zone.dataset_name() {
+        // Typically, the transient filesystem pool will be placed on the same
+        // zpool as the durable dataset (to reduce the fault domain), but that
+        // decision belongs to Nexus, and is not enforced here.
+        if let Some(dataset) = zone.dataset_name() {
             // Check that the dataset is actually ready to be used.
             let [zoned, canmount, encryption] =
                 illumos_utils::zfs::Zfs::get_values(
@@ -3317,11 +3328,6 @@ impl ServiceManager {
                 check_property("encryption", encryption, "aes-256-gcm")?;
             }
 
-            // If the zone happens to already manage a dataset, then
-            // we co-locate the zone dataset on the same zpool.
-            //
-            // This slightly reduces the underlying fault domain for the
-            // service.
             let data_pool = dataset.pool();
             if !all_u2_pools.contains(&data_pool) {
                 warn!(
@@ -3334,20 +3340,35 @@ impl ServiceManager {
                     device: format!("zpool: {data_pool}"),
                 });
             }
-            data_pool.dataset_mountpoint(&mount_config.root, ZONE_DATASET)
-        } else {
-            // If the zone it not coupled to other datsets, we pick one
-            // arbitrarily.
-            let mut rng = rand::thread_rng();
-            all_u2_pools
-                .choose(&mut rng)
-                .map(|pool| {
-                    pool.dataset_mountpoint(&mount_config.root, ZONE_DATASET)
-                })
+        }
+
+        let filesystem_pool = match (&zone.filesystem_pool, zone.dataset_name())
+        {
+            // If a pool was explicitly requested, use it.
+            (Some(pool), _) => pool.clone(),
+            // NOTE: The following cases are for backwards compatibility.
+            //
+            // If no pool was selected, prefer to use the same pool as the
+            // durable dataset. Otherwise, pick one randomly.
+            (None, Some(dataset)) => dataset.pool().clone(),
+            (None, None) => all_u2_pools
+                .choose(&mut rand::thread_rng())
                 .ok_or_else(|| Error::U2NotFound)?
-                .clone()
+                .clone(),
         };
-        Ok(root)
+
+        if !all_u2_pools.contains(&filesystem_pool) {
+            warn!(
+                self.inner.log,
+                "zone filesystem dataset requested on a zpool which doesn't exist";
+                "zone" => &name,
+                "zpool" => %filesystem_pool
+            );
+            return Err(Error::MissingDevice {
+                device: format!("zpool: {filesystem_pool}"),
+            });
+        }
+        Ok(filesystem_pool.dataset_mountpoint(&mount_config.root, ZONE_DATASET))
     }
 
     pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
@@ -4351,6 +4372,7 @@ mod test {
                         id,
                         underlay_address: Ipv6Addr::LOCALHOST,
                         zone_type,
+                        filesystem_pool: None,
                     }],
                 },
                 Some(&tmp_dir),
@@ -4382,6 +4404,7 @@ mod test {
                         dns_servers: vec![],
                         domain: None,
                     },
+                    filesystem_pool: None,
                 }],
             },
             Some(&tmp_dir),
@@ -4798,6 +4821,7 @@ mod test {
                 dns_servers: vec![],
                 domain: None,
             },
+            filesystem_pool: None,
         }];
 
         let tmp_dir = String::from(test_config.config_dir.path().as_str());
@@ -4826,6 +4850,7 @@ mod test {
                 dns_servers: vec![],
                 domain: None,
             },
+            filesystem_pool: None,
         });
 
         // Now try to apply that list with an older generation number.  This

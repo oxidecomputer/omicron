@@ -49,7 +49,8 @@ use omicron_common::api::internal::nexus::{
     SledInstanceState, VmmRuntimeState,
 };
 use omicron_common::api::internal::shared::{
-    HostPortConfig, RackNetworkConfig,
+    HostPortConfig, RackNetworkConfig, ResolvedVpcRouteSet,
+    ResolvedVpcRouteState,
 };
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
@@ -1096,6 +1097,17 @@ impl SledAgent {
         self.inner.bootstore.clone()
     }
 
+    pub fn list_vpc_routes(&self) -> Vec<ResolvedVpcRouteState> {
+        self.inner.port_manager.vpc_routes_list()
+    }
+
+    pub fn set_vpc_routes(
+        &self,
+        routes: Vec<ResolvedVpcRouteSet>,
+    ) -> Result<(), Error> {
+        self.inner.port_manager.vpc_routes_ensure(routes).map_err(Error::from)
+    }
+
     /// Return the metric producer registry.
     pub fn metrics_registry(&self) -> &ProducerRegistry {
         self.inner.metrics_manager.registry()
@@ -1132,7 +1144,7 @@ impl SledAgent {
         let mut disks = vec![];
         let mut zpools = vec![];
         let all_disks = self.storage().get_latest_disks().await;
-        for (identity, variant, slot) in all_disks.iter_all() {
+        for (identity, variant, slot, _firmware) in all_disks.iter_all() {
             disks.push(crate::params::InventoryDisk {
                 identity: identity.clone(),
                 variant,

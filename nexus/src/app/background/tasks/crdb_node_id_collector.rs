@@ -185,7 +185,7 @@ async fn ensure_node_id_known(
     let admin_client =
         cockroach_admin_client::Client::new(&admin_url, opctx.log.clone());
     let node = admin_client
-        .node_id()
+        .local_node_id()
         .await
         .with_context(|| {
             format!("failed to fetch node ID for zone {zone_id} at {admin_url}")
@@ -241,8 +241,10 @@ mod tests {
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::BTreeMap;
     use std::iter;
     use std::net::SocketAddr;
@@ -265,16 +267,18 @@ mod tests {
             .get_mut(&sled_id)
             .expect("found entry for test sled");
 
+        let zpool_id = ZpoolUuid::new_v4();
         let make_crdb_zone_config =
             |disposition, id, addr: SocketAddrV6| BlueprintZoneConfig {
                 disposition,
                 id,
                 underlay_address: *addr.ip(),
+                filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
                 zone_type: BlueprintZoneType::CockroachDb(
                     blueprint_zone_type::CockroachDb {
                         address: addr,
                         dataset: nexus_types::inventory::OmicronZoneDataset {
-                            pool_name: format!("oxp_{}", Uuid::new_v4())
+                            pool_name: format!("oxp_{}", zpool_id)
                                 .parse()
                                 .unwrap(),
                         },
@@ -312,6 +316,7 @@ mod tests {
             disposition: BlueprintZoneDisposition::InService,
             id: OmicronZoneUuid::new_v4(),
             underlay_address: "::1".parse().unwrap(),
+            filesystem_pool: Some(ZpoolName::new_external(ZpoolUuid::new_v4())),
             zone_type: BlueprintZoneType::CruciblePantry(
                 blueprint_zone_type::CruciblePantry {
                     address: "[::1]:0".parse().unwrap(),
@@ -497,7 +502,7 @@ mod tests {
 
         // Node 1 succeeds.
         admin1.expect(Expectation::matching(any()).times(1).respond_with(
-            json_encoded(cockroach_admin_client::types::NodeId {
+            json_encoded(cockroach_admin_client::types::LocalNodeId {
                 zone_id: crdb_zone_id1,
                 node_id: crdb_node_id1.to_string(),
             }),
@@ -510,7 +515,7 @@ mod tests {
         );
         // Node 3 succeeds, but with an unexpected zone_id.
         admin3.expect(Expectation::matching(any()).times(1).respond_with(
-            json_encoded(cockroach_admin_client::types::NodeId {
+            json_encoded(cockroach_admin_client::types::LocalNodeId {
                 zone_id: crdb_zone_id4,
                 node_id: crdb_node_id3.to_string(),
             }),

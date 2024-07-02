@@ -262,7 +262,7 @@ pub struct Vpc {
 }
 
 /// A VPC subnet represents a logical grouping for instances that allows network traffic between
-/// them, within a IPv4 subnetwork or optionall an IPv6 subnetwork.
+/// them, within a IPv4 subnetwork or optionally an IPv6 subnetwork.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnet {
     /// common identifying metadata
@@ -277,6 +277,9 @@ pub struct VpcSubnet {
 
     /// The IPv6 subnet CIDR block.
     pub ipv6_block: Ipv6Net,
+
+    /// ID for an attached custom router.
+    pub custom_router_id: Option<Uuid>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
@@ -867,8 +870,8 @@ pub struct Group {
 
 /// View of a Built-in User
 ///
-/// A Built-in User is explicitly created as opposed to being derived from an
-/// Identify Provider.
+/// Built-in users are identities internal to the system, used when the control
+/// plane performs actions autonomously
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct UserBuiltin {
     // TODO-correctness is flattening here (and in all the other types) the

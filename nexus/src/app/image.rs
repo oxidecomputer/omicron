@@ -270,7 +270,8 @@ impl super::Nexus {
             image_param,
         };
 
-        self.execute_saga::<sagas::image_delete::SagaImageDelete>(saga_params)
+        self.sagas
+            .saga_execute::<sagas::image_delete::SagaImageDelete>(saga_params)
             .await?;
 
         Ok(())

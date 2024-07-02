@@ -2,10 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Manages execution of background tasks
+//! Generic system for managing execution of background tasks
+//!
+//! None of this file is specific to Nexus or any of the specific background
+//! tasks in Nexus, although the design is pretty bespoke for what Nexus needs.
 
 use super::BackgroundTask;
-use super::TaskHandle;
+use super::TaskName;
 use assert_matches::assert_matches;
 use chrono::Utc;
 use futures::future::BoxFuture;
@@ -20,6 +23,8 @@ use nexus_types::internal_api::views::LastResult;
 use nexus_types::internal_api::views::LastResultCompleted;
 use nexus_types::internal_api::views::TaskStatus;
 use std::collections::BTreeMap;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -35,7 +40,7 @@ use tokio::time::MissedTickBehavior;
 /// provides interfaces for monitoring high-level state of each task (e.g., when
 /// it last ran, whether it's currently running, etc.).
 pub struct Driver {
-    tasks: BTreeMap<TaskHandle, Task>,
+    tasks: BTreeMap<TaskName, Task>,
 }
 
 /// Driver-side state of a background task
@@ -49,9 +54,9 @@ struct Task {
     status: watch::Receiver<TaskStatus>,
     /// join handle for the tokio task that's executing this background task
     tokio_task: tokio::task::JoinHandle<()>,
-    /// `Notify` used to wake up the tokio task when a caller explicit wants to
+    /// `Activator` used to wake up the tokio task when a caller explicit wants to
     /// activate the background task
-    notify: Arc<Notify>,
+    activator: Activator,
 }
 
 impl Driver {
@@ -80,15 +85,28 @@ impl Driver {
     /// changed.  This can be used to create dependencies between background
     /// tasks, so that when one of them finishes doing something, it kicks off
     /// another one.
-    pub fn register(
+    ///
+    /// `activator` is an [`Activator`] that has not previously been used in a
+    /// call to this function.  It will be wired up so that using it will
+    /// activate this newly-registered background task.  This is an argument
+    /// rather than a returned value because it's useful for consumers to create
+    /// these ahead of time, before tasks have been set up.  See [`super::init`]
+    /// module-level docs for more on this.
+    ///
+    /// # Panics
+    ///
+    /// This function panics if the `name` or `activator` has previously been
+    /// passed to a call to this function.
+    pub fn register<N, D>(
         &mut self,
-        name: String,
-        description: String,
-        period: Duration,
-        imp: Box<dyn BackgroundTask>,
-        opctx: OpContext,
-        watchers: Vec<Box<dyn GenericWatcher>>,
-    ) -> TaskHandle {
+        taskdef: TaskDefinition<'_, N, D>,
+    ) -> TaskName
+    where
+        N: ToString,
+        D: ToString,
+    {
+        let name = taskdef.name.to_string();
+
         // Activation of the background task happens in a separate tokio task.
         // Set up a channel so that tokio task can report status back to us.
         let (status_tx, status_rx) = watch::channel(TaskStatus {
@@ -96,32 +114,56 @@ impl Driver {
             last: LastResult::NeverCompleted,
         });
 
-        // Set up a channel so that we can wake up the tokio task if somebody
-        // requests an explicit activation.
-        let notify = Arc::new(Notify::new());
+        // We'll use a `Notify` to wake up that tokio task when an activation is
+        // requested.  The caller provides their own Activator, which just
+        // provides a specific Notify for us to use here.
+        let activator = taskdef.activator;
+        if let Err(previous) = activator.0.wired_up.compare_exchange(
+            false,
+            true,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            panic!(
+                "attempted to wire up the same background task handle \
+                 twice (previous \"wired_up\" = {}): currently attempting \
+                 to wire it up to task {:?}",
+                previous, name
+            );
+        }
 
         // Spawn the tokio task that will manage activation of the background
         // task.
-        let opctx = opctx.child(BTreeMap::from([(
+        let opctx = taskdef.opctx.child(BTreeMap::from([(
             "background_task".to_string(),
             name.clone(),
         )]));
-        let task_exec =
-            TaskExec::new(period, imp, Arc::clone(&notify), opctx, status_tx);
-        let tokio_task = tokio::task::spawn(task_exec.run(watchers));
+        let task_exec = TaskExec::new(
+            taskdef.period,
+            taskdef.task_impl,
+            Arc::clone(&activator.0),
+            opctx,
+            status_tx,
+        );
+        let tokio_task = tokio::task::spawn(task_exec.run(taskdef.watchers));
 
         // Create an object to track our side of the background task's state.
         // This just provides the handles we need to read status and wake up the
         // tokio task.
-        let task =
-            Task { description, period, status: status_rx, tokio_task, notify };
-        if self.tasks.insert(TaskHandle(name.clone()), task).is_some() {
+        let task = Task {
+            description: taskdef.description.to_string(),
+            period: taskdef.period,
+            status: status_rx,
+            tokio_task,
+            activator: activator.clone(),
+        };
+        if self.tasks.insert(TaskName(name.clone()), task).is_some() {
             panic!("started two background tasks called {:?}", name);
         }
 
         // Return a handle that the caller can use to activate the task or get
         // its status.
-        TaskHandle(name)
+        TaskName(name)
     }
 
     /// Enumerate all registered background tasks
@@ -129,11 +171,11 @@ impl Driver {
     /// This is aimed at callers that want to get the status of all background
     /// tasks.  You'd call [`Driver::task_status()`] with each of the items
     /// produced by the iterator.
-    pub fn tasks(&self) -> impl Iterator<Item = &TaskHandle> {
+    pub fn tasks(&self) -> impl Iterator<Item = &TaskName> {
         self.tasks.keys()
     }
 
-    fn task_required(&self, task: &TaskHandle) -> &Task {
+    fn task_required(&self, task: &TaskName) -> &Task {
         // It should be hard to hit this in practice, since you'd have to have
         // gotten a TaskHandle from somewhere.  It would have to be another
         // Driver instance.  But it's generally a singleton.
@@ -143,12 +185,12 @@ impl Driver {
     }
 
     /// Returns a summary of what this task does (for developers)
-    pub fn task_description(&self, task: &TaskHandle) -> &str {
+    pub fn task_description(&self, task: &TaskName) -> &str {
         &self.task_required(task).description
     }
 
     /// Returns the configured period of the task
-    pub fn task_period(&self, task: &TaskHandle) -> Duration {
+    pub fn task_period(&self, task: &TaskName) -> Duration {
         self.task_required(task).period
     }
 
@@ -156,12 +198,12 @@ impl Driver {
     ///
     /// If the task is currently running, it will be activated again when it
     /// finishes.
-    pub(super) fn activate(&self, task: &TaskHandle) {
-        self.task_required(task).notify.notify_one();
+    pub(super) fn activate(&self, task: &TaskName) {
+        self.task_required(task).activator.activate();
     }
 
     /// Returns the runtime status of the background task
-    pub fn task_status(&self, task: &TaskHandle) -> TaskStatus {
+    pub fn task_status(&self, task: &TaskName) -> TaskStatus {
         // Borrowing from a watch channel's receiver blocks the sender.  Clone
         // the status to avoid an errant caller gumming up the works by hanging
         // on to a reference.
@@ -179,6 +221,79 @@ impl Drop for Driver {
     }
 }
 
+/// Describes a background task to be registered with [`Driver::register()`]
+///
+/// See [`Driver::register()`] for more on how these fields get used.
+pub struct TaskDefinition<'a, N: ToString, D: ToString> {
+    /// identifier for this task
+    pub name: N,
+    /// short human-readable summary of this task
+    pub description: D,
+    /// driver should activate the task if it hasn't run in this long
+    pub period: Duration,
+    /// impl of [`BackgroundTask`] that represents the work of the task
+    pub task_impl: Box<dyn BackgroundTask>,
+    /// `OpContext` used for task activations
+    pub opctx: OpContext,
+    /// list of watchers that will trigger activation of this task
+    pub watchers: Vec<Box<dyn GenericWatcher>>,
+    /// an [`Activator]` that will be wired up to activate this task
+    pub activator: &'a Activator,
+}
+
+/// Activates a background task
+///
+/// See [`crate::app::background`] module-level documentation for more on what
+/// that means.
+///
+/// Activators are created with [`Activator::new()`] and then wired up to
+/// specific background tasks using [`Driver::register()`].  If you call
+/// `Activator::activate()` before the activator is wired up to a background
+/// task, then once the Activator _is_ wired up to a task, that task will
+/// immediately be activated.
+///
+/// Activators are designed specifically so they can be created before the
+/// corresponding task has been created and then wired up with just an
+/// `&Activator` (not a `&mut Activator`).  See the [`super::init`] module-level
+/// documentation for more on why.
+#[derive(Clone)]
+pub struct Activator(Arc<ActivatorInner>);
+
+/// Shared state for an `Activator`.
+struct ActivatorInner {
+    pub(super) notify: Notify,
+    pub(super) wired_up: AtomicBool,
+}
+
+impl Activator {
+    /// Create an activator that is not yet wired up to any background task
+    pub fn new() -> Activator {
+        Self(Arc::new(ActivatorInner {
+            notify: Notify::new(),
+            wired_up: AtomicBool::new(false),
+        }))
+    }
+
+    /// Activate the background task that this Activator has been wired up to
+    ///
+    /// If this Activator has not yet been wired up with [`Driver::register()`],
+    /// then whenever it _is_ wired up, that task will be immediately activated.
+    pub fn activate(&self) {
+        self.0.notify.notify_one();
+    }
+}
+
+impl ActivatorInner {
+    async fn activated(&self) {
+        debug_assert!(
+            self.wired_up.load(Ordering::SeqCst),
+            "nothing should await activation from an activator that hasn't \
+             been wired up"
+        );
+        self.notify.notified().await
+    }
+}
+
 /// Encapsulates state needed by the background tokio task to manage activation
 /// of the background task
 struct TaskExec {
@@ -188,7 +303,7 @@ struct TaskExec {
     imp: Box<dyn BackgroundTask>,
     /// used to receive notifications from the Driver that someone has requested
     /// explicit activation
-    notify: Arc<Notify>,
+    activation: Arc<ActivatorInner>,
     /// passed through to the background task impl when activated
     opctx: OpContext,
     /// used to send current status back to the Driver
@@ -201,11 +316,11 @@ impl TaskExec {
     fn new(
         period: Duration,
         imp: Box<dyn BackgroundTask>,
-        notify: Arc<Notify>,
+        activation: Arc<ActivatorInner>,
         opctx: OpContext,
         status_tx: watch::Sender<TaskStatus>,
     ) -> TaskExec {
-        TaskExec { period, imp, notify, opctx, status_tx, iteration: 0 }
+        TaskExec { period, imp, activation, opctx, status_tx, iteration: 0 }
     }
 
     /// Body of the tokio task that manages activation of this background task
@@ -225,7 +340,7 @@ impl TaskExec {
                     self.activate(ActivationReason::Timeout).await;
                 },
 
-                _ = self.notify.notified() => {
+                _ = self.activation.activated() => {
                     self.activate(ActivationReason::Signaled).await;
                 }
 
@@ -319,6 +434,8 @@ impl<T: Send + Sync> GenericWatcher for watch::Receiver<T> {
 mod test {
     use super::BackgroundTask;
     use super::Driver;
+    use crate::app::background::driver::TaskDefinition;
+    use crate::app::background::Activator;
     use crate::app::sagas::SagaRequest;
     use assert_matches::assert_matches;
     use chrono::Utc;
@@ -403,35 +520,44 @@ mod test {
         let (t3, rx3) = ReportingTask::new();
         let (dep_tx1, dep_rx1) = watch::channel(0);
         let (dep_tx2, dep_rx2) = watch::channel(0);
+        let act1 = Activator::new();
+        let act2 = Activator::new();
+        let act3 = Activator::new();
         let mut driver = Driver::new();
 
         assert_eq!(*rx1.borrow(), 0);
-        let h1 = driver.register(
-            "t1".to_string(),
-            "test task".to_string(),
-            Duration::from_millis(100),
-            Box::new(t1),
-            opctx.child(std::collections::BTreeMap::new()),
-            vec![Box::new(dep_rx1.clone()), Box::new(dep_rx2.clone())],
-        );
+        let h1 = driver.register(TaskDefinition {
+            name: "t1",
+            description: "test task",
+            period: Duration::from_millis(100),
+            task_impl: Box::new(t1),
+            opctx: opctx.child(std::collections::BTreeMap::new()),
+            watchers: vec![
+                Box::new(dep_rx1.clone()),
+                Box::new(dep_rx2.clone()),
+            ],
+            activator: &act1,
+        });
 
-        let h2 = driver.register(
-            "t2".to_string(),
-            "test task".to_string(),
-            Duration::from_secs(300), // should never fire in this test
-            Box::new(t2),
-            opctx.child(std::collections::BTreeMap::new()),
-            vec![Box::new(dep_rx1.clone())],
-        );
+        let h2 = driver.register(TaskDefinition {
+            name: "t2",
+            description: "test task",
+            period: Duration::from_secs(300), // should never fire in this test
+            task_impl: Box::new(t2),
+            opctx: opctx.child(std::collections::BTreeMap::new()),
+            watchers: vec![Box::new(dep_rx1.clone())],
+            activator: &act2,
+        });
 
-        let h3 = driver.register(
-            "t3".to_string(),
-            "test task".to_string(),
-            Duration::from_secs(300), // should never fire in this test
-            Box::new(t3),
+        let h3 = driver.register(TaskDefinition {
+            name: "t3",
+            description: "test task",
+            period: Duration::from_secs(300), // should never fire in this test
+            task_impl: Box::new(t3),
             opctx,
-            vec![Box::new(dep_rx1), Box::new(dep_rx2)],
-        );
+            watchers: vec![Box::new(dep_rx1), Box::new(dep_rx2)],
+            activator: &act3,
+        });
 
         // Wait for four activations of our task.  (This is three periods.) That
         // should take between 300ms and 400ms.  Allow extra time for a busy
@@ -511,6 +637,17 @@ mod test {
         let status = driver.task_status(&h3);
         let last = status.last.unwrap_completion();
         assert_eq!(last.iteration, 4);
+
+        // Explicitly activate just "t2", this time using its Activator.
+        act2.activate();
+        wait_until_count(rx2.clone(), 3).await;
+        assert_eq!(*rx3.borrow(), 4);
+        let status = driver.task_status(&h2);
+        let last = status.last.unwrap_completion();
+        assert_eq!(last.iteration, 3);
+        let status = driver.task_status(&h3);
+        let last = status.last.unwrap_completion();
+        assert_eq!(last.iteration, 4);
     }
 
     /// Simple background task that moves in lockstep with a consumer, allowing
@@ -564,14 +701,16 @@ mod test {
         let (dep_tx1, dep_rx1) = watch::channel(0);
         let before_wall = Utc::now();
         let before_instant = Instant::now();
-        let h1 = driver.register(
-            "t1".to_string(),
-            "test task".to_string(),
-            Duration::from_secs(300), // should not elapse during test
-            Box::new(t1),
-            opctx.child(std::collections::BTreeMap::new()),
-            vec![Box::new(dep_rx1.clone())],
-        );
+        let act1 = Activator::new();
+        let h1 = driver.register(TaskDefinition {
+            name: "t1",
+            description: "test task",
+            period: Duration::from_secs(300), // should not elapse during test
+            task_impl: Box::new(t1),
+            opctx: opctx.child(std::collections::BTreeMap::new()),
+            watchers: vec![Box::new(dep_rx1.clone())],
+            activator: &act1,
+        });
 
         // Wait to enter the first activation.
         let which = ready_rx1.recv().await.unwrap();
@@ -708,15 +847,17 @@ mod test {
 
         let mut driver = Driver::new();
         let (_dep_tx1, dep_rx1) = watch::channel(0);
+        let act1 = Activator::new();
 
-        let h1 = driver.register(
-            "t1".to_string(),
-            "test saga request flow task".to_string(),
-            Duration::from_secs(300), // should not fire in this test
-            Box::new(t1),
-            opctx.child(std::collections::BTreeMap::new()),
-            vec![Box::new(dep_rx1.clone())],
-        );
+        let h1 = driver.register(TaskDefinition {
+            name: "t1",
+            description: "test saga request flow task",
+            period: Duration::from_secs(300), // should not fire in this test
+            task_impl: Box::new(t1),
+            opctx: opctx.child(std::collections::BTreeMap::new()),
+            watchers: vec![Box::new(dep_rx1.clone())],
+            activator: &act1,
+        });
 
         assert!(matches!(
             saga_request_recv.try_recv(),

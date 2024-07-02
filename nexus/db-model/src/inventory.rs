@@ -37,6 +37,7 @@ use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::ZpoolUuid;
 use uuid::Uuid;
 
@@ -1025,6 +1026,7 @@ pub struct InvOmicronZone {
     pub snat_ip: Option<IpNetwork>,
     pub snat_first_port: Option<SqlU16>,
     pub snat_last_port: Option<SqlU16>,
+    pub filesystem_pool: Option<DbTypedUuid<ZpoolKind>>,
 }
 
 impl InvOmicronZone {
@@ -1039,6 +1041,7 @@ impl InvOmicronZone {
             sled_id,
             zone.id,
             zone.underlay_address,
+            zone.filesystem_pool.as_ref().map(|pool| pool.id()),
             &zone.zone_type,
             external_ip_id,
         )?;
@@ -1064,6 +1067,7 @@ impl InvOmicronZone {
             snat_ip: zone.snat_ip,
             snat_first_port: zone.snat_first_port,
             snat_last_port: zone.snat_last_port,
+            filesystem_pool: zone.filesystem_pool.map(|id| id.into()),
         })
     }
 
@@ -1075,6 +1079,7 @@ impl InvOmicronZone {
             sled_id: self.sled_id.into(),
             id: self.id,
             underlay_address: self.underlay_address,
+            filesystem_pool: self.filesystem_pool.map(|id| id.into()),
             zone_type: self.zone_type,
             primary_service_ip: self.primary_service_ip,
             primary_service_port: self.primary_service_port,

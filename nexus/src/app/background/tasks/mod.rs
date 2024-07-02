@@ -26,3 +26,4 @@ pub mod service_firewall_rules;
 pub mod sync_service_zone_nat;
 pub mod sync_switch_configuration;
 pub mod v2p_mappings;
+pub mod vpc_routes;

@@ -433,6 +433,8 @@ enum BlueprintEditCommands {
         /// sled on which to deploy the new instance
         sled_id: SledUuid,
     },
+    /// add a CockroachDB instance to a particular sled
+    AddCockroach { sled_id: SledUuid },
 }
 
 #[derive(Debug, Args)]
@@ -755,6 +757,18 @@ fn cmd_blueprint_edit(
                 EnsureMultiple::Changed { added: 1, removed: 0 }
             );
             format!("added Nexus zone to sled {}", sled_id)
+        }
+        BlueprintEditCommands::AddCockroach { sled_id } => {
+            let current =
+                builder.sled_num_zones_of_kind(sled_id, ZoneKind::CockroachDb);
+            let added = builder
+                .sled_ensure_zone_multiple_cockroachdb(sled_id, current + 1)
+                .context("failed to add CockroachDB zone")?;
+            assert_matches::assert_matches!(
+                added,
+                EnsureMultiple::Changed { added: 1, removed: 0 }
+            );
+            format!("added CockroachDB zone to sled {}", sled_id)
         }
     };
 

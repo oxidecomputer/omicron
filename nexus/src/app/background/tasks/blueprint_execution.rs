@@ -7,6 +7,7 @@
 use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use internal_dns::resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
@@ -18,6 +19,7 @@ use tokio::sync::watch;
 /// the state of the system based on the `Blueprint`.
 pub struct BlueprintExecutor {
     datastore: Arc<DataStore>,
+    resolver: Resolver,
     rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     nexus_label: String,
     tx: watch::Sender<usize>,
@@ -26,13 +28,14 @@ pub struct BlueprintExecutor {
 impl BlueprintExecutor {
     pub fn new(
         datastore: Arc<DataStore>,
+        resolver: Resolver,
         rx_blueprint: watch::Receiver<
             Option<Arc<(BlueprintTarget, Blueprint)>>,
         >,
         nexus_label: String,
     ) -> BlueprintExecutor {
         let (tx, _) = watch::channel(0);
-        BlueprintExecutor { datastore, rx_blueprint, nexus_label, tx }
+        BlueprintExecutor { datastore, resolver, rx_blueprint, nexus_label, tx }
     }
 
     pub fn watcher(&self) -> watch::Receiver<usize> {
@@ -76,6 +79,7 @@ impl BlueprintExecutor {
         let result = nexus_reconfigurator_execution::realize_blueprint(
             opctx,
             &self.datastore,
+            &self.resolver,
             blueprint,
             &self.nexus_label,
         )
@@ -129,9 +133,11 @@ mod test {
     use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::OmicronZoneDataset;
     use omicron_common::api::external::Generation;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use serde::Deserialize;
     use serde_json::json;
     use std::collections::BTreeMap;
@@ -184,6 +190,7 @@ mod test {
         // Set up the test.
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let opctx = OpContext::for_background(
             cptestctx.logctx.log.clone(),
             nexus.authz.clone(),
@@ -230,6 +237,7 @@ mod test {
         let (blueprint_tx, blueprint_rx) = watch::channel(None);
         let mut task = BlueprintExecutor::new(
             datastore.clone(),
+            resolver.clone(),
             blueprint_rx,
             String::from("test-suite"),
         );
@@ -260,16 +268,18 @@ mod test {
         fn make_zones(
             disposition: BlueprintZoneDisposition,
         ) -> BlueprintZonesConfig {
+            let pool_id = ZpoolUuid::new_v4();
             BlueprintZonesConfig {
                 generation: Generation::new(),
                 zones: vec![BlueprintZoneConfig {
                     disposition,
                     id: OmicronZoneUuid::new_v4(),
                     underlay_address: "::1".parse().unwrap(),
+                    filesystem_pool: Some(ZpoolName::new_external(pool_id)),
                     zone_type: BlueprintZoneType::InternalDns(
                         blueprint_zone_type::InternalDns {
                             dataset: OmicronZoneDataset {
-                                pool_name: format!("oxp_{}", Uuid::new_v4())
+                                pool_name: format!("oxp_{}", pool_id)
                                     .parse()
                                     .unwrap(),
                             },
