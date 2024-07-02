@@ -9,7 +9,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{
-    ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
+    ActionRegistry, NexusActionContext, NexusSaga, RealParams,
+    SagaDoActualInstanceUpdate, SagaInitError, UpdatesRequired,
     ACTION_GENERATE_ID, INSTANCE_LOCK, INSTANCE_LOCK_ID,
 };
 use crate::app::sagas::declare_saga_actions;
@@ -117,8 +118,13 @@ async fn siu_lock_instance_undo(
 ) -> Result<(), anyhow::Error> {
     let Params { ref serialized_authn, ref authz_instance, .. } =
         sagactx.saga_params::<Params>()?;
-    super::unlock_instance_inner(serialized_authn, authz_instance, &sagactx)
-        .await?;
+    super::unlock_instance_inner(
+        serialized_authn,
+        authz_instance,
+        &sagactx,
+        None,
+    )
+    .await?;
     Ok(())
 }
 
@@ -151,17 +157,47 @@ async fn siu_fetch_state_and_start_real_saga(
         .instance_fetch_all(&opctx, &authz_instance)
         .await
         .map_err(ActionError::action_failed)?;
-    osagactx
-        .nexus()
-        .sagas
-        .saga_execute::<super::SagaDoActualInstanceUpdate>(super::RealParams {
-            serialized_authn,
-            authz_instance,
-            state,
-            orig_lock,
-        })
-        .await
-        .map_err(ActionError::action_failed)?;
+
+    // Determine what updates are required based on the instance's current
+    // state snapshot. If there are updates to perform, execute the "real"
+    // update saga. Otherwise, if we don't need to do anything else, simply
+    // release the lock and finish this saga.
+    if let Some(update) = UpdatesRequired::for_snapshot(osagactx.log(), &state)
+    {
+        info!(
+            osagactx.log(),
+            "instance update: starting real update saga...";
+            "instance_id" => %authz_instance.id(),
+            "new_runtime_state" => ?update.new_runtime,
+            "network_config_update" => ?update.network_config,
+            "destroy_vmm" => ?update.destroy_vmm,
+        );
+        osagactx
+            .nexus()
+            .sagas
+            .saga_execute::<SagaDoActualInstanceUpdate>(RealParams {
+                serialized_authn,
+                authz_instance,
+                state,
+                update,
+                orig_lock,
+            })
+            .await
+            .map_err(ActionError::action_failed)?;
+    } else {
+        info!(
+            osagactx.log(),
+            "instance update: no updates required, releasing lock.";
+            "instance_id" => %authz_instance.id(),
+        );
+        super::unlock_instance_inner(
+            &serialized_authn,
+            &authz_instance,
+            &sagactx,
+            None,
+        )
+        .await?;
+    }
 
     Ok(())
 }
