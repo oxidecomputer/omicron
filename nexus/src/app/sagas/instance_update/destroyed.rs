@@ -86,7 +86,6 @@ pub(super) async fn siu_destroyed_release_virtual_provisioning(
             instance.project_id,
             i64::from(instance.ncpus.0 .0),
             instance.memory,
-            i64::try_from(&max_gen).unwrap(),
         )
         .await;
     match result {
