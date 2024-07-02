@@ -819,9 +819,11 @@ impl SledAgent {
         &self,
         config: OmicronPhysicalDisksConfig,
     ) -> Result<DisksManagementResult, Error> {
+        info!(self.log, "physical disks ensure");
         // Tell the storage subsystem which disks should be managed.
         let disk_result =
             self.storage().omicron_physical_disks_ensure(config).await?;
+        info!(self.log, "physical disks ensure: Updated storage");
 
         // Grab a view of the latest set of disks, alongside a generation
         // number.
@@ -847,23 +849,28 @@ impl SledAgent {
         // ensure that we always progress towards the last-requested state.
         let latest_disks = self.storage().get_latest_disks().await;
         let our_gen = latest_disks.generation();
+        info!(self.log, "physical disks ensure: Propagating new generation of disks"; "generation" => ?our_gen);
 
         // Ensure that the StorageMonitor, and the dump devices, have committed
         // to start using new disks and stop using old ones.
         self.inner.storage_monitor.await_generation(*our_gen).await?;
+        info!(self.log, "physical disks ensure: Updated storage monitor");
 
         // Ensure that the ZoneBundler, if it was creating a bundle referencing
         // the old U.2s, has stopped using them.
         self.inner.zone_bundler.await_completion_of_prior_bundles().await;
+        info!(self.log, "physical disks ensure: Updated zone bundler");
 
         // Ensure that all probes, at least after our call to
         // "omicron_physical_disks_ensure", stop using any disks that
         // may have been in-service from before that request.
         self.inner.probes.only_use_disks(&latest_disks).await;
+        info!(self.log, "physical disks ensure: Updated probes");
 
         // Do the same for instances - mark them failed if they were using
         // expunged disks.
         self.inner.instances.only_use_disks(latest_disks).await?;
+        info!(self.log, "physical disks ensure: Updated instances");
 
         Ok(disk_result)
     }

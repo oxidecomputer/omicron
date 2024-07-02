@@ -107,10 +107,14 @@ impl ProbeManager {
         if let Some(last_gen) = probes.storage_generation {
             if last_gen >= requested_generation {
                 // This request looks old, ignore it.
+                info!(self.inner.log, "only_use_disks: Ignoring request";
+                    "last_gen" => ?last_gen, "requested_gen" => ?requested_generation);
                 return;
             }
         }
         probes.storage_generation = Some(requested_generation);
+        info!(self.inner.log, "only_use_disks: Processing new request";
+            "gen" => ?requested_generation);
 
         let to_remove = probes
             .zones
@@ -118,6 +122,7 @@ impl ProbeManager {
             .filter_map(|(id, probe)| {
                 let Some(probe_pool) = probe.root_zpool() else {
                     // No known pool for this probe
+                    info!(self.inner.log, "only_use_disks: Cannot read filesystem pool"; "id" => ?id);
                     return None;
                 };
 
@@ -130,6 +135,7 @@ impl ProbeManager {
             .collect::<Vec<_>>();
 
         for probe_id in to_remove {
+            info!(self.inner.log, "only_use_disks: Removing probe"; "probe_id" => ?probe_id);
             self.inner.remove_probe_locked(&mut probes, probe_id).await;
         }
     }

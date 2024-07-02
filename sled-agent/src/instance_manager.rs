@@ -812,10 +812,15 @@ impl InstanceManagerRunner {
         if let Some(last_gen) = self.storage_generation {
             if last_gen >= requested_generation {
                 // This request looks old, ignore it.
+                info!(self.log, "only_use_disks: Ignoring request";
+                    "last_gen" => ?last_gen, "requested_gen" => ?requested_generation);
+
                 return Ok(());
             }
         }
         self.storage_generation = Some(requested_generation);
+        info!(self.log, "only_use_disks: Processing new request";
+            "gen" => ?requested_generation);
 
         let u2_set: HashSet<_> = disks.all_u2_zpools().into_iter().collect();
 
@@ -826,6 +831,7 @@ impl InstanceManagerRunner {
             let Ok(Some(filesystem_pool)) =
                 instance.get_filesystem_zpool().await
             else {
+                info!(self.log, "only_use_disks: Cannot read filesystem pool"; "id" => ?id);
                 continue;
             };
             if !u2_set.contains(&filesystem_pool) {
@@ -834,6 +840,7 @@ impl InstanceManagerRunner {
         }
 
         for id in to_remove {
+            info!(self.log, "only_use_disks: Removing instance"; "id" => ?id);
             self.instances.remove(&id);
         }
 
