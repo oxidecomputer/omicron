@@ -823,17 +823,14 @@ impl StorageManager {
 #[cfg(all(test, target_os = "illumos"))]
 mod tests {
     use crate::dataset::DatasetKind;
-    use crate::disk::OmicronPhysicalDiskConfig;
     use crate::disk::RawSyntheticDisk;
     use crate::manager_test_harness::StorageManagerTestHarness;
     use crate::resources::{DiskManagementError, ManagedDisk};
 
     use super::*;
     use camino_tempfile::tempdir_in;
-    use omicron_common::api::external::Generation;
     use omicron_common::ledger;
     use omicron_test_utils::dev::test_setup_log;
-    use omicron_uuid_kinds::ZpoolUuid;
     use sled_hardware::DiskFirmware;
     use std::sync::atomic::Ordering;
     use uuid::Uuid;
