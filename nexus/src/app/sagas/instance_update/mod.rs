@@ -10,12 +10,13 @@ use crate::app::db::datastore::instance;
 use crate::app::db::datastore::InstanceSnapshot;
 use crate::app::db::lookup::LookupPath;
 use crate::app::db::model::Generation;
+use crate::app::db::model::InstanceRuntimeState;
+use crate::app::db::model::MigrationState;
 use crate::app::db::model::VmmState;
-use crate::app::db::model::{Migration, MigrationState};
 use crate::app::sagas::declare_saga_actions;
 use chrono::Utc;
 use nexus_db_queries::{authn, authz};
-use omicron_common::api::external::Error;
+use nexus_types::identity::Resource;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -41,6 +42,154 @@ use destroyed::*;
 mod start;
 pub(crate) use self::start::{Params, SagaInstanceUpdate};
 
+#[derive(Debug, Deserialize, Serialize)]
+struct UpdatesRequired {
+    /// The new runtime state that must be written back to the database.
+    new_runtime: InstanceRuntimeState,
+
+    /// If `true`, this VMM must be destroyed.
+    destroy_vmm: Option<DestroyedVmm>,
+
+    network_config: Option<NetworkConfigUpdate>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+enum NetworkConfigUpdate {
+    Delete,
+    Update(PropolisUuid),
+}
+
+/// An active VMM has been destroyed.
+#[derive(Debug, Deserialize, Serialize)]
+struct DestroyedVmm {
+    /// The UUID of the destroyed active VMM.
+    id: PropolisUuid,
+    /// If `true`, the virtual provisioning records for this instance should be
+    /// deallocated.
+    ///
+    /// This occurs when the instance's VMM is destroyed *without* migrating out.
+    /// If the instance's current active VMM has been destroyed because the
+    /// instance has successfully migrated out, the virtual provisioning records
+    /// are left in place, as the instance is still consuming those virtual
+    /// resources on its new sled.
+    deprovision: bool,
+}
+
+impl UpdatesRequired {
+    fn for_snapshot(
+        log: &slog::Logger,
+        snapshot: &InstanceSnapshot,
+    ) -> Option<Self> {
+        let mut new_runtime = snapshot.instance.runtime().clone();
+        new_runtime.gen = Generation(new_runtime.gen.next());
+        new_runtime.time_updated = Utc::now();
+        let instance_id = snapshot.instance.id();
+
+        let mut update_required = false;
+        let mut network_config = None;
+        let mut deprovision = true;
+
+        // Has the active VMM been destroyed?
+        let destroy_vmm = snapshot.active_vmm.as_ref().and_then(|active_vmm| {
+            if active_vmm.runtime.state == VmmState::Destroyed {
+                // Unlink the active VMM ID. If the active VMM was destroyed
+                // because a migration out completed, the next block, which
+                // handles migration updates, will set this to the new VMM's ID,
+                // instead.
+                new_runtime.propolis_id = None;
+                update_required = true;
+                network_config = Some(NetworkConfigUpdate::Delete);
+                Some(PropolisUuid::from_untyped_uuid(active_vmm.id))
+            } else {
+                None
+            }
+        });
+
+        // Determine what to do with the migration.
+        if let Some(ref migration) = snapshot.migration {
+            // Determine how to update the instance record to reflect the current
+            // migration state.
+            let failed = migration.either_side_failed();
+            // If the migration has failed, or if the target reports that the migration
+            // has completed, clear the instance record's migration IDs so that a new
+            // migration can begin.
+            if failed || migration.target_state == MigrationState::COMPLETED {
+                info!(
+                    log,
+                    "instance update (migration {}): clearing migration IDs",
+                    if failed { "failed" } else { "target completed" };
+                    "instance_id" => %instance_id,
+                    "migration_id" => %migration.id,
+                    "src_propolis_id" => %migration.source_propolis_id,
+                    "target_propolis_id" => %migration.target_propolis_id,
+                );
+                new_runtime.migration_id = None;
+                new_runtime.dst_propolis_id = None;
+                update_required = true;
+            }
+
+            // If the active VMM was destroyed, the network config must be
+            // deleted (which was determined above). Otherwise, if the
+            // migration failed but the active VMM was still there, we must
+            // still ensure the correct networking configuration
+            // exists for its current home.
+            //
+            // TODO(#3107) This is necessary even if the instance didn't move,
+            // because registering a migration target on a sled creates OPTE ports
+            // for its VNICs, and that creates new V2P mappings on that sled that
+            // place the relevant virtual IPs on the local sled. Once OPTE stops
+            // creating these mappings, this path only needs to be taken if an
+            // instance has changed sleds.
+            if failed && destroy_vmm.is_none() {
+                network_config = Some(NetworkConfigUpdate::Update(
+                    PropolisUuid::from_untyped_uuid(
+                        migration.source_propolis_id,
+                    ),
+                ));
+                update_required = true;
+            }
+
+            // If either side reports that the migration has completed, move the target
+            // Propolis ID to the active position.
+            if !failed && migration.either_side_completed() {
+                info!(
+                    log,
+                    "instance update (migration completed): setting active VMM ID to target";
+                    "instance_id" => %instance_id,
+                    "migration_id" => %migration.id,
+                    "src_propolis_id" => %migration.source_propolis_id,
+                    "target_propolis_id" => %migration.target_propolis_id,
+                );
+
+                network_config = Some(NetworkConfigUpdate::Update(
+                    PropolisUuid::from_untyped_uuid(
+                        migration.target_propolis_id,
+                    ),
+                ));
+                new_runtime.propolis_id = Some(migration.target_propolis_id);
+                let _prev_target_id = new_runtime.dst_propolis_id.take();
+                debug_assert_eq!(
+                    _prev_target_id,
+                    Some(migration.target_propolis_id)
+                );
+                // If the active VMM has also been destroyed, don't delete
+                // virtual provisioning records while cleaning it up.
+                deprovision = false;
+                update_required = true;
+            }
+        }
+
+        if !update_required {
+            return None;
+        }
+        Some(Self {
+            new_runtime,
+            destroy_vmm: destroy_vmm.map(|id| DestroyedVmm { id, deprovision }),
+            network_config,
+        })
+    }
+}
+
 /// Parameters to the "real" instance update saga.
 #[derive(Debug, Deserialize, Serialize)]
 struct RealParams {
@@ -50,13 +199,15 @@ struct RealParams {
 
     state: InstanceSnapshot,
 
+    update: UpdatesRequired,
+
     orig_lock: instance::UpdaterLock,
 }
 
 const INSTANCE_LOCK_ID: &str = "saga_instance_lock_id";
 const INSTANCE_LOCK: &str = "updater_lock";
 const DESTROYED_VMM_ID: &str = "destroyed_vmm_id";
-const MIGRATION: &str = "migration";
+const NETWORK_CONFIG_UPDATE: &str = "network_config_update";
 
 // instance update saga: actions
 
@@ -69,24 +220,14 @@ declare_saga_actions! {
         - siu_unbecome_updater
     }
 
-    UNLOCK_INSTANCE -> "unlocked" {
-        + siu_unlock_instance
+    // Update network configuration.
+    UPDATE_NETWORK_CONFIG -> "update_network_config" {
+        + siu_update_network_config
     }
 
-    // === migration update actions ===
-
-    // Update the instance record to reflect a migration event. If the
-    // migration has completed on the target VMM, or if the migration has
-    // failed, this will clear the migration IDs, allowing the instance to
-    // migrate again. If the migration has completed on either VMM, the target
-    // VMM becomes the active VMM.
-    MIGRATION_UPDATE_INSTANCE -> "migration_update_instance" {
-        + siu_migration_update_instance
-    }
-
-    // Update network configuration to point to the new active VMM.
-    MIGRATION_UPDATE_NETWORK_CONFIG -> "migration_update_network_config" {
-        + siu_migration_update_network_config
+    // Release the lock and write back the new instance record.
+    UPDATE_AND_UNLOCK_INSTANCE -> "unlocked" {
+        + siu_update_and_unlock_instance
     }
 
     // === active VMM destroyed actions ===
@@ -108,19 +249,11 @@ declare_saga_actions! {
         + siu_destroyed_unassign_oximeter_producer
     }
 
-    // Notify the V2P manager background task to delete the destroyed VMM's V2P
-    // mappings, and delete the destroyed VMM's NAT entries.
-    DESTROYED_UPDATE_NETWORK_CONFIG -> "destroyed_update_network_config" {
-        + siu_destroyed_update_network_config
-    }
-
-    DESTROYED_UPDATE_INSTANCE -> "destroyed_vmm_update_instance" {
-        + siu_destroyed_update_instance
-    }
-
     DESTROYED_MARK_VMM_DELETED -> "destroyed_mark_vmm_deleted" {
         + siu_destroyed_mark_vmm_deleted
     }
+
+
 }
 
 // instance update saga: definition
@@ -155,50 +288,38 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
         ));
         builder.append(become_updater_action());
 
-        // TODO(eliza): perhaps the start saga could determine whether it even
-        // needs to create a "real" saga based on whether either of the relevant
-        // state changes have occurred?
-
-        // If the active VMM's state has changed to "destroyed", then clean up
-        // after it.
-        if let Some(ref active_vmm) = params.state.active_vmm {
-            // If the active VMM is `Destroyed`, schedule the active VMM
-            // destroyed subsaga.
-            if active_vmm.runtime.state == VmmState::Destroyed {
-                builder.append(const_node(
-                    DESTROYED_VMM_ID,
-                    &PropolisUuid::from_untyped_uuid(active_vmm.id),
-                )?);
-                builder.append(destroyed_release_sled_resources_action());
+        // If the active VMM has been destroyed, clean up after it.
+        // TODO(eliza): if we also wished to delete destroyed target VMMs after
+        // a failed migration, we could move all the "VMM destroyed" actions into
+        // a subsaga that we can push twice...
+        if let Some(DestroyedVmm { ref id, deprovision }) =
+            params.update.destroy_vmm
+        {
+            builder.append(const_node(DESTROYED_VMM_ID, id)?);
+            builder.append(destroyed_release_sled_resources_action());
+            // If the instance hasn't migrated out of the destroyed VMM, also release virtual
+            // provisioning records and unassign the Oximeter producer.
+            if deprovision {
                 builder.append(destroyed_release_virtual_provisioning_action());
                 builder.append(destroyed_unassign_oximeter_producer_action());
-                builder.append(destroyed_update_network_config_action());
-                builder.append(destroyed_update_instance_action());
-                builder.append(destroyed_mark_vmm_deleted_action());
             }
         }
 
-        // Next, determine what to do with the migration. A migration update
-        // saga needs to be scheduled if (and only if) the instance's migration
-        // ID currently points to a migration. The `instance_fetch_all` query
-        // will only return a migration if it is the instance's currently active
-        // migration, so if we have one here, that means that there's a
-        // migration.
-        if let Some(ref migration) = params.state.migration {
-            // If either side of the migration reports a terminal state, update
-            // the instance to reflect that.
-            if migration.is_terminal() {
-                builder.append(const_node(MIGRATION, migration)?);
-                // TODO(eliza): perhaps we could determine the final state in
-                // `make_saga_dag` and push a constant node for it, and then
-                // only have one `update_instance` action that's run regardless
-                // of which path through the saga we build...
-                builder.append(migration_update_instance_action());
-                builder.append(migration_update_network_config_action());
-            }
+        // If a network config update is required, do that.
+        if let Some(ref update) = params.update.network_config {
+            builder.append(const_node(NETWORK_CONFIG_UPDATE, update)?);
+            builder.append(update_network_config_action());
         }
 
-        builder.append(unlock_instance_action());
+        builder.append(update_and_unlock_instance_action());
+
+        // Delete the active VMM only *after* the instance record is
+        // updated, to avoid creating a "dangling pointer" where the instance
+        // record's active VMM ID points to a VMM record that has now been
+        // deleted.
+        if params.update.destroy_vmm.is_some() {
+            builder.append(destroyed_mark_vmm_deleted_action());
+        }
         Ok(builder.build()?)
     }
 }
@@ -248,168 +369,101 @@ async fn siu_unbecome_updater(
 ) -> Result<(), anyhow::Error> {
     let RealParams { ref serialized_authn, ref authz_instance, .. } =
         sagactx.saga_params::<RealParams>()?;
-    unlock_instance_inner(serialized_authn, authz_instance, &sagactx).await?;
+    unlock_instance_inner(serialized_authn, authz_instance, &sagactx, None)
+        .await?;
 
     Ok(())
 }
 
-async fn siu_migration_update_instance(
-    sagactx: NexusActionContext,
-) -> Result<PropolisUuid, ActionError> {
-    let RealParams { ref authz_instance, ref state, .. } =
-        sagactx.saga_params()?;
-    let migration = sagactx.lookup::<Migration>(MIGRATION)?;
-
-    let osagactx = sagactx.user_data();
-    let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
-
-    let mut new_runtime = state.instance.runtime().clone();
-    new_runtime.gen = Generation(new_runtime.gen.next());
-    new_runtime.time_updated = Utc::now();
-
-    // Determine how to update the instance record to reflect the current
-    // migration state.
-    let failed = migration.either_side_failed();
-    // If the migration has failed, or if the target reports that the migration
-    // has completed, clear the instance record's migration IDs so that a new
-    // migration can begin.
-    if failed || migration.target_state == MigrationState::COMPLETED {
-        info!(
-            osagactx.log(),
-            "instance update (migration {}): clearing migration IDs",
-            if failed { "failed" } else { "target_completed" };
-            "instance_id" => %instance_id,
-            "migration_id" => %migration.id,
-            "src_propolis_id" => %migration.source_propolis_id,
-            "target_propolis_id" => %migration.target_propolis_id,
-            "instance_update" => %"migration",
-        );
-        new_runtime.migration_id = None;
-        new_runtime.dst_propolis_id = None;
-    }
-
-    // If either side reports that the migration has completed, move the target
-    // Propolis ID to the active position.
-    let new_propolis_id = if !failed && migration.either_side_completed() {
-        info!(
-            osagactx.log(),
-            "instance update (migration completed): setting active VMM ID to target";
-            "instance_id" => %instance_id,
-            "migration_id" => %migration.id,
-            "src_propolis_id" => %migration.source_propolis_id,
-            "target_propolis_id" => %migration.target_propolis_id,
-            "instance_update" => %"migration",
-        );
-        new_runtime.propolis_id = Some(migration.target_propolis_id);
-        migration.target_propolis_id
-    } else {
-        migration.source_propolis_id
-    };
-
-    osagactx
-        .datastore()
-        .instance_update_runtime(&instance_id, &new_runtime)
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    Ok(PropolisUuid::from_untyped_uuid(new_propolis_id))
-}
-
-// TODO(eliza): the `update_network_config` actions for migration and
-// destroyed-active-vmm *could* probably be combined...look into whether this is
-// a good idea or not.
-async fn siu_migration_update_network_config(
+async fn siu_update_network_config(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let Params { ref serialized_authn, ref authz_instance, .. } =
         sagactx.saga_params()?;
-
-    let migration = sagactx.lookup::<Migration>(MIGRATION)?;
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
     let osagactx = sagactx.user_data();
+    let nexus = osagactx.nexus();
     let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
-    // Either the instance moved from one sled to another, or it attempted
-    // to migrate and failed. Ensure the correct networking configuration
-    // exists for its current home.
-    //
-    // TODO(#3107) This is necessary even if the instance didn't move,
-    // because registering a migration target on a sled creates OPTE ports
-    // for its VNICs, and that creates new V2P mappings on that sled that
-    // place the relevant virtual IPs on the local sled. Once OPTE stops
-    // creating these mappings, this path only needs to be taken if an
-    // instance has changed sleds.
+    let update =
+        sagactx.lookup::<NetworkConfigUpdate>(NETWORK_CONFIG_UPDATE)?;
 
-    // Look up the ID of the sled that the instance now resides on, so that we
-    // can look up its address.
-    let active_propolis_id =
-        sagactx.lookup::<PropolisUuid>("migration_update_instance")?;
-    let new_sled_id = match osagactx
-        .datastore()
-        .vmm_fetch(&opctx, authz_instance, &active_propolis_id)
-        .await
-    {
-        Ok(vmm) => vmm.sled_id,
-
-        // A VMM in the active position should never be destroyed. If the
-        // sled sending this message is the owner of the instance's last
-        // active VMM and is destroying it, it should also have retired that
-        // VMM.
-        Err(Error::ObjectNotFound { .. }) => {
-            error!(
+    match update {
+        NetworkConfigUpdate::Delete => {
+            info!(
                 osagactx.log(),
-                "instance's active vmm unexpectedly not found";
+                "instance update: deleting network config";
                 "instance_id" => %instance_id,
-                "propolis_id" => %active_propolis_id,
+            );
+            nexus
+                .instance_delete_dpd_config(&opctx, authz_instance)
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+        NetworkConfigUpdate::Update(active_propolis_id) => {
+            // Look up the ID of the sled that the instance now resides on, so that we
+            // can look up its address.
+            let new_sled_id = osagactx
+                .datastore()
+                .vmm_fetch(&opctx, authz_instance, &active_propolis_id)
+                .await
+                .map_err(ActionError::action_failed)?
+                .sled_id;
+
+            info!(
+                osagactx.log(),
+                "instance update: ensuring updated instance network config";
+                "instance_id" => %instance_id,
+                "active_propolis_id" => %active_propolis_id,
+                "new_sled_id" => %new_sled_id,
             );
 
-            return Ok(());
+            let (.., sled) = LookupPath::new(&opctx, osagactx.datastore())
+                .sled_id(new_sled_id)
+                .fetch()
+                .await
+                .map_err(ActionError::action_failed)?;
+
+            nexus
+                .instance_ensure_dpd_config(
+                    &opctx,
+                    instance_id,
+                    &sled.address(),
+                    None,
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
         }
-        Err(e) => return Err(ActionError::action_failed(e)),
-    };
+    }
 
-    info!(
-        osagactx.log(),
-        "instance update (migration): ensuring updated instance network config";
-        "instance_id" => %instance_id,
-        "migration_id" => %migration.id,
-        "src_propolis_id" => %migration.source_propolis_id,
-        "target_propolis_id" => %migration.target_propolis_id,
-        "active_propolis_id" => %active_propolis_id,
-        "sled_id" => %new_sled_id,
-        "migration_failed" => migration.either_side_failed(),
-    );
-
-    let nexus = osagactx.nexus();
+    // Make sure the V2P manager background task runs to ensure the V2P mappings
+    // for this instance are up to date.
     nexus.background_tasks.activate(&nexus.background_tasks.task_v2p_manager);
-
-    let (.., sled) = LookupPath::new(&opctx, osagactx.datastore())
-        .sled_id(new_sled_id)
-        .fetch()
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    nexus
-        .instance_ensure_dpd_config(&opctx, instance_id, &sled.address(), None)
-        .await
-        .map_err(ActionError::action_failed)?;
 
     Ok(())
 }
 
-async fn siu_unlock_instance(
+async fn siu_update_and_unlock_instance(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    let RealParams { ref serialized_authn, ref authz_instance, .. } =
-        sagactx.saga_params::<RealParams>()?;
-    unlock_instance_inner(serialized_authn, authz_instance, &sagactx).await
+    let RealParams {
+        ref serialized_authn, ref authz_instance, ref update, ..
+    } = sagactx.saga_params::<RealParams>()?;
+    unlock_instance_inner(
+        serialized_authn,
+        authz_instance,
+        &sagactx,
+        Some(&update.new_runtime),
+    )
+    .await
 }
 
 async fn unlock_instance_inner(
     serialized_authn: &authn::saga::Serialized,
     authz_instance: &authz::Instance,
     sagactx: &NexusActionContext,
+    new_runtime: Option<&InstanceRuntimeState>,
 ) -> Result<(), ActionError> {
     let lock = sagactx.lookup::<instance::UpdaterLock>(INSTANCE_LOCK)?;
     let opctx =
@@ -424,7 +478,7 @@ async fn unlock_instance_inner(
 
     let did_unlock = osagactx
         .datastore()
-        .instance_updater_unlock(&opctx, authz_instance, lock)
+        .instance_updater_unlock(&opctx, authz_instance, lock, new_runtime)
         .await
         .map_err(ActionError::action_failed)?;
 
