@@ -309,7 +309,8 @@ impl DataStore {
         use db::model::VmmState;
         use db::schema::instance::dsl;
         use db::schema::vmm::dsl as vmm_dsl;
-        Ok(vmm_dsl::vmm
+
+        vmm_dsl::vmm
             .filter(vmm_dsl::state.eq(VmmState::Destroyed))
             .inner_join(
                 dsl::instance.on(dsl::active_propolis_id
@@ -322,7 +323,7 @@ impl DataStore {
                 &*self.pool_connection_authorized(opctx).await?,
             )
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?)
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// List all instances with active migrations that have terminated (either
@@ -339,7 +340,7 @@ impl DataStore {
         use db::schema::instance::dsl;
         use db::schema::migration::dsl as migration_dsl;
 
-        Ok(dsl::instance
+        dsl::instance
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::migration_id.is_not_null())
             .filter(dsl::updater_id.is_null())
@@ -358,7 +359,7 @@ impl DataStore {
                 &*self.pool_connection_authorized(opctx).await?,
             )
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?)
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Fetches information about an Instance that the caller has previously
