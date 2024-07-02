@@ -819,27 +819,32 @@ impl SledAgent {
         &self,
         config: OmicronPhysicalDisksConfig,
     ) -> Result<DisksManagementResult, Error> {
-        // First, tell the storage subsystem which disks should be managed.
-        //
-        // TODO: Do we want to prevent future calls to
-        // "omicron_physical_disks_ensure" until we finish flushing?
-        //
-        // Otherwise, we the following could occur:
-        //
-        // - Ensure Disks {A, B, C}
-        // - ... try to remove all non-conforming disks
-        // - Ensure Disks {A, B, C, D} concurrently
-        // - ... we remove an instance on disk "D" because the old flush is
-        // still happening?
+        // Tell the storage subsystem which disks should be managed.
         let disk_result =
             self.storage().omicron_physical_disks_ensure(config).await?;
 
+        // Grab a view of the latest set of disks, alongside a generation
+        // number.
+        //
         // This generation is at LEAST as high as our last call through
         // omicron_physical_disks_ensure. It may actually be higher, if a
         // concurrent operation occurred.
         //
-        // Now: Monitor downstream subsystems which use physical disks, and
-        // ensure they're at least using "our_gen".
+        // "latest_disks" has a generation number, which is important for other
+        // subcomponents of Sled Agent to consider. If multiple requests to
+        // ensure disks arrive concurrently, it's important to "only advance
+        // forward" as requested by Nexus.
+        //
+        // For example: if we receive the following requests concurrently:
+        // - Use Disks {A, B, C}, generation = 1
+        // - Use Disks {A, B, C, D}, generation = 2
+        //
+        // If we ignore generation numbers, it's possible that we start using
+        // "disk D" -- e.g., for instance filesystems -- and then immediately
+        // delete it when we process the request with "generation 1".
+        //
+        // By keeping these requests ordered, we prevent this thrashing, and
+        // ensure that we always progress towards the last-requested state.
         let latest_disks = self.storage().get_latest_disks().await;
         let our_gen = latest_disks.generation();
 

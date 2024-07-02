@@ -10,8 +10,8 @@ use nexus_client::types::{
     BackgroundTasksActivateRequest, ProbeExternalIp, ProbeInfo,
 };
 use omicron_common::api::external::{
-    VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRulePriority,
-    VpcFirewallRuleStatus,
+    Generation, VpcFirewallRuleAction, VpcFirewallRuleDirection,
+    VpcFirewallRulePriority, VpcFirewallRuleStatus,
 };
 use omicron_common::api::internal::shared::NetworkInterface;
 use rand::prelude::IteratorRandom;
@@ -46,6 +46,11 @@ pub(crate) struct ProbeManager {
     inner: Arc<ProbeManagerInner>,
 }
 
+struct RunningProbes {
+    storage_generation: Option<Generation>,
+    zones: HashMap<Uuid, RunningZone>,
+}
+
 pub(crate) struct ProbeManagerInner {
     join_handle: Mutex<Option<JoinHandle<()>>>,
     nexus_client: NexusClientWithResolver,
@@ -54,7 +59,7 @@ pub(crate) struct ProbeManagerInner {
     vnic_allocator: VnicAllocator<Etherstub>,
     storage: StorageHandle,
     port_manager: PortManager,
-    running_probes: Mutex<HashMap<Uuid, RunningZone>>,
+    running_probes: Mutex<RunningProbes>,
 }
 
 impl ProbeManager {
@@ -73,7 +78,10 @@ impl ProbeManager {
                     VNIC_ALLOCATOR_SCOPE,
                     etherstub,
                 ),
-                running_probes: Mutex::new(HashMap::new()),
+                running_probes: Mutex::new(RunningProbes {
+                    storage_generation: None,
+                    zones: HashMap::new(),
+                }),
                 nexus_client,
                 log,
                 sled_id,
@@ -93,7 +101,19 @@ impl ProbeManager {
         let u2_set: HashSet<_> = disks.all_u2_zpools().into_iter().collect();
         let mut probes = self.inner.running_probes.lock().await;
 
+        // Consider the generation number on the incoming request to avoid
+        // applying old requests.
+        let requested_generation = *disks.generation();
+        if let Some(last_gen) = probes.storage_generation {
+            if last_gen >= requested_generation {
+                // This request looks old, ignore it.
+                return;
+            }
+        }
+        probes.storage_generation = Some(requested_generation);
+
         let to_remove = probes
+            .zones
             .iter()
             .filter_map(|(id, probe)| {
                 let Some(probe_pool) = probe.root_zpool() else {
@@ -319,7 +339,7 @@ impl ProbeManagerInner {
         rz.ensure_address_for_port("overlay", 0).await?;
         info!(self.log, "started probe {}", probe.id);
 
-        self.running_probes.lock().await.insert(probe.id, rz);
+        self.running_probes.lock().await.zones.insert(probe.id, rz);
 
         Ok(())
     }
@@ -344,10 +364,10 @@ impl ProbeManagerInner {
 
     async fn remove_probe_locked(
         &self,
-        probes: &mut MutexGuard<'_, HashMap<Uuid, RunningZone>>,
+        probes: &mut MutexGuard<'_, RunningProbes>,
         id: Uuid,
     ) {
-        match probes.remove(&id) {
+        match probes.zones.remove(&id) {
             Some(mut running_zone) => {
                 for l in running_zone.links_mut() {
                     if let Err(e) = l.delete() {

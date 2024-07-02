@@ -311,9 +311,7 @@ impl StorageResources {
     ) -> Self {
         let disks = AllDisks {
             generation: Generation::new(),
-            inner: Arc::new(AllDisksInner {
-                values: BTreeMap::new(),
-            }),
+            inner: Arc::new(AllDisksInner { values: BTreeMap::new() }),
             mount_config,
         };
         Self {

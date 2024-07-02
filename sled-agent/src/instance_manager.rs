@@ -24,6 +24,7 @@ use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::ZoneBuilderFactory;
+use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
@@ -120,6 +121,7 @@ impl InstanceManager {
             instances: BTreeMap::new(),
             vnic_allocator: VnicAllocator::new("Instance", etherstub),
             port_manager,
+            storage_generation: None,
             storage,
             zone_bundler,
             zone_builder_factory,
@@ -439,6 +441,7 @@ struct InstanceManagerRunner {
 
     vnic_allocator: VnicAllocator<Etherstub>,
     port_manager: PortManager,
+    storage_generation: Option<Generation>,
     storage: StorageHandle,
     zone_bundler: ZoneBundler,
     zone_builder_factory: ZoneBuilderFactory,
@@ -803,6 +806,17 @@ impl InstanceManagerRunner {
         tx: oneshot::Sender<Result<(), Error>>,
         disks: AllDisks,
     ) -> Result<(), Error> {
+        // Consider the generation number on the incoming request to avoid
+        // applying old requests.
+        let requested_generation = *disks.generation();
+        if let Some(last_gen) = self.storage_generation {
+            if last_gen >= requested_generation {
+                // This request looks old, ignore it.
+                return Ok(());
+            }
+        }
+        self.storage_generation = Some(requested_generation);
+
         let u2_set: HashSet<_> = disks.all_u2_zpools().into_iter().collect();
 
         let mut to_remove = vec![];
