@@ -5,11 +5,11 @@
 //! Authz types for resources in the API hierarchy
 //!
 //! The general pattern in Nexus for working with an object is to look it up
-//! (see [`crate::db::lookup::LookupPath`]) and get back a so-called `authz`
-//! type.  This type uniquely identifies the resource regardless of any other
-//! changes (e.g., name change or moving it to a different parent collection).
-//! The various datastore functions that modify API resources accept these
-//! `authz` types.
+//! (see `nexus_db_queries::db::lookup::LookupPath`) and get back a so-called
+//! `authz` type.  This type uniquely identifies the resource regardless of
+//! any other changes (e.g., name change or moving it to a different parent
+//! collection). The various datastore functions that modify API resources
+//! accept these `authz` types.
 //!
 //! The `authz` types can be passed to
 //! [`crate::context::OpContext::authorize()`] to do an authorization check --

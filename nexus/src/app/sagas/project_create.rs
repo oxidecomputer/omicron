@@ -154,7 +154,7 @@ async fn spc_create_vpc_params(
 #[cfg(test)]
 mod test {
     use crate::{
-        app::saga::create_saga_dag, app::sagas::project_create::Params,
+        app::sagas::project_create::Params,
         app::sagas::project_create::SagaProjectCreate, external_api::params,
     };
     use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
@@ -263,15 +263,11 @@ mod test {
         // Before running the test, confirm we have no records of any projects.
         verify_clean_slate(nexus.datastore()).await;
 
-        // Build the saga DAG with the provided test parameters
+        // Build the saga DAG with the provided test parameters and run it.
         let opctx = test_opctx(&cptestctx);
         let authz_silo = opctx.authn.silo_required().unwrap();
         let params = new_test_params(&opctx, authz_silo);
-        let dag = create_saga_dag::<SagaProjectCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-
-        // Actually run the saga
-        nexus.run_saga(runnable_saga).await.unwrap();
+        nexus.sagas.saga_execute::<SagaProjectCreate>(params).await.unwrap();
     }
 
     #[nexus_test(server = crate::Server)]

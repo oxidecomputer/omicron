@@ -257,12 +257,16 @@ async fn srrs_alloc_new_region(
     // agent could reuse the allocated port and cause trouble.
     let datasets_and_regions = osagactx
         .datastore()
-        .arbitrary_region_allocate_direct(
+        .arbitrary_region_allocate(
             &opctx,
-            db_region.volume_id(),
-            db_region.block_size().to_bytes(),
-            db_region.blocks_per_extent(),
-            db_region.extent_count(),
+            db::datastore::RegionAllocationFor::DiskVolume {
+                volume_id: db_region.volume_id(),
+            },
+            db::datastore::RegionAllocationParameters::FromRaw {
+                block_size: db_region.block_size().to_bytes(),
+                blocks_per_extent: db_region.blocks_per_extent(),
+                extent_count: db_region.extent_count(),
+            },
             &params.allocation_strategy,
             // Note: this assumes that previous redundancy is
             // REGION_REDUNDANCY_THRESHOLD, and that region replacement will
@@ -795,7 +799,6 @@ pub(crate) mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
-    use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Asset;
     use sled_agent_client::types::VolumeConstructionRequest;
@@ -803,6 +806,8 @@ pub(crate) mod test {
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+    type DiskTest<'a> =
+        nexus_test_utils::resource_helpers::DiskTest<'a, crate::Server>;
 
     const DISK_NAME: &str = "my-disk";
     const PROJECT_NAME: &str = "springfield-squidport";
@@ -812,7 +817,7 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let mut disk_test = DiskTest::new(cptestctx).await;
-        disk_test.add_zpool_with_dataset(&cptestctx).await;
+        disk_test.add_zpool_with_dataset(cptestctx.first_sled()).await;
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
@@ -860,19 +865,18 @@ pub(crate) mod test {
             .unwrap();
 
         // Run the region replacement start saga
-        let dag = create_saga_dag::<SagaRegionReplacementStart>(Params {
+        let params = Params {
             serialized_authn: Serialized::for_opctx(&opctx),
             request: request.clone(),
             allocation_strategy: RegionAllocationStrategy::Random {
                 seed: None,
             },
-        })
-        .unwrap();
-
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-
-        // Actually run the saga
-        let output = nexus.run_saga(runnable_saga).await.unwrap();
+        };
+        let output = nexus
+            .sagas
+            .saga_execute::<SagaRegionReplacementStart>(params)
+            .await
+            .unwrap();
 
         // Validate the state transition
         let result = datastore
@@ -1005,7 +1009,7 @@ pub(crate) mod test {
 
     pub(crate) async fn verify_clean_slate(
         cptestctx: &ControlPlaneTestContext,
-        test: &DiskTest,
+        test: &DiskTest<'_>,
         request: &RegionReplacement,
         affected_volume_original: &Volume,
         affected_region_original: &Region,
@@ -1029,11 +1033,11 @@ pub(crate) mod test {
 
     async fn three_region_allocations_exist(
         datastore: &DataStore,
-        test: &DiskTest,
+        test: &DiskTest<'_>,
     ) -> bool {
         let mut count = 0;
 
-        for zpool in &test.zpools {
+        for zpool in test.zpools() {
             for dataset in &zpool.datasets {
                 if datastore
                     .regions_total_occupied_size(dataset.id)
@@ -1128,7 +1132,7 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let mut disk_test = DiskTest::new(cptestctx).await;
-        disk_test.add_zpool_with_dataset(&cptestctx).await;
+        disk_test.add_zpool_with_dataset(cptestctx.first_sled()).await;
 
         let log = &cptestctx.logctx.log;
 
@@ -1205,7 +1209,7 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let mut disk_test = DiskTest::new(cptestctx).await;
-        disk_test.add_zpool_with_dataset(&cptestctx).await;
+        disk_test.add_zpool_with_dataset(cptestctx.first_sled()).await;
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;

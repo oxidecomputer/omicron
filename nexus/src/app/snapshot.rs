@@ -125,7 +125,8 @@ impl super::Nexus {
         };
 
         let saga_outputs = self
-            .execute_saga::<sagas::snapshot_create::SagaSnapshotCreate>(
+            .sagas
+            .saga_execute::<sagas::snapshot_create::SagaSnapshotCreate>(
                 saga_params,
             )
             .await?;
@@ -165,10 +166,11 @@ impl super::Nexus {
             snapshot: db_snapshot,
         };
 
-        self.execute_saga::<sagas::snapshot_delete::SagaSnapshotDelete>(
-            saga_params,
-        )
-        .await?;
+        self.sagas
+            .saga_execute::<sagas::snapshot_delete::SagaSnapshotDelete>(
+                saga_params,
+            )
+            .await?;
 
         Ok(())
     }

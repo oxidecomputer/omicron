@@ -286,17 +286,6 @@ table! {
 }
 
 table! {
-    v2p_mapping_view (nic_id) {
-        nic_id -> Uuid,
-        sled_id -> Uuid,
-        sled_ip -> Inet,
-        vni -> Int4,
-        mac -> Int8,
-        ip -> Inet,
-    }
-}
-
-table! {
     bgp_announce_set (id) {
         id -> Uuid,
         name -> Text,
@@ -430,9 +419,9 @@ table! {
         active_propolis_id -> Nullable<Uuid>,
         target_propolis_id -> Nullable<Uuid>,
         migration_id -> Nullable<Uuid>,
+        state -> crate::InstanceStateEnum,
         updater_id -> Nullable<Uuid>,
         updater_gen-> Int8,
-        state -> crate::InstanceStateEnum,
     }
 }
 
@@ -522,6 +511,7 @@ table! {
         ip -> Inet,
         slot -> Int2,
         is_primary -> Bool,
+        transit_ips -> Array<Inet>,
     }
 }
 
@@ -540,6 +530,7 @@ table! {
         ip -> Inet,
         slot -> Int2,
         is_primary -> Bool,
+        transit_ips -> Array<Inet>,
     }
 }
 joinable!(instance_network_interface -> instance (instance_id));
@@ -1117,6 +1108,7 @@ table! {
         rcgen -> Int8,
         ipv4_block -> Inet,
         ipv6_block -> Inet,
+        custom_router_id -> Nullable<Uuid>,
     }
 }
 
@@ -1131,6 +1123,7 @@ table! {
         kind -> crate::VpcRouterKindEnum,
         vpc_id -> Uuid,
         rcgen -> Int8,
+        resolved_version -> Int8,
     }
 }
 
@@ -1483,6 +1476,7 @@ table! {
         snat_ip -> Nullable<Inet>,
         snat_first_port -> Nullable<Int4>,
         snat_last_port -> Nullable<Int4>,
+        filesystem_pool -> Nullable<Uuid>,
     }
 }
 
@@ -1599,6 +1593,7 @@ table! {
         snat_last_port -> Nullable<Int4>,
         disposition -> crate::DbBpZoneDispositionEnum,
         external_ip_id -> Nullable<Uuid>,
+        filesystem_pool -> Nullable<Uuid>,
     }
 }
 
@@ -1769,6 +1764,7 @@ table! {
 table! {
     migration (id) {
         id -> Uuid,
+        instance_id -> Uuid,
         time_created -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         source_state -> crate::MigrationStateEnum,
@@ -1842,6 +1838,7 @@ allow_tables_to_appear_in_same_query!(
     user_builtin,
     role_builtin,
     role_assignment,
+    probe,
 );
 
 allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);
@@ -1870,3 +1867,5 @@ joinable!(instance_ssh_key -> ssh_key (ssh_key_id));
 joinable!(instance_ssh_key -> instance (instance_id));
 
 allow_tables_to_appear_in_same_query!(sled, sled_instance);
+
+joinable!(network_interface -> probe (parent_id));

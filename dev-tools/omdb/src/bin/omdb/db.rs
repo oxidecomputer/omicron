@@ -111,6 +111,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::MacAddr;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_client::types::VolumeConstructionRequest;
 use std::borrow::Cow;
@@ -129,12 +130,18 @@ use uuid::Uuid;
 const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
 const NOT_ON_SLED_MSG: &str = "<not on any sled>";
 
-struct MaybePropolisId(Option<Uuid>);
-struct MaybeSledId(Option<Uuid>);
+struct MaybePropolisId(Option<PropolisUuid>);
+struct MaybeSledId(Option<SledUuid>);
 
 impl From<&InstanceAndActiveVmm> for MaybePropolisId {
     fn from(value: &InstanceAndActiveVmm) -> Self {
-        Self(value.instance().runtime().propolis_id)
+        Self(
+            value
+                .instance()
+                .runtime()
+                .propolis_id
+                .map(PropolisUuid::from_untyped_uuid),
+        )
     }
 }
 
@@ -1040,7 +1047,7 @@ async fn cmd_db_disk_info(
             let my_sled_id = instance.sled_id().unwrap();
 
             let (_, my_sled) = LookupPath::new(opctx, datastore)
-                .sled_id(my_sled_id)
+                .sled_id(my_sled_id.into_untyped_uuid())
                 .fetch()
                 .await
                 .context("failed to look up sled")?;
@@ -1948,7 +1955,7 @@ async fn cmd_db_instances(
     check_limit(&instances, limit, ctx);
 
     let mut rows = Vec::new();
-    let mut h_to_s: HashMap<Uuid, String> = HashMap::new();
+    let mut h_to_s: HashMap<SledUuid, String> = HashMap::new();
 
     for i in instances {
         let host_serial = if i.vmm().is_some() {
@@ -1956,7 +1963,7 @@ async fn cmd_db_instances(
                 h_to_s.entry(i.sled_id().unwrap())
             {
                 let (_, my_sled) = LookupPath::new(opctx, datastore)
-                    .sled_id(i.sled_id().unwrap())
+                    .sled_id(i.sled_id().unwrap().into_untyped_uuid())
                     .fetch()
                     .await
                     .context("failed to look up sled")?;

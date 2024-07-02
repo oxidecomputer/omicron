@@ -4,6 +4,7 @@
 
 //! Convert Omicron VPC firewall rules to OPTE firewall rules.
 
+use super::net_to_cidr;
 use crate::opte::params::VpcFirewallRule;
 use crate::opte::Vni;
 use macaddr::MacAddr6;
@@ -18,11 +19,6 @@ use oxide_vpc::api::Filters;
 use oxide_vpc::api::FirewallAction;
 use oxide_vpc::api::FirewallRule;
 use oxide_vpc::api::IpAddr;
-use oxide_vpc::api::IpCidr;
-use oxide_vpc::api::Ipv4Cidr;
-use oxide_vpc::api::Ipv4PrefixLen;
-use oxide_vpc::api::Ipv6Cidr;
-use oxide_vpc::api::Ipv6PrefixLen;
 use oxide_vpc::api::Ports;
 use oxide_vpc::api::ProtoFilter;
 use oxide_vpc::api::Protocol;
@@ -68,21 +64,10 @@ impl FromVpcFirewallRule for VpcFirewallRule {
                     HostIdentifier::Ip(IpNet::V4(net)) if net.is_host_net() => {
                         Address::Ip(IpAddr::Ip4(net.addr().into()))
                     }
-                    HostIdentifier::Ip(IpNet::V4(net)) => {
-                        Address::Subnet(IpCidr::Ip4(Ipv4Cidr::new(
-                            net.addr().into(),
-                            Ipv4PrefixLen::new(net.width()).unwrap(),
-                        )))
-                    }
                     HostIdentifier::Ip(IpNet::V6(net)) if net.is_host_net() => {
                         Address::Ip(IpAddr::Ip6(net.addr().into()))
                     }
-                    HostIdentifier::Ip(IpNet::V6(net)) => {
-                        Address::Subnet(IpCidr::Ip6(Ipv6Cidr::new(
-                            net.addr().into(),
-                            Ipv6PrefixLen::new(net.width()).unwrap(),
-                        )))
-                    }
+                    HostIdentifier::Ip(ip) => Address::Subnet(net_to_cidr(*ip)),
                     HostIdentifier::Vpc(vni) => {
                         Address::Vni(Vni::new(u32::from(*vni)).unwrap())
                     }

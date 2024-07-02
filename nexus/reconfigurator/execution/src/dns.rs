@@ -472,6 +472,7 @@ mod test {
     use nexus_reconfigurator_planning::example::example;
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
     use nexus_test_utils::resource_helpers::create_silo;
+    use nexus_test_utils::resource_helpers::DiskTestBuilder;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
@@ -500,9 +501,11 @@ mod test {
     use omicron_common::address::SLED_PREFIX;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_client::ZoneKind;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
@@ -622,6 +625,9 @@ mod test {
                 disposition: BlueprintZoneDisposition::Quiesced,
                 id: out_of_service_id,
                 underlay_address: out_of_service_addr,
+                filesystem_pool: Some(ZpoolName::new_external(
+                    ZpoolUuid::new_v4(),
+                )),
                 zone_type: BlueprintZoneType::Oximeter(
                     blueprint_zone_type::Oximeter {
                         address: SocketAddrV6::new(
@@ -1135,6 +1141,14 @@ mod test {
     async fn test_silos_external_dns_end_to_end(
         cptestctx: &ControlPlaneTestContext,
     ) {
+        // Add a zpool to all sleds, just to ensure that all new zones can find
+        // a transient filesystem wherever they end up being placed.
+        DiskTestBuilder::new(&cptestctx)
+            .on_all_sleds()
+            .with_zpool_count(1)
+            .build()
+            .await;
+
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let resolver = nexus.resolver();

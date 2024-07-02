@@ -27,6 +27,8 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
@@ -120,7 +122,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_user: &authz::SiloUser,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         keys: &Option<Vec<Uuid>>,
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::ListChildren, authz_user).await?;
@@ -142,7 +144,7 @@ impl DataStore {
                     })?
                     .iter()
                     .map(|key| db::model::InstanceSshKey {
-                        instance_id,
+                        instance_id: instance_id.into_untyped_uuid(),
                         ssh_key_id: *key,
                     })
                     .collect()
@@ -153,7 +155,7 @@ impl DataStore {
             Some(vec) => vec
                 .iter()
                 .map(|key| db::model::InstanceSshKey {
-                    instance_id,
+                    instance_id: instance_id.into_untyped_uuid(),
                     ssh_key_id: *key,
                 })
                 .collect(),
@@ -203,11 +205,11 @@ impl DataStore {
     pub async fn instance_ssh_keys_delete(
         &self,
         opctx: &OpContext,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
     ) -> DeleteResult {
         use db::schema::instance_ssh_key::dsl;
         diesel::delete(dsl::instance_ssh_key)
-            .filter(dsl::instance_id.eq(instance_id))
+            .filter(dsl::instance_id.eq(instance_id.into_untyped_uuid()))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;

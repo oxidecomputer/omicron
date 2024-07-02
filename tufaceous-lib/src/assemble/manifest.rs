@@ -279,6 +279,9 @@ impl<'a> FakeDataAttributes<'a> {
         use hubtools::{CabooseBuilder, HubrisArchiveBuilder};
 
         let board = match self.kind {
+            KnownArtifactKind::GimletRotBootloader
+            | KnownArtifactKind::PscRotBootloader
+            | KnownArtifactKind::SwitchRotBootloader => "SimRotStage0",
             // non-Hubris artifacts: just make fake data
             KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
@@ -287,11 +290,11 @@ impl<'a> FakeDataAttributes<'a> {
             // hubris artifacts: build a fake archive (SimGimletSp and
             // SimGimletRot are used by sp-sim)
             KnownArtifactKind::GimletSp => "SimGimletSp",
-            KnownArtifactKind::GimletRot => "SimGimletRot",
+            KnownArtifactKind::GimletRot => "SimRot",
             KnownArtifactKind::PscSp => "fake-psc-sp",
             KnownArtifactKind::PscRot => "fake-psc-rot",
-            KnownArtifactKind::SwitchSp => "fake-sidecar-sp",
-            KnownArtifactKind::SwitchRot => "fake-sidecar-rot",
+            KnownArtifactKind::SwitchSp => "SimSidecarSp",
+            KnownArtifactKind::SwitchRot => "SimRot",
         };
 
         let caboose = CabooseBuilder::default()
