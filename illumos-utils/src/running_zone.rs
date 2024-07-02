@@ -657,15 +657,13 @@ impl RunningZone {
                 port_idx,
             }
         })?;
-        // TODO-remove(#2932): Switch to using port directly once vnic is no longer needed.
-        let addrobj =
-            AddrObject::new(port.vnic_name(), name).map_err(|err| {
-                EnsureAddressError::AddrObject {
-                    request: AddressRequest::Dhcp,
-                    zone: self.inner.name.clone(),
-                    err,
-                }
-            })?;
+        let addrobj = AddrObject::new(port.name(), name).map_err(|err| {
+            EnsureAddressError::AddrObject {
+                request: AddressRequest::Dhcp,
+                zone: self.inner.name.clone(),
+                err,
+            }
+        })?;
         let zone = Some(self.inner.name.as_ref());
         if let IpAddr::V4(gateway) = port.gateway().ip() {
             let addr =
@@ -684,7 +682,7 @@ impl RunningZone {
                 &private_ip.to_string(),
                 "-interface",
                 "-ifp",
-                port.vnic_name(),
+                port.name(),
             ])?;
             self.run_cmd(&[
                 "/usr/sbin/route",
@@ -1427,7 +1425,7 @@ impl<'a> ZoneBuilder<'a> {
 
         let mut net_device_names: Vec<String> = opte_ports
             .iter()
-            .map(|(port, _)| port.vnic_name().to_string())
+            .map(|(port, _)| port.name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
             .chain(bootstrap_vnic.as_ref().map(|vnic| vnic.name().to_string()))
             .chain(links.iter().map(|nic| nic.name().to_string()))

@@ -651,9 +651,7 @@ impl InstanceRunner {
         let nics = running_zone
             .opte_ports()
             .map(|port| propolis_client::types::NetworkInterfaceRequest {
-                // TODO-correctness: Remove `.vnic()` call when we use the port
-                // directly.
-                name: port.vnic_name().to_string(),
+                name: port.name().to_string(),
                 slot: propolis_client::types::Slot(port.slot()),
             })
             .collect();
