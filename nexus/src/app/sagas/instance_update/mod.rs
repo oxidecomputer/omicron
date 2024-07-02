@@ -11,6 +11,7 @@ use crate::app::db::datastore::InstanceSnapshot;
 use crate::app::db::lookup::LookupPath;
 use crate::app::db::model::Generation;
 use crate::app::db::model::InstanceRuntimeState;
+use crate::app::db::model::InstanceState;
 use crate::app::db::model::MigrationState;
 use crate::app::db::model::VmmState;
 use crate::app::sagas::declare_saga_actions;
@@ -97,6 +98,7 @@ impl UpdatesRequired {
                 // handles migration updates, will set this to the new VMM's ID,
                 // instead.
                 new_runtime.propolis_id = None;
+                new_runtime.nexus_state = InstanceState::NoVmm;
                 update_required = true;
                 network_config = Some(NetworkConfigUpdate::Delete);
                 Some(PropolisUuid::from_untyped_uuid(active_vmm.id))
@@ -167,6 +169,10 @@ impl UpdatesRequired {
                     ),
                 ));
                 new_runtime.propolis_id = Some(migration.target_propolis_id);
+                // Even if the active VMM was destroyed (and we set the
+                // instance's state to `NoVmm` above), it has successfully
+                // migrated, so leave it in the VMM state.
+                new_runtime.nexus_state = InstanceState::Vmm;
                 let _prev_target_id = new_runtime.dst_propolis_id.take();
                 debug_assert_eq!(
                     _prev_target_id,
