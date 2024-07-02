@@ -8,9 +8,7 @@ use std::collections::HashSet;
 
 use crate::config::MountConfig;
 use crate::dataset::{DatasetName, CONFIG_DATASET};
-use crate::disk::{
-    OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig, RawDisk,
-};
+use crate::disk::{OmicronPhysicalDisksConfig, RawDisk};
 use crate::error::Error;
 use crate::resources::{AllDisks, DisksManagementResult, StorageResources};
 use camino::Utf8PathBuf;
@@ -589,89 +587,9 @@ impl StorageManager {
             self.resources.set_config(&ledger.data());
         } else {
             info!(self.log, "KeyManager ready, but no ledger detected");
-            let mut synthetic_config =
-                self.resources.get_config().values().cloned().collect();
-            // TODO(https://github.com/oxidecomputer/omicron/issues/5328): Once
-            // we are confident that we have migrated to a world where this
-            // ledger is universally used, we should remove the following
-            // kludge. The sled agent should not need to "self-manage" anything!
-            let changed = self
-                .self_manage_disks_with_zpools(&mut synthetic_config)
-                .await?;
-            if !changed {
-                info!(self.log, "No disks to be automatically managed");
-                return Ok(());
-            }
-            info!(self.log, "auto-managed disks"; "count" => synthetic_config.len());
-            self.resources.set_config(&synthetic_config);
         }
 
         Ok(())
-    }
-
-    // NOTE: What follows is an exceptional case: one where we have
-    // no record of "Control Plane Physical Disks", but we have zpools
-    // on our U.2s, and we want to use them regardless.
-    //
-    // THIS WOULD NORMALLY BE INCORRECT BEHAVIOR. In the future, these
-    // zpools will not be "automatically imported", and instead, we'll
-    // let Nexus decide whether or not to reformat the disks.
-    //
-    // However, because we are transitioning from "the set of disks /
-    // zpools is implicit" to a world where that set is explicit, this
-    // is a necessary transitional tool.
-    //
-    // Returns "true" if the synthetic_config has changed.
-    async fn self_manage_disks_with_zpools(
-        &mut self,
-        synthetic_config: &mut Vec<OmicronPhysicalDiskConfig>,
-    ) -> Result<bool, Error> {
-        let mut changed = false;
-        for (identity, disk) in self.resources.disks().iter_all_inner() {
-            match disk {
-                crate::resources::ManagedDisk::Unmanaged(raw) => {
-                    let zpool_path = match raw.u2_zpool_path() {
-                        Ok(zpool_path) => zpool_path,
-                        Err(err) => {
-                            info!(self.log, "Cannot find zpool path"; "identity" => ?identity, "err" => ?err);
-                            continue;
-                        }
-                    };
-
-                    let zpool_name =
-                        match sled_hardware::disk::check_if_zpool_exists(
-                            &zpool_path,
-                        ) {
-                            Ok(zpool_name) => zpool_name,
-                            Err(err) => {
-                                info!(self.log, "Zpool does not exist"; "identity" => ?identity, "err" => ?err);
-                                continue;
-                            }
-                        };
-
-                    info!(self.log, "Found existing zpool on device without ledger";
-                        "identity" => ?identity,
-                        "zpool" => ?zpool_name);
-
-                    // We found an unmanaged disk with a zpool, even though
-                    // we have no prior record of a ledger of control-plane
-                    // disks.
-                    synthetic_config.push(
-                        // These disks don't have a control-plane UUID --
-                        // report "nil" until they're overwritten with real
-                        // values.
-                        OmicronPhysicalDiskConfig {
-                            identity: identity.clone(),
-                            id: Uuid::nil(),
-                            pool_id: zpool_name.id(),
-                        },
-                    );
-                    changed = true;
-                }
-                _ => continue,
-            }
-        }
-        Ok(changed)
     }
 
     // Makes an U.2 disk managed by the control plane within [`StorageResources`].
@@ -905,9 +823,10 @@ impl StorageManager {
 #[cfg(all(test, target_os = "illumos"))]
 mod tests {
     use crate::dataset::DatasetKind;
+    use crate::disk::OmicronPhysicalDiskConfig;
     use crate::disk::RawSyntheticDisk;
     use crate::manager_test_harness::StorageManagerTestHarness;
-    use crate::resources::{DiskManagementError, ManagedDisk};
+    use crate::resources::DiskManagementError;
 
     use super::*;
     use camino_tempfile::tempdir_in;
@@ -1083,8 +1002,8 @@ mod tests {
 
         // Now let's verify we saw the correct firmware update.
         for rd in &raw_disks {
-            let managed = all_disks_gen2
-                .iter_all_inner()
+            let disk = all_disks_gen2
+                .iter_managed()
                 .find_map(|(identity, disk)| {
                     if identity == rd.identity() {
                         Some(disk)
@@ -1093,19 +1012,11 @@ mod tests {
                     }
                 })
                 .expect("disk exists");
-            match managed {
-                ManagedDisk::ExplicitlyManaged(disk)
-                | ManagedDisk::ImplicitlyManaged(disk) => {
-                    assert_eq!(
-                        disk.firmware(),
-                        rd.firmware(),
-                        "didn't see firmware update"
-                    );
-                }
-                ManagedDisk::Unmanaged(disk) => {
-                    assert_eq!(disk, rd, "didn't see firmware update");
-                }
-            }
+            assert_eq!(
+                disk.firmware(),
+                rd.firmware(),
+                "didn't see firmware update"
+            );
         }
 
         harness.cleanup().await;

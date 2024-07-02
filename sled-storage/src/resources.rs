@@ -6,7 +6,10 @@
 
 use crate::config::MountConfig;
 use crate::dataset::{DatasetError, M2_DEBUG_DATASET};
-use crate::disk::{Disk, DiskError, OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig, RawDisk};
+use crate::disk::{
+    Disk, DiskError, OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig,
+    RawDisk,
+};
 use crate::error::Error;
 use camino::Utf8PathBuf;
 use cfg_if::cfg_if;
@@ -261,20 +264,6 @@ impl AllDisks {
     }
 
     /// Returns an iterator over all disks, managed or not.
-    ///
-    /// Additionally identifies details of "how the disk is managed".
-    pub(crate) fn iter_all_inner(
-        &self,
-    ) -> impl Iterator<Item = (&DiskIdentity, &ManagedDisk)> {
-        self.inner.values.iter()
-    }
-
-    /// Returns an iterator over all disks, managed or not.
-    // Intentionally avoids returning the "ManagedDisk" structure to callers, to
-    // hide the details of management.
-    //
-    // If this is important to the caller, they should use
-    // [Self::iter_all_inner].
     pub fn iter_all(
         &self,
     ) -> impl Iterator<Item = (&DiskIdentity, DiskVariant, i64, &DiskFirmware)>
@@ -481,7 +470,7 @@ impl StorageResources {
         }
 
         if updated {
-//            disks.generation = disks.generation.next();
+            //            disks.generation = disks.generation.next();
             self.disk_updates.send_replace(self.disks.clone());
         }
 
@@ -595,7 +584,7 @@ impl StorageResources {
             }
         }
 
-//        disks.generation = disks.generation.next();
+        //        disks.generation = disks.generation.next();
         self.disk_updates.send_replace(self.disks.clone());
 
         Ok(())
@@ -639,7 +628,7 @@ impl StorageResources {
         let disks = Arc::make_mut(&mut self.disks.inner);
         disks.values.remove(id).unwrap();
 
-//        disks.generation = disks.generation.next();
+        //        disks.generation = disks.generation.next();
         self.disk_updates.send_replace(self.disks.clone());
     }
 }
