@@ -101,11 +101,6 @@ pub(crate) async fn deploy_zones(
 }
 
 /// Idempontently perform any cleanup actions necessary for expunged zones.
-///
-/// # Panics
-///
-/// Panics if any of the zones yielded by the `expunged_zones` iterator has a
-/// disposition other than `Expunged`.
 pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
     opctx: &OpContext,
     datastore: &DataStore,
@@ -114,15 +109,11 @@ pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
 ) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<anyhow::Error> = stream::iter(expunged_zones)
         .filter_map(|(sled_id, config)| async move {
-            // It is a programmer error to call this function on a non-expunged
-            // zone; 'tis better to crash than attempt to clean up a zone that
-            // isn't really expunged!
-            assert_eq!(
-                config.disposition,
-                BlueprintZoneDisposition::Expunged,
-                "clean_up_expunged_zones called with \
-                 non-expunged zone {config:?}"
-            );
+            // We expect to only be called with expunged zones; skip any with a
+            // different disposition.
+            if config.disposition != BlueprintZoneDisposition::Expunged {
+                return None;
+            }
 
             let log = opctx.log.new(slog::o!(
                 "sled_id" => sled_id.to_string(),
