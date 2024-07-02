@@ -823,6 +823,7 @@ impl StorageManager {
 #[cfg(all(test, target_os = "illumos"))]
 mod tests {
     use crate::dataset::DatasetKind;
+    use crate::disk::OmicronPhysicalDiskConfig;
     use crate::disk::RawSyntheticDisk;
     use crate::manager_test_harness::StorageManagerTestHarness;
     use crate::resources::{DiskManagementError, ManagedDisk};
