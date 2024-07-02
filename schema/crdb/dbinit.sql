@@ -4060,11 +4060,20 @@ CREATE TYPE IF NOT EXISTS omicron.public.migration_state AS ENUM (
 CREATE TABLE IF NOT EXISTS omicron.public.migration (
     id UUID PRIMARY KEY,
 
+    /* The ID of the instance that was migrated */
+    instance_id UUID NOT NULL,
+
     /* The time this migration record was created. */
     time_created TIMESTAMPTZ NOT NULL,
 
     /* The time this migration record was deleted. */
     time_deleted TIMESTAMPTZ,
+
+    /* Note that there's no `time_modified/time_updated` timestamp for migration
+     * records. This is because we track updated time separately for the source
+     * and target sides of the migration, using separate `time_source_updated`
+     * and time_target_updated` columns.
+    */
 
     /* The state of the migration source */
     source_state omicron.public.migration_state NOT NULL,
@@ -4099,6 +4108,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.migration (
     time_target_updated TIMESTAMPTZ
 );
 
+/* Lookup migrations by instance ID */
+CREATE INDEX IF NOT EXISTS lookup_migrations_by_instance_id ON omicron.public.migration (
+    instance_id
+);
+
 /* Lookup region snapshot by snapshot id */
 CREATE INDEX IF NOT EXISTS lookup_region_snapshot_by_snapshot_id on omicron.public.region_snapshot (
     snapshot_id
@@ -4115,7 +4129,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '79.0.0', NULL)
+    (TRUE, NOW(), NOW(), '80.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

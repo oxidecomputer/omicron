@@ -230,6 +230,7 @@ async fn sim_create_migration_record(
             &opctx,
             db::model::Migration::new(
                 migration_id,
+                InstanceUuid::from_untyped_uuid(params.instance.id()),
                 source_propolis_id,
                 target_propolis_id,
             ),
