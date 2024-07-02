@@ -999,21 +999,17 @@ mod tests {
 
         // Now let's verify we saw the correct firmware update.
         for rd in &raw_disks {
-            let disk = all_disks_gen2
-                .iter_managed()
-                .find_map(|(identity, disk)| {
+            let firmware = all_disks_gen2
+                .iter_all()
+                .find_map(|(identity, _, _, fw)| {
                     if identity == rd.identity() {
-                        Some(disk)
+                        Some(fw)
                     } else {
                         None
                     }
                 })
                 .expect("disk exists");
-            assert_eq!(
-                disk.firmware(),
-                rd.firmware(),
-                "didn't see firmware update"
-            );
+            assert_eq!(firmware, rd.firmware(), "didn't see firmware update");
         }
 
         harness.cleanup().await;
