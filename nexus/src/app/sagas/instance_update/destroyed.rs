@@ -6,10 +6,6 @@ use super::NexusActionContext;
 use super::RealParams;
 use super::DESTROYED_VMM_ID;
 use crate::app::sagas::ActionError;
-use chrono::Utc;
-use nexus_db_model::Generation;
-use nexus_db_model::InstanceRuntimeState;
-use nexus_db_model::InstanceState;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -62,22 +58,6 @@ pub(super) async fn siu_destroyed_release_virtual_provisioning(
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
 
-    // `virtual_provisioning_collection_delete_instace` will only delete virtual
-    // provisioning records that are *less than* the max generation parameter,
-    // not less than or equal to it --- the idea is that the generation number
-    // has already been advanced when we are deallocating the virtual
-    // provisioning records. This is kind of an artifact of sled-agent
-    // previously owning instance runtime state generations, since the
-    // sled-agent would have already advanced the instance's generation.
-    //
-    // However, now that the instance record is owned by Nexus, and we are
-    // updating the instance in response to a VMM state update from sled-agent,
-    // the instance record snapshot we are holding has not yet had its
-    // generation advanced, so we want to allow deleting virtual provisioning
-    // records that were created with the instance's current generation. The
-    // generation will be advanced at the end of this saga, once we have updated
-    // the actual instance record.
-    let max_gen = instance.runtime_state.gen.next();
     let result = osagactx
         .datastore()
         .virtual_provisioning_collection_delete_instance(
@@ -141,90 +121,6 @@ pub(super) async fn siu_destroyed_unassign_oximeter_producer(
     )
     .await
     .map_err(ActionError::action_failed)
-}
-
-pub(super) async fn siu_destroyed_update_network_config(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    let osagactx = sagactx.user_data();
-    let RealParams { ref serialized_authn, ref authz_instance, .. } =
-        sagactx.saga_params::<RealParams>()?;
-    let vmm_id = sagactx.lookup::<PropolisUuid>(DESTROYED_VMM_ID)?;
-    let nexus = osagactx.nexus();
-
-    info!(
-        osagactx.log(),
-        "instance update (VMM destroyed): deleting V2P mappings";
-        "instance_id" => %authz_instance.id(),
-        "propolis_id" => %vmm_id,
-        "instance_update" => %"VMM destroyed",
-    );
-
-    nexus.background_tasks.activate(&nexus.background_tasks.task_v2p_manager);
-
-    info!(
-        osagactx.log(),
-        "instance update (VMM destroyed): deleting NAT entries";
-        "instance_id" => %authz_instance.id(),
-        "propolis_id" => %vmm_id,
-        "instance_update" => %"VMM destroyed",
-    );
-
-    let opctx =
-        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
-    nexus
-        .instance_delete_dpd_config(&opctx, &authz_instance)
-        .await
-        .map_err(ActionError::action_failed)?;
-    Ok(())
-}
-
-pub(super) async fn siu_destroyed_update_instance(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    let RealParams { ref authz_instance, state, .. } =
-        sagactx.saga_params::<RealParams>()?;
-
-    let vmm_id = sagactx.lookup::<PropolisUuid>(DESTROYED_VMM_ID)?;
-    let instance = state.instance;
-    let osagactx = sagactx.user_data();
-    let new_runtime = InstanceRuntimeState {
-        propolis_id: None,
-        nexus_state: InstanceState::NoVmm,
-        gen: Generation(instance.runtime_state.gen.0.next()),
-        time_updated: Utc::now(),
-        ..instance.runtime_state
-    };
-
-    info!(
-        osagactx.log(),
-        "instance update (VMM destroyed): updating runtime state";
-        "instance_id" => %authz_instance.id(),
-        "propolis_id" => %vmm_id,
-        "new_runtime_state" => ?new_runtime,
-        "instance_update" => %"VMM destroyed",
-    );
-
-    // It's okay for this to fail, it just means that the active VMM ID has changed.
-    if let Err(e) = osagactx
-        .datastore()
-        .instance_update_runtime(
-            &InstanceUuid::from_untyped_uuid(authz_instance.id()),
-            &new_runtime,
-        )
-        .await
-    {
-        warn!(
-            osagactx.log(),
-            "instance update (VMM destroyed): updating runtime state failed";
-            "instance_id" => %authz_instance.id(),
-            "propolis_id" => %vmm_id,
-            "new_runtime_state" => ?new_runtime,
-            "instance_update" => %"VMM destroyed",
-            "error" => %e,
-        );
-    }
-    Ok(())
 }
 
 pub(super) async fn siu_destroyed_mark_vmm_deleted(

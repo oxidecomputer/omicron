@@ -1157,11 +1157,15 @@ impl DataStore {
     /// - `authz_instance`: the instance to attempt to unlock
     /// - `updater_lock`: an [`UpdaterLock`] token representing the acquired
     ///   lock to release.
+    /// - `new_runtime`: an optional [`InstanceRuntimeState`] to write
+    ///   back to the database when the lock is released. If this is [`None`],
+    ///   the instance's runtime state will not be modified.
     pub async fn instance_updater_unlock(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
         UpdaterLock { updater_id, locked_gen }: UpdaterLock,
+        new_runtime: Option<&InstanceRuntimeState>,
     ) -> Result<bool, Error> {
         use db::schema::instance::dsl;
 
@@ -1180,6 +1184,7 @@ impl DataStore {
             .set((
                 dsl::updater_gen.eq(Generation(locked_gen.0.next())),
                 dsl::updater_id.eq(None::<Uuid>),
+                new_runtime.cloned(),
             ))
             .check_if_exists::<Instance>(instance_id)
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
