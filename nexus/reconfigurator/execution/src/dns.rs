@@ -503,7 +503,6 @@ mod test {
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::ExternalIpUuid;
-    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_client::ZoneKind;
@@ -1141,19 +1140,10 @@ mod test {
     async fn test_silos_external_dns_end_to_end(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        // Add a zpool to both sleds, just to ensure that all new zones can find
+        // Add a zpool to all sleds, just to ensure that all new zones can find
         // a transient filesystem wherever they end up being placed.
-        let _sled_agent_zpools = DiskTestBuilder::new(&cptestctx)
-            .on_sled(SledUuid::from_untyped_uuid(
-                cptestctx.sled_agent.sled_agent.id,
-            ))
-            .with_zpool_count(1)
-            .build()
-            .await;
-        let _sled_agent2_zpools = DiskTestBuilder::new(&cptestctx)
-            .on_sled(SledUuid::from_untyped_uuid(
-                cptestctx.sled_agent2.sled_agent.id,
-            ))
+        DiskTestBuilder::new(&cptestctx)
+            .on_all_sleds()
             .with_zpool_count(1)
             .build()
             .await;
