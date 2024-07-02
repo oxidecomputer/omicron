@@ -1367,7 +1367,7 @@ mod tests {
 
         // unlock the instance from saga 1
         let unlocked = datastore
-            .instance_updater_unlock(&opctx, &authz_instance, lock1)
+            .instance_updater_unlock(&opctx, &authz_instance, lock1, None)
             .await
             .expect("instance must be unlocked by saga 1");
         assert!(unlocked, "instance must actually be unlocked");
@@ -1380,7 +1380,7 @@ mod tests {
 
         // unlock the instance from saga 2
         let unlocked = datastore
-            .instance_updater_unlock(&opctx, &authz_instance, lock2)
+            .instance_updater_unlock(&opctx, &authz_instance, lock2, None)
             .await
             .expect("instance must be unlocked by saga 2");
         assert!(unlocked, "instance must actually be unlocked");
@@ -1426,7 +1426,7 @@ mod tests {
         // now, unlock the instance.
         let unlocked = dbg!(
             datastore
-                .instance_updater_unlock(&opctx, &authz_instance, lock1)
+                .instance_updater_unlock(&opctx, &authz_instance, lock1, None)
                 .await
         )
         .expect("instance should unlock");
@@ -1435,7 +1435,7 @@ mod tests {
         // unlocking it again should also succeed...
         let unlocked = dbg!(
             datastore
-                .instance_updater_unlock(&opctx, &authz_instance, lock2)
+                .instance_updater_unlock(&opctx, &authz_instance, lock2, None)
                 .await
         )
         .expect("instance should unlock again");
@@ -1482,6 +1482,7 @@ mod tests {
                         updater_id: saga2,
                         locked_gen: lock1.locked_gen,
                     },
+                    None,
                 )
                 .await
         )
@@ -1500,7 +1501,7 @@ mod tests {
         // unlocking with the correct ID should succeed.
         let unlocked = dbg!(
             datastore
-                .instance_updater_unlock(&opctx, &authz_instance, lock1)
+                .instance_updater_unlock(&opctx, &authz_instance, lock1, None)
                 .await
         )
         .expect("instance should unlock");
@@ -1517,6 +1518,7 @@ mod tests {
                     // you from doing this exact thing. But, we should  still
                     // test that we handle it gracefully.
                     UpdaterLock { updater_id: saga1, locked_gen: next_gen },
+                    None,
                 )
                 .await
         )
