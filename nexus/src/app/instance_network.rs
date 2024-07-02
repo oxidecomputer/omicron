@@ -4,6 +4,7 @@
 
 //! Routines that manage instance-related networking state.
 
+use crate::app::background;
 use crate::app::switch_port;
 use ipnetwork::IpNetwork;
 use nexus_db_model::ExternalIp;
@@ -267,7 +268,7 @@ pub(crate) async fn ensure_updated_instance_network_config(
     authz_instance: &authz::Instance,
     prev_instance_state: &db::model::InstanceRuntimeState,
     new_instance_state: &nexus::InstanceRuntimeState,
-    v2p_notification_tx: tokio::sync::watch::Sender<()>,
+    v2p_manager: &background::Activator,
 ) -> Result<(), Error> {
     let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
@@ -298,7 +299,7 @@ pub(crate) async fn ensure_updated_instance_network_config(
             opctx,
             opctx_alloc,
             authz_instance,
-            v2p_notification_tx,
+            v2p_manager,
         )
         .await?;
         return Ok(());
@@ -379,13 +380,7 @@ pub(crate) async fn ensure_updated_instance_network_config(
         Err(e) => return Err(e),
     };
 
-    if let Err(e) = v2p_notification_tx.send(()) {
-        error!(
-            log,
-            "error notifying background task of v2p change";
-            "error" => ?e
-        )
-    };
+    v2p_manager.activate();
 
     let (.., sled) =
         LookupPath::new(opctx, datastore).sled_id(new_sled_id).fetch().await?;
@@ -703,15 +698,9 @@ async fn clear_instance_networking_state(
     opctx: &OpContext,
     opctx_alloc: &OpContext,
     authz_instance: &authz::Instance,
-    v2p_notification_tx: tokio::sync::watch::Sender<()>,
+    v2p_manager: &background::Activator,
 ) -> Result<(), Error> {
-    if let Err(e) = v2p_notification_tx.send(()) {
-        error!(
-            log,
-            "error notifying background task of v2p change";
-            "error" => ?e
-        )
-    };
+    v2p_manager.activate();
 
     instance_delete_dpd_config(
         datastore,

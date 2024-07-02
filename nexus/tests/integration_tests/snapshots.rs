@@ -25,7 +25,6 @@ use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
-use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
@@ -44,6 +43,12 @@ use uuid::Uuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
+type DiskTest<'a> =
+    nexus_test_utils::resource_helpers::DiskTest<'a, omicron_nexus::Server>;
+type DiskTestBuilder<'a> = nexus_test_utils::resource_helpers::DiskTestBuilder<
+    'a,
+    omicron_nexus::Server,
+>;
 
 const PROJECT_NAME: &str = "springfield-squidport-disks";
 
@@ -962,9 +967,10 @@ async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // Set the third region's running snapshot callback so it fails
-    let zpool = &disk_test.zpools[2];
+    let zpool = disk_test.zpools().nth(2).expect("Not enough zpools");
     let dataset = &zpool.datasets[0];
-    disk_test
+    cptestctx
+        .sled_agent
         .sled_agent
         .get_crucible_dataset(zpool.id, dataset.id)
         .await
@@ -1460,12 +1466,16 @@ async fn test_region_allocation_for_snapshot(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Create three 10 GiB zpools, each with one dataset.
-    let mut disk_test = DiskTest::new(&cptestctx).await;
-
-    // An additional disk is required, otherwise the allocation will fail with
-    // "not enough storage"
-    disk_test.add_zpool_with_dataset(&cptestctx).await;
+    // Create four 10 GiB zpools, each with one dataset.
+    //
+    // We add one more than the "three" default to avoid failing
+    // with "not enough storage".
+    let sled_id = cptestctx.first_sled();
+    let mut disk_test = DiskTestBuilder::new(&cptestctx)
+        .on_specific_sled(cptestctx.first_sled())
+        .with_zpool_count(4)
+        .build()
+        .await;
 
     // Assert default is still 10 GiB
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
@@ -1611,7 +1621,7 @@ async fn test_region_allocation_for_snapshot(
     assert_eq!(allocated_regions.len(), 1);
 
     // If an additional region is required, make sure that works too.
-    disk_test.add_zpool_with_dataset(&cptestctx).await;
+    disk_test.add_zpool_with_dataset(sled_id).await;
 
     datastore
         .arbitrary_region_allocate(

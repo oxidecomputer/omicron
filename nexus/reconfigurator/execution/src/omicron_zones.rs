@@ -104,8 +104,10 @@ mod test {
     };
     use nexus_types::inventory::OmicronZoneDataset;
     use omicron_common::api::external::Generation;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::BTreeMap;
     use std::net::SocketAddr;
     use uuid::Uuid;
@@ -183,19 +185,17 @@ mod test {
         // the full set of zones that must be running.
         // See `rack_setup::service::ServiceInner::run` for more details.
         fn make_zones() -> BlueprintZonesConfig {
+            let zpool = ZpoolName::new_external(ZpoolUuid::new_v4());
             BlueprintZonesConfig {
                 generation: Generation::new(),
                 zones: vec![BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: OmicronZoneUuid::new_v4(),
                     underlay_address: "::1".parse().unwrap(),
+                    filesystem_pool: Some(zpool.clone()),
                     zone_type: BlueprintZoneType::InternalDns(
                         blueprint_zone_type::InternalDns {
-                            dataset: OmicronZoneDataset {
-                                pool_name: format!("oxp_{}", Uuid::new_v4())
-                                    .parse()
-                                    .unwrap(),
-                            },
+                            dataset: OmicronZoneDataset { pool_name: zpool },
                             dns_address: "[::1]:0".parse().unwrap(),
                             gz_address: "::1".parse().unwrap(),
                             gz_address_index: 0,
@@ -295,6 +295,9 @@ mod test {
                 disposition,
                 id: OmicronZoneUuid::new_v4(),
                 underlay_address: "::1".parse().unwrap(),
+                filesystem_pool: Some(ZpoolName::new_external(
+                    ZpoolUuid::new_v4(),
+                )),
                 zone_type: BlueprintZoneType::InternalNtp(
                     blueprint_zone_type::InternalNtp {
                         address: "[::1]:0".parse().unwrap(),

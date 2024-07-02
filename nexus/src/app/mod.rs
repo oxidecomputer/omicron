@@ -205,9 +205,6 @@ pub struct Nexus {
 
     /// Default Crucible region allocation strategy
     default_region_allocation_strategy: RegionAllocationStrategy,
-
-    /// Channel for notifying background task of change to opte v2p state
-    v2p_notification_tx: tokio::sync::watch::Sender<()>,
 }
 
 impl Nexus {
@@ -404,8 +401,6 @@ impl Nexus {
             Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
 
-        let v2p_watcher_channel = tokio::sync::watch::channel(());
-
         let (background_tasks_initializer, background_tasks) =
             background::BackgroundTasksInitializer::new();
 
@@ -462,7 +457,6 @@ impl Nexus {
                 .pkg
                 .default_region_allocation_strategy
                 .clone(),
-            v2p_notification_tx: v2p_watcher_channel.0.clone(),
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -489,11 +483,11 @@ impl Nexus {
 
         *nexus.recovery_task.lock().unwrap() = Some(recovery_task);
 
-        // Kick all background tasks once the populate step finishes.  Among
-        // other things, the populate step installs role assignments for
-        // internal identities that are used by the background tasks.  If we
-        // don't do this here, those tasks might fail spuriously on startup and
-        // not be retried for a while.
+        // Wait to start background tasks until after the populate step
+        // finishes.  Among other things, the populate step installs role
+        // assignments for internal identities that are used by the background
+        // tasks.  If we don't do this here, those tasks would fail spuriously
+        // on startup and not be retried for a while.
         let task_nexus = nexus.clone();
         let task_log = nexus.log.clone();
         let task_registry = producer_registry.clone();
@@ -501,36 +495,31 @@ impl Nexus {
         tokio::spawn(async move {
             match task_nexus.wait_for_populate().await {
                 Ok(_) => {
-                    info!(
-                        task_log,
-                        "populate complete; activating background tasks"
-                    );
-
-                    let driver = background_tasks_initializer.start(
-                        &task_nexus.background_tasks,
-                        background_ctx,
-                        db_datastore,
-                        task_config.pkg.background_tasks,
-                        rack_id,
-                        task_config.deployment.id,
-                        resolver,
-                        v2p_watcher_channel.clone(),
-                        task_registry,
-                        task_nexus.sagas.clone(),
-                    );
-
-                    if let Err(_) =
-                        task_nexus.background_tasks_driver.set(driver)
-                    {
-                        panic!(
-                            "concurrent initialization of \
-                             background_tasks_driver?!"
-                        )
-                    }
+                    info!(task_log, "populate complete");
                 }
                 Err(_) => {
                     error!(task_log, "populate failed");
                 }
+            };
+
+            // That said, even if the populate step fails, we may as well try to
+            // start the background tasks so that whatever can work will work.
+            info!(task_log, "activating background tasks");
+
+            let driver = background_tasks_initializer.start(
+                &task_nexus.background_tasks,
+                background_ctx,
+                db_datastore,
+                task_config.pkg.background_tasks,
+                rack_id,
+                task_config.deployment.id,
+                resolver,
+                task_nexus.sagas.clone(),
+                task_registry,
+            );
+
+            if let Err(_) = task_nexus.background_tasks_driver.set(driver) {
+                panic!("multiple initialization of background_tasks_driver");
             }
         });
 

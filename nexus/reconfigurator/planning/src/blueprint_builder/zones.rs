@@ -190,6 +190,9 @@ mod tests {
     };
 
     use maplit::btreeset;
+    use nexus_types::deployment::SledDisk;
+    use nexus_types::external_api::views::PhysicalDiskPolicy;
+    use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::{
         deployment::{
             blueprint_zone_type, BlueprintZoneType, SledDetails, SledFilter,
@@ -198,7 +201,11 @@ mod tests {
         external_api::views::{SledPolicy, SledState},
     };
     use omicron_common::address::Ipv6Subnet;
+    use omicron_common::disk::DiskIdentity;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
 
     use crate::{
         blueprint_builder::{
@@ -233,7 +240,19 @@ mod tests {
                             subnet: Ipv6Subnet::new(
                                 "fd00:1::".parse().unwrap(),
                             ),
-                            zpools: BTreeMap::new(),
+                            zpools: BTreeMap::from([(
+                                ZpoolUuid::new_v4(),
+                                SledDisk {
+                                    disk_identity: DiskIdentity {
+                                        vendor: String::from("fake-vendor"),
+                                        serial: String::from("fake-serial"),
+                                        model: String::from("fake-model"),
+                                    },
+                                    disk_id: PhysicalDiskUuid::new_v4(),
+                                    policy: PhysicalDiskPolicy::InService,
+                                    state: PhysicalDiskState::Active,
+                                },
+                            )]),
                         },
                     },
                 )
@@ -280,11 +299,15 @@ mod tests {
         let change = builder.zones.change_sled_zones(existing_sled_id);
 
         let new_zone_id = OmicronZoneUuid::new_v4();
+        // NOTE: This pool doesn't actually exist on the sled, but nothing is
+        // checking for that in this test?
+        let filesystem_pool = ZpoolName::new_external(ZpoolUuid::new_v4());
         change
             .add_zone(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: new_zone_id,
                 underlay_address: Ipv6Addr::UNSPECIFIED,
+                filesystem_pool: Some(filesystem_pool),
                 zone_type: BlueprintZoneType::Oximeter(
                     blueprint_zone_type::Oximeter {
                         address: SocketAddrV6::new(
