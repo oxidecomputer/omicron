@@ -80,19 +80,14 @@ use uuid::Uuid;
 pub(crate) fn create_saga_dag<N: NexusSaga>(
     params: N::Params,
 ) -> Result<SagaDag, Error> {
-    let builder = DagBuilder::new(SagaName::new(N::NAME));
-    let dag = N::make_saga_dag(&params, builder)?;
-    let params = serde_json::to_value(&params).map_err(|e| {
-        SagaInitError::SerializeError(String::from("saga params"), e)
-    })?;
-    Ok(SagaDag::new(dag, params))
+    N::prepare(&params)
 }
 
 /// Interface for kicking off sagas
 ///
 /// See [`NexusSagaStarter`] for the implementation within Nexus.  Some tests
 /// use alternate implementations that don't actually run the sagas.
-pub(crate) trait SagaStarter {
+pub(crate) trait SagaStarter: Send + Sync {
     /// Create a new saga (of type `N` with parameters `params`), start it
     /// running, but do not wait for it to finish.
     fn saga_start(&self, dag: SagaDag) -> BoxFuture<'_, Result<(), Error>>;

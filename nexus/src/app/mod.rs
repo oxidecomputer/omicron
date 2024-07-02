@@ -5,7 +5,7 @@
 //! Nexus, the service that operates much of the control plane in an Oxide fleet
 
 use self::external_endpoints::NexusCertResolver;
-use self::saga::{SagaExecutor, SagaStarter};
+use self::saga::SagaExecutor;
 use crate::app::oximeter::LazyTimeseriesClient;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
@@ -36,6 +36,9 @@ use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use uuid::Uuid;
+
+#[cfg(test)]
+use self::saga::SagaStarter;
 
 // The implementation of Nexus is large, and split into a number of submodules
 // by resource.
@@ -546,8 +549,8 @@ impl Nexus {
     }
 
     #[cfg(test)]
-    pub(crate) fn saga_starter(&self) -> &Arc<dyn SagaStarter> {
-        &self.sagas
+    pub(crate) fn saga_starter(&self) -> Arc<dyn SagaStarter> {
+        self.sagas.clone()
     }
 
     pub(crate) async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {

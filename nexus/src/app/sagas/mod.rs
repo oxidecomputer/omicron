@@ -69,6 +69,17 @@ pub(crate) trait NexusSaga {
         params: &Self::Params,
         builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError>;
+
+    fn prepare(
+        params: &Self::Params,
+    ) -> Result<SagaDag, omicron_common::api::external::Error> {
+        let builder = DagBuilder::new(SagaName::new(Self::NAME));
+        let dag = Self::make_saga_dag(&params, builder)?;
+        let params = serde_json::to_value(&params).map_err(|e| {
+            SagaInitError::SerializeError(String::from("saga params"), e)
+        })?;
+        Ok(SagaDag::new(dag, params))
+    }
 }
 
 #[derive(Debug, Error)]
@@ -317,3 +328,6 @@ pub(crate) use __action_name;
 pub(crate) use __emit_action;
 pub(crate) use __stringify_ident;
 pub(crate) use declare_saga_actions;
+use steno::DagBuilder;
+use steno::SagaDag;
+use steno::SagaName;
