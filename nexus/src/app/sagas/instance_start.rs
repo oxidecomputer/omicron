@@ -363,9 +363,6 @@ async fn sis_account_virtual_resources_undo(
         &params.serialized_authn,
     );
 
-    let started_record =
-        sagactx.lookup::<db::model::Instance>("started_record")?;
-
     osagactx
         .datastore()
         .virtual_provisioning_collection_delete_instance(
@@ -374,11 +371,6 @@ async fn sis_account_virtual_resources_undo(
             params.db_instance.project_id,
             i64::from(params.db_instance.ncpus.0 .0),
             nexus_db_model::ByteCount(*params.db_instance.memory),
-            // Use the next instance generation number as the generation limit
-            // to ensure the provisioning counters are released. (The "mark as
-            // starting" undo step will "publish" this new state generation when
-            // it moves the instance back to Stopped.)
-            (&started_record.runtime().gen.next()).into(),
         )
         .await
         .map_err(ActionError::action_failed)?;
