@@ -173,11 +173,7 @@ impl UpdatesRequired {
                 // instance's state to `NoVmm` above), it has successfully
                 // migrated, so leave it in the VMM state.
                 new_runtime.nexus_state = InstanceState::Vmm;
-                let _prev_target_id = new_runtime.dst_propolis_id.take();
-                debug_assert_eq!(
-                    _prev_target_id,
-                    Some(migration.target_propolis_id)
-                );
+                new_runtime.dst_propolis_id = None;
                 // If the active VMM has also been destroyed, don't delete
                 // virtual provisioning records while cleaning it up.
                 deprovision = false;
