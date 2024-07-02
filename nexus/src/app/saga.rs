@@ -82,8 +82,8 @@ pub(crate) fn create_saga_dag<N: NexusSaga>(
 
 /// Interface for kicking off sagas
 ///
-/// See [`NexusSagaStarter`] for the implementation within Nexus.  Some tests
-/// use alternate implementations that don't actually run the sagas.
+/// See [`SagaExecutor`] for the implementation within Nexus.  Some tests use
+/// alternate implementations that don't actually run the sagas.
 pub(crate) trait SagaStarter: Send + Sync {
     /// Create a new saga (of type `N` with parameters `params`), start it
     /// running, but do not wait for it to finish.
