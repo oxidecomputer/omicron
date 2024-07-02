@@ -729,7 +729,9 @@ fn init_dns(
 
 #[cfg(test)]
 pub mod test {
+    use crate::app::saga::SagaStarter;
     use dropshot::HandlerTaskMode;
+    use futures::FutureExt;
     use nexus_db_model::DnsGroup;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
@@ -738,8 +740,38 @@ pub mod test {
     use nexus_types::internal_api::params as nexus_params;
     use omicron_test_utils::dev::poll;
     use std::net::SocketAddr;
+    use std::sync::atomic::AtomicU64;
+    use std::sync::atomic::Ordering;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    /// Used by various tests of tasks that kick off sagas
+    pub(crate) struct NoopSagaStarter {
+        count: AtomicU64,
+    }
+
+    impl NoopSagaStarter {
+        pub(crate) fn new() -> Self {
+            Self { count: AtomicU64::new(0) }
+        }
+
+        pub(crate) fn count_reset(&self) -> u64 {
+            self.count.swap(0, Ordering::SeqCst)
+        }
+    }
+
+    impl SagaStarter for NoopSagaStarter {
+        fn saga_start(
+            &self,
+            _: steno::SagaDag,
+        ) -> futures::prelude::future::BoxFuture<
+            '_,
+            Result<(), omicron_common::api::external::Error>,
+        > {
+            let _ = self.count.fetch_add(1, Ordering::SeqCst);
+            async { Ok(()) }.boxed()
+        }
+    }
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;

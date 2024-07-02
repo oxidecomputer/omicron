@@ -37,9 +37,6 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use uuid::Uuid;
 
-#[cfg(test)]
-use self::saga::SagaStarter;
-
 // The implementation of Nexus is large, and split into a number of submodules
 // by resource.
 mod address_lot;
@@ -546,11 +543,6 @@ impl Nexus {
 
     pub fn authz(&self) -> &Arc<authz::Authz> {
         &self.authz
-    }
-
-    #[cfg(test)]
-    pub(crate) fn saga_starter(&self) -> Arc<dyn SagaStarter> {
-        self.sagas.clone()
     }
 
     pub(crate) async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {

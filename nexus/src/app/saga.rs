@@ -49,7 +49,6 @@
 //!   or inject errors.
 
 use super::sagas::NexusSaga;
-use super::sagas::SagaInitError;
 use super::sagas::ACTION_REGISTRY;
 use crate::saga_interface::SagaContext;
 use crate::Nexus;
@@ -67,10 +66,8 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use steno::DagBuilder;
 use steno::SagaDag;
 use steno::SagaId;
-use steno::SagaName;
 use steno::SagaResult;
 use steno::SagaResultOk;
 use uuid::Uuid;

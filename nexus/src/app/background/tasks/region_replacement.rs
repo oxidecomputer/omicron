@@ -198,6 +198,7 @@ impl BackgroundTask for RegionReplacementDetector {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::app::background::init::test::NoopSagaStarter;
     use nexus_db_model::RegionReplacement;
     use nexus_test_utils_macros::nexus_test;
     use uuid::Uuid;
@@ -216,10 +217,9 @@ mod test {
             datastore.clone(),
         );
 
-        let mut task = RegionReplacementDetector::new(
-            datastore.clone(),
-            nexus.saga_starter(),
-        );
+        let starter = Arc::new(NoopSagaStarter::new());
+        let mut task =
+            RegionReplacementDetector::new(datastore.clone(), starter.clone());
 
         // Noop test
         let result = task.activate(&opctx).await;
@@ -250,8 +250,6 @@ mod test {
             })
         );
 
-        // XXX-dap
-        // saga_request_rx.try_recv().unwrap();
-        todo!();
+        assert_eq!(starter.count_reset(), 1);
     }
 }
