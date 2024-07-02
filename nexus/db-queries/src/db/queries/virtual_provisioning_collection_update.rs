@@ -654,7 +654,6 @@ mod test {
         let conn = pool.pool().get().await.unwrap();
 
         let id = InstanceUuid::nil();
-        let max_instance_gen = 0;
         let project_id = Uuid::nil();
         let cpus_diff = 16.try_into().unwrap();
         let ram_diff = 2048.try_into().unwrap();
