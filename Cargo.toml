@@ -372,14 +372,14 @@ omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
 omicron-zone-package = "0.11.0"
 oxide-client = { path = "clients/oxide-client" }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "915975f6d1729db95619f752148974016912412f", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "a250d664930c48c5f2745e6c8ba21ebea59ced2b", features = [ "api", "std" ] }
 once_cell = "1.19.0"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapiv3 = "2.0.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "915975f6d1729db95619f752148974016912412f" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "a250d664930c48c5f2745e6c8ba21ebea59ced2b" }
 oso = "0.27"
 owo-colors = "4.0.0"
 oximeter = { path = "oximeter/oximeter" }
@@ -408,9 +408,9 @@ prettyplease = { version = "0.2.20", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "59868677c70f3cd03f03e12584ad1056da8b5459" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "59868677c70f3cd03f03e12584ad1056da8b5459" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "59868677c70f3cd03f03e12584ad1056da8b5459" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "66d1ee7d4a5829dbbf02a152091ea051023b5b8b" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "66d1ee7d4a5829dbbf02a152091ea051023b5b8b" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "66d1ee7d4a5829dbbf02a152091ea051023b5b8b" }
 proptest = "1.4.0"
 quote = "1.0"
 rand = "0.8.5"

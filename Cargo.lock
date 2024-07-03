@@ -464,9 +464,9 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459#59868677c70f3cd03f03e12584ad1056da8b5459"
+source = "git+https://github.com/oxidecomputer/propolis?rev=66d1ee7d4a5829dbbf02a152091ea051023b5b8b#66d1ee7d4a5829dbbf02a152091ea051023b5b8b"
 dependencies = [
- "bhyve_api_sys 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459)",
+ "bhyve_api_sys 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=66d1ee7d4a5829dbbf02a152091ea051023b5b8b)",
  "libc",
  "strum",
 ]
@@ -484,7 +484,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459#59868677c70f3cd03f03e12584ad1056da8b5459"
+source = "git+https://github.com/oxidecomputer/propolis?rev=66d1ee7d4a5829dbbf02a152091ea051023b5b8b#66d1ee7d4a5829dbbf02a152091ea051023b5b8b"
 dependencies = [
  "libc",
  "strum",
@@ -3480,7 +3480,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=915975f6d1729db95619f752148974016912412f#915975f6d1729db95619f752148974016912412f"
+source = "git+https://github.com/oxidecomputer/opte?rev=a250d664930c48c5f2745e6c8ba21ebea59ced2b#a250d664930c48c5f2745e6c8ba21ebea59ced2b"
 
 [[package]]
 name = "illumos-utils"
@@ -3488,7 +3488,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "bhyve_api 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459)",
+ "bhyve_api 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=66d1ee7d4a5829dbbf02a152091ea051023b5b8b)",
  "byteorder",
  "camino",
  "camino-tempfile",
@@ -3894,7 +3894,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=915975f6d1729db95619f752148974016912412f#915975f6d1729db95619f752148974016912412f"
+source = "git+https://github.com/oxidecomputer/opte?rev=a250d664930c48c5f2745e6c8ba21ebea59ced2b#a250d664930c48c5f2745e6c8ba21ebea59ced2b"
 dependencies = [
  "quote",
  "syn 2.0.68",
@@ -5553,7 +5553,7 @@ dependencies = [
  "pq-sys",
  "pretty_assertions",
  "progenitor-client",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=66d1ee7d4a5829dbbf02a152091ea051023b5b8b)",
  "rand 0.8.5",
  "rcgen",
  "ref-cast",
@@ -5803,7 +5803,7 @@ dependencies = [
  "oximeter-producer",
  "oxnet",
  "pretty_assertions",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=66d1ee7d4a5829dbbf02a152091ea051023b5b8b)",
  "propolis-mock-server",
  "rand 0.8.5",
  "rcgen",
@@ -6126,7 +6126,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=915975f6d1729db95619f752148974016912412f#915975f6d1729db95619f752148974016912412f"
+source = "git+https://github.com/oxidecomputer/opte?rev=a250d664930c48c5f2745e6c8ba21ebea59ced2b#a250d664930c48c5f2745e6c8ba21ebea59ced2b"
 dependencies = [
  "cfg-if",
  "dyn-clone",
@@ -6143,7 +6143,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=915975f6d1729db95619f752148974016912412f#915975f6d1729db95619f752148974016912412f"
+source = "git+https://github.com/oxidecomputer/opte?rev=a250d664930c48c5f2745e6c8ba21ebea59ced2b#a250d664930c48c5f2745e6c8ba21ebea59ced2b"
 dependencies = [
  "illumos-sys-hdrs",
  "ipnetwork",
@@ -6155,7 +6155,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=915975f6d1729db95619f752148974016912412f#915975f6d1729db95619f752148974016912412f"
+source = "git+https://github.com/oxidecomputer/opte?rev=a250d664930c48c5f2745e6c8ba21ebea59ced2b#a250d664930c48c5f2745e6c8ba21ebea59ced2b"
 dependencies = [
  "libc",
  "libnet 0.1.0 (git+https://github.com/oxidecomputer/netadm-sys)",
@@ -6229,7 +6229,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=915975f6d1729db95619f752148974016912412f#915975f6d1729db95619f752148974016912412f"
+source = "git+https://github.com/oxidecomputer/opte?rev=a250d664930c48c5f2745e6c8ba21ebea59ced2b#a250d664930c48c5f2745e6c8ba21ebea59ced2b"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",
@@ -7267,7 +7267,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459#59868677c70f3cd03f03e12584ad1056da8b5459"
+source = "git+https://github.com/oxidecomputer/propolis?rev=66d1ee7d4a5829dbbf02a152091ea051023b5b8b#66d1ee7d4a5829dbbf02a152091ea051023b5b8b"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -7309,7 +7309,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459#59868677c70f3cd03f03e12584ad1056da8b5459"
+source = "git+https://github.com/oxidecomputer/propolis?rev=66d1ee7d4a5829dbbf02a152091ea051023b5b8b#66d1ee7d4a5829dbbf02a152091ea051023b5b8b"
 dependencies = [
  "anyhow",
  "atty",
@@ -7319,7 +7319,7 @@ dependencies = [
  "futures",
  "hyper 0.14.28",
  "progenitor",
- "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459)",
+ "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=66d1ee7d4a5829dbbf02a152091ea051023b5b8b)",
  "rand 0.8.5",
  "reqwest",
  "schemars",
@@ -7351,7 +7351,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=59868677c70f3cd03f03e12584ad1056da8b5459#59868677c70f3cd03f03e12584ad1056da8b5459"
+source = "git+https://github.com/oxidecomputer/propolis?rev=66d1ee7d4a5829dbbf02a152091ea051023b5b8b#66d1ee7d4a5829dbbf02a152091ea051023b5b8b"
 dependencies = [
  "schemars",
  "serde",
