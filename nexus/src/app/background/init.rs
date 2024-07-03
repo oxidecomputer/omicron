@@ -121,6 +121,7 @@ use nexus_config::BackgroundTaskConfig;
 use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
@@ -706,7 +707,7 @@ pub struct BackgroundTasksData {
     /// handle to Steno SEC client, used to recover sagas
     pub saga_recovery_sec: Arc<steno::SecClient>,
     /// unique identifier for this lifetime of this SEC
-    pub saga_recovery_sec_generation: String,
+    pub saga_recovery_sec_generation: db::SecGeneration,
     /// Steno (saga) action registry
     pub saga_recovery_registry: Arc<ActionRegistry>,
 }

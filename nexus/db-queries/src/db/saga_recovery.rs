@@ -76,7 +76,7 @@ impl SagasRecovered {
 pub async fn recover<T>(
     opctx: &OpContext,
     sec_id: db::SecId,
-    sec_generation: String,
+    sec_generation: db::SecGeneration,
     skip: &(dyn Fn(SagaId) -> bool + Send + Sync),
     make_context: &(dyn Fn(&slog::Logger) -> Arc<T::ExecContextType>
           + Send
@@ -174,7 +174,7 @@ async fn list_unfinished_sagas(
     opctx: &OpContext,
     datastore: &db::DataStore,
     sec_id: &db::SecId,
-    ignore_sec_generation: &str,
+    ignore_sec_generation: &db::SecGeneration,
 ) -> Result<Vec<db::saga_types::Saga>, Error> {
     trace!(&opctx.log, "listing sagas");
 
@@ -189,27 +189,28 @@ async fn list_unfinished_sagas(
     while let Some(p) = paginator.next() {
         use db::schema::saga::dsl;
 
-        let mut batch =
-            paginated(dsl::saga, dsl::id, &p.current_pagparams())
-                .filter(dsl::saga_state.ne(db::saga_types::SagaCachedState(
-                    steno::SagaCachedState::Done,
-                )))
-                .filter(dsl::current_sec.eq(*sec_id))
-                .filter(dsl::sec_generation.is_null().or(
-                    dsl::sec_generation.ne(ignore_sec_generation.to_string()),
-                ))
-                .select(db::saga_types::Saga::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(
-                        e,
-                        ErrorHandler::NotFoundByLookup(
-                            ResourceType::SagaDbg,
-                            LookupType::ById(sec_id.0),
-                        ),
-                    )
-                })?;
+        let mut batch = paginated(dsl::saga, dsl::id, &p.current_pagparams())
+            .filter(dsl::saga_state.ne(db::saga_types::SagaCachedState(
+                steno::SagaCachedState::Done,
+            )))
+            .filter(dsl::current_sec.eq(*sec_id))
+            .filter(
+                dsl::sec_generation
+                    .is_null()
+                    .or(dsl::sec_generation.ne(ignore_sec_generation.clone())),
+            )
+            .select(db::saga_types::Saga::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::SagaDbg,
+                        LookupType::ById(sec_id.0),
+                    ),
+                )
+            })?;
 
         paginator = p.found_batch(&batch, &|row| row.id);
         sagas.append(&mut batch);
@@ -434,7 +435,7 @@ mod test {
         log: &slog::Logger,
         db_datastore: Arc<db::DataStore>,
         sec_id: db::SecId,
-        sec_generation: String,
+        sec_generation: db::SecGeneration,
     ) -> (Arc<UnpluggableCockroachDbSecStore>, SecClient, Arc<TestContext>)
     {
         let storage = Arc::new(UnpluggableCockroachDbSecStore::new(
@@ -461,7 +462,7 @@ mod test {
         let log = logctx.log.new(o!());
         let (mut db, db_datastore) = new_db(&log).await;
         let sec_id = db::SecId(uuid::Uuid::new_v4());
-        let sec_generation = String::from("unused");
+        let sec_generation = db::SecGeneration::random();
         let (storage, sec_client, uctx) = create_storage_sec_and_context(
             &log,
             db_datastore.clone(),
@@ -561,7 +562,7 @@ mod test {
         let log = logctx.log.new(o!());
         let (mut db, db_datastore) = new_db(&log).await;
         let sec_id = db::SecId(uuid::Uuid::new_v4());
-        let sec_generation = String::from("unused");
+        let sec_generation = db::SecGeneration::random();
         let (storage, sec_client, uctx) = create_storage_sec_and_context(
             &log,
             db_datastore.clone(),
@@ -626,7 +627,7 @@ mod test {
         let log = logctx.log.new(o!());
         let (mut db, db_datastore) = new_db(&log).await;
         let sec_id = db::SecId(uuid::Uuid::new_v4());
-        let sec_generation = String::from("unused");
+        let sec_generation = db::SecGeneration::random();
         let (storage, sec_client, uctx) = create_storage_sec_and_context(
             &log,
             db_datastore.clone(),
@@ -699,8 +700,9 @@ mod test {
         let log = logctx.log.new(o!());
         let (mut db, db_datastore) = new_db(&log).await;
         let sec_id = db::SecId(uuid::Uuid::new_v4());
-        let sec_generation = String::from("unused");
-        let other_sec_generation = String::from("newest");
+        let sec_generation = db::SecGeneration::random();
+        let other_sec_generation = db::SecGeneration::random();
+        assert_ne!(sec_generation, other_sec_generation);
         let opctx = OpContext::for_tests(
             log,
             Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
@@ -781,7 +783,7 @@ mod test {
         let log = logctx.log.new(o!());
         let (mut db, db_datastore) = new_db(&log).await;
         let sec_id = db::SecId(uuid::Uuid::new_v4());
-        let sec_generation = String::from("unused");
+        let sec_generation = db::SecGeneration::random();
         let opctx = OpContext::for_tests(
             log,
             Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
@@ -876,7 +878,7 @@ mod test {
         let log = logctx.log.new(o!());
         let (mut db, db_datastore) = new_db(&log).await;
         let sec_id = db::SecId(uuid::Uuid::new_v4());
-        let sec_generation = String::from("unused");
+        let sec_generation = db::SecGeneration::random();
         let opctx = OpContext::for_tests(
             log,
             Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
@@ -904,8 +906,11 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    // XXX-dap need to fix *and* test the case where we attempt to recover a
-    // saga that was started in this program's lifetime
+    // XXX-dap need to test the case where we attempt to recover a saga that was
+    // started in this program's lifetime
+    // XXX-dap consider removing the "skip" business and instead mark each
+    // saga's SEC generation before recovering it.  (But if recovery fails, we
+    // won't try again, which is bad!  Maybe nevermind.)
     // XXX-dap TODO-coverage test the case of saga recovery error, with other
     // sagas present
 }

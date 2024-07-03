@@ -6,6 +6,7 @@
 
 use self::external_endpoints::NexusCertResolver;
 use self::saga::SagaExecutor;
+use crate::app::background::BackgroundTasksData;
 use crate::app::oximeter::LazyTimeseriesClient;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
@@ -90,11 +91,8 @@ pub(crate) mod sagas;
 
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 
-use crate::app::background::BackgroundTasksData;
-use chrono::Datelike;
 use nexus_db_model::AllSchemaVersions;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
-use rand::distributions::DistString;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
 //      ephemeral (so bounded in saga by design).
@@ -233,24 +231,17 @@ impl Nexus {
         db_datastore.register_producers(producer_registry);
 
         let my_sec_id = db::SecId::from(config.deployment.id);
-        let sec_generation = {
-            let now = chrono::Utc::now();
-            if now.year() < 2020 {
-                let generation = rand::distributions::Alphanumeric
-                    .sample_string(&mut rand::thread_rng(), 20);
-                warn!(
-                    log,
-                    "using random SEC generation \
-                     (current time looks unreasonable)";
-                    "sec_generation" => &generation,
-                    "time" => ?now,
-                );
-                generation
-            } else {
-                now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-            }
+        let (sec_generation, bad_time) = db::SecGeneration::generate();
+        if bad_time {
+            warn!(
+                log,
+                "using random SEC generation \
+                 (current time looks unreasonable)";
+                "sec_generation" => &*sec_generation,
+            );
         };
-        info!(log, "using SEC generation"; "sec_generation" => &sec_generation);
+        info!(log, "using SEC generation";
+            "sec_generation" => &*sec_generation);
 
         let sec_store = Arc::new(db::CockroachDbSecStore::new(
             my_sec_id,

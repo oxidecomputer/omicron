@@ -23,7 +23,7 @@ pub struct UnpluggableCockroachDbSecStore {
 impl UnpluggableCockroachDbSecStore {
     pub fn new(
         sec_id: db::SecId,
-        sec_generation: String,
+        sec_generation: db::SecGeneration,
         datastore: Arc<db::DataStore>,
         log: slog::Logger,
     ) -> Self {

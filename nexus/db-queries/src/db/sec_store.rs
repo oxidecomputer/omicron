@@ -20,7 +20,7 @@ use steno::SagaId;
 /// database.
 pub struct CockroachDbSecStore {
     sec_id: db::SecId,
-    sec_generation: String,
+    sec_generation: db::SecGeneration,
     datastore: Arc<db::DataStore>,
     log: Logger,
 }
@@ -34,7 +34,7 @@ impl fmt::Debug for CockroachDbSecStore {
 impl CockroachDbSecStore {
     pub fn new(
         sec_id: db::SecId,
-        sec_generation: String,
+        sec_generation: db::SecGeneration,
         datastore: Arc<db::DataStore>,
         log: Logger,
     ) -> Self {

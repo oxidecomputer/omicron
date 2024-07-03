@@ -12,6 +12,7 @@ use chrono::{DateTime, Utc};
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use serde::Serialize;
 use slog_error_chain::InlineErrorChain;
@@ -35,8 +36,8 @@ pub struct SagaRecovery {
     /// Unique identifier for this Saga Execution Coordinator
     ///
     /// This always matches the Nexus id.
-    sec_id: nexus_db_queries::db::SecId,
-    sec_generation: String,
+    sec_id: db::SecId,
+    sec_generation: db::SecGeneration,
     /// OpContext used for saga recovery
     saga_recovery_opctx: OpContext,
     nexus: Arc<Nexus>,
@@ -80,12 +81,12 @@ impl SagaRecovery {
         saga_recovery_opctx: OpContext,
         nexus: Arc<Nexus>,
         sec: Arc<steno::SecClient>,
-        sec_generation: String,
+        sec_generation: db::SecGeneration,
         registry: Arc<ActionRegistry>,
     ) -> SagaRecovery {
         SagaRecovery {
             datastore,
-            sec_id: nexus_db_queries::db::SecId(sec_id),
+            sec_id: db::SecId(sec_id),
             sec_generation,
             saga_recovery_opctx,
             nexus,
@@ -110,7 +111,7 @@ impl BackgroundTask for SagaRecovery {
             // XXX-dap TODO-coverage figure out how to test all this
             // XXX-dap review logging around all of this
 
-            let recovered = nexus_db_queries::db::recover(
+            let recovered = db::recover(
                 &self.saga_recovery_opctx,
                 self.sec_id,
                 self.sec_generation.clone(),
