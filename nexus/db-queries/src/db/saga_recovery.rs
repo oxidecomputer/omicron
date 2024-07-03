@@ -25,7 +25,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use steno::SagaId;
 
-/// Describes the result [`recover`]
+/// Describes the result of [`recover()`]
 pub struct SagasRecovered {
     recovered: BTreeMap<SagaId, BoxFuture<'static, Result<(), Error>>>,
     skipped: BTreeSet<SagaId>,

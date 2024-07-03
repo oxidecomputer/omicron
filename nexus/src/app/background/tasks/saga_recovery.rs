@@ -16,9 +16,13 @@ use nexus_db_queries::db::DataStore;
 use serde::Serialize;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::VecDeque;
 use std::sync::Arc;
 use steno::SagaId;
 use uuid::Uuid;
+
+/// Maximum number of recent failures to keep track of for debugging
+const N_FAILED_SAGA_HISTORY: usize = 16;
 
 /// Background task that recovers sagas assigned to this Nexus
 ///
@@ -39,7 +43,7 @@ pub struct SagaRecovery {
     registry: Arc<ActionRegistry>,
 
     sagas_recovered: BTreeMap<SagaId, DateTime<Utc>>,
-    recent_failures: Vec<RecoveryFailure>,
+    recent_failures: VecDeque<RecoveryFailure>,
     last_pass: LastPass,
 }
 
@@ -48,7 +52,7 @@ pub struct SagaRecovery {
 #[derive(Clone, Serialize)]
 pub struct SagaRecoveryTaskStatus {
     all_recovered: BTreeMap<SagaId, DateTime<Utc>>,
-    recent_failures: Vec<RecoveryFailure>,
+    recent_failures: VecDeque<RecoveryFailure>,
     last_pass: LastPass,
 }
 
@@ -85,7 +89,7 @@ impl SagaRecovery {
             sec,
             registry,
             sagas_recovered: BTreeMap::new(),
-            recent_failures: Vec::new(),
+            recent_failures: VecDeque::with_capacity(N_FAILED_SAGA_HISTORY),
             last_pass: LastPass::NeverStarted,
         }
     }
@@ -149,7 +153,10 @@ impl BackgroundTask for SagaRecovery {
                     }
 
                     for (saga_id, error) in ok.iter_failed() {
-                        self.recent_failures.push(RecoveryFailure {
+                        if self.recent_failures.len() == N_FAILED_SAGA_HISTORY {
+                            let _ = self.recent_failures.pop_front();
+                        }
+                        self.recent_failures.push_back(RecoveryFailure {
                             time: now,
                             saga_id,
                             message: InlineErrorChain::new(error).to_string(),
