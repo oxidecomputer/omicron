@@ -639,16 +639,15 @@ impl BackgroundTasksInitializer {
                 datastore.clone(),
                 saga_request.clone(),
             );
-            driver.register(
-                "instance_updater".to_string(),
-                "detects if instances require update sagas and schedules them"
-                    .to_string(),
-                config.instance_updater.period_secs,
-                Box::new(updater),
-                opctx.child(BTreeMap::new()),
-                vec![],
-                task_instance_updater,
-            );
+            driver.register( TaskDefinition {
+                name: "instance_updater",
+                description: "detects if instances require update sagas and schedules them",
+                period: config.instance_updater.period_secs,
+                task_impl: Box::new(updater),
+                opctx: opctx.child(BTreeMap::new()),
+                watchers: vec![],
+                activator: task_instance_updater,
+            });
         }
 
         // Background task: service firewall rule propagation
