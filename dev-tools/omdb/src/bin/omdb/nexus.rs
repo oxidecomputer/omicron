@@ -1656,27 +1656,33 @@ async fn cmd_nexus_sled_expunge_disk(
                     }
                 }
                 _ => {
+                    // This should be impossible due to a unique database index,
+                    // "vendor_serial_model_unique".
+                    //
+                    // Even if someone tried moving a disk, it would need to be
+                    // decommissioned before being re-commissioned elsewhere.
+                    //
+                    // However, we still print out an error message here in the
+                    // (unlikely) even that it happens anyway.
                     eprintln!(
-                        "WARNING: physical disk {} is PRESENT MULTIPLE TIMES in \
-                        the most recent inventory collection (spotted at {}). \
-                        It is dangerous to expunge a disk that is still \
-                        running. Are you sure you want to proceed anyway?",
+                        "ERROR: physical disk {} is PRESENT MULTIPLE TIMES in \
+                        the most recent inventory collection (spotted at {}).
+                        This should not be possible, and is an indication of a \
+                        database issue.",
                         args.physical_disk_id, collection.time_done,
                     );
-                    let confirm = read_with_prompt("y/N")?;
-                    if confirm != "y" {
-                        eprintln!("expungement not confirmed: aborting");
-                        return Ok(());
-                    }
+                    bail!("Physical Disk appeared on multiple sleds");
                 }
             }
         }
         None => {
             eprintln!(
-                "WARNING: cannot verify that the physical disk is physically gone \
+                "ERROR: cannot verify that the physical disk inventory status \
                  because there are no inventory collections present. Please \
-                 make sure that the physical disk has been physically removed."
+                 make sure that the physical disk has been physically removed, \
+                 or ensure that inventory may be collected."
             );
+            bail!("No inventory");
         }
     }
 

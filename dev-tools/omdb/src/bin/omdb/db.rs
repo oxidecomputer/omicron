@@ -62,6 +62,7 @@ use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_model::NetworkInterface;
 use nexus_db_model::NetworkInterfaceKind;
+use nexus_db_model::PhysicalDisk;
 use nexus_db_model::Probe;
 use nexus_db_model::Project;
 use nexus_db_model::Region;
@@ -96,7 +97,10 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
+use nexus_types::external_api::views::PhysicalDiskPolicy;
+use nexus_types::external_api::views::PhysicalDiskState;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::identity::Resource;
@@ -281,12 +285,14 @@ pub struct DbFetchOptions {
 enum DbCommands {
     /// Print information about the rack
     Rack(RackArgs),
-    /// Print information about disks
+    /// Print information about virtual disks
     Disks(DiskArgs),
     /// Print information about internal and external DNS
     Dns(DnsArgs),
     /// Print information about collected hardware/software inventory
     Inventory(InventoryArgs),
+    /// Print information about physical disks
+    PhysicalDisks(PhysicalDisksArgs),
     /// Save the current Reconfigurator inputs to a file
     ReconfiguratorSave(ReconfiguratorSaveArgs),
     /// Query for information about region replacements, optionally manually
@@ -406,7 +412,7 @@ enum InventoryCommands {
     /// list and show details from particular collections
     Collections(CollectionsArgs),
     /// show all physical disks every found
-    PhysicalDisks(PhysicalDisksArgs),
+    PhysicalDisks(InvPhysicalDisksArgs),
     /// list all root of trust pages ever found
     RotPages,
 }
@@ -435,12 +441,19 @@ struct CollectionsShowArgs {
 }
 
 #[derive(Debug, Args, Clone, Copy)]
-struct PhysicalDisksArgs {
+struct InvPhysicalDisksArgs {
     #[clap(long)]
     collection_id: Option<CollectionUuid>,
 
     #[clap(long, requires("collection_id"))]
     sled_id: Option<SledUuid>,
+}
+
+#[derive(Debug, Args)]
+struct PhysicalDisksArgs {
+    /// Show disks that match the given filter
+    #[clap(short = 'F', long, value_enum)]
+    filter: Option<DiskFilter>,
 }
 
 #[derive(Debug, Args)]
@@ -594,6 +607,15 @@ impl DbArgs {
                     &datastore,
                     &self.fetch_opts,
                     inventory_args,
+                )
+                .await
+            }
+            DbCommands::PhysicalDisks(args) => {
+                cmd_db_physical_disks(
+                    &opctx,
+                    &datastore,
+                    &self.fetch_opts,
+                    args,
                 )
                 .await
             }
@@ -1365,6 +1387,68 @@ async fn cmd_db_disk_physical(
         .to_string();
 
     println!("{}", table);
+    Ok(())
+}
+
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct PhysicalDiskRow {
+    id: Uuid,
+    serial: String,
+    vendor: String,
+    model: String,
+    sled_id: Uuid,
+    policy: PhysicalDiskPolicy,
+    state: PhysicalDiskState,
+}
+
+impl From<PhysicalDisk> for PhysicalDiskRow {
+    fn from(d: PhysicalDisk) -> Self {
+        PhysicalDiskRow {
+            id: d.id(),
+            serial: d.serial.clone(),
+            vendor: d.vendor.clone(),
+            model: d.model.clone(),
+            sled_id: d.sled_id,
+            policy: d.disk_policy.into(),
+            state: d.disk_state.into(),
+        }
+    }
+}
+
+/// Run `omdb db physical-disks`.
+async fn cmd_db_physical_disks(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &PhysicalDisksArgs,
+) -> Result<(), anyhow::Error> {
+    let limit = fetch_opts.fetch_limit;
+    let filter = match args.filter {
+        Some(filter) => filter,
+        None => {
+            eprintln!(
+                "note: listing all in-service disks \
+                 (use -F to filter, e.g. -F in-service)"
+            );
+            DiskFilter::InService
+        }
+    };
+
+    let sleds = datastore
+        .physical_disk_list(&opctx, &first_page(limit), filter)
+        .await
+        .context("listing sleds")?;
+    check_limit(&sleds, limit, || String::from("listing sleds"));
+
+    let rows = sleds.into_iter().map(|s| PhysicalDiskRow::from(s));
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(1, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
     Ok(())
 }
 
@@ -3156,7 +3240,7 @@ async fn cmd_db_inventory_cabooses(
 async fn cmd_db_inventory_physical_disks(
     conn: &DataStoreConnection<'_>,
     limit: NonZeroU32,
-    args: PhysicalDisksArgs,
+    args: InvPhysicalDisksArgs,
 ) -> Result<(), anyhow::Error> {
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]

@@ -13,6 +13,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::model::DatasetKind;
+use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::SledPolicy;
@@ -212,7 +213,9 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::PhysicalDisk> {
-        self.db_datastore.physical_disk_list(&opctx, pagparams).await
+        self.db_datastore
+            .physical_disk_list(&opctx, pagparams, DiskFilter::InService)
+            .await
     }
 
     /// Upserts a physical disk into the database, updating it if it already exists.

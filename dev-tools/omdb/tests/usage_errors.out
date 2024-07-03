@@ -103,9 +103,10 @@ Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
   rack                 Print information about the rack
-  disks                Print information about disks
+  disks                Print information about virtual disks
   dns                  Print information about internal and external DNS
   inventory            Print information about collected hardware/software inventory
+  physical-disks       Print information about physical disks
   reconfigurator-save  Save the current Reconfigurator inputs to a file
   region-replacement   Query for information about region replacements, optionally manually
                            triggering one
@@ -143,9 +144,10 @@ Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
   rack                 Print information about the rack
-  disks                Print information about disks
+  disks                Print information about virtual disks
   dns                  Print information about internal and external DNS
   inventory            Print information about collected hardware/software inventory
+  physical-disks       Print information about physical disks
   reconfigurator-save  Save the current Reconfigurator inputs to a file
   region-replacement   Query for information about region replacements, optionally manually
                            triggering one
@@ -181,7 +183,7 @@ termination: Exited(2)
 stdout:
 ---------------------------------------------
 stderr:
-Print information about disks
+Print information about virtual disks
 
 Usage: omdb db disks [OPTIONS] <COMMAND>
 
