@@ -62,6 +62,7 @@ impl NexusSaga for SagaInstanceUpdate {
     fn register_actions(registry: &mut ActionRegistry) {
         start_instance_update_register_actions(registry);
         super::SagaDoActualInstanceUpdate::register_actions(registry);
+        super::destroyed::SagaDestroyVmm::register_actions(registry);
     }
 
     fn make_saga_dag(
@@ -170,7 +171,9 @@ async fn siu_fetch_state_and_start_real_saga(
             "instance_id" => %authz_instance.id(),
             "new_runtime_state" => ?update.new_runtime,
             "network_config_update" => ?update.network_config,
-            "destroy_vmm" => ?update.destroy_vmm,
+            "destroy_active_vmm" => ?update.destroy_active_vmm,
+            "destroy_target_vmm" => ?update.destroy_target_vmm,
+            "deprovision" => update.deprovision,
         );
         osagactx
             .nexus()

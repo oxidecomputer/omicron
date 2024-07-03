@@ -18,15 +18,13 @@ use crate::app::sagas::declare_saga_actions;
 use chrono::Utc;
 use nexus_db_queries::{authn, authz};
 use nexus_types::identity::Resource;
+use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use serde::{Deserialize, Serialize};
 use steno::{ActionError, DagBuilder, Node};
 use uuid::Uuid;
-
-mod destroyed;
-use destroyed::*;
 
 // The public interface to this saga is actually a smaller saga that starts the
 // "real" update saga, which inherits the lock from the start saga. This is
@@ -43,14 +41,16 @@ use destroyed::*;
 mod start;
 pub(crate) use self::start::{Params, SagaInstanceUpdate};
 
+mod destroyed;
+
 #[derive(Debug, Deserialize, Serialize)]
 struct UpdatesRequired {
     /// The new runtime state that must be written back to the database.
     new_runtime: InstanceRuntimeState,
 
-    /// If `true`, this VMM must be destroyed.
-    destroy_vmm: Option<DestroyedVmm>,
-
+    destroy_active_vmm: Option<PropolisUuid>,
+    destroy_target_vmm: Option<PropolisUuid>,
+    deprovision: bool,
     network_config: Option<NetworkConfigUpdate>,
 }
 
@@ -58,22 +58,6 @@ struct UpdatesRequired {
 enum NetworkConfigUpdate {
     Delete,
     Update(PropolisUuid),
-}
-
-/// An active VMM has been destroyed.
-#[derive(Debug, Deserialize, Serialize)]
-struct DestroyedVmm {
-    /// The UUID of the destroyed active VMM.
-    id: PropolisUuid,
-    /// If `true`, the virtual provisioning records for this instance should be
-    /// deallocated.
-    ///
-    /// This occurs when the instance's VMM is destroyed *without* migrating out.
-    /// If the instance's current active VMM has been destroyed because the
-    /// instance has successfully migrated out, the virtual provisioning records
-    /// are left in place, as the instance is still consuming those virtual
-    /// resources on its new sled.
-    deprovision: bool,
 }
 
 impl UpdatesRequired {
@@ -88,24 +72,53 @@ impl UpdatesRequired {
 
         let mut update_required = false;
         let mut network_config = None;
-        let mut deprovision = true;
+        let mut deprovision = false;
 
         // Has the active VMM been destroyed?
-        let destroy_vmm = snapshot.active_vmm.as_ref().and_then(|active_vmm| {
-            if active_vmm.runtime.state == VmmState::Destroyed {
-                // Unlink the active VMM ID. If the active VMM was destroyed
-                // because a migration out completed, the next block, which
-                // handles migration updates, will set this to the new VMM's ID,
-                // instead.
-                new_runtime.propolis_id = None;
-                new_runtime.nexus_state = InstanceState::NoVmm;
-                update_required = true;
-                network_config = Some(NetworkConfigUpdate::Delete);
-                Some(PropolisUuid::from_untyped_uuid(active_vmm.id))
-            } else {
-                None
-            }
-        });
+        let destroy_active_vmm =
+            snapshot.active_vmm.as_ref().and_then(|active_vmm| {
+                if active_vmm.runtime.state == VmmState::Destroyed {
+                    // Unlink the active VMM ID. If the active VMM was destroyed
+                    // because a migration out completed, the next block, which
+                    // handles migration updates, will set this to the new VMM's ID,
+                    // instead.
+                    new_runtime.propolis_id = None;
+                    new_runtime.nexus_state = InstanceState::NoVmm;
+                    update_required = true;
+                    // If and only if the active VMM was destroyed *and* we did
+                    // not successfully migrate out of it, the instance's
+                    // virtual provisioning records and oximeter producer must
+                    // be cleaned up.
+                    //
+                    // If the active VMM was destroyed as a result of a
+                    // successful migration out, the subsequent code for
+                    // determining what to do with the migration will change
+                    // this back.
+                    deprovision = true;
+                    // Similarly, if the active VMM was destroyed and the
+                    // instance has not migrated out of it, we must delete the
+                    // instance's network configuration. Again, if there was a
+                    // migration out, the subsequent migration-handling code
+                    // will change this to a network config update if the
+                    // instance is now living somewhere else.
+                    network_config = Some(NetworkConfigUpdate::Delete);
+                    Some(PropolisUuid::from_untyped_uuid(active_vmm.id))
+                } else {
+                    None
+                }
+            });
+
+        let destroy_target_vmm =
+            snapshot.target_vmm.as_ref().and_then(|target_vmm| {
+                if target_vmm.runtime.state == VmmState::Destroyed {
+                    // Unlink the target VMM ID.
+                    new_runtime.dst_propolis_id = None;
+                    update_required = true;
+                    Some(PropolisUuid::from_untyped_uuid(target_vmm.id))
+                } else {
+                    None
+                }
+            });
 
         // Determine what to do with the migration.
         if let Some(ref migration) = snapshot.migration {
@@ -142,7 +155,7 @@ impl UpdatesRequired {
             // place the relevant virtual IPs on the local sled. Once OPTE stops
             // creating these mappings, this path only needs to be taken if an
             // instance has changed sleds.
-            if failed && destroy_vmm.is_none() {
+            if failed && destroy_active_vmm.is_none() {
                 network_config = Some(NetworkConfigUpdate::Update(
                     PropolisUuid::from_untyped_uuid(
                         migration.source_propolis_id,
@@ -184,9 +197,12 @@ impl UpdatesRequired {
         if !update_required {
             return None;
         }
+
         Some(Self {
             new_runtime,
-            destroy_vmm: destroy_vmm.map(|id| DestroyedVmm { id, deprovision }),
+            destroy_active_vmm,
+            destroy_target_vmm,
+            deprovision,
             network_config,
         })
     }
@@ -208,7 +224,6 @@ struct RealParams {
 
 const INSTANCE_LOCK_ID: &str = "saga_instance_lock_id";
 const INSTANCE_LOCK: &str = "updater_lock";
-const DESTROYED_VMM_ID: &str = "destroyed_vmm_id";
 const NETWORK_CONFIG_UPDATE: &str = "network_config_update";
 
 // instance update saga: actions
@@ -227,34 +242,21 @@ declare_saga_actions! {
         + siu_update_network_config
     }
 
+    // Deallocate virtual provisioning resources reserved by the instance, as it
+    // is no longer running.
+    RELEASE_VIRTUAL_PROVISIONING -> "release_virtual_provisioning" {
+        + siu_release_virtual_provisioning
+    }
+
+    // Unassign the instance's Oximeter producer.
+    UNASSIGN_OXIMETER_PRODUCER -> "unassign_oximeter_producer" {
+        + siu_unassign_oximeter_producer
+    }
+
     // Release the lock and write back the new instance record.
     UPDATE_AND_UNLOCK_INSTANCE -> "unlocked" {
         + siu_update_and_unlock_instance
     }
-
-    // === active VMM destroyed actions ===
-
-    // Deallocate physical sled resources reserved for the destroyed VMM, as it
-    // is no longer using them.
-    DESTROYED_RELEASE_SLED_RESOURCES -> "destroyed_vmm_release_sled_resources" {
-        + siu_destroyed_release_sled_resources
-    }
-
-    // Deallocate virtual provisioning resources reserved by the instance, as it
-    // is no longer running.
-    DESTROYED_RELEASE_VIRTUAL_PROVISIONING -> "destroyed_vmm_release_virtual_provisioning" {
-        + siu_destroyed_release_virtual_provisioning
-    }
-
-    // Unassign the instance's Oximeter producer.
-    DESTROYED_UNASSIGN_OXIMETER_PRODUCER -> "destroyed_vmm_unassign_oximeter" {
-        + siu_destroyed_unassign_oximeter_producer
-    }
-
-    DESTROYED_MARK_VMM_DELETED -> "destroyed_mark_vmm_deleted" {
-        + siu_destroyed_mark_vmm_deleted
-    }
-
 
 }
 
@@ -272,17 +274,19 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
     fn make_saga_dag(
         params: &Self::Params,
         mut builder: DagBuilder,
-    ) -> Result<steno::Dag, super::SagaInitError> {
+    ) -> Result<steno::Dag, SagaInitError> {
+        // Helper function for constructing a constant node.
         fn const_node(
-            name: &'static str,
+            name: impl AsRef<str>,
             value: &impl serde::Serialize,
-        ) -> Result<steno::Node, super::SagaInitError> {
+        ) -> Result<steno::Node, SagaInitError> {
             let value = serde_json::to_value(value).map_err(|e| {
-                SagaInitError::SerializeError(name.to_string(), e)
+                SagaInitError::SerializeError(name.as_ref().to_string(), e)
             })?;
             Ok(Node::constant(name, value))
         }
 
+        // Generate a new ID and attempt to inherit the lock from the start saga.
         builder.append(Node::action(
             INSTANCE_LOCK_ID,
             "GenerateInstanceLockId",
@@ -290,38 +294,72 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
         ));
         builder.append(become_updater_action());
 
-        // If the active VMM has been destroyed, clean up after it.
-        // TODO(eliza): if we also wished to delete destroyed target VMMs after
-        // a failed migration, we could move all the "VMM destroyed" actions into
-        // a subsaga that we can push twice...
-        if let Some(DestroyedVmm { ref id, deprovision }) =
-            params.update.destroy_vmm
-        {
-            builder.append(const_node(DESTROYED_VMM_ID, id)?);
-            builder.append(destroyed_release_sled_resources_action());
-            // If the instance hasn't migrated out of the destroyed VMM, also release virtual
-            // provisioning records and unassign the Oximeter producer.
-            if deprovision {
-                builder.append(destroyed_release_virtual_provisioning_action());
-                builder.append(destroyed_unassign_oximeter_producer_action());
-            }
-        }
-
         // If a network config update is required, do that.
         if let Some(ref update) = params.update.network_config {
             builder.append(const_node(NETWORK_CONFIG_UPDATE, update)?);
             builder.append(update_network_config_action());
         }
 
+        // If the instance now has no active VMM, release its virtual
+        // provisioning resources and unassign its Oximeter producer.
+        if params.update.deprovision {
+            builder.append(release_virtual_provisioning_action());
+            builder.append(unassign_oximeter_producer_action());
+        }
+
+        // Once we've finished mutating everything owned by the instance, we can
+        // write ck the updated state and release the instance lock.
         builder.append(update_and_unlock_instance_action());
 
-        // Delete the active VMM only *after* the instance record is
-        // updated, to avoid creating a "dangling pointer" where the instance
-        // record's active VMM ID points to a VMM record that has now been
-        // deleted.
-        if params.update.destroy_vmm.is_some() {
-            builder.append(destroyed_mark_vmm_deleted_action());
+        // If either VMM linked to this instance has been destroyed, append
+        // subsagas to clean up the VMMs resources and mark them as deleted.
+        //
+        // Note that we must not mark the VMMs as deleted until *after* we have
+        // written back the updated instance record. Otherwise, if we mark a VMM
+        // as deleted while the instance record still references its ID, we will
+        // have created a state where the instance record contains a "dangling
+        // pointer" (database version) where the foreign key points to a record
+        // that no longer exists. Other consumers of the instance record may be
+        // unpleasantly surprised by this, so we avoid marking these rows as
+        // deleted until they've been unlinked from the instance by the
+        // `update_and_unlock_instance` action.
+        let mut append_destroyed_vmm_subsaga =
+            |vmm_id: PropolisUuid, which_vmm: &'static str| {
+                let params = destroyed::Params {
+                    vmm_id,
+                    instance_id: InstanceUuid::from_untyped_uuid(
+                        params.authz_instance.id(),
+                    ),
+                    serialized_authn: params.serialized_authn.clone(),
+                };
+                let name = format!("destroy_{which_vmm}_vmm");
+
+                let subsaga = destroyed::SagaDestroyVmm::make_saga_dag(
+                    &params,
+                    DagBuilder::new(steno::SagaName::new(&name)),
+                )?;
+
+                let params_name = format!("{name}_params");
+                builder.append(const_node(&params_name, &params)?);
+
+                let output_name = format!("{which_vmm}_vmm_destroyed");
+                builder.append(Node::subsaga(
+                    output_name.as_str(),
+                    subsaga,
+                    &params_name,
+                ));
+
+                Ok::<(), SagaInitError>(())
+            };
+
+        if let Some(vmm_id) = params.update.destroy_active_vmm {
+            append_destroyed_vmm_subsaga(vmm_id, "active")?;
         }
+
+        if let Some(vmm_id) = params.update.destroy_target_vmm {
+            append_destroyed_vmm_subsaga(vmm_id, "target")?;
+        }
+
         Ok(builder.build()?)
     }
 }
@@ -444,6 +482,92 @@ async fn siu_update_network_config(
     nexus.background_tasks.activate(&nexus.background_tasks.task_v2p_manager);
 
     Ok(())
+}
+
+pub(super) async fn siu_release_virtual_provisioning(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let RealParams { ref serialized_authn, ref authz_instance, state, .. } =
+        sagactx.saga_params::<RealParams>()?;
+
+    let instance = state.instance;
+    let vmm_id = {
+        let id = instance
+            .runtime()
+            .propolis_id
+            .expect("a `release_virtual_provisioning` action should not have been pushed if there is no active VMM ID");
+        PropolisUuid::from_untyped_uuid(id)
+    };
+    let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
+
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+
+    let result = osagactx
+        .datastore()
+        .virtual_provisioning_collection_delete_instance(
+            &opctx,
+            instance_id,
+            instance.project_id,
+            i64::from(instance.ncpus.0 .0),
+            instance.memory,
+        )
+        .await;
+    match result {
+        Ok(deleted) => {
+            info!(
+                osagactx.log(),
+                "instance update (VMM destroyed): deallocated virtual \
+                 provisioning resources";
+                "instance_id" => %instance_id,
+                "propolis_id" => %vmm_id,
+                "records_deleted" => ?deleted,
+                "instance_update" => %"active VMM destroyed",
+            );
+        }
+        // Necessary for idempotency --- the virtual provisioning resources may
+        // have been deleted already, that's fine.
+        Err(Error::ObjectNotFound { .. }) => {
+            info!(
+                osagactx.log(),
+                "instance update (VMM destroyed): virtual provisioning \
+                 record not found; perhaps it has already been deleted?";
+                "instance_id" => %instance_id,
+                "propolis_id" => %vmm_id,
+                "instance_update" => %"active VMM destroyed",
+            );
+        }
+        Err(err) => return Err(ActionError::action_failed(err)),
+    };
+
+    Ok(())
+}
+
+pub(super) async fn siu_unassign_oximeter_producer(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let RealParams { ref serialized_authn, ref authz_instance, .. } =
+        sagactx.saga_params::<RealParams>()?;
+
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+
+    info!(
+        osagactx.log(),
+        "instance update (VMM destroyed): unassigning oximeter producer";
+        "instance_id" => %authz_instance.id(),
+        "instance_update" => %"active VMM destroyed",
+    );
+    crate::app::oximeter::unassign_producer(
+        osagactx.datastore(),
+        osagactx.log(),
+        &opctx,
+        &authz_instance.id(),
+    )
+    .await
+    .map_err(ActionError::action_failed)
 }
 
 async fn siu_update_and_unlock_instance(
