@@ -119,6 +119,7 @@ instance_watcher.period_secs = 30
 service_firewall_propagation.period_secs = 300
 v2p_mapping_propagation.period_secs = 30
 abandoned_vmm_reaper.period_secs = 60
+saga_recovery.period_secs = 600
 
 [default_region_allocation_strategy]
 # we only have one sled in the test environment, so we need to use the

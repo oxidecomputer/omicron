@@ -10,7 +10,6 @@ use crate::app::oximeter::LazyTimeseriesClient;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
-use crate::saga_interface::SagaContext;
 use crate::DropshotServer;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
@@ -91,6 +90,7 @@ pub(crate) mod sagas;
 
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 
+use crate::app::background::BackgroundTasksData;
 use nexus_db_model::AllSchemaVersions;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 
@@ -134,9 +134,6 @@ pub struct Nexus {
 
     /// saga execution coordinator
     sagas: Arc<SagaExecutor>,
-
-    /// Task representing completion of recovered Sagas
-    recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
 
     /// External dropshot servers
     external_server: std::sync::Mutex<Option<DropshotServer>>,
@@ -420,7 +417,6 @@ impl Nexus {
             db_datastore: Arc::clone(&db_datastore),
             authz: Arc::clone(&authz),
             sagas,
-            recovery_task: std::sync::Mutex::new(None),
             external_server: std::sync::Mutex::new(None),
             techport_external_server: std::sync::Mutex::new(None),
             internal_server: std::sync::Mutex::new(None),
@@ -462,26 +458,12 @@ impl Nexus {
         // TODO-cleanup all the extra Arcs here seems wrong
         let nexus = Arc::new(nexus);
         nexus.sagas.set_nexus(nexus.clone());
-        let opctx = OpContext::for_background(
+        let saga_recovery_opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
             Arc::clone(&authz),
             authn::Context::internal_saga_recovery(),
             Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
-        let saga_logger = nexus.log.new(o!("saga_type" => "recovery"));
-        let recovery_task = db::recover(
-            opctx,
-            my_sec_id,
-            Arc::new(Arc::new(SagaContext::new(
-                Arc::clone(&nexus),
-                saga_logger,
-            ))),
-            Arc::clone(&db_datastore),
-            Arc::clone(&sec_client),
-            sagas::ACTION_REGISTRY.clone(),
-        );
-
-        *nexus.recovery_task.lock().unwrap() = Some(recovery_task);
 
         // Wait to start background tasks until after the populate step
         // finishes.  Among other things, the populate step installs role
@@ -508,14 +490,21 @@ impl Nexus {
 
             let driver = background_tasks_initializer.start(
                 &task_nexus.background_tasks,
-                background_ctx,
-                db_datastore,
-                task_config.pkg.background_tasks,
-                rack_id,
-                task_config.deployment.id,
-                resolver,
-                task_nexus.sagas.clone(),
-                task_registry,
+                BackgroundTasksData {
+                    opctx: background_ctx,
+                    datastore: db_datastore,
+                    config: task_config.pkg.background_tasks,
+                    rack_id,
+                    nexus_id: task_config.deployment.id,
+                    resolver,
+                    saga_starter: task_nexus.sagas.clone(),
+                    producer_registry: task_registry,
+
+                    saga_recovery_opctx,
+                    saga_recovery_nexus: task_nexus.clone(),
+                    saga_recovery_sec: sec_client.clone(),
+                    saga_recovery_registry: sagas::ACTION_REGISTRY.clone(),
+                },
             );
 
             if let Err(_) = task_nexus.background_tasks_driver.set(driver) {
