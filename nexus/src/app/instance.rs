@@ -1420,11 +1420,14 @@ impl super::Nexus {
                 serialized_authn: authn::saga::Serialized::for_opctx(opctx),
                 authz_instance,
             };
-            self.sagas
-                .saga_execute::<sagas::instance_update::SagaInstanceUpdate>(
-                    saga_params,
-                )
-                .await?;
+            let sagas = self.sagas.clone();
+            tokio::spawn(async move {
+                sagas
+                    .saga_execute::<sagas::instance_update::SagaInstanceUpdate>(
+                        saga_params,
+                    )
+                    .await
+            });
         }
         Ok(())
     }
