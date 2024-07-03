@@ -67,7 +67,7 @@ impl DataStore {
                 .filter(
                     network_interface::kind.eq(NetworkInterfaceKind::Instance),
                 )
-                .sled_filter(SledFilter::V2PMapping)
+                .sled_filter(SledFilter::VpcRouting)
                 .select((
                     NetworkInterface::as_select(),
                     Sled::as_select(),
@@ -116,7 +116,7 @@ impl DataStore {
                 .inner_join(sled_dsl::sled.on(sled_dsl::id.eq(probe_dsl::sled)))
                 .filter(network_interface::time_deleted.is_null())
                 .filter(network_interface::kind.eq(NetworkInterfaceKind::Probe))
-                .sled_filter(SledFilter::V2PMapping)
+                .sled_filter(SledFilter::VpcRouting)
                 .select((
                     NetworkInterface::as_select(),
                     Sled::as_select(),

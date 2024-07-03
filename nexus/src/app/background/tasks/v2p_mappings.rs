@@ -42,7 +42,7 @@ impl BackgroundTask for V2PManager {
 
             // Get sleds
             // we only care about sleds that are active && inservice
-            let sleds = match self.datastore.sled_list_all_batched(opctx, SledFilter::V2PMapping).await
+            let sleds = match self.datastore.sled_list_all_batched(opctx, SledFilter::VpcRouting).await
             {
                 Ok(v) => v,
                 Err(e) => {
