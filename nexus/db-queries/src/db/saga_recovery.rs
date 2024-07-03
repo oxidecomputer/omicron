@@ -76,6 +76,7 @@ impl SagasRecovered {
 pub async fn recover<T>(
     opctx: &OpContext,
     sec_id: db::SecId,
+    sec_generation: String,
     skip: &(dyn Fn(SagaId) -> bool + Send + Sync),
     make_context: &(dyn Fn(&slog::Logger) -> Arc<T::ExecContextType>
           + Send
@@ -98,7 +99,9 @@ where
     // up anything we missed.
     // TODO-monitoring we definitely want a way to raise a big red flag if
     // saga recovery is not completing.
-    let found_sagas = list_unfinished_sagas(&opctx, datastore, &sec_id).await?;
+    let found_sagas =
+        list_unfinished_sagas(&opctx, datastore, &sec_id, &sec_generation)
+            .await?;
 
     info!(&opctx.log, "listed sagas ({} total)", found_sagas.len());
 
@@ -171,6 +174,7 @@ async fn list_unfinished_sagas(
     opctx: &OpContext,
     datastore: &db::DataStore,
     sec_id: &db::SecId,
+    ignore_sec_generation: &str,
 ) -> Result<Vec<db::saga_types::Saga>, Error> {
     trace!(&opctx.log, "listing sagas");
 
@@ -185,23 +189,27 @@ async fn list_unfinished_sagas(
     while let Some(p) = paginator.next() {
         use db::schema::saga::dsl;
 
-        let mut batch = paginated(dsl::saga, dsl::id, &p.current_pagparams())
-            .filter(dsl::saga_state.ne(db::saga_types::SagaCachedState(
-                steno::SagaCachedState::Done,
-            )))
-            .filter(dsl::current_sec.eq(*sec_id))
-            .select(db::saga_types::Saga::as_select())
-            .load_async(&*conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::SagaDbg,
-                        LookupType::ById(sec_id.0),
-                    ),
-                )
-            })?;
+        let mut batch =
+            paginated(dsl::saga, dsl::id, &p.current_pagparams())
+                .filter(dsl::saga_state.ne(db::saga_types::SagaCachedState(
+                    steno::SagaCachedState::Done,
+                )))
+                .filter(dsl::current_sec.eq(*sec_id))
+                .filter(dsl::sec_generation.is_null().or(
+                    dsl::sec_generation.ne(ignore_sec_generation.to_string()),
+                ))
+                .select(db::saga_types::Saga::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::NotFoundByLookup(
+                            ResourceType::SagaDbg,
+                            LookupType::ById(sec_id.0),
+                        ),
+                    )
+                })?;
 
         paginator = p.found_batch(&batch, &|row| row.id);
         sagas.append(&mut batch);
@@ -426,10 +434,12 @@ mod test {
         log: &slog::Logger,
         db_datastore: Arc<db::DataStore>,
         sec_id: db::SecId,
+        sec_generation: String,
     ) -> (Arc<UnpluggableCockroachDbSecStore>, SecClient, Arc<TestContext>)
     {
         let storage = Arc::new(UnpluggableCockroachDbSecStore::new(
             sec_id,
+            sec_generation,
             db_datastore,
             log.new(o!("component" => "SecStore")),
         ));
@@ -451,8 +461,13 @@ mod test {
         let log = logctx.log.new(o!());
         let (mut db, db_datastore) = new_db(&log).await;
         let sec_id = db::SecId(uuid::Uuid::new_v4());
-        let (storage, sec_client, uctx) =
-            create_storage_sec_and_context(&log, db_datastore.clone(), sec_id);
+        let sec_generation = String::from("unused");
+        let (storage, sec_client, uctx) = create_storage_sec_and_context(
+            &log,
+            db_datastore.clone(),
+            sec_id,
+            sec_generation.clone(),
+        );
         let sec_log = log.new(o!("component" => "SEC"));
         let opctx = OpContext::for_tests(
             log,
@@ -490,6 +505,7 @@ mod test {
         let recovered = recover(
             &opctx,
             sec_id,
+            sec_generation,
             &|_| false,
             &|_| uctx.clone(),
             &db_datastore,
@@ -545,8 +561,13 @@ mod test {
         let log = logctx.log.new(o!());
         let (mut db, db_datastore) = new_db(&log).await;
         let sec_id = db::SecId(uuid::Uuid::new_v4());
-        let (storage, sec_client, uctx) =
-            create_storage_sec_and_context(&log, db_datastore.clone(), sec_id);
+        let sec_generation = String::from("unused");
+        let (storage, sec_client, uctx) = create_storage_sec_and_context(
+            &log,
+            db_datastore.clone(),
+            sec_id,
+            sec_generation.clone(),
+        );
         let sec_log = log.new(o!("component" => "SEC"));
         let opctx = OpContext::for_tests(
             log,
@@ -571,6 +592,7 @@ mod test {
         let recovered = recover(
             &opctx,
             sec_id,
+            sec_generation,
             &|_| false,
             &|_| uctx.clone(),
             &db_datastore,
@@ -604,8 +626,13 @@ mod test {
         let log = logctx.log.new(o!());
         let (mut db, db_datastore) = new_db(&log).await;
         let sec_id = db::SecId(uuid::Uuid::new_v4());
-        let (storage, sec_client, uctx) =
-            create_storage_sec_and_context(&log, db_datastore.clone(), sec_id);
+        let sec_generation = String::from("unused");
+        let (storage, sec_client, uctx) = create_storage_sec_and_context(
+            &log,
+            db_datastore.clone(),
+            sec_id,
+            sec_generation.clone(),
+        );
         let sec_log = log.new(o!("component" => "SEC"));
         let opctx = OpContext::for_tests(
             log,
@@ -638,6 +665,7 @@ mod test {
         let recovered = recover(
             &opctx,
             sec_id,
+            sec_generation,
             &|found_saga_id| found_saga_id == saga_id,
             &|_| uctx.clone(),
             &db_datastore,
@@ -671,6 +699,8 @@ mod test {
         let log = logctx.log.new(o!());
         let (mut db, db_datastore) = new_db(&log).await;
         let sec_id = db::SecId(uuid::Uuid::new_v4());
+        let sec_generation = String::from("unused");
+        let other_sec_generation = String::from("newest");
         let opctx = OpContext::for_tests(
             log,
             Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
@@ -685,7 +715,11 @@ mod test {
                 state: steno::SagaCachedState::Running,
             };
 
-            db::model::saga_types::Saga::new(sec_id, params)
+            db::model::saga_types::Saga::new(
+                sec_id,
+                sec_generation.clone(),
+                params,
+            )
         };
         let mut inserted_sagas = (0..SQL_BATCH_SIZE.get() * 2)
             .map(|_| new_running_db_saga())
@@ -708,10 +742,14 @@ mod test {
             .expect("Failed to insert test setup data");
 
         // List them, expect to see them all in order by ID.
-        let mut observed_sagas =
-            list_unfinished_sagas(&opctx, &db_datastore, &sec_id)
-                .await
-                .expect("Failed to list unfinished sagas");
+        let mut observed_sagas = list_unfinished_sagas(
+            &opctx,
+            &db_datastore,
+            &sec_id,
+            &other_sec_generation,
+        )
+        .await
+        .expect("Failed to list unfinished sagas");
         inserted_sagas.sort_by_key(|a| a.id);
 
         // Timestamps can change slightly when we insert them.
@@ -743,6 +781,7 @@ mod test {
         let log = logctx.log.new(o!());
         let (mut db, db_datastore) = new_db(&log).await;
         let sec_id = db::SecId(uuid::Uuid::new_v4());
+        let sec_generation = String::from("unused");
         let opctx = OpContext::for_tests(
             log,
             Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
@@ -800,7 +839,8 @@ mod test {
             dag: serde_json::value::Value::Null,
             state: steno::SagaCachedState::Running,
         };
-        let saga = db::model::saga_types::Saga::new(sec_id, params);
+        let saga =
+            db::model::saga_types::Saga::new(sec_id, sec_generation, params);
         let observed_nodes = load_saga_log(&opctx, &db_datastore, &saga)
             .await
             .expect("Failed to list unfinished nodes");
@@ -836,6 +876,7 @@ mod test {
         let log = logctx.log.new(o!());
         let (mut db, db_datastore) = new_db(&log).await;
         let sec_id = db::SecId(uuid::Uuid::new_v4());
+        let sec_generation = String::from("unused");
         let opctx = OpContext::for_tests(
             log,
             Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
@@ -848,7 +889,8 @@ mod test {
             dag: serde_json::value::Value::Null,
             state: steno::SagaCachedState::Running,
         };
-        let saga = db::model::saga_types::Saga::new(sec_id, params);
+        let saga =
+            db::model::saga_types::Saga::new(sec_id, sec_generation, params);
 
         // Test that this returns "no nodes" rather than throwing some "not
         // found" error.

@@ -193,10 +193,15 @@ pub struct Saga {
     pub current_sec: Option<SecId>,
     pub adopt_generation: super::Generation,
     pub adopt_time: chrono::DateTime<chrono::Utc>,
+    sec_generation: Option<String>,
 }
 
 impl Saga {
-    pub fn new(creator: SecId, params: steno::SagaCreateParams) -> Self {
+    pub fn new(
+        creator: SecId,
+        sec_generation: String,
+        params: steno::SagaCreateParams,
+    ) -> Self {
         let now = chrono::Utc::now();
 
         // This match will help us identify a case where Steno adds a new field
@@ -217,6 +222,7 @@ impl Saga {
             current_sec: Some(creator),
             adopt_generation: Generation::new().into(),
             adopt_time: now,
+            sec_generation: Some(sec_generation),
         }
     }
 }

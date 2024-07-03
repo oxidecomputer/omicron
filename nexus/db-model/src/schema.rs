@@ -827,6 +827,7 @@ table! {
         current_sec -> Nullable<Uuid>,
         adopt_generation -> Int8,
         adopt_time -> Timestamptz,
+        sec_generation -> Nullable<Text>,
     }
 }
 

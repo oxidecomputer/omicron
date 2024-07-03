@@ -2009,17 +2009,22 @@ CREATE TABLE IF NOT EXISTS omicron.public.saga (
     /* saga DAG (includes params and name) */
     saga_dag JSONB NOT NULL,
 
-    /*
-     * TODO:
-     * - id for current SEC (maybe NULL?)
-     * - time of last adoption
-     * - previous SEC? previous adoption time?
-     * - number of adoptions?
-     */
+    /* cached saga state */
     saga_state omicron.public.saga_state NOT NULL,
+
+    /* SEC currently assigned to run this saga */
     current_sec UUID,
+
     adopt_generation INT NOT NULL,
     adopt_time TIMESTAMPTZ NOT NULL
+
+    /*
+     * generation of the SEC that last created or recovered this saga
+     *
+     * This is used during saga recovery to identify sagas that don't need to be
+     * recovered.  See the saga recovery background task for details.
+     */
+    sec_generation STRING(32),
 );
 
 /*
@@ -2027,13 +2032,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.saga (
  * sagas by SEC.  We need to paginate this list by the id.
  */
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_saga_by_sec ON omicron.public.saga (
-    current_sec, id
+    current_sec, sec_generation, id
 ) WHERE saga_state != 'done';
 
-/*
- * TODO more indexes for Saga?
- * - Debugging and/or reporting: saga_name? creator?
- */
 /*
  * TODO: This is a data-carrying enum, see note on disk_state.
  *
