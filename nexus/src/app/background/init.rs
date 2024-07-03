@@ -113,7 +113,7 @@ use super::tasks::vpc_routes;
 use super::Activator;
 use super::Driver;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
-use crate::app::sagas::SagaRequest;
+use crate::app::saga::StartSaga;
 use nexus_config::BackgroundTaskConfig;
 use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
@@ -122,7 +122,6 @@ use nexus_db_queries::db::DataStore;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use tokio::sync::mpsc::Sender;
 use tokio::sync::watch;
 use uuid::Uuid;
 
@@ -254,7 +253,7 @@ impl BackgroundTasksInitializer {
         rack_id: Uuid,
         nexus_id: Uuid,
         resolver: internal_dns::resolver::Resolver,
-        saga_request: Sender<SagaRequest>,
+        sagas: Arc<dyn StartSaga>,
         producer_registry: ProducerRegistry,
     ) -> Driver {
         let mut driver = self.driver;
@@ -548,7 +547,7 @@ impl BackgroundTasksInitializer {
         {
             let detector = region_replacement::RegionReplacementDetector::new(
                 datastore.clone(),
-                saga_request.clone(),
+                sagas.clone(),
             );
 
             driver.register(TaskDefinition {
@@ -569,7 +568,7 @@ impl BackgroundTasksInitializer {
             let detector =
                 region_replacement_driver::RegionReplacementDriver::new(
                     datastore.clone(),
-                    saga_request.clone(),
+                    sagas.clone(),
                 );
 
             driver.register(TaskDefinition {
@@ -731,7 +730,9 @@ fn init_dns(
 
 #[cfg(test)]
 pub mod test {
+    use crate::app::saga::StartSaga;
     use dropshot::HandlerTaskMode;
+    use futures::FutureExt;
     use nexus_db_model::DnsGroup;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
@@ -740,8 +741,38 @@ pub mod test {
     use nexus_types::internal_api::params as nexus_params;
     use omicron_test_utils::dev::poll;
     use std::net::SocketAddr;
+    use std::sync::atomic::AtomicU64;
+    use std::sync::atomic::Ordering;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    /// Used by various tests of tasks that kick off sagas
+    pub(crate) struct NoopStartSaga {
+        count: AtomicU64,
+    }
+
+    impl NoopStartSaga {
+        pub(crate) fn new() -> Self {
+            Self { count: AtomicU64::new(0) }
+        }
+
+        pub(crate) fn count_reset(&self) -> u64 {
+            self.count.swap(0, Ordering::SeqCst)
+        }
+    }
+
+    impl StartSaga for NoopStartSaga {
+        fn saga_start(
+            &self,
+            _: steno::SagaDag,
+        ) -> futures::prelude::future::BoxFuture<
+            '_,
+            Result<(), omicron_common::api::external::Error>,
+        > {
+            let _ = self.count.fetch_add(1, Ordering::SeqCst);
+            async { Ok(()) }.boxed()
+        }
+    }
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
