@@ -1723,8 +1723,7 @@ mod tests {
 
         let ticket = InstanceTicket::new_without_manager_for_test(id);
 
-        let initial_state =
-            fake_instance_initial_state(propolis_id, propolis_addr);
+        let initial_state = fake_instance_initial_state(propolis_addr);
 
         let services = fake_instance_manager_services(
             log,
@@ -1759,7 +1758,6 @@ mod tests {
     }
 
     fn fake_instance_initial_state(
-        propolis_id: PropolisUuid,
         propolis_addr: SocketAddr,
     ) -> InstanceInitialState {
         let hardware = InstanceHardware {
@@ -2132,8 +2130,8 @@ mod tests {
             hardware,
             vmm_runtime,
             propolis_addr,
-            migration_id,
-        } = fake_instance_initial_state(propolis_id, propolis_addr);
+            migration_id: _,
+        } = fake_instance_initial_state(propolis_addr);
 
         let metadata = InstanceMetadata {
             silo_id: Uuid::new_v4(),
