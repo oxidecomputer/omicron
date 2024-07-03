@@ -484,7 +484,7 @@ pub enum SledFilter {
     /// Sleds on which reservations can be created.
     ReservationCreate,
 
-    /// Sleds which should be sent OPTE V2P mappings.
+    /// Sleds which should be sent OPTE V2P mappings and Routing rules.
     VpcRouting,
 
     /// Sleds which should be sent VPC firewall rules.
