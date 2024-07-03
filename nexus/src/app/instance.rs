@@ -12,7 +12,9 @@ use super::MAX_NICS_PER_INSTANCE;
 use super::MAX_SSH_KEYS_PER_INSTANCE;
 use super::MAX_VCPU_PER_INSTANCE;
 use super::MIN_MEMORY_BYTES_PER_INSTANCE;
+use crate::app::saga::StartSaga;
 use crate::app::sagas;
+use crate::app::sagas::NexusSaga;
 use crate::cidata::InstanceCiData;
 use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
@@ -1862,14 +1864,17 @@ impl super::Nexus {
     }
 }
 
-/// `Nexus::notify_instance_updated` (~~Taylor~~ background task's version)
-pub(crate) async fn notify_instance_updated_background(
+/// Invoked by a sled agent to publish an updated runtime state for an
+/// Instance.
+pub(crate) async fn notify_instance_updated(
     datastore: &DataStore,
+    sagas: &dyn StartSaga,
     opctx: &OpContext,
-    saga_request: &tokio::sync::mpsc::Sender<sagas::SagaRequest>,
     instance_id: InstanceUuid,
     new_runtime_state: nexus::SledInstanceState,
 ) -> Result<bool, Error> {
+    use sagas::instance_update;
+
     let migrations = new_runtime_state.migrations();
     let propolis_id = new_runtime_state.propolis_id;
     info!(opctx.log, "received new VMM runtime state from sled agent";
@@ -1894,24 +1899,13 @@ pub(crate) async fn notify_instance_updated_background(
             .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await?;
-        let params = sagas::instance_update::Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            authz_instance,
-        };
-        info!(opctx.log, "queueing update saga for {instance_id}";
-            "instance_id" => %instance_id,
-            "propolis_id" => %propolis_id,
-            "vmm_state" => ?new_runtime_state.vmm_state,
-            "migration_state" => ?migrations,
-        );
-        saga_request
-            .send(sagas::SagaRequest::InstanceUpdate { params })
-            .await
-            .map_err(|_| {
-                Error::internal_error(
-                    "background saga executor is gone! this is not supposed to happen"
-                )
-            })?;
+        let saga = instance_update::SagaInstanceUpdate::prepare(
+            &instance_update::Params {
+                serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+                authz_instance,
+            },
+        )?;
+        sagas.saga_start(saga).await?;
     }
 
     Ok(updated)

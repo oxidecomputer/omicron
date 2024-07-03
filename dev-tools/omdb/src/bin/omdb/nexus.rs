@@ -1269,8 +1269,17 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             /// number of instances found with terminated active migrations
             terminated_active_migrations: usize,
 
-            /// number of update sagas queued.
-            update_sagas_queued: usize,
+            /// number of update sagas started.
+            sagas_started: usize,
+
+            /// number of sagas completed successfully
+            sagas_completed: usize,
+
+            /// number of sagas which failed
+            sagas_failed: usize,
+
+            /// number of sagas which could not be started
+            saga_start_failures: usize,
 
             /// the last error that occurred during execution.
             error: Option<String>,
@@ -1283,7 +1292,10 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             Ok(UpdaterStatus {
                 destroyed_active_vmms,
                 terminated_active_migrations,
-                update_sagas_queued,
+                sagas_started,
+                sagas_completed,
+                sagas_failed,
+                saga_start_failures,
                 error,
             }) => {
                 if let Some(error) = error {
@@ -1303,7 +1315,21 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     "      instances with terminated active migrations: {}",
                     terminated_active_migrations,
                 );
-                println!("    update sagas queued: {update_sagas_queued}");
+                println!("    update sagas started: {sagas_started}");
+                println!(
+                    "    update sagas completed successfully: {}",
+                    sagas_completed,
+                );
+
+                let total_failed = sagas_failed + saga_start_failures;
+                if total_failed > 0 {
+                    println!("    unsuccessful update sagas: {total_failed}");
+                    println!(
+                        "      sagas which could not be started: {}",
+                        saga_start_failures
+                    );
+                    println!("      sagas failed: {sagas_failed}");
+                }
             }
         };
     } else {
