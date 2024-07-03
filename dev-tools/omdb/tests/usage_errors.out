@@ -522,6 +522,7 @@ Commands:
   list-uninitialized  List all uninitialized sleds
   add                 Add an uninitialized sled
   expunge             Expunge a sled (DANGEROUS)
+  expunge-disk        Expunge a disk (DANGEROUS)
   help                Print this message or the help of the given subcommand(s)
 
 Options:

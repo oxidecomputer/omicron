@@ -6137,7 +6137,7 @@ async fn physical_disk_view(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
         let (.., physical_disk) =
-            nexus.physical_disk_lookup(&opctx, &path).await?.fetch().await?;
+            nexus.physical_disk_lookup(&opctx, &path)?.fetch().await?;
         Ok(HttpResponseOk(physical_disk.into()))
     };
     apictx
