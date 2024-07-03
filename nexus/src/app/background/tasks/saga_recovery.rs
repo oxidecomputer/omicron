@@ -8,12 +8,16 @@ use crate::app::background::BackgroundTask;
 use crate::app::sagas::ActionRegistry;
 use crate::saga_interface::SagaContext;
 use crate::Nexus;
+use chrono::{DateTime, Utc};
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use serde_json::json;
+use serde::Serialize;
+use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
 use std::sync::Arc;
+use steno::SagaId;
 use uuid::Uuid;
 
 /// Background task that recovers sagas assigned to this Nexus
@@ -33,6 +37,35 @@ pub struct SagaRecovery {
     nexus: Arc<Nexus>,
     sec: Arc<steno::SecClient>,
     registry: Arc<ActionRegistry>,
+
+    sagas_recovered: BTreeMap<SagaId, DateTime<Utc>>,
+    recent_failures: Vec<RecoveryFailure>,
+    last_pass: LastPass,
+}
+
+// XXX-dap TODO-doc
+// XXX-dap omdb
+#[derive(Clone, Serialize)]
+pub struct SagaRecoveryTaskStatus {
+    all_recovered: BTreeMap<SagaId, DateTime<Utc>>,
+    recent_failures: Vec<RecoveryFailure>,
+    last_pass: LastPass,
+}
+
+// XXX-dap TODO-doc
+#[derive(Clone, Serialize)]
+pub struct RecoveryFailure {
+    time: DateTime<Utc>,
+    saga_id: SagaId,
+    message: String,
+}
+
+// XXX-dap TODO-doc
+#[derive(Clone, Serialize)]
+pub enum LastPass {
+    NeverStarted,
+    Failed { message: String },
+    Recovered { nrecovered: usize, nfailed: usize, nskipped: usize },
 }
 
 impl SagaRecovery {
@@ -51,6 +84,9 @@ impl SagaRecovery {
             nexus,
             sec,
             registry,
+            sagas_recovered: BTreeMap::new(),
+            recent_failures: Vec::new(),
+            last_pass: LastPass::NeverStarted,
         }
     }
 }
@@ -61,30 +97,16 @@ impl BackgroundTask for SagaRecovery {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
-            // XXX-dap We need to modify `recover_saga()` to handle the case
-            // that we've already recovered this saga or we're already running
-            // it.  This should include cases where:
-            // - we recovered in a previous run
-            // - we already started it (and maybe finished and are trying to
-            //   write out saga log entries reflecting that)
-            //   - including the case where it actually finishes in between when
-            //     we listed it and when we tried to recover it -- this is
-            //     important since the SEC might not remember it any more!
-            // - we want tests for all of this, which we might be able to
-            //   simulate by manually messing with the same SecClient
-            // XXX-dap it'd be nice if this function returned:
-            // - a list of sagas that it successfully recovered
-            // - a list of sagas whose recovery failed (for a reason other than
-            //   "we were already working on it")
-            // Then this background task's status could report:
-            // - the N most recently-recovered sagas
-            // - up to M sagas we failed to recover, and why
-            // - how many we recovered in the last go-around
+            // XXX-dap TODO-doc all of this, especially why it's critical that
+            // we keep track of already-recovered sagas and why we do it the way
+            // we do.
+            // XXX-dap TODO-coverage figure out how to test all this
             // XXX-dap review logging around all of this
 
-            nexus_db_queries::db::recover(
+            let recovered = nexus_db_queries::db::recover(
                 &self.saga_recovery_opctx,
                 self.sec_id,
+                &|saga_id| self.sagas_recovered.contains_key(&saga_id),
                 &|saga_logger| {
                     // The extra `Arc` is a little ridiculous.  The problem is
                     // that Steno expects (in `sec_client.saga_resume()`) that
@@ -102,8 +124,50 @@ impl BackgroundTask for SagaRecovery {
             )
             .await;
 
-            // XXX-dap
-            serde_json::Value::Null
+            let last_pass = match recovered {
+                Err(error) => {
+                    warn!(opctx.log, "saga recovery pass failed"; &error);
+                    LastPass::Failed {
+                        message: InlineErrorChain::new(&error).to_string(),
+                    }
+                }
+
+                Ok(ok) => {
+                    let nrecovered = ok.iter_recovered().count();
+                    let nfailed = ok.iter_failed().count();
+                    let nskipped = ok.iter_skipped().count();
+
+                    info!(opctx.log, "saga recovery pass completed";
+                        "nrecovered" => nrecovered,
+                        "nfailed" => nfailed,
+                        "nskipped" => nskipped,
+                    );
+
+                    let now = Utc::now();
+                    for saga_id in ok.iter_recovered() {
+                        self.sagas_recovered.insert(saga_id, now);
+                    }
+
+                    for (saga_id, error) in ok.iter_failed() {
+                        self.recent_failures.push(RecoveryFailure {
+                            time: now,
+                            saga_id,
+                            message: InlineErrorChain::new(error).to_string(),
+                        });
+                    }
+
+                    LastPass::Recovered { nrecovered, nfailed, nskipped }
+                }
+            };
+
+            self.last_pass = last_pass;
+
+            serde_json::to_value(SagaRecoveryTaskStatus {
+                all_recovered: self.sagas_recovered.clone(),
+                recent_failures: self.recent_failures.clone(),
+                last_pass: self.last_pass.clone(),
+            })
+            .unwrap()
         }
         .boxed()
     }

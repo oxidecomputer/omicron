@@ -14,57 +14,84 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::ExpressionMethods;
 use diesel::SelectableHelper;
-use futures::{future::BoxFuture, TryFutureExt};
+use futures::future::BoxFuture;
+use futures::FutureExt;
+use futures::TryFutureExt;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
-use std::future::Future;
-use std::pin::Pin;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::sync::Arc;
-use std::task::{Context, Poll};
+use steno::SagaId;
 
-/// Result type from a [`CompletionTask`].
-pub type CompletionResult = Result<(), Error>;
+/// Describes the result [`recover`]
+pub struct SagasRecovered {
+    recovered: BTreeMap<SagaId, BoxFuture<'static, Result<(), Error>>>,
+    skipped: BTreeSet<SagaId>,
+    failed: BTreeMap<SagaId, Error>,
+}
 
-/// A future which completes once loaded and resumed sagas have also completed.
-pub struct CompletionTask(BoxFuture<'static, CompletionResult>);
+impl SagasRecovered {
+    /// Iterate over the set of sagas that were successfully recovered
+    pub fn iter_recovered(&self) -> impl Iterator<Item = SagaId> + '_ {
+        self.recovered.keys().copied()
+    }
 
-impl Future for CompletionTask {
-    type Output = CompletionResult;
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Pin::new(&mut self.get_mut().0).poll(cx)
+    /// Iterate over the set of sagas that were found but skipped
+    pub fn iter_skipped(&self) -> impl Iterator<Item = SagaId> + '_ {
+        self.skipped.iter().copied()
+    }
+
+    /// Iterate over the set of sagas where recovery was attempted, but failed
+    pub fn iter_failed(&self) -> impl Iterator<Item = (SagaId, &Error)> + '_ {
+        self.failed.iter().map(|(id, error)| (*id, error))
+    }
+
+    /// Waits for all of the successfully recovered sagas to be completed
+    /// successfully.  Returns the first error, if any.
+    #[cfg(test)]
+    async fn wait_for_recovered_sagas_to_finish(self) -> Result<(), Error> {
+        let completion_futures = self.recovered.into_values();
+        futures::future::try_join_all(completion_futures).await?;
+        Ok(())
     }
 }
 
-/// Kick off saga recovery (as after a crash or restart)
+/// Recover in-progress sagas (as after a crash or restart)
 ///
 /// More specifically, this function queries the database to list all
 /// uncompleted sagas that are assigned to SEC `sec_id` and for each one:
 ///
-/// * loads the saga DAG and log from `datastore`
+/// * invokes `skip(saga_id)` to see if this saga should be skipped altogether
+/// * assuming it wasn't skipped, loads the saga DAG and log from `datastore`
 /// * uses [`steno::SecClient::saga_resume`] to prepare to resume execution of
 ///   the saga using the persistent saga log
-/// * resumes execution of each saga
+/// * resumes execution of the saga
 ///
-/// The function completes once all sagas have been loaded and resumed.  The
-/// itself returns a [`CompletionTask`] that completes when those resumed sagas
-/// have finished.
+/// The function completes successfully as long it successfully identifies the
+/// sagas that need to be recovered and it returns once it has attempted to load
+/// and resume all sagas that were found.  The returned value can be used to
+/// inspect more about what happened.
 pub async fn recover<T>(
     opctx: &OpContext,
     sec_id: db::SecId,
+    skip: &(dyn Fn(SagaId) -> bool + Send + Sync),
     make_context: &(dyn Fn(&slog::Logger) -> Arc<T::ExecContextType>
           + Send
           + Sync),
     datastore: &db::DataStore,
     sec_client: &steno::SecClient,
     registry: Arc<steno::ActionRegistry<T>>,
-) -> Result<CompletionTask, Error>
+) -> Result<SagasRecovered, Error>
 where
     T: steno::SagaType,
 {
-    // XXX-dap who else was calling this function and is it okay that we do this
-    // work "synchronously" now?
     info!(&opctx.log, "start saga recovery");
+
+    let mut recovered = BTreeMap::new();
+    let mut skipped = BTreeSet::new();
+    let mut failed = BTreeMap::new();
 
     // We do not retry any database operations here because we're being invoked
     // by a background task that will be re-activated some time later and pick
@@ -80,7 +107,7 @@ where
     // this since these operations should generally be quick, and there
     // shouldn't be too many sagas outstanding, and Nexus has already crashed so
     // they've experienced a bit of latency already.
-    let mut completion_futures = Vec::with_capacity(found_sagas.len());
+    let nfound = found_sagas.len();
     for saga in found_sagas {
         // TODO-debugging want visibility into sagas that we cannot recover for
         // whatever reason
@@ -90,6 +117,13 @@ where
             "saga_name" => saga_name,
             "saga_id" => saga_id.to_string()
         ));
+
+        if skip(saga_id) {
+            skipped.insert(saga_id);
+            debug!(&saga_logger, "recovering saga: skipped (already done)");
+            continue;
+        }
+
         info!(&saga_logger, "recovering saga: start");
         match recover_saga(
             &opctx,
@@ -104,7 +138,7 @@ where
         {
             Ok(completion_future) => {
                 info!(&saga_logger, "recovered saga");
-                completion_futures.push(completion_future);
+                recovered.insert(saga_id, completion_future.boxed());
             }
             Err(error) => {
                 // It's essential that we not bail out early just because we hit
@@ -112,17 +146,15 @@ where
                 error!(
                     &saga_logger,
                     "failed to recover saga";
-                    slog_error_chain::InlineErrorChain::new(&error),
+                    &error,
                 );
+                failed.insert(saga_id, error);
             }
         }
     }
 
-    // Returns a future that awaits the completion of all resumed sagas.
-    Ok(CompletionTask(Box::pin(async move {
-        futures::future::try_join_all(completion_futures).await?;
-        Ok(())
-    })))
+    assert_eq!(recovered.len() + skipped.len() + failed.len(), nfound);
+    Ok(SagasRecovered { recovered, skipped, failed })
 }
 
 /// Queries the database to return a list of uncompleted sagas assigned to SEC
@@ -463,6 +495,7 @@ mod test {
         recover(
             &opctx,
             sec_id,
+            &|_| false,
             &|_| uctx.clone(),
             &db_datastore,
             &sec_client,
@@ -470,7 +503,8 @@ mod test {
         )
         .await // Await the loading and resuming of the sagas
         .unwrap()
-        .await // Awaits the completion of the resumed sagas
+        .wait_for_recovered_sagas_to_finish()
+        .await
         .unwrap();
         assert_eq!(uctx.n1_count.load(Ordering::SeqCst), 2);
         assert_eq!(uctx.n2_count.load(Ordering::SeqCst), 2);
@@ -528,6 +562,7 @@ mod test {
         recover(
             &opctx,
             sec_id,
+            &|_| false,
             &|_| uctx.clone(),
             &db_datastore,
             &sec_client,
@@ -535,6 +570,7 @@ mod test {
         )
         .await
         .unwrap()
+        .wait_for_recovered_sagas_to_finish()
         .await
         .unwrap();
         assert_eq!(uctx.n1_count.load(Ordering::SeqCst), 1);
