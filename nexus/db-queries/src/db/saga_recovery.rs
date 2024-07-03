@@ -314,8 +314,8 @@ mod test {
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use steno::{
         new_action_noop_undo, Action, ActionContext, ActionError,
-        ActionRegistry, DagBuilder, Node, SagaDag, SagaId, SagaName, SagaType,
-        SecClient,
+        ActionRegistry, DagBuilder, Node, SagaDag, SagaId, SagaName,
+        SagaResult, SagaType, SecClient,
     };
     use uuid::Uuid;
 
@@ -439,6 +439,10 @@ mod test {
         (storage, sec_client, uctx)
     }
 
+    // Tests the basic case: recovery of a saga that appears (from its log) to
+    // be still running, and which is not currently running already.  In Nexus,
+    // this corresponds to the basic case where a saga was created in a previous
+    // Nexus lifetime and the current process knows nothing about it.
     #[tokio::test]
     async fn test_failure_during_saga_can_be_recovered() {
         // Test setup
@@ -460,21 +464,12 @@ mod test {
         // Because "do_unplug" is set to true, we should detach storage within
         // the first node operation.
         //
-        // We expect the saga will complete successfully, because the
-        // storage subsystem returns "OK" rather than an error.
+        // We expect the saga will appear to complete successfully because the
+        // simulated storage subsystem returns "OK" rather than an error.  But
+        // the saga log that remains in the database will make it look like it
+        // didn't finish.
         uctx.do_unplug.store(true, Ordering::SeqCst);
-        let saga_id = SagaId(Uuid::new_v4());
-        let future = sec_client
-            .saga_create(
-                saga_id,
-                uctx.clone(),
-                saga_object_create(),
-                registry_create(),
-            )
-            .await
-            .unwrap();
-        sec_client.saga_start(saga_id).await.unwrap();
-        let result = future.await;
+        let (saga_id, result) = run_test_saga(&uctx, &sec_client).await;
         let output = result.kind.unwrap();
         assert_eq!(output.lookup_node_output::<i32>("n1_out").unwrap(), 1);
         assert_eq!(output.lookup_node_output::<i32>("n2_out").unwrap(), 2);
@@ -492,7 +487,7 @@ mod test {
 
         // Recover the saga, observing that it re-runs operations and completes.
         let sec_client = Arc::new(sec_client);
-        recover(
+        let recovered = recover(
             &opctx,
             sec_id,
             &|_| false,
@@ -501,11 +496,14 @@ mod test {
             &sec_client,
             registry_create(),
         )
-        .await // Await the loading and resuming of the sagas
-        .unwrap()
-        .wait_for_recovered_sagas_to_finish()
         .await
         .unwrap();
+
+        assert_eq!([saga_id], *recovered.iter_recovered().collect::<Vec<_>>());
+        assert_eq!(0, recovered.iter_failed().count());
+        assert_eq!(0, recovered.iter_skipped().count());
+
+        recovered.wait_for_recovered_sagas_to_finish().await.unwrap();
         assert_eq!(uctx.n1_count.load(Ordering::SeqCst), 2);
         assert_eq!(uctx.n2_count.load(Ordering::SeqCst), 2);
 
@@ -516,6 +514,28 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    // Helper function to run a basic saga that we can use to see which nodes
+    // ran and how many times.
+    async fn run_test_saga(
+        uctx: &Arc<TestContext>,
+        sec_client: &SecClient,
+    ) -> (SagaId, SagaResult) {
+        let saga_id = SagaId(Uuid::new_v4());
+        let future = sec_client
+            .saga_create(
+                saga_id,
+                uctx.clone(),
+                saga_object_create(),
+                registry_create(),
+            )
+            .await
+            .unwrap();
+        sec_client.saga_start(saga_id).await.unwrap();
+        (saga_id, future.await)
+    }
+
+    // Tests that a saga that has finished (as reflected in the database state)
+    // does not get recovered.
     #[tokio::test]
     async fn test_successful_saga_does_not_replay_during_recovery() {
         // Test setup
@@ -534,18 +554,7 @@ mod test {
         );
 
         // Create and start a saga, which we expect to complete successfully.
-        let saga_id = SagaId(Uuid::new_v4());
-        let future = sec_client
-            .saga_create(
-                saga_id,
-                uctx.clone(),
-                saga_object_create(),
-                registry_create(),
-            )
-            .await
-            .unwrap();
-        sec_client.saga_start(saga_id).await.unwrap();
-        let result = future.await;
+        let (_, result) = run_test_saga(&uctx, &sec_client).await;
         let output = result.kind.unwrap();
         assert_eq!(output.lookup_node_output::<i32>("n1_out").unwrap(), 1);
         assert_eq!(output.lookup_node_output::<i32>("n2_out").unwrap(), 2);
@@ -557,9 +566,9 @@ mod test {
         sec_client.shutdown().await;
         let sec_client = steno::sec(sec_log, storage.clone());
 
-        // Recover the saga, observing that it does not replay the nodes.
+        // Recover the saga.
         let sec_client = Arc::new(sec_client);
-        recover(
+        let recovered = recover(
             &opctx,
             sec_id,
             &|_| false,
@@ -569,10 +578,82 @@ mod test {
             registry_create(),
         )
         .await
-        .unwrap()
-        .wait_for_recovered_sagas_to_finish()
+        .unwrap();
+        // Recovery should not have even seen this saga.
+        assert_eq!(recovered.iter_recovered().count(), 0);
+        assert_eq!(recovered.iter_skipped().count(), 0);
+        assert_eq!(recovered.iter_failed().count(), 0);
+
+        // The nodes should not have been replayed.
+        recovered.wait_for_recovered_sagas_to_finish().await.unwrap();
+        assert_eq!(uctx.n1_count.load(Ordering::SeqCst), 1);
+        assert_eq!(uctx.n2_count.load(Ordering::SeqCst), 1);
+
+        // Test cleanup
+        let sec_client = Arc::try_unwrap(sec_client).unwrap();
+        sec_client.shutdown().await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    // Tests that we skip recovering sagas that we're told to skip.
+    #[tokio::test]
+    async fn test_recovery_skip() {
+        // Test setup
+        let logctx = dev::test_setup_log("test_recovery_skip");
+        let log = logctx.log.new(o!());
+        let (mut db, db_datastore) = new_db(&log).await;
+        let sec_id = db::SecId(uuid::Uuid::new_v4());
+        let (storage, sec_client, uctx) =
+            create_storage_sec_and_context(&log, db_datastore.clone(), sec_id);
+        let sec_log = log.new(o!("component" => "SEC"));
+        let opctx = OpContext::for_tests(
+            log,
+            Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
+        );
+
+        // Create and start a saga.
+        //
+        // See test_failure_during_saga_can_be_recovered().  We use the same
+        // approach here to construct database state that makes it look like the
+        // saga has not finished, even though the in-memory state will look like
+        // it has.
+        uctx.do_unplug.store(true, Ordering::SeqCst);
+        let (saga_id, result) = run_test_saga(&uctx, &sec_client).await;
+        let output = result.kind.unwrap();
+        assert_eq!(output.lookup_node_output::<i32>("n1_out").unwrap(), 1);
+        assert_eq!(output.lookup_node_output::<i32>("n2_out").unwrap(), 2);
+        assert_eq!(uctx.n1_count.load(Ordering::SeqCst), 1);
+        assert_eq!(uctx.n2_count.load(Ordering::SeqCst), 1);
+
+        // Just like in that test, we'll simulate a restart to see what happens
+        // during recovery.  But this time, we'll explicitly skip this saga.
+        sec_client.shutdown().await;
+        let sec_client = steno::sec(sec_log, storage.clone());
+        uctx.storage.set_unplug(false);
+        uctx.do_unplug.store(false, Ordering::SeqCst);
+
+        // Carry out recovery.
+        let sec_client = Arc::new(sec_client);
+        let recovered = recover(
+            &opctx,
+            sec_id,
+            &|found_saga_id| found_saga_id == saga_id,
+            &|_| uctx.clone(),
+            &db_datastore,
+            &sec_client,
+            registry_create(),
+        )
         .await
         .unwrap();
+
+        // We should report no sagas recovered, but one skipped.
+        assert_eq!(0, recovered.iter_recovered().count());
+        assert_eq!(0, recovered.iter_failed().count());
+        assert_eq!([saga_id], *recovered.iter_skipped().collect::<Vec<_>>());
+
+        // Be sure that nothing from that saga actually ran.
+        recovered.wait_for_recovered_sagas_to_finish().await.unwrap();
         assert_eq!(uctx.n1_count.load(Ordering::SeqCst), 1);
         assert_eq!(uctx.n2_count.load(Ordering::SeqCst), 1);
 
@@ -681,9 +762,9 @@ mod test {
             };
         let mut inserted_nodes = (0..SQL_BATCH_SIZE.get() * 2)
             .flat_map(|i| {
-                // This isn't an exhaustive list of event types, but gives us a few
-                // options to pick from. Since this is a pagination key, it's
-                // important to include a variety here.
+                // This isn't an exhaustive list of event types, but gives us a
+                // few options to pick from. Since this is a pagination key,
+                // it's important to include a variety here.
                 use steno::SagaNodeEventType::*;
                 [
                     new_db_saga_nodes(i, Started),
@@ -731,8 +812,8 @@ mod test {
             .collect::<Result<Vec<_>, _>>()
             .expect("Couldn't convert DB nodes to steno nodes");
 
-        // The steno::SagaNodeEvent type doesn't implement PartialEq, so we need to do this
-        // a little manually.
+        // The steno::SagaNodeEvent type doesn't implement PartialEq, so we need
+        // to do this a little manually.
         assert_eq!(inserted_nodes.len(), observed_nodes.len());
         for i in 0..inserted_nodes.len() {
             assert_eq!(inserted_nodes[i].saga_id, observed_nodes[i].saga_id);
@@ -780,4 +861,9 @@ mod test {
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
+
+    // XXX-dap need to fix *and* test the case where we attempt to recover a
+    // saga that was started in this program's lifetime
+    // XXX-dap TODO-coverage test the case of saga recovery error, with other
+    // sagas present
 }
