@@ -27,7 +27,6 @@ use crate::app::sagas::region_replacement_finish::SagaRegionReplacementFinish;
 use crate::app::sagas::NexusSaga;
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use futures::TryFutureExt;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
@@ -124,10 +123,11 @@ impl RegionReplacementDriver {
                     serialized_authn: authn::saga::Serialized::for_opctx(opctx),
                     request,
                 };
-                let result = futures::future::ready(
-                    SagaRegionReplacementDrive::prepare(&params),
-                )
-                .and_then(|saga_dag| self.sagas.saga_start(saga_dag))
+                let result = async {
+                    let saga_dag =
+                        SagaRegionReplacementDrive::prepare(&params)?;
+                    self.sagas.saga_start(saga_dag).await
+                }
                 .await;
                 match result {
                     Ok(_) => {
@@ -194,10 +194,10 @@ impl RegionReplacementDriver {
                 region_volume_id: old_region_volume_id,
                 request,
             };
-            let result = futures::future::ready(
-                SagaRegionReplacementFinish::prepare(&params),
-            )
-            .and_then(|saga_dag| self.sagas.saga_start(saga_dag))
+            let result = async {
+                let saga_dag = SagaRegionReplacementFinish::prepare(&params)?;
+                self.sagas.saga_start(saga_dag).await
+            }
             .await;
             match result {
                 Ok(_) => {

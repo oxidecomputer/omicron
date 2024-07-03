@@ -19,7 +19,6 @@ use crate::app::sagas::NexusSaga;
 use crate::app::RegionAllocationStrategy;
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use futures::TryFutureExt;
 use nexus_db_model::RegionReplacement;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -50,9 +49,8 @@ impl RegionReplacementDetector {
                 RegionAllocationStrategy::RandomWithDistinctSleds { seed: None },
         };
 
-        futures::future::ready(SagaRegionReplacementStart::prepare(&params))
-            .and_then(|saga_dag| self.sagas.saga_start(saga_dag))
-            .await
+        let saga_dag = SagaRegionReplacementStart::prepare(&params)?;
+        self.sagas.saga_start(saga_dag).await
     }
 }
 
