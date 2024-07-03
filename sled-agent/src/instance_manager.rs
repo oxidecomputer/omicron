@@ -329,7 +329,7 @@ impl InstanceManager {
         rx.await?
     }
 
-    /// Marks instances failed unless they're using "disks".
+    /// Marks instances failed unless they're using storage from `disks`.
     ///
     /// This function looks for transient zone filesystem usage on expunged
     /// zpools.
@@ -831,7 +831,7 @@ impl InstanceManagerRunner {
             let Ok(Some(filesystem_pool)) =
                 instance.get_filesystem_zpool().await
             else {
-                info!(self.log, "only_use_disks: Cannot read filesystem pool"; "id" => ?id);
+                info!(self.log, "only_use_disks: Cannot read filesystem pool"; "instance_id" => ?id);
                 continue;
             };
             if !u2_set.contains(&filesystem_pool) {
@@ -840,7 +840,7 @@ impl InstanceManagerRunner {
         }
 
         for id in to_remove {
-            info!(self.log, "only_use_disks: Removing instance"; "id" => ?id);
+            info!(self.log, "only_use_disks: Removing instance"; "instance_id" => ?id);
             self.instances.remove(&id);
         }
 
