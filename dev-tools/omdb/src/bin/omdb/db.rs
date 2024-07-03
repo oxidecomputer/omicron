@@ -1438,8 +1438,8 @@ async fn cmd_db_physical_disks(
     let sleds = datastore
         .physical_disk_list(&opctx, &first_page(limit), filter)
         .await
-        .context("listing sleds")?;
-    check_limit(&sleds, limit, || String::from("listing sleds"));
+        .context("listing physical disks")?;
+    check_limit(&sleds, limit, || String::from("listing physical disks"));
 
     let rows = sleds.into_iter().map(|s| PhysicalDiskRow::from(s));
     let table = tabled::Table::new(rows)

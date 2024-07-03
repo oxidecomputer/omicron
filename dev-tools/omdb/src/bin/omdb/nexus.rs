@@ -1614,7 +1614,7 @@ async fn cmd_nexus_sled_expunge_disk(
         }
     };
 
-    // Now check whether its sled-agent or SP were found in the most recent
+    // Now check whether its sled-agent was found in the most recent
     // inventory collection.
     match datastore
         .inventory_get_latest_collection(opctx)

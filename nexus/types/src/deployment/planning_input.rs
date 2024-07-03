@@ -355,15 +355,7 @@ impl DiskFilter {
         policy: PhysicalDiskPolicy,
         state: PhysicalDiskState,
     ) -> bool {
-        match self {
-            DiskFilter::All => true,
-            DiskFilter::InService => match (policy, state) {
-                (PhysicalDiskPolicy::InService, PhysicalDiskState::Active) => {
-                    true
-                }
-                _ => false,
-            },
-        }
+        policy.matches(self) && state.matches(self)
     }
 }
 
