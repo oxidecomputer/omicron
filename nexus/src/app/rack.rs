@@ -763,10 +763,10 @@ impl super::Nexus {
             limit: NonZeroU32::new(32).unwrap(),
         };
 
-        debug!(self.log, "Listing sleds");
+        debug!(self.log, "Listing commissioned sleds");
         let sleds = self
             .db_datastore
-            .sled_list(opctx, &pagparams, SledFilter::InService)
+            .sled_list(opctx, &pagparams, SledFilter::Commissioned)
             .await?;
 
         let mut uninitialized_sleds: Vec<UninitializedSled> = collection
@@ -897,7 +897,15 @@ impl super::Nexus {
         opctx: &OpContext,
     ) -> Result<String, Error> {
         let addr = self
-            .sled_list(opctx, &DataPageParams::max_page())
+            .sled_list(
+                opctx,
+                &DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: NonZeroU32::new(1).expect("1 is nonzero"),
+                },
+                SledFilter::SledAgentAvailable,
+            )
             .await?
             .get(0)
             .ok_or(Error::InternalError {

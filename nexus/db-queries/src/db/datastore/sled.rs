@@ -38,7 +38,6 @@ use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
-use omicron_common::bail_unless;
 use std::fmt;
 use strum::IntoEnumIterator;
 use thiserror::Error;
@@ -99,30 +98,25 @@ impl DataStore {
         Ok((sled, was_modified))
     }
 
-    /// Confirms that a sled exists and is in-service.
+    /// Confirms that a sled exists and matches the given [`SledFilter`].
     ///
     /// This function may be called from a transaction context.
-    pub async fn check_sled_in_service_on_connection(
+    pub async fn check_sled_matches_filter_on_connection(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         sled_id: Uuid,
-    ) -> Result<(), TransactionError<Error>> {
+        sled_filter: SledFilter,
+    ) -> Result<bool, TransactionError<Error>> {
         use db::schema::sled::dsl;
-        let sled_exists_and_in_service = diesel::select(diesel::dsl::exists(
+        let sled_exists_and_matches = diesel::select(diesel::dsl::exists(
             dsl::sled
                 .filter(dsl::time_deleted.is_null())
                 .filter(dsl::id.eq(sled_id))
-                .sled_filter(SledFilter::InService),
+                .sled_filter(sled_filter),
         ))
         .get_result_async::<bool>(conn)
         .await?;
 
-        bail_unless!(
-            sled_exists_and_in_service,
-            "Sled {} is not in service",
-            sled_id,
-        );
-
-        Ok(())
+        Ok(sled_exists_and_matches)
     }
 
     pub async fn sled_list(
@@ -1285,9 +1279,7 @@ mod test {
             (
                 // In-service and active sleds can be marked as expunged.
                 Before::new(
-                    predicate::in_iter(SledPolicy::all_matching(
-                        SledFilter::InService,
-                    )),
+                    predicate::in_iter(SledPolicy::all_in_service()),
                     predicate::eq(SledState::Active),
                 ),
                 SledTransition::Policy(SledPolicy::Expunged),
@@ -1296,9 +1288,7 @@ mod test {
                 // The provision policy of in-service sleds can be changed, or
                 // kept the same (1 of 2).
                 Before::new(
-                    predicate::in_iter(SledPolicy::all_matching(
-                        SledFilter::InService,
-                    )),
+                    predicate::in_iter(SledPolicy::all_in_service()),
                     predicate::eq(SledState::Active),
                 ),
                 SledTransition::Policy(SledPolicy::InService {
@@ -1308,9 +1298,7 @@ mod test {
             (
                 // (2 of 2)
                 Before::new(
-                    predicate::in_iter(SledPolicy::all_matching(
-                        SledFilter::InService,
-                    )),
+                    predicate::in_iter(SledPolicy::all_in_service()),
                     predicate::eq(SledState::Active),
                 ),
                 SledTransition::Policy(SledPolicy::InService {

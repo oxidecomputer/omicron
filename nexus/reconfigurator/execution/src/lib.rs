@@ -144,7 +144,7 @@ where
     .map_err(|err| vec![err])?;
 
     let sleds_by_id: BTreeMap<SledUuid, _> = datastore
-        .sled_list_all_batched(&opctx, SledFilter::InService)
+        .sled_list_all_batched(&opctx, SledFilter::BlueprintExecutionTarget)
         .await
         .context("listing all sleds")
         .map_err(|e| vec![e])?

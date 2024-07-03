@@ -226,7 +226,7 @@ impl<'a> Planner<'a> {
         let mut sleds_waiting_for_ntp_zone = BTreeSet::new();
 
         for (sled_id, sled_resources) in
-            self.input.all_sled_resources(SledFilter::InService)
+            self.input.all_sled_resources(SledFilter::MandatoryServices)
         {
             // First, we need to ensure that sleds are using their expected
             // disks. This is necessary before we can allocate any zones.
@@ -418,7 +418,10 @@ impl<'a> Planner<'a> {
         // services, but will not include sleds that have been expunged or
         // decommissioned.
         let mut num_existing_kind_zones = 0;
-        for sled_id in self.input.all_sled_ids(SledFilter::InService) {
+        for sled_id in self
+            .input
+            .all_sled_ids(SledFilter::CouldBeRunningDiscretionaryServices)
+        {
             let num_zones_of_kind = self
                 .blueprint
                 .sled_num_zones_of_kind(sled_id, zone_kind.into());

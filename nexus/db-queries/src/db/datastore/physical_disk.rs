@@ -56,18 +56,28 @@ impl DataStore {
                 let zpool = zpool.clone();
                 async move {
                     // Verify that the sled into which we are inserting the disk
-                    // and zpool pair is still in-service.
-                    //
-                    // Although the "physical_disk_insert" and "zpool_insert"
+                    // and zpool pair is still eligible to host zpools; e.g.,
+                    // although the "physical_disk_insert" and "zpool_insert"
                     // functions below check that the Sled hasn't been deleted,
                     // they do not currently check that the Sled has not been
                     // expunged.
-                    Self::check_sled_in_service_on_connection(
-                        &conn,
-                        disk.sled_id,
-                    )
-                    .await
-                    .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                    let valid_sled =
+                        Self::check_sled_matches_filter_on_connection(
+                            &conn,
+                            disk.sled_id,
+                            SledFilter::EligibleForZpools,
+                        )
+                        .await
+                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                    if !valid_sled {
+                        let txn_error = TransactionError::CustomError(
+                            Error::internal_error(&format!(
+                                "Sled {} is not in service",
+                                disk.sled_id
+                            )),
+                        );
+                        return Err(txn_error.into_diesel(&err));
+                    }
 
                     Self::physical_disk_insert_on_connection(
                         &conn, opctx, disk,
@@ -202,9 +212,9 @@ impl DataStore {
         use db::schema::sled::dsl as sled_dsl;
 
         sled_dsl::sled
-            // If the sled is not in-service, drop the list immediately.
+            // If the sled is not eligible for zpools, drop the list immediately.
             .filter(sled_dsl::time_deleted.is_null())
-            .sled_filter(SledFilter::InService)
+            .sled_filter(SledFilter::EligibleForZpools)
             // Look up all inventory physical disks that could match this sled
             .inner_join(
                 inv_physical_disk_dsl::inv_physical_disk.on(

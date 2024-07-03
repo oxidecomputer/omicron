@@ -40,6 +40,7 @@ use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
 use nexus_db_queries::{authz, db::datastore::ProbeInfo};
+use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::shared::BfdStatus;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
@@ -5961,7 +5962,11 @@ async fn sled_list(
         let query = query_params.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let sleds = nexus
-            .sled_list(&opctx, &data_page_params_for(&rqctx, &query)?)
+            .sled_list(
+                &opctx,
+                &data_page_params_for(&rqctx, &query)?,
+                SledFilter::OperatorVisible,
+            )
             .await?
             .into_iter()
             .map(|s| s.into())
