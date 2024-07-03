@@ -241,22 +241,41 @@ impl super::Nexus {
             .internal_context(
                 "fetching cockroachdb settings for rack initialization",
             )?;
-        self.datastore()
-            .cockroachdb_setting_set_string(
-                opctx,
-                cockroachdb_settings.state_fingerprint.clone(),
-                "cluster.preserve_downgrade_option",
-                CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string(),
-            )
-            .await
-            .internal_context(
-                "setting `cluster.preserve_downgrade_option` \
-                for rack initialization",
-            )?;
+        blueprint.cockroachdb_setting_preserve_downgrade =
+            if cockroachdb_settings.preserve_downgrade.is_empty() {
+                // Set the option to the current policy in both the database and
+                // the blueprint.
+                self.datastore()
+                    .cockroachdb_setting_set_string(
+                        opctx,
+                        cockroachdb_settings.state_fingerprint.clone(),
+                        "cluster.preserve_downgrade_option",
+                        CockroachDbClusterVersion::NEWLY_INITIALIZED
+                            .to_string(),
+                    )
+                    .await
+                    .internal_context(
+                        "setting `cluster.preserve_downgrade_option` \
+                        for rack initialization",
+                    )?;
+                CockroachDbClusterVersion::NEWLY_INITIALIZED
+            } else {
+                // Fill in the blueprint with the current value of the option in
+                // the database.
+                CockroachDbClusterVersion::from_str(
+                    &cockroachdb_settings.preserve_downgrade,
+                )
+                .map_err(|_| {
+                    Error::internal_error(&format!(
+                        "database has `cluster.preserve_downgrade_option` \
+                        set to invalid version {}",
+                        cockroachdb_settings.preserve_downgrade
+                    ))
+                })?
+            }
+            .into();
         blueprint.cockroachdb_fingerprint =
             cockroachdb_settings.state_fingerprint;
-        blueprint.cockroachdb_setting_preserve_downgrade =
-            CockroachDbClusterVersion::NEWLY_INITIALIZED.into();
 
         // Administrators of the Recovery Silo are automatically made
         // administrators of the Fleet.
