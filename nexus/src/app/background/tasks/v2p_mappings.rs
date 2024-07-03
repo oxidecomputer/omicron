@@ -2,12 +2,10 @@ use std::{collections::HashSet, sync::Arc};
 
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use nexus_db_model::{Sled, SledState};
+use nexus_db_model::Sled;
 use nexus_db_queries::{context::OpContext, db::DataStore};
 use nexus_networking::sled_client_from_address;
-use nexus_types::{
-    deployment::SledFilter, external_api::views::SledPolicy, identity::Asset,
-};
+use nexus_types::{deployment::SledFilter, identity::Asset};
 use omicron_common::api::external::Vni;
 use serde_json::json;
 use sled_agent_client::types::VirtualNetworkInterfaceHost;
@@ -44,7 +42,7 @@ impl BackgroundTask for V2PManager {
 
             // Get sleds
             // we only care about sleds that are active && inservice
-            let sleds = match self.datastore.sled_list_all_batched(opctx, SledFilter::InService).await
+            let sleds = match self.datastore.sled_list_all_batched(opctx, SledFilter::VpcRouting).await
             {
                 Ok(v) => v,
                 Err(e) => {
@@ -52,15 +50,11 @@ impl BackgroundTask for V2PManager {
                     error!(&log, "{msg}");
                     return json!({"error": msg});
                 }
-            }
-            .into_iter()
-            .filter(|sled| {
-                matches!(sled.state(), SledState::Active)
-                    && matches!(sled.policy(), SledPolicy::InService { .. })
-            });
+            };
 
             // Map sled db records to sled-agent clients
             let sled_clients: Vec<(Sled, sled_agent_client::Client)> = sleds
+                .into_iter()
                 .map(|sled| {
                     let client = sled_client_from_address(
                         sled.id(),
