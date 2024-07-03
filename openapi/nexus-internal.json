@@ -1967,6 +1967,14 @@
               }
             ]
           },
+          "filesystem_pool": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ZpoolName"
+              }
+            ]
+          },
           "id": {
             "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
           },

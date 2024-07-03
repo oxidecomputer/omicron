@@ -1398,7 +1398,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=64e28cea69b427b05064defaf8800a4d678b4612#64e28cea69b427b05064defaf8800a4d678b4612"
+source = "git+https://github.com/oxidecomputer/crucible?rev=e10f8793f8414fdb9a165219f17e45fa014d088b#e10f8793f8414fdb9a165219f17e45fa014d088b"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1414,7 +1414,7 @@ dependencies = [
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=64e28cea69b427b05064defaf8800a4d678b4612#64e28cea69b427b05064defaf8800a4d678b4612"
+source = "git+https://github.com/oxidecomputer/crucible?rev=e10f8793f8414fdb9a165219f17e45fa014d088b#e10f8793f8414fdb9a165219f17e45fa014d088b"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1431,7 +1431,7 @@ dependencies = [
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=64e28cea69b427b05064defaf8800a4d678b4612#64e28cea69b427b05064defaf8800a4d678b4612"
+source = "git+https://github.com/oxidecomputer/crucible?rev=e10f8793f8414fdb9a165219f17e45fa014d088b#e10f8793f8414fdb9a165219f17e45fa014d088b"
 dependencies = [
  "crucible-workspace-hack",
  "libc",
@@ -3940,11 +3940,11 @@ checksum = "d3c48237b9604c5a4702de6b824e02006c3214327564636aef27c1028a8fa0ed"
 
 [[package]]
 name = "lazy_static"
-version = "1.4.0"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
+checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 dependencies = [
- "spin 0.5.2",
+ "spin 0.9.8",
 ]
 
 [[package]]
@@ -4023,7 +4023,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.5",
 ]
 
 [[package]]
@@ -4806,6 +4806,7 @@ dependencies = [
  "anyhow",
  "async-bb8-diesel",
  "chrono",
+ "cockroach-admin-client",
  "diesel",
  "dns-service-client",
  "futures",
@@ -5300,6 +5301,7 @@ dependencies = [
  "openapi-lint",
  "openapiv3",
  "pq-sys",
+ "proptest",
  "schemars",
  "serde",
  "serde_json",
@@ -5308,6 +5310,7 @@ dependencies = [
  "slog-dtrace",
  "slog-error-chain",
  "subprocess",
+ "test-strategy",
  "thiserror",
  "tokio",
  "tokio-postgres",
@@ -8550,7 +8553,7 @@ dependencies = [
 [[package]]
 name = "serde_human_bytes"
 version = "0.1.0"
-source = "git+http://github.com/oxidecomputer/serde_human_bytes?branch=main#0a09794501b6208120528c3b457d5f3a8cb17424"
+source = "git+https://github.com/oxidecomputer/serde_human_bytes?branch=main#0a09794501b6208120528c3b457d5f3a8cb17424"
 dependencies = [
  "hex",
  "serde",
@@ -9206,7 +9209,7 @@ dependencies = [
 [[package]]
 name = "sprockets-common"
 version = "0.1.0"
-source = "git+http://github.com/oxidecomputer/sprockets?rev=77df31efa5619d0767ffc837ef7468101608aee9#77df31efa5619d0767ffc837ef7468101608aee9"
+source = "git+https://github.com/oxidecomputer/sprockets?rev=77df31efa5619d0767ffc837ef7468101608aee9#77df31efa5619d0767ffc837ef7468101608aee9"
 dependencies = [
  "derive_more",
  "hubpack 0.1.0",
@@ -9218,7 +9221,7 @@ dependencies = [
 [[package]]
 name = "sprockets-rot"
 version = "0.1.0"
-source = "git+http://github.com/oxidecomputer/sprockets?rev=77df31efa5619d0767ffc837ef7468101608aee9#77df31efa5619d0767ffc837ef7468101608aee9"
+source = "git+https://github.com/oxidecomputer/sprockets?rev=77df31efa5619d0767ffc837ef7468101608aee9#77df31efa5619d0767ffc837ef7468101608aee9"
 dependencies = [
  "corncobs",
  "derive_more",
@@ -9286,9 +9289,9 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "steno"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a1e7ccea133c197729abfd16dccf91a3c4d0da1e94bb0c0aa164c2b8a227481"
+checksum = "a77bea0b19d52c04783569b87bb3e8d47c85e285be239a9b0428241bdbb95460"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9865,7 +9868,7 @@ dependencies = [
 [[package]]
 name = "tofino"
 version = "0.1.0"
-source = "git+http://github.com/oxidecomputer/tofino?branch=main#1b66b89c3727d2191082df057b068ec52560e334"
+source = "git+https://github.com/oxidecomputer/tofino?branch=main#1b66b89c3727d2191082df057b068ec52560e334"
 dependencies = [
  "anyhow",
  "cc",

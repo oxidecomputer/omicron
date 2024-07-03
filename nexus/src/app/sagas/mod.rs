@@ -15,9 +15,11 @@ use std::sync::Arc;
 use steno::new_action_noop_undo;
 use steno::ActionContext;
 use steno::ActionError;
+use steno::DagBuilder;
+use steno::SagaDag;
+use steno::SagaName;
 use steno::SagaType;
 use thiserror::Error;
-use tokio::sync::mpsc;
 use uuid::Uuid;
 
 pub mod disk_create;
@@ -70,6 +72,17 @@ pub(crate) trait NexusSaga {
         params: &Self::Params,
         builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError>;
+
+    fn prepare(
+        params: &Self::Params,
+    ) -> Result<SagaDag, omicron_common::api::external::Error> {
+        let builder = DagBuilder::new(SagaName::new(Self::NAME));
+        let dag = Self::make_saga_dag(&params, builder)?;
+        let params = serde_json::to_value(&params).map_err(|e| {
+            SagaInitError::SerializeError(format!("saga params: {params:?}"), e)
+        })?;
+        Ok(SagaDag::new(dag, params))
+    }
 }
 
 #[derive(Debug, Error)]
@@ -318,35 +331,3 @@ pub(crate) use __action_name;
 pub(crate) use __emit_action;
 pub(crate) use __stringify_ident;
 pub(crate) use declare_saga_actions;
-
-/// Reliable persistent workflows can request that sagas be run as part of their
-/// activation by sending a SagaRequest through a supplied channel to Nexus.
-pub enum SagaRequest {
-    #[cfg(test)]
-    TestOnly,
-
-    RegionReplacementStart {
-        params: region_replacement_start::Params,
-    },
-
-    RegionReplacementDrive {
-        params: region_replacement_drive::Params,
-    },
-
-    RegionReplacementFinish {
-        params: region_replacement_finish::Params,
-    },
-}
-
-impl SagaRequest {
-    pub fn channel() -> (mpsc::Sender<SagaRequest>, mpsc::Receiver<SagaRequest>)
-    {
-        // Limit the maximum number of saga requests that background tasks can
-        // queue for Nexus to run.
-        //
-        // Note this value was chosen arbitrarily!
-        const MAX_QUEUED_SAGA_REQUESTS: usize = 128;
-
-        mpsc::channel(MAX_QUEUED_SAGA_REQUESTS)
-    }
-}
