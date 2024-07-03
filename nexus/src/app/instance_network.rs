@@ -4,7 +4,6 @@
 
 //! Routines that manage instance-related networking state.
 
-use crate::app::background;
 use crate::app::switch_port;
 use ipnetwork::IpNetwork;
 use nexus_db_model::ExternalIp;

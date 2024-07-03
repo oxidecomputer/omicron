@@ -4,9 +4,8 @@
 
 //! Background task for pulling instance state from sled-agents.
 
-use crate::app::background::Activator;
 use crate::app::background::BackgroundTask;
-use crate::app::sagas;
+use crate::app::saga::StartSaga;
 use futures::{future::BoxFuture, FutureExt};
 use http::StatusCode;
 use nexus_db_model::Instance;
@@ -31,7 +30,6 @@ use std::future::Future;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::Mutex;
-use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
 oximeter::use_timeseries!("vm-health-check.toml");
@@ -40,9 +38,9 @@ use virtual_machine::VirtualMachine;
 /// Background task that periodically checks instance states.
 pub(crate) struct InstanceWatcher {
     datastore: Arc<DataStore>,
+    sagas: Arc<dyn StartSaga>,
     metrics: Arc<Mutex<metrics::Metrics>>,
     id: WatcherIdentity,
-    v2p_manager: Activator,
 }
 
 const MAX_SLED_AGENTS: NonZeroU32 = unsafe {
@@ -53,15 +51,15 @@ const MAX_SLED_AGENTS: NonZeroU32 = unsafe {
 impl InstanceWatcher {
     pub(crate) fn new(
         datastore: Arc<DataStore>,
+        sagas: Arc<dyn StartSaga>,
         producer_registry: &ProducerRegistry,
         id: WatcherIdentity,
-        v2p_manager: Activator,
     ) -> Self {
         let metrics = Arc::new(Mutex::new(metrics::Metrics::default()));
         producer_registry
             .register_producer(metrics::Producer(metrics.clone()))
             .unwrap();
-        Self { datastore, resolver, metrics, id, v2p_manager }
+        Self { datastore, sagas, metrics, id }
     }
 
     fn check_instance(
@@ -71,6 +69,7 @@ impl InstanceWatcher {
         target: VirtualMachine,
     ) -> impl Future<Output = Check> + Send + 'static {
         let datastore = self.datastore.clone();
+        let sagas = self.sagas.clone();
 
         let opctx = opctx.child(
             std::iter::once((
@@ -80,7 +79,6 @@ impl InstanceWatcher {
             .collect(),
         );
         let client = client.clone();
-        let v2p_manager = self.v2p_manager.clone();
 
         async move {
             slog::trace!(opctx.log, "checking on instance...");
@@ -161,35 +159,34 @@ impl InstanceWatcher {
                 "updating instance state";
                 "state" => ?new_runtime_state.vmm_state.state,
             );
-            check.result =
-                crate::app::instance::notify_instance_updated_background(
-                    &datastore,
-                    &opctx,
-                    &saga_req,
-                    InstanceUuid::from_untyped_uuid(target.instance_id),
-                    new_runtime_state,
-                )
-                .await
-                .map_err(|e| {
-                    slog::warn!(
-                        opctx.log,
-                        "error updating instance";
-                        "error" => ?e,
-                    );
-                    match e {
-                        Error::ObjectNotFound { .. } => {
-                            Incomplete::InstanceNotFound
-                        }
-                        _ => Incomplete::UpdateFailed,
+            check.result = crate::app::instance::notify_instance_updated(
+                &datastore,
+                sagas.as_ref(),
+                &opctx,
+                InstanceUuid::from_untyped_uuid(target.instance_id),
+                new_runtime_state,
+            )
+            .await
+            .map_err(|e| {
+                slog::warn!(
+                    opctx.log,
+                    "error updating instance";
+                    "error" => ?e,
+                );
+                match e {
+                    Error::ObjectNotFound { .. } => {
+                        Incomplete::InstanceNotFound
                     }
-                })
-                .map(|updated| {
-                    slog::debug!(
-                        opctx.log, "update successful";
-                        "vmm_updated" => ?updated,
-                    );
-                    check.update_saga_queued = updated;
-                });
+                    _ => Incomplete::UpdateFailed,
+                }
+            })
+            .map(|updated| {
+                slog::debug!(
+                    opctx.log, "update successful";
+                    "vmm_updated" => ?updated,
+                );
+                check.update_saga_queued = updated;
+            });
             check
         }
     }
