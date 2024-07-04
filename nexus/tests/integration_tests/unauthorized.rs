@@ -214,6 +214,19 @@ static SETUP_REQUESTS: Lazy<Vec<SetupReq>> = Lazy::new(|| {
                 &*DEMO_SILO_USER_ID_SET_PASSWORD_URL,
             ],
         },
+        // Create the default Address Lot
+        SetupReq::Post {
+            url: &DEMO_ADDRESS_LOTS_URL,
+            body: serde_json::to_value(&*DEMO_ADDRESS_LOT_CREATE).unwrap(),
+            id_routes: vec!["/v1/system/networking/address-lot/{id}"],
+        },
+        // Create the default Address Lot Block
+        SetupReq::Post {
+            url: &DEMO_ADDRESS_LOT_BLOCKS_URL,
+            body: serde_json::to_value(&*DEMO_ADDRESS_LOT_BLOCK_CREATE)
+                .unwrap(),
+            id_routes: vec![],
+        },
         // Create the default IP pool
         SetupReq::Post {
             url: &DEMO_IP_POOLS_URL,

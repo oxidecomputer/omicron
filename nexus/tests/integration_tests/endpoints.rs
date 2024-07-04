@@ -2232,7 +2232,7 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
 
         VerifyEndpoint {
             url: &DEMO_ADDRESS_LOT_BLOCKS_URL,
-            visibility: Visibility::Public,
+            visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(
@@ -2249,15 +2249,6 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             allowed_methods: vec![
                 AllowedMethod::Delete,
             ]
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_ADDRESS_LOT_BLOCKS_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::GetNonexistent
-            ],
         },
 
         VerifyEndpoint {
