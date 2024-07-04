@@ -126,7 +126,7 @@ impl InstanceUpdater {
                 Ok(Err(err)) => {
                     warn!(opctx.log, "update saga failed!"; "error" => %err);
                     stats.sagas_failed += 1;
-                    last_err = Err(err.into());
+                    last_err = Err(err);
                 }
                 Ok(Ok(())) => stats.sagas_completed += 1,
             }
