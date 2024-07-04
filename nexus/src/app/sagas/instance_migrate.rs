@@ -847,9 +847,29 @@ mod tests {
                     test_helpers::instance_simulate(cptestctx, &instance_id)
                         .await;
 
-                    let new_state =
-                        test_helpers::instance_fetch(cptestctx, instance_id)
-                            .await;
+                    // Wait until the instance has advanced to the `NoVmm`
+                    // state. This may not happen immediately, as the
+                    // `Nexus::cpapi_instances_put` API endpoint simply
+                    // writes the new VMM state to the database and *starts*
+                    // an `instance-update` saga, and the instance record
+                    // isn't updated until that saga completes.
+                    let new_state = poll::wait_for_condition(
+                        || async {
+                            let new_state = test_helpers::instance_fetch(
+                                cptestctx,
+                                instance_id,
+                            )
+                            .await.instance().clone();
+                            if new_state.runtime().nexus_state == nexus_db_model::InstanceState::Vmm {
+                                Err(poll::CondCheckError::<nexus_db_model::Instance>::NotYet)
+                            } else {
+                                Ok(new_state)
+                            }
+                        },
+                        &Duration::from_secs(5),
+                        &Duration::from_secs(300),
+                    )
+                    .await.expect("instance did not transition to NoVmm state after 300 seconds");
 
                     let new_instance = new_state.instance();
                     let new_vmm = new_state.vmm().as_ref();
