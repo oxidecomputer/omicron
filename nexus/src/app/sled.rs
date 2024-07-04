@@ -20,6 +20,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_uuid_kinds::{GenericUuid, SledUuid};
 use sled_agent_client::Client as SledAgentClient;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -123,7 +124,7 @@ impl super::Nexus {
 
     pub async fn sled_client(
         &self,
-        id: &Uuid,
+        id: &SledUuid,
     ) -> Result<Arc<SledAgentClient>, Error> {
         // TODO: We should consider injecting connection pooling here,
         // but for now, connections to sled agents are constructed
@@ -135,7 +136,7 @@ impl super::Nexus {
         let client = nexus_networking::sled_client(
             &self.db_datastore,
             &self.opctx_alloc,
-            *id,
+            id.into_untyped_uuid(),
             &self.log,
         )
         .await?;

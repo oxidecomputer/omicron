@@ -31,7 +31,7 @@ impl Hardware {
             })?;
 
         let disks: Vec<RawDisk> =
-            hardware.disks().into_iter().map(|disk| disk.into()).collect();
+            hardware.disks().into_values().map(|disk| disk.into()).collect();
 
         info!(
             log, "found gimlet hardware";

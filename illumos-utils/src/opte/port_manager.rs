@@ -7,6 +7,7 @@
 use crate::opte::opte_firewall_rules;
 use crate::opte::params::VirtualNetworkInterfaceHost;
 use crate::opte::params::VpcFirewallRule;
+use crate::opte::port::PortData;
 use crate::opte::Error;
 use crate::opte::Gateway;
 use crate::opte::Port;
@@ -15,8 +16,15 @@ use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::api::internal::shared::ResolvedVpcRoute;
+use omicron_common::api::internal::shared::ResolvedVpcRouteSet;
+use omicron_common::api::internal::shared::ResolvedVpcRouteState;
+use omicron_common::api::internal::shared::RouterId;
+use omicron_common::api::internal::shared::RouterTarget as ApiRouterTarget;
+use omicron_common::api::internal::shared::RouterVersion;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use oxide_vpc::api::AddRouterEntryReq;
+use oxide_vpc::api::DelRouterEntryReq;
 use oxide_vpc::api::DhcpCfg;
 use oxide_vpc::api::ExternalIpCfg;
 use oxide_vpc::api::IpCfg;
@@ -24,7 +32,7 @@ use oxide_vpc::api::IpCidr;
 use oxide_vpc::api::Ipv4Cfg;
 use oxide_vpc::api::Ipv6Cfg;
 use oxide_vpc::api::MacAddr;
-use oxide_vpc::api::RouterTarget;
+use oxide_vpc::api::RouterClass;
 use oxide_vpc::api::SNat4Cfg;
 use oxide_vpc::api::SNat6Cfg;
 use oxide_vpc::api::SetExternalIpsReq;
@@ -34,6 +42,8 @@ use slog::error;
 use slog::info;
 use slog::Logger;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::sync::atomic::AtomicU64;
@@ -45,19 +55,30 @@ use uuid::Uuid;
 // Prefix used to identify xde data links.
 const XDE_LINK_PREFIX: &str = "opte";
 
+/// Stored routes (and usage count) for a given VPC/subnet.
+#[derive(Debug, Clone)]
+struct RouteSet {
+    version: Option<RouterVersion>,
+    routes: HashSet<ResolvedVpcRoute>,
+    active_ports: usize,
+}
+
 #[derive(Debug)]
 struct PortManagerInner {
     log: Logger,
 
-    // Sequential identifier for each port on the system.
+    /// Sequential identifier for each port on the system.
     next_port_id: AtomicU64,
 
-    // IP address of the hosting sled on the underlay.
+    /// IP address of the hosting sled on the underlay.
     underlay_ip: Ipv6Addr,
 
-    // Map of all ports, keyed on the interface Uuid and its kind
-    // (which includes the Uuid of the parent instance or service)
+    /// Map of all ports, keyed on the interface Uuid and its kind
+    /// (which includes the Uuid of the parent instance or service)
     ports: Mutex<BTreeMap<(Uuid, NetworkInterfaceKind), Port>>,
+
+    /// Map of all current resolved routes.
+    routes: Mutex<HashMap<RouterId, RouteSet>>,
 }
 
 impl PortManagerInner {
@@ -68,6 +89,18 @@ impl PortManagerInner {
             self.next_port_id.fetch_add(1, Ordering::SeqCst)
         )
     }
+}
+
+#[derive(Debug)]
+/// Parameters needed to create and configure an OPTE port.
+pub struct PortCreateParams<'a> {
+    pub nic: &'a NetworkInterface,
+    pub source_nat: Option<SourceNatConfig>,
+    pub ephemeral_ip: Option<IpAddr>,
+    pub floating_ips: &'a [IpAddr],
+    pub firewall_rules: &'a [VpcFirewallRule],
+    pub dhcp_config: DhcpCfg,
+    pub is_service: bool,
 }
 
 /// The port manager controls all OPTE ports on a single host.
@@ -84,6 +117,7 @@ impl PortManager {
             next_port_id: AtomicU64::new(0),
             underlay_ip,
             ports: Mutex::new(BTreeMap::new()),
+            routes: Mutex::new(Default::default()),
         });
 
         Self { inner }
@@ -97,13 +131,18 @@ impl PortManager {
     #[cfg_attr(not(target_os = "illumos"), allow(unused_variables))]
     pub fn create_port(
         &self,
-        nic: &NetworkInterface,
-        source_nat: Option<SourceNatConfig>,
-        ephemeral_ip: Option<IpAddr>,
-        floating_ips: &[IpAddr],
-        firewall_rules: &[VpcFirewallRule],
-        dhcp_config: DhcpCfg,
+        params: PortCreateParams,
     ) -> Result<(Port, PortTicket), Error> {
+        let PortCreateParams {
+            nic,
+            source_nat,
+            ephemeral_ip,
+            floating_ips,
+            firewall_rules,
+            dhcp_config,
+            is_service,
+        } = params;
+
         let mac = *nic.mac;
         let vni = Vni::new(nic.vni).unwrap();
         let subnet = IpNetwork::from(nic.subnet);
@@ -319,15 +358,16 @@ impl PortManager {
         let (port, ticket) = {
             let mut ports = self.inner.ports.lock().unwrap();
             let ticket = PortTicket::new(nic.id, nic.kind, self.inner.clone());
-            let port = Port::new(
-                port_name.clone(),
-                nic.ip,
+            let port = Port::new(PortData {
+                name: port_name.clone(),
+                ip: nic.ip,
                 mac,
-                nic.slot,
+                slot: nic.slot,
                 vni,
+                subnet: nic.subnet,
                 gateway,
                 vnic,
-            );
+            });
             let old = ports.insert((nic.id, nic.kind), port.clone());
             assert!(
                 old.is_none(),
@@ -338,57 +378,102 @@ impl PortManager {
             (port, ticket)
         };
 
-        // Add a router entry for this interface's subnet, directing traffic to the
-        // VPC subnet.
-        let route = AddRouterEntryReq {
-            port_name: port_name.clone(),
-            dest: vpc_subnet,
-            target: RouterTarget::VpcSubnet(vpc_subnet),
-        };
-        #[cfg(target_os = "illumos")]
-        hdl.add_router_entry(&route)?;
-        debug!(
-            self.inner.log,
-            "Added VPC Subnet router entry";
-            "port_name" => &port_name,
-            "route" => ?route,
-        );
+        // Check locally to see whether we have any routes from the
+        // control plane for this port already installed. If not,
+        // create a record to show that we're interested in receiving
+        // those routes.
+        let mut routes = self.inner.routes.lock().unwrap();
+        let system_routes =
+            routes.entry(port.system_router_key()).or_insert_with(|| {
+                let mut routes = HashSet::new();
 
-        // TODO-remove
-        //
-        // See https://github.com/oxidecomputer/omicron/issues/1336
-        //
-        // This is another part of the workaround, allowing reply traffic from
-        // the guest back out. Normally, OPTE would drop such traffic at the
-        // router layer, as it has no route for that external IP address. This
-        // allows such traffic through.
-        //
-        // Note that this exact rule will eventually be included, since it's one
-        // of the default routing rules in the VPC System Router. However, that
-        // will likely be communicated in a different way, or could be modified,
-        // and this specific call should be removed in favor of sending the
-        // routing rules the control plane provides.
-        //
-        // This rule sends all traffic that has no better match to the gateway.
-        let dest = match vpc_subnet {
-            IpCidr::Ip4(_) => "0.0.0.0/0",
-            IpCidr::Ip6(_) => "::/0",
+                // Services do not talk to one another via OPTE, but do need
+                // to reach out over the Internet *before* nexus is up to give
+                // us real rules. The easiest bet is to instantiate these here.
+                if is_service {
+                    routes.insert(ResolvedVpcRoute {
+                        dest: "0.0.0.0/0".parse().unwrap(),
+                        target: ApiRouterTarget::InternetGateway,
+                    });
+                    routes.insert(ResolvedVpcRoute {
+                        dest: "::/0".parse().unwrap(),
+                        target: ApiRouterTarget::InternetGateway,
+                    });
+                }
+
+                RouteSet { version: None, routes, active_ports: 0 }
+            });
+        system_routes.active_ports += 1;
+        // Clone is needed to get borrowck on our side, sadly.
+        let system_routes = system_routes.clone();
+
+        let custom_routes = routes
+            .entry(port.custom_router_key())
+            .or_insert_with(|| RouteSet {
+                version: None,
+                routes: HashSet::default(),
+                active_ports: 0,
+            });
+        custom_routes.active_ports += 1;
+
+        for (class, routes) in [
+            (RouterClass::System, &system_routes),
+            (RouterClass::Custom, custom_routes),
+        ] {
+            for route in &routes.routes {
+                let route = AddRouterEntryReq {
+                    class,
+                    port_name: port_name.clone(),
+                    dest: super::net_to_cidr(route.dest),
+                    target: super::router_target_opte(&route.target),
+                };
+
+                #[cfg(target_os = "illumos")]
+                hdl.add_router_entry(&route)?;
+
+                debug!(
+                    self.inner.log,
+                    "Added router entry";
+                    "port_name" => &port_name,
+                    "route" => ?route,
+                );
+            }
         }
-        .parse()
-        .unwrap();
-        let route = AddRouterEntryReq {
-            port_name: port_name.clone(),
-            dest,
-            target: RouterTarget::InternetGateway,
-        };
-        #[cfg(target_os = "illumos")]
-        hdl.add_router_entry(&route)?;
-        debug!(
-            self.inner.log,
-            "Added default internet gateway route entry";
-            "port_name" => &port_name,
-            "route" => ?route,
-        );
+
+        // If there are any transit IPs set, allow them through.
+        // TODO: Currently set only in initial state.
+        //       This, external IPs, and cfg'able state
+        //       (DHCP?) are probably worth being managed by an RPW.
+        for block in &nic.transit_ips {
+            #[cfg(target_os = "illumos")]
+            {
+                use oxide_vpc::api::Direction;
+
+                // In principle if this were an operation on an existing
+                // port, we would explicitly undo the In addition if the
+                // Out addition fails.
+                // However, failure here will just destroy the port
+                // outright -- this should only happen if an excessive
+                // number of rules are specified.
+                hdl.allow_cidr(
+                    &port_name,
+                    super::net_to_cidr(*block),
+                    Direction::In,
+                )?;
+                hdl.allow_cidr(
+                    &port_name,
+                    super::net_to_cidr(*block),
+                    Direction::Out,
+                )?;
+            }
+
+            debug!(
+                self.inner.log,
+                "Added CIDR to in/out allowlist";
+                "port_name" => &port_name,
+                "cidr" => ?block,
+            );
+        }
 
         info!(
             self.inner.log,
@@ -396,6 +481,122 @@ impl PortManager {
             "port" => ?&port,
         );
         Ok((port, ticket))
+    }
+
+    pub fn vpc_routes_list(&self) -> Vec<ResolvedVpcRouteState> {
+        let routes = self.inner.routes.lock().unwrap();
+        routes
+            .iter()
+            .map(|(k, v)| ResolvedVpcRouteState { id: *k, version: v.version })
+            .collect()
+    }
+
+    pub fn vpc_routes_ensure(
+        &self,
+        new_routes: Vec<ResolvedVpcRouteSet>,
+    ) -> Result<(), Error> {
+        let mut routes = self.inner.routes.lock().unwrap();
+        let mut deltas = HashMap::new();
+        for new in new_routes {
+            // Disregard any route information for a subnet we don't have.
+            let Some(old) = routes.get(&new.id) else {
+                continue;
+            };
+
+            // We have to handle subnet router changes, as well as
+            // spurious updates from multiple Nexus instances.
+            // If there's a UUID match, only update if vers increased,
+            // otherwise take the update verbatim (including loss of version).
+            let (to_add, to_delete): (HashSet<_>, HashSet<_>) =
+                match (old.version, new.version) {
+                    (Some(old_vers), Some(new_vers))
+                        if !old_vers.is_replaced_by(&new_vers) =>
+                    {
+                        continue;
+                    }
+                    _ => (
+                        new.routes.difference(&old.routes).cloned().collect(),
+                        old.routes.difference(&new.routes).cloned().collect(),
+                    ),
+                };
+            deltas.insert(new.id, (to_add, to_delete));
+
+            let active_ports = old.active_ports;
+            routes.insert(
+                new.id,
+                RouteSet {
+                    version: new.version,
+                    routes: new.routes,
+                    active_ports,
+                },
+            );
+        }
+
+        // Note: We're deliberately holding both locks here
+        // to prevent several nexuses computng and applying deltas
+        // out of order.
+        let ports = self.inner.ports.lock().unwrap();
+        #[cfg(target_os = "illumos")]
+        let hdl = opte_ioctl::OpteHdl::open(opte_ioctl::OpteHdl::XDE_CTL)?;
+
+        // Propagate deltas out to all ports.
+        for port in ports.values() {
+            let system_id = port.system_router_key();
+            let system_delta = deltas.get(&system_id);
+
+            let custom_id = port.custom_router_key();
+            let custom_delta = deltas.get(&custom_id);
+
+            #[cfg_attr(not(target_os = "illumos"), allow(unused_variables))]
+            for (class, delta) in [
+                (RouterClass::System, system_delta),
+                (RouterClass::Custom, custom_delta),
+            ] {
+                let Some((to_add, to_delete)) = delta else {
+                    continue;
+                };
+
+                for route in to_delete {
+                    let route = DelRouterEntryReq {
+                        class,
+                        port_name: port.name().into(),
+                        dest: super::net_to_cidr(route.dest),
+                        target: super::router_target_opte(&route.target),
+                    };
+
+                    #[cfg(target_os = "illumos")]
+                    hdl.del_router_entry(&route)?;
+
+                    debug!(
+                        self.inner.log,
+                        "Removed router entry";
+                        "port_name" => &port.name(),
+                        "route" => ?route,
+                    );
+                }
+
+                for route in to_add {
+                    let route = AddRouterEntryReq {
+                        class,
+                        port_name: port.name().into(),
+                        dest: super::net_to_cidr(route.dest),
+                        target: super::router_target_opte(&route.target),
+                    };
+
+                    #[cfg(target_os = "illumos")]
+                    hdl.add_router_entry(&route)?;
+
+                    debug!(
+                        self.inner.log,
+                        "Added router entry";
+                        "port_name" => &port.name(),
+                        "route" => ?route,
+                    );
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Ensure external IPs for an OPTE port are up to date.
@@ -739,6 +940,29 @@ impl PortTicket {
             );
             return Err(Error::ReleaseMissingPort(self.id, self.kind));
         };
+        drop(ports);
+
+        // Cleanup the set of subnets we want to receive routes for.
+        let mut routes = self.manager.routes.lock().unwrap();
+        for key in [port.system_router_key(), port.custom_router_key()] {
+            let should_remove = routes
+                .get_mut(&key)
+                .map(|v| {
+                    v.active_ports = v.active_ports.saturating_sub(1);
+                    v.active_ports == 0
+                })
+                .unwrap_or_default();
+
+            if should_remove {
+                routes.remove(&key);
+                info!(
+                    self.manager.log,
+                    "Removed route set for subnet";
+                    "id" => ?&key,
+                );
+            }
+        }
+
         debug!(
             self.manager.log,
             "Removed OPTE port from manager";

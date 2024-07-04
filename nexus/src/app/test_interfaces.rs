@@ -6,6 +6,8 @@ use async_trait::async_trait;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::{InstanceUuid, SledUuid};
 use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -28,12 +30,12 @@ pub trait TestInterfaces {
     /// but after all it's a test suite special to begin with.
     async fn instance_sled_by_id(
         &self,
-        id: &Uuid,
+        id: &InstanceUuid,
     ) -> Result<Option<Arc<SledAgentClient>>, Error>;
 
     async fn instance_sled_by_id_with_opctx(
         &self,
-        id: &Uuid,
+        id: &InstanceUuid,
         opctx: &OpContext,
     ) -> Result<Option<Arc<SledAgentClient>>, Error>;
 
@@ -47,14 +49,14 @@ pub trait TestInterfaces {
     /// Returns the supplied instance's current active sled ID.
     async fn instance_sled_id(
         &self,
-        instance_id: &Uuid,
-    ) -> Result<Option<Uuid>, Error>;
+        instance_id: &InstanceUuid,
+    ) -> Result<Option<SledUuid>, Error>;
 
     async fn instance_sled_id_with_opctx(
         &self,
-        instance_id: &Uuid,
+        instance_id: &InstanceUuid,
         opctx: &OpContext,
-    ) -> Result<Option<Uuid>, Error>;
+    ) -> Result<Option<SledUuid>, Error>;
 
     async fn set_disk_as_faulted(&self, disk_id: &Uuid) -> Result<bool, Error>;
 
@@ -69,11 +71,12 @@ impl TestInterfaces for super::Nexus {
 
     async fn instance_sled_by_id(
         &self,
-        id: &Uuid,
+        id: &InstanceUuid,
     ) -> Result<Option<Arc<SledAgentClient>>, Error> {
         let opctx = OpContext::for_tests(
             self.log.new(o!()),
-            Arc::clone(&self.db_datastore),
+            Arc::clone(&self.db_datastore)
+                as Arc<dyn nexus_auth::storage::Storage>,
         );
 
         self.instance_sled_by_id_with_opctx(id, &opctx).await
@@ -81,7 +84,7 @@ impl TestInterfaces for super::Nexus {
 
     async fn instance_sled_by_id_with_opctx(
         &self,
-        id: &Uuid,
+        id: &InstanceUuid,
         opctx: &OpContext,
     ) -> Result<Option<Arc<SledAgentClient>>, Error> {
         let sled_id = self.instance_sled_id_with_opctx(id, opctx).await?;
@@ -98,21 +101,28 @@ impl TestInterfaces for super::Nexus {
     ) -> Result<Option<Arc<SledAgentClient>>, Error> {
         let opctx = OpContext::for_tests(
             self.log.new(o!()),
-            Arc::clone(&self.db_datastore),
+            Arc::clone(&self.db_datastore)
+                as Arc<dyn nexus_auth::storage::Storage>,
         );
         let (.., db_disk) = LookupPath::new(&opctx, &self.db_datastore)
             .disk_id(*id)
             .fetch()
             .await?;
 
-        self.instance_sled_by_id(&db_disk.runtime().attach_instance_id.unwrap())
-            .await
+        let instance_id = InstanceUuid::from_untyped_uuid(
+            db_disk.runtime().attach_instance_id.unwrap(),
+        );
+        self.instance_sled_by_id(&instance_id).await
     }
 
-    async fn instance_sled_id(&self, id: &Uuid) -> Result<Option<Uuid>, Error> {
+    async fn instance_sled_id(
+        &self,
+        id: &InstanceUuid,
+    ) -> Result<Option<SledUuid>, Error> {
         let opctx = OpContext::for_tests(
             self.log.new(o!()),
-            Arc::clone(&self.db_datastore),
+            Arc::clone(&self.db_datastore)
+                as Arc<dyn nexus_auth::storage::Storage>,
         );
 
         self.instance_sled_id_with_opctx(id, &opctx).await
@@ -120,11 +130,11 @@ impl TestInterfaces for super::Nexus {
 
     async fn instance_sled_id_with_opctx(
         &self,
-        id: &Uuid,
+        id: &InstanceUuid,
         opctx: &OpContext,
-    ) -> Result<Option<Uuid>, Error> {
+    ) -> Result<Option<SledUuid>, Error> {
         let (.., authz_instance) = LookupPath::new(&opctx, &self.db_datastore)
-            .instance_id(*id)
+            .instance_id(id.into_untyped_uuid())
             .lookup_for(nexus_db_queries::authz::Action::Read)
             .await?;
 
@@ -138,7 +148,8 @@ impl TestInterfaces for super::Nexus {
     async fn set_disk_as_faulted(&self, disk_id: &Uuid) -> Result<bool, Error> {
         let opctx = OpContext::for_tests(
             self.log.new(o!()),
-            Arc::clone(&self.db_datastore),
+            Arc::clone(&self.db_datastore)
+                as Arc<dyn nexus_auth::storage::Storage>,
         );
 
         let (.., authz_disk, db_disk) =

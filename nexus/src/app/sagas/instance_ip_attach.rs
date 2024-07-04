@@ -13,6 +13,7 @@ use crate::app::{authn, authz};
 use nexus_db_model::{IpAttachState, Ipv4NatEntry};
 use nexus_types::external_api::views;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid, SledUuid};
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -89,6 +90,8 @@ async fn siia_begin_attach_ip(
         &params.serialized_authn,
     );
 
+    let instance_id =
+        InstanceUuid::from_untyped_uuid(params.authz_instance.id());
     match &params.create_params {
         // Allocate a new IP address from the target, possibly default, pool
         ExternalIpAttach::Ephemeral { pool } => {
@@ -111,7 +114,7 @@ async fn siia_begin_attach_ip(
                 .allocate_instance_ephemeral_ip(
                     &opctx,
                     Uuid::new_v4(),
-                    params.authz_instance.id(),
+                    instance_id,
                     pool,
                     false,
                 )
@@ -124,12 +127,7 @@ async fn siia_begin_attach_ip(
         }
         // Set the parent of an existing floating IP to the new instance's ID.
         ExternalIpAttach::Floating { floating_ip } => datastore
-            .floating_ip_begin_attach(
-                &opctx,
-                &floating_ip,
-                params.authz_instance.id(),
-                false,
-            )
+            .floating_ip_begin_attach(&opctx, &floating_ip, instance_id, false)
             .await
             .map_err(ActionError::action_failed)
             .map(|(external_ip, do_saga)| ModifyStateForExternalIp {
@@ -163,7 +161,7 @@ async fn siia_begin_attach_ip_undo(
 
 async fn siia_get_instance_state(
     sagactx: NexusActionContext,
-) -> Result<Option<Uuid>, ActionError> {
+) -> Result<Option<SledUuid>, ActionError> {
     let params = sagactx.saga_params::<Params>()?;
     instance_ip_get_instance_state(
         &sagactx,
@@ -179,7 +177,7 @@ async fn siia_nat(
     sagactx: NexusActionContext,
 ) -> Result<Option<Ipv4NatEntry>, ActionError> {
     let params = sagactx.saga_params::<Params>()?;
-    let sled_id = sagactx.lookup::<Option<Uuid>>("instance_state")?;
+    let sled_id = sagactx.lookup::<Option<SledUuid>>("instance_state")?;
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
     instance_ip_add_nat(
         &sagactx,
@@ -248,7 +246,7 @@ async fn siia_update_opte(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let params = sagactx.saga_params::<Params>()?;
-    let sled_id = sagactx.lookup::<Option<Uuid>>("instance_state")?;
+    let sled_id = sagactx.lookup::<Option<SledUuid>>("instance_state")?;
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
     instance_ip_add_opte(&sagactx, &params.authz_instance, sled_id, target_ip)
         .await
@@ -259,7 +257,7 @@ async fn siia_update_opte_undo(
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
-    let sled_id = sagactx.lookup::<Option<Uuid>>("instance_state")?;
+    let sled_id = sagactx.lookup::<Option<SledUuid>>("instance_state")?;
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
     if let Err(e) = instance_ip_remove_opte(
         &sagactx,
@@ -420,19 +418,25 @@ pub(crate) mod test {
         let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
+        crate::app::sagas::test_helpers::instance_simulate(
+            cptestctx,
+            &instance_id,
+        )
+        .await;
+
         for use_float in [false, true] {
             let params = new_test_params(&opctx, datastore, use_float).await;
-
-            let dag = create_saga_dag::<SagaInstanceIpAttach>(params).unwrap();
-            let saga = nexus.create_runnable_saga(dag).await.unwrap();
-            nexus.run_saga(saga).await.expect("Attach saga should succeed");
+            nexus
+                .sagas
+                .saga_execute::<SagaInstanceIpAttach>(params)
+                .await
+                .expect("Attach saga should succeed");
         }
-
-        let instance_id = instance.id();
 
         // Sled agent has a record of the new external IPs.
         let mut eips = sled_agent.external_ips.lock().await;
-        let my_eips = eips.entry(instance_id).or_default();
+        let my_eips = eips.entry(instance_id.into_untyped_uuid()).or_default();
         assert!(my_eips.iter().any(|v| matches!(
             v,
             omicron_sled_agent::params::InstanceExternalIpBody::Floating(_)
@@ -509,6 +513,12 @@ pub(crate) mod test {
         let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 
+        crate::app::sagas::test_helpers::instance_simulate(
+            cptestctx,
+            &InstanceUuid::from_untyped_uuid(instance.identity.id),
+        )
+        .await;
+
         for use_float in [false, true] {
             test_helpers::action_failure_can_unwind::<SagaInstanceIpAttach, _, _>(
                 nexus,
@@ -534,6 +544,12 @@ pub(crate) mod test {
         let _project_id = ip_manip_test_setup(&client).await;
         let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
+
+        crate::app::sagas::test_helpers::instance_simulate(
+            cptestctx,
+            &InstanceUuid::from_untyped_uuid(instance.identity.id),
+        )
+        .await;
 
         for use_float in [false, true] {
             test_helpers::action_failure_can_unwind_idempotently::<
@@ -561,8 +577,14 @@ pub(crate) mod test {
         let opctx = test_helpers::test_opctx(cptestctx);
         let datastore = &nexus.db_datastore;
         let _project_id = ip_manip_test_setup(&client).await;
-        let _instance =
+        let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
+
+        crate::app::sagas::test_helpers::instance_simulate(
+            cptestctx,
+            &InstanceUuid::from_untyped_uuid(instance.identity.id),
+        )
+        .await;
 
         for use_float in [false, true] {
             let params = new_test_params(&opctx, datastore, use_float).await;

@@ -174,6 +174,8 @@ impl<'a> Collector<'a> {
                     CabooseWhich::SpSlot1 => ("sp", 1),
                     CabooseWhich::RotSlotA => ("rot", 0),
                     CabooseWhich::RotSlotB => ("rot", 1),
+                    CabooseWhich::Stage0 => ("stage0", 0),
+                    CabooseWhich::Stage0Next => ("stage0", 1),
                 };
 
                 let result = client
@@ -377,7 +379,9 @@ mod test {
     use gateway_messages::SpPort;
     use nexus_types::inventory::Collection;
     use omicron_common::api::external::Generation;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_sled_agent::sim;
+    use omicron_uuid_kinds::ZpoolUuid;
     use std::fmt::Write;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
@@ -545,6 +549,7 @@ mod test {
         let sled_url = format!("http://{}/", agent.http_server.local_addr());
         let client = sled_agent_client::Client::new(&sled_url, log);
 
+        let filesystem_pool = ZpoolName::new_external(ZpoolUuid::new_v4());
         let zone_address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0);
         client
             .omicron_zones_put(&sled_agent_client::types::OmicronZonesConfig {
@@ -556,6 +561,7 @@ mod test {
                         sled_agent_client::types::OmicronZoneType::Oximeter {
                             address: zone_address.to_string(),
                         },
+                    filesystem_pool: Some(filesystem_pool),
                 }],
             })
             .await

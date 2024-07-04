@@ -33,7 +33,6 @@ use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use nexus_db_model::ServiceNetworkInterface;
 use nexus_types::identity::Resource;
-use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -61,6 +60,7 @@ struct NicInfo {
     vni: db::model::Vni,
     primary: bool,
     slot: i16,
+    transit_ips: Vec<ipnetwork::IpNetwork>,
 }
 
 impl From<NicInfo> for omicron_common::api::internal::shared::NetworkInterface {
@@ -93,6 +93,7 @@ impl From<NicInfo> for omicron_common::api::internal::shared::NetworkInterface {
             vni: nic.vni.0,
             primary: nic.primary,
             slot: u8::try_from(nic.slot).unwrap(),
+            transit_ips: nic.transit_ips.iter().map(|v| (*v).into()).collect(),
         }
     }
 }
@@ -137,11 +138,27 @@ impl DataStore {
                 ),
             ));
         }
-        self.create_network_interface_raw(opctx, interface)
+
+        let out = self
+            .create_network_interface_raw(opctx, interface)
             .await
             // Convert to `InstanceNetworkInterface` before returning; we know
             // this is valid as we've checked the condition on-entry.
-            .map(NetworkInterface::as_instance)
+            .map(NetworkInterface::as_instance)?;
+
+        // `instance:xxx` targets in router rules resolve to the primary
+        // NIC of that instance. Accordingly, NIC create may cause dangling
+        // entries to re-resolve to a valid instance (even if it is not yet
+        // started).
+        // This will not trigger the route RPW directly, we still need to do
+        // so in e.g. the instance watcher task.
+        if out.primary {
+            self.vpc_increment_rpw_version(opctx, out.vpc_id)
+                .await
+                .map_err(|e| network_interface::InsertError::External(e))?;
+        }
+
+        Ok(out)
     }
 
     /// List network interfaces associated with a given service.
@@ -487,6 +504,7 @@ impl DataStore {
                 vpc::vni,
                 network_interface::is_primary,
                 network_interface::slot,
+                network_interface::transit_ips,
             ))
             .get_results_async::<NicInfo>(
                 &*self.pool_connection_authorized(opctx).await?,
@@ -609,6 +627,28 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Retrieve the primary network interface for a given instance.
+    pub async fn instance_get_primary_network_interface(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+    ) -> LookupResult<InstanceNetworkInterface> {
+        opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
+
+        use db::schema::instance_network_interface::dsl;
+        dsl::instance_network_interface
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::instance_id.eq(authz_instance.id()))
+            .filter(dsl::is_primary.eq(true))
+            .select(InstanceNetworkInterface::as_select())
+            .limit(1)
+            .first_async::<InstanceNetworkInterface>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     /// Get network interface associated with a given probe.
     pub async fn probe_get_network_interface(
         &self,
@@ -681,8 +721,7 @@ impl DataStore {
                 .filter(dsl::time_deleted.is_null())
                 .select(Instance::as_select())
         };
-        let stopped =
-            db::model::InstanceState::new(external::InstanceState::Stopped);
+        let stopped = db::model::InstanceState::NoVmm;
 
         // This is the actual query to update the target interface.
         // Unlike Postgres, CockroachDB doesn't support inserting or updating a view
@@ -713,7 +752,6 @@ impl DataStore {
             self.transaction_retry_wrapper("instance_update_network_interface")
                 .transaction(&conn, |conn| {
                     let err = err.clone();
-                    let stopped = stopped.clone();
                     let update_target_query = update_target_query.clone();
                     async move {
                         let instance_runtime =
@@ -759,7 +797,6 @@ impl DataStore {
             self.transaction_retry_wrapper("instance_update_network_interface")
                 .transaction(&conn, |conn| {
                     let err = err.clone();
-                    let stopped = stopped.clone();
                     let update_target_query = update_target_query.clone();
                     async move {
                         let instance_state =
@@ -854,8 +891,8 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::datastore::test_utils::datastore_test;
-    use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+    use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use nexus_test_utils::db::test_setup_database;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_test_utils::dev;
@@ -897,7 +934,7 @@ mod tests {
             .addr_iter()
             .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES)
             .take(10);
-        let mut macs = external::MacAddr::iter_system();
+        let mut macs = omicron_common::api::external::MacAddr::iter_system();
         let mut service_nics = Vec::new();
         for (i, ip) in ip_range.enumerate() {
             let name = format!("service-nic-{i}");
@@ -905,7 +942,7 @@ mod tests {
                 Uuid::new_v4(),
                 Uuid::new_v4(),
                 NEXUS_VPC_SUBNET.clone(),
-                external::IdentityMetadataCreateParams {
+                omicron_common::api::external::IdentityMetadataCreateParams {
                     name: name.parse().unwrap(),
                     description: name,
                 },

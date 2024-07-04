@@ -35,7 +35,6 @@ use crate::params::{
     TimeSync, ZoneBundleCause, ZoneBundleMetadata, ZoneType,
 };
 use crate::profile::*;
-use crate::services_migration::{AllZoneRequests, SERVICES_LEDGER_FILENAME};
 use crate::smf_helper::SmfHelper;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
@@ -49,7 +48,9 @@ use illumos_utils::dladm::{
     Dladm, Etherstub, EtherstubVnic, GetSimnetError, PhysicalLink,
 };
 use illumos_utils::link::{Link, VnicAllocator};
-use illumos_utils::opte::{DhcpCfg, Port, PortManager, PortTicket};
+use illumos_utils::opte::{
+    DhcpCfg, Port, PortCreateParams, PortManager, PortTicket,
+};
 use illumos_utils::running_zone::{
     EnsureAddressError, InstalledZone, RunCommandError, RunningZone,
     ZoneBuilderFactory,
@@ -759,7 +760,11 @@ impl ServiceManager {
         self.inner.switch_zone_bootstrap_address
     }
 
+    // TODO: This function refers to an old, deprecated format for storing
+    // service information. It is not deprecated for cleanup purposes, but
+    // should otherwise not be called in new code.
     async fn all_service_ledgers(&self) -> Vec<Utf8PathBuf> {
+        pub const SERVICES_LEDGER_FILENAME: &str = "services.json";
         if let Some(dir) = self.inner.ledger_directory_override.get() {
             return vec![dir.join(SERVICES_LEDGER_FILENAME)];
         }
@@ -785,157 +790,54 @@ impl ServiceManager {
 
     // Loads persistent configuration about any Omicron-managed zones that we're
     // supposed to be running.
-    //
-    // For historical reasons, there are two possible places this configuration
-    // could live, each with its own format.  This function first checks the
-    // newer one.  If no configuration was found there, it checks the older
-    // one.  If only the older one was found, it is converted into the new form
-    // so that future calls will only look at the new form.
     async fn load_ledgered_zones(
         &self,
         // This argument attempts to ensure that the caller holds the right
         // lock.
         _map: &MutexGuard<'_, ZoneMap>,
     ) -> Result<Option<Ledger<OmicronZonesConfigLocal>>, Error> {
-        // First, try to load the current software's zone ledger.  If that
-        // works, we're done.
         let log = &self.inner.log;
+
+        // NOTE: This is a function where we used to access zones by "service
+        // ledgers". This format has since been deprecated, and these files,
+        // if they exist, should not be used.
+        //
+        // We try to clean them up at this spot. Deleting this "removal" code
+        // in the future should be a safe operation; this is a non-load-bearing
+        // cleanup.
+        for path in self.all_service_ledgers().await {
+            match tokio::fs::remove_file(&path).await {
+                Ok(_) => (),
+                Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => (),
+                Err(e) => {
+                    warn!(
+                        log,
+                        "Failed to delete old service ledger";
+                        "err" => ?e,
+                        "path" => ?path,
+                    );
+                }
+            }
+        }
+
+        // Try to load the current software's zone ledger
         let ledger_paths = self.all_omicron_zone_ledgers().await;
         info!(log, "Loading Omicron zones from: {ledger_paths:?}");
         let maybe_ledger =
             Ledger::<OmicronZonesConfigLocal>::new(log, ledger_paths.clone())
                 .await;
 
-        if let Some(ledger) = maybe_ledger {
-            info!(
-                log,
-                "Loaded Omicron zones";
-                "zones_config" => ?ledger.data()
-            );
-            return Ok(Some(ledger));
-        }
-
-        // Now look for the ledger used by previous versions.  If we find it,
-        // we'll convert it and write out a new ledger used by the current
-        // software.
-        info!(
-            log,
-            "Loading Omicron zones - No zones detected \
-            (will look for old-format services)"
-        );
-        let services_ledger_paths = self.all_service_ledgers().await;
-        info!(
-            log,
-            "Loading old-format services from: {services_ledger_paths:?}"
-        );
-
-        let maybe_ledger =
-            Ledger::<AllZoneRequests>::new(log, services_ledger_paths.clone())
-                .await;
-        let maybe_converted = match maybe_ledger {
-            None => {
-                // The ledger ignores all errors attempting to load files.  That
-                // might be fine most of the time.  In this case, we want to
-                // raise a big red flag if we find an old-format ledger that we
-                // can't process.
-                if services_ledger_paths.iter().any(|p| p.exists()) {
-                    Err(Error::ServicesMigration(anyhow!(
-                        "failed to read or parse old-format ledger, \
-                        but one exists"
-                    )))
-                } else {
-                    // There was no old-format ledger at all.
-                    return Ok(None);
-                }
-            }
-            Some(ledger) => {
-                let all_services = ledger.into_inner();
-                OmicronZonesConfigLocal::try_from(all_services)
-                    .map_err(Error::ServicesMigration)
-            }
+        let Some(ledger) = maybe_ledger else {
+            info!(log, "Loading Omicron zones - No zones detected");
+            return Ok(None);
         };
 
-        match maybe_converted {
-            Err(error) => {
-                // We've tried to test thoroughly so that this should never
-                // happen.  If for some reason it does happen, engineering
-                // intervention is likely to be required to figure out how to
-                // proceed.  The current software does not directly support
-                // whatever was in the ledger, and it's not safe to just come up
-                // with no zones when we're supposed to be running stuff.  We'll
-                // need to figure out what's unexpected about what we found in
-                // the ledger and figure out how to fix the
-                // conversion.
-                error!(
-                    log,
-                    "Loading Omicron zones - found services but failed \
-                    to convert them (support intervention required): \
-                    {:#}",
-                    error
-                );
-                return Err(error);
-            }
-            Ok(new_config) => {
-                // We've successfully converted the old ledger.  Write a new
-                // one.
-                info!(
-                    log,
-                    "Successfully migrated old-format services ledger to \
-                    zones ledger"
-                );
-                let mut ledger = Ledger::<OmicronZonesConfigLocal>::new_with(
-                    log,
-                    ledger_paths.clone(),
-                    new_config,
-                );
-
-                ledger.commit().await?;
-
-                // We could consider removing the old ledger here.  That would
-                // not guarantee that it would be gone, though, because we could
-                // crash during `ledger.commit()` above having written at least
-                // one of the new ledgers.  In that case, we won't go through
-                // this code path again on restart.  If we wanted to ensure the
-                // old-format ledger was gone after the migration, we could
-                // consider unconditionally removing the old ledger paths in the
-                // caller, after we've got a copy of the new-format ledger.
-                //
-                // Should we?  In principle, it shouldn't matter either way
-                // because we will never look at the old-format ledger unless we
-                // don't have a new-format one, and we should now have a
-                // new-format one forever now.
-                //
-                // When might it matter?  Two cases:
-                //
-                // (1) If the sled agent is downgraded to a previous version
-                //     that doesn't know about the new-format ledger.  Do we
-                //     want that sled agent to use the old-format one?  It
-                //     depends.  If that downgrade happens immediately because
-                //     the upgrade to the first new-format version was a
-                //     disaster, then we'd probably rather the downgraded sled
-                //     agent _did_ start its zones.  If the downgrade happens
-                //     months later, potentially after various additional
-                //     reconfigurations, then that old-format ledger is probably
-                //     out of date and shouldn't be used.  There's no way to
-                //     really know which case we're in, but the latter seems
-                //     quite unlikely (why would we downgrade so far back after
-                //     so long?).  So that's a reason to keep the old-format
-                //     ledger.
-                //
-                // (2) Suppose a developer or Oxide support engineer removes the
-                //     new ledger for some reason, maybe thinking sled agent
-                //     would come up with no zones running.  They'll be
-                //     surprised to discover that it actually starts running a
-                //     potentially old set of zones.  This probably only matters
-                //     on a production system, and even then, it probably
-                //     shouldn't happen.
-                //
-                // Given these cases, we're left ambivalent.  We choose to keep
-                // the old ledger around.  If nothing else, if something goes
-                // wrong, we'll have a copy of its last contents!
-                Ok(Some(ledger))
-            }
-        }
+        info!(
+            log,
+            "Loaded Omicron zones";
+            "zones_config" => ?ledger.data()
+        );
+        Ok(Some(ledger))
     }
 
     // TODO(https://github.com/oxidecomputer/omicron/issues/2973):
@@ -1262,11 +1164,19 @@ impl ServiceManager {
 
         // Create the OPTE port for the service.
         // Note we don't plumb any firewall rules at this point,
-        // Nexus will plumb them down later but the default OPTE
+        // Nexus will plumb them down later but services' default OPTE
         // config allows outbound access which is enough for
         // Boundary NTP which needs to come up before Nexus.
         let port = port_manager
-            .create_port(nic, snat, None, floating_ips, &[], DhcpCfg::default())
+            .create_port(PortCreateParams {
+                nic,
+                source_nat: snat,
+                ephemeral_ip: None,
+                floating_ips,
+                firewall_rules: &[],
+                dhcp_config: DhcpCfg::default(),
+                is_service: true,
+            })
             .map_err(|err| Error::ServicePortCreation {
                 service: zone_type_str.clone(),
                 err: Box::new(err),
@@ -1295,7 +1205,7 @@ impl ServiceManager {
                 dpd_client
                     .ensure_nat_entry(
                         &self.inner.log,
-                        target_ip.into(),
+                        target_ip,
                         dpd_client::types::MacAddr {
                             a: port.0.mac().into_array(),
                         },
@@ -1693,6 +1603,7 @@ impl ServiceManager {
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
                     OmicronZoneConfig {
+                        id: zone_id,
                         zone_type: OmicronZoneType::CockroachDb { .. },
                         underlay_address,
                         ..
@@ -1734,6 +1645,7 @@ impl ServiceManager {
                 // Configure the Omicron cockroach-admin service.
                 let cockroach_admin_config =
                     PropertyGroupBuilder::new("config")
+                        .add_property("zone_id", "astring", zone_id.to_string())
                         .add_property(
                             "cockroach_address",
                             "astring",
@@ -2186,6 +2098,7 @@ impl ServiceManager {
                             },
                         underlay_address,
                         id,
+                        ..
                     },
                 ..
             }) => {
@@ -3379,13 +3292,13 @@ impl ServiceManager {
     ) -> Result<Utf8PathBuf, Error> {
         let name = zone.zone_name();
 
-        // For each new zone request, we pick a U.2 to store the zone
-        // filesystem. Note: This isn't known to Nexus right now, so it's a
-        // local-to-sled decision.
+        // If the caller has requested a specific durable dataset,
+        // ensure that it is encrypted and that it exists.
         //
-        // Currently, the zone filesystem should be destroyed between
-        // reboots, so it's fine to make this decision locally.
-        let root = if let Some(dataset) = zone.dataset_name() {
+        // Typically, the transient filesystem pool will be placed on the same
+        // zpool as the durable dataset (to reduce the fault domain), but that
+        // decision belongs to Nexus, and is not enforced here.
+        if let Some(dataset) = zone.dataset_name() {
             // Check that the dataset is actually ready to be used.
             let [zoned, canmount, encryption] =
                 illumos_utils::zfs::Zfs::get_values(
@@ -3415,11 +3328,6 @@ impl ServiceManager {
                 check_property("encryption", encryption, "aes-256-gcm")?;
             }
 
-            // If the zone happens to already manage a dataset, then
-            // we co-locate the zone dataset on the same zpool.
-            //
-            // This slightly reduces the underlying fault domain for the
-            // service.
             let data_pool = dataset.pool();
             if !all_u2_pools.contains(&data_pool) {
                 warn!(
@@ -3432,20 +3340,35 @@ impl ServiceManager {
                     device: format!("zpool: {data_pool}"),
                 });
             }
-            data_pool.dataset_mountpoint(&mount_config.root, ZONE_DATASET)
-        } else {
-            // If the zone it not coupled to other datsets, we pick one
-            // arbitrarily.
-            let mut rng = rand::thread_rng();
-            all_u2_pools
-                .choose(&mut rng)
-                .map(|pool| {
-                    pool.dataset_mountpoint(&mount_config.root, ZONE_DATASET)
-                })
+        }
+
+        let filesystem_pool = match (&zone.filesystem_pool, zone.dataset_name())
+        {
+            // If a pool was explicitly requested, use it.
+            (Some(pool), _) => pool.clone(),
+            // NOTE: The following cases are for backwards compatibility.
+            //
+            // If no pool was selected, prefer to use the same pool as the
+            // durable dataset. Otherwise, pick one randomly.
+            (None, Some(dataset)) => dataset.pool().clone(),
+            (None, None) => all_u2_pools
+                .choose(&mut rand::thread_rng())
                 .ok_or_else(|| Error::U2NotFound)?
-                .clone()
+                .clone(),
         };
-        Ok(root)
+
+        if !all_u2_pools.contains(&filesystem_pool) {
+            warn!(
+                self.inner.log,
+                "zone filesystem dataset requested on a zpool which doesn't exist";
+                "zone" => &name,
+                "zpool" => %filesystem_pool
+            );
+            return Err(Error::MissingDevice {
+                device: format!("zpool: {filesystem_pool}"),
+            });
+        }
+        Ok(filesystem_pool.dataset_mountpoint(&mount_config.root, ZONE_DATASET))
     }
 
     pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
@@ -4449,6 +4372,7 @@ mod test {
                         id,
                         underlay_address: Ipv6Addr::LOCALHOST,
                         zone_type,
+                        filesystem_pool: None,
                     }],
                 },
                 Some(&tmp_dir),
@@ -4480,6 +4404,7 @@ mod test {
                         dns_servers: vec![],
                         domain: None,
                     },
+                    filesystem_pool: None,
                 }],
             },
             Some(&tmp_dir),
@@ -4896,6 +4821,7 @@ mod test {
                 dns_servers: vec![],
                 domain: None,
             },
+            filesystem_pool: None,
         }];
 
         let tmp_dir = String::from(test_config.config_dir.path().as_str());
@@ -4924,6 +4850,7 @@ mod test {
                 dns_servers: vec![],
                 domain: None,
             },
+            filesystem_pool: None,
         });
 
         // Now try to apply that list with an older generation number.  This
@@ -4983,109 +4910,6 @@ mod test {
         drop_service_manager(mgr);
 
         illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
-        helper.cleanup().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_old_ledger_migration() {
-        let logctx = omicron_test_utils::dev::test_setup_log(
-            "test_old_ledger_migration",
-        );
-        let test_config = TestConfig::new().await;
-
-        // Before we start the service manager, stuff one of our old-format
-        // service ledgers into place.
-        let contents =
-            include_str!("../tests/old-service-ledgers/rack2-sled10.json");
-        std::fs::write(
-            test_config.config_dir.path().join(SERVICES_LEDGER_FILENAME),
-            contents,
-        )
-        .expect("failed to copy example old-format services ledger into place");
-
-        // Now start the service manager.
-        let mut helper =
-            LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
-        let mgr = helper.new_service_manager();
-        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
-
-        // Trigger the migration code.  (Yes, it's hokey that we create this
-        // fake argument.)
-        let unused = Mutex::new(BTreeMap::new());
-        let migrated_ledger = mgr
-            .load_ledgered_zones(&unused.lock().await)
-            .await
-            .expect("failed to load ledgered zones")
-            .unwrap();
-
-        // As a quick check, the migrated ledger should have some zones.
-        let migrated_config = migrated_ledger.data();
-        assert!(!migrated_config.zones.is_empty());
-
-        // The ServiceManager should now report the migrated zones, meaning that
-        // they've been copied into the new-format ledger.
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
-        assert_eq!(found, migrated_config.clone().to_omicron_zones_config());
-        // They should both match the expected converted output.
-        let expected: OmicronZonesConfigLocal = serde_json::from_str(
-            include_str!("../tests/output/new-zones-ledgers/rack2-sled10.json"),
-        )
-        .unwrap();
-        let expected_config = expected.to_omicron_zones_config();
-        assert_eq!(found, expected_config);
-
-        // Just to be sure, shut down the manager and create a new one without
-        // triggering migration again.  It should also report the same zones.
-        drop_service_manager(mgr);
-
-        let mgr = helper.new_service_manager();
-        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
-
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
-        assert_eq!(found, expected_config);
-
-        drop_service_manager(mgr);
-        helper.cleanup().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_old_ledger_migration_bad() {
-        let logctx = omicron_test_utils::dev::test_setup_log(
-            "test_old_ledger_migration_bad",
-        );
-        let test_config = TestConfig::new().await;
-        let mut helper =
-            LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
-
-        // Before we start things, stuff a broken ledger into place.  For this
-        // to test what we want, it needs to be a valid ledger that we simply
-        // failed to convert.
-        std::fs::write(
-            test_config.config_dir.path().join(SERVICES_LEDGER_FILENAME),
-            "{",
-        )
-        .expect("failed to copy example old-format services ledger into place");
-
-        // Start the service manager.
-        let mgr = helper.new_service_manager();
-        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
-
-        // Trigger the migration code.
-        let unused = Mutex::new(BTreeMap::new());
-        let error = mgr
-            .load_ledgered_zones(&unused.lock().await)
-            .await
-            .expect_err("succeeded in loading bogus ledgered zones");
-        assert_eq!(
-            "Error migrating old-format services ledger: failed to read or \
-            parse old-format ledger, but one exists",
-            format!("{:#}", error)
-        );
-
         helper.cleanup().await;
         logctx.cleanup_successful();
     }

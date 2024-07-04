@@ -17,6 +17,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use omicron_common::api::external::{DeleteResult, Error};
+use omicron_uuid_kinds::InstanceUuid;
 use uuid::Uuid;
 
 /// The types of resources which can consume storage space.
@@ -261,7 +262,7 @@ impl DataStore {
     pub async fn virtual_provisioning_collection_insert_instance(
         &self,
         opctx: &OpContext,
-        id: Uuid,
+        id: InstanceUuid,
         project_id: Uuid,
         cpus_diff: i64,
         ram_diff: ByteCount,
@@ -286,7 +287,7 @@ impl DataStore {
     pub async fn virtual_provisioning_collection_delete_instance(
         &self,
         opctx: &OpContext,
-        id: Uuid,
+        id: InstanceUuid,
         project_id: Uuid,
         cpus_diff: i64,
         ram_diff: ByteCount,
@@ -312,7 +313,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
-        let id = *db::fixed_data::FLEET_ID;
+        let id = *nexus_db_fixed_data::FLEET_ID;
         self.virtual_provisioning_collection_create(
             opctx,
             db::model::VirtualProvisioningCollection::new(
@@ -331,7 +332,6 @@ mod test {
     use super::*;
 
     use crate::db::datastore::test_utils::datastore_test;
-    use crate::db::fixed_data;
     use crate::db::lookup::LookupPath;
     use nexus_db_model::Instance;
     use nexus_db_model::Project;
@@ -384,8 +384,8 @@ mod test {
         datastore: &DataStore,
         opctx: &OpContext,
     ) -> TestData {
-        let fleet_id = *fixed_data::FLEET_ID;
-        let silo_id = *fixed_data::silo::DEFAULT_SILO_ID;
+        let fleet_id = *nexus_db_fixed_data::FLEET_ID;
+        let silo_id = *nexus_db_fixed_data::silo::DEFAULT_SILO_ID;
         let project_id = Uuid::new_v4();
 
         let (authz_project, _project) = datastore
@@ -434,7 +434,7 @@ mod test {
         datastore: &DataStore,
         opctx: &OpContext,
         authz_project: &crate::authz::Project,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         project_id: Uuid,
         cpus: i64,
         memory: ByteCount,
@@ -481,7 +481,7 @@ mod test {
 
         // Actually provision the instance
 
-        let instance_id = Uuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
         let cpus = 12;
         let ram = ByteCount::try_from(1 << 30).unwrap();
 
@@ -554,7 +554,7 @@ mod test {
 
         // Actually provision the instance
 
-        let instance_id = Uuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
         let cpus = 12;
         let ram = ByteCount::try_from(1 << 30).unwrap();
 

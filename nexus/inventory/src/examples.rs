@@ -49,7 +49,7 @@ pub fn representative() -> Representative {
                 model: String::from("model1"),
                 power_state: PowerState::A0,
                 revision: 0,
-                rot: RotState::Enabled {
+                rot: RotState::V2 {
                     active: RotSlot::A,
                     pending_persistent_boot_preference: None,
                     persistent_boot_preference: RotSlot::A,
@@ -74,7 +74,7 @@ pub fn representative() -> Representative {
                 model: String::from("model2"),
                 power_state: PowerState::A2,
                 revision: 1,
-                rot: RotState::Enabled {
+                rot: RotState::V2 {
                     active: RotSlot::B,
                     pending_persistent_boot_preference: Some(RotSlot::A),
                     persistent_boot_preference: RotSlot::A,
@@ -101,7 +101,7 @@ pub fn representative() -> Representative {
                 model: String::from("model3"),
                 power_state: PowerState::A1,
                 revision: 2,
-                rot: RotState::Enabled {
+                rot: RotState::V2 {
                     active: RotSlot::B,
                     pending_persistent_boot_preference: None,
                     persistent_boot_preference: RotSlot::A,
@@ -128,7 +128,7 @@ pub fn representative() -> Representative {
                 model: String::from("model4"),
                 power_state: PowerState::A2,
                 revision: 3,
-                rot: RotState::Enabled {
+                rot: RotState::V2 {
                     active: RotSlot::B,
                     pending_persistent_boot_preference: None,
                     persistent_boot_preference: RotSlot::A,
@@ -471,7 +471,7 @@ pub fn sp_state(unique: &str) -> SpState {
         model: format!("model{}", unique),
         power_state: PowerState::A2,
         revision: 0,
-        rot: RotState::Enabled {
+        rot: RotState::V2 {
             active: RotSlot::A,
             pending_persistent_boot_preference: None,
             persistent_boot_preference: RotSlot::A,

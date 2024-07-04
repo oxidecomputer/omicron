@@ -356,19 +356,27 @@ pub async fn run_standalone_server(
     let internal_dns_version = Generation::try_from(dns_config.generation)
         .expect("invalid internal dns version");
 
+    let all_u2_zpools = server.sled_agent.get_zpools().await;
+    let get_random_zpool = || {
+        use rand::seq::SliceRandom;
+        let pool = all_u2_zpools
+            .choose(&mut rand::thread_rng())
+            .expect("No external zpools found, but we need one");
+        ZpoolName::new_external(ZpoolUuid::from_untyped_uuid(pool.id))
+    };
+
     // Record the internal DNS server as though RSS had provisioned it so
     // that Nexus knows about it.
     let http_bound = match dns.dropshot_server.local_addr() {
         SocketAddr::V4(_) => panic!("did not expect v4 address"),
         SocketAddr::V6(a) => a,
     };
+    let pool_name = ZpoolName::new_external(ZpoolUuid::new_v4());
     let mut zones = vec![OmicronZoneConfig {
         id: Uuid::new_v4(),
         underlay_address: *http_bound.ip(),
         zone_type: OmicronZoneType::InternalDns {
-            dataset: OmicronZoneDataset {
-                pool_name: ZpoolName::new_external(ZpoolUuid::new_v4()),
-            },
+            dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
             http_address: http_bound,
             dns_address: match dns.dns_server.local_address() {
                 SocketAddr::V4(_) => panic!("did not expect v4 address"),
@@ -377,6 +385,8 @@ pub async fn run_standalone_server(
             gz_address: Ipv6Addr::LOCALHOST,
             gz_address_index: 0,
         },
+        // Co-locate the filesystem pool with the dataset
+        filesystem_pool: Some(pool_name),
     }];
 
     let mut internal_services_ip_pool_ranges = vec![];
@@ -410,10 +420,12 @@ pub async fn run_standalone_server(
                     vni: Vni::SERVICES_VNI,
                     primary: true,
                     slot: 0,
+                    transit_ips: vec![],
                 },
                 external_tls: false,
                 external_dns_servers: vec![],
             },
+            filesystem_pool: Some(get_random_zpool()),
         });
 
         internal_services_ip_pool_ranges.push(match ip {
@@ -431,13 +443,12 @@ pub async fn run_standalone_server(
     {
         let ip = *external_dns_internal_addr.ip();
         let id = Uuid::new_v4();
+        let pool_name = ZpoolName::new_external(ZpoolUuid::new_v4());
         zones.push(OmicronZoneConfig {
             id,
             underlay_address: ip,
             zone_type: OmicronZoneType::ExternalDns {
-                dataset: OmicronZoneDataset {
-                    pool_name: ZpoolName::new_external(ZpoolUuid::new_v4()),
-                },
+                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
                 http_address: external_dns_internal_addr,
                 dns_address: SocketAddr::V6(external_dns_internal_addr),
                 nic: nexus_types::inventory::NetworkInterface {
@@ -453,8 +464,11 @@ pub async fn run_standalone_server(
                     vni: Vni::SERVICES_VNI,
                     primary: true,
                     slot: 0,
+                    transit_ips: vec![],
                 },
             },
+            // Co-locate the filesystem pool with the dataset
+            filesystem_pool: Some(pool_name),
         });
 
         internal_services_ip_pool_ranges
@@ -527,7 +541,7 @@ pub async fn run_standalone_server(
         external_port_count: NexusTypes::ExternalPortDiscovery::Static(
             HashMap::new(),
         ),
-        rack_network_config: NexusTypes::RackNetworkConfigV1 {
+        rack_network_config: NexusTypes::RackNetworkConfigV2 {
             rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
             infra_ip_first: Ipv4Addr::LOCALHOST,
             infra_ip_last: Ipv4Addr::LOCALHOST,

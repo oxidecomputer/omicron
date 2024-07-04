@@ -11,6 +11,8 @@ use omicron_common::api::external::NameOrId;
 
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use uuid::Uuid;
 
 use nexus_db_queries::authz;
@@ -87,7 +89,7 @@ impl super::Nexus {
         let interface_id = Uuid::new_v4();
         let interface = db::model::IncompleteNetworkInterface::new_instance(
             interface_id,
-            authz_instance.id(),
+            InstanceUuid::from_untyped_uuid(authz_instance.id()),
             db_subnet,
             params.identity.clone(),
             params.ip,

@@ -98,6 +98,10 @@ pub(crate) struct StartRackUpdateArgs {
     #[clap(flatten)]
     component_ids: ComponentIdSelector,
 
+    /// Force update the RoT Bootloader even if the version is the same.
+    #[clap(long, help_heading = "Update options")]
+    force_update_rot_bootloader: bool,
+
     /// Force update the RoT even if the version is the same.
     #[clap(long, help_heading = "Update options")]
     force_update_rot: bool,
@@ -125,6 +129,7 @@ impl StartRackUpdateArgs {
 
         let update_ids = self.component_ids.to_component_ids()?;
         let options = CreateStartUpdateOptions {
+            force_update_rot_bootloader: self.force_update_rot_bootloader,
             force_update_rot: self.force_update_rot,
             force_update_sp: self.force_update_sp,
         }

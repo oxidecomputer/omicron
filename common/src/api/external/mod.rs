@@ -305,8 +305,8 @@ impl JsonSchema for Name {
                     "Names must begin with a lower case ASCII letter, be \
                      composed exclusively of lowercase ASCII, uppercase \
                      ASCII, numbers, and '-', and may not end with a '-'. \
-                     Names cannot be a UUID though they may contain a UUID."
-                        .to_string(),
+                     Names cannot be a UUID, but they may contain a UUID. \
+                     They can be at most 63 characters long.".to_string(),
                 ),
                 ..Default::default()
             })),
@@ -996,6 +996,22 @@ pub enum InstanceState {
     Destroyed,
 }
 
+impl From<crate::api::internal::nexus::VmmState> for InstanceState {
+    fn from(state: crate::api::internal::nexus::VmmState) -> Self {
+        use crate::api::internal::nexus::VmmState as InternalVmmState;
+        match state {
+            InternalVmmState::Starting => Self::Starting,
+            InternalVmmState::Running => Self::Running,
+            InternalVmmState::Stopping => Self::Stopping,
+            InternalVmmState::Stopped => Self::Stopped,
+            InternalVmmState::Rebooting => Self::Rebooting,
+            InternalVmmState::Migrating => Self::Migrating,
+            InternalVmmState::Failed => Self::Failed,
+            InternalVmmState::Destroyed => Self::Destroyed,
+        }
+    }
+}
+
 impl Display for InstanceState {
     fn fmt(&self, f: &mut Formatter) -> FormatResult {
         write!(f, "{}", self.label())
@@ -1315,6 +1331,9 @@ pub enum RouteTarget {
     #[display("inetgw:{0}")]
     /// Forward traffic to an internet gateway
     InternetGateway(Name),
+    #[display("drop")]
+    /// Drop matching traffic
+    Drop,
 }
 
 /// A `RouteDestination` is used to match traffic with a routing rule, on the
@@ -1388,14 +1407,13 @@ pub struct RouterRoute {
     /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-
     /// The ID of the VPC Router to which the route belongs
     pub vpc_router_id: Uuid,
-
     /// Describes the kind of router. Set at creation. `read-only`
     pub kind: RouterRouteKind,
-
+    /// The location that matched packets should be forwarded to.
     pub target: RouteTarget,
+    /// Selects which traffic this routing rule will apply to.
     pub destination: RouteDestination,
 }
 
@@ -1960,6 +1978,11 @@ pub struct InstanceNetworkInterface {
     /// True if this interface is the primary for the instance to which it's
     /// attached.
     pub primary: bool,
+
+    /// A set of additional networks that this interface may send and
+    /// receive traffic on.
+    #[serde(default)]
+    pub transit_ips: Vec<IpNet>,
 }
 
 #[derive(
@@ -2536,6 +2559,9 @@ pub struct SwitchPortAddressConfig {
 
     /// The IP address and prefix.
     pub address: oxnet::IpNet,
+
+    /// An optional VLAN ID
+    pub vlan_id: Option<u16>,
 
     /// The interface name this address belongs to.
     // TODO: https://github.com/oxidecomputer/omicron/issues/3050

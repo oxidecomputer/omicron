@@ -37,6 +37,7 @@ use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::ZpoolUuid;
 use uuid::Uuid;
 
@@ -124,6 +125,8 @@ impl_enum_type!(
     SpSlot1 => b"sp_slot_1"
     RotSlotA => b"rot_slot_A"
     RotSlotB => b"rot_slot_B"
+    Stage0 => b"stage0"
+    Stage0Next => b"stage0next"
 );
 
 impl From<nexus_types::inventory::CabooseWhich> for CabooseWhich {
@@ -134,6 +137,10 @@ impl From<nexus_types::inventory::CabooseWhich> for CabooseWhich {
             nexus_inventory::CabooseWhich::SpSlot1 => CabooseWhich::SpSlot1,
             nexus_inventory::CabooseWhich::RotSlotA => CabooseWhich::RotSlotA,
             nexus_inventory::CabooseWhich::RotSlotB => CabooseWhich::RotSlotB,
+            nexus_inventory::CabooseWhich::Stage0 => CabooseWhich::Stage0,
+            nexus_inventory::CabooseWhich::Stage0Next => {
+                CabooseWhich::Stage0Next
+            }
         }
     }
 }
@@ -146,6 +153,10 @@ impl From<CabooseWhich> for nexus_types::inventory::CabooseWhich {
             CabooseWhich::SpSlot1 => nexus_inventory::CabooseWhich::SpSlot1,
             CabooseWhich::RotSlotA => nexus_inventory::CabooseWhich::RotSlotA,
             CabooseWhich::RotSlotB => nexus_inventory::CabooseWhich::RotSlotB,
+            CabooseWhich::Stage0 => nexus_inventory::CabooseWhich::Stage0,
+            CabooseWhich::Stage0Next => {
+                nexus_inventory::CabooseWhich::Stage0Next
+            }
         }
     }
 }
@@ -198,6 +209,125 @@ impl From<RotPageWhich> for nexus_types::inventory::RotPageWhich {
             }
             RotPageWhich::CfpaScratch => {
                 nexus_inventory::RotPageWhich::CfpaScratch
+            }
+        }
+    }
+}
+
+// See [`nexus_types::inventory::RotImageError`].
+impl_enum_type!(
+    #[derive(SqlType, Debug, QueryId)]
+    #[diesel(postgres_type(name = "rot_image_error", schema = "public"))]
+    pub struct RotImageErrorEnum;
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    #[diesel(sql_type = RotImageErrorEnum)]
+    pub enum RotImageError;
+
+    // Enum values
+    Unchecked => b"unchecked"
+    FirstPageErased => b"first_page_erased"
+    PartiallyProgrammed => b"partially_programmed"
+    InvalidLength => b"invalid_length"
+    HeaderNotProgrammed => b"header_not_programmed"
+    BootloaderTooSmall => b"bootloader_too_small"
+    BadMagic => b"bad_magic"
+    HeaderImageSize => b"header_image_size"
+    UnalignedLength => b"unaligned_length"
+    UnsupportedType => b"unsupported_type"
+    ResetVectorNotThumb2 => b"not_thumb2"
+    ResetVector => b"reset_vector"
+    Signature => b"signature"
+
+);
+
+impl From<nexus_types::inventory::RotImageError> for RotImageError {
+    fn from(c: nexus_types::inventory::RotImageError) -> Self {
+        match c {
+            nexus_types::inventory::RotImageError::Unchecked => {
+                RotImageError::Unchecked
+            }
+            nexus_types::inventory::RotImageError::FirstPageErased => {
+                RotImageError::FirstPageErased
+            }
+            nexus_types::inventory::RotImageError::PartiallyProgrammed => {
+                RotImageError::PartiallyProgrammed
+            }
+            nexus_types::inventory::RotImageError::InvalidLength => {
+                RotImageError::InvalidLength
+            }
+            nexus_types::inventory::RotImageError::HeaderNotProgrammed => {
+                RotImageError::HeaderNotProgrammed
+            }
+            nexus_types::inventory::RotImageError::BootloaderTooSmall => {
+                RotImageError::BootloaderTooSmall
+            }
+            nexus_types::inventory::RotImageError::BadMagic => {
+                RotImageError::BadMagic
+            }
+            nexus_types::inventory::RotImageError::HeaderImageSize => {
+                RotImageError::HeaderImageSize
+            }
+            nexus_types::inventory::RotImageError::UnalignedLength => {
+                RotImageError::UnalignedLength
+            }
+            nexus_types::inventory::RotImageError::UnsupportedType => {
+                RotImageError::UnsupportedType
+            }
+            nexus_types::inventory::RotImageError::ResetVectorNotThumb2 => {
+                RotImageError::ResetVectorNotThumb2
+            }
+            nexus_types::inventory::RotImageError::ResetVector => {
+                RotImageError::ResetVector
+            }
+            nexus_types::inventory::RotImageError::Signature => {
+                RotImageError::Signature
+            }
+        }
+    }
+}
+
+impl From<RotImageError> for nexus_types::inventory::RotImageError {
+    fn from(row: RotImageError) -> Self {
+        match row {
+            RotImageError::Unchecked => {
+                nexus_types::inventory::RotImageError::Unchecked
+            }
+            RotImageError::FirstPageErased => {
+                nexus_types::inventory::RotImageError::FirstPageErased
+            }
+            RotImageError::PartiallyProgrammed => {
+                nexus_types::inventory::RotImageError::PartiallyProgrammed
+            }
+            RotImageError::InvalidLength => {
+                nexus_types::inventory::RotImageError::InvalidLength
+            }
+            RotImageError::HeaderNotProgrammed => {
+                nexus_types::inventory::RotImageError::HeaderNotProgrammed
+            }
+            RotImageError::BootloaderTooSmall => {
+                nexus_types::inventory::RotImageError::BootloaderTooSmall
+            }
+            RotImageError::BadMagic => {
+                nexus_types::inventory::RotImageError::BadMagic
+            }
+            RotImageError::HeaderImageSize => {
+                nexus_types::inventory::RotImageError::HeaderImageSize
+            }
+            RotImageError::UnalignedLength => {
+                nexus_types::inventory::RotImageError::UnalignedLength
+            }
+            RotImageError::UnsupportedType => {
+                nexus_types::inventory::RotImageError::UnsupportedType
+            }
+            RotImageError::ResetVectorNotThumb2 => {
+                nexus_types::inventory::RotImageError::ResetVectorNotThumb2
+            }
+            RotImageError::ResetVector => {
+                nexus_types::inventory::RotImageError::ResetVector
+            }
+            RotImageError::Signature => {
+                nexus_types::inventory::RotImageError::Signature
             }
         }
     }
@@ -532,6 +662,13 @@ pub struct InvRootOfTrust {
     pub slot_boot_pref_persistent_pending: Option<HwRotSlot>,
     pub slot_a_sha3_256: Option<String>,
     pub slot_b_sha3_256: Option<String>,
+    pub stage0_fwid: Option<String>,
+    pub stage0next_fwid: Option<String>,
+
+    pub slot_a_error: Option<RotImageError>,
+    pub slot_b_error: Option<RotImageError>,
+    pub stage0_error: Option<RotImageError>,
+    pub stage0next_error: Option<RotImageError>,
 }
 
 impl From<InvRootOfTrust> for nexus_types::inventory::RotState {
@@ -551,6 +688,21 @@ impl From<InvRootOfTrust> for nexus_types::inventory::RotState {
                 .map(RotSlot::from),
             slot_a_sha3_256_digest: row.slot_a_sha3_256,
             slot_b_sha3_256_digest: row.slot_b_sha3_256,
+            stage0_digest: row.stage0_fwid,
+            stage0next_digest: row.stage0next_fwid,
+
+            slot_a_error: row
+                .slot_a_error
+                .map(nexus_types::inventory::RotImageError::from),
+            slot_b_error: row
+                .slot_b_error
+                .map(nexus_types::inventory::RotImageError::from),
+            stage0_error: row
+                .stage0_error
+                .map(nexus_types::inventory::RotImageError::from),
+            stage0next_error: row
+                .stage0next_error
+                .map(nexus_types::inventory::RotImageError::from),
         }
     }
 }
@@ -874,6 +1026,7 @@ pub struct InvOmicronZone {
     pub snat_ip: Option<IpNetwork>,
     pub snat_first_port: Option<SqlU16>,
     pub snat_last_port: Option<SqlU16>,
+    pub filesystem_pool: Option<DbTypedUuid<ZpoolKind>>,
 }
 
 impl InvOmicronZone {
@@ -888,6 +1041,7 @@ impl InvOmicronZone {
             sled_id,
             zone.id,
             zone.underlay_address,
+            zone.filesystem_pool.as_ref().map(|pool| pool.id()),
             &zone.zone_type,
             external_ip_id,
         )?;
@@ -913,6 +1067,7 @@ impl InvOmicronZone {
             snat_ip: zone.snat_ip,
             snat_first_port: zone.snat_first_port,
             snat_last_port: zone.snat_last_port,
+            filesystem_pool: zone.filesystem_pool.map(|id| id.into()),
         })
     }
 
@@ -924,6 +1079,7 @@ impl InvOmicronZone {
             sled_id: self.sled_id.into(),
             id: self.id,
             underlay_address: self.underlay_address,
+            filesystem_pool: self.filesystem_pool.map(|id| id.into()),
             zone_type: self.zone_type,
             primary_service_ip: self.primary_service_ip,
             primary_service_port: self.primary_service_port,

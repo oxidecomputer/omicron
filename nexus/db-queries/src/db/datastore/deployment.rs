@@ -1343,6 +1343,7 @@ mod tests {
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::Ensure;
+    use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::example;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::BlueprintZoneDisposition;
@@ -1651,7 +1652,7 @@ mod tests {
                         .clone(),
                 )
                 .unwrap(),
-            Ensure::Added
+            EnsureMultiple::Changed { added: 4, removed: 0 }
         );
 
         // Add zones to our new sled.

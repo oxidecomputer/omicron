@@ -50,13 +50,15 @@ use omicron_common::api::internal::nexus::RepairProgress;
 use omicron_common::api::internal::nexus::RepairStartInfo;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::update::ArtifactId;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use std::collections::BTreeMap;
 
 type NexusApiDescription = ApiDescription<ApiContext>;
 
 /// Returns a description of the internal nexus API
 pub(crate) fn internal_api() -> NexusApiDescription {
-    NexusInternalApiFactory::api_description::<NexusInternalApiImpl>()
+    nexus_internal_api_mod::api_description::<NexusInternalApiImpl>()
         .expect("registered API endpoints successfully")
 }
 
@@ -66,7 +68,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     type Context = ApiContext;
 
     async fn sled_agent_get(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<SledAgentPathParam>,
     ) -> Result<HttpResponseOk<SledAgentInfo>, HttpError> {
         let apictx = &rqctx.context().context;
@@ -86,7 +88,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn sled_agent_put(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<SledAgentPathParam>,
         sled_info: TypedBody<SledAgentInfo>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -107,7 +109,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn sled_firewall_rules_request(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<SledAgentPathParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = &rqctx.context().context;
@@ -126,7 +128,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn rack_initialization_complete(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<RackPathParam>,
         info: TypedBody<RackInitializationRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -142,7 +144,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn switch_put(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<SwitchPathParam>,
         body: TypedBody<SwitchPutRequest>,
     ) -> Result<HttpResponseOk<SwitchPutResponse>, HttpError> {
@@ -161,7 +163,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn cpapi_instances_put(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<InstancePathParam>,
         new_runtime_state: TypedBody<SledInstanceState>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -172,7 +174,11 @@ impl NexusInternalApi for NexusInternalApiImpl {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let handler = async {
             nexus
-                .notify_instance_updated(&opctx, &path.instance_id, &new_state)
+                .notify_instance_updated(
+                    &opctx,
+                    &InstanceUuid::from_untyped_uuid(path.instance_id),
+                    &new_state,
+                )
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
         };
@@ -183,7 +189,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn cpapi_disks_put(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<DiskPathParam>,
         new_runtime_state: TypedBody<DiskRuntimeState>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -204,7 +210,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn cpapi_volume_remove_read_only_parent(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<VolumePathParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = &rqctx.context().context;
@@ -226,7 +232,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn cpapi_disk_remove_read_only_parent(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<DiskPathParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = &rqctx.context().context;
@@ -246,7 +252,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn cpapi_producers_post(
-        request_context: RequestContext<ApiContext>,
+        request_context: RequestContext<Self::Context>,
         producer_info: TypedBody<ProducerEndpoint>,
     ) -> Result<HttpResponseCreated<ProducerRegistrationResponse>, HttpError>
     {
@@ -275,7 +281,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn cpapi_assigned_producers_list(
-        request_context: RequestContext<ApiContext>,
+        request_context: RequestContext<Self::Context>,
         path_params: Path<CollectorIdPathParams>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<ProducerEndpoint>>, HttpError> {
@@ -304,7 +310,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn cpapi_collectors_post(
-        request_context: RequestContext<ApiContext>,
+        request_context: RequestContext<Self::Context>,
         oximeter_info: TypedBody<OximeterInfo>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let context = &request_context.context().context;
@@ -324,7 +330,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn cpapi_artifact_download(
-        request_context: RequestContext<ApiContext>,
+        request_context: RequestContext<Self::Context>,
         path_params: Path<ArtifactId>,
     ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
         let context = &request_context.context().context;
@@ -340,7 +346,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn cpapi_upstairs_repair_start(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<UpstairsPathParam>,
         repair_start_info: TypedBody<RepairStartInfo>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -367,7 +373,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn cpapi_upstairs_repair_finish(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<UpstairsPathParam>,
         repair_finish_info: TypedBody<RepairFinishInfo>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -394,7 +400,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn cpapi_upstairs_repair_progress(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<UpstairsRepairPathParam>,
         repair_progress: TypedBody<RepairProgress>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -422,7 +428,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn cpapi_downstairs_client_stop_request(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<UpstairsDownstairsPathParam>,
         downstairs_client_stop_request: TypedBody<DownstairsClientStopRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -450,7 +456,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn cpapi_downstairs_client_stopped(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<UpstairsDownstairsPathParam>,
         downstairs_client_stopped: TypedBody<DownstairsClientStopped>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -480,7 +486,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     // Sagas
 
     async fn saga_list(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<Saga>>, HttpError> {
         let apictx = &rqctx.context().context;
@@ -505,7 +511,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn saga_view(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<SagaPathParam>,
     ) -> Result<HttpResponseOk<Saga>, HttpError> {
         let apictx = &rqctx.context().context;
@@ -526,7 +532,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     // Background Tasks
 
     async fn bgtask_list(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<BTreeMap<String, BackgroundTask>>, HttpError>
     {
         let apictx = &rqctx.context().context;
@@ -544,7 +550,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn bgtask_view(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<BackgroundTaskPathParam>,
     ) -> Result<HttpResponseOk<BackgroundTask>, HttpError> {
         let apictx = &rqctx.context().context;
@@ -563,7 +569,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn bgtask_activate(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         body: TypedBody<BackgroundTasksActivateRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = &rqctx.context().context;
@@ -584,7 +590,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     // NAT RPW internal APIs
 
     async fn ipv4_nat_changeset(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<RpwNatPathParam>,
         query_params: Query<RpwNatQueryParam>,
     ) -> Result<HttpResponseOk<Vec<Ipv4NatEntryView>>, HttpError> {
@@ -610,7 +616,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
 
     // APIs for managing blueprints
     async fn blueprint_list(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<BlueprintMetadata>>, HttpError> {
         let apictx = &rqctx.context().context;
@@ -636,7 +642,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
 
     /// Fetches one blueprint
     async fn blueprint_view(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<nexus_types::external_api::params::BlueprintPath>,
     ) -> Result<HttpResponseOk<Blueprint>, HttpError> {
         let apictx = &rqctx.context().context;
@@ -657,7 +663,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
 
     /// Deletes one blueprint
     async fn blueprint_delete(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<nexus_types::external_api::params::BlueprintPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let apictx = &rqctx.context().context;
@@ -676,7 +682,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn blueprint_target_view(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<BlueprintTarget>, HttpError> {
         let apictx = &rqctx.context().context;
         let handler = async {
@@ -693,7 +699,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn blueprint_target_set(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         target: TypedBody<BlueprintTargetSet>,
     ) -> Result<HttpResponseOk<BlueprintTarget>, HttpError> {
         let apictx = &rqctx.context().context;
@@ -712,7 +718,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn blueprint_target_set_enabled(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         target: TypedBody<BlueprintTargetSet>,
     ) -> Result<HttpResponseOk<BlueprintTarget>, HttpError> {
         let apictx = &rqctx.context().context;
@@ -732,7 +738,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn blueprint_regenerate(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Blueprint>, HttpError> {
         let apictx = &rqctx.context().context;
         let handler = async {
@@ -749,7 +755,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn blueprint_import(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         blueprint: TypedBody<Blueprint>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = &rqctx.context().context;
@@ -768,7 +774,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn sled_list_uninitialized(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<ResultsPage<UninitializedSled>>, HttpError> {
         let apictx = &rqctx.context().context;
         let handler = async {
@@ -785,7 +791,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn sled_add(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         sled: TypedBody<UninitializedSledId>,
     ) -> Result<HttpResponseCreated<SledId>, HttpError> {
         let apictx = &rqctx.context().context;
@@ -803,7 +809,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn sled_expunge(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         sled: TypedBody<SledSelector>,
     ) -> Result<HttpResponseOk<SledPolicy>, HttpError> {
         let apictx = &rqctx.context().context;
@@ -822,7 +828,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn probes_get(
-        rqctx: RequestContext<ApiContext>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<ProbePathParam>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<Vec<ProbeInfo>>, HttpError> {

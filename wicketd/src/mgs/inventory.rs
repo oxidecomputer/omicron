@@ -316,11 +316,22 @@ async fn sp_fetching_task(
 
         if rot.is_none() || prev_state.as_ref() != Some(&state) {
             match &state.rot {
-                RotState::Enabled { active, .. } => {
+                RotState::V2 { active, .. } => {
                     rot = Some(RotInventory {
                         active: *active,
                         caboose_a: None,
                         caboose_b: None,
+                        caboose_stage0: None,
+                        caboose_stage0next: None,
+                    });
+                }
+                RotState::V3 { active, .. } => {
+                    rot = Some(RotInventory {
+                        active: *active,
+                        caboose_a: None,
+                        caboose_b: None,
+                        caboose_stage0: Some(None),
+                        caboose_stage0next: Some(None),
                     });
                 }
                 RotState::CommunicationFailed { message } => {
@@ -455,6 +466,60 @@ async fn sp_fetching_task(
                         None
                     }
                 };
+            }
+
+            if let Some(v) = &rot.caboose_stage0 {
+                if prev_state.as_ref() != Some(&state) || v.is_none() {
+                    rot.caboose_stage0 = match mgs_client
+                        .sp_component_caboose_get(
+                            id.type_,
+                            id.slot,
+                            SpComponent::STAGE0.const_as_str(),
+                            0,
+                        )
+                        .await
+                    {
+                        Ok(response) => {
+                            mgs_received = Instant::now();
+                            Some(Some(response.into_inner()))
+                        }
+                        Err(err) => {
+                            warn!(
+                                log, "Failed to get RoT caboose (stage0) for sp";
+                                "sp" => ?id,
+                                "err" => %err,
+                            );
+                            Some(None)
+                        }
+                    };
+                }
+            }
+
+            if let Some(v) = &rot.caboose_stage0next {
+                if prev_state.as_ref() != Some(&state) || v.is_none() {
+                    rot.caboose_stage0next = match mgs_client
+                        .sp_component_caboose_get(
+                            id.type_,
+                            id.slot,
+                            SpComponent::STAGE0.const_as_str(),
+                            1,
+                        )
+                        .await
+                    {
+                        Ok(response) => {
+                            mgs_received = Instant::now();
+                            Some(Some(response.into_inner()))
+                        }
+                        Err(err) => {
+                            warn!(
+                                log, "Failed to get RoT caboose (stage0next) for sp";
+                                "sp" => ?id,
+                                "err" => %err,
+                            );
+                            Some(None)
+                        }
+                    };
+                }
             }
         }
 
