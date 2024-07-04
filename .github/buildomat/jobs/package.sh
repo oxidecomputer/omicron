@@ -3,7 +3,7 @@
 #: name = "helios / package"
 #: variety = "basic"
 #: target = "helios-2.0"
-#: rust_toolchain = "1.78.0"
+#: rust_toolchain = true
 #: output_rules = [
 #:	"=/work/package.tar.gz",
 #: ]
@@ -20,7 +20,7 @@ WORK=/work
 pfexec mkdir -p $WORK && pfexec chown $USER $WORK
 
 ptime -m ./tools/install_builder_prerequisites.sh -yp
-ptime -m ./tools/ci_download_softnpu_machinery
+ptime -m cargo xtask download softnpu
 
 # Build the test target
 export CARGO_INCREMENTAL=0

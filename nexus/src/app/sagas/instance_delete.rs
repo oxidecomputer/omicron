@@ -268,22 +268,17 @@ mod test {
         let nexus = &cptestctx.server.server_context().nexus;
         create_org_project_and_disk(&client).await;
 
-        // Build the saga DAG with the provided test parameters
-        let dag = create_saga_dag::<SagaInstanceDelete>(
-            new_test_params(
-                &cptestctx,
-                create_instance(&cptestctx, new_instance_create_params())
-                    .await
-                    .id(),
-            )
-            .await,
+        // Build the saga DAG with the provided test parameters and run it.
+        let params = new_test_params(
+            &cptestctx,
+            create_instance(&cptestctx, new_instance_create_params())
+                .await
+                .id(),
         )
-        .unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-
-        // Actually run the saga
+        .await;
         nexus
-            .run_saga(runnable_saga)
+            .sagas
+            .saga_execute::<SagaInstanceDelete>(params)
             .await
             .expect("Saga should have succeeded");
     }

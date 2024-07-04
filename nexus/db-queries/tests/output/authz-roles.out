@@ -1,4 +1,4 @@
-resource: authz::oso_generic::Database
+resource: authz::Database
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✔  ✘  ✘  ✘  ✘  ✘  ✘  ✘

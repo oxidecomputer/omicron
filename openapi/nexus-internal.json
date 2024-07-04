@@ -1567,6 +1567,7 @@
           "checker": {
             "nullable": true,
             "description": "Checker to apply to incoming messages.",
+            "default": null,
             "type": "string"
           },
           "originate": {
@@ -1579,6 +1580,7 @@
           "shaper": {
             "nullable": true,
             "description": "Shaper to apply to outgoing messages.",
+            "default": null,
             "type": "string"
           }
         },
@@ -1676,6 +1678,7 @@
           "local_pref": {
             "nullable": true,
             "description": "Apply a local preference to routes received from this peer.",
+            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -1683,11 +1686,13 @@
           "md5_auth_key": {
             "nullable": true,
             "description": "Use the given key for TCP-MD5 authentication with the peer.",
+            "default": null,
             "type": "string"
           },
           "min_ttl": {
             "nullable": true,
             "description": "Require messages from a peer have a minimum IP time to live field.",
+            "default": null,
             "type": "integer",
             "format": "uint8",
             "minimum": 0
@@ -1695,6 +1700,7 @@
           "multi_exit_discriminator": {
             "nullable": true,
             "description": "Apply the provided multi-exit discriminator (MED) updates sent to the peer.",
+            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -1706,6 +1712,7 @@
           "remote_asn": {
             "nullable": true,
             "description": "Require that a peer has a specified ASN.",
+            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -1713,6 +1720,7 @@
           "vlan_id": {
             "nullable": true,
             "description": "Associate a VLAN ID with a BGP peer session.",
+            "default": null,
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -1956,6 +1964,14 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/BlueprintZoneDisposition"
+              }
+            ]
+          },
+          "filesystem_pool": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ZpoolName"
               }
             ]
           },
@@ -3145,8 +3161,11 @@
           "dst_propolis_id": {
             "nullable": true,
             "description": "If a migration is active, the ID of the target VMM.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              }
+            ]
           },
           "gen": {
             "description": "Generation number for this state.",
@@ -3165,8 +3184,11 @@
           "propolis_id": {
             "nullable": true,
             "description": "The instance's currently active VMM ID.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              }
+            ]
           },
           "time_updated": {
             "description": "Timestamp for this information.",
@@ -3177,81 +3199,6 @@
         "required": [
           "gen",
           "time_updated"
-        ]
-      },
-      "InstanceState": {
-        "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
-        "oneOf": [
-          {
-            "description": "The instance is being created.",
-            "type": "string",
-            "enum": [
-              "creating"
-            ]
-          },
-          {
-            "description": "The instance is currently starting up.",
-            "type": "string",
-            "enum": [
-              "starting"
-            ]
-          },
-          {
-            "description": "The instance is currently running.",
-            "type": "string",
-            "enum": [
-              "running"
-            ]
-          },
-          {
-            "description": "The instance has been requested to stop and a transition to \"Stopped\" is imminent.",
-            "type": "string",
-            "enum": [
-              "stopping"
-            ]
-          },
-          {
-            "description": "The instance is currently stopped.",
-            "type": "string",
-            "enum": [
-              "stopped"
-            ]
-          },
-          {
-            "description": "The instance is in the process of rebooting - it will remain in the \"rebooting\" state until the VM is starting once more.",
-            "type": "string",
-            "enum": [
-              "rebooting"
-            ]
-          },
-          {
-            "description": "The instance is in the process of migrating - it will remain in the \"migrating\" state until the migration process is complete and the destination propolis is ready to continue execution.",
-            "type": "string",
-            "enum": [
-              "migrating"
-            ]
-          },
-          {
-            "description": "The instance is attempting to recover from a failure.",
-            "type": "string",
-            "enum": [
-              "repairing"
-            ]
-          },
-          {
-            "description": "The instance has encountered a failure.",
-            "type": "string",
-            "enum": [
-              "failed"
-            ]
-          },
-          {
-            "description": "The instance has been deleted.",
-            "type": "string",
-            "enum": [
-              "destroyed"
-            ]
-          }
         ]
       },
       "IpKind": {
@@ -3503,9 +3450,91 @@
         "minLength": 5,
         "maxLength": 17
       },
+      "MigrationRole": {
+        "oneOf": [
+          {
+            "description": "This update concerns the source VMM of a migration.",
+            "type": "string",
+            "enum": [
+              "source"
+            ]
+          },
+          {
+            "description": "This update concerns the target VMM of a migration.",
+            "type": "string",
+            "enum": [
+              "target"
+            ]
+          }
+        ]
+      },
+      "MigrationRuntimeState": {
+        "description": "An update from a sled regarding the state of a migration, indicating the role of the VMM whose migration state was updated.",
+        "type": "object",
+        "properties": {
+          "gen": {
+            "$ref": "#/components/schemas/Generation"
+          },
+          "migration_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "$ref": "#/components/schemas/MigrationRole"
+          },
+          "state": {
+            "$ref": "#/components/schemas/MigrationState"
+          },
+          "time_updated": {
+            "description": "Timestamp for the migration state update.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "gen",
+          "migration_id",
+          "role",
+          "state",
+          "time_updated"
+        ]
+      },
+      "MigrationState": {
+        "description": "The state of an instance's live migration.",
+        "oneOf": [
+          {
+            "description": "The migration has not started for this VMM.",
+            "type": "string",
+            "enum": [
+              "pending"
+            ]
+          },
+          {
+            "description": "The migration is in progress.",
+            "type": "string",
+            "enum": [
+              "in_progress"
+            ]
+          },
+          {
+            "description": "The migration has failed.",
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          },
+          {
+            "description": "The migration has completed.",
+            "type": "string",
+            "enum": [
+              "completed"
+            ]
+          }
+        ]
+      },
       "Name": {
         "title": "A name unique within the parent collection",
-        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
+        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
         "type": "string",
         "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,
@@ -3542,6 +3571,13 @@
           },
           "subnet": {
             "$ref": "#/components/schemas/IpNet"
+          },
+          "transit_ips": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNet"
+            }
           },
           "vni": {
             "$ref": "#/components/schemas/Vni"
@@ -3799,14 +3835,14 @@
           "vendor"
         ]
       },
-      "PortConfigV1": {
+      "PortConfigV2": {
         "type": "object",
         "properties": {
           "addresses": {
-            "description": "This port's addresses.",
+            "description": "This port's addresses and optional vlan IDs",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/IpNet"
+              "$ref": "#/components/schemas/UplinkAddressConfig"
             }
           },
           "autoneg": {
@@ -4123,7 +4159,7 @@
             "description": "Initial rack network configuration",
             "allOf": [
               {
-                "$ref": "#/components/schemas/RackNetworkConfigV1"
+                "$ref": "#/components/schemas/RackNetworkConfigV2"
               }
             ]
           },
@@ -4158,7 +4194,7 @@
           "zpools"
         ]
       },
-      "RackNetworkConfigV1": {
+      "RackNetworkConfigV2": {
         "description": "Initial network configuration",
         "type": "object",
         "properties": {
@@ -4191,7 +4227,7 @@
             "description": "Uplinks for connecting the rack to external networks",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/PortConfigV1"
+              "$ref": "#/components/schemas/PortConfigV2"
             }
           },
           "rack_subnet": {
@@ -4332,6 +4368,7 @@
           "vlan_id": {
             "nullable": true,
             "description": "The VLAN id associated with this route.",
+            "default": null,
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -4647,10 +4684,22 @@
               }
             ]
           },
+          "migration_state": {
+            "nullable": true,
+            "description": "The current state of any in-progress migration for this instance, as understood by this sled.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MigrationRuntimeState"
+              }
+            ]
+          },
           "propolis_id": {
             "description": "The ID of the VMM whose state is being reported.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              }
+            ]
           },
           "vmm_state": {
             "description": "The most recent state of the sled's VMM process.",
@@ -4889,6 +4938,10 @@
         "type": "string",
         "format": "uuid"
       },
+      "TypedUuidForPropolisKind": {
+        "type": "string",
+        "format": "uuid"
+      },
       "TypedUuidForSledKind": {
         "type": "string",
         "format": "uuid"
@@ -4965,6 +5018,25 @@
           "items"
         ]
       },
+      "UplinkAddressConfig": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "$ref": "#/components/schemas/IpNet"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id (if any) associated with this address.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "address"
+        ]
+      },
       "UpstairsRepairType": {
         "type": "string",
         "enum": [
@@ -4974,7 +5046,7 @@
       },
       "UserId": {
         "title": "A name unique within the parent collection",
-        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
+        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
         "type": "string",
         "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,
@@ -4996,7 +5068,7 @@
             "description": "The last state reported by this VMM.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/InstanceState"
+                "$ref": "#/components/schemas/VmmState"
               }
             ]
           },
@@ -5010,6 +5082,67 @@
           "gen",
           "state",
           "time_updated"
+        ]
+      },
+      "VmmState": {
+        "description": "One of the states that a VMM can be in.",
+        "oneOf": [
+          {
+            "description": "The VMM is initializing and has not started running guest CPUs yet.",
+            "type": "string",
+            "enum": [
+              "starting"
+            ]
+          },
+          {
+            "description": "The VMM has finished initializing and may be running guest CPUs.",
+            "type": "string",
+            "enum": [
+              "running"
+            ]
+          },
+          {
+            "description": "The VMM is shutting down.",
+            "type": "string",
+            "enum": [
+              "stopping"
+            ]
+          },
+          {
+            "description": "The VMM's guest has stopped, and the guest will not run again, but the VMM process may not have released all of its resources yet.",
+            "type": "string",
+            "enum": [
+              "stopped"
+            ]
+          },
+          {
+            "description": "The VMM is being restarted or its guest OS is rebooting.",
+            "type": "string",
+            "enum": [
+              "rebooting"
+            ]
+          },
+          {
+            "description": "The VMM is part of a live migration.",
+            "type": "string",
+            "enum": [
+              "migrating"
+            ]
+          },
+          {
+            "description": "The VMM process reported an internal failure.",
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          },
+          {
+            "description": "The VMM process has been destroyed and its resources have been released.",
+            "type": "string",
+            "enum": [
+              "destroyed"
+            ]
+          }
         ]
       },
       "Vni": {

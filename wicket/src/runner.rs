@@ -176,6 +176,10 @@ impl RunnerCore {
             Action::StartUpdate(component_id) => {
                 if let Some(wicketd) = wicketd {
                     let options = CreateStartUpdateOptions {
+                        force_update_rot_bootloader: self
+                            .state
+                            .force_update_state
+                            .force_update_rot_bootloader,
                         force_update_rot: self
                             .state
                             .force_update_state

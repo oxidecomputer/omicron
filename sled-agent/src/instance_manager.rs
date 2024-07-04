@@ -27,6 +27,8 @@ use illumos_utils::running_zone::ZoneBuilderFactory;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
+use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PropolisUuid;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -44,7 +46,7 @@ pub enum Error {
     Instance(#[from] crate::instance::Error),
 
     #[error("No such instance ID: {0}")]
-    NoSuchInstance(Uuid),
+    NoSuchInstance(InstanceUuid),
 
     #[error("OPTE port management error: {0}")]
     Opte(#[from] illumos_utils::opte::Error),
@@ -137,8 +139,8 @@ impl InstanceManager {
     #[allow(clippy::too_many_arguments)]
     pub async fn ensure_registered(
         &self,
-        instance_id: Uuid,
-        propolis_id: Uuid,
+        instance_id: InstanceUuid,
+        propolis_id: PropolisUuid,
         hardware: InstanceHardware,
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
@@ -165,7 +167,7 @@ impl InstanceManager {
 
     pub async fn ensure_unregistered(
         &self,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
     ) -> Result<InstanceUnregisterResponse, Error> {
         let (tx, rx) = oneshot::channel();
         self.inner
@@ -181,7 +183,7 @@ impl InstanceManager {
 
     pub async fn ensure_state(
         &self,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         target: InstanceStateRequested,
     ) -> Result<InstancePutStateResponse, Error> {
         let (tx, rx) = oneshot::channel();
@@ -215,7 +217,7 @@ impl InstanceManager {
 
     pub async fn put_migration_ids(
         &self,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         old_runtime: &InstanceRuntimeState,
         migration_ids: &Option<InstanceMigrationSourceParams>,
     ) -> Result<SledInstanceState, Error> {
@@ -235,7 +237,7 @@ impl InstanceManager {
 
     pub async fn instance_issue_disk_snapshot_request(
         &self,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         disk_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
@@ -272,7 +274,7 @@ impl InstanceManager {
 
     pub async fn add_external_ip(
         &self,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         ip: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
@@ -290,7 +292,7 @@ impl InstanceManager {
 
     pub async fn delete_external_ip(
         &self,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         ip: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
@@ -313,7 +315,7 @@ impl InstanceManager {
 
     pub async fn get_instance_state(
         &self,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
     ) -> Result<SledInstanceState, Error> {
         let (tx, rx) = oneshot::channel();
         self.inner
@@ -334,8 +336,8 @@ impl InstanceManager {
 #[derive(strum::Display)]
 enum InstanceManagerRequest {
     EnsureRegistered {
-        instance_id: Uuid,
-        propolis_id: Uuid,
+        instance_id: InstanceUuid,
+        propolis_id: PropolisUuid,
         hardware: InstanceHardware,
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
@@ -344,22 +346,22 @@ enum InstanceManagerRequest {
         tx: oneshot::Sender<Result<SledInstanceState, Error>>,
     },
     EnsureUnregistered {
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         tx: oneshot::Sender<Result<InstanceUnregisterResponse, Error>>,
     },
     EnsureState {
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         target: InstanceStateRequested,
         tx: oneshot::Sender<Result<InstancePutStateResponse, Error>>,
     },
     PutMigrationIds {
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         old_runtime: InstanceRuntimeState,
         migration_ids: Option<InstanceMigrationSourceParams>,
         tx: oneshot::Sender<Result<SledInstanceState, Error>>,
     },
     InstanceIssueDiskSnapshot {
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         disk_id: Uuid,
         snapshot_id: Uuid,
         tx: oneshot::Sender<Result<(), Error>>,
@@ -369,17 +371,17 @@ enum InstanceManagerRequest {
         tx: oneshot::Sender<Result<ZoneBundleMetadata, BundleError>>,
     },
     InstanceAddExternalIp {
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         ip: InstanceExternalIpBody,
         tx: oneshot::Sender<Result<(), Error>>,
     },
     InstanceDeleteExternalIp {
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         ip: InstanceExternalIpBody,
         tx: oneshot::Sender<Result<(), Error>>,
     },
     GetState {
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         tx: oneshot::Sender<Result<SledInstanceState, Error>>,
     },
 }
@@ -387,7 +389,7 @@ enum InstanceManagerRequest {
 // Requests that the instance manager stop processing information about a
 // particular instance.
 struct InstanceDeregisterRequest {
-    id: Uuid,
+    id: InstanceUuid,
 }
 
 struct InstanceManagerRunner {
@@ -414,7 +416,7 @@ struct InstanceManagerRunner {
     // instance, we could avoid the methods within "instance.rs" that panic
     // if the Propolis client hasn't been initialized.
     /// A mapping from a Sled Agent "Instance ID" to ("Propolis ID", [Instance]).
-    instances: BTreeMap<Uuid, (Uuid, Instance)>,
+    instances: BTreeMap<InstanceUuid, (PropolisUuid, Instance)>,
 
     vnic_allocator: VnicAllocator<Etherstub>,
     port_manager: PortManager,
@@ -511,7 +513,7 @@ impl InstanceManagerRunner {
         }
     }
 
-    fn get_instance(&self, instance_id: Uuid) -> Option<&Instance> {
+    fn get_instance(&self, instance_id: InstanceUuid) -> Option<&Instance> {
         self.instances.get(&instance_id).map(|(_id, v)| v)
     }
 
@@ -535,8 +537,8 @@ impl InstanceManagerRunner {
     #[allow(clippy::too_many_arguments)]
     pub async fn ensure_registered(
         &mut self,
-        instance_id: Uuid,
-        propolis_id: Uuid,
+        instance_id: InstanceUuid,
+        propolis_id: PropolisUuid,
         hardware: InstanceHardware,
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
@@ -625,7 +627,7 @@ impl InstanceManagerRunner {
     async fn ensure_unregistered(
         &mut self,
         tx: oneshot::Sender<Result<InstanceUnregisterResponse, Error>>,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
     ) -> Result<(), Error> {
         // If the instance does not exist, we response immediately.
         let Some(instance) = self.get_instance(instance_id) else {
@@ -645,7 +647,7 @@ impl InstanceManagerRunner {
     async fn ensure_state(
         &mut self,
         tx: oneshot::Sender<Result<InstancePutStateResponse, Error>>,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         target: InstanceStateRequested,
     ) -> Result<(), Error> {
         let Some(instance) = self.get_instance(instance_id) else {
@@ -680,7 +682,7 @@ impl InstanceManagerRunner {
     async fn put_migration_ids(
         &mut self,
         tx: oneshot::Sender<Result<SledInstanceState, Error>>,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         old_runtime: &InstanceRuntimeState,
         migration_ids: &Option<InstanceMigrationSourceParams>,
     ) -> Result<(), Error> {
@@ -697,7 +699,7 @@ impl InstanceManagerRunner {
     async fn instance_issue_disk_snapshot_request(
         &self,
         tx: oneshot::Sender<Result<(), Error>>,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         disk_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
@@ -734,7 +736,7 @@ impl InstanceManagerRunner {
     async fn add_external_ip(
         &self,
         tx: oneshot::Sender<Result<(), Error>>,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         ip: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
         let Some(instance) = self.get_instance(instance_id) else {
@@ -747,7 +749,7 @@ impl InstanceManagerRunner {
     async fn delete_external_ip(
         &self,
         tx: oneshot::Sender<Result<(), Error>>,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         ip: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
         let Some(instance) = self.get_instance(instance_id) else {
@@ -761,7 +763,7 @@ impl InstanceManagerRunner {
     async fn get_instance_state(
         &self,
         tx: oneshot::Sender<Result<SledInstanceState, Error>>,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
     ) -> Result<(), Error> {
         let Some(instance) = self.get_instance(instance_id) else {
             return tx
@@ -777,7 +779,7 @@ impl InstanceManagerRunner {
 
 /// Represents membership of an instance in the [`InstanceManager`].
 pub struct InstanceTicket {
-    id: Uuid,
+    id: InstanceUuid,
     terminate_tx: Option<mpsc::UnboundedSender<InstanceDeregisterRequest>>,
 }
 
@@ -785,14 +787,14 @@ impl InstanceTicket {
     // Creates a new instance ticket for instance "id" to be removed
     // from the manger on destruction.
     fn new(
-        id: Uuid,
+        id: InstanceUuid,
         terminate_tx: mpsc::UnboundedSender<InstanceDeregisterRequest>,
     ) -> Self {
         InstanceTicket { id, terminate_tx: Some(terminate_tx) }
     }
 
     #[cfg(all(test, target_os = "illumos"))]
-    pub(crate) fn new_without_manager_for_test(id: Uuid) -> Self {
+    pub(crate) fn new_without_manager_for_test(id: InstanceUuid) -> Self {
         Self { id, terminate_tx: None }
     }
 

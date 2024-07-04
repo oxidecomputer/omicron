@@ -9,18 +9,22 @@ use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
+use nexus_config::RegionAllocationStrategy;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::RegionAllocationFor;
+use nexus_db_queries::db::datastore::RegionAllocationParameters;
+use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
-use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
@@ -33,10 +37,18 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use omicron_nexus::app::MIN_DISK_SIZE_BYTES;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
+type DiskTest<'a> =
+    nexus_test_utils::resource_helpers::DiskTest<'a, omicron_nexus::Server>;
+type DiskTestBuilder<'a> = nexus_test_utils::resource_helpers::DiskTestBuilder<
+    'a,
+    omicron_nexus::Server,
+>;
 
 const PROJECT_NAME: &str = "springfield-squidport-disks";
 
@@ -134,10 +146,11 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
         },
     )
     .await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // cannot snapshot attached disk for instance in state starting
     let nexus = &cptestctx.server.server_context().nexus;
-    instance_simulate(nexus, &instance.identity.id).await;
+    instance_simulate(nexus, &instance_id).await;
 
     // Issue snapshot request
     let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
@@ -954,9 +967,10 @@ async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // Set the third region's running snapshot callback so it fails
-    let zpool = &disk_test.zpools[2];
+    let zpool = disk_test.zpools().nth(2).expect("Not enough zpools");
     let dataset = &zpool.datasets[0];
-    disk_test
+    cptestctx
+        .sled_agent
         .sled_agent
         .get_crucible_dataset(zpool.id, dataset.id)
         .await
@@ -1440,4 +1454,199 @@ async fn test_multiple_deletes_not_sent(cptestctx: &ControlPlaneTestContext) {
         assert!(!resources_1_datasets_and_snapshots.contains(tuple));
         assert!(!resources_2_datasets_and_snapshots.contains(tuple));
     }
+}
+
+/// Ensure that allocating one replacement for a snapshot works
+#[nexus_test]
+async fn test_region_allocation_for_snapshot(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Create four 10 GiB zpools, each with one dataset.
+    //
+    // We add one more than the "three" default to avoid failing
+    // with "not enough storage".
+    let sled_id = cptestctx.first_sled();
+    let mut disk_test = DiskTestBuilder::new(&cptestctx)
+        .on_specific_sled(cptestctx.first_sled())
+        .with_zpool_count(4)
+        .build()
+        .await;
+
+    // Assert default is still 10 GiB
+    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+
+    // Create a disk
+    let client = &cptestctx.external_client;
+    let _project_id = create_project_and_pool(client).await;
+
+    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+
+    // Assert disk has three allocated regions
+    let disk_id = disk.identity.id;
+    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk_id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+    let allocated_regions =
+        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+    assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD);
+
+    // Create a snapshot of the disk
+
+    let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
+
+    let snapshot: views::Snapshot = object_create(
+        client,
+        &snapshots_url,
+        &params::SnapshotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "snapshot".parse().unwrap(),
+                description: String::from("a snapshot"),
+            },
+            disk: disk_id.into(),
+        },
+    )
+    .await;
+
+    assert_eq!(snapshot.disk_id, disk.identity.id);
+    assert_eq!(snapshot.size, disk.size);
+
+    // There shouldn't be any regions for the snapshot volume
+
+    let snapshot_id = snapshot.identity.id;
+    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+        .snapshot_id(snapshot_id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| {
+            panic!("test snapshot {:?} should exist", snapshot_id)
+        });
+
+    let allocated_regions =
+        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+
+    assert_eq!(allocated_regions.len(), 0);
+
+    // Run region allocation for the snapshot volume, setting the redundancy to
+    // 1 (aka one more than existing number of regions), and expect only _one_
+    // region to be allocated.
+
+    datastore
+        .arbitrary_region_allocate(
+            &opctx,
+            RegionAllocationFor::SnapshotVolume {
+                volume_id: db_snapshot.volume_id,
+                snapshot_id: snapshot.identity.id,
+            },
+            RegionAllocationParameters::FromDiskSource {
+                disk_source: &params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(
+                        disk.block_size.to_bytes() as u32,
+                    )
+                    .unwrap(),
+                },
+                size: disk.size,
+            },
+            &RegionAllocationStrategy::Random { seed: None },
+            1,
+        )
+        .await
+        .unwrap();
+
+    let allocated_regions =
+        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+
+    assert_eq!(allocated_regions.len(), 1);
+
+    // Assert that all regions are on separate datasets from the region
+    // snapshots
+
+    for (_, region) in allocated_regions {
+        {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+            use async_bb8_diesel::AsyncRunQueryDsl;
+            use db::schema::region_snapshot::dsl;
+            use diesel::ExpressionMethods;
+            use diesel::QueryDsl;
+            use diesel::SelectableHelper;
+
+            let region_snapshots: Vec<db::model::RegionSnapshot> =
+                dsl::region_snapshot
+                    .filter(dsl::dataset_id.eq(region.dataset_id()))
+                    .filter(dsl::snapshot_id.eq(snapshot.identity.id))
+                    .select(db::model::RegionSnapshot::as_select())
+                    .load_async::<db::model::RegionSnapshot>(&*conn)
+                    .await
+                    .unwrap();
+
+            assert!(region_snapshots.is_empty());
+        }
+    }
+
+    // Ensure the function is idempotent
+
+    datastore
+        .arbitrary_region_allocate(
+            &opctx,
+            RegionAllocationFor::SnapshotVolume {
+                volume_id: db_snapshot.volume_id,
+                snapshot_id: snapshot.identity.id,
+            },
+            RegionAllocationParameters::FromDiskSource {
+                disk_source: &params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(
+                        disk.block_size.to_bytes() as u32,
+                    )
+                    .unwrap(),
+                },
+                size: disk.size,
+            },
+            &RegionAllocationStrategy::Random { seed: None },
+            1,
+        )
+        .await
+        .unwrap();
+
+    let allocated_regions =
+        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+
+    assert_eq!(allocated_regions.len(), 1);
+
+    // If an additional region is required, make sure that works too.
+    disk_test.add_zpool_with_dataset(sled_id).await;
+
+    datastore
+        .arbitrary_region_allocate(
+            &opctx,
+            RegionAllocationFor::SnapshotVolume {
+                volume_id: db_snapshot.volume_id,
+                snapshot_id: snapshot.identity.id,
+            },
+            RegionAllocationParameters::FromDiskSource {
+                disk_source: &params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(
+                        disk.block_size.to_bytes() as u32,
+                    )
+                    .unwrap(),
+                },
+                size: disk.size,
+            },
+            &RegionAllocationStrategy::Random { seed: None },
+            2,
+        )
+        .await
+        .unwrap();
+
+    let allocated_regions =
+        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+
+    assert_eq!(allocated_regions.len(), 2);
 }

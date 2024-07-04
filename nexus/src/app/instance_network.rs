@@ -4,6 +4,7 @@
 
 //! Routines that manage instance-related networking state.
 
+use crate::app::background;
 use crate::app::switch_port;
 use ipnetwork::IpNetwork;
 use nexus_db_model::ExternalIp;
@@ -20,6 +21,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
 use std::collections::HashSet;
@@ -27,8 +30,9 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 use super::background::BackgroundTasks;
+use super::Nexus;
 
-impl super::Nexus {
+impl Nexus {
     /// Returns the set of switches with uplinks configured and boundary
     /// services enabled.
     pub(crate) async fn boundary_switches(
@@ -63,14 +67,14 @@ impl super::Nexus {
     pub(crate) async fn instance_ensure_dpd_config(
         &self,
         opctx: &OpContext,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         sled_ip_address: &std::net::SocketAddrV6,
         ip_filter: Option<Uuid>,
     ) -> Result<Vec<Ipv4NatEntry>, Error> {
         instance_ensure_dpd_config(
             &self.db_datastore,
             &self.log,
-            &self.resolver().await,
+            self.resolver(),
             opctx,
             &self.opctx_alloc,
             instance_id,
@@ -131,11 +135,10 @@ impl super::Nexus {
         opctx: &OpContext,
         authz_instance: &authz::Instance,
     ) -> Result<(), Error> {
-        let resolver = self.resolver().await;
         instance_delete_dpd_config(
             &self.db_datastore,
             &self.log,
-            &resolver,
+            self.resolver(),
             opctx,
             &self.opctx_alloc,
             authz_instance,
@@ -174,7 +177,7 @@ impl super::Nexus {
     ) -> Result<(), Error> {
         delete_dpd_config_by_entry(
             &self.db_datastore,
-            &self.resolver().await,
+            self.resolver(),
             &self.log,
             opctx,
             &self.opctx_alloc,
@@ -195,7 +198,7 @@ impl super::Nexus {
         probe_delete_dpd_config(
             &self.db_datastore,
             &self.log,
-            &self.resolver().await,
+            self.resolver(),
             opctx,
             &self.opctx_alloc,
             probe_id,
@@ -264,9 +267,9 @@ pub(crate) async fn ensure_updated_instance_network_config(
     authz_instance: &authz::Instance,
     prev_instance_state: &db::model::InstanceRuntimeState,
     new_instance_state: &nexus::InstanceRuntimeState,
-    v2p_notification_tx: tokio::sync::watch::Sender<()>,
+    v2p_manager: &background::Activator,
 ) -> Result<(), Error> {
-    let instance_id = authz_instance.id();
+    let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
     // If this instance update is stale, do nothing, since the superseding
     // update may have allowed the instance's location to change further.
@@ -295,7 +298,7 @@ pub(crate) async fn ensure_updated_instance_network_config(
             opctx,
             opctx_alloc,
             authz_instance,
-            v2p_notification_tx,
+            v2p_manager,
         )
         .await?;
         return Ok(());
@@ -335,7 +338,8 @@ pub(crate) async fn ensure_updated_instance_network_config(
     let migration_retired = prev_instance_state.migration_id.is_some()
         && new_instance_state.migration_id.is_none();
 
-    if (prev_instance_state.propolis_id == new_instance_state.propolis_id)
+    if (prev_instance_state.propolis_id
+        == new_instance_state.propolis_id.map(GenericUuid::into_untyped_uuid))
         && !migration_retired
     {
         debug!(log, "instance didn't move, won't touch network config";
@@ -375,13 +379,7 @@ pub(crate) async fn ensure_updated_instance_network_config(
         Err(e) => return Err(e),
     };
 
-    if let Err(e) = v2p_notification_tx.send(()) {
-        error!(
-            log,
-            "error notifying background task of v2p change";
-            "error" => ?e
-        )
-    };
+    v2p_manager.activate();
 
     let (.., sled) =
         LookupPath::new(opctx, datastore).sled_id(new_sled_id).fetch().await?;
@@ -438,7 +436,7 @@ pub(crate) async fn instance_ensure_dpd_config(
     resolver: &internal_dns::resolver::Resolver,
     opctx: &OpContext,
     opctx_alloc: &OpContext,
-    instance_id: Uuid,
+    instance_id: InstanceUuid,
     sled_ip_address: &std::net::SocketAddrV6,
     ip_filter: Option<Uuid>,
 ) -> Result<Vec<Ipv4NatEntry>, Error> {
@@ -446,7 +444,7 @@ pub(crate) async fn instance_ensure_dpd_config(
             "instance_id" => %instance_id);
 
     let (.., authz_instance) = LookupPath::new(opctx, datastore)
-        .instance_id(instance_id)
+        .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::ListChildren)
         .await?;
 
@@ -699,15 +697,9 @@ async fn clear_instance_networking_state(
     opctx: &OpContext,
     opctx_alloc: &OpContext,
     authz_instance: &authz::Instance,
-    v2p_notification_tx: tokio::sync::watch::Sender<()>,
+    v2p_manager: &background::Activator,
 ) -> Result<(), Error> {
-    if let Err(e) = v2p_notification_tx.send(()) {
-        error!(
-            log,
-            "error notifying background task of v2p change";
-            "error" => ?e
-        )
-    };
+    v2p_manager.activate();
 
     instance_delete_dpd_config(
         datastore,
@@ -724,7 +716,7 @@ async fn clear_instance_networking_state(
         log,
         resolver,
         opctx_alloc,
-        Some(authz_instance.id()),
+        Some(InstanceUuid::from_untyped_uuid(authz_instance.id())),
         true,
     )
     .await
@@ -760,7 +752,7 @@ pub(crate) async fn instance_delete_dpd_config(
     opctx_alloc: &OpContext,
     authz_instance: &authz::Instance,
 ) -> Result<(), Error> {
-    let instance_id = authz_instance.id();
+    let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
     info!(log, "deleting instance dpd configuration";
             "instance_id" => %instance_id);
@@ -949,7 +941,7 @@ async fn notify_dendrite_nat_state(
     log: &slog::Logger,
     resolver: &internal_dns::resolver::Resolver,
     opctx_alloc: &OpContext,
-    instance_id: Option<Uuid>,
+    instance_id: Option<InstanceUuid>,
     fail_fast: bool,
 ) -> Result<(), Error> {
     // Querying boundary switches also requires fleet access and the use of the

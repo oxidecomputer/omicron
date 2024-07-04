@@ -13,6 +13,7 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_client::types::OmicronZoneDataset;
 use sled_agent_client::types::OmicronZoneType;
 use sled_agent_client::ZoneKind;
 
@@ -34,33 +35,10 @@ pub enum BlueprintZoneType {
 
 impl BlueprintZoneType {
     /// Returns the zpool being used by this zone, if any.
-    pub fn zpool(&self) -> Option<&omicron_common::zpool_name::ZpoolName> {
-        match self {
-            BlueprintZoneType::ExternalDns(
-                blueprint_zone_type::ExternalDns { dataset, .. },
-            )
-            | BlueprintZoneType::Clickhouse(
-                blueprint_zone_type::Clickhouse { dataset, .. },
-            )
-            | BlueprintZoneType::ClickhouseKeeper(
-                blueprint_zone_type::ClickhouseKeeper { dataset, .. },
-            )
-            | BlueprintZoneType::CockroachDb(
-                blueprint_zone_type::CockroachDb { dataset, .. },
-            )
-            | BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
-                dataset,
-                ..
-            })
-            | BlueprintZoneType::InternalDns(
-                blueprint_zone_type::InternalDns { dataset, .. },
-            ) => Some(&dataset.pool_name),
-            BlueprintZoneType::BoundaryNtp(_)
-            | BlueprintZoneType::InternalNtp(_)
-            | BlueprintZoneType::Nexus(_)
-            | BlueprintZoneType::Oximeter(_)
-            | BlueprintZoneType::CruciblePantry(_) => None,
-        }
+    pub fn durable_zpool(
+        &self,
+    ) -> Option<&omicron_common::zpool_name::ZpoolName> {
+        self.durable_dataset().map(|dataset| &dataset.pool_name)
     }
 
     pub fn external_networking(
@@ -137,6 +115,37 @@ impl BlueprintZoneType {
             | BlueprintZoneType::InternalNtp(_)
             | BlueprintZoneType::Nexus(_)
             | BlueprintZoneType::Oximeter(_) => false,
+        }
+    }
+
+    /// Returns a durable dataset associated with this zone, if any exists.
+    pub fn durable_dataset(&self) -> Option<&OmicronZoneDataset> {
+        match self {
+            BlueprintZoneType::Clickhouse(
+                blueprint_zone_type::Clickhouse { dataset, .. },
+            )
+            | BlueprintZoneType::ClickhouseKeeper(
+                blueprint_zone_type::ClickhouseKeeper { dataset, .. },
+            )
+            | BlueprintZoneType::CockroachDb(
+                blueprint_zone_type::CockroachDb { dataset, .. },
+            )
+            | BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
+                dataset,
+                ..
+            })
+            | BlueprintZoneType::ExternalDns(
+                blueprint_zone_type::ExternalDns { dataset, .. },
+            )
+            | BlueprintZoneType::InternalDns(
+                blueprint_zone_type::InternalDns { dataset, .. },
+            ) => Some(dataset),
+            // Transient-dataset-only zones
+            BlueprintZoneType::BoundaryNtp(_)
+            | BlueprintZoneType::CruciblePantry(_)
+            | BlueprintZoneType::InternalNtp(_)
+            | BlueprintZoneType::Nexus(_)
+            | BlueprintZoneType::Oximeter(_) => None,
         }
     }
 }

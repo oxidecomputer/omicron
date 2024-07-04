@@ -8,7 +8,7 @@ use anyhow::{bail, Context, Result};
 use camino::Utf8Path;
 use cargo_toml::{Dependency, Manifest};
 use fs_err as fs;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 const WORKSPACE_HACK_PACKAGE_NAME: &str = "omicron-workspace-hack";
 
@@ -114,6 +114,53 @@ pub fn run_cmd() -> Result<()> {
         );
         eprintln!("  used in: {}", examples.join(", "));
         nerrors += 1;
+    }
+
+    // Check that `default-members` is configured correctly.
+    let non_default = workspace
+        .packages
+        .iter()
+        .filter_map(|package| {
+            [
+                // Including xtask causes hakari to not work as well and build
+                // times to be longer (omicron#4392).
+                "xtask",
+                // The tests here should not be run by default, as they require
+                // a running control plane.
+                "end-to-end-tests",
+            ]
+            .contains(&package.name.as_str())
+            .then_some(&package.id)
+        })
+        .collect::<BTreeSet<_>>();
+    let members = workspace.workspace_members.iter().collect::<BTreeSet<_>>();
+    let default_members =
+        workspace.workspace_default_members.iter().collect::<BTreeSet<_>>();
+    for package in members.difference(&default_members) {
+        if !non_default.contains(package) {
+            eprintln!(
+                "error: package {:?} not in default-members",
+                package.repr
+            );
+            nerrors += 1;
+        }
+    }
+
+    let mut seen_bins = BTreeSet::new();
+    for package in &workspace.packages {
+        if workspace.workspace_members.contains(&package.id) {
+            for target in &package.targets {
+                if target.is_bin() {
+                    if !seen_bins.insert(&target.name) {
+                        eprintln!(
+                            "error: bin target {:?} seen multiple times",
+                            target.name
+                        );
+                        nerrors += 1;
+                    }
+                }
+            }
+        }
     }
 
     eprintln!(

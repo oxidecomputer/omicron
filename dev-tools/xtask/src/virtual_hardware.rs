@@ -104,6 +104,7 @@ const IPADM: &'static str = "/usr/sbin/ipadm";
 const MODINFO: &'static str = "/usr/sbin/modinfo";
 const MODUNLOAD: &'static str = "/usr/sbin/modunload";
 const NETSTAT: &'static str = "/usr/bin/netstat";
+const OPTEADM: &'static str = "/opt/oxide/opte/bin/opteadm";
 const PFEXEC: &'static str = "/usr/bin/pfexec";
 const PING: &'static str = "/usr/sbin/ping";
 const SWAP: &'static str = "/usr/sbin/swap";
@@ -113,7 +114,7 @@ const ZPOOL: &'static str = "/usr/sbin/zpool";
 const ZONEADM: &'static str = "/usr/sbin/zoneadm";
 
 const SIDECAR_LITE_COMMIT: &'static str =
-    "960f11afe859e0316088e04578aedb700fba6159";
+    "de6fab7885a6bbc5327accffd2a872a31e2f1cb6";
 const SOFTNPU_COMMIT: &'static str = "3203c51cf4473d30991b522062ac0df2e045c2f2";
 const PXA_MAC_DEFAULT: &'static str = "a8:e1:de:01:70:1d";
 
@@ -234,9 +235,7 @@ fn unload_xde_driver() -> Result<()> {
         .context("Invalid modinfo output")?
         .lines()
         .find_map(|line| {
-            let mut cols = line.trim().splitn(2, ' ');
-            let id = cols.next()?;
-            let desc = cols.next()?;
+            let (id, desc) = line.trim().split_once(' ')?;
             if !desc.contains("xde") {
                 return None;
             }
@@ -247,8 +246,17 @@ fn unload_xde_driver() -> Result<()> {
         println!("xde driver already unloaded");
         return Ok(());
     };
-    println!("unloading xde driver");
+    println!("unloading xde driver:\na) clearing underlay...");
+    let mut cmd = Command::new(PFEXEC);
+    cmd.args([OPTEADM, "clear-xde-underlay"]);
+    if let Err(e) = execute(cmd) {
+        // This is explicitly non-fatal: the underlay is only set when
+        // sled-agent is running. We still need to be able to tear
+        // down the driver if we immediately call create->destroy.
+        println!("\tFailed or already unset: {e}");
+    }
 
+    println!("b) unloading module...");
     let mut cmd = Command::new(PFEXEC);
     cmd.arg(MODUNLOAD);
     cmd.arg("-i");
@@ -409,7 +417,7 @@ fn run_scadm_command(args: Vec<&str>) -> Result<Output> {
     for arg in &args {
         cmd.arg(arg);
     }
-    Ok(execute(cmd)?)
+    execute(cmd)
 }
 
 fn default_gateway_ip() -> Result<String> {
@@ -487,8 +495,8 @@ struct SledAgentConfig {
 impl SledAgentConfig {
     fn read(path: &Utf8Path) -> Result<Self> {
         let config = std::fs::read_to_string(path)?;
-        Ok(toml::from_str(&config)
-            .context("Could not parse sled agent config as toml")?)
+        toml::from_str(&config)
+            .context("Could not parse sled agent config as toml")
     }
 }
 
@@ -595,7 +603,7 @@ fn swap_list() -> Result<Vec<Utf8PathBuf>> {
     let mut cmd = Command::new(SWAP);
     cmd.arg("-l");
 
-    let output = cmd.output().context(format!("Could not start swap"))?;
+    let output = cmd.output().context("Could not start swap")?;
     if !output.status.success() {
         if let Ok(stderr) = String::from_utf8(output.stderr) {
             // This is an exceptional case - if there are no swap devices,

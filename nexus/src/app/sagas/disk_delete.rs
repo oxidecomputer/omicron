@@ -236,7 +236,7 @@ pub(crate) mod test {
         let project_id = create_project(client, PROJECT_NAME).await.identity.id;
         let disk = create_disk(&cptestctx).await;
 
-        // Build the saga DAG with the provided test parameters
+        // Build the saga DAG with the provided test parameters and run it.
         let opctx = test_opctx(&cptestctx);
         let params = Params {
             serialized_authn: Serialized::for_opctx(&opctx),
@@ -244,11 +244,7 @@ pub(crate) mod test {
             disk_id: disk.id(),
             volume_id: disk.volume_id,
         };
-        let dag = create_saga_dag::<SagaDiskDelete>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-
-        // Actually run the saga
-        nexus.run_saga(runnable_saga).await.unwrap();
+        nexus.sagas.saga_execute::<SagaDiskDelete>(params).await.unwrap();
     }
 
     #[nexus_test(server = crate::Server)]

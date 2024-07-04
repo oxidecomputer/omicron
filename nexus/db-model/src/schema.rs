@@ -286,17 +286,6 @@ table! {
 }
 
 table! {
-    v2p_mapping_view (nic_id) {
-        nic_id -> Uuid,
-        sled_id -> Uuid,
-        sled_ip -> Inet,
-        vni -> Int4,
-        mac -> Int8,
-        ip -> Inet,
-    }
-}
-
-table! {
     bgp_announce_set (id) {
         id -> Uuid,
         name -> Text,
@@ -322,6 +311,7 @@ table! {
         rsvd_address_lot_block_id -> Uuid,
         address -> Inet,
         interface_name -> Text,
+        vlan_id -> Nullable<Int4>,
     }
 }
 
@@ -424,12 +414,12 @@ table! {
         memory -> Int8,
         hostname -> Text,
         boot_on_fault -> Bool,
-        state -> crate::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_propolis_id -> Nullable<Uuid>,
         target_propolis_id -> Nullable<Uuid>,
         migration_id -> Nullable<Uuid>,
+        state -> crate::InstanceStateEnum,
         updater_id -> Nullable<Uuid>,
         updater_gen-> Int8,
     }
@@ -444,9 +434,9 @@ table! {
         sled_id -> Uuid,
         propolis_ip -> Inet,
         propolis_port -> Int4,
-        state -> crate::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
+        state -> crate::VmmStateEnum,
     }
 }
 joinable!(vmm -> sled (sled_id));
@@ -459,7 +449,7 @@ table! {
         project_name -> Text,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        state -> crate::InstanceStateEnum,
+        state -> crate::VmmStateEnum,
         active_sled_id -> Uuid,
         migration_id -> Nullable<Uuid>,
         ncpus -> Int8,
@@ -521,6 +511,7 @@ table! {
         ip -> Inet,
         slot -> Int2,
         is_primary -> Bool,
+        transit_ips -> Array<Inet>,
     }
 }
 
@@ -539,6 +530,7 @@ table! {
         ip -> Inet,
         slot -> Int2,
         is_primary -> Bool,
+        transit_ips -> Array<Inet>,
     }
 }
 joinable!(instance_network_interface -> instance (instance_id));
@@ -1116,6 +1108,7 @@ table! {
         rcgen -> Int8,
         ipv4_block -> Inet,
         ipv6_block -> Inet,
+        custom_router_id -> Nullable<Uuid>,
     }
 }
 
@@ -1130,6 +1123,7 @@ table! {
         kind -> crate::VpcRouterKindEnum,
         vpc_id -> Uuid,
         rcgen -> Int8,
+        resolved_version -> Int8,
     }
 }
 
@@ -1370,6 +1364,13 @@ table! {
         slot_boot_pref_persistent_pending -> Nullable<crate::HwRotSlotEnum>,
         slot_a_sha3_256 -> Nullable<Text>,
         slot_b_sha3_256 -> Nullable<Text>,
+        stage0_fwid -> Nullable<Text>,
+        stage0next_fwid -> Nullable<Text>,
+
+        slot_a_error -> Nullable<crate::RotImageErrorEnum>,
+        slot_b_error -> Nullable<crate::RotImageErrorEnum>,
+        stage0_error -> Nullable<crate::RotImageErrorEnum>,
+        stage0next_error -> Nullable<crate::RotImageErrorEnum>,
     }
 }
 
@@ -1475,6 +1476,7 @@ table! {
         snat_ip -> Nullable<Inet>,
         snat_first_port -> Nullable<Int4>,
         snat_last_port -> Nullable<Int4>,
+        filesystem_pool -> Nullable<Uuid>,
     }
 }
 
@@ -1591,6 +1593,7 @@ table! {
         snat_last_port -> Nullable<Int4>,
         disposition -> crate::DbBpZoneDispositionEnum,
         external_ip_id -> Nullable<Uuid>,
+        filesystem_pool -> Nullable<Uuid>,
     }
 }
 
@@ -1605,6 +1608,13 @@ table! {
         vni -> Int8,
         is_primary -> Bool,
         slot -> Int2,
+    }
+}
+
+table! {
+    cockroachdb_zone_id_to_node_id (omicron_zone_id, crdb_node_id) {
+        omicron_zone_id -> Uuid,
+        crdb_node_id -> Text,
     }
 }
 
@@ -1751,6 +1761,27 @@ table! {
     }
 }
 
+table! {
+    migration (id) {
+        id -> Uuid,
+        instance_id -> Uuid,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        source_state -> crate::MigrationStateEnum,
+        source_propolis_id -> Uuid,
+        source_gen -> Int8,
+        time_source_updated -> Nullable<Timestamptz>,
+        target_state -> crate::MigrationStateEnum,
+        target_propolis_id -> Uuid,
+        target_gen -> Int8,
+        time_target_updated -> Nullable<Timestamptz>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(instance, migration);
+allow_tables_to_appear_in_same_query!(migration, vmm);
+joinable!(instance -> migration (migration_id));
+
 allow_tables_to_appear_in_same_query!(
     ip_pool_range,
     ip_pool,
@@ -1807,6 +1838,7 @@ allow_tables_to_appear_in_same_query!(
     user_builtin,
     role_builtin,
     role_assignment,
+    probe,
 );
 
 allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);
@@ -1835,3 +1867,5 @@ joinable!(instance_ssh_key -> ssh_key (ssh_key_id));
 joinable!(instance_ssh_key -> instance (instance_id));
 
 allow_tables_to_appear_in_same_query!(sled, sled_instance);
+
+joinable!(network_interface -> probe (parent_id));

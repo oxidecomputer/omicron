@@ -10,6 +10,7 @@ use omicron_common::address::{
     get_64_subnet, Ipv6Subnet, AZ_PREFIX, RACK_PREFIX, SLED_PREFIX,
 };
 
+pub use crate::bootstrap::params::back_compat::RackInitializeRequestV1 as SetupServiceConfigV1;
 use crate::bootstrap::params::Certificate;
 pub use crate::bootstrap::params::RackInitializeRequest as SetupServiceConfig;
 
@@ -18,8 +19,9 @@ impl SetupServiceConfig {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(&path)
             .map_err(|err| ConfigError::Io { path: path.into(), err })?;
-        let mut raw_config: SetupServiceConfig = toml::from_str(&contents)
-            .map_err(|err| ConfigError::Parse { path: path.into(), err })?;
+        let mut raw_config =
+            SetupServiceConfig::from_toml_with_fallback(&contents)
+                .map_err(|err| ConfigError::Parse { path: path.into(), err })?;
 
         // In the same way that sled-agent itself (our caller) discovers the
         // optional config-rss.toml in a well-known path relative to its config

@@ -125,13 +125,19 @@ SP DETAILS: type "Sled" slot 0
 
     ROOT OF TRUST
 
-        NAME                               VALUE  
-        active slot                        slot A 
-        persistent boot preference         slot A 
-        pending persistent boot preference -      
-        transient boot preference          -      
-        slot A SHA3 256 digest             -      
-        slot B SHA3 256 digest             -      
+        NAME                               VALUE                                                            
+        active slot                        slot A                                                           
+        persistent boot preference         slot A                                                           
+        pending persistent boot preference -                                                                
+        transient boot preference          -                                                                
+        slot A FWID                        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 
+        slot B FWID                        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 
+        Stage0 FWID                        cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc 
+        Stage0Next FWID                    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd 
+        Slot A status                      VALID                                                            
+        Slot B status                      VALID                                                            
+        Stage0 status                      VALID                                                            
+        stage0next status                  VALID                                                            
 
     COMPONENTS
 
@@ -145,13 +151,19 @@ SP DETAILS: type "Sled" slot 1
 
     ROOT OF TRUST
 
-        NAME                               VALUE  
-        active slot                        slot A 
-        persistent boot preference         slot A 
-        pending persistent boot preference -      
-        transient boot preference          -      
-        slot A SHA3 256 digest             -      
-        slot B SHA3 256 digest             -      
+        NAME                               VALUE                                                            
+        active slot                        slot A                                                           
+        persistent boot preference         slot A                                                           
+        pending persistent boot preference -                                                                
+        transient boot preference          -                                                                
+        slot A FWID                        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 
+        slot B FWID                        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 
+        Stage0 FWID                        cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc 
+        Stage0Next FWID                    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd 
+        Slot A status                      VALID                                                            
+        Slot B status                      VALID                                                            
+        Stage0 status                      VALID                                                            
+        stage0next status                  VALID                                                            
 
     COMPONENTS
 
@@ -164,13 +176,19 @@ SP DETAILS: type "Switch" slot 0
 
     ROOT OF TRUST
 
-        NAME                               VALUE  
-        active slot                        slot A 
-        persistent boot preference         slot A 
-        pending persistent boot preference -      
-        transient boot preference          -      
-        slot A SHA3 256 digest             -      
-        slot B SHA3 256 digest             -      
+        NAME                               VALUE                                                            
+        active slot                        slot A                                                           
+        persistent boot preference         slot A                                                           
+        pending persistent boot preference -                                                                
+        transient boot preference          -                                                                
+        slot A FWID                        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 
+        slot B FWID                        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 
+        Stage0 FWID                        cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc 
+        Stage0Next FWID                    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd 
+        Slot A status                      VALID                                                            
+        Slot B status                      VALID                                                            
+        Stage0 status                      VALID                                                            
+        stage0next status                  VALID                                                            
 
     COMPONENTS
 
@@ -184,13 +202,19 @@ SP DETAILS: type "Switch" slot 1
 
     ROOT OF TRUST
 
-        NAME                               VALUE  
-        active slot                        slot A 
-        persistent boot preference         slot A 
-        pending persistent boot preference -      
-        transient boot preference          -      
-        slot A SHA3 256 digest             -      
-        slot B SHA3 256 digest             -      
+        NAME                               VALUE                                                            
+        active slot                        slot A                                                           
+        persistent boot preference         slot A                                                           
+        pending persistent boot preference -                                                                
+        transient boot preference          -                                                                
+        slot A FWID                        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 
+        slot B FWID                        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 
+        Stage0 FWID                        cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc 
+        Stage0Next FWID                    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd 
+        Slot A status                      VALID                                                            
+        Slot B status                      VALID                                                            
+        Stage0 status                      VALID                                                            
+        stage0next status                  VALID                                                            
 
     COMPONENTS: none found
 
@@ -218,6 +242,10 @@ task: "blueprint_executor"
 
 task: "blueprint_loader"
     Loads the current target blueprint from the DB
+
+
+task: "crdb_node_id_collector"
+    Collects node IDs of running CockroachDB zones
 
 
 task: "dns_config_external"
@@ -283,6 +311,10 @@ task: "region_replacement"
     detects if a region requires replacing and begins the process
 
 
+task: "region_replacement_driver"
+    drive region replacements forward to completion
+
+
 task: "service_firewall_rule_propagation"
     propagates VPC firewall rules for Omicron services with external network
     connectivity
@@ -298,6 +330,10 @@ task: "switch_port_config_manager"
 
 task: "v2p_manager"
     manages opte v2p mappings for vpc networking
+
+
+task: "vpc_route_manager"
+    propagates updated VPC routes to all OPTE ports
 
 
 ---------------------------------------------
@@ -367,28 +403,28 @@ task: "dns_propagation_external"
 task: "nat_v4_garbage_collector"
   configured period: every 30s
   currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "blueprint_loader"
   configured period: every 1m 40s
   currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
 
 task: "blueprint_executor"
   configured period: every 10m
   currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: no blueprint
 
 task: "abandoned_vmm_reaper"
   configured period: every 1m
   currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total abandoned VMMs found: 0
       VMM records deleted: 0
@@ -398,9 +434,16 @@ task: "abandoned_vmm_reaper"
 task: "bfd_manager"
   configured period: every 30s
   currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+
+task: "crdb_node_id_collector"
+  configured period: every 10m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: no blueprint
 
 task: "external_endpoints"
   configured period: every 1m
@@ -422,7 +465,7 @@ task: "external_endpoints"
 task: "instance_watcher"
   configured period: every 30s
   currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total instances checked: 0
     checks completed: 0
@@ -443,14 +486,14 @@ task: "inventory_collection"
 task: "metrics_producer_gc"
   configured period: every 1m
   currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "metrics_producer_gc" (don't know how to interpret details: Object {"expiration": String("<REDACTED           TIMESTAMP>"), "pruned": Array []})
 
 task: "phantom_disks"
   configured period: every 30s
   currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     number of phantom disks deleted: 0
     number of phantom disk delete errors: 0
@@ -465,37 +508,53 @@ task: "physical_disk_adoption"
 task: "region_replacement"
   configured period: every 30s
   currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     number of region replacements started ok: 0
     number of region replacement start errors: 0
 
+task: "region_replacement_driver"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    number of region replacement drive sagas started ok: 0
+    number of region replacement finish sagas started ok: 0
+    number of errors: 0
+
 task: "service_firewall_rule_propagation"
   configured period: every 5m
   currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "service_zone_nat_tracker"
   configured period: every 30s
   currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: inventory collection is None
 
 task: "switch_port_config_manager"
   configured period: every 30s
   currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
 
 task: "v2p_manager"
   configured period: every 30s
   currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "v2p_manager" (don't know how to interpret details: Object {})
+
+task: "vpc_route_manager"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "vpc_route_manager" (don't know how to interpret details: Object {})
 
 ---------------------------------------------
 stderr:

@@ -171,6 +171,21 @@ impl Component {
             self.sp().rot.as_ref().and_then(|rot| rot.caboose_b.as_ref()),
         )
     }
+
+    pub fn stage0_version(&self) -> String {
+        version_or_unknown(
+            self.sp().rot.as_ref().and_then(|rot| rot.caboose_stage0.as_ref()),
+        )
+    }
+
+    pub fn stage0next_version(&self) -> String {
+        version_or_unknown(
+            self.sp()
+                .rot
+                .as_ref()
+                .and_then(|rot| rot.caboose_stage0next.as_ref()),
+        )
+    }
 }
 
 /// The component type and its slot.
@@ -253,6 +268,14 @@ impl ComponentId {
             ComponentId::Sled(_) => KnownArtifactKind::GimletRot,
             ComponentId::Switch(_) => KnownArtifactKind::SwitchRot,
             ComponentId::Psc(_) => KnownArtifactKind::PscRot,
+        }
+    }
+
+    pub fn rot_bootloader_known_artifact_kind(&self) -> KnownArtifactKind {
+        match self {
+            ComponentId::Sled(_) => KnownArtifactKind::GimletRotBootloader,
+            ComponentId::Switch(_) => KnownArtifactKind::SwitchRotBootloader,
+            ComponentId::Psc(_) => KnownArtifactKind::PscRotBootloader,
         }
     }
 

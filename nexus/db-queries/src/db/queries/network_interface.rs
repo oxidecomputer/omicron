@@ -41,26 +41,26 @@ use uuid::Uuid;
 
 // States an instance must be in to operate on its network interfaces, in
 // most situations.
-static INSTANCE_STOPPED: Lazy<db::model::InstanceState> =
-    Lazy::new(|| db::model::InstanceState(external::InstanceState::Stopped));
+const INSTANCE_STOPPED: db::model::InstanceState =
+    db::model::InstanceState::NoVmm;
 
-static INSTANCE_FAILED: Lazy<db::model::InstanceState> =
-    Lazy::new(|| db::model::InstanceState(external::InstanceState::Failed));
+const INSTANCE_FAILED: db::model::InstanceState =
+    db::model::InstanceState::Failed;
 
 // An instance can be in the creating state while we manipulate its
 // interfaces. The intention is for this only to be the case during sagas.
-static INSTANCE_CREATING: Lazy<db::model::InstanceState> =
-    Lazy::new(|| db::model::InstanceState(external::InstanceState::Creating));
+const INSTANCE_CREATING: db::model::InstanceState =
+    db::model::InstanceState::Creating;
 
 // A sentinel value for the instance state when the instance actually does
 // not exist.
-static INSTANCE_DESTROYED: Lazy<db::model::InstanceState> =
-    Lazy::new(|| db::model::InstanceState(external::InstanceState::Destroyed));
+const INSTANCE_DESTROYED: db::model::InstanceState =
+    db::model::InstanceState::Destroyed;
 
 // A sentinel value for the instance state when the instance has an active
 // VMM, irrespective of that VMM's actual state.
-static INSTANCE_RUNNING: Lazy<db::model::InstanceState> =
-    Lazy::new(|| db::model::InstanceState(external::InstanceState::Running));
+const INSTANCE_RUNNING: db::model::InstanceState =
+    db::model::InstanceState::Vmm;
 
 static NO_INSTANCE_SENTINEL_STRING: Lazy<String> =
     Lazy::new(|| String::from(NO_INSTANCE_SENTINEL));
@@ -1853,6 +1853,7 @@ mod tests {
     use crate::db::model;
     use crate::db::model::IncompleteNetworkInterface;
     use crate::db::model::Instance;
+    use crate::db::model::InstanceState;
     use crate::db::model::NetworkInterface;
     use crate::db::model::Project;
     use crate::db::model::VpcSubnet;
@@ -1872,6 +1873,8 @@ mod tests {
     use omicron_common::api::external::MacAddr;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::db::CockroachInstance;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::InstanceUuid;
     use oxnet::Ipv4Net;
     use oxnet::Ipv6Net;
     use std::collections::HashSet;
@@ -1889,7 +1892,7 @@ mod tests {
         project_id: Uuid,
         db_datastore: &DataStore,
     ) -> Instance {
-        let instance_id = Uuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
         // Use the first chunk of the UUID as the name, to avoid conflicts.
         // Start with a lower ascii character to satisfy the name constraints.
         let name = format!("a{}", instance_id)[..9].parse().unwrap();
@@ -1929,55 +1932,32 @@ mod tests {
         db_datastore: &DataStore,
     ) -> Instance {
         let instance = create_instance(opctx, project_id, db_datastore).await;
-        instance_set_state(
-            db_datastore,
-            instance,
-            external::InstanceState::Stopped,
-        )
-        .await
+        instance_set_state(db_datastore, instance, InstanceState::NoVmm).await
     }
 
     async fn instance_set_state(
         db_datastore: &DataStore,
         mut instance: Instance,
-        state: external::InstanceState,
+        state: InstanceState,
     ) -> Instance {
-        let new_runtime = model::InstanceRuntimeState {
-            nexus_state: model::InstanceState::new(state),
-            gen: instance.runtime_state.gen.next().into(),
-            ..instance.runtime_state.clone()
+        let propolis_id = match state {
+            InstanceState::Vmm => Some(Uuid::new_v4()),
+            _ => None,
         };
-        let res = db_datastore
-            .instance_update_runtime(&instance.id(), &new_runtime)
-            .await;
-        assert!(matches!(res, Ok(true)), "Failed to change instance state");
-        instance.runtime_state = new_runtime;
-        instance
-    }
 
-    /// Sets or clears the active Propolis ID in the supplied instance record.
-    /// This can be used to exercise the "does this instance have an active
-    /// VMM?" test that determines in part whether an instance's network
-    /// interfaces can change.
-    ///
-    /// Note that this routine does not construct a VMM record for the
-    /// corresponding ID, so any functions that expect such a record to exist
-    /// will fail in strange and exciting ways.
-    async fn instance_set_active_vmm(
-        db_datastore: &DataStore,
-        mut instance: Instance,
-        propolis_id: Option<Uuid>,
-    ) -> Instance {
         let new_runtime = model::InstanceRuntimeState {
+            nexus_state: state,
             propolis_id,
             gen: instance.runtime_state.gen.next().into(),
             ..instance.runtime_state.clone()
         };
-
         let res = db_datastore
-            .instance_update_runtime(&instance.id(), &new_runtime)
+            .instance_update_runtime(
+                &InstanceUuid::from_untyped_uuid(instance.id()),
+                &new_runtime,
+            )
             .await;
-        assert!(matches!(res, Ok(true)), "Failed to change instance VMM ref");
+        assert!(matches!(res, Ok(true)), "Failed to change instance state");
         instance.runtime_state = new_runtime;
         instance
     }
@@ -2102,13 +2082,13 @@ mod tests {
                     &self.db_datastore,
                 )
                 .await,
-                external::InstanceState::Stopped,
+                InstanceState::NoVmm,
             )
             .await
         }
 
         async fn create_running_instance(&self) -> Instance {
-            let instance = instance_set_state(
+            instance_set_state(
                 &self.db_datastore,
                 create_instance(
                     &self.opctx,
@@ -2116,14 +2096,7 @@ mod tests {
                     &self.db_datastore,
                 )
                 .await,
-                external::InstanceState::Starting,
-            )
-            .await;
-
-            instance_set_active_vmm(
-                &self.db_datastore,
-                instance,
-                Some(Uuid::new_v4()),
+                InstanceState::Vmm,
             )
             .await
         }
@@ -2209,7 +2182,7 @@ mod tests {
         let context =
             TestContext::new("test_insert_running_instance_fails", 2).await;
         let instance = context.create_running_instance().await;
-        let instance_id = instance.id();
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
         let requested_ip = "172.30.0.5".parse().unwrap();
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
@@ -2238,7 +2211,7 @@ mod tests {
     async fn test_insert_request_exact_ip() {
         let context = TestContext::new("test_insert_request_exact_ip", 2).await;
         let instance = context.create_stopped_instance().await;
-        let instance_id = instance.id();
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
         let requested_ip = "172.30.0.5".parse().unwrap();
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
@@ -2274,7 +2247,7 @@ mod tests {
             TestContext::new("test_insert_no_instance_fails", 2).await;
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
-            Uuid::new_v4(),
+            InstanceUuid::new_v4(),
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-b".parse().unwrap(),
@@ -2309,9 +2282,10 @@ mod tests {
 
         for (i, expected_address) in addresses.take(2).enumerate() {
             let instance = context.create_stopped_instance().await;
+            let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
-                instance.id(),
+                instance_id,
                 context.net1.subnets[0].clone(),
                 IdentityMetadataCreateParams {
                     name: format!("interface-{}", i).parse().unwrap(),
@@ -2347,12 +2321,15 @@ mod tests {
             TestContext::new("test_insert_request_same_ip_fails", 2).await;
 
         let instance = context.create_stopped_instance().await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
         let new_instance = context.create_stopped_instance().await;
+        let new_instance_id =
+            InstanceUuid::from_untyped_uuid(new_instance.id());
 
         // Insert an interface on the first instance.
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
-            instance.id(),
+            instance_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2371,7 +2348,7 @@ mod tests {
         // other parameters are valid.
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
-            new_instance.id(),
+            new_instance_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2607,9 +2584,10 @@ mod tests {
         let context =
             TestContext::new("test_insert_with_duplicate_name_fails", 2).await;
         let instance = context.create_stopped_instance().await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
-            instance.id(),
+            instance_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2628,7 +2606,7 @@ mod tests {
             .expect("Failed to insert interface");
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
-            instance.id(),
+            instance_id,
             context.net1.subnets[1].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2656,9 +2634,10 @@ mod tests {
         let context =
             TestContext::new("test_insert_same_vpc_subnet_fails", 2).await;
         let instance = context.create_stopped_instance().await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
-            instance.id(),
+            instance_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2674,7 +2653,7 @@ mod tests {
             .expect("Failed to insert interface");
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
-            instance.id(),
+            instance_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-d".parse().unwrap(),
@@ -2699,9 +2678,10 @@ mod tests {
         let context =
             TestContext::new("test_insert_same_interface_fails", 2).await;
         let instance = context.create_stopped_instance().await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
-            instance.id(),
+            instance_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2740,9 +2720,10 @@ mod tests {
         let context =
             TestContext::new("test_insert_multiple_vpcs_fails", 2).await;
         let instance = context.create_stopped_instance().await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
-            instance.id(),
+            instance_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2760,7 +2741,7 @@ mod tests {
         for addr in [Some(expected_address), None] {
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
-                instance.id(),
+                instance_id,
                 context.net2.subnets[0].clone(),
                 IdentityMetadataCreateParams {
                     name: "interface-a".parse().unwrap(),
@@ -2793,9 +2774,10 @@ mod tests {
         let n_interfaces = context.net1.available_ipv4_addresses()[0];
         for _ in 0..n_interfaces {
             let instance = context.create_stopped_instance().await;
+            let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
-                instance.id(),
+                instance_id,
                 context.net1.subnets[0].clone(),
                 IdentityMetadataCreateParams {
                     name: "interface-c".parse().unwrap(),
@@ -2821,9 +2803,10 @@ mod tests {
             &context.db_datastore,
         )
         .await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
-            instance.id(),
+            instance_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-d".parse().unwrap(),
@@ -2851,10 +2834,11 @@ mod tests {
             TestContext::new("test_insert_multiple_vpc_subnets_succeeds", 2)
                 .await;
         let instance = context.create_stopped_instance().await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
         for (i, subnet) in context.net1.subnets.iter().enumerate() {
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
-                instance.id(),
+                instance_id,
                 subnet.clone(),
                 IdentityMetadataCreateParams {
                     name: format!("if{}", i).parse().unwrap(),
@@ -2917,11 +2901,12 @@ mod tests {
         )
         .await;
         let instance = context.create_stopped_instance().await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
         for slot in 0..MAX_NICS_PER_INSTANCE {
             let subnet = &context.net1.subnets[slot];
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
-                instance.id(),
+                instance_id,
                 subnet.clone(),
                 IdentityMetadataCreateParams {
                     name: format!("interface-{}", slot).parse().unwrap(),
@@ -2956,7 +2941,7 @@ mod tests {
         // The next one should fail
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
-            instance.id(),
+            instance_id,
             context.net1.subnets.last().unwrap().clone(),
             IdentityMetadataCreateParams {
                 name: "interface-8".parse().unwrap(),

@@ -4,6 +4,7 @@ members = [
     "bootstore",
     "certificates",
     "clients/bootstrap-agent-client",
+    "clients/cockroach-admin-client",
     "clients/ddm-admin-client",
     "clients/dns-service-client",
     "clients/dpd-client",
@@ -39,6 +40,8 @@ members = [
     "nexus",
     "nexus-config",
     "nexus/authz-macros",
+    "nexus/auth",
+    "nexus/db-fixed-data",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
@@ -56,10 +59,12 @@ members = [
     "nexus/types",
     "oximeter/collector",
     "oximeter/db",
+    "oximeter/impl",
     "oximeter/instruments",
     "oximeter/oximeter-macro-impl",
     "oximeter/oximeter",
     "oximeter/producer",
+    "oximeter/timeseries-macro",
     "package",
     "passwords",
     "rpaths",
@@ -84,9 +89,11 @@ members = [
 ]
 
 default-members = [
+    "api_identity",
     "bootstore",
     "certificates",
     "clients/bootstrap-agent-client",
+    "clients/cockroach-admin-client",
     "clients/ddm-admin-client",
     "clients/dns-service-client",
     "clients/dpd-client",
@@ -109,6 +116,8 @@ default-members = [
     # hakari to not work as well and build times to be longer.
     # See omicron#4392.
     "dns-server",
+    # Do not include end-to-end-tests in the list of default members, as its
+    # tests only work on a deployed control plane.
     "gateway-cli",
     "gateway-test-utils",
     "gateway",
@@ -123,24 +132,31 @@ default-members = [
     "nexus",
     "nexus-config",
     "nexus/authz-macros",
-    "nexus/macros-common",
-    "nexus/metrics-producer-gc",
-    "nexus/networking",
+    "nexus/auth",
+    "nexus/db-fixed-data",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/defaults",
     "nexus/inventory",
+    "nexus/macros-common",
+    "nexus/metrics-producer-gc",
+    "nexus/networking",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
+    "nexus/test-interface",
+    "nexus/test-utils-macros",
+    "nexus/test-utils",
     "nexus/types",
     "oximeter/collector",
     "oximeter/db",
+    "oximeter/impl",
     "oximeter/instruments",
     "oximeter/oximeter-macro-impl",
     "oximeter/oximeter",
     "oximeter/producer",
+    "oximeter/timeseries-macro",
     "package",
     "passwords",
     "rpaths",
@@ -160,6 +176,7 @@ default-members = [
     "wicket-dbg",
     "wicket",
     "wicketd",
+    "workspace-hack",
     "zone-setup",
 ]
 resolver = "2"
@@ -236,15 +253,16 @@ ciborium = "0.2.2"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
 clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
+cockroach-admin-client = { path = "clients/cockroach-admin-client" }
 colored = "2.1"
 const_format = "0.2.32"
 cookie = "0.18"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.27.0", features = ["event-stream"] }
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "8c6d485110ecfae5409575246b986a145c386dc4" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "8c6d485110ecfae5409575246b986a145c386dc4" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "8c6d485110ecfae5409575246b986a145c386dc4" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "e10f8793f8414fdb9a165219f17e45fa014d088b" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "e10f8793f8414fdb9a165219f17e45fa014d088b" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "e10f8793f8414fdb9a165219f17e45fa014d088b" }
 csv = "1.3.0"
 curve25519-dalek = "4"
 datatest-stable = "0.2.9"
@@ -266,13 +284,14 @@ expectorate = "1.1.0"
 fatfs = "0.3.6"
 filetime = "0.2.23"
 flate2 = "1.0.30"
+float-ord = "0.3.2"
 flume = "0.11.0"
 foreign-types = "0.3.2"
 fs-err = "2.11.0"
 futures = "0.3.30"
 gateway-client = { path = "clients/gateway-client" }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9", default-features = false, features = ["std"] }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9" }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "c85a4ca043aaa389df12aac5348d8a3feda28762", default-features = false, features = ["std"] }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "c85a4ca043aaa389df12aac5348d8a3feda28762" }
 gateway-test-utils = { path = "gateway-test-utils" }
 gethostname = "0.4.3"
 glob = "0.3.1"
@@ -305,20 +324,22 @@ internet-checksum = "0.2"
 ipnetwork = { version = "0.20", features = ["schemars"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
 key-manager = { path = "key-manager" }
-kstat-rs = "0.2.3"
+kstat-rs = "0.2.4"
 libc = "0.2.155"
 libfalcon = { git = "https://github.com/oxidecomputer/falcon", rev = "e69694a1f7cc9fe31fab27f321017280531fb5f7" }
-libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe" }
+libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
 linear-map = "1.2.0"
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 mockall = "0.12"
 newtype_derive = "0.1.6"
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "025389ff39d594bf2b815377e2c1dc4dd23b1f96" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "025389ff39d594bf2b815377e2c1dc4dd23b1f96" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "6e0a232fd0b443c19f61f94bf02b7695505aa8e3" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "6e0a232fd0b443c19f61f94bf02b7695505aa8e3" }
 multimap = "0.10.0"
+nexus-auth = { path = "nexus/auth" }
 nexus-client = { path = "clients/nexus-client" }
 nexus-config = { path = "nexus-config" }
+nexus-db-fixed-data = { path = "nexus/db-fixed-data" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
 nexus-defaults = { path = "nexus/defaults" }
@@ -333,7 +354,7 @@ omicron-certificates = { path = "certificates" }
 omicron-passwords = { path = "passwords" }
 omicron-workspace-hack = "0.1.0"
 oxlog = { path = "dev-tools/oxlog" }
-oxnet = { git = "https://github.com/oxidecomputer/oxnet", branch = "main" }
+oxnet = { git = "https://github.com/oxidecomputer/oxnet" }
 nexus-test-interface = { path = "nexus/test-interface" }
 nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
@@ -351,23 +372,25 @@ omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
 omicron-zone-package = "0.11.0"
 oxide-client = { path = "clients/oxide-client" }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "194a8d1d6443f78d59702a25849607dba33db732", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "915975f6d1729db95619f752148974016912412f", features = [ "api", "std" ] }
 once_cell = "1.19.0"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapiv3 = "2.0.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "194a8d1d6443f78d59702a25849607dba33db732" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "915975f6d1729db95619f752148974016912412f" }
 oso = "0.27"
 owo-colors = "4.0.0"
 oximeter = { path = "oximeter/oximeter" }
 oximeter-client = { path = "clients/oximeter-client" }
 oximeter-db = { path = "oximeter/db/" }
 oximeter-collector = { path = "oximeter/collector" }
+oximeter-impl = { path = "oximeter/impl" }
 oximeter-instruments = { path = "oximeter/instruments" }
 oximeter-macro-impl = { path = "oximeter/oximeter-macro-impl" }
 oximeter-producer = { path = "oximeter/producer" }
+oximeter-timeseries-macro = { path = "oximeter/timeseries-macro" }
 p256 = "0.13"
 parse-display = "0.9.0"
 partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }
@@ -385,13 +408,14 @@ prettyplease = { version = "0.2.20", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "6d7ed9a033babc054db9eff5b59dee978d2b0d76" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "6d7ed9a033babc054db9eff5b59dee978d2b0d76" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "6d7ed9a033babc054db9eff5b59dee978d2b0d76" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "5ebf9626e0ad274eb515d206d102cb09d2d51f15" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "5ebf9626e0ad274eb515d206d102cb09d2d51f15" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "5ebf9626e0ad274eb515d206d102cb09d2d51f15" }
 proptest = "1.4.0"
 quote = "1.0"
 rand = "0.8.5"
 rand_core = "0.6.4"
+rand_distr = "0.4.3"
 rand_seeder = "0.2.3"
 ratatui = "0.26.2"
 rayon = "1.10"
@@ -413,7 +437,7 @@ schemars = "0.8.16"
 secrecy = "0.8.0"
 semver = { version = "1.0.23", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
-serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
+serde_human_bytes = { git = "https://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
 serde_json = "1.0.117"
 serde_path_to_error = "0.1.16"
 serde_tokenstream = "0.2"
@@ -426,7 +450,12 @@ signal-hook = "0.3"
 signal-hook-tokio = { version = "0.3", features = [ "futures-v0_3" ] }
 sigpipe = "0.1.3"
 similar-asserts = "1.5.0"
-sled = "0.34"
+# Don't change sled's version on accident; sled's on-disk format is not yet
+# stable and requires manual migrations. In the limit this won't matter because
+# the upgrade system will replace the DNS server zones entirely, but while we
+# are still doing mupdate a change to the on-disk format will break existing DNS
+# server zones.
+sled = "=0.34.7"
 sled-agent-client = { path = "clients/sled-agent-client" }
 sled-hardware = { path = "sled-hardware" }
 sled-hardware-types = { path = "sled-hardware/types" }
@@ -441,16 +470,16 @@ slog-term = "2.9.1"
 smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
-sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
-sprockets-host = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
-sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
+sprockets-common = { git = "https://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
+sprockets-host = { git = "https://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
+sprockets-rot = { git = "https://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sqlformat = "0.2.3"
 sqlparser = { version = "0.45.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
 # Please do not change the Steno version to a Git dependency.  It makes it
 # harder than expected to make breaking changes (even if you specify a specific
 # SHA).  Cut a new Steno release instead.  See omicron#2117.
-steno = "0.4.0"
+steno = "0.4.1"
 strum = { version = "0.26", features = [ "derive" ] }
 subprocess = "0.2.9"
 supports-color = "3.0.0"
@@ -465,7 +494,7 @@ termios = "0.3"
 textwrap = "0.16.1"
 test-strategy = "0.3.1"
 thiserror = "1.0"
-tofino = { git = "http://github.com/oxidecomputer/tofino", branch = "main" }
+tofino = { git = "https://github.com/oxidecomputer/tofino", branch = "main" }
 tokio = "1.37.0"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.15"

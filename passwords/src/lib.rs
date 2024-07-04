@@ -33,9 +33,9 @@ use thiserror::Error;
 // values (provided by the `argon2` crate) for the version, salt length, and
 // output length.
 const ARGON2_ALGORITHM: argon2::Algorithm = argon2::Algorithm::Argon2id;
-const ARGON2_COST_M_KIB: u32 = 96 * 1024;
-const ARGON2_COST_T: u32 = 13;
-const ARGON2_COST_P: u32 = 1;
+pub const ARGON2_COST_M_KIB: u32 = 96 * 1024;
+pub const ARGON2_COST_T: u32 = 13;
+pub const ARGON2_COST_P: u32 = 1;
 
 // Maximum password length, intended to prevent denial of service attacks.  See
 // CVE-2013-1443, CVE-2014-9016, and CVE-2014-9034 for examples.

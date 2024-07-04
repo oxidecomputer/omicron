@@ -457,6 +457,7 @@ mod test {
     use crate::overridables::Overridables;
     use crate::Sled;
     use dns_service_client::DnsDiff;
+    use internal_dns::resolver::Resolver;
     use internal_dns::ServiceName;
     use internal_dns::DNS_ZONE;
     use nexus_db_model::DnsGroup;
@@ -471,6 +472,7 @@ mod test {
     use nexus_reconfigurator_planning::example::example;
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
     use nexus_test_utils::resource_helpers::create_silo;
+    use nexus_test_utils::resource_helpers::DiskTestBuilder;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
@@ -493,14 +495,18 @@ mod test {
     use omicron_common::address::get_switch_zone_address;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
+    use omicron_common::address::COCKROACHDB_REDUNDANCY;
     use omicron_common::address::NEXUS_REDUNDANCY;
     use omicron_common::address::RACK_PREFIX;
     use omicron_common::address::SLED_PREFIX;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_client::ZoneKind;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
@@ -619,6 +625,9 @@ mod test {
                 disposition: BlueprintZoneDisposition::Quiesced,
                 id: out_of_service_id,
                 underlay_address: out_of_service_addr,
+                filesystem_pool: Some(ZpoolName::new_external(
+                    ZpoolUuid::new_v4(),
+                )),
                 zone_type: BlueprintZoneType::Oximeter(
                     blueprint_zone_type::Oximeter {
                         address: SocketAddrV6::new(
@@ -1132,8 +1141,17 @@ mod test {
     async fn test_silos_external_dns_end_to_end(
         cptestctx: &ControlPlaneTestContext,
     ) {
+        // Add a zpool to all sleds, just to ensure that all new zones can find
+        // a transient filesystem wherever they end up being placed.
+        DiskTestBuilder::new(&cptestctx)
+            .on_all_sleds()
+            .with_zpool_count(1)
+            .build()
+            .await;
+
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let log = &cptestctx.logctx.log;
         let opctx = OpContext::for_background(
             log.clone(),
@@ -1167,6 +1185,7 @@ mod test {
         crate::realize_blueprint_with_overrides(
             &opctx,
             datastore,
+            resolver,
             &blueprint,
             "test-suite",
             &overrides,
@@ -1191,6 +1210,7 @@ mod test {
             cptestctx,
             &opctx,
             datastore,
+            resolver,
             &blueprint,
             &overrides,
             "squidport",
@@ -1235,6 +1255,7 @@ mod test {
                 external_ip_rows: &[],
                 service_nic_rows: &[],
                 target_nexus_zone_count: NEXUS_REDUNDANCY,
+                target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
                 target_cockroachdb_cluster_version:
                     CockroachDbClusterVersion::POLICY,
                 log,
@@ -1260,11 +1281,11 @@ mod test {
         .unwrap();
         let sled_id =
             blueprint.sleds().next().expect("expected at least one sled");
-        let nalready = builder.sled_num_nexus_zones(sled_id);
+        let nalready = builder.sled_num_zones_of_kind(sled_id, ZoneKind::Nexus);
         let rv = builder
             .sled_ensure_zone_multiple_nexus(sled_id, nalready + 1)
             .unwrap();
-        assert_eq!(rv, EnsureMultiple::Added(1));
+        assert_eq!(rv, EnsureMultiple::Changed { added: 1, removed: 0 });
         let blueprint2 = builder.build();
         eprintln!("blueprint2: {}", blueprint2.display());
         // Figure out the id of the new zone.
@@ -1302,6 +1323,7 @@ mod test {
         crate::realize_blueprint_with_overrides(
             &opctx,
             datastore,
+            resolver,
             &blueprint2,
             "test-suite",
             &overrides,
@@ -1375,6 +1397,7 @@ mod test {
         crate::realize_blueprint_with_overrides(
             &opctx,
             datastore,
+            resolver,
             &blueprint2,
             "test-suite",
             &overrides,
@@ -1396,6 +1419,7 @@ mod test {
             &cptestctx,
             &opctx,
             datastore,
+            resolver,
             &blueprint2,
             &overrides,
             "tickety-boo",
@@ -1409,6 +1433,7 @@ mod test {
         crate::realize_blueprint_with_overrides(
             &opctx,
             datastore,
+            resolver,
             &blueprint2,
             "test-suite",
             &overrides,
@@ -1454,6 +1479,7 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
         opctx: &OpContext,
         datastore: &DataStore,
+        resolver: &Resolver,
         blueprint: &Blueprint,
         overrides: &Overridables,
         silo_name: &str,
@@ -1501,6 +1527,7 @@ mod test {
         crate::realize_blueprint_with_overrides(
             &opctx,
             datastore,
+            resolver,
             &blueprint,
             "test-suite",
             &overrides,
