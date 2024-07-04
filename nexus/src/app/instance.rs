@@ -1546,13 +1546,13 @@ impl super::Nexus {
     ) -> Result<(), Error> {
         notify_instance_updated(
             &self.datastore(),
-            &self.resolver().await,
+            self.resolver(),
             &self.opctx_alloc,
             opctx,
             &self.log,
             instance_id,
             new_runtime_state,
-            self.v2p_notification_tx.clone(),
+            &self.background_tasks.task_v2p_manager,
         )
         .await?;
         self.vpc_needed_notify_sleds();
@@ -2005,7 +2005,7 @@ pub(crate) async fn notify_instance_updated(
     log: &slog::Logger,
     instance_id: &InstanceUuid,
     new_runtime_state: &nexus::SledInstanceState,
-    v2p_notification_tx: tokio::sync::watch::Sender<()>,
+    v2p_manager: &crate::app::background::Activator,
 ) -> Result<Option<InstanceUpdateResult>, Error> {
     let propolis_id = new_runtime_state.propolis_id;
 
@@ -2045,7 +2045,7 @@ pub(crate) async fn notify_instance_updated(
         &authz_instance,
         db_instance.runtime(),
         &new_runtime_state.instance_state,
-        v2p_notification_tx.clone(),
+        v2p_manager,
     )
     .await?;
 

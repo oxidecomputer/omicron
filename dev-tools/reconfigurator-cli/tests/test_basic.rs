@@ -8,6 +8,7 @@ use expectorate::assert_contents;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_test_utils::resource_helpers::DiskTestBuilder;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::Blueprint;
@@ -56,6 +57,15 @@ type ControlPlaneTestContext =
 #[nexus_test]
 async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     // Setup
+    //
+    // Add a zpool to all sleds, just to ensure that all new zones can find
+    // a transient filesystem wherever they end up being placed.
+    DiskTestBuilder::new(&cptestctx)
+        .on_all_sleds()
+        .with_zpool_count(1)
+        .build()
+        .await;
+
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let log = &cptestctx.logctx.log;

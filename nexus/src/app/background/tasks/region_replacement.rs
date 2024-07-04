@@ -12,7 +12,10 @@
 
 use crate::app::authn;
 use crate::app::background::BackgroundTask;
+use crate::app::saga::StartSaga;
 use crate::app::sagas;
+use crate::app::sagas::region_replacement_start::SagaRegionReplacementStart;
+use crate::app::sagas::NexusSaga;
 use crate::app::RegionAllocationStrategy;
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -23,39 +26,31 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TypedUuid;
 use serde_json::json;
 use std::sync::Arc;
-use tokio::sync::mpsc::error::SendError;
-use tokio::sync::mpsc::Sender;
 
 pub struct RegionReplacementDetector {
     datastore: Arc<DataStore>,
-    saga_request: Sender<sagas::SagaRequest>,
+    sagas: Arc<dyn StartSaga>,
 }
 
 impl RegionReplacementDetector {
-    pub fn new(
-        datastore: Arc<DataStore>,
-        saga_request: Sender<sagas::SagaRequest>,
-    ) -> Self {
-        RegionReplacementDetector { datastore, saga_request }
+    pub fn new(datastore: Arc<DataStore>, sagas: Arc<dyn StartSaga>) -> Self {
+        RegionReplacementDetector { datastore, sagas }
     }
 
     async fn send_start_request(
         &self,
         serialized_authn: authn::saga::Serialized,
         request: RegionReplacement,
-    ) -> Result<(), SendError<sagas::SagaRequest>> {
-        let saga_request = sagas::SagaRequest::RegionReplacementStart {
-            params: sagas::region_replacement_start::Params {
-                serialized_authn,
-                request,
-                allocation_strategy:
-                    RegionAllocationStrategy::RandomWithDistinctSleds {
-                        seed: None,
-                    },
-            },
+    ) -> Result<(), omicron_common::api::external::Error> {
+        let params = sagas::region_replacement_start::Params {
+            serialized_authn,
+            request,
+            allocation_strategy:
+                RegionAllocationStrategy::RandomWithDistinctSleds { seed: None },
         };
 
-        self.saga_request.send(saga_request).await
+        let saga_dag = SagaRegionReplacementStart::prepare(&params)?;
+        self.sagas.saga_start(saga_dag).await
     }
 }
 
@@ -201,9 +196,9 @@ impl BackgroundTask for RegionReplacementDetector {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::app::background::init::test::NoopStartSaga;
     use nexus_db_model::RegionReplacement;
     use nexus_test_utils_macros::nexus_test;
-    use tokio::sync::mpsc;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -220,9 +215,9 @@ mod test {
             datastore.clone(),
         );
 
-        let (saga_request_tx, mut saga_request_rx) = mpsc::channel(1);
+        let starter = Arc::new(NoopStartSaga::new());
         let mut task =
-            RegionReplacementDetector::new(datastore.clone(), saga_request_tx);
+            RegionReplacementDetector::new(datastore.clone(), starter.clone());
 
         // Noop test
         let result = task.activate(&opctx).await;
@@ -253,6 +248,6 @@ mod test {
             })
         );
 
-        saga_request_rx.try_recv().unwrap();
+        assert_eq!(starter.count_reset(), 1);
     }
 }

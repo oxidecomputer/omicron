@@ -20,7 +20,11 @@
 
 use crate::app::authn;
 use crate::app::background::BackgroundTask;
+use crate::app::saga::StartSaga;
 use crate::app::sagas;
+use crate::app::sagas::region_replacement_drive::SagaRegionReplacementDrive;
+use crate::app::sagas::region_replacement_finish::SagaRegionReplacementFinish;
+use crate::app::sagas::NexusSaga;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
@@ -28,19 +32,15 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
 use serde_json::json;
 use std::sync::Arc;
-use tokio::sync::mpsc::Sender;
 
 pub struct RegionReplacementDriver {
     datastore: Arc<DataStore>,
-    saga_request: Sender<sagas::SagaRequest>,
+    sagas: Arc<dyn StartSaga>,
 }
 
 impl RegionReplacementDriver {
-    pub fn new(
-        datastore: Arc<DataStore>,
-        saga_request: Sender<sagas::SagaRequest>,
-    ) -> Self {
-        RegionReplacementDriver { datastore, saga_request }
+    pub fn new(datastore: Arc<DataStore>, sagas: Arc<dyn StartSaga>) -> Self {
+        RegionReplacementDriver { datastore, sagas }
     }
 
     /// Drive running region replacements forward
@@ -119,36 +119,32 @@ impl RegionReplacementDriver {
                 // (or determine if it is complete).
 
                 let request_id = request.id;
-
-                let result = self
-                    .saga_request
-                    .send(sagas::SagaRequest::RegionReplacementDrive {
-                        params: sagas::region_replacement_drive::Params {
-                            serialized_authn:
-                                authn::saga::Serialized::for_opctx(opctx),
-                            request,
-                        },
-                    })
-                    .await;
-
+                let params = sagas::region_replacement_drive::Params {
+                    serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+                    request,
+                };
+                let result = async {
+                    let saga_dag =
+                        SagaRegionReplacementDrive::prepare(&params)?;
+                    self.sagas.saga_start(saga_dag).await
+                }
+                .await;
                 match result {
-                    Ok(()) => {
-                        let s = format!("{request_id}: drive invoked ok");
-
+                    Ok(_) => {
+                        let s = format!("{request_id}: drive saga started ok");
                         info!(&log, "{s}");
                         status.drive_invoked_ok.push(s);
                     }
-
                     Err(e) => {
                         let s = format!(
-                            "sending region replacement drive request for \
+                            "starting region replacement drive saga for \
                             {request_id} failed: {e}",
                         );
 
                         error!(&log, "{s}");
                         status.errors.push(s);
                     }
-                };
+                }
             }
         }
     }
@@ -193,22 +189,19 @@ impl RegionReplacementDriver {
             };
 
             let request_id = request.id;
-
-            let result =
-                self.saga_request
-                    .send(sagas::SagaRequest::RegionReplacementFinish {
-                        params: sagas::region_replacement_finish::Params {
-                            serialized_authn:
-                                authn::saga::Serialized::for_opctx(opctx),
-                            region_volume_id: old_region_volume_id,
-                            request,
-                        },
-                    })
-                    .await;
-
+            let params = sagas::region_replacement_finish::Params {
+                serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+                region_volume_id: old_region_volume_id,
+                request,
+            };
+            let result = async {
+                let saga_dag = SagaRegionReplacementFinish::prepare(&params)?;
+                self.sagas.saga_start(saga_dag).await
+            }
+            .await;
             match result {
-                Ok(()) => {
-                    let s = format!("{request_id}: finish invoked ok");
+                Ok(_) => {
+                    let s = format!("{request_id}: finish saga started ok");
 
                     info!(&log, "{s}");
                     status.finish_invoked_ok.push(s);
@@ -216,14 +209,14 @@ impl RegionReplacementDriver {
 
                 Err(e) => {
                     let s = format!(
-                        "sending region replacement finish request for \
+                        "starting region replacement finish saga for \
                         {request_id} failed: {e}"
                     );
 
                     error!(&log, "{s}");
                     status.errors.push(s);
                 }
-            };
+            }
         }
     }
 }
@@ -253,6 +246,7 @@ impl BackgroundTask for RegionReplacementDriver {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::app::background::init::test::NoopStartSaga;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use chrono::Utc;
     use nexus_db_model::Region;
@@ -268,7 +262,6 @@ mod test {
     use omicron_uuid_kinds::UpstairsKind;
     use omicron_uuid_kinds::UpstairsRepairKind;
     use omicron_uuid_kinds::UpstairsSessionKind;
-    use tokio::sync::mpsc;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -285,9 +278,9 @@ mod test {
             datastore.clone(),
         );
 
-        let (saga_request_tx, mut saga_request_rx) = mpsc::channel(1);
+        let starter = Arc::new(NoopStartSaga::new());
         let mut task =
-            RegionReplacementDriver::new(datastore.clone(), saga_request_tx);
+            RegionReplacementDriver::new(datastore.clone(), starter.clone());
 
         // Noop test
         let result = task.activate(&opctx).await;
@@ -320,17 +313,12 @@ mod test {
 
         assert_eq!(
             result.drive_invoked_ok,
-            vec![format!("{request_id}: drive invoked ok")]
+            vec![format!("{request_id}: drive saga started ok")]
         );
         assert!(result.finish_invoked_ok.is_empty());
         assert!(result.errors.is_empty());
 
-        let request = saga_request_rx.try_recv().unwrap();
-
-        assert!(matches!(
-            request,
-            sagas::SagaRequest::RegionReplacementDrive { .. }
-        ));
+        assert_eq!(starter.count_reset(), 1);
     }
 
     #[nexus_test(server = crate::Server)]
@@ -344,9 +332,9 @@ mod test {
             datastore.clone(),
         );
 
-        let (saga_request_tx, mut saga_request_rx) = mpsc::channel(1);
+        let starter = Arc::new(NoopStartSaga::new());
         let mut task =
-            RegionReplacementDriver::new(datastore.clone(), saga_request_tx);
+            RegionReplacementDriver::new(datastore.clone(), starter.clone());
 
         // Noop test
         let result = task.activate(&opctx).await;
@@ -423,16 +411,11 @@ mod test {
         assert!(result.drive_invoked_ok.is_empty());
         assert_eq!(
             result.finish_invoked_ok,
-            vec![format!("{request_id}: finish invoked ok")]
+            vec![format!("{request_id}: finish saga started ok")]
         );
         assert!(result.errors.is_empty());
 
-        let request = saga_request_rx.try_recv().unwrap();
-
-        assert!(matches!(
-            request,
-            sagas::SagaRequest::RegionReplacementFinish { .. }
-        ));
+        assert_eq!(starter.count_reset(), 1);
     }
 
     #[nexus_test(server = crate::Server)]
@@ -446,9 +429,9 @@ mod test {
             datastore.clone(),
         );
 
-        let (saga_request_tx, mut saga_request_rx) = mpsc::channel(1);
+        let starter = Arc::new(NoopStartSaga::new());
         let mut task =
-            RegionReplacementDriver::new(datastore.clone(), saga_request_tx);
+            RegionReplacementDriver::new(datastore.clone(), starter.clone());
 
         // Noop test
         let result = task.activate(&opctx).await;
@@ -523,17 +506,12 @@ mod test {
 
         assert_eq!(
             result.drive_invoked_ok,
-            vec![format!("{request_id}: drive invoked ok")]
+            vec![format!("{request_id}: drive saga started ok")]
         );
         assert!(result.finish_invoked_ok.is_empty());
         assert!(result.errors.is_empty());
 
-        let saga_request = saga_request_rx.try_recv().unwrap();
-
-        assert!(matches!(
-            saga_request,
-            sagas::SagaRequest::RegionReplacementDrive { .. }
-        ));
+        assert_eq!(starter.count_reset(), 1);
 
         // Now, pretend that an Upstairs sent a notification that it
         // successfully finished a repair
@@ -584,12 +562,7 @@ mod test {
             );
         }
 
-        let saga_request = saga_request_rx.try_recv().unwrap();
-
-        assert!(matches!(
-            saga_request,
-            sagas::SagaRequest::RegionReplacementFinish { .. }
-        ));
+        assert_eq!(starter.count_reset(), 1);
     }
 
     #[nexus_test(server = crate::Server)]
@@ -603,9 +576,9 @@ mod test {
             datastore.clone(),
         );
 
-        let (saga_request_tx, mut saga_request_rx) = mpsc::channel(1);
+        let starter = Arc::new(NoopStartSaga::new());
         let mut task =
-            RegionReplacementDriver::new(datastore.clone(), saga_request_tx);
+            RegionReplacementDriver::new(datastore.clone(), starter.clone());
 
         // Noop test
         let result = task.activate(&opctx).await;
@@ -679,17 +652,12 @@ mod test {
 
         assert_eq!(
             result.drive_invoked_ok,
-            vec![format!("{request_id}: drive invoked ok")]
+            vec![format!("{request_id}: drive saga started ok")]
         );
         assert!(result.finish_invoked_ok.is_empty());
         assert!(result.errors.is_empty());
 
-        let saga_request = saga_request_rx.try_recv().unwrap();
-
-        assert!(matches!(
-            saga_request,
-            sagas::SagaRequest::RegionReplacementDrive { .. }
-        ));
+        assert_eq!(starter.count_reset(), 1);
 
         // Now, pretend that an Upstairs sent a notification that it failed to
         // finish a repair
@@ -727,16 +695,11 @@ mod test {
 
         assert_eq!(
             result.drive_invoked_ok,
-            vec![format!("{request_id}: drive invoked ok")]
+            vec![format!("{request_id}: drive saga started ok")]
         );
         assert!(result.finish_invoked_ok.is_empty());
         assert!(result.errors.is_empty());
 
-        let saga_request = saga_request_rx.try_recv().unwrap();
-
-        assert!(matches!(
-            saga_request,
-            sagas::SagaRequest::RegionReplacementDrive { .. }
-        ));
+        assert_eq!(starter.count_reset(), 1);
     }
 }

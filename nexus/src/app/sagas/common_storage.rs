@@ -24,7 +24,6 @@ pub(crate) async fn get_pantry_address(
 ) -> Result<SocketAddrV6, ActionError> {
     nexus
         .resolver()
-        .await
         .lookup_socket_v6(ServiceName::CruciblePantry)
         .await
         .map_err(|e| e.to_string())
