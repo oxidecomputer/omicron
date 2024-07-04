@@ -10,7 +10,7 @@ use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
 use openapiv3::OpenAPI;
 use subprocess::Exec;
 
-const CMD_API_GEN: &str = env!("CARGO_BIN_EXE_dns-apigen");
+const CMD_API_GEN: &str = env!("CARGO_BIN_EXE_apigen");
 
 #[test]
 fn test_dns_server_openapi() {

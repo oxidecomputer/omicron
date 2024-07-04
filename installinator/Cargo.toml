@@ -57,4 +57,3 @@ tokio-stream.workspace = true
 
 [features]
 image-standard = []
-image-trampoline = []
