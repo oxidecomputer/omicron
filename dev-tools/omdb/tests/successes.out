@@ -490,7 +490,7 @@ task: "inventory_collection"
 task: "lookup_region_port"
   configured period: every 1m
   currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total filled in ports: 0
     errors: 0
