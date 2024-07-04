@@ -402,6 +402,8 @@ pub struct SledResources {
     ///
     /// (used to allocate storage for control plane zones with persistent
     /// storage)
+    // NOTE: I'd really like to make this private, to make it harder to
+    // accidentally pick a zpool that is not in-service.
     pub zpools: BTreeMap<ZpoolUuid, SledDisk>,
 
     /// the IPv6 subnet of this sled on the underlay network
@@ -482,6 +484,9 @@ pub enum SledFilter {
     /// Sleds on which reservations can be created.
     ReservationCreate,
 
+    /// Sleds which should be sent OPTE V2P mappings and Routing rules.
+    VpcRouting,
+
     /// Sleds which should be sent VPC firewall rules.
     VpcFirewall,
 }
@@ -536,6 +541,7 @@ impl SledPolicy {
                 SledFilter::InService => true,
                 SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => true,
+                SledFilter::VpcRouting => true,
                 SledFilter::VpcFirewall => true,
             },
             SledPolicy::InService {
@@ -547,6 +553,7 @@ impl SledPolicy {
                 SledFilter::InService => true,
                 SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => false,
+                SledFilter::VpcRouting => true,
                 SledFilter::VpcFirewall => true,
             },
             SledPolicy::Expunged => match filter {
@@ -556,6 +563,7 @@ impl SledPolicy {
                 SledFilter::InService => false,
                 SledFilter::QueryDuringInventory => false,
                 SledFilter::ReservationCreate => false,
+                SledFilter::VpcRouting => false,
                 SledFilter::VpcFirewall => false,
             },
         }
@@ -587,6 +595,7 @@ impl SledState {
                 SledFilter::InService => true,
                 SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => true,
+                SledFilter::VpcRouting => true,
                 SledFilter::VpcFirewall => true,
             },
             SledState::Decommissioned => match filter {
@@ -596,6 +605,7 @@ impl SledState {
                 SledFilter::InService => false,
                 SledFilter::QueryDuringInventory => false,
                 SledFilter::ReservationCreate => false,
+                SledFilter::VpcRouting => false,
                 SledFilter::VpcFirewall => false,
             },
         }

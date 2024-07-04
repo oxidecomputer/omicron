@@ -17,6 +17,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use omicron_common::api::external::{DeleteResult, Error};
+use omicron_uuid_kinds::InstanceUuid;
 use uuid::Uuid;
 
 /// The types of resources which can consume storage space.
@@ -261,7 +262,7 @@ impl DataStore {
     pub async fn virtual_provisioning_collection_insert_instance(
         &self,
         opctx: &OpContext,
-        id: Uuid,
+        id: InstanceUuid,
         project_id: Uuid,
         cpus_diff: i64,
         ram_diff: ByteCount,
@@ -286,7 +287,7 @@ impl DataStore {
     pub async fn virtual_provisioning_collection_delete_instance(
         &self,
         opctx: &OpContext,
-        id: Uuid,
+        id: InstanceUuid,
         project_id: Uuid,
         cpus_diff: i64,
         ram_diff: ByteCount,
@@ -433,7 +434,7 @@ mod test {
         datastore: &DataStore,
         opctx: &OpContext,
         authz_project: &crate::authz::Project,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         project_id: Uuid,
         cpus: i64,
         memory: ByteCount,
@@ -480,7 +481,7 @@ mod test {
 
         // Actually provision the instance
 
-        let instance_id = Uuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
         let cpus = 12;
         let ram = ByteCount::try_from(1 << 30).unwrap();
 
@@ -553,7 +554,7 @@ mod test {
 
         // Actually provision the instance
 
-        let instance_id = Uuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
         let cpus = 12;
         let ram = ByteCount::try_from(1 << 30).unwrap();
 

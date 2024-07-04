@@ -14,7 +14,6 @@ use internal_dns::names::DNS_ZONE_EXTERNAL_TESTING;
 use nexus_db_queries::authn;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::Resource;
-use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::PHYSICAL_DISK_UUID;
 use nexus_test_utils::RACK_UUID;
 use nexus_test_utils::SLED_AGENT_UUID;
@@ -40,6 +39,9 @@ use once_cell::sync::Lazy;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
+
+type DiskTest<'a> =
+    nexus_test_utils::resource_helpers::DiskTest<'a, omicron_nexus::Server>;
 
 pub static HARDWARE_RACK_URL: Lazy<String> =
     Lazy::new(|| format!("/v1/system/hardware/racks/{}", RACK_UUID));
@@ -202,6 +204,7 @@ pub static DEMO_VPC_SUBNET_CREATE: Lazy<params::VpcSubnetCreate> =
         },
         ipv4_block: "10.1.2.3/8".parse().unwrap(),
         ipv6_block: None,
+        custom_router: None,
     });
 
 // VPC Router used for testing
@@ -461,6 +464,7 @@ pub static DEMO_INSTANCE_NIC_PUT: Lazy<params::InstanceNetworkInterfaceUpdate> =
             description: Some(String::from("an updated description")),
         },
         primary: false,
+        transit_ips: vec![],
     });
 
 pub static DEMO_CERTIFICATE_NAME: Lazy<Name> =
@@ -1515,6 +1519,7 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
                             name: None,
                             description: Some("different".to_string())
                         },
+                        custom_router: None,
                     }).unwrap()
                 ),
                 AllowedMethod::Delete,

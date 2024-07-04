@@ -1406,7 +1406,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.vpc_subnet (
     /* Child resource creation generation number */
     rcgen INT8 NOT NULL,
     ipv4_block INET NOT NULL,
-    ipv6_block INET NOT NULL
+    ipv6_block INET NOT NULL,
+    /* nullable FK to the `vpc_router` table. */
+    custom_router_id UUID
 );
 
 /* Subnet and network interface names are unique per VPC, not project */
@@ -1471,7 +1473,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.network_interface (
      * The primary interface appears in DNS and its address is used for external
      * connectivity.
      */
-    is_primary BOOL NOT NULL
+    is_primary BOOL NOT NULL,
+
+    /*
+     * A supplementary list of addresses/CIDR blocks which a NIC is
+     * *allowed* to send/receive traffic on, in addition to its
+     * assigned address.
+     */
+    transit_ips INET[] NOT NULL DEFAULT ARRAY[]
 );
 
 /* A view of the network_interface table for just instance-kind records. */
@@ -1489,7 +1498,8 @@ SELECT
     mac,
     ip,
     slot,
-    is_primary
+    is_primary,
+    transit_ips
 FROM
     omicron.public.network_interface
 WHERE
@@ -1636,7 +1646,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.vpc_router (
     time_deleted TIMESTAMPTZ,
     kind omicron.public.vpc_router_kind NOT NULL,
     vpc_id UUID NOT NULL,
-    rcgen INT NOT NULL
+    rcgen INT NOT NULL,
+    /*
+     * version information used to trigger VPC router RPW.
+     * this is sensitive to CRUD on named resources beyond
+     * routers e.g. instances, subnets, ...
+     */
+    resolved_version INT NOT NULL DEFAULT 0
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_router_by_vpc ON omicron.public.vpc_router (
@@ -1662,6 +1678,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.router_route (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
 
+    /* FK to the `vpc_router` table. */
     vpc_router_id UUID NOT NULL,
     kind omicron.public.router_route_kind NOT NULL,
     target STRING(128) NOT NULL,
@@ -3230,6 +3247,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
     snat_last_port INT4
         CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
 
+    -- TODO: This is nullable for backwards compatibility.
+    -- Eventually, that nullability should be removed.
+    filesystem_pool UUID,
+
     PRIMARY KEY (inv_collection_id, id)
 );
 
@@ -3475,6 +3496,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- blueprint has not yet been realized, it's possible the IP hasn't been
     -- created yet.
     external_ip_id UUID,
+
+    -- TODO: This is nullable for backwards compatibility.
+    -- Eventually, that nullability should be removed.
+    filesystem_pool UUID,
 
     PRIMARY KEY (blueprint_id, id)
 );
@@ -3891,53 +3916,6 @@ ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_loca
 
 CREATE INDEX IF NOT EXISTS switch_port_name ON omicron.public.switch_port (port_name);
 
-COMMIT;
-BEGIN;
-
--- view for v2p mapping rpw
-CREATE VIEW IF NOT EXISTS omicron.public.v2p_mapping_view
-AS
-WITH VmV2pMappings AS (
-  SELECT
-    n.id as nic_id,
-    s.id as sled_id,
-    s.ip as sled_ip,
-    v.vni,
-    n.mac,
-    n.ip
-  FROM omicron.public.network_interface n
-  JOIN omicron.public.vpc_subnet vs ON vs.id = n.subnet_id
-  JOIN omicron.public.vpc v ON v.id = n.vpc_id
-  JOIN omicron.public.vmm vmm ON n.parent_id = vmm.instance_id
-  JOIN omicron.public.sled s ON vmm.sled_id = s.id
-  WHERE n.time_deleted IS NULL
-  AND n.kind = 'instance'
-  AND (vmm.state = 'running' OR vmm.state = 'starting')
-  AND s.sled_policy = 'in_service'
-  AND s.sled_state = 'active'
-),
-ProbeV2pMapping AS (
-  SELECT
-    n.id as nic_id,
-    s.id as sled_id,
-    s.ip as sled_ip,
-    v.vni,
-    n.mac,
-    n.ip
-  FROM omicron.public.network_interface n
-  JOIN omicron.public.vpc_subnet vs ON vs.id = n.subnet_id
-  JOIN omicron.public.vpc v ON v.id = n.vpc_id
-  JOIN omicron.public.probe p ON n.parent_id = p.id
-  JOIN omicron.public.sled s ON p.sled = s.id
-  WHERE n.time_deleted IS NULL
-  AND n.kind = 'probe'
-  AND s.sled_policy = 'in_service'
-  AND s.sled_state = 'active'
-)
-SELECT nic_id, sled_id, sled_ip, vni, mac, ip FROM VmV2pMappings
-UNION
-SELECT nic_id, sled_id, sled_ip, vni, mac, ip FROM ProbeV2pMapping;
-
 CREATE INDEX IF NOT EXISTS network_interface_by_parent
 ON omicron.public.network_interface (parent_id)
 STORING (name, kind, vpc_id, subnet_id, mac, ip, slot);
@@ -4090,11 +4068,20 @@ CREATE TYPE IF NOT EXISTS omicron.public.migration_state AS ENUM (
 CREATE TABLE IF NOT EXISTS omicron.public.migration (
     id UUID PRIMARY KEY,
 
+    /* The ID of the instance that was migrated */
+    instance_id UUID NOT NULL,
+
     /* The time this migration record was created. */
     time_created TIMESTAMPTZ NOT NULL,
 
     /* The time this migration record was deleted. */
     time_deleted TIMESTAMPTZ,
+
+    /* Note that there's no `time_modified/time_updated` timestamp for migration
+     * records. This is because we track updated time separately for the source
+     * and target sides of the migration, using separate `time_source_updated`
+     * and time_target_updated` columns.
+    */
 
     /* The state of the migration source */
     source_state omicron.public.migration_state NOT NULL,
@@ -4129,6 +4116,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.migration (
     time_target_updated TIMESTAMPTZ
 );
 
+/* Lookup migrations by instance ID */
+CREATE INDEX IF NOT EXISTS lookup_migrations_by_instance_id ON omicron.public.migration (
+    instance_id
+);
+
 /* Lookup region snapshot by snapshot id */
 CREATE INDEX IF NOT EXISTS lookup_region_snapshot_by_snapshot_id on omicron.public.region_snapshot (
     snapshot_id
@@ -4145,7 +4137,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '76.0.0', NULL)
+    (TRUE, NOW(), NOW(), '81.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

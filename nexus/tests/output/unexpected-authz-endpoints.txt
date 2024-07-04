@@ -1,13 +1,3 @@
 API endpoints tested by unauthorized.rs but not found in the OpenAPI spec:
-GET    "/v1/vpc-routers?project=demo-project&vpc=demo-vpc"
-POST   "/v1/vpc-routers?project=demo-project&vpc=demo-vpc"
-GET    "/v1/vpc-routers/demo-vpc-router?project=demo-project&vpc=demo-vpc"
-PUT    "/v1/vpc-routers/demo-vpc-router?project=demo-project&vpc=demo-vpc"
-DELETE "/v1/vpc-routers/demo-vpc-router?project=demo-project&vpc=demo-vpc"
-GET    "/v1/vpc-router-routes?project=demo-project&vpc=demo-vpc&router=demo-vpc-router"
-POST   "/v1/vpc-router-routes?project=demo-project&vpc=demo-vpc&router=demo-vpc-router"
-GET    "/v1/vpc-router-routes/demo-router-route?project=demo-project&vpc=demo-vpc&router=demo-vpc-router"
-PUT    "/v1/vpc-router-routes/demo-router-route?project=demo-project&vpc=demo-vpc&router=demo-vpc-router"
-DELETE "/v1/vpc-router-routes/demo-router-route?project=demo-project&vpc=demo-vpc&router=demo-vpc-router"
 PUT    "/v1/system/update/repository?file_name=demo-repo.zip"
 GET    "/v1/system/update/repository/1.0.0"

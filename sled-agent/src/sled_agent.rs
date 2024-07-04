@@ -49,7 +49,8 @@ use omicron_common::api::internal::nexus::{
     SledInstanceState, VmmRuntimeState,
 };
 use omicron_common::api::internal::shared::{
-    HostPortConfig, RackNetworkConfig,
+    HostPortConfig, RackNetworkConfig, ResolvedVpcRouteSet,
+    ResolvedVpcRouteState,
 };
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
@@ -59,6 +60,7 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_ddm_admin_client::Client as DdmAdminClient;
+use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
 use oximeter::types::ProducerRegistry;
 use sled_hardware::{underlay, HardwareManager};
 use sled_hardware_types::underlay::BootstrapInterface;
@@ -882,8 +884,8 @@ impl SledAgent {
     #[allow(clippy::too_many_arguments)]
     pub async fn instance_ensure_registered(
         &self,
-        instance_id: Uuid,
-        propolis_id: Uuid,
+        instance_id: InstanceUuid,
+        propolis_id: PropolisUuid,
         hardware: InstanceHardware,
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
@@ -912,7 +914,7 @@ impl SledAgent {
     /// rudely terminates the instance.
     pub async fn instance_ensure_unregistered(
         &self,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
     ) -> Result<InstanceUnregisterResponse, Error> {
         self.inner
             .instances
@@ -925,7 +927,7 @@ impl SledAgent {
     /// state.
     pub async fn instance_ensure_state(
         &self,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         target: InstanceStateRequested,
     ) -> Result<InstancePutStateResponse, Error> {
         self.inner
@@ -941,7 +943,7 @@ impl SledAgent {
     /// [`crate::params::InstancePutMigrationIdsBody`].
     pub async fn instance_put_migration_ids(
         &self,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         old_runtime: &InstanceRuntimeState,
         migration_ids: &Option<InstanceMigrationSourceParams>,
     ) -> Result<SledInstanceState, Error> {
@@ -959,7 +961,7 @@ impl SledAgent {
     /// does not match the current ephemeral IP.
     pub async fn instance_put_external_ip(
         &self,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         external_ip: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
         self.inner
@@ -973,7 +975,7 @@ impl SledAgent {
     /// specified external IP address in either its ephemeral or floating IP set.
     pub async fn instance_delete_external_ip(
         &self,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         external_ip: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
         self.inner
@@ -986,7 +988,7 @@ impl SledAgent {
     /// Returns the state of the instance with the provided ID.
     pub async fn instance_get_state(
         &self,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
     ) -> Result<SledInstanceState, Error> {
         self.inner
             .instances
@@ -1023,7 +1025,7 @@ impl SledAgent {
     /// Issue a snapshot request for a Crucible disk attached to an instance
     pub async fn instance_issue_disk_snapshot_request(
         &self,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         disk_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
@@ -1095,6 +1097,17 @@ impl SledAgent {
         self.inner.bootstore.clone()
     }
 
+    pub fn list_vpc_routes(&self) -> Vec<ResolvedVpcRouteState> {
+        self.inner.port_manager.vpc_routes_list()
+    }
+
+    pub fn set_vpc_routes(
+        &self,
+        routes: Vec<ResolvedVpcRouteSet>,
+    ) -> Result<(), Error> {
+        self.inner.port_manager.vpc_routes_ensure(routes).map_err(Error::from)
+    }
+
     /// Return the metric producer registry.
     pub fn metrics_registry(&self) -> &ProducerRegistry {
         self.inner.metrics_manager.registry()
@@ -1131,7 +1144,7 @@ impl SledAgent {
         let mut disks = vec![];
         let mut zpools = vec![];
         let all_disks = self.storage().get_latest_disks().await;
-        for (identity, variant, slot) in all_disks.iter_all() {
+        for (identity, variant, slot, _firmware) in all_disks.iter_all() {
             disks.push(crate::params::InventoryDisk {
                 identity: identity.clone(),
                 variant,

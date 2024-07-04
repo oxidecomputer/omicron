@@ -328,6 +328,7 @@
           "checker": {
             "nullable": true,
             "description": "Checker to apply to incoming messages.",
+            "default": null,
             "type": "string"
           },
           "originate": {
@@ -340,6 +341,7 @@
           "shaper": {
             "nullable": true,
             "description": "Shaper to apply to outgoing messages.",
+            "default": null,
             "type": "string"
           }
         },
@@ -437,6 +439,7 @@
           "local_pref": {
             "nullable": true,
             "description": "Apply a local preference to routes received from this peer.",
+            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -444,11 +447,13 @@
           "md5_auth_key": {
             "nullable": true,
             "description": "Use the given key for TCP-MD5 authentication with the peer.",
+            "default": null,
             "type": "string"
           },
           "min_ttl": {
             "nullable": true,
             "description": "Require messages from a peer have a minimum IP time to live field.",
+            "default": null,
             "type": "integer",
             "format": "uint8",
             "minimum": 0
@@ -456,6 +461,7 @@
           "multi_exit_discriminator": {
             "nullable": true,
             "description": "Apply the provided multi-exit discriminator (MED) updates sent to the peer.",
+            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -467,6 +473,7 @@
           "remote_asn": {
             "nullable": true,
             "description": "Require that a peer has a specified ASN.",
+            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -474,6 +481,7 @@
           "vlan_id": {
             "nullable": true,
             "description": "Associate a VLAN ID with a BGP peer session.",
+            "default": null,
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -726,7 +734,7 @@
       },
       "Name": {
         "title": "A name unique within the parent collection",
-        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
+        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
         "type": "string",
         "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,
@@ -1192,6 +1200,7 @@
           "vlan_id": {
             "nullable": true,
             "description": "The VLAN id associated with this route.",
+            "default": null,
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -1234,6 +1243,7 @@
           "vlan_id": {
             "nullable": true,
             "description": "The VLAN id (if any) associated with this address.",
+            "default": null,
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -1244,7 +1254,7 @@
         ]
       },
       "UserId": {
-        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.\n\n<details><summary>JSON schema</summary>\n\n```json { \"title\": \"A name unique within the parent collection\", \"description\": \"Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.\", \"type\": \"string\", \"maxLength\": 63, \"minLength\": 1, \"pattern\": \"^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$\" } ``` </details>",
+        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.\n\n<details><summary>JSON schema</summary>\n\n```json { \"title\": \"A name unique within the parent collection\", \"description\": \"Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.\", \"type\": \"string\", \"maxLength\": 63, \"minLength\": 1, \"pattern\": \"^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$\" } ``` </details>",
         "type": "string"
       }
     },

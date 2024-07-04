@@ -46,6 +46,7 @@ impl RackUpdateState {
                             *id,
                             vec![
                                 UpdateComponent::Rot,
+                                UpdateComponent::RotBootloader,
                                 UpdateComponent::Sp,
                                 UpdateComponent::Host,
                             ],
@@ -55,14 +56,22 @@ impl RackUpdateState {
                         *id,
                         UpdateItem::new(
                             *id,
-                            vec![UpdateComponent::Rot, UpdateComponent::Sp],
+                            vec![
+                                UpdateComponent::Rot,
+                                UpdateComponent::RotBootloader,
+                                UpdateComponent::Sp,
+                            ],
                         ),
                     ),
                     ComponentId::Psc(_) => (
                         *id,
                         UpdateItem::new(
                             *id,
-                            vec![UpdateComponent::Rot, UpdateComponent::Sp],
+                            vec![
+                                UpdateComponent::Rot,
+                                UpdateComponent::RotBootloader,
+                                UpdateComponent::Sp,
+                            ],
                         ),
                     ),
                 })
@@ -429,6 +438,7 @@ fn update_component_state(
 #[allow(unused)]
 pub fn update_component_title(component: UpdateComponent) -> &'static str {
     match component {
+        UpdateComponent::RotBootloader => "ROT_BOOTLOADER",
         UpdateComponent::Rot => "ROT",
         UpdateComponent::Sp => "SP",
         UpdateComponent::Host => "HOST",
@@ -436,6 +446,7 @@ pub fn update_component_title(component: UpdateComponent) -> &'static str {
 }
 
 pub struct CreateStartUpdateOptions {
+    pub(crate) force_update_rot_bootloader: bool,
     pub(crate) force_update_rot: bool,
     pub(crate) force_update_sp: bool,
 }
@@ -454,7 +465,9 @@ impl CreateStartUpdateOptions {
                             as a u64",
                 )
             });
-
+        let test_simulate_rot_bootloader_result = get_update_simulated_result(
+            "WICKET_UPDATE_TEST_SIMULATE_ROT_BOOTLOADER_RESULT",
+        )?;
         let test_simulate_rot_result = get_update_simulated_result(
             "WICKET_UPDATE_TEST_SIMULATE_ROT_RESULT",
         )?;
@@ -465,8 +478,10 @@ impl CreateStartUpdateOptions {
         Ok(StartUpdateOptions {
             test_error,
             test_step_seconds,
+            test_simulate_rot_bootloader_result,
             test_simulate_rot_result,
             test_simulate_sp_result,
+            skip_rot_bootloader_version_check: self.force_update_rot_bootloader,
             skip_rot_version_check: self.force_update_rot,
             skip_sp_version_check: self.force_update_sp,
         })

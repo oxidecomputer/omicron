@@ -21,6 +21,7 @@ use dropshot::HttpError;
 use futures::lock::Mutex;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::types::VolumeConstructionRequest;
@@ -868,7 +869,7 @@ impl Pantry {
 
         self.sled_agent
             .instance_issue_disk_snapshot_request(
-                Uuid::new_v4(), // instance id, not used by function
+                InstanceUuid::new_v4(), // instance id, not used by function
                 volume_id.parse().unwrap(),
                 snapshot_id.parse().unwrap(),
             )

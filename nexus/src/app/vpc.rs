@@ -81,7 +81,8 @@ impl super::Nexus {
         };
 
         let saga_outputs = self
-            .execute_saga::<sagas::vpc_create::SagaVpcCreate>(saga_params)
+            .sagas
+            .saga_execute::<sagas::vpc_create::SagaVpcCreate>(saga_params)
             .await?;
 
         let (_, db_vpc) = saga_outputs
@@ -179,7 +180,8 @@ impl super::Nexus {
         let rules = db::model::VpcFirewallRule::vec_from_params(
             authz_vpc.id(),
             params.clone(),
-        );
+        )?;
+
         let rules = self
             .db_datastore
             .vpc_update_firewall_rules(opctx, &authz_vpc, rules)
@@ -199,7 +201,7 @@ impl super::Nexus {
         let mut rules = db::model::VpcFirewallRule::vec_from_params(
             vpc_id,
             defaults::DEFAULT_FIREWALL_RULES.clone(),
-        );
+        )?;
         for rule in rules.iter_mut() {
             for target in rule.targets.iter_mut() {
                 match target.0 {

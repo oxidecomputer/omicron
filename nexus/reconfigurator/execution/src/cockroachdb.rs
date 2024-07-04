@@ -49,6 +49,7 @@ mod test {
     ) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let log = &cptestctx.logctx.log;
         let opctx = OpContext::for_background(
             log.clone(),
@@ -92,6 +93,7 @@ mod test {
         crate::realize_blueprint_with_overrides(
             &opctx,
             datastore,
+            resolver,
             &blueprint,
             "test-suite",
             &overrides,

@@ -41,11 +41,11 @@ use omicron_common::api::external::SemverVersion;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service, BackoffError,
 };
+use omicron_uuid_kinds::{GenericUuid, SledUuid};
 use slog::Logger;
 use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use uuid::Uuid;
 
 mod address_lot;
 mod allow_list;
@@ -306,11 +306,13 @@ impl DataStore {
     pub async fn next_ipv6_address(
         &self,
         opctx: &OpContext,
-        sled_id: Uuid,
+        sled_id: SledUuid,
     ) -> Result<Ipv6Addr, Error> {
         use db::schema::sled::dsl;
         let net = diesel::update(
-            dsl::sled.find(sled_id).filter(dsl::time_deleted.is_null()),
+            dsl::sled
+                .find(sled_id.into_untyped_uuid())
+                .filter(dsl::time_deleted.is_null()),
         )
         .set(dsl::last_used_address.eq(dsl::last_used_address + 1))
         .returning(dsl::last_used_address)
@@ -321,7 +323,7 @@ impl DataStore {
                 e,
                 ErrorHandler::NotFoundByLookup(
                     ResourceType::Sled,
-                    LookupType::ById(sled_id),
+                    LookupType::ById(sled_id.into_untyped_uuid()),
                 ),
             )
         })?;
@@ -1655,6 +1657,8 @@ mod test {
         );
         datastore.sled_upsert(sled2).await.unwrap();
 
+        let sled1_id = SledUuid::from_untyped_uuid(sled1_id);
+        let sled2_id = SledUuid::from_untyped_uuid(sled2_id);
         let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();
         let expected_ip = Ipv6Addr::new(0xfd00, 0x1de, 0, 0, 0, 0, 1, 0);
         assert_eq!(ip, expected_ip);

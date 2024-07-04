@@ -36,9 +36,12 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, VmmRuntimeState,
 };
-use omicron_common::api::internal::shared::RackNetworkConfig;
+use omicron_common::api::internal::shared::{
+    RackNetworkConfig, ResolvedVpcRoute, ResolvedVpcRouteSet,
+    ResolvedVpcRouteState, RouterId, RouterKind, RouterVersion,
+};
 use omicron_common::disk::DiskIdentity;
-use omicron_uuid_kinds::ZpoolUuid;
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, ZpoolUuid};
 use oxnet::Ipv6Net;
 use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
@@ -77,6 +80,7 @@ pub struct SledAgent {
         Mutex<Option<(HttpServer<Arc<PropolisContext>>, PropolisClient)>>,
     /// lists of external IPs assigned to instances
     pub external_ips: Mutex<HashMap<Uuid, HashSet<InstanceExternalIpBody>>>,
+    pub vpc_routes: Mutex<HashMap<RouterId, RouteSet>>,
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
@@ -182,6 +186,7 @@ impl SledAgent {
             disk_id_to_region_ids: Mutex::new(HashMap::new()),
             v2p_mappings: Mutex::new(HashSet::new()),
             external_ips: Mutex::new(HashMap::new()),
+            vpc_routes: Mutex::new(HashMap::new()),
             mock_propolis: Mutex::new(None),
             config: config.clone(),
             fake_zones: Mutex::new(OmicronZonesConfig {
@@ -253,8 +258,8 @@ impl SledAgent {
     /// (described by `target`).
     pub async fn instance_register(
         self: &Arc<Self>,
-        instance_id: Uuid,
-        propolis_id: Uuid,
+        instance_id: InstanceUuid,
+        propolis_id: PropolisUuid,
         hardware: InstanceHardware,
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
@@ -271,7 +276,9 @@ impl SledAgent {
 
         for disk in &hardware.disks {
             let initial_state = DiskRuntimeState {
-                disk_state: DiskState::Attached(instance_id),
+                disk_state: DiskState::Attached(
+                    instance_id.into_untyped_uuid(),
+                ),
                 gen: omicron_common::api::external::Generation::new(),
                 time_updated: chrono::Utc::now(),
             };
@@ -286,7 +293,9 @@ impl SledAgent {
                 .sim_ensure(
                     &id,
                     initial_state,
-                    Some(DiskStateRequested::Attached(instance_id)),
+                    Some(DiskStateRequested::Attached(
+                        instance_id.into_untyped_uuid(),
+                    )),
                 )
                 .await?;
             self.disks
@@ -303,9 +312,13 @@ impl SledAgent {
         //      point to the correct address.
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
-            if !self.instances.contains_key(&instance_id).await {
+            if !self
+                .instances
+                .contains_key(&instance_id.into_untyped_uuid())
+                .await
+            {
                 let properties = propolis_client::types::InstanceProperties {
-                    id: propolis_id,
+                    id: propolis_id.into_untyped_uuid(),
                     name: hardware.properties.hostname.to_string(),
                     description: "sled-agent-sim created instance".to_string(),
                     image_id: Uuid::default(),
@@ -336,7 +349,7 @@ impl SledAgent {
         let instance_run_time_state = self
             .instances
             .sim_ensure(
-                &instance_id,
+                &instance_id.into_untyped_uuid(),
                 SledInstanceState {
                     instance_state: instance_runtime,
                     vmm_state: vmm_runtime,
@@ -352,6 +365,18 @@ impl SledAgent {
             self.map_disk_ids_to_region_ids(&vcr).await?;
         }
 
+        let mut routes = self.vpc_routes.lock().await;
+        for nic in &hardware.nics {
+            let my_routers = [
+                RouterId { vni: nic.vni, kind: RouterKind::System },
+                RouterId { vni: nic.vni, kind: RouterKind::Custom(nic.subnet) },
+            ];
+
+            for router in my_routers {
+                routes.entry(router).or_default();
+            }
+        }
+
         Ok(instance_run_time_state)
     }
 
@@ -360,32 +385,33 @@ impl SledAgent {
     /// not notified.
     pub async fn instance_unregister(
         self: &Arc<Self>,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
     ) -> Result<InstanceUnregisterResponse, Error> {
-        let instance =
-            match self.instances.sim_get_cloned_object(&instance_id).await {
-                Ok(instance) => instance,
-                Err(Error::ObjectNotFound { .. }) => {
-                    return Ok(InstanceUnregisterResponse {
-                        updated_runtime: None,
-                    })
-                }
-                Err(e) => return Err(e),
-            };
+        let instance = match self
+            .instances
+            .sim_get_cloned_object(&instance_id.into_untyped_uuid())
+            .await
+        {
+            Ok(instance) => instance,
+            Err(Error::ObjectNotFound { .. }) => {
+                return Ok(InstanceUnregisterResponse { updated_runtime: None })
+            }
+            Err(e) => return Err(e),
+        };
 
         self.detach_disks_from_instance(instance_id).await?;
         let response = InstanceUnregisterResponse {
             updated_runtime: Some(instance.terminate()),
         };
 
-        self.instances.sim_force_remove(instance_id).await;
+        self.instances.sim_force_remove(instance_id.into_untyped_uuid()).await;
         Ok(response)
     }
 
     /// Asks the supplied instance to transition to the requested state.
     pub async fn instance_ensure_state(
         self: &Arc<Self>,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         state: InstanceStateRequested,
     ) -> Result<InstancePutStateResponse, Error> {
         if let Some(e) = self.instance_ensure_state_error.lock().await.as_ref()
@@ -393,23 +419,26 @@ impl SledAgent {
             return Err(e.clone());
         }
 
-        let current =
-            match self.instances.sim_get_cloned_object(&instance_id).await {
-                Ok(i) => i.current().clone(),
-                Err(_) => match state {
-                    InstanceStateRequested::Stopped => {
-                        return Ok(InstancePutStateResponse {
-                            updated_runtime: None,
-                        });
-                    }
-                    _ => {
-                        return Err(Error::invalid_request(&format!(
-                            "instance {} not registered on sled",
-                            instance_id,
-                        )));
-                    }
-                },
-            };
+        let current = match self
+            .instances
+            .sim_get_cloned_object(&instance_id.into_untyped_uuid())
+            .await
+        {
+            Ok(i) => i.current().clone(),
+            Err(_) => match state {
+                InstanceStateRequested::Stopped => {
+                    return Ok(InstancePutStateResponse {
+                        updated_runtime: None,
+                    });
+                }
+                _ => {
+                    return Err(Error::invalid_request(&format!(
+                        "instance {} not registered on sled",
+                        instance_id,
+                    )));
+                }
+            },
+        };
 
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
@@ -427,7 +456,11 @@ impl SledAgent {
                     tokio::spawn(async move {
                         tokio::time::sleep(Duration::from_secs(10)).await;
                         match instances
-                            .sim_ensure(&instance_id, current, Some(state))
+                            .sim_ensure(
+                                &instance_id.into_untyped_uuid(),
+                                current,
+                                Some(state),
+                            )
                             .await
                         {
                             Ok(state) => {
@@ -457,7 +490,7 @@ impl SledAgent {
 
         let new_state = self
             .instances
-            .sim_ensure(&instance_id, current, Some(state))
+            .sim_ensure(&instance_id.into_untyped_uuid(), current, Some(state))
             .await?;
 
         // If this request will shut down the simulated instance, look for any
@@ -471,11 +504,11 @@ impl SledAgent {
 
     pub async fn instance_get_state(
         &self,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
     ) -> Result<SledInstanceState, HttpError> {
         let instance = self
             .instances
-            .sim_get_cloned_object(&instance_id)
+            .sim_get_cloned_object(&instance_id.into_untyped_uuid())
             .await
             .map_err(|_| {
                 crate::sled_agent::Error::Instance(
@@ -491,13 +524,13 @@ impl SledAgent {
 
     async fn detach_disks_from_instance(
         &self,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
     ) -> Result<(), Error> {
         self.disks
             .sim_ensure_for_each_where(
                 |disk| match disk.current().disk_state {
                     DiskState::Attached(id) | DiskState::Attaching(id) => {
-                        id == instance_id
+                        id == instance_id.into_untyped_uuid()
                     }
                     _ => false,
                 },
@@ -510,12 +543,14 @@ impl SledAgent {
 
     pub async fn instance_put_migration_ids(
         self: &Arc<Self>,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         old_runtime: &InstanceRuntimeState,
         migration_ids: &Option<InstanceMigrationSourceParams>,
     ) -> Result<SledInstanceState, Error> {
-        let instance =
-            self.instances.sim_get_cloned_object(&instance_id).await?;
+        let instance = self
+            .instances
+            .sim_get_cloned_object(&instance_id.into_untyped_uuid())
+            .await?;
 
         instance.put_migration_ids(old_runtime, migration_ids).await
     }
@@ -544,8 +579,8 @@ impl SledAgent {
         self.disks.size().await
     }
 
-    pub async fn instance_poke(&self, id: Uuid) {
-        self.instances.sim_poke(id, PokeMode::Drain).await;
+    pub async fn instance_poke(&self, id: InstanceUuid) {
+        self.instances.sim_poke(id.into_untyped_uuid(), PokeMode::Drain).await;
     }
 
     pub async fn disk_poke(&self, id: Uuid) {
@@ -628,7 +663,7 @@ impl SledAgent {
     /// snapshot here.
     pub async fn instance_issue_disk_snapshot_request(
         &self,
-        _instance_id: Uuid,
+        _instance_id: InstanceUuid,
         disk_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
@@ -689,17 +724,18 @@ impl SledAgent {
 
     pub async fn instance_put_external_ip(
         &self,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         body_args: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
-        if !self.instances.contains_key(&instance_id).await {
+        if !self.instances.contains_key(&instance_id.into_untyped_uuid()).await
+        {
             return Err(Error::internal_error(
                 "can't alter IP state for nonexistent instance",
             ));
         }
 
         let mut eips = self.external_ips.lock().await;
-        let my_eips = eips.entry(instance_id).or_default();
+        let my_eips = eips.entry(instance_id.into_untyped_uuid()).or_default();
 
         // High-level behaviour: this should always succeed UNLESS
         // trying to add a double ephemeral.
@@ -722,17 +758,18 @@ impl SledAgent {
 
     pub async fn instance_delete_external_ip(
         &self,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         body_args: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
-        if !self.instances.contains_key(&instance_id).await {
+        if !self.instances.contains_key(&instance_id.into_untyped_uuid()).await
+        {
             return Err(Error::internal_error(
                 "can't alter IP state for nonexistent instance",
             ));
         }
 
         let mut eips = self.external_ips.lock().await;
-        let my_eips = eips.entry(instance_id).or_default();
+        let my_eips = eips.entry(instance_id.into_untyped_uuid()).or_default();
 
         my_eips.remove(&body_args);
 
@@ -859,4 +896,49 @@ impl SledAgent {
     pub async fn drop_dataset(&self, zpool_id: ZpoolUuid, dataset_id: Uuid) {
         self.storage.lock().await.drop_dataset(zpool_id, dataset_id)
     }
+
+    pub async fn list_vpc_routes(&self) -> Vec<ResolvedVpcRouteState> {
+        let routes = self.vpc_routes.lock().await;
+        routes
+            .iter()
+            .map(|(k, v)| ResolvedVpcRouteState { id: *k, version: v.version })
+            .collect()
+    }
+
+    pub async fn set_vpc_routes(&self, new_routes: Vec<ResolvedVpcRouteSet>) {
+        let mut routes = self.vpc_routes.lock().await;
+        for new in new_routes {
+            // Disregard any route information for a subnet we don't have.
+            let Some(old) = routes.get(&new.id) else {
+                continue;
+            };
+
+            // We have to handle subnet router changes, as well as
+            // spurious updates from multiple Nexus instances.
+            // If there's a UUID match, only update if vers increased,
+            // otherwise take the update verbatim (including loss of version).
+            match (old.version, new.version) {
+                (Some(old_vers), Some(new_vers))
+                    if !old_vers.is_replaced_by(&new_vers) =>
+                {
+                    continue;
+                }
+                _ => {}
+            };
+
+            routes.insert(
+                new.id,
+                RouteSet { version: new.version, routes: new.routes },
+            );
+        }
+    }
+}
+
+/// Stored routes (and usage count) for a given VPC/subnet.
+//  NB: We aren't doing post count tracking here to unsubscribe
+//      from (VNI, subnet) pairs.
+#[derive(Debug, Clone, Default)]
+pub struct RouteSet {
+    pub version: Option<RouterVersion>,
+    pub routes: HashSet<ResolvedVpcRoute>,
 }
