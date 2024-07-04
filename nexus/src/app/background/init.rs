@@ -99,6 +99,7 @@ use super::tasks::dns_servers;
 use super::tasks::external_endpoints;
 use super::tasks::instance_watcher;
 use super::tasks::inventory_collection;
+use super::tasks::lookup_region_port;
 use super::tasks::metrics_producer_gc;
 use super::tasks::nat_cleanup;
 use super::tasks::phantom_disks;
@@ -152,6 +153,7 @@ pub struct BackgroundTasks {
     pub task_service_firewall_propagation: Activator,
     pub task_abandoned_vmm_reaper: Activator,
     pub task_vpc_route_manager: Activator,
+    pub task_lookup_region_port: Activator,
 
     // Handles to activate background tasks that do not get used by Nexus
     // at-large.  These background tasks are implementation details as far as
@@ -229,6 +231,7 @@ impl BackgroundTasksInitializer {
             task_service_firewall_propagation: Activator::new(),
             task_abandoned_vmm_reaper: Activator::new(),
             task_vpc_route_manager: Activator::new(),
+            task_lookup_region_port: Activator::new(),
 
             task_internal_dns_propagation: Activator::new(),
             task_external_dns_propagation: Activator::new(),
@@ -288,6 +291,7 @@ impl BackgroundTasksInitializer {
             task_service_firewall_propagation,
             task_abandoned_vmm_reaper,
             task_vpc_route_manager,
+            task_lookup_region_port,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -640,11 +644,23 @@ impl BackgroundTasksInitializer {
                  by their instances",
             period: config.abandoned_vmm_reaper.period_secs,
             task_impl: Box::new(abandoned_vmm_reaper::AbandonedVmmReaper::new(
-                datastore,
+                datastore.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_abandoned_vmm_reaper,
+        });
+
+        driver.register(TaskDefinition {
+            name: "lookup_region_port",
+            description: "fill in missing ports for region records",
+            period: config.lookup_region_port.period_secs,
+            task_impl: Box::new(lookup_region_port::LookupRegionPort::new(
+                datastore,
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_lookup_region_port,
         });
 
         driver
