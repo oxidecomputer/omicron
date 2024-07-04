@@ -1382,53 +1382,44 @@ impl super::Nexus {
     pub(crate) async fn notify_instance_updated(
         self: &Arc<Self>,
         opctx: &OpContext,
-        instance_id: &InstanceUuid,
+        instance_id: InstanceUuid,
         new_runtime_state: &nexus::SledInstanceState,
     ) -> Result<(), Error> {
-        let migrations = new_runtime_state.migrations();
-        let propolis_id = new_runtime_state.propolis_id;
-        info!(opctx.log, "received new VMM runtime state from sled agent";
-            "instance_id" => %instance_id,
-            "propolis_id" => %propolis_id,
-            "vmm_state" => ?new_runtime_state.vmm_state,
-            "migration_state" => ?migrations,
-        );
+        let saga = notify_instance_updated(
+            &self.db_datastore,
+            opctx,
+            instance_id,
+            new_runtime_state,
+        )
+        .await?;
 
-        let (vmm_updated, migration_updated) = self
-            .db_datastore
-            .vmm_and_migration_update_runtime(
-                propolis_id,
-                // TODO(eliza): probably should take this by value...
-                &new_runtime_state.vmm_state.clone().into(),
-                migrations,
-            )
-            .await?;
-        let updated = vmm_updated || migration_updated.unwrap_or(false);
-        if updated {
+        // We don't need to wait for the instance update saga to run to
+        // completion to return OK to the sled-agent --- all it needs to care
+        // about is that the VMM/migration state in the database was updated.
+        // Even if we fail to successfully start an update saga, the
+        // instance-updater background task will eventually see that the
+        // instance is in a state which requires an update saga, and ensure that
+        // one is eventually executed.
+        //
+        // Therefore, just spawn the update saga in a new task, and return.
+        if let Some(saga) = saga {
             info!(opctx.log, "starting update saga for {instance_id}";
                 "instance_id" => %instance_id,
-                "propolis_id" => %propolis_id,
                 "vmm_state" => ?new_runtime_state.vmm_state,
-                "migration_state" => ?migrations,
+                "migration_state" => ?new_runtime_state.migrations(),
             );
-            let (.., authz_instance) =
-                LookupPath::new(&opctx, &self.db_datastore)
-                    .instance_id(instance_id.into_untyped_uuid())
-                    .lookup_for(authz::Action::Modify)
-                    .await?;
-            let saga_params = sagas::instance_update::Params {
-                serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-                authz_instance,
-            };
             let sagas = self.sagas.clone();
+            let log = opctx.log.clone();
             tokio::spawn(async move {
-                sagas
-                    .saga_execute::<sagas::instance_update::SagaInstanceUpdate>(
-                        saga_params,
-                    )
-                    .await
+                if let Err(error) = sagas.saga_start(saga).await {
+                    warn!(&log, "update saga for {instance_id} failed!";
+                        "instance_id" => %instance_id,
+                        "error" => %error,
+                    );
+                }
             });
         }
+
         Ok(())
     }
 
@@ -1868,14 +1859,13 @@ impl super::Nexus {
 }
 
 /// Invoked by a sled agent to publish an updated runtime state for an
-/// Instance.
+/// Instance, returning an update saga for that instance.
 pub(crate) async fn notify_instance_updated(
     datastore: &DataStore,
-    sagas: &dyn StartSaga,
     opctx: &OpContext,
     instance_id: InstanceUuid,
-    new_runtime_state: nexus::SledInstanceState,
-) -> Result<bool, Error> {
+    new_runtime_state: &nexus::SledInstanceState,
+) -> Result<Option<steno::SagaDag>, Error> {
     use sagas::instance_update;
 
     let migrations = new_runtime_state.migrations();
@@ -1895,8 +1885,11 @@ pub(crate) async fn notify_instance_updated(
             migrations,
         )
         .await?;
-    let updated = vmm_updated || migration_updated.unwrap_or(false);
 
+    // If the instance or VMM records in the database have changed as a result
+    // of this update, prepare an `instance-update` saga to ensure that the
+    // changes are reflected by the instance record.
+    let updated = vmm_updated || migration_updated.unwrap_or(false);
     if updated {
         let (.., authz_instance) = LookupPath::new(&opctx, datastore)
             .instance_id(instance_id.into_untyped_uuid())
@@ -1908,10 +1901,10 @@ pub(crate) async fn notify_instance_updated(
                 authz_instance,
             },
         )?;
-        sagas.saga_start(saga).await?;
+        Ok(Some(saga))
+    } else {
+        Ok(None)
     }
-
-    Ok(updated)
 }
 
 /// Determines the disposition of a request to start an instance given its state

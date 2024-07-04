@@ -609,6 +609,7 @@ async fn sim_instance_migrate(
 
 #[cfg(test)]
 mod tests {
+    use crate::app::db::datastore::InstanceAndActiveVmm;
     use crate::app::sagas::test_helpers;
     use camino::Utf8Path;
     use dropshot::test_util::ClientTestContext;
@@ -622,6 +623,8 @@ mod tests {
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
     use omicron_sled_agent::sim::Server;
+    use omicron_test_utils::dev::poll;
+    use std::time::Duration;
 
     use super::*;
 
@@ -859,9 +862,9 @@ mod tests {
                                 cptestctx,
                                 instance_id,
                             )
-                            .await.instance().clone();
-                            if new_state.runtime().nexus_state == nexus_db_model::InstanceState::Vmm {
-                                Err(poll::CondCheckError::<nexus_db_model::Instance>::NotYet)
+                            .await;
+                            if new_state.instance().runtime().nexus_state == nexus_db_model::InstanceState::Vmm {
+                                Err(poll::CondCheckError::<InstanceAndActiveVmm>::NotYet)
                             } else {
                                 Ok(new_state)
                             }
