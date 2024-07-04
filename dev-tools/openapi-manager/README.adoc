@@ -47,7 +47,7 @@ In the implementation crate:
 . Add a dependency on the API crate.
 . Following the example in https://rfd.shared.oxide.computer/rfd/0479#guide_api_implementation[RFD 479's _API implementation_], provide an implementation of the trait.
 
-Once the API crate is defined, follow the instructions in <<add_to_manager>> below.
+Once the API crate is defined, perform the steps in <<add_to_manager>> below.
 
 === Converting existing documents
 
@@ -56,9 +56,16 @@ Existing, unmanaged documents are generated via *function-based servers*: a set 
 The first step is to convert the function-based server into an API trait. To do so, create an API crate (see <<api_crates>> above).
 
 . Add the API crate to the workspace's `Cargo.toml`: `members` and `default-members`, and a reference in `[workspace.dependencies]`.
-. Follow the instructions in https://rfd.shared.oxide.computer/rfd/0479#guide_converting_functions_to_traits[RFD 479's _Converting functions to API traits_] for the API crate, as well as for the implementation crate where the endpoint functions are currently defined.
+. Follow the instructions in https://rfd.shared.oxide.computer/rfd/0479#guide_converting_functions_to_traits[RFD 479's _Converting functions to API traits_] for the API crate.
 
-Finally, follow the instructions in <<add_to_manager>> below.
+In the implementation crate:
+
+. Continue following the instructions in https://rfd.shared.oxide.computer/rfd/0479#guide_converting_functions_to_traits[RFD 479's _Converting functions to API traits_] for where the endpoint functions are currently defined.
+. Find the test which currently manages the document (try searching the repo for `openapi_lint::validate`). If it performs any checks on the document beyond `openapi_lint::validate` or `openapi_lint::validate_external`, see <<extra_validation>>.
+
+Next, perform the steps in <<add_to_manager>> below.
+
+Finally, remove the test which used to manage the document.
 
 === Adding the API crate to the manager [[add_to_manager]]
 
@@ -71,6 +78,16 @@ To ensure everything works well, run `cargo xtask openapi generate`.
 
 * Your OpenAPI document should be generated on disk and listed in the output.
 * If you're converting an existing API, the only changes should be the ones you might have introduced as part of the refactor. If there are significant changes, something's gone wrong--maybe you missed an endpoint?
+
+==== Performing extra validation [[extra_validation]]
+
+By default, the OpenAPI manager does basic validation on the generated document. Some documents require extra validation steps.
+
+It's best to put extra validation next to the trait, within the API crate.
+
+. In the API crate, add dependencies on `anyhow` and `openapiv3`.
+. Define a function with signature `fn extra_validation(openapi: &openapiv3::OpenAPI) -> anyhow::Result<()>` which performs the extra validation steps.
+. In `all_apis`, set the `extra_validation` field to this function.
 
 == Design notes
 
