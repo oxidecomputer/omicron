@@ -685,6 +685,8 @@ mod test {
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
+    use omicron_test_utils::dev::poll;
+    use std::time::Duration;
     use uuid::Uuid;
 
     use super::*;
@@ -802,28 +804,45 @@ mod test {
                 })
             },
             || {
-                Box::pin({
-                    async {
-                        let new_db_instance = test_helpers::instance_fetch(
-                            cptestctx,
-                            instance_id,
+                Box::pin(async {
+                    let new_db_instance =
+                        // Wait until the instance has advanced to the `NoVmm`
+                        // state. This may not happen immediately, as the
+                        // `Nexus::cpapi_instances_put` API endpoint simply
+                        // writes the new VMM state to the database and *starts*
+                        // an `instance-update` saga, and the instance record
+                        // isn't updated until that saga completes.
+                        poll::wait_for_condition(
+                            || async {
+                                let new_db_instance = test_helpers::instance_fetch(
+                                    cptestctx,
+                                    instance_id,
+                                )
+                                .await.instance().clone();
+                                if new_db_instance.runtime().nexus_state == nexus_db_model::InstanceState::Vmm {
+                                    Err(poll::CondCheckError::<nexus_db_model::Instance>::NotYet)
+                                } else {
+                                    Ok(new_db_instance)
+                                }
+                            },
+                            &Duration::from_secs(5),
+                            &Duration::from_secs(300),
                         )
-                        .await.instance().clone();
+                        .await.expect("instance did not transition to NoVmm state after 300 seconds");
 
-                        info!(log,
-                              "fetched instance runtime state after saga execution";
-                              "instance_id" => %instance.identity.id,
-                              "instance_runtime" => ?new_db_instance.runtime());
+                    info!(log,
+                        "fetched instance runtime state after saga execution";
+                        "instance_id" => %instance.identity.id,
+                        "instance_runtime" => ?new_db_instance.runtime());
 
-                        assert!(new_db_instance.runtime().propolis_id.is_none());
-                        assert_eq!(
-                            new_db_instance.runtime().nexus_state,
-                            nexus_db_model::InstanceState::NoVmm
-                        );
+                    assert!(new_db_instance.runtime().propolis_id.is_none());
+                    assert_eq!(
+                        new_db_instance.runtime().nexus_state,
+                        nexus_db_model::InstanceState::NoVmm
+                    );
 
-                        assert!(test_helpers::no_virtual_provisioning_resource_records_exist(cptestctx).await);
-                        assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx).await);
-                    }
+                    assert!(test_helpers::no_virtual_provisioning_resource_records_exist(cptestctx).await);
+                    assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx).await);
                 })
             },
             log,
