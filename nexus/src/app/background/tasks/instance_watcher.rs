@@ -154,39 +154,38 @@ impl InstanceWatcher {
             let new_runtime_state: SledInstanceState = state.into();
             check.outcome =
                 CheckOutcome::Success(new_runtime_state.vmm_state.state.into());
-            slog::debug!(
+            debug!(
                 opctx.log,
                 "updating instance state";
                 "state" => ?new_runtime_state.vmm_state.state,
             );
-            check.result = crate::app::instance::notify_instance_updated(
+            match crate::app::instance::notify_instance_updated(
                 &datastore,
-                sagas.as_ref(),
                 &opctx,
                 InstanceUuid::from_untyped_uuid(target.instance_id),
-                new_runtime_state,
+                &new_runtime_state,
             )
             .await
-            .map_err(|e| {
-                slog::warn!(
-                    opctx.log,
-                    "error updating instance";
-                    "error" => ?e,
-                );
-                match e {
-                    Error::ObjectNotFound { .. } => {
-                        Incomplete::InstanceNotFound
-                    }
-                    _ => Incomplete::UpdateFailed,
+            {
+                Err(e) => {
+                    warn!(opctx.log, "error updating instance"; "error" => %e);
+                    check.result = match e {
+                        Error::ObjectNotFound { .. } => {
+                            Err(Incomplete::InstanceNotFound)
+                        }
+                        _ => Err(Incomplete::UpdateFailed),
+                    };
                 }
-            })
-            .map(|updated| {
-                slog::debug!(
-                    opctx.log, "update successful";
-                    "vmm_updated" => ?updated,
-                );
-                check.update_saga_queued = updated;
-            });
+                Ok(Some(saga)) => {
+                    check.update_saga_queued = true;
+                    if let Err(e) = sagas.saga_start(saga).await {
+                        warn!(opctx.log, "update saga failed"; "error" => ?e);
+                        check.result = Err(Incomplete::UpdateFailed);
+                    }
+                }
+                Ok(None) => {}
+            };
+
             check
         }
     }
