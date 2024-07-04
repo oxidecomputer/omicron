@@ -1749,9 +1749,11 @@ mod test {
     use omicron_common::api::external::InstanceCpuCount;
     use omicron_common::api::external::Name;
     use omicron_common::api::external::NameOrId;
+    use omicron_test_utils::dev::poll;
     use sled_agent_client::types::CrucibleOpts;
     use sled_agent_client::TestInterfaces as SledAgentTestInterfaces;
     use std::str::FromStr;
+    use std::time::Duration;
 
     type DiskTest<'a> =
         nexus_test_utils::resource_helpers::DiskTest<'a, crate::Server>;
@@ -2308,6 +2310,31 @@ mod test {
                             PROJECT_NAME,
                         )
                         .await;
+                        // Wait until the instance has advanced to the `NoVmm`
+                        // state before deleting it. This may not happen
+                        // immediately, as the `Nexus::cpapi_instances_put` API
+                        // endpoint simply writes the new VMM state to the
+                        // database and *starts* an `instance-update` saga, and
+                        // the instance record isn't updated until that saga
+                        // completes.
+                        poll::wait_for_condition(
+                            || async {
+                                let new_state = test_helpers::instance_fetch_by_name(
+                                    cptestctx,
+                                    INSTANCE_NAME,
+                                    PROJECT_NAME,
+                                )
+                                .await;
+                                if new_state.instance().runtime().nexus_state != nexus_db_model::InstanceState::NoVmm {
+                                    Err(poll::CondCheckError::<()>::NotYet)
+                                } else {
+                                    Ok(())
+                                }
+                            },
+                            &Duration::from_secs(5),
+                            &Duration::from_secs(300),
+                        )
+                            .await.expect("instance did not advance to NoVmm after 400 seconds");
                         test_helpers::instance_delete_by_name(
                             cptestctx,
                             INSTANCE_NAME,
