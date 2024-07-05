@@ -841,7 +841,17 @@ impl InstanceManagerRunner {
 
         for id in to_remove {
             info!(self.log, "only_use_disks: Removing instance"; "instance_id" => ?id);
-            self.instances.remove(&id);
+            if let Some((_, instance)) = self.instances.remove(&id) {
+                let (tx, rx) = oneshot::channel();
+                if let Err(e) = instance.terminate(tx).await {
+                    warn!(self.log, "only_use_disks: Failed to request instance removal"; "err" => ?e);
+                    continue;
+                }
+
+                if let Err(e) = rx.await {
+                    warn!(self.log, "only_use_disks: Failed while removing instance"; "err" => ?e);
+                }
+            }
         }
 
         tx.send(Ok(())).map_err(|_| Error::FailedSendClientClosed)?;
