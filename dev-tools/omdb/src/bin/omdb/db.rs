@@ -411,7 +411,7 @@ enum InventoryCommands {
     Cabooses,
     /// list and show details from particular collections
     Collections(CollectionsArgs),
-    /// show all physical disks every found
+    /// show all physical disks ever found
     PhysicalDisks(InvPhysicalDisksArgs),
     /// list all root of trust pages ever found
     RotPages,
