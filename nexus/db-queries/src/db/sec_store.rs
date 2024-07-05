@@ -20,7 +20,6 @@ use steno::SagaId;
 /// database.
 pub struct CockroachDbSecStore {
     sec_id: db::SecId,
-    sec_generation: db::SecGeneration,
     datastore: Arc<db::DataStore>,
     log: Logger,
 }
@@ -34,11 +33,10 @@ impl fmt::Debug for CockroachDbSecStore {
 impl CockroachDbSecStore {
     pub fn new(
         sec_id: db::SecId,
-        sec_generation: db::SecGeneration,
         datastore: Arc<db::DataStore>,
         log: Logger,
     ) -> Self {
-        CockroachDbSecStore { sec_id, sec_generation, datastore, log }
+        CockroachDbSecStore { sec_id, datastore, log }
     }
 }
 
@@ -53,11 +51,7 @@ impl steno::SecStore for CockroachDbSecStore {
             "saga_name" => create_params.name.to_string(),
         );
         self.datastore
-            .saga_create(&db::saga_types::Saga::new(
-                self.sec_id,
-                self.sec_generation.clone(),
-                create_params,
-            ))
+            .saga_create(&db::saga_types::Saga::new(self.sec_id, create_params))
             .await
             .context("creating saga record")
     }

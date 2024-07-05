@@ -231,21 +231,8 @@ impl Nexus {
         db_datastore.register_producers(producer_registry);
 
         let my_sec_id = db::SecId::from(config.deployment.id);
-        let (sec_generation, bad_time) = db::SecGeneration::generate();
-        if bad_time {
-            warn!(
-                log,
-                "using random SEC generation \
-                 (current time looks unreasonable)";
-                "sec_generation" => &*sec_generation,
-            );
-        };
-        info!(log, "using SEC generation";
-            "sec_generation" => &*sec_generation);
-
         let sec_store = Arc::new(db::CockroachDbSecStore::new(
             my_sec_id,
-            sec_generation.clone(),
             Arc::clone(&db_datastore),
             log.new(o!("component" => "SecStore")),
         )) as Arc<dyn steno::SecStore>;
@@ -516,7 +503,6 @@ impl Nexus {
                     saga_recovery_opctx,
                     saga_recovery_nexus: task_nexus.clone(),
                     saga_recovery_sec: sec_client.clone(),
-                    saga_recovery_sec_generation: sec_generation,
                     saga_recovery_registry: sagas::ACTION_REGISTRY.clone(),
                 },
             );

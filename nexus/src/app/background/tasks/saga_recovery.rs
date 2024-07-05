@@ -158,7 +158,6 @@ pub struct SagaRecovery {
     ///
     /// This always matches the Nexus id.
     sec_id: db::SecId,
-    sec_generation: db::SecGeneration,
     /// OpContext used for saga recovery
     saga_recovery_opctx: OpContext,
     nexus: Arc<Nexus>,
@@ -202,13 +201,11 @@ impl SagaRecovery {
         saga_recovery_opctx: OpContext,
         nexus: Arc<Nexus>,
         sec: Arc<steno::SecClient>,
-        sec_generation: db::SecGeneration,
         registry: Arc<ActionRegistry>,
     ) -> SagaRecovery {
         SagaRecovery {
             datastore,
             sec_id: db::SecId(sec_id),
-            sec_generation,
             saga_recovery_opctx,
             nexus,
             sec,
@@ -235,7 +232,6 @@ impl BackgroundTask for SagaRecovery {
             let recovered = db::recover(
                 &self.saga_recovery_opctx,
                 self.sec_id,
-                self.sec_generation.clone(),
                 &|saga_id| self.sagas_recovered.contains_key(&saga_id),
                 &|saga_logger| {
                     // The extra `Arc` is a little ridiculous.  The problem is

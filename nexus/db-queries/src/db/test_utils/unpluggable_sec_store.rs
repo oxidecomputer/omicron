@@ -23,18 +23,12 @@ pub struct UnpluggableCockroachDbSecStore {
 impl UnpluggableCockroachDbSecStore {
     pub fn new(
         sec_id: db::SecId,
-        sec_generation: db::SecGeneration,
         datastore: Arc<db::DataStore>,
         log: slog::Logger,
     ) -> Self {
         Self {
             unplugged: AtomicBool::new(false),
-            sec_store: db::CockroachDbSecStore::new(
-                sec_id,
-                sec_generation,
-                datastore,
-                log,
-            ),
+            sec_store: db::CockroachDbSecStore::new(sec_id, datastore, log),
         }
     }
 

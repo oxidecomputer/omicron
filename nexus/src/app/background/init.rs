@@ -660,7 +660,6 @@ impl BackgroundTasksInitializer {
                 args.saga_recovery_opctx,
                 args.saga_recovery_nexus,
                 args.saga_recovery_sec,
-                args.saga_recovery_sec_generation,
                 args.saga_recovery_registry,
             ));
 
@@ -706,8 +705,6 @@ pub struct BackgroundTasksData {
     pub saga_recovery_nexus: Arc<Nexus>,
     /// handle to Steno SEC client, used to recover sagas
     pub saga_recovery_sec: Arc<steno::SecClient>,
-    /// unique identifier for this lifetime of this SEC
-    pub saga_recovery_sec_generation: db::SecGeneration,
     /// Steno (saga) action registry
     pub saga_recovery_registry: Arc<ActionRegistry>,
 }
