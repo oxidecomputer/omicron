@@ -92,9 +92,11 @@ pub(crate) async fn device_auth_request(
             &model.into_response(rqctx.server.using_tls(), host),
         )
     };
-    // TODO: instrumentation doesn't work because we use `Response<Body>`
-    //apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-    handler.await
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -250,7 +252,9 @@ pub(crate) async fn device_access_token(
             ),
         }
     };
-    // TODO: instrumentation doesn't work because we use `Response<Body>`
-    //apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-    handler.await
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
 }

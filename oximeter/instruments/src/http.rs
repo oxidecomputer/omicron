@@ -4,7 +4,7 @@
 
 //! Instrumentation tools for HTTP services.
 
-// Copyright 2021 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
 use dropshot::{
     HttpError, HttpResponse, RequestContext, RequestInfo, ServerContext,
@@ -178,16 +178,22 @@ impl LatencyTracker {
         let start = Instant::now();
         let result = handler.await;
         let latency = start.elapsed();
-        let status_code = match result {
-            Ok(_) => R::response_metadata().success.unwrap(),
+        let status_code = match &result {
+            Ok(response) => response.status_code(),
             Err(ref e) => e.status_code,
         };
-        self.update(&context.request, status_code, latency).map_err(|e| {
-            HttpError::for_internal_error(format!(
-                "error instrumenting dropshot request handler: {}",
-                e
-            ))
-        })?;
+        if let Err(e) = self.update(&context.request, status_code, latency) {
+            slog::error!(
+                &context.log,
+                "error instrumenting dropshot handler";
+                "error" => ?e,
+                "status_code" => status_code.as_u16(),
+                "method" => %context.request.method(),
+                "uri" => %context.request.uri(),
+                "remote_addr" => context.request.remote_addr(),
+                "latency" => ?latency,
+            );
+        }
         result
     }
 }
