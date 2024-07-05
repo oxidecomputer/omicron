@@ -517,7 +517,8 @@ impl InstanceManagerRunner {
                             self.get_instance_state(tx, instance_id).await
                         },
                         Some(OnlyUseDisks { disks, tx } ) => {
-                            self.only_use_disks(tx, disks).await
+                            self.only_use_disks(disks).await;
+                            tx.send(Ok(())).map_err(|_| Error::FailedSendClientClosed)
                         },
                         None => {
                             warn!(self.log, "InstanceManager's request channel closed; shutting down");
@@ -803,9 +804,8 @@ impl InstanceManagerRunner {
 
     async fn only_use_disks(
         &mut self,
-        tx: oneshot::Sender<Result<(), Error>>,
         disks: AllDisks,
-    ) -> Result<(), Error> {
+    )  {
         // Consider the generation number on the incoming request to avoid
         // applying old requests.
         let requested_generation = *disks.generation();
@@ -814,8 +814,7 @@ impl InstanceManagerRunner {
                 // This request looks old, ignore it.
                 info!(self.log, "only_use_disks: Ignoring request";
                     "last_gen" => ?last_gen, "requested_gen" => ?requested_generation);
-
-                return Ok(());
+                return;
             }
         }
         self.storage_generation = Some(requested_generation);
@@ -853,9 +852,6 @@ impl InstanceManagerRunner {
                 }
             }
         }
-
-        tx.send(Ok(())).map_err(|_| Error::FailedSendClientClosed)?;
-        Ok(())
     }
 }
 
