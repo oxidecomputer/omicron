@@ -1,0 +1,38 @@
+format_version = 1
+
+[target]
+name = "http_service"
+description = "An Oxide HTTP server"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "name", "id" ] },
+]
+
+[[metrics]]
+name = "request_latency_histogram"
+description = "Duration for the server to handle a request"
+units = "seconds"
+datum_type = "histogram_f64"
+versions = [
+    { added_in = 1, fields = [ "route", "method", "status_code" ] }
+]
+
+[fields.name]
+type = "string"
+description = "The name of the HTTP server, or program running it"
+
+[fields.id]
+type = "uuid"
+description = "UUID of the HTTP server"
+
+[fields.route]
+type = "string"
+description = "HTTP route in the request"
+
+[fields.method]
+type = "string"
+description = "HTTP method in the request"
+
+[fields.status_code]
+type = "u16"
+description = "HTTP status code in the server's response"

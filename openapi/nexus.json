@@ -19798,7 +19798,8 @@
         "type": "string",
         "enum": [
           "count",
-          "bytes"
+          "bytes",
+          "seconds"
         ]
       },
       "User": {
