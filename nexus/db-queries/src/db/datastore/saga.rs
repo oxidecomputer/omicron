@@ -12,10 +12,12 @@ use crate::db::error::ErrorHandler;
 use crate::db::model::Generation;
 use crate::db::pagination::paginated;
 use crate::db::pagination::paginated_multicolumn;
+use crate::db::pagination::Paginator;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use nexus_auth::context::OpContext;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
@@ -139,14 +141,14 @@ impl DataStore {
 
     /// Returns a list of all saga log entries for the given saga, making as
     /// many queries as needed (in batches) to get them all
-    pub async fn saga_load_log_batched(
+    pub async fn saga_fetch_log_batched(
         &self,
         opctx: &OpContext,
         saga: &db::saga_types::Saga,
-    ) -> Result<Vec<SagaNodeEvent>, Error> {
+    ) -> Result<Vec<steno::SagaNodeEvent>, Error> {
         let mut events = vec![];
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
-        let conn = datastore.pool_connection_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
         while let Some(p) = paginator.next() {
             use db::schema::saga_node_event::dsl;
             let batch = paginated_multicolumn(
@@ -157,8 +159,8 @@ impl DataStore {
             .filter(dsl::saga_id.eq(saga.id))
             .select(db::saga_types::SagaNodeEvent::as_select())
             .load_async(&*conn)
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-            .await?;
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
             paginator = p.found_batch(&batch, &|row| {
                 (row.node_id, row.event_type.clone())
@@ -182,6 +184,8 @@ mod test {
     use crate::db::datastore::test_utils::datastore_test;
     use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
+    use rand::seq::SliceRandom;
+    use uuid::Uuid;
 
     // Tests pagination in listing sagas that are candidates for recovery
     #[tokio::test]
@@ -315,7 +319,7 @@ mod test {
         };
         let saga = db::model::saga_types::Saga::new(sec_id, params);
         let observed_nodes = datastore
-            .saga_load_log_batched(&opctx, &saga)
+            .saga_fetch_log_batched(&opctx, &saga)
             .await
             .expect("Failed to list nodes of unfinished saga");
         inserted_nodes.sort_by_key(|a| (a.node_id, a.event_type.clone()));
@@ -364,7 +368,7 @@ mod test {
         // Test that this returns "no nodes" rather than throwing some "not
         // found" error.
         let observed_nodes = datastore
-            .saga_load_log_batched(&opctx, &db_datastore, &saga)
+            .saga_fetch_log_batched(&opctx, &saga)
             .await
             .expect("Failed to list nodes of unfinished saga");
         assert_eq!(observed_nodes.len(), 0);
