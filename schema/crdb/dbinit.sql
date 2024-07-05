@@ -2016,7 +2016,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.saga (
     current_sec UUID,
 
     adopt_generation INT NOT NULL,
-    adopt_time TIMESTAMPTZ NOT NULL
+    adopt_time TIMESTAMPTZ NOT NULL,
 
     /*
      * generation of the SEC that last created or recovered this saga
@@ -2024,7 +2024,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.saga (
      * This is used during saga recovery to identify sagas that don't need to be
      * recovered.  See the saga recovery background task for details.
      */
-    sec_generation STRING(32),
+    sec_generation STRING(32)
 );
 
 /*

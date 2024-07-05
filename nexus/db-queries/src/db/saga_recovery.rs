@@ -462,12 +462,20 @@ mod test {
         let log = logctx.log.new(o!());
         let (mut db, db_datastore) = new_db(&log).await;
         let sec_id = db::SecId(uuid::Uuid::new_v4());
-        let sec_generation = db::SecGeneration::random();
+        // SEC generation for the "current" lifetime.
+        // This is the generation that will be used for newly created sagas.
+        let sec_generation_now = db::SecGeneration::random();
+        // SEC generation for the "next" lifetime.
+        // We'll use this generation during saga recovery.  It must differ from
+        // the one we use to create new sagas or else we'll skip those sagas
+        // during recovery.
+        let sec_generation_recovery = db::SecGeneration::random();
+        assert_ne!(sec_generation_now, sec_generation_recovery);
         let (storage, sec_client, uctx) = create_storage_sec_and_context(
             &log,
             db_datastore.clone(),
             sec_id,
-            sec_generation.clone(),
+            sec_generation_now,
         );
         let sec_log = log.new(o!("component" => "SEC"));
         let opctx = OpContext::for_tests(
@@ -506,7 +514,7 @@ mod test {
         let recovered = recover(
             &opctx,
             sec_id,
-            sec_generation,
+            sec_generation_recovery,
             &|_| false,
             &|_| uctx.clone(),
             &db_datastore,
@@ -562,12 +570,20 @@ mod test {
         let log = logctx.log.new(o!());
         let (mut db, db_datastore) = new_db(&log).await;
         let sec_id = db::SecId(uuid::Uuid::new_v4());
-        let sec_generation = db::SecGeneration::random();
+        // SEC generation for the "current" lifetime.
+        // This is the generation that will be used for newly created sagas.
+        let sec_generation_now = db::SecGeneration::random();
+        // SEC generation for the "next" lifetime.
+        // We'll use this generation during saga recovery.  It must differ from
+        // the one we use to create new sagas or else we'll skip those sagas
+        // during recovery.
+        let sec_generation_recovery = db::SecGeneration::random();
+        assert_ne!(sec_generation_now, sec_generation_recovery);
         let (storage, sec_client, uctx) = create_storage_sec_and_context(
             &log,
             db_datastore.clone(),
             sec_id,
-            sec_generation.clone(),
+            sec_generation_now,
         );
         let sec_log = log.new(o!("component" => "SEC"));
         let opctx = OpContext::for_tests(
@@ -593,7 +609,7 @@ mod test {
         let recovered = recover(
             &opctx,
             sec_id,
-            sec_generation,
+            sec_generation_recovery,
             &|_| false,
             &|_| uctx.clone(),
             &db_datastore,
@@ -619,7 +635,8 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    // Tests that we skip recovering sagas that we're told to skip.
+    // Tests that we skip recovering sagas (1) from the current SEC generation
+    // and (2) that we're told to skip.
     #[tokio::test]
     async fn test_recovery_skip() {
         // Test setup
@@ -627,12 +644,20 @@ mod test {
         let log = logctx.log.new(o!());
         let (mut db, db_datastore) = new_db(&log).await;
         let sec_id = db::SecId(uuid::Uuid::new_v4());
-        let sec_generation = db::SecGeneration::random();
+        // SEC generation for the "current" lifetime.
+        // This is the generation that will be used for newly created sagas.
+        let sec_generation_now = db::SecGeneration::random();
+        // SEC generation for the "next" lifetime.
+        // We'll use this generation during saga recovery.  It must differ from
+        // the one we use to create new sagas or else we'll skip those sagas
+        // during recovery.
+        let sec_generation_recovery = db::SecGeneration::random();
+        assert_ne!(sec_generation_now, sec_generation_recovery);
         let (storage, sec_client, uctx) = create_storage_sec_and_context(
             &log,
             db_datastore.clone(),
             sec_id,
-            sec_generation.clone(),
+            sec_generation_now.clone(),
         );
         let sec_log = log.new(o!("component" => "SEC"));
         let opctx = OpContext::for_tests(
@@ -661,12 +686,31 @@ mod test {
         uctx.storage.set_unplug(false);
         uctx.do_unplug.store(false, Ordering::SeqCst);
 
-        // Carry out recovery.
+        // First of all, carry out recovery using the same generation as the
+        // SecStore.  This should not find our saga because recovery explicitly
+        // skips sagas created with the same generation.
         let sec_client = Arc::new(sec_client);
         let recovered = recover(
             &opctx,
             sec_id,
-            sec_generation,
+            sec_generation_now,
+            &|found_saga_id| found_saga_id == saga_id,
+            &|_| uctx.clone(),
+            &db_datastore,
+            &sec_client,
+            registry_create(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(0, recovered.iter_recovered().count());
+        assert_eq!(0, recovered.iter_failed().count());
+        assert_eq!(0, recovered.iter_skipped().count());
+
+        // Carry out recovery.
+        let recovered = recover(
+            &opctx,
+            sec_id,
+            sec_generation_recovery,
             &|found_saga_id| found_saga_id == saga_id,
             &|_| uctx.clone(),
             &db_datastore,
