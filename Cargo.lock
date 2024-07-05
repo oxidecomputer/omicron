@@ -3296,7 +3296,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.4.10",
+ "socket2 0.5.7",
  "tokio",
  "tower-service",
  "tracing",
@@ -3572,12 +3572,6 @@ name = "indoc"
 version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfa799dd5ed20a7e349f3b4639aa80d74549c81716d9ec4f994c9b5815598306"
-
-[[package]]
-name = "indoc"
-version = "2.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b248f5224d1d606005e02c97f5aa4e88eeb230488bcc03bc9ca4d7991399f2b5"
 
 [[package]]
 name = "inout"
@@ -5648,7 +5642,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oximeter-client",
  "pq-sys",
- "ratatui 0.27.0",
+ "ratatui",
  "reedline",
  "serde",
  "serde_json",
@@ -5990,7 +5984,6 @@ dependencies = [
  "similar",
  "slog",
  "smallvec 1.13.2",
- "socket2 0.5.7",
  "spin 0.9.8",
  "string_cache",
  "subtle",
@@ -6949,7 +6942,7 @@ version = "0.27.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b3aa6f61d235de56ccffbca8627377ebe6ff0052a419f67b098f319a5f32e06d"
 dependencies = [
- "indoc 1.0.9",
+ "indoc",
  "js-sys",
  "lalrpop",
  "lalrpop-util",
@@ -7567,25 +7560,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d25bf25ec5ae4a3f1b92f929810509a2f53d7dca2f50b794ff57e3face536c8f"
 dependencies = [
  "rand_core 0.6.4",
-]
-
-[[package]]
-name = "ratatui"
-version = "0.26.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a564a852040e82671dc50a37d88f3aa83bbc690dfc6844cfe7a2591620206a80"
-dependencies = [
- "bitflags 2.5.0",
- "cassowary",
- "compact_str",
- "indoc 2.0.5",
- "itertools 0.12.1",
- "lru",
- "paste",
- "stability",
- "strum",
- "unicode-segmentation",
- "unicode-width",
 ]
 
 [[package]]
@@ -10396,11 +10370,11 @@ dependencies = [
 
 [[package]]
 name = "tui-tree-widget"
-version = "0.19.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb0c6f924587e719c50b8f83485afbe4d4c16edca6b641d5d9a3204edeba5cf0"
+checksum = "0ac69db35529be6a75f9d27516ff33df299e2e8e961a1986d52185cef0427352"
 dependencies = [
- "ratatui 0.26.2",
+ "ratatui",
  "unicode-width",
 ]
 
@@ -11057,7 +11031,7 @@ dependencies = [
  "once_cell",
  "owo-colors",
  "proptest",
- "ratatui 0.27.0",
+ "ratatui",
  "reqwest",
  "rpassword",
  "serde",
