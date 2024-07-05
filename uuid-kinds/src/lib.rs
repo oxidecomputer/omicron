@@ -14,15 +14,63 @@ pub use newtype_uuid::{
     GenericUuid, ParseError, TagError, TypedUuid, TypedUuidKind, TypedUuidTag,
 };
 
-#[cfg(feature = "schemars08")]
-use schemars::JsonSchema;
-
 macro_rules! impl_typed_uuid_kind {
     ($($kind:ident => $tag:literal),* $(,)?) => {
         $(
             paste::paste! {
-                #[cfg_attr(feature = "schemars08", derive(JsonSchema))]
-                pub enum [< $kind Kind>] {}
+                pub enum [< $kind Kind >] {}
+
+                #[cfg(feature = "schemars08")]
+                impl schemars::JsonSchema for [< $kind Kind >]{
+                    fn schema_name() -> String {
+                        stringify!([< $kind Kind >]).to_string()
+                    }
+
+                    fn is_referenceable() -> bool {
+                        false
+                    }
+
+                    fn json_schema(_: &mut schemars::gen::SchemaGenerator)
+                        -> schemars::schema::Schema
+                    {
+                        use schemars::schema::Metadata;
+                        use schemars::schema::Schema;
+                        use schemars::schema::SchemaObject;
+                        use schemars::schema::SubschemaValidation;
+
+                        SchemaObject {
+                            metadata: Some(
+                                Metadata{
+                                    title: Some(Self::schema_name()),
+                                    ..Default::default()
+                                }.into(),
+                            ),
+                            subschemas: Some(
+                                SubschemaValidation {
+                                    not: Some(Schema::Bool(true).into()),
+                                    ..Default::default()
+                                }
+                                .into(),
+                            ),
+                            extensions: [(
+                                "x-rust-type".to_string(),
+                                serde_json::json!({
+                                    "crate": "omicron-uuid-kinds",
+                                    "version": "0.1.0",
+                                    "path":
+                                        format!(
+                                            "omicron_uuid_kinds::{}",
+                                            Self::schema_name(),
+                                        ),
+                                }),
+                            )]
+                            .into_iter()
+                            .collect(),
+                            ..Default::default()
+                        }
+                        .into()
+                    }
+                }
 
                 impl TypedUuidKind for [< $kind Kind >] {
                     #[inline]

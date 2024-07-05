@@ -5889,6 +5889,7 @@ dependencies = [
  "newtype-uuid",
  "paste",
  "schemars",
+ "serde_json",
 ]
 
 [[package]]

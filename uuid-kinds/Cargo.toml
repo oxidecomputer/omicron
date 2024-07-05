@@ -14,11 +14,12 @@ workspace = true
 [dependencies]
 newtype-uuid.workspace = true
 schemars = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 paste.workspace = true
 
 [features]
 default = ["std"]
 serde = ["newtype-uuid/serde"]
-schemars08 = ["newtype-uuid/schemars08", "schemars"]
+schemars08 = ["newtype-uuid/schemars08", "dep:schemars", "dep:serde_json"]
 std = ["newtype-uuid/std"]
 uuid-v4 = ["newtype-uuid/v4"]
