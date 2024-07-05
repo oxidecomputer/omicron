@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::process::ExitCode;
+use std::{io::Write, process::ExitCode};
 
 use anyhow::Result;
 use camino::Utf8Path;
@@ -11,7 +11,8 @@ use owo_colors::OwoColorize;
 
 use crate::{
     output::{
-        display_error, display_summary, headers::*, plural, OutputOpts, Styles,
+        display_api_spec, display_error, display_summary, headers::*, plural,
+        OutputOpts, Styles,
     },
     spec::{all_apis, OverwriteStatus},
     FAILURE_EXIT_CODE,
@@ -44,6 +45,7 @@ pub(crate) fn generate_impl(
     let all_apis = all_apis();
     let total = all_apis.len();
     let count_width = total.to_string().len();
+    let continued_indent = continued_indent(count_width);
 
     eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
 
@@ -57,16 +59,16 @@ pub(crate) fn generate_impl(
     let mut num_unchanged = 0;
     let mut num_failed = 0;
 
-    for (ix, api) in all_apis.iter().enumerate() {
+    for (ix, spec) in all_apis.iter().enumerate() {
         let count = ix + 1;
 
-        match api.overwrite(&dir) {
+        match spec.overwrite(&dir) {
             Ok((status, summary)) => match status {
                 OverwriteStatus::Updated => {
                     eprintln!(
                         "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}: {}",
                         UPDATED.style(styles.success_header),
-                        api.filename,
+                        display_api_spec(spec, &styles),
                         display_summary(&summary, &styles),
                     );
                     num_updated += 1;
@@ -75,31 +77,31 @@ pub(crate) fn generate_impl(
                     eprintln!(
                         "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}: {}",
                         UNCHANGED.style(styles.unchanged_header),
-                        api.filename,
+                        display_api_spec(spec, &styles),
                         display_summary(&summary, &styles),
                     );
                     num_unchanged += 1;
                 }
             },
             Err(err) => {
-                eprint!(
-                    "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}: ",
+                eprintln!(
+                    "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}",
                     FAILURE.style(styles.failure_header),
-                    api.filename
+                    display_api_spec(spec, &styles),
                 );
-                display_error(
-                    &err,
-                    styles.failure,
-                    &mut IndentWriter::new_skip_initial(
-                        "      ",
-                        std::io::stderr(),
-                    ),
+                let display = display_error(&err, styles.failure);
+                write!(
+                    IndentWriter::new(&continued_indent, std::io::stderr()),
+                    "{}",
+                    display,
                 )?;
 
                 num_failed += 1;
             }
         };
     }
+
+    eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
 
     let status_header = if num_failed > 0 {
         FAILURE.style(styles.failure_header)
@@ -111,7 +113,7 @@ pub(crate) fn generate_impl(
         "{:>HEADER_WIDTH$} {} {} generated: \
          {} updated, {} unchanged, {} failed",
         status_header,
-        all_apis.len().style(styles.bold),
+        total.style(styles.bold),
         plural::documents(total),
         num_updated.style(styles.bold),
         num_unchanged.style(styles.bold),

@@ -2,15 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{fmt, io, io::Write};
+use std::{fmt, fmt::Write, io};
 
 use camino::Utf8Path;
 use clap::{Args, ColorChoice};
-use indent_write::io::IndentWriter;
+use indent_write::fmt::IndentWriter;
 use owo_colors::{OwoColorize, Style};
 use similar::{ChangeTag, DiffableStr, TextDiff};
 
-use crate::spec::DocumentSummary;
+use crate::spec::{ApiSpec, DocumentSummary};
 
 #[derive(Debug, Args)]
 #[clap(next_help_heading = "Global options")]
@@ -40,6 +40,7 @@ pub(crate) struct Styles {
     pub(crate) failure_header: Style,
     pub(crate) warning_header: Style,
     pub(crate) unchanged_header: Style,
+    pub(crate) filename: Style,
     pub(crate) diff_before: Style,
     pub(crate) diff_after: Style,
 }
@@ -53,6 +54,7 @@ impl Styles {
         self.failure_header = Style::new().red().bold();
         self.unchanged_header = Style::new().blue().bold();
         self.warning_header = Style::new().yellow().bold();
+        self.filename = Style::new().cyan();
         self.diff_before = Style::new().red();
         self.diff_after = Style::new().green();
     }
@@ -112,17 +114,30 @@ where
     Ok(())
 }
 
+pub(crate) fn display_api_spec(spec: &ApiSpec, styles: &Styles) -> String {
+    format!(
+        "{} ({} v{})",
+        spec.filename.style(styles.filename),
+        spec.title,
+        spec.version,
+    )
+}
+
 pub(crate) fn display_summary(
     summary: &DocumentSummary,
     styles: &Styles,
 ) -> String {
-    let mut summary_str =
-        format!("{} paths", summary.path_count.to_string().style(styles.bold));
+    let mut summary_str = format!(
+        "{} {}",
+        summary.path_count.style(styles.bold),
+        plural::paths(summary.path_count),
+    );
 
     if let Some(schema_count) = summary.schema_count {
         summary_str.push_str(&format!(
-            ", {} schemas",
-            schema_count.to_string().style(styles.bold),
+            ", {} {}",
+            schema_count.style(styles.bold),
+            plural::schemas(schema_count),
         ));
     } else {
         summary_str.push_str(&format!(
@@ -137,22 +152,32 @@ pub(crate) fn display_summary(
 pub(crate) fn display_error(
     error: &anyhow::Error,
     failure_style: Style,
-    mut out: &mut dyn io::Write,
-) -> io::Result<()> {
-    writeln!(out, "{}", error.style(failure_style))?;
-
-    let mut source = error.source();
-    while let Some(curr) = source {
-        write!(out, "-> ")?;
-        writeln!(
-            IndentWriter::new_skip_initial("   ", &mut out),
-            "{}",
-            curr.style(failure_style),
-        )?;
-        source = curr.source();
+) -> impl fmt::Display + '_ {
+    struct DisplayError<'a> {
+        error: &'a anyhow::Error,
+        failure_style: Style,
     }
 
-    Ok(())
+    impl fmt::Display for DisplayError<'_> {
+        fn fmt(&self, mut f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            writeln!(f, "{}", self.error.style(self.failure_style))?;
+
+            let mut source = self.error.source();
+            while let Some(curr) = source {
+                write!(f, "-> ")?;
+                writeln!(
+                    IndentWriter::new_skip_initial("   ", &mut f),
+                    "{}",
+                    curr.style(self.failure_style),
+                )?;
+                source = curr.source();
+            }
+
+            Ok(())
+        }
+    }
+
+    DisplayError { error, failure_style }
 }
 
 struct MissingNewlineHint(bool);
@@ -185,6 +210,20 @@ pub(crate) mod headers {
 
     pub(crate) static SUCCESS: &str = "Success";
     pub(crate) static FAILURE: &str = "Failure";
+
+    pub(crate) fn continued_indent(count_width: usize) -> String {
+        // Status strings are of the form:
+        //
+        //    Generated [ 1/12] api.json: 1 path, 1 schema
+        //
+        // So the continued indent is:
+        //
+        // HEADER_WIDTH for the status string
+        // + (count_width * 2) for current and total counts
+        // + 3 for '[/]'
+        // + 2 for spaces on either side.
+        " ".repeat(HEADER_WIDTH + count_width * 2 + 3 + 2)
+    }
 }
 
 pub(crate) mod plural {
@@ -193,6 +232,22 @@ pub(crate) mod plural {
             "document"
         } else {
             "documents"
+        }
+    }
+
+    pub(crate) fn paths(count: usize) -> &'static str {
+        if count == 1 {
+            "path"
+        } else {
+            "paths"
+        }
+    }
+
+    pub(crate) fn schemas(count: usize) -> &'static str {
+        if count == 1 {
+            "schema"
+        } else {
+            "schemas"
         }
     }
 }

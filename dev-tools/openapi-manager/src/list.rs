@@ -8,7 +8,7 @@ use indent_write::io::IndentWriter;
 use owo_colors::OwoColorize;
 
 use crate::{
-    output::{display_error, OutputOpts, Styles},
+    output::{display_api_spec, display_error, OutputOpts, Styles},
     spec::all_apis,
 };
 
@@ -23,17 +23,15 @@ pub(crate) fn list_impl(
     let mut out = std::io::stdout();
 
     let all_apis = all_apis();
-
-    let count_width = all_apis.len().to_string().len();
+    let total = all_apis.len();
+    let count_width = total.to_string().len();
 
     if verbose {
         // A string for verbose indentation. +1 for the closing ), and +2 for
         // further indentation.
-        let initial_indent =
-            format!("{:width$}", "", width = count_width + 1 + 2);
+        let initial_indent = " ".repeat(count_width + 1 + 2);
         // This plus 4 more for continued indentation.
-        let continued_indent =
-            format!("{:width$}", "", width = count_width + 1 + 2 + 4);
+        let continued_indent = " ".repeat(count_width + 1 + 2 + 4);
 
         for (ix, api) in all_apis.iter().enumerate() {
             let count = ix + 1;
@@ -91,32 +89,30 @@ pub(crate) fn list_impl(
                         "{initial_indent} {}: ",
                         "error".style(styles.failure),
                     )?;
-                    display_error(
-                        &error,
-                        styles.failure,
-                        &mut IndentWriter::new_skip_initial(
+                    let display = display_error(&error, styles.failure);
+                    write!(
+                        IndentWriter::new_skip_initial(
                             &continued_indent,
-                            &mut out,
+                            std::io::stderr(),
                         ),
+                        "{}",
+                        display,
                     )?;
-                    continue;
                 }
             };
 
-            if ix + 1 < all_apis.len() {
+            if ix + 1 < total {
                 writeln!(&mut out)?;
             }
         }
     } else {
-        for (ix, api) in all_apis.iter().enumerate() {
+        for (ix, spec) in all_apis.iter().enumerate() {
             let count = ix + 1;
 
             writeln!(
                 &mut out,
-                "{count:count_width$}) {}: {} v{}",
-                api.filename.style(styles.bold),
-                api.title,
-                api.version,
+                "{count:count_width$}) {}",
+                display_api_spec(spec, &styles),
             )?;
         }
 

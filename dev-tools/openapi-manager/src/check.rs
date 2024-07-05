@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::process::ExitCode;
+use std::{io::Write, process::ExitCode};
 
 use anyhow::Result;
 use camino::Utf8Path;
@@ -12,8 +12,8 @@ use similar::TextDiff;
 
 use crate::{
     output::{
-        display_error, display_summary, headers::*, plural, write_diff,
-        OutputOpts, Styles,
+        display_api_spec, display_error, display_summary, headers::*, plural,
+        write_diff, OutputOpts, Styles,
     },
     spec::{all_apis, CheckStatus},
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
@@ -48,6 +48,7 @@ pub(crate) fn check_impl(
     let all_apis = all_apis();
     let total = all_apis.len();
     let count_width = total.to_string().len();
+    let continued_indent = continued_indent(count_width);
 
     eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
 
@@ -62,16 +63,16 @@ pub(crate) fn check_impl(
     let mut num_missing = 0;
     let mut num_failed = 0;
 
-    for (ix, api) in all_apis.iter().enumerate() {
+    for (ix, spec) in all_apis.iter().enumerate() {
         let count = ix + 1;
 
-        match api.check(&dir) {
+        match spec.check(&dir) {
             Ok(status) => match status {
                 CheckStatus::Ok(summary) => {
                     eprintln!(
                             "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}: {}",
                             UP_TO_DATE.style(styles.success_header),
-                            api.filename,
+                            display_api_spec(spec, &styles),
                             display_summary(&summary, &styles),
                         );
 
@@ -81,7 +82,7 @@ pub(crate) fn check_impl(
                     eprintln!(
                         "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}",
                         STALE.style(styles.warning_header),
-                        api.filename,
+                        display_api_spec(spec, &styles),
                     );
 
                     let diff = TextDiff::from_lines(&actual, &expected);
@@ -90,7 +91,10 @@ pub(crate) fn check_impl(
                         &full_path,
                         &styles,
                         // Add an indent to align diff with the status message.
-                        &mut IndentWriter::new("    ", std::io::stderr()),
+                        &mut IndentWriter::new(
+                            &continued_indent,
+                            std::io::stderr(),
+                        ),
                     )?;
 
                     num_stale += 1;
@@ -99,31 +103,31 @@ pub(crate) fn check_impl(
                     eprintln!(
                         "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}",
                         MISSING.style(styles.warning_header),
-                        api.filename,
+                        display_api_spec(spec, &styles),
                     );
 
                     num_missing += 1;
                 }
             },
-            Err(err) => {
+            Err(error) => {
                 eprint!(
-                    "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}: ",
+                    "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}",
                     FAILURE.style(styles.failure_header),
-                    api.filename
+                    display_api_spec(spec, &styles),
                 );
-                display_error(
-                    &err,
-                    styles.failure,
-                    &mut IndentWriter::new_skip_initial(
-                        "      ",
-                        std::io::stderr(),
-                    ),
+                let display = display_error(&error, styles.failure);
+                write!(
+                    IndentWriter::new(&continued_indent, std::io::stderr()),
+                    "{}",
+                    display,
                 )?;
 
                 num_failed += 1;
             }
         };
     }
+
+    eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
 
     let status_header = if num_failed > 0 {
         FAILURE.style(styles.failure_header)
