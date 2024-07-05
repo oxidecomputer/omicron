@@ -231,6 +231,7 @@ enum InstanceRequest {
         tx: oneshot::Sender<Result<SledInstanceState, ManagerError>>,
     },
     Terminate {
+        mark_failed: bool,
         tx: oneshot::Sender<Result<InstanceUnregisterResponse, ManagerError>>,
     },
     IssueSnapshotRequest {
@@ -395,7 +396,8 @@ impl InstanceRunner {
                         // of the sender alive in "self.tx_monitor".
                         None => {
                             warn!(self.log, "Instance 'VMM monitor' channel closed; shutting down");
-                            self.terminate().await;
+                            let mark_failed = true;
+                            self.terminate(mark_failed).await;
                         },
                     }
 
@@ -432,9 +434,9 @@ impl InstanceRunner {
                             )
                             .map_err(|_| Error::FailedSendClientClosed)
                         },
-                        Some(Terminate { tx }) => {
+                        Some(Terminate { mark_failed, tx }) => {
                             tx.send(Ok(InstanceUnregisterResponse {
-                                updated_runtime: Some(self.terminate().await)
+                                updated_runtime: Some(self.terminate(mark_failed).await)
                             }))
                             .map_err(|_| Error::FailedSendClientClosed)
                         },
@@ -457,7 +459,8 @@ impl InstanceRunner {
                         },
                         None => {
                             warn!(self.log, "Instance request channel closed; shutting down");
-                            self.terminate().await;
+                            let mark_failed = false;
+                            self.terminate(mark_failed).await;
                             break;
                         },
                     };
@@ -617,8 +620,8 @@ impl InstanceRunner {
             Some(InstanceAction::Destroy) => {
                 info!(self.log, "terminating VMM that has exited";
                       "instance_id" => %self.id());
-
-                self.terminate().await;
+                let mark_failed = false;
+                self.terminate(mark_failed).await;
                 Reaction::Terminate
             }
             None => Reaction::Continue,
@@ -1132,9 +1135,10 @@ impl Instance {
     pub async fn terminate(
         &self,
         tx: oneshot::Sender<Result<InstanceUnregisterResponse, ManagerError>>,
+        mark_failed: bool,
     ) -> Result<(), Error> {
         self.tx
-            .send(InstanceRequest::Terminate { tx })
+            .send(InstanceRequest::Terminate { mark_failed, tx })
             .await
             .map_err(|_| Error::FailedSendChannelClosed)?;
         Ok(())
@@ -1254,7 +1258,8 @@ impl InstanceRunner {
                 // This case is morally equivalent to starting Propolis and then
                 // rudely terminating it before asking it to do anything. Update
                 // the VMM and instance states accordingly.
-                self.state.terminate_rudely();
+                let mark_failed = false;
+                self.state.terminate_rudely(mark_failed);
             }
             setup_result?;
         }
@@ -1281,7 +1286,8 @@ impl InstanceRunner {
                 // this happens, generate an instance record bearing the
                 // "Destroyed" state and return it to the caller.
                 if self.running_state.is_none() {
-                    self.terminate().await;
+                    let mark_failed = false;
+                    self.terminate(mark_failed).await;
                     (None, None)
                 } else {
                     (
@@ -1481,9 +1487,9 @@ impl InstanceRunner {
         Ok(PropolisSetup { client, running_zone })
     }
 
-    async fn terminate(&mut self) -> SledInstanceState {
+    async fn terminate(&mut self, mark_failed: bool) -> SledInstanceState {
         self.terminate_inner().await;
-        self.state.terminate_rudely();
+        self.state.terminate_rudely(mark_failed);
 
         // This causes the "run" task to exit on the next iteration.
         self.should_terminate = true;
