@@ -333,7 +333,10 @@ impl InstanceManager {
     ///
     /// This function looks for transient zone filesystem usage on expunged
     /// zpools.
-    pub async fn only_use_disks(&self, disks: AllDisks) -> Result<(), Error> {
+    pub async fn use_only_these_disks(
+        &self,
+        disks: AllDisks,
+    ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         self.inner
             .tx
@@ -517,7 +520,7 @@ impl InstanceManagerRunner {
                             self.get_instance_state(tx, instance_id).await
                         },
                         Some(OnlyUseDisks { disks, tx } ) => {
-                            self.only_use_disks(disks).await;
+                            self.use_only_these_disks(disks).await;
                             tx.send(Ok(())).map_err(|_| Error::FailedSendClientClosed)
                         },
                         None => {
@@ -802,23 +805,20 @@ impl InstanceManagerRunner {
         Ok(())
     }
 
-    async fn only_use_disks(
-        &mut self,
-        disks: AllDisks,
-    )  {
+    async fn use_only_these_disks(&mut self, disks: AllDisks) {
         // Consider the generation number on the incoming request to avoid
         // applying old requests.
         let requested_generation = *disks.generation();
         if let Some(last_gen) = self.storage_generation {
             if last_gen >= requested_generation {
                 // This request looks old, ignore it.
-                info!(self.log, "only_use_disks: Ignoring request";
+                info!(self.log, "use_only_these_disks: Ignoring request";
                     "last_gen" => ?last_gen, "requested_gen" => ?requested_generation);
                 return;
             }
         }
         self.storage_generation = Some(requested_generation);
-        info!(self.log, "only_use_disks: Processing new request";
+        info!(self.log, "use_only_these_disks: Processing new request";
             "gen" => ?requested_generation);
 
         let u2_set: HashSet<_> = disks.all_u2_zpools().into_iter().collect();
@@ -830,7 +830,7 @@ impl InstanceManagerRunner {
             let Ok(Some(filesystem_pool)) =
                 instance.get_filesystem_zpool().await
             else {
-                info!(self.log, "only_use_disks: Cannot read filesystem pool"; "instance_id" => ?id);
+                info!(self.log, "use_only_these_disks: Cannot read filesystem pool"; "instance_id" => ?id);
                 continue;
             };
             if !u2_set.contains(&filesystem_pool) {
@@ -839,16 +839,16 @@ impl InstanceManagerRunner {
         }
 
         for id in to_remove {
-            info!(self.log, "only_use_disks: Removing instance"; "instance_id" => ?id);
+            info!(self.log, "use_only_these_disks: Removing instance"; "instance_id" => ?id);
             if let Some((_, instance)) = self.instances.remove(&id) {
                 let (tx, rx) = oneshot::channel();
                 if let Err(e) = instance.terminate(tx).await {
-                    warn!(self.log, "only_use_disks: Failed to request instance removal"; "err" => ?e);
+                    warn!(self.log, "use_only_these_disks: Failed to request instance removal"; "err" => ?e);
                     continue;
                 }
 
                 if let Err(e) = rx.await {
-                    warn!(self.log, "only_use_disks: Failed while removing instance"; "err" => ?e);
+                    warn!(self.log, "use_only_these_disks: Failed while removing instance"; "err" => ?e);
                 }
             }
         }

@@ -864,12 +864,12 @@ impl SledAgent {
         // Ensure that all probes, at least after our call to
         // "omicron_physical_disks_ensure", stop using any disks that
         // may have been in-service from before that request.
-        self.inner.probes.only_use_disks(&latest_disks).await;
+        self.inner.probes.use_only_these_disks(&latest_disks).await;
         info!(self.log, "physical disks ensure: Updated probes");
 
         // Do the same for instances - mark them failed if they were using
         // expunged disks.
-        self.inner.instances.only_use_disks(latest_disks).await?;
+        self.inner.instances.use_only_these_disks(latest_disks).await?;
         info!(self.log, "physical disks ensure: Updated instances");
 
         Ok(disk_result)
