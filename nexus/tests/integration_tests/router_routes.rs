@@ -3,11 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use dropshot::test_util::ClientTestContext;
+use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use http::StatusCode;
 use itertools::Itertools;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
+use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::create_route;
 use nexus_test_utils::resource_helpers::create_route_with_error;
@@ -437,25 +439,7 @@ async fn test_router_routes_internet_gateway_target(
     let _router =
         create_router(&client, PROJECT_NAME, VPC_NAME, router_name).await;
 
-    // Internet gateways are not fully supported: only 'inetgw:outbound'
-    // is a valid choice.
     let dest: RouteDestination = "ipnet:240.0.0.0/8".parse().unwrap();
-
-    let err = create_route_with_error(
-        client,
-        PROJECT_NAME,
-        VPC_NAME,
-        &router_name,
-        "bad-route",
-        dest.clone(),
-        "inetgw:not-a-real-gw".parse().unwrap(),
-        StatusCode::BAD_REQUEST,
-    )
-    .await;
-    assert_eq!(
-        err.message,
-        "'outbound' is currently the only valid internet gateway"
-    );
 
     // This can be used in a custom router, in addition
     // to its default system spot.
@@ -485,55 +469,112 @@ async fn test_router_routes_disallow_custom_targets(
     let _router =
         create_router(&client, PROJECT_NAME, VPC_NAME, router_name).await;
 
-    // Neither 'vpc:xxx' nor 'subnet:xxx' can be specified as route targets
-    // in custom routers.
-    let dest: RouteDestination = "ipnet:240.0.0.0/8".parse().unwrap();
-
-    let err = create_route_with_error(
+    let valid_dest: RouteDestination = "ipnet:240.0.0.0/8".parse().unwrap();
+    let pairs: &[(RouteDestination, RouteTarget, &str)] = &[
+        // Neither 'vpc:xxx' nor 'subnet:xxx' can be specified as route targets
+        // in custom routers.
+        (
+            valid_dest.clone(),
+            "vpc:a-vpc-name-unknown".parse().unwrap(),
+            "users cannot specify VPCs as a destination or target in Custom routes",
+        ),
+        (
+            "vpc:a-vpc-name-unknown".parse().unwrap(),
+            RouteTarget::Drop,
+            "users cannot specify VPCs as a destination or target in Custom routes",
+        ),
+        (
+            valid_dest.clone(),
+            "subnet:a-sub-name-unknown".parse().unwrap(),
+            "subnets cannot be used as a target in Custom routers",
+        ),
+        // Internet gateways are not fully supported: only 'inetgw:outbound'
+        // is a valid choice.
+        (
+            valid_dest.clone(),
+            "inetgw:not-a-real-gw".parse().unwrap(),
+            "'outbound' is currently the only valid internet gateway",
+        ),
+    ];
+    _ = create_route(
         client,
         PROJECT_NAME,
         VPC_NAME,
-        &router_name,
-        "bad-route",
-        dest.clone(),
-        "vpc:a-vpc-name-unknown".parse().unwrap(),
-        StatusCode::BAD_REQUEST,
+        router_name,
+        "good-route",
+        valid_dest,
+        "instance:madeup".parse().unwrap(),
     )
     .await;
-    assert_eq!(
-        err.message,
-        "VPCs cannot be used as a destination or target in custom routers"
-    );
 
-    let err = create_route_with_error(
-        client,
-        PROJECT_NAME,
-        VPC_NAME,
-        &router_name,
-        "bad-route",
-        "vpc:a-vpc-name-unknown".parse().unwrap(),
-        "drop".parse().unwrap(),
-        StatusCode::BAD_REQUEST,
-    )
-    .await;
-    assert_eq!(
-        err.message,
-        "VPCs cannot be used as a destination or target in custom routers"
-    );
+    for (update, (dest, target, msg)) in
+        [false, true].into_iter().cartesian_product(pairs.iter())
+    {
+        let err = if update {
+            create_route_with_error(
+                client,
+                PROJECT_NAME,
+                VPC_NAME,
+                &router_name,
+                "bad-route",
+                dest.clone(),
+                target.clone(),
+                StatusCode::BAD_REQUEST,
+            )
+            .await
+        } else {
+            update_route_with_error(
+                client,
+                PROJECT_NAME,
+                VPC_NAME,
+                &router_name,
+                "good-route",
+                dest.clone(),
+                target.clone(),
+                StatusCode::BAD_REQUEST,
+            )
+            .await
+        };
 
-    let err = create_route_with_error(
-        client,
-        PROJECT_NAME,
-        VPC_NAME,
-        &router_name,
-        "bad-route",
-        dest.clone(),
-        "subnet:a-vpc-name-unknown".parse().unwrap(),
-        StatusCode::BAD_REQUEST,
+        assert_eq!(err.message, *msg);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn update_route_with_error(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    router_name: &str,
+    route_name: &str,
+    destination: RouteDestination,
+    target: RouteTarget,
+    status: StatusCode,
+) -> HttpErrorResponseBody {
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::PUT,
+            format!(
+                "/v1/vpc-router-routes/{}?project={}&vpc={}&router={}",
+                route_name, project_name, vpc_name, router_name
+            )
+            .as_str(),
+        )
+        .body(Some(&params::RouterRouteUpdate {
+            identity: IdentityMetadataUpdateParams {
+                name: None,
+                description: None,
+            },
+            target,
+            destination,
+        }))
+        .expect_status(Some(status)),
     )
-    .await;
-    assert_eq!(
-        err.message,
-        "subnets cannot be used as a target in custom routers"
-    );
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
 }
