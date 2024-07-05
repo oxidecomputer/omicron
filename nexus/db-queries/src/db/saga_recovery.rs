@@ -2,7 +2,183 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Handles recovery of sagas
+//! Saga recovery
+//!
+//! ## Review of distributed sagas
+//!
+//! Nexus uses distributed sagas via [`steno`] to manage multi-step operations
+//! that have their own unwinding or cleanup steps.  While executing sagas,
+//! critical state is durably stored in the **saga log** such that after a
+//! crash, the saga can be resumed while maintaining certain guarantees:
+//!
+//! - During normal execution, each **action** will be executed at least once.
+//! - If an action B depends on action A, then once B has started, A will not
+//!   run again.
+//! - Once any action has failed, the saga is **unwound**, meaning that the undo
+//!   actions are executed for any action that has successfully completed.
+//! - The saga will not come to rest until one of these three things has
+//!   happened:
+//!   1. All actions complete successfully.  This is the normal case of saga
+//!      completion.
+//!   2. Any number of actions complete successfully, at least one action
+//!      failed, and the undo actions complete successfully for any actions that
+//!      *did* run.  This is the normal case of clean saga failure where
+//!      intuitively the state of the world is unwound to match whatever it was
+//!      before the saga ran.
+//!   3. Any number of actions complete successfully, at least one action
+//!      failed, and at least one undo action also failed.  This is a nebulous
+//!      "stuck" state where the world may be partially changed by the saga.
+//!
+//! There's more to this (see the Steno docs).  The important thing here is that
+//! the persistent state is critical for ensuring these properties across a
+//! Nexus crash.  The process of resuming an in-progress saga is called **saga
+//! recovery**.  When we recover a saga after a crash and set it running again,
+//! we call that **resuming** the saga.
+//!
+//!
+//! ## Saga recovery and persistent state
+//!
+//! Everything needed to recover a saga is stored in:
+//!
+//! 1. a **saga** record, which is mostly immutable
+//! 2. the **saga log**, an append-only description of exactly what happened
+//!    during execution
+//!
+//! Responsibility for persisting this state is divided across Steno and Nexus:
+//!
+//! 1. Steno tells its consumer (Nexus) precisely what information needs to be
+//!    stored and when.  It does this by invoking methods on the `SecStore`
+//!    trait at key points in the saga's execution.  Steno does not care how
+//!    this information is stored or where it is stored.
+//!
+//! 2. Nexus serializes the given state and stores it into CockroachDB using
+//!    the `saga` and `saga_node_event` tables.
+//!
+//! After a crash, Nexus is then responsible for:
+//!
+//! 1. Identifying what sagas were in-progress before the crash
+//! 2. Loading all the information about them from the database (namely, the
+//!    `saga` record and the full saga log in the form of records from the
+//!    `saga_node_event` table)
+//! 3. Providing all this information to Steno so that it can resume running the
+//!    saga.
+//!
+//! 
+//! ## Saga recovery: not just at startup
+//!
+//! So far, this is fairly straightforward.  What makes it tricky is that there
+//! are situations where we want to carry out saga recovery after Nexus has
+//! already started and potentially recovered other sagas and started its own
+//! sagas.  Specifically, when a Nexus instance gets _expunged_ (removed
+//! permanently), it may have outstanding sagas that need to be re-assigned to
+//! another Nexus instance, which then needs to resume them.  To do this, we run
+//! saga recovery in a Nexus background task so that it runs both periodically
+//! and on-demand when activated.
+//!
+//! Why does this make things tricky?  When Nexus goes to identify what sagas
+//! it needs to recover, it lists sagas that are (1) assigned to it (as opposed
+//! to a different Nexus) and (2) not yet finished.  But that could include
+//! sagas in one of three categories:
+//!
+//! 1. Sagas from a previous Nexus [Unix process] lifetime that have not yet
+//!    been recovered in this lifetime.  These **should** be recovered.
+//! 2. Sagas from a previous Nexus [Unix process] lifetime that have already
+//!    been recovered in this lifetime.  These **should not** be recovered.
+//! 3. Sagas that were created in this Nexus lifetime.  These **should not** be
+//!    recovered.
+//!
+//! There are a bunch of ways to attack this problem.  Here's what we do here.
+//!
+//! To filter out category (2), the recovery background task simply keeps a list
+//! of all of the sagas it has ever successfully recovered and ignores sagas
+//! that it has recovered before.
+//!
+//! Filtering out category (3) is a little more complicated:
+//!
+//! 1. Each Nexus lifetime is assigned a unique identifier called an **SEC
+//!    generation**.  For debuggability, since we already assume a working clock
+//!    whenever Nexus is running, we use the startup timestamp as the unique
+//!    identifier.
+//!
+//! 2. When a saga is first created, we store with it the current SEC
+//!    generation.
+//!
+//! 3. During recovery, when querying the database for sagas that might need to
+//!    be recovered, we filter out any sagas created with the current Nexus
+//!    instance lifetime.
+//!
+//! In this way, we only ever recover sagas that were created in previous
+//! process lifetimes and also not recovered before.
+//!
+//! It's worth examining the costs of this approach:
+//! 
+//! * Nexus must _forever_ track in memory the list of saga ids that it has
+//!   recovered.  But this list is small and only grows once at startup plus
+//!   each time another Nexus instance is expunged.
+//!
+//! * CockroachDB must track the extra state about the SEC generation.  This
+//!   uses some additional memory, storage, and CPU -- currently replicated 5x.
+//!
+//! More on this below when we describe alternatives.
+//!
+//!
+//! ## Why do we do it this way?
+//!
+//! You would think it'd be easy to filter out cases (2) and (3) by saying: if
+//! the saga is currently running in memory, then just ignore it.  i.e., ask
+//! Steno, and if it knows about it, then ignore it.  Or just ask Steno to
+//! resume it anyway and have it fail if it's currently running.  But there's a
+//! race between finding the saga in the database and checking if it's running:
+//! it could finish in between!  Worse, if it _was_ running when we found it,
+//! then the log that Nexus loads during recovery might be changing underneath
+//! it.  Putting these together, this could happen: Nexus finds a saga that
+//! appears to be in-progress, it loads its log for recovery, then the saga
+//! finishes, then Nexus proceeds with recovery and ends up loading an older
+//! state into Steno and running part of the saga again!  (In practice, Steno
+//! _does_ keep track of sagas forever, so this wouldn't happen.  But that's an
+//! implementation detail -- and probably not a good one -- that we don't want
+//! to rely on.)  This approach is certainly hampered by the fact that our
+//! interface with Steno is asynchronous, but even if we were to integrate
+//! recovery more tightly with Steno, there's an intrinsic race here.
+//!
+//! Another idea is: treat categories (2) and (3) the same by saying: after
+//! successfully recovering a saga, rewrite its SEC generation to the current
+//! one.  That way we won't find it again.  If we crash before doing this, it's
+//! no problem anyway because the SEC generation will change and the new Nexus
+//! will pick it up for recovery.
+//! XXX-dap I think this would be fine and maybe we should just do that?
+//!
+//! Another idea is: treat categories (2) and (3) the same not by using the
+//! SEC generation, but by instead forgetting about SEC generations altogether
+//! and instead just keeping track of all the sagas that we have ever recovered
+//! _or_ started in this process lifetime.  This is tricky (but possible) due to
+//! uninteresting issues involved with sharing that structure between both the
+//! saga recovery and saga dispatching contexts.  And it should work.  But
+//! unless we remove sagas from this structure when they finish, it would lead
+//! to unbounded memory growth as Nexus runs more sagas.  When can we remove
+//! sagas from the map?  It's not quite when they're finished: it's when they're
+//! finished _and_ that state has been recorded durably in the database _and_ we
+//! know that there's not an outstanding recovery attempt that might have seen
+//! the unfinished database state.  This is all fine and doable but it's not
+//! simpler or meaningfully better than what we've done above.
+//
+// XXX-dap it's worth reviewing that.  I think actually both of these options
+// are doable.  We could use the database state all the time, or we could use
+// in-memory state all the time.  It might be worth fleshing those out a bit
+// more.
+//
+// All things being equal, it'd be nice to avoid having to store anything into
+// the database.  Though that approach necessarily means extra CPU usage,
+// database usage, etc. to query a bunch of rows that we're going to ignore.  At
+// least that's bounded to O(number of running sagas).  If we do this, we need a
+// data structure where:
+//
+// 1. Saga dispatch can insert into it
+// 2. Saga completion can remove from it... but:
+// 2. Saga recovery can read it, and it should see any items that have been
+//    inserted, but it should not see anything that's been removed.
+//
+// Ugh, this is feeling too complicated.
 
 use crate::context::OpContext;
 use crate::db;
