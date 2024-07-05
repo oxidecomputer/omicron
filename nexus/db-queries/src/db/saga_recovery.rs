@@ -950,11 +950,6 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    // XXX-dap need to test the case where we attempt to recover a saga that was
-    // started in this program's lifetime
-    // XXX-dap consider removing the "skip" business and instead mark each
-    // saga's SEC generation before recovering it.  (But if recovery fails, we
-    // won't try again, which is bad!  Maybe nevermind.)
     // XXX-dap TODO-coverage test the case of saga recovery error, with other
     // sagas present
 }
