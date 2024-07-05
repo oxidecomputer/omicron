@@ -39,12 +39,9 @@ impl super::Nexus {
         // add the bfd session to the db and trigger the bfd manager to handle
         // the reset
         self.datastore().bfd_session_create(opctx, &session).await?;
-        self.background_tasks
-            .driver
-            .activate(&self.background_tasks.bfd_manager);
+        self.background_tasks.activate(&self.background_tasks.task_bfd_manager);
         // for timely propagation to bootstore
         self.background_tasks
-            .driver
             .activate(&self.background_tasks.task_switch_port_settings_manager);
         Ok(())
     }
@@ -57,12 +54,9 @@ impl super::Nexus {
         // remove the bfd session from the db and trigger the bfd manager to
         // handle the reset
         self.datastore().bfd_session_delete(opctx, &session).await?;
-        self.background_tasks
-            .driver
-            .activate(&self.background_tasks.bfd_manager);
+        self.background_tasks.activate(&self.background_tasks.task_bfd_manager);
         // for timely propagation to bootstore
         self.background_tasks
-            .driver
             .activate(&self.background_tasks.task_switch_port_settings_manager);
         Ok(())
     }

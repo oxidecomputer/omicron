@@ -75,6 +75,8 @@ pub enum NvmeFormattingError {
     NvmeInit(#[from] libnvme::NvmeInitError),
     #[error(transparent)]
     Nvme(#[from] libnvme::NvmeError),
+    #[error(transparent)]
+    NvmeController(#[from] libnvme::controller::NvmeControllerError),
     #[error("Device is missing expected LBA format")]
     LbaFormatMissing,
     #[error("Device has {0} active namespaces but we expected 1")]

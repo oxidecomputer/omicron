@@ -65,21 +65,12 @@ impl super::Nexus {
         switch_port_settings_id: Uuid,
         new_settings: params::SwitchPortSettingsCreate,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
-        // delete old settings
-        self.switch_port_settings_delete(
-            opctx,
-            &params::SwitchPortSettingsSelector {
-                port_settings: Some(NameOrId::Id(switch_port_settings_id)),
-            },
-        )
-        .await?;
-
-        // create new settings
         let result = self
-            .switch_port_settings_create(
+            .db_datastore
+            .switch_port_settings_update(
                 opctx,
-                new_settings.clone(),
-                Some(switch_port_settings_id),
+                &new_settings,
+                switch_port_settings_id,
             )
             .await?;
 
@@ -100,7 +91,6 @@ impl super::Nexus {
 
         // eagerly propagate changes via rpw
         self.background_tasks
-            .driver
             .activate(&self.background_tasks.task_switch_port_settings_manager);
 
         Ok(result)
@@ -214,7 +204,6 @@ impl super::Nexus {
 
         // eagerly propagate changes via rpw
         self.background_tasks
-            .driver
             .activate(&self.background_tasks.task_switch_port_settings_manager);
 
         Ok(())
@@ -248,7 +237,6 @@ impl super::Nexus {
 
         // eagerly propagate changes via rpw
         self.background_tasks
-            .driver
             .activate(&self.background_tasks.task_switch_port_settings_manager);
 
         Ok(())

@@ -402,10 +402,11 @@ pub(crate) mod test {
 
         for use_float in [false, true] {
             let params = new_test_params(&opctx, datastore, use_float).await;
-
-            let dag = create_saga_dag::<SagaInstanceIpDetach>(params).unwrap();
-            let saga = nexus.create_runnable_saga(dag).await.unwrap();
-            nexus.run_saga(saga).await.expect("Detach saga should succeed");
+            nexus
+                .sagas
+                .saga_execute::<SagaInstanceIpDetach>(params)
+                .await
+                .expect("Detach saga should succeed");
         }
 
         // Sled agent has removed its records of the external IPs.

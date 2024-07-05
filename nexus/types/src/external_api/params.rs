@@ -808,6 +808,11 @@ pub struct InstanceNetworkInterfaceUpdate {
     // for the instance, though not the name.
     #[serde(default)]
     pub primary: bool,
+
+    /// A set of additional networks that this interface may send and
+    /// receive traffic on.
+    #[serde(default)]
+    pub transit_ips: Vec<IpNet>,
 }
 
 // CERTIFICATES
@@ -1220,6 +1225,14 @@ pub struct VpcSubnetCreate {
     /// be assigned if one is not provided. It must not overlap with any
     /// existing subnet in the VPC.
     pub ipv6_block: Option<Ipv6Net>,
+
+    /// An optional router, used to direct packets sent from hosts in this subnet
+    /// to any destination address.
+    ///
+    /// Custom routers apply in addition to the VPC-wide *system* router, and have
+    /// higher priority than the system router for an otherwise
+    /// equal-prefix-length match.
+    pub custom_router: Option<NameOrId>,
 }
 
 /// Updateable properties of a `VpcSubnet`
@@ -1227,6 +1240,10 @@ pub struct VpcSubnetCreate {
 pub struct VpcSubnetUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
+
+    /// An optional router, used to direct packets sent from hosts in this subnet
+    /// to any destination address.
+    pub custom_router: Option<NameOrId>,
 }
 
 // VPC ROUTERS
@@ -1252,7 +1269,9 @@ pub struct VpcRouterUpdate {
 pub struct RouterRouteCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+    /// The location that matched packets should be forwarded to.
     pub target: RouteTarget,
+    /// Selects which traffic this routing rule will apply to.
     pub destination: RouteDestination,
 }
 
@@ -1261,7 +1280,9 @@ pub struct RouterRouteCreate {
 pub struct RouterRouteUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
+    /// The location that matched packets should be forwarded to.
     pub target: RouteTarget,
+    /// Selects which traffic this routing rule will apply to.
     pub destination: RouteDestination,
 }
 

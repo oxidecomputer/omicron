@@ -35,6 +35,7 @@ impl DataStore {
 
         opctx.check_complex_operations_allowed()?;
 
+        // Query for instance v2p mappings
         let mut mappings = Vec::new();
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         while let Some(p) = paginator.next() {
@@ -66,7 +67,7 @@ impl DataStore {
                 .filter(
                     network_interface::kind.eq(NetworkInterfaceKind::Instance),
                 )
-                .sled_filter(SledFilter::V2PMapping)
+                .sled_filter(SledFilter::VpcRouting)
                 .select((
                     NetworkInterface::as_select(),
                     Sled::as_select(),
@@ -92,6 +93,7 @@ impl DataStore {
             mappings.extend(batch);
         }
 
+        // Query for probe v2p mappings
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         while let Some(p) = paginator.next() {
             let batch: Vec<_> =
@@ -113,10 +115,8 @@ impl DataStore {
                 )
                 .inner_join(sled_dsl::sled.on(sled_dsl::id.eq(probe_dsl::sled)))
                 .filter(network_interface::time_deleted.is_null())
-                .filter(
-                    network_interface::kind.eq(NetworkInterfaceKind::Instance),
-                )
-                .sled_filter(SledFilter::V2PMapping)
+                .filter(network_interface::kind.eq(NetworkInterfaceKind::Probe))
+                .sled_filter(SledFilter::VpcRouting)
                 .select((
                     NetworkInterface::as_select(),
                     Sled::as_select(),

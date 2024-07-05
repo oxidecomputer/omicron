@@ -13,9 +13,12 @@ chrono = { workspace = true, optional = true }
 dropshot = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
+hyper = { workspace = true, optional = true }
 kstat-rs = { workspace = true, optional = true }
 libc = { workspace = true, optional = true }
 oximeter = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
 slog = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
@@ -29,7 +32,10 @@ http-instruments = [
     "dep:dropshot",
     "dep:futures",
     "dep:http",
+    "dep:hyper",
     "dep:oximeter",
+    "dep:schemars",
+    "dep:serde",
     "dep:uuid"
 ]
 kstat = [
