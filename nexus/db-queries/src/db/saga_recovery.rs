@@ -29,11 +29,12 @@
 //!      failed, and at least one undo action also failed.  This is a nebulous
 //!      "stuck" state where the world may be partially changed by the saga.
 //!
-//! There's more to this (see the Steno docs).  The important thing here is that
-//! the persistent state is critical for ensuring these properties across a
-//! Nexus crash.  The process of resuming an in-progress saga is called **saga
-//! recovery**.  When we recover a saga after a crash and set it running again,
-//! we call that **resuming** the saga.
+//! There's more to all this (see the Steno docs), but the important thing here
+//! is that the persistent state is critical for ensuring these properties
+//! across a Nexus crash.  The process of resuming in-progress sagas after a
+//! crash is called **saga recovery**.  Fortunately, Steno handles the details
+//! of those constraints.  All we have to do is provide Steno with the
+//! persistent state of any sagas that it needs to resume.
 //!
 //!
 //! ## Saga recovery and persistent state
@@ -56,29 +57,31 @@
 //!
 //! After a crash, Nexus is then responsible for:
 //!
-//! 1. Identifying what sagas were in-progress before the crash
+//! 1. Identifying what sagas were in progress before the crash,
 //! 2. Loading all the information about them from the database (namely, the
 //!    `saga` record and the full saga log in the form of records from the
-//!    `saga_node_event` table)
+//!    `saga_node_event` table), and
 //! 3. Providing all this information to Steno so that it can resume running the
 //!    saga.
 //!
-//! 
+//!
 //! ## Saga recovery: not just at startup
 //!
 //! So far, this is fairly straightforward.  What makes it tricky is that there
 //! are situations where we want to carry out saga recovery after Nexus has
 //! already started and potentially recovered other sagas and started its own
-//! sagas.  Specifically, when a Nexus instance gets _expunged_ (removed
+//! sagas.  Specifically, when a Nexus instance gets **expunged** (removed
 //! permanently), it may have outstanding sagas that need to be re-assigned to
 //! another Nexus instance, which then needs to resume them.  To do this, we run
 //! saga recovery in a Nexus background task so that it runs both periodically
-//! and on-demand when activated.
+//! and on-demand when activated.  (This approach is also useful for other
+//! reasons, like retrying recovery for sagas whose recovery failed due to
+//! transient errors.)
 //!
 //! Why does this make things tricky?  When Nexus goes to identify what sagas
 //! it needs to recover, it lists sagas that are (1) assigned to it (as opposed
 //! to a different Nexus) and (2) not yet finished.  But that could include
-//! sagas in one of three categories:
+//! sagas in one of three groups:
 //!
 //! 1. Sagas from a previous Nexus [Unix process] lifetime that have not yet
 //!    been recovered in this lifetime.  These **should** be recovered.
@@ -87,98 +90,39 @@
 //! 3. Sagas that were created in this Nexus lifetime.  These **should not** be
 //!    recovered.
 //!
-//! There are a bunch of ways to attack this problem.  Here's what we do here.
+//! There are a bunch of ways to attack this problem.  We do it by keeping track
+//! in-memory of the set of sagas that might be running in the current process
+//! and then ignoring those when we do recovery.  Even this is easier said than
+//! done!  It's easy enough to insert new sagas into the set whenever a saga is
+//! successfully recovered as well as any time a saga is created for the first
+//! time (though that requires a structure that's modifiable from multiple
+//! different contexts).  But to avoid this set growing unbounded, we should
+//! remove entries when a saga finishes running.  When exactly can we do that?
+//! We have to be careful of the intrinsic race between when the recovery
+//! process queries the database to list candidate sagas for recovery (i.e.,
+//! unfinished sagas assigned to this Nexus) and when it checks the set of sagas
+//! that should be ignored.  Suppose a saga is running, the recovery process
+//! finds it, then the saga finishes, it gets removed from the set, and then the
+//! recovery process checks the set.  We'll think it wasn't running and start it
+//! again -- very bad.  We can't remove anything from the set until we know that
+//! the saga recovery task _doesn't_ have a stale list of candidate sagas to be
+//! recovered.
 //!
-//! To filter out category (2), the recovery background task simply keeps a list
-//! of all of the sagas it has ever successfully recovered and ignores sagas
-//! that it has recovered before.
-//!
-//! Filtering out category (3) is a little more complicated:
-//!
-//! 1. Each Nexus lifetime is assigned a unique identifier called an **SEC
-//!    generation**.  For debuggability, since we already assume a working clock
-//!    whenever Nexus is running, we use the startup timestamp as the unique
-//!    identifier.
-//!
-//! 2. When a saga is first created, we store with it the current SEC
-//!    generation.
-//!
-//! 3. During recovery, when querying the database for sagas that might need to
-//!    be recovered, we filter out any sagas created with the current Nexus
-//!    instance lifetime.
-//!
-//! In this way, we only ever recover sagas that were created in previous
-//! process lifetimes and also not recovered before.
-//!
-//! It's worth examining the costs of this approach:
-//! 
-//! * Nexus must _forever_ track in memory the list of saga ids that it has
-//!   recovered.  But this list is small and only grows once at startup plus
-//!   each time another Nexus instance is expunged.
-//!
-//! * CockroachDB must track the extra state about the SEC generation.  This
-//!   uses some additional memory, storage, and CPU -- currently replicated 5x.
-//!
-//! More on this below when we describe alternatives.
-//!
-//!
-//! ## Why do we do it this way?
-//!
-//! You would think it'd be easy to filter out cases (2) and (3) by saying: if
-//! the saga is currently running in memory, then just ignore it.  i.e., ask
-//! Steno, and if it knows about it, then ignore it.  Or just ask Steno to
-//! resume it anyway and have it fail if it's currently running.  But there's a
-//! race between finding the saga in the database and checking if it's running:
-//! it could finish in between!  Worse, if it _was_ running when we found it,
-//! then the log that Nexus loads during recovery might be changing underneath
-//! it.  Putting these together, this could happen: Nexus finds a saga that
-//! appears to be in-progress, it loads its log for recovery, then the saga
-//! finishes, then Nexus proceeds with recovery and ends up loading an older
-//! state into Steno and running part of the saga again!  (In practice, Steno
-//! _does_ keep track of sagas forever, so this wouldn't happen.  But that's an
-//! implementation detail -- and probably not a good one -- that we don't want
-//! to rely on.)  This approach is certainly hampered by the fact that our
-//! interface with Steno is asynchronous, but even if we were to integrate
-//! recovery more tightly with Steno, there's an intrinsic race here.
-//!
-//! Another idea is: treat categories (2) and (3) the same by saying: after
-//! successfully recovering a saga, rewrite its SEC generation to the current
-//! one.  That way we won't find it again.  If we crash before doing this, it's
-//! no problem anyway because the SEC generation will change and the new Nexus
-//! will pick it up for recovery.
-//! XXX-dap I think this would be fine and maybe we should just do that?
-//!
-//! Another idea is: treat categories (2) and (3) the same not by using the
-//! SEC generation, but by instead forgetting about SEC generations altogether
-//! and instead just keeping track of all the sagas that we have ever recovered
-//! _or_ started in this process lifetime.  This is tricky (but possible) due to
-//! uninteresting issues involved with sharing that structure between both the
-//! saga recovery and saga dispatching contexts.  And it should work.  But
-//! unless we remove sagas from this structure when they finish, it would lead
-//! to unbounded memory growth as Nexus runs more sagas.  When can we remove
-//! sagas from the map?  It's not quite when they're finished: it's when they're
-//! finished _and_ that state has been recorded durably in the database _and_ we
-//! know that there's not an outstanding recovery attempt that might have seen
-//! the unfinished database state.  This is all fine and doable but it's not
-//! simpler or meaningfully better than what we've done above.
-//
-// XXX-dap it's worth reviewing that.  I think actually both of these options
-// are doable.  We could use the database state all the time, or we could use
-// in-memory state all the time.  It might be worth fleshing those out a bit
-// more.
-//
-// All things being equal, it'd be nice to avoid having to store anything into
-// the database.  Though that approach necessarily means extra CPU usage,
-// database usage, etc. to query a bunch of rows that we're going to ignore.  At
-// least that's bounded to O(number of running sagas).  If we do this, we need a
-// data structure where:
-//
-// 1. Saga dispatch can insert into it
-// 2. Saga completion can remove from it... but:
-// 2. Saga recovery can read it, and it should see any items that have been
-//    inserted, but it should not see anything that's been removed.
-//
-// Ugh, this is feeling too complicated.
+//! This constraint suggests the solution: the set will be owned and managed
+//! entirely by the task that's doing saga recovery.  We'll use a channel to
+//! trigger inserts when sagas are created elsewhere in Nexus.  What about
+//! deletes?  The recovery process can actually figure out on its own when a
+//! saga can be removed: if a saga was _not_ in the list of candidates to be
+//! recovered, then that means it's finished, and that means it can be deleted
+//! from the set.  Care must be taken to process things in the right order, but
+//! in the end it's pretty simple: the recovery process first fetches the
+//! candidate list of sagas, then processes all insertions that have come in
+//! over the channel and adds them to the set, then compares the set against the
+//! candidate list.  Sagas in the set and not in the list can be removed.  Sagas
+//! in the list and not in the set must be recovered.  Sagas in both the set and
+//! the list may or may not still be running, but they were running at some
+//! point during this recovery pass and they can be safely ignored until the
+//! next pass.
 
 use crate::context::OpContext;
 use crate::db;
@@ -336,64 +280,6 @@ where
     Ok(SagasRecovered { recovered, skipped, failed })
 }
 
-/// Queries the database to return a list of uncompleted sagas assigned to SEC
-/// `sec_id`
-// For now, we do the simplest thing: we fetch all the sagas that the
-// caller's going to need before returning any of them.  This is easier to
-// implement than, say, using a channel or some other stream.  In principle
-// we're giving up some opportunity for parallelism.  The caller could be
-// going off and fetching the saga log for the first sagas that we find
-// while we're still listing later sagas.  Doing that properly would require
-// concurrency limits to prevent overload or starvation of other database
-// consumers.
-async fn list_unfinished_sagas(
-    opctx: &OpContext,
-    datastore: &db::DataStore,
-    sec_id: &db::SecId,
-    ignore_sec_generation: &db::SecGeneration,
-) -> Result<Vec<db::saga_types::Saga>, Error> {
-    trace!(&opctx.log, "listing sagas");
-
-    // Read all sagas in batches.
-    //
-    // Although we could read them all into memory simultaneously, this
-    // risks blocking the DB for an unreasonable amount of time. Instead,
-    // we paginate to avoid cutting off availability to the DB.
-    let mut sagas = vec![];
-    let mut paginator = Paginator::new(SQL_BATCH_SIZE);
-    let conn = datastore.pool_connection_authorized(opctx).await?;
-    while let Some(p) = paginator.next() {
-        use db::schema::saga::dsl;
-
-        let mut batch = paginated(dsl::saga, dsl::id, &p.current_pagparams())
-            .filter(dsl::saga_state.ne(db::saga_types::SagaCachedState(
-                steno::SagaCachedState::Done,
-            )))
-            .filter(dsl::current_sec.eq(*sec_id))
-            .filter(
-                dsl::sec_generation
-                    .is_null()
-                    .or(dsl::sec_generation.ne(ignore_sec_generation.clone())),
-            )
-            .select(db::saga_types::Saga::as_select())
-            .load_async(&*conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::SagaDbg,
-                        LookupType::ById(sec_id.0),
-                    ),
-                )
-            })?;
-
-        paginator = p.found_batch(&batch, &|row| row.id);
-        sagas.append(&mut batch);
-    }
-    Ok(sagas)
-}
-
 /// Recovers an individual saga
 ///
 /// This function loads the saga log and uses `sec_client` to resume execution.
@@ -453,37 +339,8 @@ async fn load_saga_log(
     datastore: &db::DataStore,
     saga: &db::saga_types::Saga,
 ) -> Result<Vec<steno::SagaNodeEvent>, Error> {
-    // Read all events in batches.
-    //
-    // Although we could read them all into memory simultaneously, this
-    // risks blocking the DB for an unreasonable amount of time. Instead,
-    // we paginate to avoid cutting off availability.
-    let mut events = vec![];
-    let mut paginator = Paginator::new(SQL_BATCH_SIZE);
-    let conn = datastore.pool_connection_authorized(opctx).await?;
-    while let Some(p) = paginator.next() {
-        use db::schema::saga_node_event::dsl;
-        let batch = paginated_multicolumn(
-            dsl::saga_node_event,
-            (dsl::node_id, dsl::event_type),
-            &p.current_pagparams(),
-        )
-        .filter(dsl::saga_id.eq(saga.id))
-        .select(db::saga_types::SagaNodeEvent::as_select())
-        .load_async(&*conn)
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-        .await?;
-        paginator =
-            p.found_batch(&batch, &|row| (row.node_id, row.event_type.clone()));
-
-        let mut batch = batch
-            .into_iter()
-            .map(|event| steno::SagaNodeEvent::try_from(event))
-            .collect::<Result<Vec<_>, Error>>()?;
-
-        events.append(&mut batch);
-    }
-    Ok(events)
+    // XXX-dap
+    datastore.saga_load_log_batched(opctx, saga).await
 }
 
 #[cfg(test)]
@@ -909,219 +766,6 @@ mod test {
         // Test cleanup
         let sec_client = Arc::try_unwrap(sec_client).unwrap();
         sec_client.shutdown().await;
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_list_unfinished_sagas() {
-        // Test setup
-        let logctx = dev::test_setup_log("test_list_unfinished_sagas");
-        let log = logctx.log.new(o!());
-        let (mut db, db_datastore) = new_db(&log).await;
-        let sec_id = db::SecId(uuid::Uuid::new_v4());
-        let sec_generation = db::SecGeneration::random();
-        let other_sec_generation = db::SecGeneration::random();
-        assert_ne!(sec_generation, other_sec_generation);
-        let opctx = OpContext::for_tests(
-            log,
-            Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
-        );
-
-        // Create a couple batches of sagas.
-        let new_running_db_saga = || {
-            let params = steno::SagaCreateParams {
-                id: steno::SagaId(Uuid::new_v4()),
-                name: steno::SagaName::new("test saga"),
-                dag: serde_json::value::Value::Null,
-                state: steno::SagaCachedState::Running,
-            };
-
-            db::model::saga_types::Saga::new(
-                sec_id,
-                sec_generation.clone(),
-                params,
-            )
-        };
-        let mut inserted_sagas = (0..SQL_BATCH_SIZE.get() * 2)
-            .map(|_| new_running_db_saga())
-            .collect::<Vec<_>>();
-
-        // Shuffle these sagas into a random order to check that the pagination
-        // order is working as intended on the read path, which we'll do later
-        // in this test.
-        inserted_sagas.shuffle(&mut rand::thread_rng());
-
-        // Insert the batches of unfinished sagas into the database
-        let conn = db_datastore
-            .pool_connection_unauthorized()
-            .await
-            .expect("Failed to access db connection");
-        diesel::insert_into(db::schema::saga::dsl::saga)
-            .values(inserted_sagas.clone())
-            .execute_async(&*conn)
-            .await
-            .expect("Failed to insert test setup data");
-
-        // List them, expect to see them all in order by ID.
-        let mut observed_sagas = list_unfinished_sagas(
-            &opctx,
-            &db_datastore,
-            &sec_id,
-            &other_sec_generation,
-        )
-        .await
-        .expect("Failed to list unfinished sagas");
-        inserted_sagas.sort_by_key(|a| a.id);
-
-        // Timestamps can change slightly when we insert them.
-        //
-        // Sanitize them to make input/output equality checks easier.
-        let sanitize_timestamps = |sagas: &mut Vec<db::saga_types::Saga>| {
-            for saga in sagas {
-                saga.time_created = chrono::DateTime::UNIX_EPOCH;
-                saga.adopt_time = chrono::DateTime::UNIX_EPOCH;
-            }
-        };
-        sanitize_timestamps(&mut observed_sagas);
-        sanitize_timestamps(&mut inserted_sagas);
-
-        assert_eq!(
-            inserted_sagas, observed_sagas,
-            "Observed sagas did not match inserted sagas"
-        );
-
-        // Test cleanup
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_list_unfinished_nodes() {
-        // Test setup
-        let logctx = dev::test_setup_log("test_list_unfinished_nodes");
-        let log = logctx.log.new(o!());
-        let (mut db, db_datastore) = new_db(&log).await;
-        let sec_id = db::SecId(uuid::Uuid::new_v4());
-        let sec_generation = db::SecGeneration::random();
-        let opctx = OpContext::for_tests(
-            log,
-            Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
-        );
-        let saga_id = steno::SagaId(Uuid::new_v4());
-
-        // Create a couple batches of saga events
-        let new_db_saga_nodes =
-            |node_id: u32, event_type: steno::SagaNodeEventType| {
-                let event = steno::SagaNodeEvent {
-                    saga_id,
-                    node_id: steno::SagaNodeId::from(node_id),
-                    event_type,
-                };
-
-                db::model::saga_types::SagaNodeEvent::new(event, sec_id)
-            };
-        let mut inserted_nodes = (0..SQL_BATCH_SIZE.get() * 2)
-            .flat_map(|i| {
-                // This isn't an exhaustive list of event types, but gives us a
-                // few options to pick from. Since this is a pagination key,
-                // it's important to include a variety here.
-                use steno::SagaNodeEventType::*;
-                [
-                    new_db_saga_nodes(i, Started),
-                    new_db_saga_nodes(i, UndoStarted),
-                    new_db_saga_nodes(i, UndoFinished),
-                ]
-            })
-            .collect::<Vec<_>>();
-
-        // Shuffle these nodes into a random order to check that the pagination
-        // order is working as intended on the read path, which we'll do later
-        // in this test.
-        inserted_nodes.shuffle(&mut rand::thread_rng());
-
-        // Insert them into the database
-        let conn = db_datastore
-            .pool_connection_unauthorized()
-            .await
-            .expect("Failed to access db connection");
-        diesel::insert_into(db::schema::saga_node_event::dsl::saga_node_event)
-            .values(inserted_nodes.clone())
-            .execute_async(&*conn)
-            .await
-            .expect("Failed to insert test setup data");
-
-        // List them, expect to see them all in order by ID.
-        //
-        // Note that we need to make up a saga to see this, but the
-        // part of it that actually matters is the ID.
-        let params = steno::SagaCreateParams {
-            id: saga_id,
-            name: steno::SagaName::new("test saga"),
-            dag: serde_json::value::Value::Null,
-            state: steno::SagaCachedState::Running,
-        };
-        let saga =
-            db::model::saga_types::Saga::new(sec_id, sec_generation, params);
-        let observed_nodes = load_saga_log(&opctx, &db_datastore, &saga)
-            .await
-            .expect("Failed to list unfinished nodes");
-        inserted_nodes.sort_by_key(|a| (a.node_id, a.event_type.clone()));
-
-        let inserted_nodes = inserted_nodes
-            .into_iter()
-            .map(|node| steno::SagaNodeEvent::try_from(node))
-            .collect::<Result<Vec<_>, _>>()
-            .expect("Couldn't convert DB nodes to steno nodes");
-
-        // The steno::SagaNodeEvent type doesn't implement PartialEq, so we need
-        // to do this a little manually.
-        assert_eq!(inserted_nodes.len(), observed_nodes.len());
-        for i in 0..inserted_nodes.len() {
-            assert_eq!(inserted_nodes[i].saga_id, observed_nodes[i].saga_id);
-            assert_eq!(inserted_nodes[i].node_id, observed_nodes[i].node_id);
-            assert_eq!(
-                inserted_nodes[i].event_type.label(),
-                observed_nodes[i].event_type.label()
-            );
-        }
-
-        // Test cleanup
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_list_no_unfinished_nodes() {
-        // Test setup
-        let logctx = dev::test_setup_log("test_list_no_unfinished_nodes");
-        let log = logctx.log.new(o!());
-        let (mut db, db_datastore) = new_db(&log).await;
-        let sec_id = db::SecId(uuid::Uuid::new_v4());
-        let sec_generation = db::SecGeneration::random();
-        let opctx = OpContext::for_tests(
-            log,
-            Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
-        );
-        let saga_id = steno::SagaId(Uuid::new_v4());
-
-        let params = steno::SagaCreateParams {
-            id: saga_id,
-            name: steno::SagaName::new("test saga"),
-            dag: serde_json::value::Value::Null,
-            state: steno::SagaCachedState::Running,
-        };
-        let saga =
-            db::model::saga_types::Saga::new(sec_id, sec_generation, params);
-
-        // Test that this returns "no nodes" rather than throwing some "not
-        // found" error.
-        let observed_nodes = load_saga_log(&opctx, &db_datastore, &saga)
-            .await
-            .expect("Failed to list unfinished nodes");
-        assert_eq!(observed_nodes.len(), 0);
-
-        // Test cleanup
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
