@@ -524,7 +524,7 @@ impl DumpSetupWorker {
         // This is particularly useful for disk expungement, when a caller
         // wants to ensure that the dump device is no longer accessing an
         // old device.
-        let mut last_update_complete_tx = None;
+        let mut evaluation_and_archiving_complete_tx = None;
 
         loop {
             match tokio::time::timeout(ARCHIVAL_INTERVAL, self.rx.recv()).await
@@ -535,7 +535,8 @@ impl DumpSetupWorker {
                     core_datasets,
                     update_complete_tx,
                 })) => {
-                    last_update_complete_tx = Some(update_complete_tx);
+                    evaluation_and_archiving_complete_tx =
+                        Some(update_complete_tx);
                     self.update_disk_loadout(
                         dump_slices,
                         debug_datasets,
@@ -562,7 +563,7 @@ impl DumpSetupWorker {
                 error!(self.log, "Failed to archive debug/dump files: {err:?}");
             }
 
-            if let Some(tx) = last_update_complete_tx.take() {
+            if let Some(tx) = evaluation_and_archiving_complete_tx.take() {
                 if let Err(err) = tx.send(()) {
                     error!(self.log, "DumpDevice failed to notify caller"; "err" => ?err);
                 }
