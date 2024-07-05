@@ -10,7 +10,9 @@ use indent_write::io::IndentWriter;
 use owo_colors::OwoColorize;
 
 use crate::{
-    output::{display_error, OutputOpts, Styles, CHECK, CROSS, STAR},
+    output::{
+        display_error, display_summary, headers::*, plural, OutputOpts, Styles,
+    },
     spec::{all_apis, OverwriteStatus},
     FAILURE_EXIT_CODE,
 };
@@ -40,20 +42,51 @@ pub(crate) fn generate_impl(
     }
 
     let all_apis = all_apis();
+    let total = all_apis.len();
+    let count_width = total.to_string().len();
+
+    eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
 
     eprintln!(
-        "{STAR} generating {} APIs...",
-        all_apis.len().style(styles.bold)
+        "{:>HEADER_WIDTH$} {} OpenAPI {}...",
+        GENERATING.style(styles.success_header),
+        total.style(styles.bold),
+        plural::documents(total),
     );
     let mut num_updated = 0;
     let mut num_unchanged = 0;
     let mut num_failed = 0;
 
-    for api in &all_apis {
-        let status = match api.overwrite(&dir) {
-            Ok(status) => status,
+    for (ix, api) in all_apis.iter().enumerate() {
+        let count = ix + 1;
+
+        match api.overwrite(&dir) {
+            Ok((status, summary)) => match status {
+                OverwriteStatus::Updated => {
+                    eprintln!(
+                        "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}: {}",
+                        UPDATED.style(styles.success_header),
+                        api.filename,
+                        display_summary(&summary, &styles),
+                    );
+                    num_updated += 1;
+                }
+                OverwriteStatus::Unchanged => {
+                    eprintln!(
+                        "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}: {}",
+                        UNCHANGED.style(styles.unchanged_header),
+                        api.filename,
+                        display_summary(&summary, &styles),
+                    );
+                    num_unchanged += 1;
+                }
+            },
             Err(err) => {
-                eprint!("  {} {}: ", CROSS.style(styles.failure), api.filename);
+                eprint!(
+                    "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}: ",
+                    FAILURE.style(styles.failure_header),
+                    api.filename
+                );
                 display_error(
                     &err,
                     styles.failure,
@@ -64,42 +97,22 @@ pub(crate) fn generate_impl(
                 )?;
 
                 num_failed += 1;
-                continue;
             }
         };
-
-        match status {
-            OverwriteStatus::Updated => {
-                eprintln!(
-                    "  {} {}: {}",
-                    CHECK.style(styles.success),
-                    api.filename,
-                    "updated".style(styles.warning),
-                );
-                num_updated += 1;
-            }
-            OverwriteStatus::Unchanged => {
-                eprintln!(
-                    "  {} {}: {}",
-                    CHECK.style(styles.success),
-                    api.filename,
-                    "unchanged".style(styles.unchanged),
-                );
-                num_unchanged += 1;
-            }
-        }
     }
 
-    let status_icon = if num_failed > 0 {
-        CROSS.style(styles.failure)
+    let status_header = if num_failed > 0 {
+        FAILURE.style(styles.failure_header)
     } else {
-        CHECK.style(styles.success)
+        SUCCESS.style(styles.success_header)
     };
 
     eprintln!(
-        "{} {} APIs generated: {} updated, {} unchanged, {} failed",
-        status_icon,
+        "{:>HEADER_WIDTH$} {} {} generated: \
+         {} updated, {} unchanged, {} failed",
+        status_header,
         all_apis.len().style(styles.bold),
+        plural::documents(total),
         num_updated.style(styles.bold),
         num_unchanged.style(styles.bold),
         num_failed.style(styles.bold),

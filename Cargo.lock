@@ -429,12 +429,11 @@ checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
 
 [[package]]
 name = "bb8"
-version = "0.8.3"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df7c2093d15d6a1d33b1f972e1c5ea3177748742b97a5f392aa83a65262c6780"
+checksum = "b10cf871f3ff2ce56432fddc2615ac7acc3aa22ca321f8fea800846fbb32f188"
 dependencies = [
  "async-trait",
- "futures-channel",
  "futures-util",
  "parking_lot 0.12.2",
  "tokio",
@@ -2029,7 +2028,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.10.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#5ba58196d18feadcfefcfb2d1bc34e8c317db5d5"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#6a3f84ca5fd8d0c5c010cfe837efbe6b5d117d9d"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2075,7 +2074,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.10.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#5ba58196d18feadcfefcfb2d1bc34e8c317db5d5"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#6a3f84ca5fd8d0c5c010cfe837efbe6b5d117d9d"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -6448,11 +6447,14 @@ dependencies = [
  "dropshot",
  "futures",
  "http 0.2.12",
+ "hyper 0.14.28",
  "kstat-rs",
  "libc",
  "omicron-workspace-hack",
  "oximeter",
  "rand 0.8.5",
+ "schemars",
+ "serde",
  "slog",
  "slog-async",
  "slog-term",

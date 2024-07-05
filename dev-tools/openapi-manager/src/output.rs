@@ -10,6 +10,8 @@ use indent_write::io::IndentWriter;
 use owo_colors::{OwoColorize, Style};
 use similar::{ChangeTag, DiffableStr, TextDiff};
 
+use crate::spec::DocumentSummary;
+
 #[derive(Debug, Args)]
 #[clap(next_help_heading = "Global options")]
 pub struct OutputOpts {
@@ -33,10 +35,11 @@ impl OutputOpts {
 pub(crate) struct Styles {
     pub(crate) bold: Style,
     pub(crate) header: Style,
-    pub(crate) unchanged: Style,
-    pub(crate) success: Style,
+    pub(crate) success_header: Style,
     pub(crate) failure: Style,
-    pub(crate) warning: Style,
+    pub(crate) failure_header: Style,
+    pub(crate) warning_header: Style,
+    pub(crate) unchanged_header: Style,
     pub(crate) diff_before: Style,
     pub(crate) diff_after: Style,
 }
@@ -45,10 +48,11 @@ impl Styles {
     pub(crate) fn colorize(&mut self) {
         self.bold = Style::new().bold();
         self.header = Style::new().purple();
-        self.unchanged = Style::new().blue();
-        self.success = Style::new().green();
+        self.success_header = Style::new().green().bold();
         self.failure = Style::new().red();
-        self.warning = Style::new().yellow();
+        self.failure_header = Style::new().red().bold();
+        self.unchanged_header = Style::new().blue().bold();
+        self.warning_header = Style::new().yellow().bold();
         self.diff_before = Style::new().red();
         self.diff_after = Style::new().green();
     }
@@ -108,6 +112,28 @@ where
     Ok(())
 }
 
+pub(crate) fn display_summary(
+    summary: &DocumentSummary,
+    styles: &Styles,
+) -> String {
+    let mut summary_str =
+        format!("{} paths", summary.path_count.to_string().style(styles.bold));
+
+    if let Some(schema_count) = summary.schema_count {
+        summary_str.push_str(&format!(
+            ", {} schemas",
+            schema_count.to_string().style(styles.bold),
+        ));
+    } else {
+        summary_str.push_str(&format!(
+            ", {} for schemas",
+            "data missing".style(styles.failure)
+        ));
+    }
+
+    summary_str
+}
+
 pub(crate) fn display_error(
     error: &anyhow::Error,
     failure_style: Style,
@@ -140,7 +166,33 @@ impl fmt::Display for MissingNewlineHint {
     }
 }
 
-pub(crate) const STAR: char = '★';
-pub(crate) const CHECK: char = '✓';
-pub(crate) const CROSS: char = '✗';
-pub(crate) const WARNING: char = '⚠';
+/// Output headers.
+pub(crate) mod headers {
+    // Same width as Cargo's output.
+    pub(crate) const HEADER_WIDTH: usize = 12;
+
+    pub(crate) static SEPARATOR: &str = "-------";
+
+    pub(crate) static CHECKING: &str = "Checking";
+    pub(crate) static GENERATING: &str = "Generating";
+
+    pub(crate) static UP_TO_DATE: &str = "Up-to-date";
+    pub(crate) static STALE: &str = "Stale";
+    pub(crate) static MISSING: &str = "Missing";
+
+    pub(crate) static UPDATED: &str = "Updated";
+    pub(crate) static UNCHANGED: &str = "Unchanged";
+
+    pub(crate) static SUCCESS: &str = "Success";
+    pub(crate) static FAILURE: &str = "Failure";
+}
+
+pub(crate) mod plural {
+    pub(crate) fn documents(count: usize) -> &'static str {
+        if count == 1 {
+            "document"
+        } else {
+            "documents"
+        }
+    }
+}

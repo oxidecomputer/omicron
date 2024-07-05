@@ -107,6 +107,7 @@ Commands:
   dns                  Print information about internal and external DNS
   inventory            Print information about collected hardware/software inventory
   reconfigurator-save  Save the current Reconfigurator inputs to a file
+  region               Print information about regions
   region-replacement   Query for information about region replacements, optionally manually
                            triggering one
   sleds                Print information about sleds
@@ -147,6 +148,7 @@ Commands:
   dns                  Print information about internal and external DNS
   inventory            Print information about collected hardware/software inventory
   reconfigurator-save  Save the current Reconfigurator inputs to a file
+  region               Print information about regions
   region-replacement   Query for information about region replacements, optionally manually
                            triggering one
   sleds                Print information about sleds

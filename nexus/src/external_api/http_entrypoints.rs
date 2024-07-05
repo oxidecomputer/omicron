@@ -7018,7 +7018,7 @@ async fn probe_list(
             probes,
             &|_, p: &ProbeInfo| match paginated_by {
                 PaginatedBy::Id(_) => NameOrId::Id(p.id),
-                PaginatedBy::Name(_) => NameOrId::Name(p.name.clone().into()),
+                PaginatedBy::Name(_) => NameOrId::Name(p.name.clone()),
             },
         )?))
     };

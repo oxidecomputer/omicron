@@ -12,8 +12,8 @@ use similar::TextDiff;
 
 use crate::{
     output::{
-        display_error, write_diff, OutputOpts, Styles, CHECK, CROSS, STAR,
-        WARNING,
+        display_error, display_summary, headers::*, plural, write_diff,
+        OutputOpts, Styles,
     },
     spec::{all_apis, CheckStatus},
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
@@ -46,17 +46,71 @@ pub(crate) fn check_impl(
     }
 
     let all_apis = all_apis();
+    let total = all_apis.len();
+    let count_width = total.to_string().len();
 
-    eprintln!("{STAR} checking {} APIs...", all_apis.len().style(styles.bold));
+    eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
+
+    eprintln!(
+        "{:>HEADER_WIDTH$} {} OpenAPI {}...",
+        CHECKING.style(styles.success_header),
+        total.style(styles.bold),
+        plural::documents(total),
+    );
     let mut num_up_to_date = 0;
-    let mut num_outdated = 0;
+    let mut num_stale = 0;
+    let mut num_missing = 0;
     let mut num_failed = 0;
 
-    for api in &all_apis {
-        let status = match api.check(&dir) {
-            Ok(status) => status,
+    for (ix, api) in all_apis.iter().enumerate() {
+        let count = ix + 1;
+
+        match api.check(&dir) {
+            Ok(status) => match status {
+                CheckStatus::Ok(summary) => {
+                    eprintln!(
+                            "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}: {}",
+                            UP_TO_DATE.style(styles.success_header),
+                            api.filename,
+                            display_summary(&summary, &styles),
+                        );
+
+                    num_up_to_date += 1;
+                }
+                CheckStatus::Stale { full_path, actual, expected } => {
+                    eprintln!(
+                        "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}",
+                        STALE.style(styles.warning_header),
+                        api.filename,
+                    );
+
+                    let diff = TextDiff::from_lines(&actual, &expected);
+                    write_diff(
+                        &diff,
+                        &full_path,
+                        &styles,
+                        // Add an indent to align diff with the status message.
+                        &mut IndentWriter::new("    ", std::io::stderr()),
+                    )?;
+
+                    num_stale += 1;
+                }
+                CheckStatus::Missing => {
+                    eprintln!(
+                        "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}",
+                        MISSING.style(styles.warning_header),
+                        api.filename,
+                    );
+
+                    num_missing += 1;
+                }
+            },
             Err(err) => {
-                eprint!("  {} {}: ", CROSS.style(styles.failure), api.filename);
+                eprint!(
+                    "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}: ",
+                    FAILURE.style(styles.failure_header),
+                    api.filename
+                );
                 display_error(
                     &err,
                     styles.failure,
@@ -67,77 +121,39 @@ pub(crate) fn check_impl(
                 )?;
 
                 num_failed += 1;
-                continue;
             }
         };
-
-        match status {
-            CheckStatus::Ok => {
-                eprintln!(
-                    "  {} {}: {}",
-                    CHECK.style(styles.success),
-                    api.filename,
-                    "up-to-date".style(styles.success)
-                );
-
-                num_up_to_date += 1;
-            }
-            CheckStatus::Mismatch { full_path, actual, expected } => {
-                eprintln!(
-                    "  {} {}: {}",
-                    WARNING.style(styles.warning),
-                    api.filename,
-                    "mismatch".style(styles.warning),
-                );
-
-                let diff = TextDiff::from_lines(&actual, &expected);
-                write_diff(
-                    &diff,
-                    &full_path,
-                    &styles,
-                    // Add an indent to align diff with the status message.
-                    &mut IndentWriter::new("    ", std::io::stderr()),
-                )?;
-
-                num_outdated += 1;
-            }
-            CheckStatus::Missing => {
-                println!(
-                    "  {} {}: {}",
-                    WARNING.style(styles.warning),
-                    api.filename,
-                    "missing".style(styles.warning),
-                );
-                num_outdated += 1;
-            }
-        }
     }
 
-    let status_icon = if num_failed > 0 {
-        CROSS.style(styles.failure)
-    } else if num_outdated > 0 {
-        WARNING.style(styles.warning)
+    let status_header = if num_failed > 0 {
+        FAILURE.style(styles.failure_header)
+    } else if num_stale > 0 {
+        STALE.style(styles.warning_header)
     } else {
-        CHECK.style(styles.success)
+        SUCCESS.style(styles.success_header)
     };
 
     eprintln!(
-        "{} {} APIs checked: {} up-to-date, {} out of date, {} failed",
-        status_icon,
-        all_apis.len().style(styles.bold),
+        "{:>HEADER_WIDTH$} {} {} checked: {} up-to-date, {} stale, {} missing, {} failed",
+        status_header,
+        total.style(styles.bold),
+        plural::documents(total),
         num_up_to_date.style(styles.bold),
-        num_outdated.style(styles.bold),
+        num_stale.style(styles.bold),
+        num_missing.style(styles.bold),
         num_failed.style(styles.bold),
     );
     if num_failed > 0 {
         eprintln!(
-            "(fix failures, then run {} to update)",
+            "{:>HEADER_WIDTH$} (fix failures, then run {} to update)",
+            "",
             "cargo xtask openapi generate".style(styles.bold)
         );
         Ok(CheckResult::Failures)
-    } else if num_outdated > 0 {
+    } else if num_stale > 0 {
         eprintln!(
-            "(run {} to update)",
+            "{:>HEADER_WIDTH$} (run {} to update)",
+            "",
             "cargo xtask openapi generate".style(styles.bold)
         );
         Ok(CheckResult::NeedsUpdate)

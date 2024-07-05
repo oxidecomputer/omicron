@@ -22,7 +22,9 @@ pub(crate) fn list_impl(
     }
     let mut out = std::io::stdout();
 
-    let count_width = all_apis().len().to_string().len();
+    let all_apis = all_apis();
+
+    let count_width = all_apis.len().to_string().len();
 
     if verbose {
         // A string for verbose indentation. +1 for the closing ), and +2 for
@@ -33,7 +35,7 @@ pub(crate) fn list_impl(
         let continued_indent =
             format!("{:width$}", "", width = count_width + 1 + 2 + 4);
 
-        for (ix, api) in all_apis().iter().enumerate() {
+        for (ix, api) in all_apis.iter().enumerate() {
             let count = ix + 1;
 
             writeln!(
@@ -101,12 +103,12 @@ pub(crate) fn list_impl(
                 }
             };
 
-            if ix + 1 < all_apis().len() {
+            if ix + 1 < all_apis.len() {
                 writeln!(&mut out)?;
             }
         }
     } else {
-        for (ix, api) in all_apis().iter().enumerate() {
+        for (ix, api) in all_apis.iter().enumerate() {
             let count = ix + 1;
 
             writeln!(

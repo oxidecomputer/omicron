@@ -12,3 +12,10 @@ pub struct RegionReplacementDriverStatus {
     pub finish_invoked_ok: Vec<String>,
     pub errors: Vec<String>,
 }
+
+/// The status of a `lookup_region_port` background task activation
+#[derive(Serialize, Deserialize, Default)]
+pub struct LookupRegionPortStatus {
+    pub found_port_ok: Vec<String>,
+    pub errors: Vec<String>,
+}

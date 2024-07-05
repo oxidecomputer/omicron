@@ -54,19 +54,26 @@ pub struct ApiSpec {
 }
 
 impl ApiSpec {
-    pub(crate) fn overwrite(&self, dir: &Utf8Path) -> Result<OverwriteStatus> {
+    pub(crate) fn overwrite(
+        &self,
+        dir: &Utf8Path,
+    ) -> Result<(OverwriteStatus, DocumentSummary)> {
         let contents = self.to_json_bytes()?;
 
-        self.validate_json(&contents)
+        let summary = self
+            .validate_json(&contents)
             .context("OpenAPI document validation failed")?;
 
         let full_path = dir.join(&self.filename);
-        overwrite_file(&full_path, &contents)
+        let status = overwrite_file(&full_path, &contents)?;
+
+        Ok((status, summary))
     }
 
     pub(crate) fn check(&self, dir: &Utf8Path) -> Result<CheckStatus> {
         let contents = self.to_json_bytes()?;
-        self.validate_json(&contents)
+        let summary = self
+            .validate_json(&contents)
             .context("OpenAPI document validation failed")?;
 
         let full_path = dir.join(&self.filename);
@@ -75,9 +82,9 @@ impl ApiSpec {
 
         match existing_contents {
             Some(existing_contents) if existing_contents == contents => {
-                Ok(CheckStatus::Ok)
+                Ok(CheckStatus::Ok(summary))
             }
-            Some(existing_contents) => Ok(CheckStatus::Mismatch {
+            Some(existing_contents) => Ok(CheckStatus::Stale {
                 full_path,
                 actual: existing_contents,
                 expected: contents,
@@ -116,7 +123,7 @@ impl ApiSpec {
         Ok(contents)
     }
 
-    fn validate_json(&self, contents: &[u8]) -> Result<()> {
+    fn validate_json(&self, contents: &[u8]) -> Result<DocumentSummary> {
         let openapi_doc = contents_to_openapi(contents)
             .context("JSON returned by ApiDescription is not valid OpenAPI")?;
 
@@ -135,7 +142,7 @@ impl ApiSpec {
             extra_validation(&openapi_doc)?;
         }
 
-        Ok(())
+        Ok(DocumentSummary::new(&openapi_doc))
     }
 }
 
@@ -170,9 +177,29 @@ pub(crate) enum OverwriteStatus {
 #[derive(Debug)]
 #[must_use]
 pub(crate) enum CheckStatus {
-    Ok,
-    Mismatch { full_path: Utf8PathBuf, actual: Vec<u8>, expected: Vec<u8> },
+    Ok(DocumentSummary),
+    Stale { full_path: Utf8PathBuf, actual: Vec<u8>, expected: Vec<u8> },
     Missing,
+}
+
+#[derive(Debug)]
+#[must_use]
+pub(crate) struct DocumentSummary {
+    pub(crate) path_count: usize,
+    // None if data is missing.
+    pub(crate) schema_count: Option<usize>,
+}
+
+impl DocumentSummary {
+    fn new(doc: &OpenAPI) -> Self {
+        Self {
+            path_count: doc.paths.paths.len(),
+            schema_count: doc
+                .components
+                .as_ref()
+                .map_or(None, |c| Some(c.schemas.len())),
+        }
+    }
 }
 
 pub(crate) fn openapi_dir(dir: Option<Utf8PathBuf>) -> Result<Utf8PathBuf> {
@@ -207,6 +234,7 @@ pub(crate) fn find_openapi_dir() -> Result<Utf8PathBuf> {
 /// The file is left unchanged if the contents are the same. That's to avoid
 /// mtime-based recompilations.
 fn overwrite_file(path: &Utf8Path, contents: &[u8]) -> Result<OverwriteStatus> {
+    // Only overwrite the file if the contents are actually different.
     let existing_contents =
         read_opt(path).context("failed to read contents on disk")?;
 
@@ -224,7 +252,6 @@ fn overwrite_file(path: &Utf8Path, contents: &[u8]) -> Result<OverwriteStatus> {
 }
 
 fn read_opt(path: &Utf8Path) -> std::io::Result<Option<Vec<u8>>> {
-    // Only overwrite the file if the contents are actually different.
     match fs::read(path) {
         Ok(contents) => Ok(Some(contents)),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),

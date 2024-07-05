@@ -66,7 +66,7 @@ impl ListArgs {
 
 #[derive(Debug, Args)]
 pub struct GenerateArgs {
-    /// The directory to write generated APIs to (default: <workspace root>/openapi)
+    /// The directory to write generated APIs to (default: workspace root/openapi)
     #[clap(long)]
     dir: Option<Utf8PathBuf>,
 }
