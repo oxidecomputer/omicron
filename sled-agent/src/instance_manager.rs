@@ -667,7 +667,8 @@ impl InstanceManagerRunner {
 
         // Otherwise, we pipeline the request, and send it to the instance,
         // where it can receive an appropriate response.
-        instance.terminate(tx).await?;
+        let mark_failed = false;
+        instance.terminate(tx, mark_failed).await?;
         Ok(())
     }
 
@@ -842,7 +843,8 @@ impl InstanceManagerRunner {
             info!(self.log, "use_only_these_disks: Removing instance"; "instance_id" => ?id);
             if let Some((_, instance)) = self.instances.remove(&id) {
                 let (tx, rx) = oneshot::channel();
-                if let Err(e) = instance.terminate(tx).await {
+                let mark_failed = true;
+                if let Err(e) = instance.terminate(tx, mark_failed).await {
                     warn!(self.log, "use_only_these_disks: Failed to request instance removal"; "err" => ?e);
                     continue;
                 }
