@@ -297,6 +297,24 @@ impl TimeseriesSchema {
         self.field_schema.iter().find(|field| field.name == name.as_ref())
     }
 
+    /// Return an iterator over the target fields.
+    pub fn target_fields(&self) -> impl Iterator<Item = &FieldSchema> {
+        self.field_iter(FieldSource::Target)
+    }
+
+    /// Return an iterator over the metric fields.
+    pub fn metric_fields(&self) -> impl Iterator<Item = &FieldSchema> {
+        self.field_iter(FieldSource::Metric)
+    }
+
+    /// Return an iterator over fields from the given source.
+    fn field_iter(
+        &self,
+        source: FieldSource,
+    ) -> impl Iterator<Item = &FieldSchema> {
+        self.field_schema.iter().filter(move |field| field.source == source)
+    }
+
     /// Return the target and metric component names for this timeseries
     pub fn component_names(&self) -> (&str, &str) {
         self.timeseries_name

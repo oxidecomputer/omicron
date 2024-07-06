@@ -693,7 +693,19 @@ impl From<MetricsError> for omicron_common::api::external::Error {
 }
 
 /// A cumulative or counter data type.
-#[derive(Debug, Clone, Copy, PartialEq, JsonSchema, Deserialize, Serialize)]
+#[derive(
+    Debug,
+    Deserialize,
+    Clone,
+    Copy,
+    Eq,
+    Hash,
+    JsonSchema,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+)]
 #[schemars(rename = "Cumulative{T}")]
 pub struct Cumulative<T> {
     start_time: DateTime<Utc>,
