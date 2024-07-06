@@ -26,11 +26,13 @@ use sled_agent_client::Client as SledAgentClient;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::net::IpAddr;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::Mutex;
 use uuid::Uuid;
+
+oximeter::use_timeseries!("vm-health-check.toml");
+use virtual_machine::VirtualMachine;
 
 /// Background task that periodically checks instance states.
 pub(crate) struct InstanceWatcher {
@@ -209,30 +211,6 @@ impl InstanceWatcher {
 pub struct WatcherIdentity {
     pub nexus_id: Uuid,
     pub rack_id: Uuid,
-}
-
-#[derive(
-    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, oximeter::Target,
-)]
-struct VirtualMachine {
-    /// The rack ID of the Nexus process which performed the health check.
-    rack_id: Uuid,
-    /// The ID of the Nexus process which performed the health check.
-    nexus_id: Uuid,
-    /// The instance's ID.
-    instance_id: Uuid,
-    /// The silo ID of the instance's silo.
-    silo_id: Uuid,
-    /// The project ID of the instance.
-    project_id: Uuid,
-    /// The VMM ID of the instance's virtual machine manager.
-    vmm_id: Uuid,
-    /// The sled-agent's ID.
-    sled_agent_id: Uuid,
-    /// The sled agent's IP address.
-    sled_agent_ip: IpAddr,
-    /// The sled agent's port.
-    sled_agent_port: u16,
 }
 
 impl VirtualMachine {
@@ -497,12 +475,12 @@ impl BackgroundTask for InstanceWatcher {
 }
 
 mod metrics {
+    use super::virtual_machine::Check;
+    use super::virtual_machine::IncompleteCheck;
     use super::{CheckOutcome, Incomplete, VirtualMachine};
     use oximeter::types::Cumulative;
-    use oximeter::Metric;
     use oximeter::MetricsError;
     use oximeter::Sample;
-    use std::borrow::Cow;
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::sync::Mutex;
@@ -539,7 +517,7 @@ mod metrics {
                     .check_errors
                     .entry(error)
                     .or_insert_with(|| IncompleteCheck {
-                        reason: error.as_str(),
+                        failure_reason: error.as_str(),
                         datum: Cumulative::default(),
                     })
                     .datum += 1;
@@ -591,38 +569,5 @@ mod metrics {
             }
             Ok(())
         }
-    }
-
-    /// The number of successful checks for a single instance, VMM, and sled agent.
-    #[derive(Clone, Debug, Metric)]
-    struct Check {
-        /// The string representation of the instance's state as understood by
-        /// the VMM. If the check failed, this will generally be "failed".
-        state: Cow<'static, str>,
-        /// `Why the instance was marked as being in this state.
-        ///
-        /// If an instance was marked as "failed" due to a check failure, this
-        /// will be a string representation of the failure reason. Otherwise, if
-        /// the check was successful, this will be "success". Note that this may
-        /// be "success" even if the instance's state is "failed", which
-        /// indicates that we successfully queried the instance's state from the
-        /// sled-agent, and the *sled-agent* reported that the instance has
-        /// failed --- which is distinct from the instance watcher marking an
-        /// instance as failed due to a failed check.
-        reason: Cow<'static, str>,
-        /// The number of checks for this instance and sled agent which recorded
-        /// this state for this reason.
-        datum: Cumulative<u64>,
-    }
-
-    /// The number of unsuccessful checks for an instance and sled agent pair.
-    #[derive(Clone, Debug, Metric)]
-    struct IncompleteCheck {
-        /// The reason why the check was unsuccessful.
-        ///
-        /// This is generated from the [`Incomplete`] enum's `Display` implementation.
-        reason: Cow<'static, str>,
-        /// The number of failed checks for this instance and sled agent.
-        datum: Cumulative<u64>,
     }
 }
