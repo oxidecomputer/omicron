@@ -422,7 +422,7 @@ rayon = "1.10"
 rcgen = "0.12.1"
 reedline = "0.31.0"
 ref-cast = "1.0"
-regex = "1.10.4"
+regex = "1.10.5"
 regress = "0.9.1"
 reqwest = { version = "0.11", default-features = false }
 ring = "0.17.8"
