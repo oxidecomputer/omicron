@@ -270,7 +270,7 @@ display-error-chain = "0.2.0"
 omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
-derive_more = "0.99.17"
+derive_more = "0.99.18"
 derive-where = "1.2.7"
 diesel = { version = "2.1.6", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", branch = "main" }
