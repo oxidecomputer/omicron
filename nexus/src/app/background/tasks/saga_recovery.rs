@@ -2,6 +2,34 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+// XXX-dap working here
+// As I write this now, there's one compile error left: we're incorrectly trying
+// to store a Future into a map that's specified to hold timestamps.  This is an
+// artifact of combining two pre-existing hunks of code: one tracked all sagas
+// recovered and stored timestamps; the other tracked the sagas recovered *in
+// one pass* and stored the completion Futures.  The completion Futures are only
+// used for the test suite.  So the answer here is probably to refactor some of
+// this stuff to expose smaller pieces for use by the test suite.
+//
+// That's an important next step anyway.  I need to take a pass through
+// `activate()` and all the functions that it calls to figure out how to
+// decompose it into smaller pieces, particularly for testing, but also in hopes
+// that it'll be more obviously correct.  Some ideas:
+// - separate out planning from execution?  i.e., compute which sagas are
+//   to be recovered/skipped/etc. with a helper that we can test in isolation.
+//   This is a little tricky because recovery *is* one of those steps needed to
+//   determine if something succeeded or failed.
+// - create a StatusBuilder where we can report what we're doing?  This seems
+//   kind of hard though
+//
+// I think maybe the very next step is to change `self.sagas_recovered` to
+// `self.recent_sagas_recovered` and make it look like `self.recent_failures`.
+//
+// XXX-dap at the end, verify:
+// - counters (maybe plumb these into Oximeter?)
+// - task status reported by omdb
+// - log entries
+
 //! Saga recovery
 //!
 //! ## Review of distributed sagas
@@ -349,7 +377,6 @@ impl SagaRecovery {
         bgtask_log: &slog::Logger,
         candidate_sagas: Vec<nexus_db_model::Saga>,
     ) -> LastPassSuccess {
-        let datastore = &self.datastore;
         let nfound = candidate_sagas.len();
         let mut nskipped = 0;
         let mut nrecovered = 0;
@@ -358,11 +385,13 @@ impl SagaRecovery {
         let mut nremoved = 0;
         let time = Utc::now();
 
-        let candidate_saga_ids: BTreeMap<steno::SagaId, nexus_db_model::Saga> =
-            candidate_sagas
-                .into_iter()
-                .map(|saga| (saga.id.into(), saga))
-                .collect();
+        let mut candidate_saga_ids: BTreeMap<
+            steno::SagaId,
+            nexus_db_model::Saga,
+        > = candidate_sagas
+            .into_iter()
+            .map(|saga| (saga.id.into(), saga))
+            .collect();
 
         // First of all, remove finished sagas from our "ignore" set.
         //
@@ -466,9 +495,9 @@ impl SagaRecovery {
                 Ok(completion_future) => {
                     info!(&saga_log, "recovered saga");
                     nrecovered += 1;
-                    // XXX-dap where to store these completion futures
-                    self.sagas_recovered
-                        .insert(saga_id, completion_future.boxed());
+                    // XXX-dap what to do with the completion future (besides
+                    // boxing it)
+                    self.sagas_recovered.insert(saga_id, time);
                 }
                 Err(error) => {
                     // It's essential that we not bail out early just because we
@@ -493,7 +522,7 @@ impl SagaRecovery {
             "nfailed" => nfailed,
             "nskipped" => nskipped,
             "nambiguous" => nambiguous,
-            "nremove_next" => remove_next.len(),
+            "nremove_next" => self.remove_next.len(),
         );
 
         assert_eq!(nrecovered + nfailed + nskipped + nambiguous, nfound);
