@@ -121,11 +121,11 @@ use nexus_config::BackgroundTaskConfig;
 use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use tokio::sync::watch;
 use uuid::Uuid;
 
@@ -661,6 +661,7 @@ impl BackgroundTasksInitializer {
                 args.saga_recovery_nexus,
                 args.saga_recovery_sec,
                 args.saga_recovery_registry,
+                args.saga_recovery_rx,
             ));
 
             driver.register(TaskDefinition {
@@ -707,6 +708,8 @@ pub struct BackgroundTasksData {
     pub saga_recovery_sec: Arc<steno::SecClient>,
     /// Steno (saga) action registry
     pub saga_recovery_registry: Arc<ActionRegistry>,
+    /// Channel for receiving notifications about newly-created sagas
+    pub saga_recovery_rx: mpsc::UnboundedReceiver<steno::SagaId>,
 }
 
 /// Starts the three DNS-propagation-related background tasks for either

@@ -93,6 +93,7 @@ pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 
 use nexus_db_model::AllSchemaVersions;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
+use tokio::sync::mpsc;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
 //      ephemeral (so bounded in saga by design).
@@ -245,9 +246,34 @@ impl Nexus {
             sec_store,
         ));
 
+        // It's a bit of a red flag to use an unbounded channel.
+        //
+        // This particular channel is used to send a Uuid from the saga executor
+        // to the saga recovery background task each time a saga is started.
+        //
+        // The usual argument for keeping a channel bounded is to ensure
+        // backpressure.  But we don't really want that here.  These items don't
+        // represent meaningful work for the saga recovery task, such that if it
+        // were somehow processing these slowly, we'd want to slow down the saga
+        // dispatch process.  Under normal conditions, we'd expect this queue to
+        // grow as we dispatch new sagas until the saga recovery task runs, at
+        // which point the queue will quickly be drained.  The only way this
+        // could really grow without bound is if the saga recovery task gets
+        // completely wedged and stops receiving these messages altogether.  In
+        // this case, the maximum size this queue could grow over time is the
+        // number of sagas we can launch in that time.  That's not ever likely
+        // to be a significant amount of memory.
+        //
+        // We could put our money where our mouth is: pick a sufficiently large
+        // bound and panic if we reach it.  But "sufficiently large" depends on
+        // the saga creation rate and the period of the saga recovery background
+        // task.  If someone changed the config, they'd have to remember to
+        // update this here.  This doesn't seem worth it.
+        let (saga_create_tx, saga_recovery_rx) = mpsc::unbounded_channel();
         let sagas = Arc::new(SagaExecutor::new(
             Arc::clone(&sec_client),
             log.new(o!("component" => "SagaExecutor")),
+            saga_create_tx,
         ));
 
         let client_state = dpd_client::ClientState {
@@ -504,6 +530,7 @@ impl Nexus {
                     saga_recovery_nexus: task_nexus.clone(),
                     saga_recovery_sec: sec_client.clone(),
                     saga_recovery_registry: sagas::ACTION_REGISTRY.clone(),
+                    saga_recovery_rx,
                 },
             );
 
