@@ -655,7 +655,7 @@ impl Drop for CockroachInstance {
                      \t# Run the database\n\
                      \tcargo run --bin omicron-dev db-run --no-populate --store-dir {data_path:?}\n\
                      \t# Access the database. Note the port may change if you run multiple databases.\n\
-                     \tcockroach sql --host=localhost:32221 --insecure",
+                     \tcockroach sql --host=localhost:32221 --insecure --database omicron",
                      data_path = path.join("data"),
                 );
             }

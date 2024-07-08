@@ -70,8 +70,8 @@ where
     }
 }
 
-/// Uses `pagparams` to list a subset of rows in `table`, ordered by `c1, and
-/// then by `c2.
+/// Uses `pagparams` to list a subset of rows in `table`, ordered by `c1`, and
+/// then by `c2`.
 ///
 /// This is a two-column variation of the [`paginated`] function.
 // NOTE: This function could probably be made generic over an arbitrary number

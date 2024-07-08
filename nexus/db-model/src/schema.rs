@@ -1754,16 +1754,6 @@ table! {
 }
 
 table! {
-    db_metadata (singleton) {
-        singleton -> Bool,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-        version -> Text,
-        target_version -> Nullable<Text>,
-    }
-}
-
-table! {
     migration (id) {
         id -> Uuid,
         instance_id -> Uuid,
@@ -1777,6 +1767,52 @@ table! {
         target_propolis_id -> Uuid,
         target_gen -> Int8,
         time_target_updated -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
+    timeseries_schema (timeseries_name) {
+        timeseries_name -> Text,
+        authz_scope -> crate::TimeseriesAuthzScopeEnum,
+        target_description -> Text,
+        metric_description -> Text,
+        datum_type -> crate::TimeseriesDatumTypeEnum,
+        units -> crate::TimeseriesUnitsEnum,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        generation -> Int8,
+    }
+}
+
+table! {
+    timeseries_field (timeseries_name, name) {
+        timeseries_name -> Text,
+        name -> Text,
+        type_ -> crate::TimeseriesFieldTypeEnum,
+        source -> crate::TimeseriesFieldSourceEnum,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        generation -> Int8,
+    }
+}
+
+table! {
+    timeseries_field_by_version (timeseries_name, version, field_name) {
+        timeseries_name -> Text,
+        version -> Int2,
+        field_name -> Text,
+        generation -> Int8,
+    }
+}
+
+table! {
+    db_metadata (singleton) {
+        singleton -> Bool,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        version -> Text,
+        target_version -> Nullable<Text>,
     }
 }
 
@@ -1871,3 +1907,9 @@ joinable!(instance_ssh_key -> instance (instance_id));
 allow_tables_to_appear_in_same_query!(sled, sled_instance);
 
 joinable!(network_interface -> probe (parent_id));
+
+allow_tables_to_appear_in_same_query!(
+    timeseries_field,
+    timeseries_schema,
+    timeseries_field_by_version
+);

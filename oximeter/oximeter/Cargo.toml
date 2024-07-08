@@ -20,3 +20,10 @@ prettyplease.workspace = true
 syn.workspace = true
 toml.workspace = true
 uuid.workspace = true
+
+[build-dependencies]
+anyhow.workspace = true
+oximeter-impl.workspace = true
+prettyplease.workspace = true
+quote.workspace = true
+syn.workspace = true

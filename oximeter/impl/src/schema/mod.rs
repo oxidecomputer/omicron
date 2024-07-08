@@ -54,6 +54,16 @@ pub struct FieldSchema {
     pub description: String,
 }
 
+impl FieldSchema {
+    /// Return true if `self` and `other` are equal, ignoring their
+    /// descriptions.
+    pub fn eq_ignoring_description(&self, other: &Self) -> bool {
+        self.name.eq(&other.name)
+            && self.field_type.eq(&other.field_type)
+            && self.source.eq(&other.source)
+    }
+}
+
 /// The source from which a field is derived, the target or metric.
 #[derive(
     Clone,
@@ -167,7 +177,9 @@ fn validate_timeseries_name(s: &str) -> Result<&str, MetricsError> {
 }
 
 /// Text descriptions for the target and metric of a timeseries.
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema, Serialize)]
+#[derive(
+    Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize,
+)]
 pub struct TimeseriesDescription {
     pub target: String,
     pub metric: String,
@@ -188,7 +200,7 @@ pub enum Units {
 ///
 /// This includes the name of the timeseries, as well as the datum type of its metric and the
 /// schema for each field.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct TimeseriesSchema {
     pub timeseries_name: TimeseriesName,
     pub description: TimeseriesDescription,
@@ -198,6 +210,12 @@ pub struct TimeseriesSchema {
     pub authz_scope: AuthzScope,
     pub units: Units,
     pub created: DateTime<Utc>,
+}
+
+impl PartialEq for TimeseriesSchema {
+    fn eq(&self, other: &Self) -> bool {
+        self.eq_ignoring_creation_time(other)
+    }
 }
 
 /// Default version for timeseries schema, 1.
@@ -313,14 +331,41 @@ impl TimeseriesSchema {
     pub fn metric_name(&self) -> &str {
         self.component_names().1
     }
-}
 
-impl PartialEq for TimeseriesSchema {
-    fn eq(&self, other: &TimeseriesSchema) -> bool {
-        self.timeseries_name == other.timeseries_name
+    /// Return true if `self` and `other` are equal, ignoring the timeseries and
+    /// field descriptions.
+    pub fn eq_ignoring_descriptions(&self, other: &Self) -> bool {
+        if !(self.timeseries_name == other.timeseries_name
             && self.version == other.version
+            && self.authz_scope == other.authz_scope
             && self.datum_type == other.datum_type
+            && self.units == other.units)
+        {
+            return false;
+        }
+
+        // Compare all fields, in both directions.
+        if self.field_schema.len() != other.field_schema.len() {
+            return false;
+        }
+        self.field_schema
+            .iter()
+            .zip(other.field_schema.iter())
+            .all(|(lhs, rhs)| lhs.eq_ignoring_description(rhs))
+    }
+
+    /// Return true if `self` and `other` are equal, ignoring the creation
+    /// timestamps.
+    ///
+    /// This method includes the text descriptions in its comparison.
+    pub fn eq_ignoring_creation_time(&self, other: &Self) -> bool {
+        self.timeseries_name == other.timeseries_name
+            && self.description == other.description
             && self.field_schema == other.field_schema
+            && self.datum_type == other.datum_type
+            && self.version == other.version
+            && self.authz_scope == other.authz_scope
+            && self.units == other.units
     }
 }
 

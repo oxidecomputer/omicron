@@ -97,6 +97,7 @@ mod switch_interface;
 mod switch_port;
 #[cfg(test)]
 pub(crate) mod test_utils;
+mod timeseries_schema;
 mod update;
 mod utilization;
 mod v2p_mapping;

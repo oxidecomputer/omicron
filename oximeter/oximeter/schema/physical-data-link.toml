@@ -14,31 +14,31 @@ versions = [
 
 [fields.rack_id]
 type = "uuid"
-description = "UUID for the link's sled"
+description = "UUID for the rack hosting the sled"
 
 [fields.sled_id]
 type = "uuid"
-description = "UUID for the link's sled"
+description = "UUID for the sled hosting the link"
 
 [fields.hostname]
 type = "string"
-description = "Hostname of the link's sled"
+description = "Hostname of the sled hosting the link"
 
 [fields.model]
 type = "string"
-description = "Model number of the link's sled"
+description = "Model number of the sled hosting the link"
 
 [fields.revision]
 type = "u32"
-description = "Revision number of the sled"
+description = "Revision number of the sled hosting the link"
 
 [fields.serial]
 type = "string"
-description = "Serial number of the sled"
+description = "Serial number of the sled hosting the link"
 
 [fields.link_name]
 type = "string"
-description = "Name of the physical data link"
+description = "Name of the data link"
 
 [[metrics]]
 name = "bytes_sent"

@@ -24,35 +24,20 @@ use quote::quote;
 /// Emit types for using one timeseries definition.
 ///
 /// Provided with a TOML-formatted schema definition, this emits Rust types for
-/// the target and metric from the latest version; and a function that returns
-/// the `TimeseriesSchema` for _all_ versions of the timeseries.
+/// the target and metric from the latest version.
 ///
-/// Both of these items are emitted in a module with the same name as the
+/// All of these items are emitted in a module with the same name as the
 /// target.
 pub fn use_timeseries(contents: &str) -> Result<TokenStream, MetricsError> {
     let schema = load_schema(contents)?;
     let latest = find_schema_version(schema.iter().cloned(), None);
     let mod_name = quote::format_ident!("{}", latest[0].target_name());
     let types = emit_schema_types(latest);
-    let func = emit_schema_function(schema.into_iter());
     Ok(quote! {
         pub mod #mod_name {
             #types
-            #func
         }
     })
-}
-
-fn emit_schema_function(
-    list: impl Iterator<Item = TimeseriesSchema>,
-) -> TokenStream {
-    quote! {
-        pub fn timeseries_schema() -> Vec<::oximeter::schema::TimeseriesSchema> {
-            vec![
-                #(#list),*
-            ]
-        }
-    }
 }
 
 fn emit_schema_types(list: Vec<TimeseriesSchema>) -> TokenStream {
