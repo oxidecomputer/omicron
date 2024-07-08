@@ -1409,13 +1409,43 @@ impl super::Nexus {
                 "migration_state" => ?new_runtime_state.migrations(),
             );
             let sagas = self.sagas.clone();
+            let task_instance_updater =
+                self.background_tasks.task_instance_updater.clone();
             let log = opctx.log.clone();
             tokio::spawn(async move {
-                if let Err(error) = sagas.saga_start(saga).await {
-                    warn!(&log, "update saga for {instance_id} failed!";
+                // TODO(eliza): maybe we should use the lower level saga API so
+                // we can see if the saga failed due to the lock being held and
+                // retry it immediately?
+                let running_saga = async move {
+                    let runnable_saga = sagas.saga_prepare(saga).await?;
+                    runnable_saga.start().await
+                }
+                .await;
+                let result = match running_saga {
+                    Err(error) => {
+                        error!(&log, "failed to start update saga for {instance_id}";
+                            "instance_id" => %instance_id,
+                            "error" => %error,
+                        );
+                        // If we couldn't start the update saga for this
+                        // instance, kick the instance-updater background task
+                        // to try and start it again in a timely manner.
+                        task_instance_updater.activate();
+                        return;
+                    }
+                    Ok(saga) => {
+                        saga.wait_until_stopped().await.into_omicron_result()
+                    }
+                };
+                if let Err(error) = result {
+                    error!(&log, "update saga for {instance_id} failed";
                         "instance_id" => %instance_id,
                         "error" => %error,
                     );
+                    // If we couldn't complete the update saga for this
+                    // instance, kick the instance-updater background task
+                    // to try and start it again in a timely manner.
+                    task_instance_updater.activate();
                 }
             });
         }
