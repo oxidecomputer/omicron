@@ -27,6 +27,10 @@ const CMD_OMDB: &str = env!("CARGO_BIN_EXE_omdb");
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
+/// The `oximeter` list-producers command output is not easy to compare as a
+/// string directly because the timing of registrations with both our test
+/// producer and the one nexus registers. But, let's find our test producer
+/// in the list.
 fn assert_oximeter_list_producers_output(output: &str, ox_url: &str) {
     assert!(
         output.contains(format!("Collector ID: {}", OXIMETER_UUID).as_str())
@@ -193,10 +197,6 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         .is_some());
     assert!(!parsed.collections.is_empty());
 
-    // The `oximeter` list-producers command output is not easy to compare as a
-    // string directly because the timing of registrations with both our test
-    // producer and the one nexus registers. But, let's find our test producer
-    // in the list.
     let ox_invocation = &["oximeter", "list-producers"];
     let mut ox_output = String::new();
     let ox = ox_url.clone();
@@ -317,7 +317,7 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // Case: specified in multiple places (command-line argument wins)
-    let args = &["oxql", "--metrics-db-url", "junk"];
+    let args = &["oxql", "--clickhouse-url", "junk"];
     do_run(
         &mut output,
         move |exec| exec.env("OMDB_CLICKHOUSE_URL", &ch_url),
@@ -327,11 +327,6 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     assert_contents("tests/env.out", &output);
-
-    // The `oximeter` list-producers command output is not easy to compare as a
-    // string directly because the timing of registrations with both our test
-    // producer and the one nexus registers. But, let's find our test producer
-    // in the list.
 
     // Oximeter URL
     // Case 1: specified on the command line.

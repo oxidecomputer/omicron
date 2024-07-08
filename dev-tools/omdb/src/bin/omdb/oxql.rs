@@ -59,8 +59,7 @@ impl OxqlArgs {
             log.new(slog::o!("component" => "clickhouse-client")),
             opts,
         )
-        .await?;
-        Ok(())
+        .await
     }
 
     /// Resolve the ClickHouse URL to a socket address.
