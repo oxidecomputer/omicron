@@ -296,16 +296,13 @@ logdir /var/log/chrony
 log measurements statistics tracking
 
 # makestep <threshold> <limit>
-# We allow chrony to step the system clock if we are more than a day out,
-# regardless of how many clock updates have occurred since boot.
-# The boundary NTP servers are configured with local reference mode, which
-# means that if they start up without external connectivity, they will appear
-# as authoritative servers even if they are advertising January 1987
-# (which is the default system clock on a gimlet after boot).
-# This configuration allows a one-off adjustment once RSS begins and the
-# boundary servers are synchronised, after which the clock will advance
-# monotonically forwards.
-makestep 86400 -1
+# We allow chrony to step the system clock up to three times on startup if we
+# are more than a second out. Even though boundary NTP servers are configured
+# with local reference mode, they will not appear as authoritative servers
+# until they synchronize upstream. This configuration allows us to converge
+# quickly once the boundary servers converge. After this the clock will advance
+# monotonically forward.
+makestep 1.0 3
 
 # When a leap second occurs we slew the clock over approximately 37 seconds.
 leapsecmode slew
@@ -369,8 +366,10 @@ maxslewrate 2708.333
 
     let new_config = if *is_boundary {
         for s in servers {
-            let str_line =
-                format!("pool {} iburst maxdelay 0.1 maxsources 16\n", s);
+            let str_line = format!(
+                "pool {} iburst maxdelay 0.1 minpoll 0 maxpoll 3 maxsources 16\n",
+                s
+            );
             contents.push_str(&str_line)
         }
         contents
