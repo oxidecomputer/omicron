@@ -276,240 +276,58 @@ impl SagaRecovery {
             last_pass: LastPass::NeverStarted,
         }
     }
-}
 
-impl BackgroundTask for SagaRecovery {
-    fn activate<'a>(
-        &'a mut self,
-        opctx: &'a OpContext,
-    ) -> BoxFuture<'a, serde_json::Value> {
-        async {
-            let log = &opctx.log;
-            let datastore = &self.datastore;
-            // XXX-dap TODO-cleanup remove clone
-            let mut recovery =
-                SagaRecoveryState::new(log, self.sagas_to_ignore.clone());
+    fn activate_finish(&mut self, last_pass: LastPass) {
+        self.last_pass = last_pass;
 
-            // Fetch the list of not-yet-finished sagas that are assigned to
-            // this Nexus instance.
-            let result =
-                list_sagas_in_progress(&self.saga_recovery_opctx, &self.sec_id)
-                    .await;
-
-            // Process any newly-created sagas, adding them to our set of sagas
-            // to ignore during recovery.  We never want to try to recover a
-            // saga that was created within this Nexus's lifetime.
-            //
-            // It's critical that we do this *after* having fetched the
-            // candidate sagas from the database.  It's okay if one of these
-            // newly-created sagas doesn't show up in the candidate list
-            // (because it hadn't actually started at the point where we fetched
-            // the candidate list).  By contrast, if we did this step before
-            // fetching candidates, and a saga was immediately created and
-            // showed up in our candidate list, we'd erroneously conclude that
-            // it needed to be recovered.
-            update_sagas_started(
-                &mut self.sagas_to_ignore,
-                &mut self.sagas_started_rx,
-                &mut recovery,
-            );
-
-            let db_sagas = match result {
-                Ok(db_sagas) => db_sagas,
-                Err(error) => {
-                    return self.activate_finish(LastPass::Failed {
-                        message: InlineErrorChain::new(&error).to_string(),
-                    })
-                }
-            };
-
-            recovery_plan(&mut recovery, db_sagas);
-            recovery_execute(&mut recovery);
-
-            let last_pass = match result {
-                Ok(db_sagas) => LastPass::Success(
-                    self.recover_candidates(log, db_sagas, &mut recovery).await,
-                ),
-                Err(error) => LastPass::Failed {
-                    message: InlineErrorChain::new(&error).to_string(),
-                },
-            };
-
-            self.activate_finish(last_pass)
-        }
-        .boxed()
+        serde_json::to_value(SagaRecoveryTaskStatus {
+            recent_recoveries: self.recent_recoveries.clone(),
+            recent_failures: self.recent_failures.clone(),
+            last_pass: self.last_pass.clone(),
+        })
+        .unwrap()
     }
-}
 
-impl SagaRecovery {
-    // XXX-dap TODO-doc
-    async fn recover_candidates(
-        &mut self,
+    async fn recovery_execute(
         bgtask_log: &slog::Logger,
-        recovery: &mut SagaRecoveryState<'_>,
-        candidate_sagas: Vec<nexus_db_model::Saga>,
-    ) -> LastPassSuccess {
-        let nfound = candidate_sagas.len();
-        let mut nskipped = 0;
-        let mut nrecovered = 0;
-        let mut nfailed = 0;
-        let mut nambiguous = 0;
-        let mut nremoved = 0;
-        let time = Utc::now();
+        plan: &SagaRecoveryPlan,
+    ) -> SagaExecutionDone {
+        let builder = SagaExecutionDoneBuilder::new(bgtask_log);
 
-        let mut candidate_saga_ids: BTreeMap<
-            steno::SagaId,
-            nexus_db_model::Saga,
-        > = candidate_sagas
-            .into_iter()
-            .map(|saga| (saga.id.into(), saga))
-            .collect();
-
-        // First of all, remove finished sagas from our "ignore" set.
-        //
-        // "self.remove_next" was computed the last time we ran and
-        // contains sagas that either just started or already finished.  We
-        // couldn't really tell.  All we knew is that they were running
-        // in-memory but were not included in our database query for in-progress
-        // sagas.  At this point, though, we've done a second database query for
-        // in-progress sagas.  Any items that aren't in that list either cannot
-        // still be running, so we can safely remove them from our ignore set.
-        for saga_id in &self.remove_next {
-            if !candidate_saga_ids.contains_key(saga_id) {
-                info!(
-                    bgtask_log,
-                    "considering saga done \
-                     (missing from two database listings)";
-                    "saga_id" => %saga_id,
-                );
-                // XXX-dap keep a total counter of this
-
-                if !self.sagas_to_ignore.remove(saga_id) {
-                    panic!(
-                        "entry in `self.remove_next` was not in \
-                         `self.sagas_to_ignore`"
-                    );
-                }
-
-                nremoved += 1;
-            }
-        }
-
-        // Figure out which of the candidate sagas can clearly be skipped.
-        // Correctness here requires that the caller has already updated the set
-        // of sagas that we're ignoring to include any that may have been
-        // created up to the beginning of the database query.  Since we now have
-        // the list of sagas that were not-finished in the database, we can
-        // compare these two sets.
-        let mut remove_next = Vec::new();
-        for running_saga_id in &self.sagas_to_ignore {
-            match candidate_saga_ids.remove(running_saga_id) {
-                None => {
-                    // The saga is in the ignore set, but not the database list
-                    // of running sagas.  It's possible that the saga has simply
-                    // finished.  And if the saga is definitely not running any
-                    // more, then we can remove it from the ignore set.  This is
-                    // important to keep that set from growing without bound.
-                    //
-                    // But it's also possible that the saga started immediately
-                    // after the database query's snapshot, in which case we
-                    // don't really know if it's still running.
-                    //
-                    // The way to resolve this is to do another database query
-                    // for unfinished sagas.  If it's not in that list, the saga
-                    // must have finished.  Rather than do that now, we'll just
-                    // keep track of this list and take care of it in the next
-                    // activation.
-                    nambiguous += 1;
-                    remove_next.push(*running_saga_id);
-                }
-
-                Some(found_saga) => {
-                    // The saga is in the ignore set and the database list of
-                    // running sagas.  It may have been created in the lifetime
-                    // of this program or we may have recovered it previously,
-                    // but either way, we don't have to do anything else with
-                    // this one.
-                    trace!(bgtask_log, "ignoring candidate saga";
-                        "saga_id" => ?running_saga_id,
-                        "saga_name" => &found_saga.name,
-                        "reason" => "already running",
-                    );
-                    nskipped += 1;
-                }
-            }
-        }
-
-        self.remove_next = remove_next;
-
-        // Whatever's left in `candidate_saga_ids` at this point was found in
-        // the database list of running sagas but is not in the ignore set.  We
-        // must recover it.  (It's not possible that we already did recover it
-        // because we would have added it to our ignore set.  It's not possible
-        // that it was newly started because the starter sends a message to add
-        // this to the ignore set (and waits for it to make it to the channel)
-        // before writing the database record, and we read everything off that
-        // channel and added it to the set before calling this function.
-        //
-        // Load and resume all these sagas serially.  Too much parallelism here
-        // could overload the database.  It wouldn't buy us much anyway to
-        // parallelize this since these operations should generally be quick,
-        // and there shouldn't be too many sagas outstanding, and Nexus has
-        // already crashed so they've experienced a bit of latency already.
-        for (saga_id, saga) in candidate_saga_ids {
+        for (saga_id, saga) in &plan.needs_recovery {
             let saga_log = self.nexus.log.new(o!(
                 "saga_name" => saga.name.clone(),
                 "saga_id" => saga_id.to_string(),
             ));
 
-            info!(&saga_log, "recovering saga: start");
+            builder.saga_recovery_start(*saga_id, saga_log.clone());
             match self.recover_one_saga(bgtask_log, &saga_log, saga).await {
                 Ok(completion_future) => {
-                    info!(&saga_log, "recovered saga");
-                    nrecovered += 1;
-                    // XXX-dap what to do with the completion future (besides
-                    // boxing it)
-                    self.recent_recoveries
-                        .append(RecoverySuccess { time, saga_id })
+                    builder.saga_recovery_success(saga_id, completion_future);
                 }
                 Err(error) => {
                     // It's essential that we not bail out early just because we
                     // hit an error here.  We want to recover all the sagas that
                     // we can.
-                    error!(&saga_log, "failed to recover saga"; &error);
-                    nfailed += 1;
-                    self.recent_failures.append(RecoveryFailure {
-                        time,
-                        saga_id,
-                        message: InlineErrorChain::new(&error).to_string(),
-                    });
+                    builder.saga_recovery_failure(saga_id, &error);
                 }
             }
         }
 
-        info!(bgtask_log, "saga recovery pass completed";
-            "nrecovered" => nrecovered,
-            "nfailed" => nfailed,
-            "nskipped" => nskipped,
-            "nambiguous" => nambiguous,
-            "nremove_next" => self.remove_next.len(),
-        );
-
-        assert_eq!(nrecovered + nfailed + nskipped + nambiguous, nfound);
-        LastPassSuccess { nfound, nrecovered, nfailed, nskipped, nremoved }
+        builder.build()
     }
 
     async fn recover_one_saga(
         &self,
         bgtask_logger: &slog::Logger,
         saga_logger: &slog::Logger,
-        saga: nexus_db_model::Saga,
+        saga: &nexus_db_model::Saga,
     ) -> Result<BoxFuture<'static, Result<(), Error>>, Error> {
         let datastore = &self.datastore;
         let saga_id: steno::SagaId = saga.id.into();
 
         let log_events = datastore
-            .saga_fetch_log_batched(&self.saga_recovery_opctx, &saga)
+            .saga_fetch_log_batched(&self.saga_recovery_opctx, saga)
             .await
             .with_internal_context(|| format!("recovering saga {saga_id}"))?;
         trace!(bgtask_logger, "recovering saga: loaded log";
@@ -530,7 +348,7 @@ impl SagaRecovery {
             .saga_resume(
                 saga_id,
                 saga_context,
-                saga.saga_dag,
+                saga.saga_dag.clone(),
                 self.registry.clone(),
                 log_events,
             )
@@ -559,94 +377,281 @@ impl SagaRecovery {
         }
         .boxed())
     }
+}
 
-    fn activate_finish(&mut self, last_pass: LastPass) {
-        self.last_pass = last_pass;
+impl BackgroundTask for SagaRecovery {
+    fn activate<'a>(
+        &'a mut self,
+        opctx: &'a OpContext,
+    ) -> BoxFuture<'a, serde_json::Value> {
+        async {
+            let log = &opctx.log;
+            let datastore = &self.datastore;
 
-        serde_json::to_value(SagaRecoveryTaskStatus {
-            recent_recoveries: self.recent_recoveries.clone(),
-            recent_failures: self.recent_failures.clone(),
-            last_pass: self.last_pass.clone(),
-        })
-        .unwrap()
+            // Fetch the list of not-yet-finished sagas that are assigned to
+            // this Nexus instance.
+            let result =
+                list_sagas_in_progress(&self.saga_recovery_opctx, &self.sec_id)
+                    .await;
+
+            // Process any newly-created sagas, adding them to our set of sagas
+            // to ignore during recovery.  We never want to try to recover a
+            // saga that was created within this Nexus's lifetime.
+            //
+            // It's critical that we do this *after* having fetched the
+            // candidate sagas from the database.  It's okay if one of these
+            // newly-created sagas doesn't show up in the candidate list
+            // (because it hadn't actually started at the point where we fetched
+            // the candidate list).  By contrast, if we did this step before
+            // fetching candidates, and a saga was immediately created and
+            // showed up in our candidate list, we'd erroneously conclude that
+            // it needed to be recovered.
+            update_sagas_started(
+                &mut self.sagas_to_ignore,
+                &mut self.sagas_started_rx,
+            );
+
+            // If we failed to fetch the list of in-progress sagas from the
+            // database, bail out now.  There's nothing more we can do.
+            let db_sagas = match result {
+                Ok(db_sagas) => db_sagas,
+                Err(error) => {
+                    return self.activate_finish(LastPass::Failed {
+                        message: InlineErrorChain::new(&error).to_string(),
+                    })
+                }
+            };
+
+            let plan = SagaRecoveryPlan::new(
+                log,
+                &self.remove_next,
+                &mut self.sagas_to_ignore,
+                db_sagas,
+            );
+            let last_pass =
+                LastPass::Success(self.recovery_execute(log, &plan).await);
+            self.activate_finish(last_pass)
+        }
+        .boxed()
     }
 }
 
-struct SagaRecoveryState<'a> {
-    log: &'a slog::Logger,
-    sagas_started_before: BTreeSet<steno::SagaId>,
-    sagas_newly_started: BTreeSet<steno::SagaId>,
-    sagas_inferred_done: BTreeSet<steno::SagaId>,
+struct SagaRecoveryPlan {
+    needs_recovery: BTreeMap<steno::SagaId, nexus_db_model::Saga>,
+    skipped_running: BTreeSet<steno::SagaId>,
+    inferred_done: BTreeSet<steno::SagaId>,
+    maybe_done: BTreeSet<steno::SagaId>,
 }
 
-impl<'a> SagaRecoveryState<'a> {
+impl SagaRecoveryPlan {
     pub fn new(
-        log: &'a slog::Logger,
-        sagas_started_before: BTreeSet<steno::SagaId>,
-    ) -> SagaRecoveryState<'a> {
-        SagaRecoveryState {
+        log: &slog::Logger,
+        previously_maybe_done: &[steno::SagaId],
+        sagas_started: &mut BTreeSet<steno::SagaId>,
+        running_sagas_found: BTreeMap<steno::SagaId, nexus_db_model::Saga>,
+    ) -> SagaRecoveryPlan {
+        let builder = SagaRecoveryPlanBuilder::new();
+
+        // First of all, remove finished sagas from our "ignore" set.
+        //
+        // `previously_maybe_done` was computed the last time we ran and
+        // contains sagas that either just started or already finished.  We
+        // couldn't really tell.  All we knew is that they were running
+        // in-memory but were not included in our database query for in-progress
+        // sagas.  At this point, though, we've done a second database query for
+        // in-progress sagas.  Any items that aren't in that list either cannot
+        // still be running, so we can safely remove them from our ignore set.
+        for saga_id in previously_maybe_done {
+            if !running_sagas_found.contains_key(saga_id) {
+                builder.saga_infer_done(*saga_id);
+            }
+        }
+
+        // Figure out which of the candidate sagas can clearly be skipped.
+        // Correctness here requires that the caller has already updated the set
+        // of sagas that we're ignoring to include any that may have been
+        // created up to the beginning of the database query.  Since we now have
+        // the list of sagas that were not-finished in the database, we can
+        // compare these two sets.
+        for running_saga_id in sagas_started {
+            match running_sagas_found.remove(running_saga_id) {
+                None => {
+                    // The saga is in the ignore set, but not the database list
+                    // of running sagas.  It's possible that the saga has simply
+                    // finished.  And if the saga is definitely not running any
+                    // more, then we can remove it from the ignore set.  This is
+                    // important to keep that set from growing without bound.
+                    //
+                    // But it's also possible that the saga started immediately
+                    // after the database query's snapshot, in which case we
+                    // don't really know if it's still running.
+                    //
+                    // The way to resolve this is to do another database query
+                    // for unfinished sagas.  If it's not in that list, the saga
+                    // must have finished.  Rather than do that now, we'll just
+                    // keep track of this list and take care of it in the next
+                    // activation.
+                    builder.saga_recovery_maybe_done(*running_saga_id)
+                }
+
+                Some(found_saga) => {
+                    // The saga is in the ignore set and the database list of
+                    // running sagas.  It may have been created in the lifetime
+                    // of this program or we may have recovered it previously,
+                    // but either way, we don't have to do anything else with
+                    // this one.
+                    builder.saga_recovery_not_needed(
+                        *running_saga_id,
+                        "already running",
+                    );
+                }
+            }
+        }
+
+        // Whatever's left in `running_sagas_found` at this point was found in
+        // the database list of running sagas but is not in the ignore set.  We
+        // must recover it.  (It's not possible that we already did recover it
+        // because we would have added it to our ignore set.  It's not possible
+        // that it was newly started because the starter sends a message to add
+        // this to the ignore set (and waits for it to make it to the channel)
+        // before writing the database record, and we read everything off that
+        // channel and added it to the set before calling this function.
+        //
+        // Load and resume all these sagas serially.  Too much parallelism here
+        // could overload the database.  It wouldn't buy us much anyway to
+        // parallelize this since these operations should generally be quick,
+        // and there shouldn't be too many sagas outstanding, and Nexus has
+        // already crashed so they've experienced a bit of latency already.
+        for (saga_id, saga) in running_sagas_found {
+            builder.saga_recovery_needed(saga_id, saga);
+        }
+
+        builder.build()
+    }
+}
+
+struct SagaRecoveryPlanBuilder<'a> {
+    log: &'a slog::Logger,
+    needs_recovery: BTreeMap<steno::SagaId, nexus_db_model::Saga>,
+    skipped_running: BTreeSet<steno::SagaId>,
+    inferred_done: BTreeSet<steno::SagaId>,
+    maybe_done: BTreeSet<steno::SagaId>,
+}
+
+impl<'a> SagaRecoveryPlanBuilder<'a> {
+    pub fn new(log: &'a slog::Logger) {
+        SagaRecoveryPlanBuilder {
             log,
-            sagas_started_before,
-            sagas_newly_started: BTreeSet::new(),
-            sagas_inferred_done: BTreeSet::new(),
+            needs_recovery: BTreeMap::new(),
+            skipped_running: BTreeSet::new(),
+            inferred_done: BTreeSet::new(),
+            maybe_done: BTreeSet::new(),
         }
     }
 
-    pub fn saga_observe_start(
-        &mut self,
-        saga_id: steno::SagaId,
-        reason: &'static str,
-    ) {
-        // XXX-dap log entry
-        // XXX-dap panic if already present
-        self.sagas_newly_started.insert(saga_id);
+    pub fn build(self) {
+        SagaRecoveryPlan {
+            needs_recovery: self.needs_recovery,
+            skipped_running: self.skipped_running,
+            inferred_done: self.inferred_done,
+            maybe_done: self.maybe_done,
+        }
     }
 
     pub fn saga_infer_done(&mut self, saga_id: steno::SagaId) {
         // XXX-dap log entry
         // XXX-dap panic if already present
-        self.sagas_inferred_done.insert(saga_id);
+        self.inferred_done.insert(saga_id);
     }
-
-    pub fn saga_recovery_start(&mut self, saga_id: steno::SagaId) {
-        // XXX-dap log entry
-        // XXX-dap bookkeeping
-    }
-
-    pub fn saga_recovery_success(&mut self, saga_id: steno::SagaId) {
-        // XXX-dap log entry
-        // XXX-dap record success
-        // XXX-dap bookkeeping
-    }
-
-    pub fn saga_recovery_failure(&mut self, saga_id: steno::SagaId) {
-        // XXX-dap log entry
-        // XXX-dap record failure
-        // XXX-dap bookkeeping
-    }
-
     pub fn saga_recovery_not_needed(
         &mut self,
         saga_id: steno::SagaId,
         reason: &'static str,
     ) {
         // XXX-dap log entry
-        // XXX-dap bookkeeping
+        // XXX-dap panic if already present
+        self.skipped_running.insert(saga_id)
     }
 
     pub fn saga_recovery_maybe_done(&mut self, saga_id: steno::SagaId) {
         // XXX-dap log entry
+        // XXX-dap panic if already present
+        self.maybe_done.insert(saga_id);
     }
 
     pub fn saga_recovery_needed(&mut self, saga_id: steno::SagaId) {
-        // XXX-dap bookkeeping
+        // XXX-dap log entry
+        // XXX-dap panic if already present
+        self.needs_recovery.insert(saga_id);
+    }
+}
+
+struct SagaExecutionDone {
+    succeeded: Vec<RecoverySuccess>,
+    failed: Vec<RecoveryFailure>,
+    // XXX-dap only under cfg(test)
+    completion_futures: Vec<BoxFuture<'static, Result<(), Error>>>,
+}
+
+struct SagaExecutionDoneBuilder<'a> {
+    log: &'a slog::Logger,
+    in_progress: BTreeMap<steno::SagaId, slog::Logger>,
+    succeeded: Vec<RecoverySuccess>,
+    failed: Vec<RecoveryFailed>,
+}
+
+impl<'a> SagaExecutionDoneBuilder<'a> {
+    pub fn new(log: &'a slog::Logger) -> SagaExecutionDoneBuilder<'a> {
+        SagaExecutionDoneBuilder {
+            log,
+            in_progress: BTreeSet::new(),
+            succeeded: Vec::new(),
+            failed: Vec::new(),
+        }
     }
 
-    // XXX-dap what am I doing here?  This sort of seems useful to decouple the
-    // logic from the summary of the result... but also, it's kind of the
-    // opposite of what I need?  I need a programmatic way to access what the
-    // logic wants to do, not _produce_ it.  I can add some read interfaces to
-    // this I guess?
+    pub fn build(self) -> SagaExecutionDone {
+        assert!(
+            self.in_progress.is_empty(),
+            "attempted to build execution result while some recoveries are \
+            still in progress"
+        );
+        SagaExecutionDone { succeeded: self.succeeded, failed: self.failed }
+    }
+
+    pub fn saga_recovery_start(
+        &mut self,
+        saga_id: steno::SagaId,
+        saga_logger: slog::Logger,
+    ) {
+        // XXX-dap log entry
+        self.in_progress.insert(saga_id, saga_logger);
+    }
+
+    pub fn saga_recovery_success(
+        &mut self,
+        saga_id: steno::SagaId,
+        completion_future: BoxFuture<'static, Result<(), Error>>,
+    ) {
+        // XXX-dap log entry
+        self.in_progress.remove(saga_id);
+        self.succeeded.push(RecoverySuccess { time: Utc::now(), saga_id });
+        self.completion_futures.push(completion_future);
+    }
+
+    pub fn saga_recovery_failure(
+        &mut self,
+        saga_id: steno::SagaId,
+        error: &Error,
+    ) {
+        // XXX-dap log entry
+        self.in_progress.remove(saga_id);
+        self.failed.push(RecoveryFailure {
+            time: Utc::now(),
+            saga_id,
+            message: InlineErrorChain::new(error).to_string(),
+        });
+    }
 }
 
 // Helpers
@@ -674,7 +679,7 @@ async fn list_sagas_in_progress(
             info!(log, "listed in-progress sagas"; "count" => list.len());
         }
         Err(error) => {
-            warn!(log, "failed to list in-progress sagas", error);
+            warn!(log, "failed to list in-progress sagas"; error);
         }
     };
 }
@@ -682,12 +687,13 @@ async fn list_sagas_in_progress(
 async fn update_sagas_started(
     set: &mut BTreeSet<steno::SagaId>,
     rx: &mut mpsc::UnboundedReceiver<T>,
-    recovery: &mut SagaRecoveryState,
 ) {
     let (new_sagas, disconnected) = read_all_from_channel(rx);
     // XXX-dap warn on disconnected
     for saga_id in new_sagas {
-        recovery.saga_observe_start(saga_id, "received start message");
+        // XXX-dap log message (reason: "received start message")
+        // XXX-dap panic if needed
+        set.insert(saga_id);
     }
 }
 
