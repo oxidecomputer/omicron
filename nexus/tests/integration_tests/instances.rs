@@ -629,8 +629,7 @@ async fn test_instance_start_creates_networking_state(
     instance_simulate(nexus, &instance_id).await;
     instance_post(&client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance_id).await;
-    let instance = instance_get(&client, &instance_url).await;
-    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     // Forcibly clear the instance's V2P mappings to simulate what happens when
     // the control plane comes up when an instance is stopped.
@@ -1226,9 +1225,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
         instance_post(&client, instance_name, InstanceOp::Stop).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     instance_simulate(nexus, &instance_id).await;
-    let instance =
-        instance_get(&client, &get_instance_url(&instance_name)).await;
-    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     let virtual_provisioning_collection = datastore
         .virtual_provisioning_collection_get(&opctx, project_id)
@@ -4621,7 +4618,13 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
     .expect("Failed to stop the instance");
 
     instance_simulate_with_opctx(nexus, &instance_id, &opctx).await;
-    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+    instance_wait_for_state_as(
+        client,
+        AuthnMode::SiloUser(user_id),
+        instance_id,
+        InstanceState::Stopped,
+    )
+    .await;
 
     // Delete the instance
     NexusRequest::object_delete(client, &instance_url)
@@ -4709,6 +4712,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     instance_simulate(nexus, &instance_id).await;
     instance_post(&client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     let instance_url = get_instance_url(instance_name);
     NexusRequest::object_delete(client, &instance_url)
@@ -4780,6 +4784,23 @@ pub async fn instance_wait_for_state(
     instance_id: InstanceUuid,
     state: omicron_common::api::external::InstanceState,
 ) -> Instance {
+    instance_wait_for_state_as(
+        client,
+        AuthnMode::PrivilegedUser,
+        instance_id,
+        state,
+    )
+    .await
+}
+
+/// Line [`instance_wait_for_state`], but with an [`AuthnMode`] parameter for
+/// the instance lookup requests.
+pub async fn instance_wait_for_state_as(
+    client: &ClientTestContext,
+    authn_as: AuthnMode,
+    instance_id: InstanceUuid,
+    state: omicron_common::api::external::InstanceState,
+) -> Instance {
     const MAX_WAIT: Duration = Duration::from_secs(120);
 
     slog::info!(
@@ -4790,7 +4811,7 @@ pub async fn instance_wait_for_state(
     let result = wait_for_condition(
         || async {
             let instance: Instance = NexusRequest::object_get(client, &url)
-                .authn_as(AuthnMode::PrivilegedUser)
+                .authn_as(authn_as.clone())
                 .execute()
                 .await?
                 .parsed_body()?;
