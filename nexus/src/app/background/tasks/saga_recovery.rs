@@ -206,7 +206,7 @@ pub struct SagaRecovery {
     // XXX-dap sagas_recovered is not reasonable any more.  want
     // recent_recovered
     sagas_recovered: BTreeMap<SagaId, DateTime<Utc>>,
-    recent_failures: VecDeque<RecoveryFailure>,
+    recent_failures: DebuggingHistory<RecoveryFailure>,
     last_pass: LastPass,
 }
 
@@ -215,7 +215,7 @@ pub struct SagaRecovery {
 #[derive(Clone, Serialize)]
 pub struct SagaRecoveryTaskStatus {
     all_recovered: BTreeMap<SagaId, DateTime<Utc>>,
-    recent_failures: VecDeque<RecoveryFailure>,
+    recent_failures: DebuggingHistory<RecoveryFailure>,
     last_pass: LastPass,
 }
 
@@ -265,7 +265,7 @@ impl SagaRecovery {
             sagas_to_ignore: BTreeSet::new(),
             remove_next: Vec::new(),
             sagas_recovered: BTreeMap::new(),
-            recent_failures: VecDeque::with_capacity(N_FAILED_SAGA_HISTORY),
+            recent_failures: DebuggingHistory::new(N_FAILED_SAGA_HISTORY),
             last_pass: LastPass::NeverStarted,
         }
     }
@@ -505,10 +505,7 @@ impl SagaRecovery {
                     // we can.
                     error!(&saga_log, "failed to recover saga"; &error);
                     nfailed += 1;
-                    if self.recent_failures.len() == N_FAILED_SAGA_HISTORY {
-                        let _ = self.recent_failures.pop_front();
-                    }
-                    self.recent_failures.push_back(RecoveryFailure {
+                    self.recent_failures.append(RecoveryFailure {
                         time,
                         saga_id,
                         message: InlineErrorChain::new(&error).to_string(),
@@ -592,3 +589,25 @@ impl SagaRecovery {
 }
 
 // XXX-dap TODO-coverage
+#[derive(Clone, Serialize)]
+struct DebuggingHistory<T> {
+    size: usize,
+    ring: VecDeque<T>,
+}
+
+impl<T> DebuggingHistory<T> {
+    fn new(size: usize) -> DebuggingHistory<T> {
+        DebuggingHistory { size, ring: VecDeque::with_capacity(size) }
+    }
+
+    fn append(&mut self, t: T) {
+        let len = self.ring.len();
+        assert!(len <= self.size);
+        if len == self.size {
+            let _ = self.ring.pop_front();
+        }
+        self.ring.push_back(t);
+    }
+}
+
+// XXX-dap TODO-coverage everything here
