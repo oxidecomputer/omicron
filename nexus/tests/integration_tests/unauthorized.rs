@@ -222,7 +222,7 @@ static SETUP_REQUESTS: Lazy<Vec<SetupReq>> = Lazy::new(|| {
         },
         // Create the default Address Lot Block
         SetupReq::Post {
-            url: &DEMO_ADDRESS_LOT_BLOCKS_URL,
+            url: &DEMO_ADDRESS_LOT_BLOCK_ADD_URL,
             body: serde_json::to_value(&*DEMO_ADDRESS_LOT_BLOCK_CREATE)
                 .unwrap(),
             id_routes: vec![],

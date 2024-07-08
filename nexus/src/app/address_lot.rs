@@ -72,7 +72,7 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         address_lot_id: Uuid,
-        block: params::AddressLotBlockCreate,
+        block: params::AddressLotBlock,
     ) -> CreateResult<AddressLotBlock> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
         validate_block(&block)?;
@@ -84,11 +84,14 @@ impl super::Nexus {
     pub(crate) async fn address_lot_block_delete(
         self: &Arc<Self>,
         opctx: &OpContext,
-        address_lot: &lookup::AddressLot<'_>,
-        block: params::AddressLotBlockCreate,
+        address_lot_id: Uuid,
+        block: params::AddressLotBlock,
     ) -> DeleteResult {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        todo!("delete address lot block")
+        opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
+        validate_block(&block)?;
+        self.db_datastore
+            .address_lot_block_delete(opctx, address_lot_id, block)
+            .await
     }
 
     pub(crate) async fn address_lot_block_list(
@@ -105,7 +108,7 @@ impl super::Nexus {
     }
 }
 
-fn validate_block(block: &params::AddressLotBlockCreate) -> Result<(), Error> {
+fn validate_block(block: &params::AddressLotBlock) -> Result<(), Error> {
     match (&block.first_address, &block.last_address) {
         (IpAddr::V4(first), IpAddr::V4(last)) => {
             validate_v4_block(first, last)?

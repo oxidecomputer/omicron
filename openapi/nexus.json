@@ -6303,7 +6303,9 @@
         "x-dropshot-pagination": {
           "required": []
         }
-      },
+      }
+    },
+    "/v1/system/networking/address-lot/{address_lot}/blocks/add": {
       "post": {
         "tags": [
           "system/networking"
@@ -6325,7 +6327,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AddressLotBlockCreate"
+                "$ref": "#/components/schemas/AddressLotBlock2"
               }
             }
           },
@@ -6351,8 +6353,8 @@
         }
       }
     },
-    "/v1/system/networking/address-lot/{address_lot}/blocks/{block}": {
-      "delete": {
+    "/v1/system/networking/address-lot/{address_lot}/blocks/remove": {
+      "post": {
         "tags": [
           "system/networking"
         ],
@@ -6362,32 +6364,26 @@
           {
             "in": "path",
             "name": "address_lot",
-            "description": "The address lot the block belongs to",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "path",
-            "name": "block",
-            "description": "The block to delete from the address lot",
+            "description": "Name or ID of the address lot",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
           }
         ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AddressLotBlockResultsPage"
-                }
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddressLotBlock2"
               }
             }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -9820,7 +9816,7 @@
           "last_address"
         ]
       },
-      "AddressLotBlockCreate": {
+      "AddressLotBlock2": {
         "description": "Parameters for creating an address lot block. Fist and last addresses are inclusive.",
         "type": "object",
         "properties": {

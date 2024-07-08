@@ -258,7 +258,6 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_address_lot_create)?;
         api.register(networking_address_lot_delete)?;
 
-        // TODO: Levon - Operator-Accessible Address Lot Block API
         api.register(networking_address_lot_block_list)?;
         api.register(networking_address_lot_block_add)?;
         api.register(networking_address_lot_block_remove)?;
@@ -3500,13 +3499,13 @@ async fn networking_address_lot_list(
 /// Add block to address lot
 #[endpoint {
     method = POST,
-    path = "/v1/system/networking/address-lot/{address_lot}/blocks",
+    path = "/v1/system/networking/address-lot/{address_lot}/blocks/add",
     tags = ["system/networking"],
 }]
 async fn networking_address_lot_block_add(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::AddressLotPath>,
-    block: TypedBody<params::AddressLotBlockCreate>,
+    block: TypedBody<params::AddressLotBlock>,
 ) -> Result<HttpResponseCreated<AddressLotBlock>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -3536,25 +3535,17 @@ async fn networking_address_lot_block_add(
         .await
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct AddressLotBlockPath {
-    /// The address lot the block belongs to
-    address_lot: NameOrId,
-
-    /// The block to delete from the address lot
-    block: NameOrId,
-}
-
 /// Remove block from address lot
 #[endpoint {
-    method = DELETE,
-    path = "/v1/system/networking/address-lot/{address_lot}/blocks/{block}",
+    method = POST,
+    path = "/v1/system/networking/address-lot/{address_lot}/blocks/remove",
     tags = ["system/networking"],
 }]
 async fn networking_address_lot_block_remove(
     rqctx: RequestContext<ApiContext>,
-    path_params: Path<AddressLotBlockPath>,
-) -> Result<HttpResponseOk<ResultsPage<AddressLotBlock>>, HttpError> {
+    path_params: Path<params::AddressLotPath>,
+    block: TypedBody<params::AddressLotBlock>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
@@ -3563,7 +3554,18 @@ async fn networking_address_lot_block_remove(
         let address_lot_lookup =
             nexus.address_lot_lookup(&opctx, path.address_lot)?;
 
-        todo!("implement address lot block remove logic")
+        let (.., authz_address_lot) =
+            address_lot_lookup.lookup_for(authz::Action::CreateChild).await?;
+
+        nexus
+            .address_lot_block_delete(
+                &opctx,
+                authz_address_lot.id(),
+                block.into_inner(),
+            )
+            .await?;
+
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx
         .context

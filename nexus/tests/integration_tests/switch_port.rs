@@ -9,7 +9,7 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
-    Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
+    Address, AddressConfig, AddressLotBlock, AddressLotCreate,
     BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate,
     BgpPeerConfig, LinkConfigCreate, LldpServiceConfigCreate, Route,
     RouteConfig, SwitchInterfaceConfigCreate, SwitchInterfaceKind,
@@ -43,11 +43,11 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     };
 
     let block_params = vec![
-        AddressLotBlockCreate {
+        AddressLotBlock {
             first_address: "203.0.113.10".parse().unwrap(),
             last_address: "203.0.113.20".parse().unwrap(),
         },
-        AddressLotBlockCreate {
+        AddressLotBlock {
             first_address: "1.2.3.0".parse().unwrap(),
             last_address: "1.2.3.255".parse().unwrap(),
         },

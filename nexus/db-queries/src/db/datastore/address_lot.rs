@@ -16,13 +16,10 @@ use crate::db::pagination::paginated;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::{AsyncRunQueryDsl, Connection};
 use chrono::Utc;
-use diesel::pg::sql_types;
-use diesel::IntoSql;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use diesel_dtrace::DTraceConnection;
 use ipnetwork::IpNetwork;
 use nexus_types::external_api::params;
-use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
@@ -205,7 +202,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         address_lot_id: Uuid,
-        params: params::AddressLotBlockCreate,
+        params: params::AddressLotBlock,
     ) -> CreateResult<AddressLotBlock> {
         use db::schema::address_lot_block::dsl;
 
@@ -261,6 +258,83 @@ impl DataStore {
                         ),
                     ),
                 )
+            })
+    }
+
+    pub async fn address_lot_block_delete(
+        &self,
+        opctx: &OpContext,
+        address_lot_id: Uuid,
+        params: params::AddressLotBlock,
+    ) -> DeleteResult {
+        use db::schema::address_lot_block::dsl;
+        use db::schema::address_lot_rsvd_block::dsl as rsvd_block_dsl;
+
+        #[derive(Debug)]
+        enum AddressLotBlockDeleteError {
+            BlockInUse,
+        }
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper("address_lot_delete")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    let rsvd: Vec<AddressLotReservedBlock> =
+                        rsvd_block_dsl::address_lot_rsvd_block
+                            .filter(
+                                rsvd_block_dsl::address_lot_id
+                                    .eq(address_lot_id),
+                            )
+                            .filter(
+                                rsvd_block_dsl::first_address
+                                    .eq(IpNetwork::from(params.first_address)),
+                            )
+                            .filter(
+                                rsvd_block_dsl::last_address
+                                    .eq(IpNetwork::from(params.last_address)),
+                            )
+                            .select(AddressLotReservedBlock::as_select())
+                            .limit(1)
+                            .load_async(&conn)
+                            .await?;
+
+                    if !rsvd.is_empty() {
+                        return Err(
+                            err.bail(AddressLotBlockDeleteError::BlockInUse)
+                        );
+                    }
+
+                    diesel::delete(dsl::address_lot_block)
+                        .filter(dsl::address_lot_id.eq(address_lot_id))
+                        .filter(
+                            dsl::first_address
+                                .eq(IpNetwork::from(params.first_address)),
+                        )
+                        .filter(
+                            dsl::last_address
+                                .eq(IpNetwork::from(params.last_address)),
+                        )
+                        .execute_async(&conn)
+                        .await?;
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    match err {
+                        AddressLotBlockDeleteError::BlockInUse => {
+                            Error::invalid_request("block is in use")
+                        }
+                    }
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
             })
     }
 

@@ -550,6 +550,10 @@ pub const DEMO_ADDRESS_LOT_URL: &'static str =
     "/v1/system/networking/address-lot/parkinglot";
 pub const DEMO_ADDRESS_LOT_BLOCKS_URL: &'static str =
     "/v1/system/networking/address-lot/parkinglot/blocks";
+pub const DEMO_ADDRESS_LOT_BLOCK_ADD_URL: &'static str =
+    "/v1/system/networking/address-lot/parkinglot/blocks/add";
+pub const DEMO_ADDRESS_LOT_BLOCK_REMOVE_URL: &'static str =
+    "/v1/system/networking/address-lot/parkinglot/blocks/remove";
 pub static DEMO_ADDRESS_LOT_CREATE: Lazy<params::AddressLotCreate> =
     Lazy::new(|| params::AddressLotCreate {
         identity: IdentityMetadataCreateParams {
@@ -559,8 +563,8 @@ pub static DEMO_ADDRESS_LOT_CREATE: Lazy<params::AddressLotCreate> =
         kind: AddressLotKind::Infra,
     });
 
-pub static DEMO_ADDRESS_LOT_BLOCK_CREATE: Lazy<params::AddressLotBlockCreate> =
-    Lazy::new(|| params::AddressLotBlockCreate {
+pub static DEMO_ADDRESS_LOT_BLOCK_CREATE: Lazy<params::AddressLotBlock> =
+    Lazy::new(|| params::AddressLotBlock {
         first_address: "203.0.113.10".parse().unwrap(),
         last_address: "203.0.113.20".parse().unwrap(),
     });
@@ -2231,14 +2235,42 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         },
 
         VerifyEndpoint {
-            url: &DEMO_ADDRESS_LOT_BLOCKS_URL,
+            url: &DEMO_ADDRESS_LOT_BLOCK_ADD_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_ADDRESS_LOT_BLOCK_CREATE).unwrap(),
                 ),
-                AllowedMethod::Get
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_ADDRESS_LOT_BLOCKS_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_ADDRESS_LOT_BLOCK_REMOVE_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_ADDRESS_LOT_BLOCK_CREATE).unwrap(),
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_ADDRESS_LOT_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Delete,
             ],
         },
 
