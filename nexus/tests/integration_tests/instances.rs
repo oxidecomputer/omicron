@@ -2087,6 +2087,7 @@ async fn test_instance_create_delete_network_interface(
     let instance = instance_post(client, instance_name, InstanceOp::Stop).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     // Verify we can now make the requests again
     let mut interfaces = Vec::with_capacity(2);
@@ -2156,6 +2157,7 @@ async fn test_instance_create_delete_network_interface(
     // Stop the instance and verify we can delete the interface
     instance_post(client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     // We should not be able to delete the primary interface, while the
     // secondary still exists
@@ -2294,6 +2296,7 @@ async fn test_instance_update_network_interfaces(
     let instance = instance_post(client, instance_name, InstanceOp::Stop).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     // Create the first interface on the instance.
     let primary_iface = NexusRequest::objects_post(
@@ -2489,6 +2492,7 @@ async fn test_instance_update_network_interfaces(
     // Stop the instance again.
     instance_post(client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     // Verify that we can set the secondary as the new primary, and that nothing
     // else changes about the NICs.
@@ -3787,6 +3791,8 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
     instance_simulate(nexus, &instance_id).await;
     instances[1] = instance_post(client, configs[1].0, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
     expect_instance_start_ok(client, configs[2].0).await;
 }
 
@@ -3894,6 +3900,8 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
     instance_simulate(nexus, &instance_id).await;
     instances[1] = instance_post(client, configs[1].0, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
     expect_instance_start_ok(client, configs[2].0).await;
 }
 
