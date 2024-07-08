@@ -421,8 +421,9 @@ async fn test_instances_create_reboot_halt(
 
     let instance = instance_next;
     instance_simulate(nexus, &instance_id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, InstanceState::Stopped);
+    let instance_next =
+        instance_wait_for_state(client, instance_id, InstanceState::Stopped)
+            .await;
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -516,8 +517,9 @@ async fn test_instances_create_reboot_halt(
     // assert_eq!(error.message, "cannot reboot instance in state \"stopping\"");
     let instance = instance_next;
     instance_simulate(nexus, &instance_id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, InstanceState::Stopped);
+    let instance_next =
+        instance_wait_for_state(client, instance_id, InstanceState::Stopped)
+            .await;
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
