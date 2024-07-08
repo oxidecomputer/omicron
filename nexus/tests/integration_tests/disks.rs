@@ -4,6 +4,7 @@
 
 //! Tests basic disk support in the API
 
+use super::instances::instance_wait_for_state;
 use super::metrics::{get_latest_silo_metric, query_for_metrics};
 use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
@@ -37,6 +38,7 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_nexus::app::{MAX_DISK_SIZE_BYTES, MIN_DISK_SIZE_BYTES};
@@ -395,6 +397,8 @@ async fn test_disk_slot_assignment(cptestctx: &ControlPlaneTestContext) {
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     set_instance_state(&client, INSTANCE_NAME, "stop").await;
     instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(&client, INSTANCE_NAME, InstanceState::Stopped)
+        .await;
     let url_instance_disks =
         get_instance_disks_url(instance.identity.name.as_str());
     let listed_disks = disks_list(&client, &url_instance_disks).await;
@@ -504,6 +508,8 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     // is an artificial limitation without hotplug support.
     set_instance_state(&client, INSTANCE_NAME, "stop").await;
     instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(&client, INSTANCE_NAME, InstanceState::Stopped)
+        .await;
 
     // Verify that there are no disks attached to the instance, and specifically
     // that our disk is not attached to this instance.
