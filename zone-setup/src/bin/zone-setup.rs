@@ -257,16 +257,23 @@ maxslewrate 2708.333
 
 ";
 
+    let ChronySetupArgs {
+        file: config_path,
+        boundary: is_boundary,
+        servers,
+        allow,
+    } = args;
+
     let mut new_config =
-        if args.boundary { boundary_ntp_tpl } else { internal_ntp_tpl }
+        if is_boundary { boundary_ntp_tpl } else { internal_ntp_tpl }
             .to_string();
 
-    if let Some(allow) = args.allow {
+    if let Some(allow) = allow {
         new_config = new_config.replace("@ALLOW@", &allow);
     }
 
-    if args.boundary {
-        for s in args.servers {
+    if is_boundary {
+        for s in servers {
             writeln!(
                 &mut new_config,
                 "pool {s} iburst maxdelay 0.1 maxsources 16"
@@ -274,7 +281,7 @@ maxslewrate 2708.333
             .expect("write to String is infallible");
         }
     } else {
-        for s in args.servers {
+        for s in servers {
             writeln!(&mut new_config, "server {s} iburst minpoll 0 maxpoll 4")
                 .expect("write to String is infallible");
         }
@@ -282,11 +289,11 @@ maxslewrate 2708.333
 
     // We read the contents from the old configuration file if it existed
     // so that we can verify if it changed.
-    let old_file = if args.file.exists() {
-        Some(read_to_string(&args.file).with_context(|| {
+    let old_file = if config_path.exists() {
+        Some(read_to_string(&config_path).with_context(|| {
             format!(
                 "failed reading old chrony config file {}",
-                args.file.display(),
+                config_path.display(),
             )
         })?)
     } else {
@@ -297,26 +304,28 @@ maxslewrate 2708.333
         .write(true)
         .create(true)
         .truncate(true)
-        .open(&args.file)
+        .open(&config_path)
         .with_context(|| {
             format!(
-                "failed to create chrony config file {}",
-                args.file.display(),
+                "failed to create chrony config config_path {}",
+                config_path.display(),
             )
         })?;
     config_file.write(new_config.as_bytes()).with_context(|| {
         format!(
             "failed writing chrony configuration file {}",
-            args.file.display(),
+            config_path.display(),
         )
     })?;
 
-    if old_file.clone().is_some_and(|f| f != new_config) {
-        info!(
-            &log, "Chrony configuration file has changed";
-            "old configuration file" => ?old_file,
-            "new configuration file" => ?new_config,
-        );
+    if let Some(old_config) = old_file {
+        if old_config != new_config {
+            info!(
+                log, "Chrony configuration file has changed";
+                "old configuration file" => ?old_config,
+                "new configuration file" => ?new_config,
+            );
+        }
     }
 
     Ok(())
@@ -328,57 +337,48 @@ async fn common_nw_set_up(
 ) -> anyhow::Result<()> {
     let zonename =
         zone::current().await.context("could not determine local zone name")?;
+    let CommonNetworkingArgs { datalink, gateway, static_addr } = args;
 
     // TODO: remove when https://github.com/oxidecomputer/stlouis/issues/435 is
     // addressed
     info!(
         log, "Ensuring a temporary IP interface is created";
-        "data link" => ?args.datalink,
+        "data link" => ?datalink,
     );
-    Ipadm::set_temp_interface_for_datalink(&args.datalink).with_context(
-        || {
-            format!(
-                "failed to ensure temporary IP interface on datalink {}",
-                args.datalink
-            )
-        },
-    )?;
+    Ipadm::set_temp_interface_for_datalink(&datalink).with_context(|| {
+        format!(
+            "failed to ensure temporary IP interface on datalink {datalink}",
+        )
+    })?;
 
     info!(
         log, "Setting MTU to 9000 for IPv6 and IPv4";
-        "data link" => ?args.datalink,
+        "data link" => ?datalink,
     );
-    Ipadm::set_interface_mtu(&args.datalink).with_context(|| {
-        format!("failed to set MTU on datalink {}", args.datalink)
-    })?;
+    Ipadm::set_interface_mtu(&datalink)
+        .with_context(|| format!("failed to set MTU on datalink {datalink}"))?;
 
     info!(
         log,
         "Ensuring static and auto-configured addresses are set on the IP \
          interface";
-        "data link" => ?args.datalink,
-        "static address" => ?args.static_addr);
-    Ipadm::create_static_and_autoconfigured_addrs(
-        &args.datalink,
-        &args.static_addr,
-    )
-    .with_context(|| {
-        format!(
-            "failed to ensure static address {} on datalink {}",
-            args.static_addr, args.datalink
-        )
-    })?;
+        "data link" => ?datalink,
+        "static address" => ?static_addr);
+    Ipadm::create_static_and_autoconfigured_addrs(&datalink, &static_addr)
+        .with_context(|| {
+            format!(
+                "failed to ensure static address {static_addr} \
+                on datalink {datalink}",
+            )
+        })?;
 
     info!(
         log, "Ensuring there is a default route";
-        "gateway" => ?args.gateway,
+        "gateway" => ?gateway,
     );
-    Route::ensure_default_route_with_gateway(Gateway::Ipv6(args.gateway))
+    Route::ensure_default_route_with_gateway(Gateway::Ipv6(gateway))
         .with_context(|| {
-            format!(
-                "failed to ensure default route via gateway {}",
-                args.gateway
-            )
+            format!("failed to ensure default route via gateway {gateway}")
         })?;
 
     info!(
@@ -391,9 +391,8 @@ async fn common_nw_set_up(
             r#"
 ::1 localhost loghost
 127.0.0.1 localhost loghost
-{} {zonename}.local {zonename}
+{static_addr} {zonename}.local {zonename}
 "#,
-            args.static_addr
         ),
     )
     .with_context(|| format!("failed to write hosts file {HOSTS_FILE}"))?;
@@ -405,40 +404,36 @@ async fn opte_interface_set_up(
     args: OpteInterfaceArgs,
     log: &Logger,
 ) -> anyhow::Result<()> {
+    let OpteInterfaceArgs { interface, gateway, ip } = args;
     info!(
         log,
         "Creating gateway on the OPTE IP interface if it doesn't already exist";
-        "OPTE interface" => ?args.interface
+        "OPTE interface" => ?interface
     );
-    Ipadm::create_opte_gateway(&args.interface).with_context(|| {
-        format!("failed to create OPTE gateway on interface {}", args.interface)
+    Ipadm::create_opte_gateway(&interface).with_context(|| {
+        format!("failed to create OPTE gateway on interface {interface}")
     })?;
 
     info!(
         log, "Ensuring there is a gateway route";
-        "OPTE gateway" => ?args.gateway,
-        "OPTE interface" => ?args.interface,
-        "OPTE IP" => ?args.ip,
+        "OPTE gateway" => ?gateway,
+        "OPTE interface" => ?interface,
+        "OPTE IP" => ?ip,
     );
-    Route::ensure_opte_route(&args.gateway, &args.interface, &args.ip)
-        .with_context(|| {
-            format!(
-                "failed to ensure OPTE gateway route on interface {} \
-                 with gateway {} and IP {}",
-                args.interface, args.gateway, args.ip
-            )
-        })?;
+    Route::ensure_opte_route(&gateway, &interface, &ip).with_context(|| {
+        format!(
+            "failed to ensure OPTE gateway route on interface {interface} \
+                 with gateway {gateway} and IP {ip}",
+        )
+    })?;
 
     info!(
         log, "Ensuring there is a default route";
-        "gateway" => ?args.gateway,
+        "gateway" => ?gateway,
     );
-    Route::ensure_default_route_with_gateway(Gateway::Ipv4(args.gateway))
+    Route::ensure_default_route_with_gateway(Gateway::Ipv4(gateway))
         .with_context(|| {
-            format!(
-                "failed to ensure default route via gateway {}",
-                args.gateway
-            )
+            format!("failed to ensure default route via gateway {gateway}")
         })?;
 
     Ok(())
