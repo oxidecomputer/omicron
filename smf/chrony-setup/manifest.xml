@@ -12,7 +12,7 @@
   </dependency>
 
   <exec_method type='method' name='start'
-    exec='/opt/oxide/zone-setup-cli/bin/zone-setup chrony-setup -b %{config/boundary} -s %{config/server} -a %{config/allow}'
+    exec='/opt/oxide/zone-setup-cli/bin/zone-setup chrony-setup -b %{config/boundary} -p ${config/boundary_pool} -s %{config/server} -a %{config/allow}'
     timeout_seconds='0'>
   <method_context security_flags="aslr">
   <method_credential user="root" group="root"
@@ -27,6 +27,7 @@
 
   <property_group name="config" type="application">
     <propval name="boundary" type="boolean" value="false" />
+    <propval name="boundary_pool" type="astring" value="" />
     <propval name="server" type="astring" value="" />
     <propval name="allow" type="astring" value="" />
   </property_group>
