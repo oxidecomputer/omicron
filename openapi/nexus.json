@@ -8401,7 +8401,7 @@
           {
             "in": "query",
             "name": "vpc",
-            "description": "Name or ID of the VPC, only required if `subnet` is provided as a `Name`",
+            "description": "Name or ID of the VPC, only required if `router` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -8458,7 +8458,7 @@
           {
             "in": "query",
             "name": "vpc",
-            "description": "Name or ID of the VPC, only required if `subnet` is provided as a `Name`",
+            "description": "Name or ID of the VPC, only required if `router` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -8531,7 +8531,7 @@
           {
             "in": "query",
             "name": "vpc",
-            "description": "Name or ID of the VPC, only required if `subnet` is provided as a `Name`",
+            "description": "Name or ID of the VPC, only required if `router` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -8591,7 +8591,7 @@
           {
             "in": "query",
             "name": "vpc",
-            "description": "Name or ID of the VPC, only required if `subnet` is provided as a `Name`",
+            "description": "Name or ID of the VPC, only required if `router` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -8661,7 +8661,7 @@
           {
             "in": "query",
             "name": "vpc",
-            "description": "Name or ID of the VPC, only required if `subnet` is provided as a `Name`",
+            "description": "Name or ID of the VPC, only required if `router` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
