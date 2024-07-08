@@ -54,6 +54,13 @@ pub struct FieldSchema {
     pub description: String,
 }
 
+impl FieldSchema {
+    /// Return `true` if this field is copyable.
+    pub const fn is_copyable(&self) -> bool {
+        self.field_type.is_copyable()
+    }
+}
+
 /// The source from which a field is derived, the target or metric.
 #[derive(
     Clone,

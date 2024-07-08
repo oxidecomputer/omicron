@@ -78,7 +78,9 @@ fn emit_target(schema: &TimeseriesSchema) -> TokenStream {
 fn fields_are_copyable<'a>(
     mut fields: impl Iterator<Item = &'a FieldSchema>,
 ) -> bool {
-    !fields.any(|field| field.field_type == FieldType::String)
+    // Do a positive match, to ensure new variants don't actually derive copy
+    // inappropriately. Better we clone, in that case.
+    fields.all(FieldSchema::is_copyable)
 }
 
 fn compute_extra_derives(

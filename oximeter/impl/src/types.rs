@@ -63,6 +63,29 @@ pub enum FieldType {
     Bool,
 }
 
+impl FieldType {
+    /// Return `true` if a field of this type is copyable.
+    ///
+    /// NOTE: This doesn't mean `self` is copyable, instead refering to a field
+    /// with this type.
+    pub const fn is_copyable(&self) -> bool {
+        match self {
+            FieldType::String => false,
+            FieldType::I8
+            | FieldType::U8
+            | FieldType::I16
+            | FieldType::U16
+            | FieldType::I32
+            | FieldType::U32
+            | FieldType::I64
+            | FieldType::U64
+            | FieldType::IpAddr
+            | FieldType::Uuid
+            | FieldType::Bool => true,
+        }
+    }
+}
+
 impl std::fmt::Display for FieldType {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{:?}", self)
