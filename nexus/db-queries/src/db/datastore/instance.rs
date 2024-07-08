@@ -38,6 +38,7 @@ use nexus_db_model::Disk;
 use nexus_db_model::VmmRuntimeState;
 use nexus_types::deployment::SledFilter;
 use omicron_common::api;
+use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -76,9 +77,7 @@ impl InstanceAndActiveVmm {
         self.vmm.as_ref().map(|v| SledUuid::from_untyped_uuid(v.sled_id))
     }
 
-    pub fn effective_state(
-        &self,
-    ) -> omicron_common::api::external::InstanceState {
+    pub fn effective_state(&self) -> external::InstanceState {
         if let Some(vmm) = &self.vmm {
             vmm.runtime.state.into()
         } else {
@@ -93,17 +92,49 @@ impl From<(Instance, Option<Vmm>)> for InstanceAndActiveVmm {
     }
 }
 
-impl From<InstanceAndActiveVmm> for omicron_common::api::external::Instance {
+impl From<InstanceAndActiveVmm> for external::Instance {
     fn from(value: InstanceAndActiveVmm) -> Self {
-        let run_state: omicron_common::api::external::InstanceState;
-        let time_run_state_updated: chrono::DateTime<Utc>;
-        (run_state, time_run_state_updated) = if let Some(vmm) = value.vmm {
-            (vmm.runtime.state.into(), vmm.runtime.time_state_updated)
-        } else {
-            (
-                value.instance.runtime_state.nexus_state.into(),
-                value.instance.runtime_state.time_updated,
-            )
+        use crate::db::model::InstanceState;
+        use crate::db::model::VmmState;
+        let time_run_state_updated = value
+            .vmm
+            .as_ref()
+            .map(|vmm| vmm.runtime.time_state_updated)
+            .unwrap_or(value.instance.runtime_state.time_updated);
+
+        let instance_state = value.instance.runtime_state.nexus_state;
+        let vmm_state = value.vmm.as_ref().map(|vmm| vmm.runtime.state);
+
+        // We want to only report that an instance is `Stopped` when a new
+        // `instance-start` saga is able to proceed. That means that:
+        let run_state = match (instance_state, vmm_state) {
+            // - An instance with a "stopped" VMM needs to be recast as a
+            //   "stopping" instance.
+            (InstanceState::Vmm, Some(VmmState::Stopped)) => {
+                external::InstanceState::Stopping
+            }
+            // - An instance with a "destroyed" VMM can be recast as a "stopped"
+            //   instance if the start saga is allowed to immediately replace
+            //   it. This applies to "destroyed" VMMs but, critically, *not* to
+            //   "SagaUnwound" VMMs, even though they will be otherwise
+            //   converted to "destroyed" in the public API.
+            (InstanceState::Vmm, Some(VmmState::Destroyed)) => {
+                external::InstanceState::Stopped
+            }
+            // - An instance with no VMM is always "stopped" (as long as it's
+            //   not "starting" etc.)
+            (InstanceState::NoVmm, _vmm_state) => {
+                debug_assert_eq!(_vmm_state, None);
+                external::InstanceState::Stopped
+            }
+            // If there's a VMM state, and none of the above rules apply, use
+            // that.
+            (_instance_state, Some(vmm_state)) => {
+                debug_assert_eq!(_instance_state, InstanceState::Vmm);
+                vmm_state.into()
+            }
+            // If there's no VMM state, use the instance's state.
+            (instance_state, None) => instance_state.into(),
         };
 
         Self {
@@ -116,7 +147,7 @@ impl From<InstanceAndActiveVmm> for omicron_common::api::external::Instance {
                 .hostname
                 .parse()
                 .expect("found invalid hostname in the database"),
-            runtime: omicron_common::api::external::InstanceRuntimeState {
+            runtime: external::InstanceRuntimeState {
                 run_state,
                 time_run_state_updated,
             },
