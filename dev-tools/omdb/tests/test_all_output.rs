@@ -18,6 +18,7 @@ use omicron_test_utils::dev::test_cmds::run_command;
 use omicron_test_utils::dev::test_cmds::ExtraRedactions;
 use slog_error_chain::InlineErrorChain;
 use std::fmt::Write;
+use std::net::IpAddr;
 use std::path::Path;
 use subprocess::Exec;
 
@@ -31,12 +32,22 @@ type ControlPlaneTestContext =
 /// string directly because the timing of registrations with both our test
 /// producer and the one nexus registers. But, let's find our test producer
 /// in the list.
-fn assert_oximeter_list_producers_output(output: &str, ox_url: &str) {
+fn assert_oximeter_list_producers_output(
+    output: &str,
+    ox_url: &str,
+    test_producer: IpAddr,
+) {
     assert!(
         output.contains(format!("Collector ID: {}", OXIMETER_UUID).as_str())
     );
-    assert!(output.contains(PRODUCER_UUID));
     assert!(output.contains(ox_url));
+
+    let found = output.lines().any(|line| {
+        line.contains(PRODUCER_UUID)
+            && line.contains(&test_producer.to_string())
+    });
+
+    assert!(found, "test producer {} and producer UUID {} not found in oximeter list-producers output", test_producer, PRODUCER_UUID);
 }
 
 #[tokio::test]
@@ -97,6 +108,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         format!("http://{}/", cptestctx.internal_client.bind_address);
     let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
     let ox_url = format!("http://{}/", cptestctx.oximeter.server_address());
+    let ox_test_producer = cptestctx.producer.address().ip();
     let ch_url = format!("http://{}/", cptestctx.clickhouse.address);
 
     let tmpdir = camino_tempfile::tempdir()
@@ -208,7 +220,11 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         ox_invocation,
     )
     .await;
-    assert_oximeter_list_producers_output(&ox_output, &ox_url);
+    assert_oximeter_list_producers_output(
+        &ox_output,
+        &ox_url,
+        ox_test_producer,
+    );
 
     gwtestctx.teardown().await;
 }
@@ -229,6 +245,7 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     let nexus_internal_url =
         format!("http://{}", cptestctx.internal_client.bind_address);
     let ox_url = format!("http://{}/", cptestctx.oximeter.server_address());
+    let ox_test_producer = cptestctx.producer.address().ip();
     let ch_url = format!("http://{}/", cptestctx.clickhouse.address);
     let dns_sockaddr = cptestctx.internal_dns.dns_server.local_address();
     let mut output = String::new();
@@ -340,7 +357,11 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
         ox_args1,
     )
     .await;
-    assert_oximeter_list_producers_output(&ox_output1, &ox_url);
+    assert_oximeter_list_producers_output(
+        &ox_output1,
+        &ox_url,
+        ox_test_producer,
+    );
 }
 
 async fn do_run<F>(
