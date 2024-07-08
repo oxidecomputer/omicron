@@ -2,8 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::anyhow;
-use omicron_common::cmd::CmdError;
+use anyhow::{bail, Context};
 use slog::{info, Logger};
 use std::fs::{copy, create_dir_all};
 use uzers::{get_group_by_name, get_user_by_name};
@@ -48,34 +47,31 @@ impl SwitchZoneUser {
         self
     }
 
-    fn add_new_group_for_user(&self) -> Result<(), CmdError> {
+    fn add_new_group_for_user(&self) -> anyhow::Result<()> {
         match get_group_by_name(&self.group) {
             Some(_) => {}
             None => {
                 let cmd = std::process::Command::new("groupadd")
                     .arg(&self.group)
                     .output()
-                    .map_err(|err| {
-                        CmdError::Failure(anyhow!(
-                            "Could not execute `groupadd {}`: {}",
-                            self.group,
-                            err
-                        ))
+                    .with_context(|| {
+                        format!("Could not execute `groupadd {}`", self.group)
                     })?;
 
+                // TODO-john add stdout/stderr?
                 if !cmd.status.success() {
-                    return Err(CmdError::Failure(anyhow!(
+                    bail!(
                         "Could not add group: {} status: {}",
                         self.group,
                         cmd.status
-                    )));
+                    );
                 }
             }
         };
         Ok(())
     }
 
-    fn add_new_user(&self) -> Result<(), CmdError> {
+    fn add_new_user(&self) -> anyhow::Result<()> {
         match get_user_by_name(&self.user) {
             Some(_) => {}
             None => {
@@ -91,185 +87,161 @@ impl SwitchZoneUser {
                         &self.user,
                     ])
                     .output()
-                    .map_err(|err| {
-                        CmdError::Failure(anyhow!(
-                            "Could not execute `useradd -m -s {} -g {} -c {} {}`: {}",
-                            self.shell, self.group, self.gecos, self.user, err
-                        ))
+                    .with_context(|| {
+                        format!(
+                            "Could not execute `useradd -m -s {} -g {} -c {} {}`",
+                            self.shell, self.group, self.gecos, self.user,
+                        )
                     })?;
 
+                // TODO-john add stdout/stderr?
                 if !cmd.status.success() {
-                    return Err(CmdError::Failure(anyhow!(
+                    bail!(
                         "Could not add user: {} status: {}",
                         self.user,
                         cmd.status
-                    )));
+                    );
                 }
             }
         };
         Ok(())
     }
 
-    fn enable_passwordless_login(&self) -> Result<(), CmdError> {
+    fn enable_passwordless_login(&self) -> anyhow::Result<()> {
         let cmd = std::process::Command::new("passwd")
             .args(["-d", &self.user])
             .output()
-            .map_err(|err| {
-                CmdError::Failure(anyhow!(
-                    "Could not execute `passwd -d {}`: {}",
-                    self.user,
-                    err
-                ))
+            .with_context(|| {
+                format!("Could not execute `passwd -d {}`", self.user)
             })?;
 
+        // TODO-john add stdout/stderr?
         if !cmd.status.success() {
-            return Err(CmdError::Failure(anyhow!(
+            bail!(
                 "Could not enable password-less login: {} status: {}",
                 self.user,
                 cmd.status
-            )));
+            );
         }
         Ok(())
     }
 
-    fn disable_password_based_login(&self) -> Result<(), CmdError> {
+    fn disable_password_based_login(&self) -> anyhow::Result<()> {
         let cmd = std::process::Command::new("passwd")
             .args(["-N", &self.user])
             .output()
-            .map_err(|err| {
-                CmdError::Failure(anyhow!(
-                    "Could not execute `passwd -N {}`: {}",
-                    self.user,
-                    err
-                ))
+            .with_context(|| {
+                format!("Could not execute `passwd -N {}`", self.user)
             })?;
 
+        // TODO-john add stdout/stderr?
         if !cmd.status.success() {
-            return Err(CmdError::Failure(anyhow!(
+            bail!(
                 "Could not disable password-based logins: {} status: {}",
                 self.user,
                 cmd.status
-            )));
+            );
         }
         Ok(())
     }
 
-    fn assign_user_profiles(&self) -> Result<(), CmdError> {
+    fn assign_user_profiles(&self) -> anyhow::Result<()> {
         let Some(ref profiles) = self.profiles else {
-            return Err(CmdError::Failure(anyhow!(
-                "Profile list must not be empty to assign user profiles",
-            )));
+            bail!("Profile list must not be empty to assign user profiles",);
         };
 
         let mut profile_list: String = Default::default();
         for profile in profiles {
+            // TODO-john need separator?
             profile_list.push_str(&profile)
         }
 
         let cmd = std::process::Command::new("usermod")
             .args(["-P", &profile_list, &self.user])
             .output()
-            .map_err(|err| {
-                CmdError::Failure(anyhow!(
-                    "Could not execute `usermod -P {} {}`: {}",
-                    profile_list,
-                    self.user,
-                    err
-                ))
+            .with_context(|| {
+                format!(
+                    "Could not execute `usermod -P {} {}`",
+                    profile_list, self.user,
+                )
             })?;
 
+        // TODO-john add stdout/stderr?
         if !cmd.status.success() {
-            return Err(CmdError::Failure(anyhow!(
+            bail!(
                 "Could not assign user profiles: {} status: {}",
                 self.user,
                 cmd.status
-            )));
+            );
         }
         Ok(())
     }
 
-    fn remove_user_profiles(&self) -> Result<(), CmdError> {
+    fn remove_user_profiles(&self) -> anyhow::Result<()> {
         let cmd = std::process::Command::new("usermod")
             .args(["-P", "", &self.user])
             .output()
-            .map_err(|err| {
-                CmdError::Failure(anyhow!(
-                    "Could not execute `usermod -P '' {}`: {}",
-                    self.user,
-                    err
-                ))
+            .with_context(|| {
+                format!("Could not execute `usermod -P '' {}`", self.user)
             })?;
 
         if !cmd.status.success() {
-            return Err(CmdError::Failure(anyhow!(
+            bail!(
                 "Could not remove user profiles: {} status: {}",
                 self.user,
                 cmd.status
-            )));
+            );
         }
         Ok(())
     }
 
-    fn set_up_home_directory_and_startup_files(&self) -> Result<(), CmdError> {
-        let Some(ref homedir) = self.homedir else {
-            return Err(CmdError::Failure(anyhow!(
+    fn set_up_home_directory_and_startup_files(&self) -> anyhow::Result<()> {
+        let Some(homedir) = &self.homedir else {
+            bail!(
                 "A home directory must be provided to set up home directory and startup files",
-            )));
+            );
         };
 
-        create_dir_all(&homedir).map_err(|err| {
-            CmdError::Failure(anyhow!(
-                "Could not execute create directory {} and its parents: {}",
-                &homedir,
-                err
-            ))
+        create_dir_all(&homedir).with_context(|| {
+            format!(
+                "Could not execute create directory {} and its parents",
+                homedir,
+            )
         })?;
 
         let mut home_bashrc = homedir.clone();
         home_bashrc.push_str("/.bashrc");
-        copy("/root/.bashrc", &home_bashrc).map_err(|err| {
-            CmdError::Failure(anyhow!(
-                "Could not copy file from /root/.bashrc to {}: {}",
-                &homedir,
-                err
-            ))
+        copy("/root/.bashrc", &home_bashrc).with_context(|| {
+            format!("Could not copy file from /root/.bashrc to {homedir}")
         })?;
 
         let mut home_profile = homedir.clone();
         home_profile.push_str("/.profile");
-        copy("/root/.profile", &home_profile).map_err(|err| {
-            CmdError::Failure(anyhow!(
-                "Could not copy file from /root/.profile to {}: {}",
-                &homedir,
-                err
-            ))
+        copy("/root/.profile", &home_profile).with_context(|| {
+            format!("Could not copy file from /root/.profile to {homedir}")
         })?;
 
+        // TODO-john check for recursive version
         // Not using std::os::unix::fs::chown here because it doesn't support
         // recursive option.
         let cmd = std::process::Command::new("chown")
             .args(["-R", &self.user, &homedir])
             .output()
-            .map_err(|err| {
-                CmdError::Failure(anyhow!(
-                    "Could not execute `chown -R {} {}`: {}",
-                    self.user,
-                    homedir,
-                    err
-                ))
+            .with_context(|| {
+                format!("Could not execute `chown -R {} {homedir}`", self.user)
             })?;
 
         if !cmd.status.success() {
-            return Err(CmdError::Failure(anyhow!(
+            bail!(
                 "Could not change ownership: {} status: {}",
                 homedir,
                 cmd.status
-            )));
+            );
         }
         Ok(())
     }
 
-    pub fn setup_switch_zone_user(self, log: &Logger) -> Result<(), CmdError> {
+    pub fn setup_switch_zone_user(self, log: &Logger) -> anyhow::Result<()> {
         info!(&log, "Add a new group for the user"; "group" => ?self.group, "user" => ?self.user);
         self.add_new_group_for_user()?;
 
