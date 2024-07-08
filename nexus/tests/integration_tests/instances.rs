@@ -4809,7 +4809,10 @@ pub async fn instance_wait_for_state(
     )
     .await;
     match result {
-        Ok(instance) => instance,
+        Ok(instance) => {
+            slog::info!(&client.client_log, "instance '{instance_name}' has transitioned to {state}");
+            instance
+        }
         Err(_) => panic!(
             "instance '{instance_name}' did not transition to {state:?} \
              after {MAX_WAIT:?}"
