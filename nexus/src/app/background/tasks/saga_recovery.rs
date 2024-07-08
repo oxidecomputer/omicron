@@ -22,9 +22,6 @@
 // - create a StatusBuilder where we can report what we're doing?  This seems
 //   kind of hard though
 //
-// I think maybe the very next step is to change `self.sagas_recovered` to
-// `self.recent_sagas_recovered` and make it look like `self.recent_failures`.
-//
 // XXX-dap at the end, verify:
 // - counters (maybe plumb these into Oximeter?)
 // - task status reported by omdb
@@ -174,8 +171,13 @@ use steno::SagaId;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+// These values are chosen to be large enough to likely cover the complete
+// history of saga recoveries, successful and otherwise.  They just need to be
+// finite so that this system doesn't use an unbounded amount of memory.
+/// Maximum number of successful recoveries to keep track of for debugging
+const N_SUCCESS_SAGA_HISTORY: usize = 128;
 /// Maximum number of recent failures to keep track of for debugging
-const N_FAILED_SAGA_HISTORY: usize = 16;
+const N_FAILED_SAGA_HISTORY: usize = 128;
 
 /// Background task that recovers sagas assigned to this Nexus
 ///
@@ -203,9 +205,7 @@ pub struct SagaRecovery {
     remove_next: Vec<steno::SagaId>,
 
     // for status reporting
-    // XXX-dap sagas_recovered is not reasonable any more.  want
-    // recent_recovered
-    sagas_recovered: BTreeMap<SagaId, DateTime<Utc>>,
+    recent_recoveries: DebuggingHistory<RecoverySuccess>,
     recent_failures: DebuggingHistory<RecoveryFailure>,
     last_pass: LastPass,
 }
@@ -214,7 +214,7 @@ pub struct SagaRecovery {
 // XXX-dap omdb
 #[derive(Clone, Serialize)]
 pub struct SagaRecoveryTaskStatus {
-    all_recovered: BTreeMap<SagaId, DateTime<Utc>>,
+    recent_recoveries: DebuggingHistory<RecoverySuccess>,
     recent_failures: DebuggingHistory<RecoveryFailure>,
     last_pass: LastPass,
 }
@@ -225,6 +225,12 @@ pub struct RecoveryFailure {
     time: DateTime<Utc>,
     saga_id: SagaId,
     message: String,
+}
+
+#[derive(Clone, Serialize)]
+pub struct RecoverySuccess {
+    time: DateTime<Utc>,
+    saga_id: SagaId,
 }
 
 // XXX-dap TODO-doc
@@ -264,7 +270,7 @@ impl SagaRecovery {
             sagas_started_rx,
             sagas_to_ignore: BTreeSet::new(),
             remove_next: Vec::new(),
-            sagas_recovered: BTreeMap::new(),
+            recent_recoveries: DebuggingHistory::new(N_SUCCESS_SAGA_HISTORY),
             recent_failures: DebuggingHistory::new(N_FAILED_SAGA_HISTORY),
             last_pass: LastPass::NeverStarted,
         }
@@ -360,7 +366,7 @@ impl BackgroundTask for SagaRecovery {
             self.last_pass = last_pass;
 
             serde_json::to_value(SagaRecoveryTaskStatus {
-                all_recovered: self.sagas_recovered.clone(),
+                recent_recoveries: self.recent_recoveries.clone(),
                 recent_failures: self.recent_failures.clone(),
                 last_pass: self.last_pass.clone(),
             })
@@ -497,7 +503,8 @@ impl SagaRecovery {
                     nrecovered += 1;
                     // XXX-dap what to do with the completion future (besides
                     // boxing it)
-                    self.sagas_recovered.insert(saga_id, time);
+                    self.recent_recoveries
+                        .append(RecoverySuccess { time, saga_id })
                 }
                 Err(error) => {
                     // It's essential that we not bail out early just because we
