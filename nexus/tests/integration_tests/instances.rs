@@ -1374,8 +1374,7 @@ async fn test_instance_metrics_with_migration(
     // After this the instance should be running and should continue to appear
     // to be provisioned.
     instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
-    instance_wait_for_state(&client, instance_name, InstanceState::Running)
-        .await;
+    instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
 
     check_provisioning_state(4, 1).await;
 
@@ -1387,8 +1386,7 @@ async fn test_instance_metrics_with_migration(
     // logical states of instances ignoring migration).
     instance_post(&client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance_id).await;
-    instance_wait_for_state(&client, instance_name, InstanceState::Stopped)
-        .await;
+    instance_wait_for_state(&client, instance_id, InstanceState::Stopped).await;
 
     check_provisioning_state(0, 0).await;
 }
@@ -1488,8 +1486,7 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
     // Stop the instance
     instance_post(&client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance_id).await;
-    instance_wait_for_state(&client, instance_name, InstanceState::Stopped)
-        .await;
+    instance_wait_for_state(&client, instance_id, InstanceState::Stopped).await;
 
     // Now deletion should succeed.
     NexusRequest::object_delete(&client, &instance_url)
@@ -2357,8 +2354,7 @@ async fn test_instance_update_network_interfaces(
     // Stop the instance again, and now verify that the update works.
     instance_post(client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance_id).await;
-    instance_wait_for_state(client, instance_name, InstanceState::Stopped)
-        .await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     let updated_primary_iface = NexusRequest::object_put(
         client,
@@ -3273,8 +3269,7 @@ async fn test_disks_detached_when_instance_destroyed(
     instance_post(&client, instance_name, InstanceOp::Stop).await;
 
     instance_simulate(nexus, &instance_id).await;
-    instance_wait_for_state(&client, instance_name, InstanceState::Stopped)
-        .await;
+    instance_wait_for_state(&client, instance_id, InstanceState::Stopped).await;
 
     NexusRequest::object_delete(&client, &instance_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -4022,7 +4017,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let instance = instance_next;
     instance_simulate(nexus, &instance_id).await;
     let instance_next =
-        instance_wait_for_state(&client, instance_name, InstanceState::Stopped)
+        instance_wait_for_state(&client, instance_id, InstanceState::Stopped)
             .await;
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -4189,14 +4184,10 @@ async fn stop_and_delete_instance(
     let client = &cptestctx.external_client;
     let instance =
         instance_post(&client, instance_name, InstanceOp::Stop).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     let nexus = &cptestctx.server.server_context().nexus;
-    instance_simulate(
-        nexus,
-        &InstanceUuid::from_untyped_uuid(instance.identity.id),
-    )
-    .await;
-    instance_wait_for_state(client, instance_name, InstanceState::Stopped)
-        .await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
     let url =
         format!("/v1/instances/{}?project={}", instance_name, PROJECT_NAME);
     object_delete(client, &url).await;
@@ -4622,8 +4613,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
     .expect("Failed to stop the instance");
 
     instance_simulate_with_opctx(nexus, &instance_id, &opctx).await;
-    instance_wait_for_state(client, instance_name, InstanceState::Stopped)
-        .await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     // Delete the instance
     NexusRequest::object_delete(client, &instance_url)
@@ -4779,29 +4769,33 @@ pub enum InstanceOp {
 
 pub async fn instance_wait_for_state(
     client: &ClientTestContext,
-    instance_name: &str,
+    instance_id: InstanceUuid,
     state: omicron_common::api::external::InstanceState,
 ) -> Instance {
     const MAX_WAIT: Duration = Duration::from_secs(120);
-    let url = get_instance_url(instance_name);
 
     slog::info!(
         &client.client_log,
-        "waiting for '{instance_name}' to transition to {state}...";
+        "waiting for instance {instance_id} to transition to {state}...";
     );
+    let url = format!("/v1/instances/{instance_id}");
     let result = wait_for_condition(
         || async {
-            let instance = instance_get(client, &url).await;
+            let instance: Instance = NexusRequest::object_get(client, &url)
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await?
+                .parsed_body()?;
             if instance.runtime.run_state == state {
                 Ok(instance)
             } else {
                 slog::info!(
                     &client.client_log,
-                    "instance '{instance_name}' has not transitioned to {state}";
+                    "instance {instance_id} has not transitioned to {state}";
                     "instance_id" => %instance.identity.id,
                     "instance_runtime_state" => ?instance.runtime,
                 );
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<anyhow::Error>::NotYet)
             }
         },
         &Duration::from_secs(1),
@@ -4810,12 +4804,15 @@ pub async fn instance_wait_for_state(
     .await;
     match result {
         Ok(instance) => {
-            slog::info!(&client.client_log, "instance '{instance_name}' has transitioned to {state}");
+            slog::info!(
+                &client.client_log,
+                "instance {instance_id} has transitioned to {state}"
+            );
             instance
         }
-        Err(_) => panic!(
-            "instance '{instance_name}' did not transition to {state:?} \
-             after {MAX_WAIT:?}"
+        Err(e) => panic!(
+            "instance {instance_id} did not transition to {state:?} \
+             after {MAX_WAIT:?}: {e}"
         ),
     }
 }
