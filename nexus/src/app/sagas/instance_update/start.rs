@@ -169,11 +169,15 @@ async fn siu_fetch_state_and_start_real_saga(
             osagactx.log(),
             "instance update: starting real update saga...";
             "instance_id" => %authz_instance.id(),
-            "new_runtime_state" => ?update.new_runtime,
-            "network_config_update" => ?update.network_config,
-            "destroy_active_vmm" => ?update.destroy_active_vmm,
-            "destroy_target_vmm" => ?update.destroy_target_vmm,
-            "deprovision" => update.deprovision,
+            "current.runtime_state" => ?state.instance.runtime(),
+            "current.migration" => ?state.migration,
+            "current.active_vmm" => ?state.active_vmm,
+            "current.target_vmm" => ?state.target_vmm,
+            "update.new_runtime_state" => ?update.new_runtime,
+            "update.network_config_update" => ?update.network_config,
+            "update.destroy_active_vmm" => ?update.destroy_active_vmm,
+            "update.destroy_target_vmm" => ?update.destroy_target_vmm,
+            "update.deprovision" => update.deprovision,
         );
         osagactx
             .nexus()
@@ -192,6 +196,10 @@ async fn siu_fetch_state_and_start_real_saga(
             osagactx.log(),
             "instance update: no updates required, releasing lock.";
             "instance_id" => %authz_instance.id(),
+            "current.runtime_state" => ?state.instance.runtime(),
+            "current.migration" => ?state.migration,
+            "current.active_vmm" => ?state.active_vmm,
+            "current.target_vmm" => ?state.target_vmm,
         );
         super::unlock_instance_inner(
             &serialized_authn,
