@@ -238,18 +238,15 @@ async fn test_disk_create_attach_detach_delete(
 
     // Create an instance to attach the disk.
     let instance = create_instance(&client, PROJECT_NAME, INSTANCE_NAME).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // TODO(https://github.com/oxidecomputer/omicron/issues/811):
     //
     // Instances must be stopped before disks can be attached - this
     // is an artificial limitation without hotplug support.
-    let instance_next =
-        set_instance_state(&client, INSTANCE_NAME, "stop").await;
-    instance_simulate(
-        nexus,
-        &InstanceUuid::from_untyped_uuid(instance_next.identity.id),
-    )
-    .await;
+    set_instance_state(&client, INSTANCE_NAME, "stop").await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     // Verify that there are no disks attached to the instance, and specifically
     // that our disk is not attached to this instance.
@@ -398,6 +395,7 @@ async fn test_disk_slot_assignment(cptestctx: &ControlPlaneTestContext) {
     set_instance_state(&client, INSTANCE_NAME, "stop").await;
     instance_simulate(nexus, &instance_id).await;
     instance_wait_for_state(&client, instance_id, InstanceState::Stopped).await;
+
     let url_instance_disks =
         get_instance_disks_url(instance.identity.name.as_str());
     let listed_disks = disks_list(&client, &url_instance_disks).await;
