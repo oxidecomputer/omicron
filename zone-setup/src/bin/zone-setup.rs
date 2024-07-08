@@ -4,7 +4,7 @@
 
 //! CLI to set up zone configuration
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use clap::{ArgAction, Args, Parser, Subcommand};
 use illumos_utils::ipadm::Ipadm;
 use illumos_utils::route::{Gateway, Route};
@@ -91,22 +91,21 @@ const SYS: &str = "sys";
 
 #[tokio::main]
 async fn main() {
-    if let Err(message) = do_run().await {
-        fatal(message);
+    if let Err(err) = do_run().await {
+        fatal(CmdError::Failure(err));
     }
 }
 
-async fn do_run() -> Result<(), CmdError> {
+async fn do_run() -> anyhow::Result<()> {
     let log = dropshot::ConfigLogging::File {
         path: "/dev/stderr".into(),
         level: dropshot::ConfigLoggingLevel::Info,
         if_exists: dropshot::ConfigLoggingIfExists::Append,
     }
     .to_logger("zone-setup")
-    .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+    .context("failed to construct stderr logger")?;
 
-    let args = ZoneSetup::try_parse()
-        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+    let args = ZoneSetup::parse();
 
     match args.command {
         ZoneSetupCommand::CommonNetworking(args) => {
@@ -122,7 +121,7 @@ async fn do_run() -> Result<(), CmdError> {
 async fn chrony_setup(
     args: ChronySetupArgs,
     log: &Logger,
-) -> Result<(), CmdError> {
+) -> anyhow::Result<()> {
     println!("running chrony setup: {args:?}");
 
     generate_chrony_config(args, &log)?;
@@ -144,57 +143,35 @@ async fn chrony_setup(
         "logadm config" => ?LOGADM_CONFIG_FILE,
     );
     Svcadm::refresh_logadm_upgrade()
-        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+        .context("failed to refresh logadm-upgrade")?;
 
     Ok(())
 }
 
-fn set_permissions_for_logadm_config() -> Result<(), CmdError> {
+fn set_permissions_for_logadm_config() -> anyhow::Result<()> {
     let mut perms = metadata(LOGADM_CONFIG_FILE)
-        .map_err(|err| {
-            CmdError::Failure(anyhow!(
-        "Could not retrieve chrony logadm configuration file {} metadata: {}",
-        LOGADM_CONFIG_FILE,
-        err
-    ))
+        .with_context(|| {
+            format!("failed to read metadata of {LOGADM_CONFIG_FILE}")
         })?
         .permissions();
     perms.set_readonly(true);
-    set_permissions(LOGADM_CONFIG_FILE, perms).map_err(|err| {
-            CmdError::Failure(anyhow!(
-                "Could not set 444 permissions on chrony logadm configuration file {}: {}",
-                LOGADM_CONFIG_FILE,
-                err
-            ))
-        })?;
+    set_permissions(LOGADM_CONFIG_FILE, perms).with_context(|| {
+        format!("failed to set 444 permissions on {LOGADM_CONFIG_FILE}")
+    })?;
 
-    let root_uid = match get_user_by_name(ROOT) {
-        Some(user) => user.uid(),
-        None => {
-            return Err(CmdError::Failure(anyhow!(format!(
-                "Could not retrieve ID from user: {}",
-                ROOT
-            ))))
-        }
-    };
+    let root_uid = get_user_by_name(ROOT)
+        .with_context(|| format!("failed to look up user {ROOT}"))?
+        .uid();
 
-    let sys_gid = match get_group_by_name(SYS) {
-        Some(group) => group.gid(),
-        None => {
-            return Err(CmdError::Failure(anyhow!(format!(
-                "Could not retrieve ID from group: {}",
-                SYS
-            ))))
-        }
-    };
+    let sys_gid = get_group_by_name(SYS)
+        .with_context(|| format!("failed to look up group {SYS}"))?
+        .gid();
 
-    chown(LOGADM_CONFIG_FILE, Some(root_uid), Some(sys_gid)).map_err(
-        |err| {
-            CmdError::Failure(anyhow!(
-                "Could not set ownership of logadm configuration file {}: {}",
-                LOGADM_CONFIG_FILE,
-                err
-            ))
+    chown(LOGADM_CONFIG_FILE, Some(root_uid), Some(sys_gid)).with_context(
+        || {
+            format!(
+            "could not set ownership to {ROOT}:{SYS} on {LOGADM_CONFIG_FILE}"
+            )
         },
     )?;
 
@@ -204,9 +181,8 @@ fn set_permissions_for_logadm_config() -> Result<(), CmdError> {
 fn generate_chrony_config(
     args: ChronySetupArgs,
     log: &Logger,
-) -> Result<(), CmdError> {
-    let internal_ntp_tpl = String::from(
-        "#
+) -> anyhow::Result<()> {
+    let internal_ntp_tpl = "#
 # Configuration file for an internal NTP server - one which communicates with
 # boundary NTP servers within the rack.
 #
@@ -235,11 +211,9 @@ makestep 86400 -1
 leapsecmode slew
 maxslewrate 2708.333
 
-",
-    );
+";
 
-    let boundary_ntp_tpl = String::from(
-        "#
+    let boundary_ntp_tpl = "#
 # Configuration file for a boundary NTP server - one which communicates with
 # NTP servers outside the rack.
 #
@@ -281,11 +255,11 @@ makestep 0.1 3
 leapsecmode slew
 maxslewrate 2708.333
 
-",
-    );
+";
 
     let mut new_config =
-        if args.boundary { boundary_ntp_tpl } else { internal_ntp_tpl };
+        if args.boundary { boundary_ntp_tpl } else { internal_ntp_tpl }
+            .to_string();
 
     if let Some(allow) = args.allow {
         new_config = new_config.replace("@ALLOW@", &allow);
@@ -309,12 +283,11 @@ maxslewrate 2708.333
     // We read the contents from the old configuration file if it existed
     // so that we can verify if it changed.
     let old_file = if args.file.exists() {
-        Some(read_to_string(&args.file).map_err(|err| {
-            CmdError::Failure(anyhow!(
-                "Could not read old chrony configuration file {}: {}",
+        Some(read_to_string(&args.file).with_context(|| {
+            format!(
+                "failed reading old chrony config file {}",
                 args.file.display(),
-                err
-            ))
+            )
         })?)
     } else {
         None
@@ -325,19 +298,17 @@ maxslewrate 2708.333
         .create(true)
         .truncate(true)
         .open(&args.file)
-        .map_err(|err| {
-            CmdError::Failure(anyhow!(
-                "Could not create chrony configuration file {}: {}",
+        .with_context(|| {
+            format!(
+                "failed to create chrony config file {}",
                 args.file.display(),
-                err
-            ))
+            )
         })?;
-    config_file.write(new_config.as_bytes()).map_err(|err| {
-        CmdError::Failure(anyhow!(
-            "Could not write to chrony configuration file {}: {}",
+    config_file.write(new_config.as_bytes()).with_context(|| {
+        format!(
+            "failed writing chrony configuration file {}",
             args.file.display(),
-            err
-        ))
+        )
     })?;
 
     if old_file.clone().is_some_and(|f| f != new_config) {
@@ -354,13 +325,9 @@ maxslewrate 2708.333
 async fn common_nw_set_up(
     args: CommonNetworkingArgs,
     log: &Logger,
-) -> Result<(), CmdError> {
-    let zonename = zone::current().await.map_err(|err| {
-        CmdError::Failure(anyhow!(
-            "Could not determine local zone name: {}",
-            err
-        ))
-    })?;
+) -> anyhow::Result<()> {
+    let zonename =
+        zone::current().await.context("could not determine local zone name")?;
 
     // TODO: remove when https://github.com/oxidecomputer/stlouis/issues/435 is
     // addressed
@@ -368,15 +335,22 @@ async fn common_nw_set_up(
         log, "Ensuring a temporary IP interface is created";
         "data link" => ?args.datalink,
     );
-    Ipadm::set_temp_interface_for_datalink(&args.datalink)
-        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+    Ipadm::set_temp_interface_for_datalink(&args.datalink).with_context(
+        || {
+            format!(
+                "failed to ensure temporary IP interface on datalink {}",
+                args.datalink
+            )
+        },
+    )?;
 
     info!(
         log, "Setting MTU to 9000 for IPv6 and IPv4";
         "data link" => ?args.datalink,
     );
-    Ipadm::set_interface_mtu(&args.datalink)
-        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+    Ipadm::set_interface_mtu(&args.datalink).with_context(|| {
+        format!("failed to set MTU on datalink {}", args.datalink)
+    })?;
 
     info!(
         log,
@@ -388,14 +362,24 @@ async fn common_nw_set_up(
         &args.datalink,
         &args.static_addr,
     )
-    .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+    .with_context(|| {
+        format!(
+            "failed to ensure static address {} on datalink {}",
+            args.static_addr, args.datalink
+        )
+    })?;
 
     info!(
         log, "Ensuring there is a default route";
         "gateway" => ?args.gateway,
     );
     Route::ensure_default_route_with_gateway(Gateway::Ipv6(args.gateway))
-        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+        .with_context(|| {
+            format!(
+                "failed to ensure default route via gateway {}",
+                args.gateway
+            )
+        })?;
 
     info!(
         log, "Populating hosts file for zone";
@@ -412,7 +396,7 @@ async fn common_nw_set_up(
             args.static_addr
         ),
     )
-    .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+    .with_context(|| format!("failed to write hosts file {HOSTS_FILE}"))?;
 
     Ok(())
 }
@@ -420,13 +404,15 @@ async fn common_nw_set_up(
 async fn opte_interface_set_up(
     args: OpteInterfaceArgs,
     log: &Logger,
-) -> Result<(), CmdError> {
+) -> anyhow::Result<()> {
     info!(
         log,
         "Creating gateway on the OPTE IP interface if it doesn't already exist";
-        "OPTE interface" => ?args.interface);
-    Ipadm::create_opte_gateway(&args.interface)
-        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+        "OPTE interface" => ?args.interface
+    );
+    Ipadm::create_opte_gateway(&args.interface).with_context(|| {
+        format!("failed to create OPTE gateway on interface {}", args.interface)
+    })?;
 
     info!(
         log, "Ensuring there is a gateway route";
@@ -435,14 +421,25 @@ async fn opte_interface_set_up(
         "OPTE IP" => ?args.ip,
     );
     Route::ensure_opte_route(&args.gateway, &args.interface, &args.ip)
-        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+        .with_context(|| {
+            format!(
+                "failed to ensure OPTE gateway route on interface {} \
+                 with gateway {} and IP {}",
+                args.interface, args.gateway, args.ip
+            )
+        })?;
 
     info!(
         log, "Ensuring there is a default route";
         "gateway" => ?args.gateway,
     );
     Route::ensure_default_route_with_gateway(Gateway::Ipv4(args.gateway))
-        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+        .with_context(|| {
+            format!(
+                "failed to ensure default route via gateway {}",
+                args.gateway
+            )
+        })?;
 
     Ok(())
 }
