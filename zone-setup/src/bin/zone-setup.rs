@@ -5,76 +5,89 @@
 //! CLI to set up zone configuration
 
 use anyhow::anyhow;
-use clap::{arg, command, value_parser, Arg, ArgMatches, Command};
+use clap::{ArgAction, Args, Parser, Subcommand};
 use illumos_utils::ipadm::Ipadm;
 use illumos_utils::route::{Gateway, Route};
 use illumos_utils::svcadm::Svcadm;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use slog::{info, Logger};
+use std::fmt::Write as _;
 use std::fs::{metadata, read_to_string, set_permissions, write, OpenOptions};
-use std::io::Write;
+use std::io::Write as _;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::unix::fs::chown;
-use std::path::Path;
+use std::path::PathBuf;
 use uzers::{get_group_by_name, get_user_by_name};
 
-pub const HOSTS_FILE: &str = "/etc/inet/hosts";
-pub const CHRONY_CONFIG_FILE: &str = "/etc/inet/chrony.conf";
-pub const LOGADM_CONFIG_FILE: &str = "/etc/logadm.d/chrony.logadm.conf";
-pub const ROOT: &str = "root";
-pub const SYS: &str = "sys";
-
-pub const COMMON_NW_CMD: &str = "common-networking";
-pub const OPTE_INTERFACE_CMD: &str = "opte-interface";
-pub const CHRONY_SETUP_CMD: &str = "chrony-setup";
-
-fn parse_ip(s: &str) -> anyhow::Result<IpAddr> {
-    if s == "unknown" {
-        return Err(anyhow!("ERROR: Missing input value"));
-    };
-    s.parse().map_err(|_| anyhow!("ERROR: Invalid IP address"))
+#[derive(Debug, Parser)]
+struct ZoneSetup {
+    #[command(subcommand)]
+    command: ZoneSetupCommand,
 }
 
-fn parse_ipv4(s: &str) -> anyhow::Result<Ipv4Addr> {
-    if s == "unknown" {
-        return Err(anyhow!("ERROR: Missing input value"));
-    };
-    s.parse().map_err(|_| anyhow!("ERROR: Invalid IPv4 address"))
+#[derive(Debug, Subcommand)]
+enum ZoneSetupCommand {
+    /// Sets up common networking configuration across all zones
+    CommonNetworking(CommonNetworkingArgs),
+    /// Sets up OPTE interface
+    OpteInterface(OpteInterfaceArgs),
+    /// Sets up Chrony configuration for NTP zone
+    ChronySetup(ChronySetupArgs),
 }
 
-fn parse_ipv6(s: &str) -> anyhow::Result<Ipv6Addr> {
-    if s == "unknown" {
-        return Err(anyhow!("ERROR: Missing input value"));
-    };
-    s.parse().map_err(|_| anyhow!("ERROR: Invalid IPv6 address"))
+// Some of our `String` cli arguments may be set to the literal "unknown" if
+// sled-agent hasn't populated our SMF config correctly. Reject this at argument
+// parsing time.
+fn parse_string_rejecting_unknown(s: &str) -> anyhow::Result<String> {
+    if s != "unknown" {
+        Ok(s.to_string())
+    } else {
+        Err(anyhow!("missing input value"))
+    }
 }
 
-fn parse_datalink(s: &str) -> anyhow::Result<String> {
-    if s == "unknown" {
-        return Err(anyhow!("ERROR: Missing data link"));
-    };
-    s.parse().map_err(|_| anyhow!("ERROR: Invalid data link"))
+#[derive(Debug, Args)]
+struct CommonNetworkingArgs {
+    #[arg(short, long, value_parser = parse_string_rejecting_unknown)]
+    datalink: String,
+    #[arg(short, long)]
+    gateway: Ipv6Addr,
+    #[arg(short, long)]
+    static_addr: Ipv6Addr,
 }
 
-fn parse_opte_iface(s: &str) -> anyhow::Result<String> {
-    if s == "unknown" {
-        return Err(anyhow!("ERROR: Missing OPTE interface"));
-    };
-    s.parse().map_err(|_| anyhow!("ERROR: Invalid OPTE interface"))
+#[derive(Debug, Args)]
+struct OpteInterfaceArgs {
+    #[arg(short, long, value_parser = parse_string_rejecting_unknown)]
+    interface: String,
+    #[arg(short, long)]
+    gateway: Ipv4Addr,
+    #[arg(short = 'p', long)]
+    ip: IpAddr,
 }
 
-fn parse_chrony_conf(s: &str) -> anyhow::Result<String> {
-    if s == "" {
-        return Err(anyhow!("ERROR: Missing chrony configuration file"));
-    };
-
-    s.parse().map_err(|_| anyhow!("ERROR: Invalid chrony configuration file"))
+#[derive(Debug, Args)]
+struct ChronySetupArgs {
+    /// chrony configuration file
+    #[arg(short, long, default_value = CHRONY_CONFIG_FILE)]
+    file: PathBuf,
+    /// whether this is a boundary or internal NTP zone
+    #[arg(short, long, action = ArgAction::Set)]
+    boundary: bool,
+    /// list of NTP servers
+    #[arg(short, long, num_args = 1..)]
+    servers: Vec<String>,
+    /// allowed IPv6 range
+    #[arg(short, long)]
+    allow: Option<String>,
 }
 
-fn parse_boundary(s: &str) -> anyhow::Result<bool> {
-    s.parse().map_err(|_| anyhow!("ERROR: Invalid boundary input"))
-}
+const HOSTS_FILE: &str = "/etc/inet/hosts";
+const CHRONY_CONFIG_FILE: &str = "/etc/inet/chrony.conf";
+const LOGADM_CONFIG_FILE: &str = "/etc/logadm.d/chrony.logadm.conf";
+const ROOT: &str = "root";
+const SYS: &str = "sys";
 
 #[tokio::main]
 async fn main() {
@@ -92,130 +105,44 @@ async fn do_run() -> Result<(), CmdError> {
     .to_logger("zone-setup")
     .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
-    let matches = command!()
-        .subcommand(
-            Command::new(COMMON_NW_CMD)
-                .about(
-                    "Sets up common networking configuration across all zones",
-                )
-                .arg(
-                    arg!(
-                        -d --datalink <STRING> "datalink"
-                    )
-                    .required(true)
-                    .value_parser(parse_datalink),
-                )
-                .arg(
-                    arg!(
-                        -g --gateway <Ipv6Addr> "gateway"
-                    )
-                    .required(true)
-                    .value_parser(parse_ipv6),
-                )
-                .arg(
-                    arg!(
-                        -s --static_addr <Ipv6Addr> "static_addr"
-                    )
-                    .required(true)
-                    .value_parser(parse_ipv6),
-                ),
-        )
-        .subcommand(
-            Command::new(OPTE_INTERFACE_CMD)
-                .about("Sets up OPTE interface")
-                .arg(
-                    arg!(
-                        -i --opte_interface <STRING> "opte_interface"
-                    )
-                    .required(true)
-                    .value_parser(parse_opte_iface),
-                )
-                .arg(
-                    arg!(
-                        -g --opte_gateway <Ipv4Addr> "opte_gateway"
-                    )
-                    .required(true)
-                    .value_parser(parse_ipv4),
-                )
-                .arg(
-                    arg!(
-                        -p --opte_ip <IpAddr> "opte_ip"
-                    )
-                    .required(true)
-                    .value_parser(parse_ip),
-                ),
-        )
-        .subcommand(
-            Command::new(CHRONY_SETUP_CMD)
-                .about("Sets up Chrony configuration for NTP zone") 
-                .arg(
-                    arg!(-f --file <String> "Chrony configuration file")
-                    .default_value(CHRONY_CONFIG_FILE)
-                    .value_parser(parse_chrony_conf)
-                )
-                .arg(
-                    arg!(-b --boundary <bool> "Whether this is a boundary or internal NTP zone")
-                    .required(true)
-                    .value_parser(parse_boundary),
-                )
-                .arg(
-                    Arg::new("servers")
-                    .short('s')
-                    .long("servers")
-                    .num_args(1..)
-                    .value_delimiter(' ')
-                    .value_parser(value_parser!(String))
-                    .help("List of NTP servers separated by a space")
-                    .required(true)
-                )
-                .arg(
-                    arg!(-a --allow <String> "Allowed IPv6 range")
-                    .num_args(0..=1)
-                ),
-        )
-        .get_matches();
+    let args = ZoneSetup::try_parse()
+        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
-    if let Some(matches) = matches.subcommand_matches(COMMON_NW_CMD) {
-        common_nw_set_up(matches, log.clone()).await?;
+    match args.command {
+        ZoneSetupCommand::CommonNetworking(args) => {
+            common_nw_set_up(args, &log).await
+        }
+        ZoneSetupCommand::OpteInterface(args) => {
+            opte_interface_set_up(args, &log).await
+        }
+        ZoneSetupCommand::ChronySetup(args) => chrony_setup(args, &log).await,
     }
-
-    if let Some(matches) = matches.subcommand_matches(OPTE_INTERFACE_CMD) {
-        opte_interface_set_up(matches, log.clone()).await?;
-    }
-
-    if let Some(matches) = matches.subcommand_matches(CHRONY_SETUP_CMD) {
-        chrony_setup(matches, log.clone()).await?;
-    }
-
-    Ok(())
 }
 
 async fn chrony_setup(
-    matches: &ArgMatches,
-    log: Logger,
+    args: ChronySetupArgs,
+    log: &Logger,
 ) -> Result<(), CmdError> {
-    let servers =
-        matches.get_many::<String>("servers").unwrap().collect::<Vec<_>>();
-    let allow: Option<&String> = matches.get_one("allow");
+    println!("running chrony setup: {args:?}");
 
-    let file: &String = matches.get_one("file").unwrap();
-    let is_boundary: &bool = matches.get_one("boundary").unwrap();
-    println!(
-        "servers: {:?}\nfile: {}\nallow: {:?}\nboundary: {:?}",
-        servers, file, allow, is_boundary
-    );
-
-    generate_chrony_config(&log, is_boundary, allow, file, servers)?;
+    generate_chrony_config(args, &log)?;
 
     // The NTP zone delivers a logadm fragment into /etc/logadm.d/ that needs to
-    // be added to the system's /etc/logadm.conf. Unfortunately, the service which
-    // does this - system/logadm-upgrade - only processes files with mode 444 and
-    // root:sys ownership so we need to adjust things here (until omicron package
-    // supports including ownership and permissions in the generated tar files).
-    info!(&log, "Setting mode 444 and root:sys ownership to logadm fragment file"; "logadm config" => ?LOGADM_CONFIG_FILE);
+    // be added to the system's /etc/logadm.conf. Unfortunately, the service
+    // which does this - system/logadm-upgrade - only processes files with mode
+    // 444 and root:sys ownership so we need to adjust things here (until
+    // omicron package supports including ownership and permissions in the
+    // generated tar files).
+    info!(
+        log, "Setting mode 444 and root:sys ownership to logadm fragment file";
+        "logadm config" => ?LOGADM_CONFIG_FILE,
+    );
     set_permissions_for_logadm_config()?;
 
-    info!(&log, "Updating logadm"; "logadm config" => ?LOGADM_CONFIG_FILE);
+    info!(
+        log, "Updating logadm";
+        "logadm config" => ?LOGADM_CONFIG_FILE,
+    );
     Svcadm::refresh_logadm_upgrade()
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
@@ -275,11 +202,8 @@ fn set_permissions_for_logadm_config() -> Result<(), CmdError> {
 }
 
 fn generate_chrony_config(
+    args: ChronySetupArgs,
     log: &Logger,
-    is_boundary: &bool,
-    allow: Option<&String>,
-    file: &String,
-    servers: Vec<&String>,
 ) -> Result<(), CmdError> {
     let internal_ntp_tpl = String::from(
         "#
@@ -360,35 +284,35 @@ maxslewrate 2708.333
 ",
     );
 
-    let mut contents =
-        if *is_boundary { boundary_ntp_tpl } else { internal_ntp_tpl };
+    let mut new_config =
+        if args.boundary { boundary_ntp_tpl } else { internal_ntp_tpl };
 
-    if let Some(allow) = allow {
-        contents = contents.replace("@ALLOW@", &allow.to_string());
+    if let Some(allow) = args.allow {
+        new_config = new_config.replace("@ALLOW@", &allow);
     }
 
-    let new_config = if *is_boundary {
-        for s in servers {
-            let str_line =
-                format!("pool {} iburst maxdelay 0.1 maxsources 16\n", s);
-            contents.push_str(&str_line)
+    if args.boundary {
+        for s in args.servers {
+            writeln!(
+                &mut new_config,
+                "pool {s} iburst maxdelay 0.1 maxsources 16"
+            )
+            .expect("write to String is infallible");
         }
-        contents
     } else {
-        for s in servers {
-            let str_line = format!("server {} iburst minpoll 0 maxpoll 4\n", s);
-            contents.push_str(&str_line)
+        for s in args.servers {
+            writeln!(&mut new_config, "server {s} iburst minpoll 0 maxpoll 4")
+                .expect("write to String is infallible");
         }
-        contents
-    };
+    }
 
     // We read the contents from the old configuration file if it existed
     // so that we can verify if it changed.
-    let old_file = if Path::exists(Path::new(file)) {
-        Some(read_to_string(file).map_err(|err| {
+    let old_file = if args.file.exists() {
+        Some(read_to_string(&args.file).map_err(|err| {
             CmdError::Failure(anyhow!(
                 "Could not read old chrony configuration file {}: {}",
-                file,
+                args.file.display(),
                 err
             ))
         })?)
@@ -400,37 +324,37 @@ maxslewrate 2708.333
         .write(true)
         .create(true)
         .truncate(true)
-        .open(file)
+        .open(&args.file)
         .map_err(|err| {
             CmdError::Failure(anyhow!(
                 "Could not create chrony configuration file {}: {}",
-                file,
+                args.file.display(),
                 err
             ))
         })?;
     config_file.write(new_config.as_bytes()).map_err(|err| {
         CmdError::Failure(anyhow!(
             "Could not write to chrony configuration file {}: {}",
-            file,
+            args.file.display(),
             err
         ))
     })?;
 
     if old_file.clone().is_some_and(|f| f != new_config) {
-        info!(&log, "Chrony configuration file has changed"; 
-        "old configuration file" => ?old_file, "new configuration file" => ?new_config,);
+        info!(
+            &log, "Chrony configuration file has changed";
+            "old configuration file" => ?old_file,
+            "new configuration file" => ?new_config,
+        );
     }
 
     Ok(())
 }
 
 async fn common_nw_set_up(
-    matches: &ArgMatches,
-    log: Logger,
+    args: CommonNetworkingArgs,
+    log: &Logger,
 ) -> Result<(), CmdError> {
-    let datalink: &String = matches.get_one("datalink").unwrap();
-    let static_addr: &Ipv6Addr = matches.get_one("static_addr").unwrap();
-    let gateway: Ipv6Addr = *matches.get_one("gateway").unwrap();
     let zonename = zone::current().await.map_err(|err| {
         CmdError::Failure(anyhow!(
             "Could not determine local zone name: {}",
@@ -440,31 +364,52 @@ async fn common_nw_set_up(
 
     // TODO: remove when https://github.com/oxidecomputer/stlouis/issues/435 is
     // addressed
-    info!(&log, "Ensuring a temporary IP interface is created"; "data link" => ?datalink);
-    Ipadm::set_temp_interface_for_datalink(&datalink)
+    info!(
+        log, "Ensuring a temporary IP interface is created";
+        "data link" => ?args.datalink,
+    );
+    Ipadm::set_temp_interface_for_datalink(&args.datalink)
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
-    info!(&log, "Setting MTU to 9000 for IPv6 and IPv4"; "data link" => ?datalink);
-    Ipadm::set_interface_mtu(&datalink)
+    info!(
+        log, "Setting MTU to 9000 for IPv6 and IPv4";
+        "data link" => ?args.datalink,
+    );
+    Ipadm::set_interface_mtu(&args.datalink)
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
-    info!(&log, "Ensuring static and auto-configured addresses are set on the IP interface"; "data link" => ?datalink, "static address" => ?static_addr);
-    Ipadm::create_static_and_autoconfigured_addrs(&datalink, static_addr)
+    info!(
+        log,
+        "Ensuring static and auto-configured addresses are set on the IP \
+         interface";
+        "data link" => ?args.datalink,
+        "static address" => ?args.static_addr);
+    Ipadm::create_static_and_autoconfigured_addrs(
+        &args.datalink,
+        &args.static_addr,
+    )
+    .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+
+    info!(
+        log, "Ensuring there is a default route";
+        "gateway" => ?args.gateway,
+    );
+    Route::ensure_default_route_with_gateway(Gateway::Ipv6(args.gateway))
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
-    info!(&log, "Ensuring there is a default route"; "gateway" => ?gateway);
-    Route::ensure_default_route_with_gateway(Gateway::Ipv6(gateway))
-        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
-
-    info!(&log, "Populating hosts file for zone"; "zonename" => ?zonename);
+    info!(
+        log, "Populating hosts file for zone";
+        "zonename" => ?zonename,
+    );
     write(
         HOSTS_FILE,
         format!(
             r#"
 ::1 localhost loghost
 127.0.0.1 localhost loghost
-{static_addr} {zonename}.local {zonename}
-"#
+{} {zonename}.local {zonename}
+"#,
+            args.static_addr
         ),
     )
     .map_err(|err| CmdError::Failure(anyhow!(err)))?;
@@ -473,23 +418,30 @@ async fn common_nw_set_up(
 }
 
 async fn opte_interface_set_up(
-    matches: &ArgMatches,
-    log: Logger,
+    args: OpteInterfaceArgs,
+    log: &Logger,
 ) -> Result<(), CmdError> {
-    let interface: &String = matches.get_one("opte_interface").unwrap();
-    let gateway: Ipv4Addr = *matches.get_one("opte_gateway").unwrap();
-    let opte_ip: &IpAddr = matches.get_one("opte_ip").unwrap();
-
-    info!(&log, "Creating gateway on the OPTE IP interface if it doesn't already exist"; "OPTE interface" => ?interface);
-    Ipadm::create_opte_gateway(interface)
+    info!(
+        log,
+        "Creating gateway on the OPTE IP interface if it doesn't already exist";
+        "OPTE interface" => ?args.interface);
+    Ipadm::create_opte_gateway(&args.interface)
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
-    info!(&log, "Ensuring there is a gateway route"; "OPTE gateway" => ?gateway, "OPTE interface" => ?interface, "OPTE IP" => ?opte_ip);
-    Route::ensure_opte_route(&gateway, interface, &opte_ip)
+    info!(
+        log, "Ensuring there is a gateway route";
+        "OPTE gateway" => ?args.gateway,
+        "OPTE interface" => ?args.interface,
+        "OPTE IP" => ?args.ip,
+    );
+    Route::ensure_opte_route(&args.gateway, &args.interface, &args.ip)
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
-    info!(&log, "Ensuring there is a default route"; "gateway" => ?gateway);
-    Route::ensure_default_route_with_gateway(Gateway::Ipv4(gateway))
+    info!(
+        log, "Ensuring there is a default route";
+        "gateway" => ?args.gateway,
+    );
+    Route::ensure_default_route_with_gateway(Gateway::Ipv4(args.gateway))
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     Ok(())
