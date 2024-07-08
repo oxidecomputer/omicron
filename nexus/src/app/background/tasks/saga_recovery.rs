@@ -26,6 +26,7 @@
 // - counters (maybe plumb these into Oximeter?)
 // - task status reported by omdb
 // - log entries
+// XXX-dap TODO-coverage everything here
 
 //! Saga recovery
 //!
@@ -285,16 +286,15 @@ impl BackgroundTask for SagaRecovery {
         async {
             let log = &opctx.log;
             let datastore = &self.datastore;
+            // XXX-dap TODO-cleanup remove clone
+            let mut recovery =
+                SagaRecoveryState::new(log, self.sagas_to_ignore.clone());
 
             // Fetch the list of not-yet-finished sagas that are assigned to
             // this Nexus instance.
-            debug!(log, "listing candidate sagas for recovery");
-            let result = datastore
-                .saga_list_recovery_candidates_batched(
-                    &self.saga_recovery_opctx,
-                    &self.sec_id,
-                )
-                .await;
+            let result =
+                list_sagas_in_progress(&self.saga_recovery_opctx, &self.sec_id)
+                    .await;
 
             // Process any newly-created sagas, adding them to our set of sagas
             // to ignore during recovery.  We never want to try to recover a
@@ -308,69 +308,34 @@ impl BackgroundTask for SagaRecovery {
             // fetching candidates, and a saga was immediately created and
             // showed up in our candidate list, we'd erroneously conclude that
             // it needed to be recovered.
-            // XXX-dap this highlights that it's not actually safe to remove an
-            // item from this list if it's not in the candidate list.  I thought
-            // that meant it had finished, but it might just mean that it has
-            // only just started.  One solution is probably to fetch from the
-            // database again after we finish this?  Or we wait for two passes?
-            let mut count = 0;
-            loop {
-                match self.sagas_started_rx.try_recv() {
-                    Ok(saga_id) => {
-                        count += 1;
-                        debug!(log,
-                            "observed saga start";
-                            "saga_id" => %saga_id
-                        );
-                        if !self.sagas_to_ignore.insert(saga_id) {
-                            panic!(
-                                "unexpectedly observed a saga start that was \
-                                already in our 'ignore' set: {saga_id}"
-                            );
-                        }
-                    }
+            update_sagas_started(
+                &mut self.sagas_to_ignore,
+                &mut self.sagas_started_rx,
+                &mut recovery,
+            );
 
-                    Err(mpsc::error::TryRecvError::Empty) => break,
-                    Err(mpsc::error::TryRecvError::Disconnected) => {
-                        warn!(
-                            log,
-                            "sagas_started_rx disconnected \
-                            (is Nexus shutting down?)"
-                        );
-                        break;
-                    }
-                }
-            }
-
-            info!(log, "processed newly-started sagas"; "count" => count);
-
-            let last_pass = match result {
-                Ok(candidate_sagas) => {
-                    info!(
-                        &opctx.log,
-                        "found candidate sagas for recovery";
-                        "count" => candidate_sagas.len()
-                    );
-                    LastPass::Success(
-                        self.recover_candidates(log, candidate_sagas).await,
-                    )
-                }
+            let db_sagas = match result {
+                Ok(db_sagas) => db_sagas,
                 Err(error) => {
-                    warn!(log, "failed to list candidate sagas"; &error);
-                    LastPass::Failed {
+                    return self.activate_finish(LastPass::Failed {
                         message: InlineErrorChain::new(&error).to_string(),
-                    }
+                    })
                 }
             };
 
-            self.last_pass = last_pass;
+            recovery_plan(&mut recovery, db_sagas);
+            recovery_execute(&mut recovery);
 
-            serde_json::to_value(SagaRecoveryTaskStatus {
-                recent_recoveries: self.recent_recoveries.clone(),
-                recent_failures: self.recent_failures.clone(),
-                last_pass: self.last_pass.clone(),
-            })
-            .unwrap()
+            let last_pass = match result {
+                Ok(db_sagas) => LastPass::Success(
+                    self.recover_candidates(log, db_sagas, &mut recovery).await,
+                ),
+                Err(error) => LastPass::Failed {
+                    message: InlineErrorChain::new(&error).to_string(),
+                },
+            };
+
+            self.activate_finish(last_pass)
         }
         .boxed()
     }
@@ -381,6 +346,7 @@ impl SagaRecovery {
     async fn recover_candidates(
         &mut self,
         bgtask_log: &slog::Logger,
+        recovery: &mut SagaRecoveryState<'_>,
         candidate_sagas: Vec<nexus_db_model::Saga>,
     ) -> LastPassSuccess {
         let nfound = candidate_sagas.len();
@@ -593,6 +559,159 @@ impl SagaRecovery {
         }
         .boxed())
     }
+
+    fn activate_finish(&mut self, last_pass: LastPass) {
+        self.last_pass = last_pass;
+
+        serde_json::to_value(SagaRecoveryTaskStatus {
+            recent_recoveries: self.recent_recoveries.clone(),
+            recent_failures: self.recent_failures.clone(),
+            last_pass: self.last_pass.clone(),
+        })
+        .unwrap()
+    }
+}
+
+struct SagaRecoveryState<'a> {
+    log: &'a slog::Logger,
+    sagas_started_before: BTreeSet<steno::SagaId>,
+    sagas_newly_started: BTreeSet<steno::SagaId>,
+    sagas_inferred_done: BTreeSet<steno::SagaId>,
+}
+
+impl<'a> SagaRecoveryState<'a> {
+    pub fn new(
+        log: &'a slog::Logger,
+        sagas_started_before: BTreeSet<steno::SagaId>,
+    ) -> SagaRecoveryState<'a> {
+        SagaRecoveryState {
+            log,
+            sagas_started_before,
+            sagas_newly_started: BTreeSet::new(),
+            sagas_inferred_done: BTreeSet::new(),
+        }
+    }
+
+    pub fn saga_observe_start(
+        &mut self,
+        saga_id: steno::SagaId,
+        reason: &'static str,
+    ) {
+        // XXX-dap log entry
+        // XXX-dap panic if already present
+        self.sagas_newly_started.insert(saga_id);
+    }
+
+    pub fn saga_infer_done(&mut self, saga_id: steno::SagaId) {
+        // XXX-dap log entry
+        // XXX-dap panic if already present
+        self.sagas_inferred_done.insert(saga_id);
+    }
+
+    pub fn saga_recovery_start(&mut self, saga_id: steno::SagaId) {
+        // XXX-dap log entry
+        // XXX-dap bookkeeping
+    }
+
+    pub fn saga_recovery_success(&mut self, saga_id: steno::SagaId) {
+        // XXX-dap log entry
+        // XXX-dap record success
+        // XXX-dap bookkeeping
+    }
+
+    pub fn saga_recovery_failure(&mut self, saga_id: steno::SagaId) {
+        // XXX-dap log entry
+        // XXX-dap record failure
+        // XXX-dap bookkeeping
+    }
+
+    pub fn saga_recovery_not_needed(
+        &mut self,
+        saga_id: steno::SagaId,
+        reason: &'static str,
+    ) {
+        // XXX-dap log entry
+        // XXX-dap bookkeeping
+    }
+
+    pub fn saga_recovery_maybe_done(&mut self, saga_id: steno::SagaId) {
+        // XXX-dap log entry
+    }
+
+    pub fn saga_recovery_needed(&mut self, saga_id: steno::SagaId) {
+        // XXX-dap bookkeeping
+    }
+
+    // XXX-dap what am I doing here?  This sort of seems useful to decouple the
+    // logic from the summary of the result... but also, it's kind of the
+    // opposite of what I need?  I need a programmatic way to access what the
+    // logic wants to do, not _produce_ it.  I can add some read interfaces to
+    // this I guess?
+}
+
+// Helpers
+
+async fn list_sagas_in_progress(
+    opctx: &OpContext,
+    sec_id: db::SecId,
+) -> Result<BTreeMap<steno::SagaId, nexus_db_model::saga_types::Saga>, Error> {
+    let log = &opctx.log;
+    debug!(log, "listing candidate sagas for recovery");
+    let result = datastore
+        .saga_list_recovery_candidates_batched(
+            &self.saga_recovery_opctx,
+            &self.sec_id,
+        )
+        .await
+        .internal_context("listing in-progress sagas for saga recovery")
+        .map(|list| {
+            list.into_iter()
+                .map(|saga| (saga.id.into(), saga))
+                .collect::<BTreeMap<steno::SagaId, nexus_db_model::Saga>>()
+        });
+    match result {
+        Ok(list) => {
+            info!(log, "listed in-progress sagas"; "count" => list.len());
+        }
+        Err(error) => {
+            warn!(log, "failed to list in-progress sagas", error);
+        }
+    };
+}
+
+async fn update_sagas_started(
+    set: &mut BTreeSet<steno::SagaId>,
+    rx: &mut mpsc::UnboundedReceiver<T>,
+    recovery: &mut SagaRecoveryState,
+) {
+    let (new_sagas, disconnected) = read_all_from_channel(rx);
+    // XXX-dap warn on disconnected
+    for saga_id in new_sagas {
+        recovery.saga_observe_start(saga_id, "received start message");
+    }
+}
+
+fn read_all_from_channel<T>(
+    rx: &mut mpsc::UnboundedReceiver<T>,
+) -> (Vec<T>, bool) {
+    let mut values = Vec::new();
+    let mut disconnected = false;
+
+    loop {
+        match rx.try_recv() {
+            Ok(value) => {
+                values.push(value);
+            }
+
+            Err(mpsc::error::TryRecvError::Empty) => break,
+            Err(mpsc::error::TryRecvError::Disconnected) => {
+                disconnected = true;
+                break;
+            }
+        }
+    }
+
+    (values, disconnected)
 }
 
 // XXX-dap TODO-coverage
@@ -616,5 +735,3 @@ impl<T> DebuggingHistory<T> {
         self.ring.push_back(t);
     }
 }
-
-// XXX-dap TODO-coverage everything here
