@@ -74,6 +74,43 @@ fn emit_target(schema: &TimeseriesSchema) -> TokenStream {
     emit_one(FieldSource::Target, schema)
 }
 
+/// Return true if all the fields in the schema are `Copy`.
+fn fields_are_copyable<'a>(
+    mut fields: impl Iterator<Item = &'a FieldSchema>,
+) -> bool {
+    // Do a positive match, to ensure new variants don't actually derive copy
+    // inappropriately. Better we clone, in that case.
+    fields.all(FieldSchema::is_copyable)
+}
+
+fn compute_extra_derives(
+    source: FieldSource,
+    schema: &TimeseriesSchema,
+) -> TokenStream {
+    match source {
+        FieldSource::Target => {
+            if fields_are_copyable(schema.target_fields()) {
+                quote! { #[derive(Copy, Eq, Hash, Ord, PartialOrd)] }
+            } else {
+                quote! { #[derive(Eq, Hash, Ord, PartialOrd)] }
+            }
+        }
+        FieldSource::Metric => {
+            if schema.datum_type.is_histogram() {
+                // No other traits can be derived, since the Histogram<T> won't
+                // satisfy them.
+                quote! {}
+            } else {
+                if fields_are_copyable(schema.metric_fields()) {
+                    quote! { #[derive(Copy, Eq, Hash, Ord, PartialOrd)] }
+                } else {
+                    quote! { #[derive(Eq, Hash, Ord, PartialOrd)] }
+                }
+            }
+        }
+    }
+}
+
 fn emit_one(source: FieldSource, schema: &TimeseriesSchema) -> TokenStream {
     let name = match source {
         FieldSource::Target => schema.target_name(),
@@ -98,6 +135,7 @@ fn emit_one(source: FieldSource, schema: &TimeseriesSchema) -> TokenStream {
             }
         })
         .collect();
+    let extra_derives = compute_extra_derives(source, schema);
     let (oximeter_trait, maybe_datum, type_docstring) = match source {
         FieldSource::Target => (
             quote! {::oximeter::Target },
@@ -116,6 +154,7 @@ fn emit_one(source: FieldSource, schema: &TimeseriesSchema) -> TokenStream {
     quote! {
         #[doc = #type_docstring]
         #[derive(Clone, Debug, PartialEq, #oximeter_trait)]
+        #extra_derives
         pub struct #struct_name {
             #( #field_defs, )*
             #maybe_datum
@@ -431,6 +470,7 @@ mod tests {
         let expected = quote! {
             #[doc = "a target"]
             #[derive(Clone, Debug, PartialEq, ::oximeter::Target)]
+            #[derive(Eq, Hash, Ord, PartialOrd)]
             pub struct Foo {
                 #[doc = "target field"]
                 pub f0: ::std::borrow::Cow<'static, str>,
@@ -438,6 +478,7 @@ mod tests {
 
             #[doc = "a metric"]
             #[derive(Clone, Debug, PartialEq, ::oximeter::Metric)]
+            #[derive(Copy, Eq, Hash, Ord, PartialOrd)]
             pub struct Bar {
                 #[doc = "metric field"]
                 pub f1: ::uuid::Uuid,
@@ -474,6 +515,7 @@ mod tests {
         let expected = quote! {
             #[doc = "a target"]
             #[derive(Clone, Debug, PartialEq, ::oximeter::Target)]
+            #[derive(Eq, Hash, Ord, PartialOrd)]
             pub struct Foo {
                 #[doc = "target field"]
                 pub f0: ::std::borrow::Cow<'static, str>,
@@ -481,6 +523,7 @@ mod tests {
 
             #[doc = "a metric"]
             #[derive(Clone, Debug, PartialEq, ::oximeter::Metric)]
+            #[derive(Copy, Eq, Hash, Ord, PartialOrd)]
             pub struct Bar {
                 pub datum: ::oximeter::types::Cumulative<u64>,
             }

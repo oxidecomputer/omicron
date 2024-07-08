@@ -54,6 +54,13 @@ pub struct FieldSchema {
     pub description: String,
 }
 
+impl FieldSchema {
+    /// Return `true` if this field is copyable.
+    pub const fn is_copyable(&self) -> bool {
+        self.field_type.is_copyable()
+    }
+}
+
 /// The source from which a field is derived, the target or metric.
 #[derive(
     Clone,
@@ -295,6 +302,24 @@ impl TimeseriesSchema {
         S: AsRef<str>,
     {
         self.field_schema.iter().find(|field| field.name == name.as_ref())
+    }
+
+    /// Return an iterator over the target fields.
+    pub fn target_fields(&self) -> impl Iterator<Item = &FieldSchema> {
+        self.field_iter(FieldSource::Target)
+    }
+
+    /// Return an iterator over the metric fields.
+    pub fn metric_fields(&self) -> impl Iterator<Item = &FieldSchema> {
+        self.field_iter(FieldSource::Metric)
+    }
+
+    /// Return an iterator over fields from the given source.
+    fn field_iter(
+        &self,
+        source: FieldSource,
+    ) -> impl Iterator<Item = &FieldSchema> {
+        self.field_schema.iter().filter(move |field| field.source == source)
     }
 
     /// Return the target and metric component names for this timeseries
