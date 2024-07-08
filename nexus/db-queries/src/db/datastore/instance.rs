@@ -108,18 +108,12 @@ impl From<InstanceAndActiveVmm> for external::Instance {
         // We want to only report that an instance is `Stopped` when a new
         // `instance-start` saga is able to proceed. That means that:
         let run_state = match (instance_state, vmm_state) {
-            // - An instance with a "stopped" VMM needs to be recast as a
-            //   "stopping" instance.
-            (InstanceState::Vmm, Some(VmmState::Stopped)) => {
+            // - An instance with a "stopped" or "destroyed" VMM needs to be
+            //   recast as a "stopping" instance, as the virtual provisioning
+            //   resources for that instance have not been deallocated until the
+            //   active VMM ID has been unlinked by an update saga.
+            (InstanceState::Vmm, Some(VmmState::Stopped | VmmState::Destroyed)) => {
                 external::InstanceState::Stopping
-            }
-            // - An instance with a "destroyed" VMM can be recast as a "stopped"
-            //   instance if the start saga is allowed to immediately replace
-            //   it. This applies to "destroyed" VMMs but, critically, *not* to
-            //   "SagaUnwound" VMMs, even though they will be otherwise
-            //   converted to "destroyed" in the public API.
-            (InstanceState::Vmm, Some(VmmState::Destroyed)) => {
-                external::InstanceState::Stopped
             }
             // - An instance with no VMM is always "stopped" (as long as it's
             //   not "starting" etc.)
