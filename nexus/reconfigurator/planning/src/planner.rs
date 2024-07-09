@@ -426,11 +426,12 @@ impl<'a> Planner<'a> {
         }
 
         let target_count = match zone_kind {
-            DiscretionaryOmicronZone::Nexus => {
-                self.input.target_nexus_zone_count()
-            }
+            DiscretionaryOmicronZone::BoundaryNtp => todo!(),
             DiscretionaryOmicronZone::CockroachDb => {
                 self.input.target_cockroachdb_zone_count()
+            }
+            DiscretionaryOmicronZone::Nexus => {
+                self.input.target_nexus_zone_count()
             }
         };
 
@@ -501,14 +502,15 @@ impl<'a> Planner<'a> {
                     + additional_zone_count;
 
             let result = match kind {
-                DiscretionaryOmicronZone::Nexus => {
-                    self.blueprint.sled_ensure_zone_multiple_nexus(
+                DiscretionaryOmicronZone::BoundaryNtp => todo!(),
+                DiscretionaryOmicronZone::CockroachDb => {
+                    self.blueprint.sled_ensure_zone_multiple_cockroachdb(
                         sled_id,
                         new_total_zone_count,
                     )?
                 }
-                DiscretionaryOmicronZone::CockroachDb => {
-                    self.blueprint.sled_ensure_zone_multiple_cockroachdb(
+                DiscretionaryOmicronZone::Nexus => {
+                    self.blueprint.sled_ensure_zone_multiple_nexus(
                         sled_id,
                         new_total_zone_count,
                     )?
