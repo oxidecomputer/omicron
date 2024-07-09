@@ -45,7 +45,7 @@ impl RequestLatencyHistogram {
         Self {
             route: normalized_uri_path(request.uri()),
             method: request.method().to_string().into(),
-            status_code: status_code.as_u16(),
+            status_code: status_code.as_u16().into(),
             datum: histogram,
         }
     }
