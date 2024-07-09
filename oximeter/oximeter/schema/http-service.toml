@@ -34,5 +34,5 @@ type = "string"
 description = "HTTP method in the request"
 
 [fields.status_code]
-type = "u16"
+type = "i64"
 description = "HTTP status code in the server's response"
