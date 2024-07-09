@@ -337,15 +337,6 @@ impl DataStore {
                 }
                 else {
                     public_error_from_diesel(e, ErrorHandler::Server)
-                    /*
-                    public_error_from_diesel(
-                        e,
-                        ErrorHandler::Conflict(
-                            ResourceType::SwitchPortSettings,
-                            params.identity.name.as_str(),
-                        ),
-                    )
-                    */
                 }
             })
     }
