@@ -213,7 +213,6 @@ impl InstanceStates {
         SledInstanceState {
             vmm_state: self.vmm.clone(),
             propolis_id: self.propolis_id,
-            // migration_state: self.migration.clone(),
             migration_in: self.migration_in.clone(),
             migration_out: self.migration_out.clone(),
         }
