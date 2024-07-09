@@ -348,7 +348,7 @@ async fn sim_set_migration_ids(
     let migration_id = sagactx.lookup::<Uuid>("migrate_id")?;
     let dst_propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
 
-    info!(osagactx.log(), "setting migration IDs on migration source sled";
+    info!(osagactx.log(), "setting instance migration IDs";
           "instance_id" => %db_instance.id(),
           "migration_id" => %migration_id,
           "src_propolis_id" => %src_propolis_id,
