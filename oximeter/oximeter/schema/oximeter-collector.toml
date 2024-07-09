@@ -1,0 +1,59 @@
+format_version = 1
+
+[target]
+name = "oximeter_collector"
+description = "An instance of the oximeter metric collector service"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "collector_id", "collector_ip", "collector_port" ] },
+]
+
+[[metrics]]
+name = "collections"
+description = "Total number of successful collections from a producer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "base_route", "producer_id", "producer_ip", "producer_port" ] }
+]
+
+[[metrics]]
+name = "failed_collections"
+description = "Total number of failed collections from a producer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "base_route", "producer_id", "producer_ip", "producer_port", "reason" ] }
+]
+
+[fields.base_route]
+type = "string"
+description = "Base HTTP route used to request data from the producer"
+
+[fields.collector_id]
+type = "uuid"
+description = "UUID of the oximeter collector instance"
+
+[fields.collector_ip]
+type = "ip_addr"
+description = "IP address of the oximeter collector instance"
+
+[fields.collector_port]
+type = "u16"
+description = "Port of the oximeter collector instance"
+
+[fields.producer_id]
+type = "uuid"
+description = "UUID of the metric producer instance"
+
+[fields.producer_ip]
+type = "ip_addr"
+description = "IP address of the metric producer instance"
+
+[fields.producer_port]
+type = "u16"
+description = "Port of the metric producer instance"
+
+[fields.reason]
+type = "string"
+description = "Reason the collection failed"
