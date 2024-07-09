@@ -72,6 +72,10 @@ impl super::Nexus {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let result =
             self.db_datastore.bgp_update_announce_set(opctx, announce).await?;
+
+        // eagerly propagate changes via rpw
+        self.background_tasks
+            .activate(&self.background_tasks.task_switch_port_settings_manager);
         Ok(result)
     }
 
