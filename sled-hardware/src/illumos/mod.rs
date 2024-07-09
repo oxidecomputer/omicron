@@ -9,6 +9,7 @@ use crate::{
 use camino::Utf8PathBuf;
 use gethostname::gethostname;
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
+use libnvme::{controller::Controller, Nvme};
 use omicron_common::disk::DiskIdentity;
 use sled_hardware_types::Baseboard;
 use slog::debug;
@@ -58,6 +59,9 @@ enum Error {
     #[error("Failed to issue request to sysconf: {0}")]
     SysconfError(#[from] sysconf::Error),
 
+    #[error("Node {node} missing device insance")]
+    MissingNvmeDevinfoInstance { node: String },
+
     #[error("Failed to init nvme handle: {0}")]
     NvmeHandleInit(#[from] libnvme::NvmeInitError),
 
@@ -66,6 +70,9 @@ enum Error {
 
     #[error("libnvme controller error: {0}")]
     NvmeController(#[from] libnvme::controller::NvmeControllerError),
+
+    #[error("Unable to grab NVMe Controller lock")]
+    NvmeControllerLocked,
 
     #[error("Failed to get NVMe Controller's firmware log page: {0}")]
     FirmwareLogPage(#[from] libnvme::firmware::FirmwareLogPageError),
@@ -493,6 +500,13 @@ fn poll_blkdev_node(
 
     // We expect that the parent of the "blkdev" node is an "nvme" driver.
     let nvme_node = get_parent_node(&node, "nvme")?;
+    // Importantly we grab the NVMe instance and not the blkdev instance.
+    // Eventually we should switch the logic here to search for nvme instances
+    // and confirm that we only have one blkdev sibling:
+    // https://github.com/oxidecomputer/omicron/issues/5241
+    let nvme_instance = nvme_node
+        .instance()
+        .ok_or(Error::MissingNvmeDevinfoInstance { node: node.node_name() })?;
 
     let vendor_id =
         i64_from_property(&find_properties(&nvme_node, ["vendor-id"])?[0])?;
@@ -526,10 +540,31 @@ fn poll_blkdev_node(
         return Err(Error::UnrecognizedSlot { slot });
     };
 
-    // XXX See https://github.com/oxidecomputer/meta/issues/443
-    // Temporarily providing static data until the issue is resolved.
-    let firmware =
-        DiskFirmware::new(1, None, true, vec![Some("meta-443".to_string())]);
+    let nvme = Nvme::new()?;
+    let controller = Controller::init_by_instance(&nvme, nvme_instance)?;
+    let controller_lock = match controller.try_read_lock() {
+        libnvme::controller::TryLockResult::Ok(locked) => locked,
+        // We should only hit this if something in the system has locked the
+        // controller in question for writing.
+        libnvme::controller::TryLockResult::Locked(_) => {
+            warn!(
+                log,
+                "NVMe Controller is already locked so we will try again
+                in the next hardware snapshot"
+            );
+            return Err(Error::NvmeControllerLocked);
+        }
+        libnvme::controller::TryLockResult::Err(err) => {
+            return Err(Error::from(err))
+        }
+    };
+    let firmware_log_page = controller_lock.get_firmware_log_page()?;
+    let firmware = DiskFirmware::new(
+        firmware_log_page.active_slot,
+        firmware_log_page.next_active_slot,
+        firmware_log_page.slot1_is_read_only,
+        firmware_log_page.slot_iter().map(|s| s.map(str::to_string)).collect(),
+    );
 
     let disk = UnparsedDisk::new(
         Utf8PathBuf::from(&devfs_path),
