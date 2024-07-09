@@ -2,26 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// XXX-dap working here
-// As I write this now, there's one compile error left: we're incorrectly trying
-// to store a Future into a map that's specified to hold timestamps.  This is an
-// artifact of combining two pre-existing hunks of code: one tracked all sagas
-// recovered and stored timestamps; the other tracked the sagas recovered *in
-// one pass* and stored the completion Futures.  The completion Futures are only
-// used for the test suite.  So the answer here is probably to refactor some of
-// this stuff to expose smaller pieces for use by the test suite.
-//
-// That's an important next step anyway.  I need to take a pass through
-// `activate()` and all the functions that it calls to figure out how to
-// decompose it into smaller pieces, particularly for testing, but also in hopes
-// that it'll be more obviously correct.  Some ideas:
-// - separate out planning from execution?  i.e., compute which sagas are
-//   to be recovered/skipped/etc. with a helper that we can test in isolation.
-//   This is a little tricky because recovery *is* one of those steps needed to
-//   determine if something succeeded or failed.
-// - create a StatusBuilder where we can report what we're doing?  This seems
-//   kind of hard though
-//
+// XXX-dap see other XXXs -- particularly: updating global state (including
+// debug state but also critical state) based on what happened during planning
+// and execution
+// XXX-dap consider breaking into a separate directory with its own submodules
 // XXX-dap at the end, verify:
 // - counters (maybe plumb these into Oximeter?)
 // - task status reported by omdb
@@ -288,12 +272,12 @@ impl SagaRecovery {
         .unwrap()
     }
 
-    async fn recovery_execute(
+    async fn recovery_execute<'a>(
         &self,
-        bgtask_log: &slog::Logger,
-        plan: &SagaRecoveryPlan,
-    ) -> SagaRecoveryDone {
-        let mut builder = SagaRecoveryDoneBuilder::new(bgtask_log);
+        bgtask_log: &'a slog::Logger,
+        plan: &'a SagaRecoveryPlan,
+    ) -> SagaRecoveryDone<'a> {
+        let mut builder = SagaRecoveryDoneBuilder::new(bgtask_log, plan);
 
         for (saga_id, saga) in &plan.needs_recovery {
             let saga_log = self.nexus.log.new(o!(
@@ -707,7 +691,9 @@ impl<'a> SagaRecoveryPlanBuilder<'a> {
 /// `recovery_execute()`) via [`SagaRecoveryDoneBuilder::new()`].  This seems a
 /// little overboard for such an internal structure but it helps separate
 /// concerns, particularly when it comes to testing.
-struct SagaRecoveryDone {
+struct SagaRecoveryDone<'a> {
+    /// plan from which this recovery was carried out
+    plan: &'a SagaRecoveryPlan,
     /// list of sagas that were successfully recovered
     succeeded: Vec<RecoverySuccess>,
     /// list of sagas that failed to be recovered
@@ -718,10 +704,17 @@ struct SagaRecoveryDone {
     completion_futures: Vec<BoxFuture<'static, Result<(), Error>>>,
 }
 
-impl SagaRecoveryDone {
+impl<'a> SagaRecoveryDone<'a> {
     pub fn to_last_pass_result(&self) -> LastPassSuccess {
-        // XXX-dap
-        todo!();
+        let plan = self.plan;
+        let nfound = plan.needs_recovery.len() + plan.skipped_running.len();
+        LastPassSuccess {
+            nfound,
+            nrecovered: self.succeeded.len(),
+            nfailed: self.failed.len(),
+            nskipped: plan.skipped_running.len(),
+            nremoved: plan.inferred_done.len(),
+        }
     }
 
     #[cfg(test)]
@@ -738,6 +731,7 @@ impl SagaRecoveryDone {
 
 struct SagaRecoveryDoneBuilder<'a> {
     log: &'a slog::Logger,
+    plan: &'a SagaRecoveryPlan,
     in_progress: BTreeMap<steno::SagaId, slog::Logger>,
     succeeded: Vec<RecoverySuccess>,
     failed: Vec<RecoveryFailure>,
@@ -746,9 +740,13 @@ struct SagaRecoveryDoneBuilder<'a> {
 }
 
 impl<'a> SagaRecoveryDoneBuilder<'a> {
-    pub fn new(log: &'a slog::Logger) -> SagaRecoveryDoneBuilder<'a> {
+    pub fn new(
+        log: &'a slog::Logger,
+        plan: &'a SagaRecoveryPlan,
+    ) -> SagaRecoveryDoneBuilder<'a> {
         SagaRecoveryDoneBuilder {
             log,
+            plan,
             in_progress: BTreeMap::new(),
             succeeded: Vec::new(),
             failed: Vec::new(),
@@ -757,13 +755,14 @@ impl<'a> SagaRecoveryDoneBuilder<'a> {
         }
     }
 
-    pub fn build(self) -> SagaRecoveryDone {
+    pub fn build(self) -> SagaRecoveryDone<'a> {
         assert!(
             self.in_progress.is_empty(),
             "attempted to build execution result while some recoveries are \
             still in progress"
         );
         SagaRecoveryDone {
+            plan: self.plan,
             succeeded: self.succeeded,
             failed: self.failed,
             #[cfg(test)]
