@@ -266,7 +266,7 @@ async fn sim_fail_migration_record(
     // If the migration record wasn't updated, this means it's already deleted,
     // which...seems weird, but isn't worth getting the whole saga unwind stuck over.
     if let Err(e) =
-        osagactx.datastore().migration_mark_deleted(&opctx, migration_id).await
+        osagactx.datastore().migration_mark_failed(&opctx, migration_id).await
     {
         warn!(osagactx.log(),
               "Error marking migration record as failed during rollback";
