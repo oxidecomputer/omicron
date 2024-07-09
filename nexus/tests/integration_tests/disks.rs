@@ -543,6 +543,8 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let instance2_id = InstanceUuid::from_untyped_uuid(instance2.identity.id);
     set_instance_state(&client, "instance2", "stop").await;
     instance_simulate(nexus, &instance2_id).await;
+    instance_wait_for_state(&client, instance2_id, InstanceState::Stopped)
+        .await;
 
     let url_instance2_attach_disk =
         get_disk_attach_url(&instance2.identity.id.into());
