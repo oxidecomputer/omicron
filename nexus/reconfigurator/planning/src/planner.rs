@@ -1766,19 +1766,45 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        // There should be no changes to the blueprint; we don't yet garbage
-        // collect zones, so we should still have the sled's expunged zones
-        // (even though the sled itself is no longer present in the list of
-        // commissioned sleds).
         let diff = blueprint3.diff_since_blueprint(&blueprint2);
         println!(
             "2 -> 3 (decommissioned {expunged_sled_id}):\n{}",
             diff.display()
         );
+
+        // No sleds should have been added or removed.
         assert_eq!(diff.sleds_added.len(), 0);
         assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 0);
-        assert_eq!(diff.sleds_unchanged.len(), DEFAULT_N_SLEDS);
+
+        // Our decommissioned sled should show up as modified.
+        assert_eq!(diff.sleds_modified.len(), 1);
+        assert_eq!(
+            diff.sleds_modified.iter().next().copied().unwrap(),
+            expunged_sled_id
+        );
+
+        // We don't yet garbage collect zones, so the zones for the
+        // decommissioned sleds should be unchanged.
+        assert_eq!(diff.zones.added.len(), 0);
+        assert_eq!(diff.zones.removed.len(), 0);
+        assert_eq!(diff.zones.modified.len(), 0);
+        assert_eq!(diff.zones.errors.len(), 0);
+
+        // However, all the disks should be removed, as we do clean up disks.
+        assert_eq!(diff.physical_disks.added.len(), 0);
+        assert_eq!(diff.physical_disks.removed.len(), 1);
+        assert_eq!(
+            diff.physical_disks
+                .removed
+                .get(&expunged_sled_id)
+                .unwrap()
+                .disks
+                .len(),
+            10
+        );
+
+        // All remaining sleds should be unchanged.
+        assert_eq!(diff.sleds_unchanged.len(), DEFAULT_N_SLEDS - 1);
 
         logctx.cleanup_successful();
     }
