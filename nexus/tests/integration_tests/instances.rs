@@ -1367,11 +1367,52 @@ async fn test_instance_metrics_with_migration(
     .parsed_body::<Instance>()
     .unwrap();
 
+    let migration_id = {
+        let datastore = apictx.nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            datastore.clone(),
+        );
+        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+            .instance_id(instance.identity.id)
+            .lookup_for(nexus_db_queries::authz::Action::Read)
+            .await
+            .unwrap();
+        datastore
+            .instance_refetch(&opctx, &authz_instance)
+            .await
+            .unwrap()
+            .runtime_state
+            .migration_id
+            .expect("since we've started a migration, the instance record must have a migration id!")
+    };
+
+    // Wait for the instance to be in the `Migrating` state. Otherwise, the
+    // subsequent `instance_wait_for_state(..., Running)` may see the `Running`
+    // state from the *old* VMM, rather than waiting for the migration to
+    // complete.
+    instance_simulate_migration_source(
+        cptestctx,
+        nexus,
+        original_sled,
+        instance_id,
+        migration_id,
+    )
+    .await;
+    instance_single_step_on_sled(cptestctx, nexus, original_sled, instance_id)
+        .await;
+    instance_single_step_on_sled(cptestctx, nexus, dst_sled_id, instance_id)
+        .await;
+    instance_wait_for_state(&client, instance_id, InstanceState::Migrating)
+        .await;
+
     check_provisioning_state(4, 1).await;
 
     // Complete migration on the target. Simulated migrations always succeed.
     // After this the instance should be running and should continue to appear
     // to be provisioned.
+    instance_simulate_on_sled(cptestctx, nexus, original_sled, instance_id)
+        .await;
     instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
     instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
 
@@ -5012,6 +5053,22 @@ pub async fn instance_simulate(nexus: &Arc<Nexus>, id: &InstanceUuid) {
         .unwrap()
         .expect("instance must be on a sled to simulate a state change");
     sa.instance_finish_transition(id.into_untyped_uuid()).await;
+}
+
+/// Simulate one step of an ongoing instance state transition.  To do this, we
+/// have to look up the instance, then get the sled agent associated with that
+/// instance, and then tell it to finish simulating whatever async transition is
+/// going on.
+async fn instance_single_step_on_sled(
+    cptestctx: &ControlPlaneTestContext,
+    nexus: &Arc<Nexus>,
+    sled_id: SledUuid,
+    instance_id: InstanceUuid,
+) {
+    info!(&cptestctx.logctx.log, "Single-stepping simulated instance on sled";
+          "instance_id" => %instance_id, "sled_id" => %sled_id);
+    let sa = nexus.sled_client(&sled_id).await.unwrap();
+    sa.instance_single_step(instance_id.into_untyped_uuid()).await;
 }
 
 pub async fn instance_simulate_with_opctx(
