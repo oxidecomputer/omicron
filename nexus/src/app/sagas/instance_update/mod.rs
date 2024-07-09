@@ -574,16 +574,58 @@ pub(super) async fn siu_unassign_oximeter_producer(
 async fn siu_update_and_unlock_instance(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    let RealParams {
-        ref serialized_authn, ref authz_instance, ref update, ..
-    } = sagactx.saga_params::<RealParams>()?;
+    let RealParams { serialized_authn, authz_instance, ref update, .. } =
+        sagactx.saga_params::<RealParams>()?;
     unlock_instance_inner(
-        serialized_authn,
-        authz_instance,
+        &serialized_authn,
+        &authz_instance,
         &sagactx,
         Some(&update.new_runtime),
     )
-    .await
+    .await?;
+
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, &serialized_authn);
+    let osagactx = sagactx.user_data();
+
+    // fetch the state from the database again to see if we should immediately
+    // run a new saga.
+    // TODO(eliza): go back and make the unlock-instance query return the
+    // current state, instead...
+    let new_state = match osagactx
+        .datastore()
+        .instance_fetch_all(&opctx, &authz_instance)
+        .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(osagactx.log(), "instance update: failed to fetch state on saga completion";
+                "instance_id" => %authz_instance.id(),
+                "error" => %e);
+            // if we can't refetch here, don't unwind all the work we did do.
+            // the instance-updater background task will take care of it.
+            return Ok(());
+        }
+    };
+
+    if UpdatesRequired::for_snapshot(osagactx.log(), &new_state).is_some() {
+        if let Err(e) = osagactx
+            .nexus()
+            .sagas
+            .saga_execute::<SagaInstanceUpdate>(Params {
+                // everyone in the friend group just venmo-ing the same
+                // serialized_authn back and forth forever.
+                serialized_authn,
+                authz_instance,
+            })
+            .await
+        {
+            // again, if this fails, don't unwind all the good work we already did.
+            warn!(osagactx.log(), "instant update: subsequent saga execution failed"; "error" => %e);
+        }
+    }
+
+    Ok(())
 }
 
 async fn unlock_instance_inner(
