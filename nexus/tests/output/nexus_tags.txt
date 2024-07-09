@@ -182,6 +182,7 @@ networking_bfd_status                    GET      /v1/system/networking/bfd-stat
 networking_bgp_announce_set_create       POST     /v1/system/networking/bgp-announce
 networking_bgp_announce_set_delete       DELETE   /v1/system/networking/bgp-announce
 networking_bgp_announce_set_list         GET      /v1/system/networking/bgp-announce
+networking_bgp_announce_set_update       PUT      /v1/system/networking/bgp-announce
 networking_bgp_config_create             POST     /v1/system/networking/bgp
 networking_bgp_config_delete             DELETE   /v1/system/networking/bgp
 networking_bgp_config_list               GET      /v1/system/networking/bgp
