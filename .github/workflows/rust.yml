@@ -53,7 +53,7 @@ jobs:
       run: cargo run --bin omicron-package -- -t default check
 
   # Note that `cargo clippy` includes `cargo check, so this ends up checking all
-  # of our code.
+  # of our (default) code.
   clippy-lint:
     runs-on: ubuntu-22.04
     env:
@@ -81,6 +81,40 @@ jobs:
       run: ./tools/install_builder_prerequisites.sh -y
     - name: Run Clippy Lints
       run: cargo xtask clippy
+
+  check-features:
+    runs-on: ubuntu-22.04
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_HACK_VERSION: 0.6.28
+    steps:
+    # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
+    - name: Disable packages.microsoft.com repo
+      run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
+    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      with:
+        ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
+    - uses: Swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84 # v2.7.3
+      if: ${{ github.ref != 'refs/heads/main' }}
+    - name: Report cargo version
+      run: cargo --version
+    - name: Update PATH
+      run: source "./env.sh"; echo "PATH=$PATH" >> "$GITHUB_ENV"
+    - name: Print PATH
+      run: echo $PATH
+    - name: Print GITHUB_ENV
+      run: cat "$GITHUB_ENV"
+    - name: Install Pre-Requisites
+      run: ./tools/install_builder_prerequisites.sh -y
+    - name: Run `cargo check` for no-default-features
+      run: cargo check --workspace --bins --tests --no-default-features
+    # Uses manifest for install
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-hack@${{ env.CARGO_HACK_VERSION }}
+    - name: Run Check on Features (Feature-Powerset, No-Dev-Deps)
+      timeout-minutes: 120 # 2 hours
+      run: cargo xtask check-features --no-install --exclude-features image-trampoline,image-standard
 
   # This is just a test build of docs.  Publicly available docs are built via
   # the separate "rustdocs" repo.
