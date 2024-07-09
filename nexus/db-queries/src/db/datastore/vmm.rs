@@ -163,8 +163,6 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        // debug_assert_eq!(result.instance_status, );
-
         let vmm_updated = match result.vmm_status {
             Some(UpdateStatus::Updated) => true,
             Some(UpdateStatus::NotUpdatedButExists) => false,
