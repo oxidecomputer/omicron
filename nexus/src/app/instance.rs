@@ -12,7 +12,6 @@ use super::MAX_NICS_PER_INSTANCE;
 use super::MAX_SSH_KEYS_PER_INSTANCE;
 use super::MAX_VCPU_PER_INSTANCE;
 use super::MIN_MEMORY_BYTES_PER_INSTANCE;
-use crate::app::saga::StartSaga;
 use crate::app::sagas;
 use crate::app::sagas::NexusSaga;
 use crate::cidata::InstanceCiData;
