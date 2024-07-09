@@ -32,13 +32,14 @@ use thiserror::Error;
 
 mod client;
 pub mod model;
-#[cfg(feature = "oxql")]
+#[cfg(any(feature = "oxql", test))]
 pub mod oxql;
 pub mod query;
+#[cfg(any(feature = "oxql", feature = "sql", test))]
+pub mod shells;
 #[cfg(any(feature = "sql", test))]
 pub mod sql;
 
-#[cfg(feature = "oxql")]
 pub use client::oxql::OxqlResult;
 pub use client::query_summary::QuerySummary;
 pub use client::Client;
@@ -141,12 +142,10 @@ pub enum Error {
     #[error("SQL error")]
     Sql(#[from] sql::Error),
 
-    #[cfg(any(feature = "oxql", test))]
     #[error(transparent)]
     Oxql(oxql::Error),
 }
 
-#[cfg(any(feature = "oxql", test))]
 impl From<crate::oxql::Error> for Error {
     fn from(e: crate::oxql::Error) -> Self {
         Error::Oxql(e)

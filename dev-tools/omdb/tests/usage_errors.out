@@ -14,6 +14,7 @@ Commands:
   mgs             Debug a specific Management Gateway Service instance
   nexus           Debug a specific Nexus instance
   oximeter        Query oximeter collector state
+  oxql            Enter the Oximeter Query Language shell for interactive querying
   sled-agent      Debug a specific Sled
   help            Print this message or the help of the given subcommand(s)
 
@@ -44,6 +45,7 @@ Commands:
   mgs             Debug a specific Management Gateway Service instance
   nexus           Debug a specific Nexus instance
   oximeter        Query oximeter collector state
+  oxql            Enter the Oximeter Query Language shell for interactive querying
   sled-agent      Debug a specific Sled
   help            Print this message or the help of the given subcommand(s)
 
@@ -614,4 +616,69 @@ Connection Options:
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
+=============================================
+EXECUTING COMMAND: omdb ["oximeter", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Query oximeter collector state
+
+Usage: omdb oximeter [OPTIONS] <COMMAND>
+
+Commands:
+  list-producers  List the producers the collector is assigned to poll
+  help            Print this message or the help of the given subcommand(s)
+
+Options:
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+  -h, --help                   Print help
+
+Connection Options:
+      --oximeter-url <OXIMETER_URL>  URL of the oximeter collector to query [env:
+                                     OMDB_OXIMETER_URL=]
+      --dns-server <DNS_SERVER>      [env: OMDB_DNS_SERVER=]
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["oxql", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Enter the Oximeter Query Language shell for interactive querying
+
+Usage: omdb oxql [OPTIONS]
+
+Options:
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --summaries              Print summaries of each SQL query run against the database
+      --elapsed                Print the total elapsed query duration
+  -h, --help                   Print help
+
+Connection Options:
+      --clickhouse-url <CLICKHOUSE_URL>
+          URL of the ClickHouse server to connect to [env: OMDB_CLICKHOUSE_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["oxql", "--summarizes"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+error: unexpected argument '--summarizes' found
+
+  tip: a similar argument exists: '--summaries'
+
+Usage: omdb oxql <--clickhouse-url <CLICKHOUSE_URL>|--summaries|--elapsed>
+
+For more information, try '--help'.
 =============================================

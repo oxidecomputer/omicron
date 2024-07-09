@@ -5641,6 +5641,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oximeter-client",
+ "oximeter-db",
  "pq-sys",
  "ratatui",
  "reedline",
@@ -5655,6 +5656,7 @@ dependencies = [
  "textwrap",
  "tokio",
  "unicode-width",
+ "url",
  "uuid",
 ]
 

@@ -384,7 +384,7 @@ oso = "0.27"
 owo-colors = "4.0.0"
 oximeter = { path = "oximeter/oximeter" }
 oximeter-client = { path = "clients/oximeter-client" }
-oximeter-db = { path = "oximeter/db/" }
+oximeter-db = { path = "oximeter/db/", default-features = false }
 oximeter-collector = { path = "oximeter/collector" }
 oximeter-impl = { path = "oximeter/impl" }
 oximeter-instruments = { path = "oximeter/instruments" }
