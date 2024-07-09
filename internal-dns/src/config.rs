@@ -425,7 +425,7 @@ impl DnsConfigBuilder {
                         DnsRecord::Aaaa(*zone_ip)
                     })
                     .collect::<Vec<DnsRecord>>();
-                (format!("{BOUNDARY_NTP_DNS_NAME}.{DNS_ZONE}"), records)
+                (BOUNDARY_NTP_DNS_NAME.to_string(), records)
             });
 
         // Assemble the set of AAAA records for zones.
