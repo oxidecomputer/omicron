@@ -47,7 +47,11 @@ fn assert_oximeter_list_producers_output(
             && line.contains(&test_producer.to_string())
     });
 
-    assert!(found, "test producer {} and producer UUID {} not found in oximeter list-producers output", test_producer, PRODUCER_UUID);
+    assert!(
+        found,
+        "test producer {} and producer UUID {} not found on line together",
+        test_producer, PRODUCER_UUID
+    );
 }
 
 #[tokio::test]
