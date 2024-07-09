@@ -7,6 +7,7 @@
 // Copyright 2024 Oxide Computer Company
 
 use crate::query::StringFieldSelector;
+use anyhow::Context as _;
 use chrono::DateTime;
 use chrono::Utc;
 use dropshot::EmptyScanParams;
@@ -23,9 +24,11 @@ pub use oximeter::Sample;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use slog::Logger;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::io;
+use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use thiserror::Error;
@@ -40,6 +43,7 @@ pub mod shells;
 #[cfg(any(feature = "sql", test))]
 pub mod sql;
 
+#[cfg(any(feature = "oxql", test))]
 pub use client::oxql::OxqlResult;
 pub use client::query_summary::QuerySummary;
 pub use client::Client;
@@ -142,10 +146,12 @@ pub enum Error {
     #[error("SQL error")]
     Sql(#[from] sql::Error),
 
+    #[cfg(any(feature = "oxql", test))]
     #[error(transparent)]
     Oxql(oxql::Error),
 }
 
+#[cfg(any(feature = "oxql", test))]
 impl From<crate::oxql::Error> for Error {
     fn from(e: crate::oxql::Error) -> Self {
         Error::Oxql(e)
@@ -237,6 +243,21 @@ pub struct TimeseriesScanParams {
 pub struct TimeseriesPageSelector {
     pub params: TimeseriesScanParams,
     pub offset: NonZeroU32,
+}
+
+/// Create a client to the timeseries database, and ensure the database exists.
+pub async fn make_client(
+    address: IpAddr,
+    port: u16,
+    log: &Logger,
+) -> Result<Client, anyhow::Error> {
+    let address = SocketAddr::new(address, port);
+    let client = Client::new(address, &log);
+    client
+        .init_single_node_db()
+        .await
+        .context("Failed to initialize timeseries database")?;
+    Ok(client)
 }
 
 pub(crate) type TimeseriesKey = u64;

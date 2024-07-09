@@ -14,7 +14,7 @@ use oximeter::{
     types::{Cumulative, Sample},
     Metric, Target,
 };
-use oximeter_db::{query, shells::make_client, Client, DbWrite};
+use oximeter_db::{make_client, query, Client, DbWrite};
 use slog::{debug, info, o, Drain, Level, Logger};
 use std::net::IpAddr;
 use uuid::Uuid;
@@ -148,6 +148,7 @@ enum Subcommand {
     },
 
     /// Enter the Oximeter Query Language shell for interactive querying.
+    #[cfg(feature = "oxql")]
     Oxql {
         #[clap(flatten)]
         opts: oximeter_db::shells::oxql::ShellOptions,
@@ -350,6 +351,7 @@ async fn main() -> anyhow::Result<()> {
             oximeter_db::shells::sql::shell(args.address, args.port, log, opts)
                 .await?
         }
+        #[cfg(feature = "oxql")]
         Subcommand::Oxql { opts } => {
             oximeter_db::shells::oxql::shell(args.address, args.port, log, opts)
                 .await?

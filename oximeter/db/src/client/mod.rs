@@ -7,6 +7,7 @@
 // Copyright 2024 Oxide Computer Company
 
 pub(crate) mod dbwrite;
+#[cfg(any(feature = "oxql", test))]
 pub(crate) mod oxql;
 pub(crate) mod query_summary;
 #[cfg(any(feature = "sql", test))]

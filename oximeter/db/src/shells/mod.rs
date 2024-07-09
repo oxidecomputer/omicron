@@ -7,14 +7,9 @@
 // Copyright 2024 Oxide Computer Company
 
 use crate::Client;
-use crate::DbWrite as _;
-use anyhow::Context as _;
 use dropshot::EmptyScanParams;
 use dropshot::WhichPage;
 use oximeter::TimeseriesSchema;
-use slog::Logger;
-use std::net::IpAddr;
-use std::net::SocketAddr;
 
 #[cfg(any(feature = "oxql", test))]
 pub mod oxql;
@@ -128,21 +123,6 @@ pub async fn describe_timeseries(
         }
     }
     Ok(())
-}
-
-/// Create a client to the timeseries database, and ensure the database exists.
-pub async fn make_client(
-    address: IpAddr,
-    port: u16,
-    log: &Logger,
-) -> Result<Client, anyhow::Error> {
-    let address = SocketAddr::new(address, port);
-    let client = Client::new(address, &log);
-    client
-        .init_single_node_db()
-        .await
-        .context("Failed to initialize timeseries database")?;
-    Ok(client)
 }
 
 /// Prepare the columns for a timeseries or virtual table.
