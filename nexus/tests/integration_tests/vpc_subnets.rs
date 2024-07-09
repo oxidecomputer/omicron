@@ -4,6 +4,7 @@
 
 use crate::integration_tests::instances::instance_post;
 use crate::integration_tests::instances::instance_simulate;
+use crate::integration_tests::instances::instance_wait_for_state;
 use crate::integration_tests::instances::InstanceOp;
 use dropshot::HttpErrorResponseBody;
 use http::method::Method;
@@ -20,6 +21,7 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::{params, views::VpcSubnet};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
+use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Ipv6NetExt;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -80,6 +82,7 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
     // Stop and then delete the instance
     instance_post(client, instance_name, InstanceOp::Stop).await;
     instance_simulate(&nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
     NexusRequest::object_delete(&client, &instance_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
