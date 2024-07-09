@@ -142,6 +142,22 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
 
   sled 48d95fef-bc9f-4f50-9a53-1e075836291d:
 
+    physical disks at generation 1:
+    ----------------------------------------------------------------------
+    vendor        model        serial                                     
+    ----------------------------------------------------------------------
+    fake-vendor   fake-model   serial-22930645-144a-415c-bceb-2dbfafb9c29e
+    fake-vendor   fake-model   serial-24155070-8a43-4244-a3ba-853d8c71972d
+    fake-vendor   fake-model   serial-494782c7-3821-4f49-918b-ce42cc4d18ad
+    fake-vendor   fake-model   serial-6ea8a67f-d27d-472b-844c-6c8245b00e2b
+    fake-vendor   fake-model   serial-77565d57-c235-4905-b3c7-32d1c2ca2c44
+    fake-vendor   fake-model   serial-8746874c-dc3b-4454-93cd-2a8fc13720fe
+    fake-vendor   fake-model   serial-a42c5a67-6e10-4586-a56e-48bb8260e75f
+    fake-vendor   fake-model   serial-ca89b120-7bcd-4eeb-baa7-71031fbd103b
+    fake-vendor   fake-model   serial-ef61aa97-c862-428c-82f3-0a69a50d6155
+    fake-vendor   fake-model   serial-ef64ff6d-250d-47ac-8686-e696cfb46966
+
+
     omicron zones generation 3 -> 4:
     ------------------------------------------------------------------------------------------
     zone type      zone id                                disposition   underlay IP           

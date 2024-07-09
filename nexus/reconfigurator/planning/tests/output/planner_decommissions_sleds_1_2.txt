@@ -43,20 +43,20 @@ to:   blueprint 1ac2d88f-27dd-4506-8585-6b2be832528e
 
   sled a1b477db-b629-48eb-911d-1ccdafca75b9:
 
-    physical disks from generation 1:
+    physical disks at generation 1:
     ----------------------------------------------------------------------
     vendor        model        serial                                     
     ----------------------------------------------------------------------
--   fake-vendor   fake-model   serial-069446b4-7881-49dc-838a-63a782d4896d
--   fake-vendor   fake-model   serial-20eba316-dffe-4516-9703-af561da19b0b
--   fake-vendor   fake-model   serial-426f4b6d-4a82-4106-bf4b-64ee86a2a5a4
--   fake-vendor   fake-model   serial-82daeef2-8641-4bf5-ac66-f7b5f62c48b6
--   fake-vendor   fake-model   serial-8e5feeb2-14f1-440f-a909-3c34aa8e129b
--   fake-vendor   fake-model   serial-942e2123-7c4e-4f6b-9317-1341fe212647
--   fake-vendor   fake-model   serial-97a5ce17-df5b-47e7-baf8-80ae710ce18e
--   fake-vendor   fake-model   serial-debc9fb6-bd58-4e4f-b8b8-6a9a07fcf25d
--   fake-vendor   fake-model   serial-f63a32a9-0659-43cf-8efc-8f34e7af9d45
--   fake-vendor   fake-model   serial-ffea118f-7715-4e21-8fc5-bb23cd0f59e8
+    fake-vendor   fake-model   serial-069446b4-7881-49dc-838a-63a782d4896d
+    fake-vendor   fake-model   serial-20eba316-dffe-4516-9703-af561da19b0b
+    fake-vendor   fake-model   serial-426f4b6d-4a82-4106-bf4b-64ee86a2a5a4
+    fake-vendor   fake-model   serial-82daeef2-8641-4bf5-ac66-f7b5f62c48b6
+    fake-vendor   fake-model   serial-8e5feeb2-14f1-440f-a909-3c34aa8e129b
+    fake-vendor   fake-model   serial-942e2123-7c4e-4f6b-9317-1341fe212647
+    fake-vendor   fake-model   serial-97a5ce17-df5b-47e7-baf8-80ae710ce18e
+    fake-vendor   fake-model   serial-debc9fb6-bd58-4e4f-b8b8-6a9a07fcf25d
+    fake-vendor   fake-model   serial-f63a32a9-0659-43cf-8efc-8f34e7af9d45
+    fake-vendor   fake-model   serial-ffea118f-7715-4e21-8fc5-bb23cd0f59e8
 
 
     omicron zones generation 2 -> 3:
