@@ -447,6 +447,7 @@ impl From<types::SledIdentifiers>
 /// are bonus endpoints, not generated in the real client.
 #[async_trait]
 pub trait TestInterfaces {
+    async fn instance_single_step(&self, id: Uuid);
     async fn instance_finish_transition(&self, id: Uuid);
     async fn instance_simulate_migration_source(
         &self,
@@ -458,6 +459,17 @@ pub trait TestInterfaces {
 
 #[async_trait]
 impl TestInterfaces for Client {
+    async fn instance_single_step(&self, id: Uuid) {
+        let baseurl = self.baseurl();
+        let client = self.client();
+        let url = format!("{}/instances/{}/poke-single-step", baseurl, id);
+        client
+            .post(url)
+            .send()
+            .await
+            .expect("instance_single_step() failed unexpectedly");
+    }
+
     async fn instance_finish_transition(&self, id: Uuid) {
         let baseurl = self.baseurl();
         let client = self.client();

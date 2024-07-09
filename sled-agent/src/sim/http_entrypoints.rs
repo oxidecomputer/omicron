@@ -4,6 +4,7 @@
 
 //! HTTP entrypoint functions for the sled agent's exposed API
 
+use super::collection::PokeMode;
 use crate::bootstrap::params::AddSledRequest;
 use crate::params::{
     DiskEnsureBody, InstanceEnsureBody, InstanceExternalIpBody,
@@ -53,6 +54,7 @@ pub fn api() -> SledApiDescription {
         api.register(instance_put_external_ip)?;
         api.register(instance_delete_external_ip)?;
         api.register(instance_poke_post)?;
+        api.register(instance_poke_single_step_post)?;
         api.register(instance_post_sim_migration_source)?;
         api.register(disk_put)?;
         api.register(disk_poke_post)?;
@@ -215,7 +217,21 @@ async fn instance_poke_post(
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
     let instance_id = path_params.into_inner().instance_id;
-    sa.instance_poke(instance_id).await;
+    sa.instance_poke(instance_id, PokeMode::Drain).await;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = POST,
+    path = "/instances/{instance_id}/poke-single-step",
+}]
+async fn instance_poke_single_step_post(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    sa.instance_poke(instance_id, PokeMode::SingleStep).await;
     Ok(HttpResponseUpdatedNoContent())
 }
 
