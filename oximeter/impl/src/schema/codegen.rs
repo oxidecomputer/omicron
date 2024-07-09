@@ -374,6 +374,7 @@ impl quote::ToTokens for Units {
         let toks = match self {
             Units::Count => quote! { ::oximeter::schema::Units::Count },
             Units::Bytes => quote! { ::oximeter::schema::Units::Bytes },
+            Units::Seconds => quote! { ::oximeter::schema::Units::Seconds },
         };
         toks.to_tokens(tokens);
     }

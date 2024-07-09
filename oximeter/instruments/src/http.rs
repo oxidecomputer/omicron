@@ -13,36 +13,24 @@ use futures::Future;
 use http::StatusCode;
 use http::Uri;
 use oximeter::{
-    histogram::Histogram, histogram::Record, Metric, MetricsError, Producer,
-    Sample, Target,
+    histogram::Histogram, histogram::Record, MetricsError, Producer, Sample,
 };
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use uuid::Uuid;
 
-/// The [`HttpService`] is an [`oximeter::Target`] for monitoring HTTP servers.
-#[derive(Debug, Clone, Target)]
-pub struct HttpService {
-    pub name: String,
-    pub id: Uuid,
-}
-
-/// An [`oximeter::Metric`] that tracks a histogram of the latency of requests to a specified HTTP
-/// endpoint.
-#[derive(Debug, Clone, Metric)]
-pub struct RequestLatencyHistogram {
-    pub route: String,
-    pub method: String,
-    pub status_code: i64,
-    #[datum]
-    pub latency: Histogram<f64>,
-}
+oximeter::use_timeseries!("http-service.toml");
+pub use http_service::HttpService;
+pub use http_service::RequestLatencyHistogram;
 
 // Return the route portion of the request, normalized to include a single
 // leading slash and no trailing slashes.
-fn normalized_uri_path(uri: &Uri) -> String {
-    format!("/{}", uri.path().trim_end_matches('/').trim_start_matches('/'))
+fn normalized_uri_path(uri: &Uri) -> Cow<'static, str> {
+    Cow::Owned(format!(
+        "/{}",
+        uri.path().trim_end_matches('/').trim_start_matches('/')
+    ))
 }
 
 impl RequestLatencyHistogram {
@@ -56,9 +44,9 @@ impl RequestLatencyHistogram {
     ) -> Self {
         Self {
             route: normalized_uri_path(request.uri()),
-            method: request.method().to_string(),
+            method: request.method().to_string().into(),
             status_code: status_code.as_u16().into(),
-            latency: histogram,
+            datum: histogram,
         }
     }
 
@@ -154,7 +142,7 @@ impl LatencyTracker {
                 self.histogram.clone(),
             )
         });
-        entry.latency.sample(latency.as_secs_f64()).map_err(MetricsError::from)
+        entry.datum.sample(latency.as_secs_f64()).map_err(MetricsError::from)
     }
 
     /// Instrument the given Dropshot endpoint handler function.
@@ -228,10 +216,8 @@ mod tests {
 
     #[test]
     fn test_latency_tracker() {
-        let service = HttpService {
-            name: String::from("my-service"),
-            id: ID.parse().unwrap(),
-        };
+        let service =
+            HttpService { name: "my-service".into(), id: ID.parse().unwrap() };
         let hist = Histogram::new(&[0.0, 1.0]).unwrap();
         let tracker = LatencyTracker::new(service, hist);
         let request = http::request::Builder::new()
@@ -249,8 +235,7 @@ mod tests {
             .unwrap();
 
         let key = "/some/uri:GET:200";
-        let actual_hist =
-            tracker.latencies.lock().unwrap()[key].latency.clone();
+        let actual_hist = tracker.latencies.lock().unwrap()[key].datum.clone();
         assert_eq!(actual_hist.n_samples(), 1);
         let bins = actual_hist.iter().collect::<Vec<_>>();
         assert_eq!(bins[1].count, 1);

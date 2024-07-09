@@ -189,6 +189,7 @@ pub struct TimeseriesDescription {
 pub enum Units {
     Count,
     Bytes,
+    Seconds,
 }
 
 /// The schema for a timeseries.
