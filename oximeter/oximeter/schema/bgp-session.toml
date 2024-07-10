@@ -1,0 +1,293 @@
+format_version = 1
+
+[target]
+name = "bgp_session"
+description = "A peer-to-peer session of the Border Gateway Protocol"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "hostname", "local_asn", "peer", "rack_id", "sled_id" ] }
+]
+
+[[metrics]]
+name = "active_connections_accepted"
+description = "Number of active connections initiated by us accepted by the other peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "connection_retries"
+description = "Number of times our connection retry timer has expired"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "hold_timer_expirations"
+description = "Number of times our hold timer has expired"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "idle_hold_timer_expirations"
+description = "Number of times our idle hold timer has expired"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "keepalive_send_failures"
+description = "Number of times we failed to send a keep-alive message to the peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "keepalives_received"
+description = "Number of keep-alive messages received from the peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "keepalives_sent"
+description = "Number keep-alive messages to the peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "notification_send_failures"
+description = "Number of times we failed to send a notification message to the peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "open_handle_failures"
+description = "Number of times we failed to handle an open message from the peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "open_send_failures"
+description = "Number of times we failed to send an open message to the peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "opens_received"
+description = "Number of open messages received from the peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "opens_sent"
+description = "Number of open messages sent to the peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "passive_connections_accepted"
+description = "Number of TCP connections accepted by our BGP peer socket"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "prefixes_advertised"
+description = "Number of prefixes advertised by our BGP peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "prefixes_imported"
+description = "Number of prefixes imported by our BGP peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "transition_to_active"
+description = "Number of times our BGP peer has entered the active state"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "transition_to_connect"
+description = "Number of times our BGP peer has entered the connect state"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "transition_to_established"
+description = "Number of times our BGP peer has entered the established state"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "transition_to_idle"
+description = "Number of times our BGP peer has entered the idle state"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "transition_to_open_confirm"
+description = "Number of times our BGP peer has entered the open-confirm state"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "transition_to_open_sent"
+description = "Number of times our BGP peer has entered the open-sent state"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "transition_to_session_setup"
+description = "Number of times our BGP peer has entered the open-sent state"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "unexpected_keepalive_messages"
+description = "Number of unexpected keep-alive messages from the peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "unexpected_open_messages"
+description = "Number of unexpected open messages from the peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "unexpected_update_messages"
+description = "Number of unexpected update messages from the peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "update_nexthop_missing"
+description = """\
+Number of update messages received with reachability entries, \
+but no next hop path attribute\
+"""
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "update_send_failures"
+description = "Number of times we failed to send an update message to the peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "updates_received"
+description = "Number of update messages received from the peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "updates_sent"
+description = "Number of update messages sent to the peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[fields.hostname]
+type = "string"
+description = "Hostname of the server running our BGP peer"
+
+[fields.local_asn]
+type = "u32"
+description = "The Autonomous System Number (ASN) advertised by our BGP peer"
+
+[fields.peer]
+type = "ip_addr"
+description = "IP address of the other peer in our BGP session"
+
+[fields.rack_id]
+type = "uuid"
+description = "ID of the rack on which our BGP peer is running"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID of the sled on which our BGP peer is running"
