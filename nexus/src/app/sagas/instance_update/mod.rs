@@ -13,6 +13,7 @@ use crate::app::db::model::Generation;
 use crate::app::db::model::InstanceRuntimeState;
 use crate::app::db::model::InstanceState;
 use crate::app::db::model::MigrationState;
+use crate::app::db::model::Vmm;
 use crate::app::db::model::VmmState;
 use crate::app::sagas::declare_saga_actions;
 use anyhow::Context;
@@ -121,19 +122,15 @@ impl UpdatesRequired {
                 }
             });
 
-        // Determine what to do with the migration.
+        // If there's an active migration, determine how to update the instance
+        // record to reflect the current migration state.
         if let Some(ref migration) = snapshot.migration {
-            // Determine how to update the instance record to reflect the current
-            // migration state.
-            let failed = migration.either_side_failed();
-            // If the migration has failed, or if the target reports that the migration
-            // has completed, clear the instance record's migration IDs so that a new
-            // migration can begin.
-            if failed || migration.target_state == MigrationState::COMPLETED {
+            if migration.either_side_failed() {
+                // If the migration has failed, clear the instance record's
+                // migration IDs so that a new migration can begin.
                 info!(
                     log,
-                    "instance update (migration {}): clearing migration IDs",
-                    if failed { "failed" } else { "target completed" };
+                    "instance update (migration failed): clearing migration IDs";
                     "instance_id" => %instance_id,
                     "migration_id" => %migration.id,
                     "src_propolis_id" => %migration.source_propolis_id,
@@ -142,66 +139,89 @@ impl UpdatesRequired {
                 new_runtime.migration_id = None;
                 new_runtime.dst_propolis_id = None;
                 update_required = true;
-            }
+                // If the active VMM was destroyed, the network config must be
+                // deleted (which was determined above). Otherwise, if the
+                // migration failed but the active VMM was still there, we must
+                // still ensure the correct networking configuration
+                // exists for its current home.
+                //
+                // TODO(#3107) This is necessary even if the instance didn't move,
+                // because registering a migration target on a sled creates OPTE ports
+                // for its VNICs, and that creates new V2P mappings on that sled that
+                // place the relevant virtual IPs on the local sled. Once OPTE stops
+                // creating these mappings, this path only needs to be taken if an
+                // instance has changed sleds.
+                if destroy_active_vmm.is_none() {
+                    if let Some(ref active_vmm) = snapshot.active_vmm {
+                        info!(
+                            log,
+                            "instance update (migration failed): pointing network \
+                             config back at current VMM";
+                            "instance_id" => %instance_id,
+                            "migration_id" => %migration.id,
+                            "src_propolis_id" => %migration.source_propolis_id,
+                            "target_propolis_id" => %migration.target_propolis_id,
+                        );
+                        network_config =
+                            Some(NetworkConfigUpdate::to_vmm(active_vmm));
+                    } else {
+                        // Otherwise, the active VMM has already been destroyed,
+                        // and the target is reporting a failure because of
+                        // that. Just delete the network config.
+                    }
+                }
+            } else if migration.either_side_completed() {
+                // If either side reports that the migration has completed, set
+                // the instance record's active Propolis ID to point at the new
+                // VMM, and update the network configuration to point at that VMM.
+                if new_runtime.propolis_id != Some(migration.target_propolis_id)
+                {
+                    info!(
+                        log,
+                        "instance update (migration completed): setting active \
+                         VMM ID to target and updating network config";
+                        "instance_id" => %instance_id,
+                        "migration_id" => %migration.id,
+                        "src_propolis_id" => %migration.source_propolis_id,
+                        "target_propolis_id" => %migration.target_propolis_id,
+                    );
+                    let new_vmm = snapshot.target_vmm.as_ref().expect(
+                        "if we have gotten here, there must be a target VMM",
+                    );
+                    debug_assert_eq!(new_vmm.id, migration.target_propolis_id);
+                    new_runtime.propolis_id =
+                        Some(migration.target_propolis_id);
+                    update_required = true;
+                    network_config = Some(NetworkConfigUpdate::to_vmm(new_vmm));
+                }
 
-            // If the active VMM was destroyed, the network config must be
-            // deleted (which was determined above). Otherwise, if the
-            // migration failed but the active VMM was still there, we must
-            // still ensure the correct networking configuration
-            // exists for its current home.
-            //
-            // TODO(#3107) This is necessary even if the instance didn't move,
-            // because registering a migration target on a sled creates OPTE ports
-            // for its VNICs, and that creates new V2P mappings on that sled that
-            // place the relevant virtual IPs on the local sled. Once OPTE stops
-            // creating these mappings, this path only needs to be taken if an
-            // instance has changed sleds.
-            if failed && destroy_active_vmm.is_none() {
-                network_config = Some(NetworkConfigUpdate::Update {
-                    active_propolis_id: PropolisUuid::from_untyped_uuid(
-                        migration.source_propolis_id,
-                    ),
-                    new_sled_id: snapshot
-                        .active_vmm
-                        .as_ref()
-                        .expect("if we're here, there must be an active VMM")
-                        .sled_id,
-                });
-                update_required = true;
-            }
+                // If the target reports that the migration has completed,
+                // unlink the migration (allowing a new one to begin). This has
+                // to wait until the target has reported completion to ensure a
+                // migration out of the target can't start until the migration
+                // in has definitely finished.
+                if migration.target_state == MigrationState::COMPLETED {
+                    info!(
+                        log,
+                        "instance update (migration target completed): \
+                         clearing migration IDs";
+                        "instance_id" => %instance_id,
+                        "migration_id" => %migration.id,
+                        "src_propolis_id" => %migration.source_propolis_id,
+                        "target_propolis_id" => %migration.target_propolis_id,
+                    );
+                    new_runtime.migration_id = None;
+                    new_runtime.dst_propolis_id = None;
+                    update_required = true;
+                }
 
-            // If either side reports that the migration has completed, move the target
-            // Propolis ID to the active position.
-            if !failed && migration.either_side_completed() {
-                info!(
-                    log,
-                    "instance update (migration completed): setting active VMM ID to target";
-                    "instance_id" => %instance_id,
-                    "migration_id" => %migration.id,
-                    "src_propolis_id" => %migration.source_propolis_id,
-                    "target_propolis_id" => %migration.target_propolis_id,
-                );
-
-                network_config = Some(NetworkConfigUpdate::Update {
-                    active_propolis_id: PropolisUuid::from_untyped_uuid(
-                        migration.target_propolis_id,
-                    ),
-                    new_sled_id: snapshot
-                        .target_vmm
-                        .as_ref()
-                        .expect("if we're here, there must be a target VMM")
-                        .sled_id,
-                });
-                new_runtime.propolis_id = Some(migration.target_propolis_id);
                 // Even if the active VMM was destroyed (and we set the
                 // instance's state to `NoVmm` above), it has successfully
                 // migrated, so leave it in the VMM state.
                 new_runtime.nexus_state = InstanceState::Vmm;
-                new_runtime.dst_propolis_id = None;
                 // If the active VMM has also been destroyed, don't delete
                 // virtual provisioning records while cleaning it up.
                 deprovision = false;
-                update_required = true;
             }
         }
 
@@ -216,6 +236,15 @@ impl UpdatesRequired {
             deprovision,
             network_config,
         })
+    }
+}
+
+impl NetworkConfigUpdate {
+    fn to_vmm(vmm: &Vmm) -> Self {
+        Self::Update {
+            active_propolis_id: PropolisUuid::from_untyped_uuid(vmm.id),
+            new_sled_id: vmm.sled_id,
+        }
     }
 }
 
