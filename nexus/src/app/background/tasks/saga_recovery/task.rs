@@ -147,6 +147,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use steno::SagaId;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -168,7 +169,7 @@ pub struct SagaRecovery {
     nexus: Arc<Nexus>,
     sec_client: Arc<steno::SecClient>,
     registry: Arc<ActionRegistry>,
-    sagas_started_rx: mpsc::UnboundedReceiver<steno::SagaId>,
+    sagas_started_rx: mpsc::UnboundedReceiver<SagaId>,
 
     /// recovery state persisted between passes
     rest_state: recovery::RestState,
@@ -185,7 +186,7 @@ impl SagaRecovery {
         nexus: Arc<Nexus>,
         sec: Arc<steno::SecClient>,
         registry: Arc<ActionRegistry>,
-        sagas_started_rx: mpsc::UnboundedReceiver<steno::SagaId>,
+        sagas_started_rx: mpsc::UnboundedReceiver<SagaId>,
     ) -> SagaRecovery {
         SagaRecovery {
             datastore,
@@ -237,7 +238,7 @@ impl SagaRecovery {
         saga: &nexus_db_model::Saga,
     ) -> Result<BoxFuture<'static, Result<(), Error>>, Error> {
         let datastore = &self.datastore;
-        let saga_id: steno::SagaId = saga.id.into();
+        let saga_id: SagaId = saga.id.into();
 
         let log_events = datastore
             .saga_fetch_log_batched(&self.saga_recovery_opctx, saga)
@@ -354,7 +355,7 @@ async fn list_sagas_in_progress(
     opctx: &OpContext,
     datastore: &DataStore,
     sec_id: db::SecId,
-) -> Result<BTreeMap<steno::SagaId, nexus_db_model::saga_types::Saga>, Error> {
+) -> Result<BTreeMap<SagaId, nexus_db_model::saga_types::Saga>, Error> {
     let log = &opctx.log;
     debug!(log, "listing candidate sagas for recovery");
     let result = datastore
@@ -364,7 +365,7 @@ async fn list_sagas_in_progress(
         .map(|list| {
             list.into_iter()
                 .map(|saga| (saga.id.into(), saga))
-                .collect::<BTreeMap<steno::SagaId, nexus_db_model::Saga>>()
+                .collect::<BTreeMap<SagaId, nexus_db_model::Saga>>()
         });
     match &result {
         Ok(list) => {

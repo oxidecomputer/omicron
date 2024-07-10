@@ -16,13 +16,14 @@ use omicron_common::api::external::Error;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use steno::SagaId;
 use tokio::sync::mpsc;
 
 /// Describes state related to saga recovery that needs to be maintained across
 /// multiple passes
 pub struct RestState {
-    sagas_started: BTreeMap<steno::SagaId, SagaStartInfo>,
-    remove_next: Vec<steno::SagaId>,
+    sagas_started: BTreeMap<SagaId, SagaStartInfo>,
+    remove_next: Vec<SagaId>,
 }
 
 #[allow(dead_code)]
@@ -46,7 +47,7 @@ impl RestState {
     pub fn update_started_sagas(
         &mut self,
         log: &slog::Logger,
-        sagas_started_rx: &mut mpsc::UnboundedReceiver<steno::SagaId>,
+        sagas_started_rx: &mut mpsc::UnboundedReceiver<SagaId>,
     ) {
         let (new_sagas, disconnected) = read_all_from_channel(sagas_started_rx);
         if disconnected {
@@ -141,17 +142,17 @@ fn read_all_from_channel<T>(
 /// better observability and testing.
 pub struct Plan {
     /// sagas that need to be recovered
-    needs_recovery: BTreeMap<steno::SagaId, nexus_db_model::Saga>,
+    needs_recovery: BTreeMap<SagaId, nexus_db_model::Saga>,
 
     /// sagas that were found in the database to be in-progress, but that don't
     /// need to be recovered because they are either already running or have
     /// actually finished
-    skipped_running: BTreeSet<steno::SagaId>,
+    skipped_running: BTreeSet<SagaId>,
 
     /// sagas that we infer have finished because they were missing from two
     /// consecutive database queries for in-progress sagas (with no intervening
     /// message indicating that they had been started)
-    inferred_done: BTreeSet<steno::SagaId>,
+    inferred_done: BTreeSet<SagaId>,
 
     /// sagas that may be done, but we can't tell yet.  These are sagas where we
     /// previously had them running in this process and the database state now
@@ -160,7 +161,7 @@ pub struct Plan {
     /// whether the saga finished or just started.  We'll be able to tell during
     /// the next pass and if it's done at that point then these sagas will move
     /// to `inferred_done`.
-    maybe_done: BTreeSet<steno::SagaId>,
+    maybe_done: BTreeSet<SagaId>,
 }
 
 impl<'a> Plan {
@@ -189,7 +190,7 @@ impl<'a> Plan {
     pub fn new(
         log: &slog::Logger,
         rest_state: &RestState,
-        mut running_sagas_found: BTreeMap<steno::SagaId, nexus_db_model::Saga>,
+        mut running_sagas_found: BTreeMap<SagaId, nexus_db_model::Saga>,
     ) -> Plan {
         let mut builder = SagaRecoveryPlanBuilder::new(log);
         let sagas_started = &rest_state.sagas_started;
@@ -275,21 +276,18 @@ impl<'a> Plan {
     /// Iterate over the sagas that need to be recovered
     pub fn sagas_needing_recovery(
         &self,
-    ) -> impl Iterator<Item = (&steno::SagaId, &nexus_db_model::Saga)> + '_
-    {
+    ) -> impl Iterator<Item = (&SagaId, &nexus_db_model::Saga)> + '_ {
         self.needs_recovery.iter()
     }
 
     /// Iterate over the sagas that were inferred to be done
-    pub fn sagas_inferred_done(
-        &self,
-    ) -> impl Iterator<Item = steno::SagaId> + '_ {
+    pub fn sagas_inferred_done(&self) -> impl Iterator<Item = SagaId> + '_ {
         self.inferred_done.iter().copied()
     }
 
     /// Iterate over the sagas that should be checked on the next pass to see if
     /// they're done
-    pub fn sagas_maybe_done(&self) -> impl Iterator<Item = steno::SagaId> + '_ {
+    pub fn sagas_maybe_done(&self) -> impl Iterator<Item = SagaId> + '_ {
         self.maybe_done.iter().copied()
     }
 }
@@ -297,10 +295,10 @@ impl<'a> Plan {
 /// Internal helper used to construct `SagaRecoveryPlan`
 struct SagaRecoveryPlanBuilder<'a> {
     log: &'a slog::Logger,
-    needs_recovery: BTreeMap<steno::SagaId, nexus_db_model::Saga>,
-    skipped_running: BTreeSet<steno::SagaId>,
-    inferred_done: BTreeSet<steno::SagaId>,
-    maybe_done: BTreeSet<steno::SagaId>,
+    needs_recovery: BTreeMap<SagaId, nexus_db_model::Saga>,
+    skipped_running: BTreeSet<SagaId>,
+    inferred_done: BTreeSet<SagaId>,
+    maybe_done: BTreeSet<SagaId>,
 }
 
 impl<'a> SagaRecoveryPlanBuilder<'a> {
@@ -328,7 +326,7 @@ impl<'a> SagaRecoveryPlanBuilder<'a> {
     /// Record that this saga appears to be done, based on it being missing from
     /// two different database queries for in-progress sagas with no intervening
     /// indication that a saga with this id was started in the meantime
-    pub fn saga_infer_done(&mut self, saga_id: steno::SagaId) {
+    pub fn saga_infer_done(&mut self, saga_id: SagaId) {
         info!(
             self.log,
             "found saga that appears to be done \
@@ -345,7 +343,7 @@ impl<'a> SagaRecoveryPlanBuilder<'a> {
     /// because it appears to already be running
     pub fn saga_recovery_not_needed(
         &mut self,
-        saga_id: steno::SagaId,
+        saga_id: SagaId,
         reason: &'static str,
     ) {
         debug!(
@@ -368,7 +366,7 @@ impl<'a> SagaRecoveryPlanBuilder<'a> {
     /// solution is to only consider sagas done that are missing for two
     /// consecutive database queries with no intervening report that a saga with
     /// that id has just started.
-    pub fn saga_recovery_maybe_done(&mut self, saga_id: steno::SagaId) {
+    pub fn saga_recovery_maybe_done(&mut self, saga_id: SagaId) {
         debug!(
             self.log,
             "found saga that may be done (will be sure on the next pass)";
@@ -384,7 +382,7 @@ impl<'a> SagaRecoveryPlanBuilder<'a> {
     /// progress" according to the database but not yet resumed in this process
     pub fn saga_recovery_needed(
         &mut self,
-        saga_id: steno::SagaId,
+        saga_id: SagaId,
         saga: nexus_db_model::Saga,
     ) {
         info!(
@@ -434,7 +432,7 @@ impl<'a> ExecutionSummary<'a> {
     /// Iterate over the sagas that were successfully recovered during this pass
     pub fn sagas_recovered_successfully(
         &self,
-    ) -> impl Iterator<Item = steno::SagaId> + '_ {
+    ) -> impl Iterator<Item = SagaId> + '_ {
         self.succeeded.iter().map(|s| s.saga_id)
     }
 
@@ -456,7 +454,7 @@ impl<'a> ExecutionSummary<'a> {
 
 pub struct ExecutionSummaryBuilder<'a> {
     plan: &'a Plan,
-    in_progress: BTreeMap<steno::SagaId, slog::Logger>,
+    in_progress: BTreeMap<SagaId, slog::Logger>,
     succeeded: Vec<RecoverySuccess>,
     failed: Vec<RecoveryFailure>,
     #[cfg(test)]
@@ -493,7 +491,7 @@ impl<'a> ExecutionSummaryBuilder<'a> {
     /// Record that we've started recovering this saga
     pub fn saga_recovery_start(
         &mut self,
-        saga_id: steno::SagaId,
+        saga_id: SagaId,
         saga_logger: slog::Logger,
     ) {
         info!(&saga_logger, "recovering saga: start");
@@ -503,7 +501,7 @@ impl<'a> ExecutionSummaryBuilder<'a> {
     /// Record that we've successfully recovered this saga
     pub fn saga_recovery_success(
         &mut self,
-        saga_id: steno::SagaId,
+        saga_id: SagaId,
         completion_future: BoxFuture<'static, Result<(), Error>>,
     ) {
         let saga_logger = self
@@ -517,11 +515,7 @@ impl<'a> ExecutionSummaryBuilder<'a> {
     }
 
     /// Record that we failed to recover this saga
-    pub fn saga_recovery_failure(
-        &mut self,
-        saga_id: steno::SagaId,
-        error: &Error,
-    ) {
+    pub fn saga_recovery_failure(&mut self, saga_id: SagaId, error: &Error) {
         let saga_logger = self
             .in_progress
             .remove(&saga_id)
