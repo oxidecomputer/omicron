@@ -168,6 +168,7 @@ pub struct SagaRecovery {
     nexus: Arc<Nexus>,
     sec_client: Arc<steno::SecClient>,
     registry: Arc<ActionRegistry>,
+    sagas_started_rx: mpsc::UnboundedReceiver<steno::SagaId>,
 
     /// recovery state persisted between passes
     rest_state: recovery::RestState,
@@ -193,7 +194,8 @@ impl SagaRecovery {
             nexus,
             sec_client: sec,
             registry,
-            rest_state: recovery::RestState::new(sagas_started_rx),
+            sagas_started_rx,
+            rest_state: recovery::RestState::new(),
             status: status::Report::new(),
         }
     }
@@ -325,7 +327,8 @@ impl BackgroundTask for SagaRecovery {
             // was immediately created and showed up in our candidate list, we'd
             // erroneously conclude that it needed to be recovered when in fact
             // it was already running.
-            self.rest_state.update_started_sagas(log);
+            self.rest_state
+                .update_started_sagas(log, &mut self.sagas_started_rx);
 
             match result {
                 Ok(db_sagas) => {

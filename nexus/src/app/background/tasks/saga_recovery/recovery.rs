@@ -22,7 +22,6 @@ use tokio::sync::mpsc;
 /// multiple passes
 pub struct RestState {
     sagas_started: BTreeMap<steno::SagaId, SagaStartInfo>,
-    sagas_started_rx: mpsc::UnboundedReceiver<steno::SagaId>,
     remove_next: Vec<steno::SagaId>,
 }
 
@@ -38,21 +37,18 @@ enum SagaStartSource {
 }
 
 impl RestState {
-    pub fn new(
-        sagas_started_rx: mpsc::UnboundedReceiver<steno::SagaId>,
-    ) -> RestState {
-        RestState {
-            sagas_started: BTreeMap::new(),
-            sagas_started_rx,
-            remove_next: Vec::new(),
-        }
+    pub fn new() -> RestState {
+        RestState { sagas_started: BTreeMap::new(), remove_next: Vec::new() }
     }
 
     /// Read messages from the channel (signaling sagas that have started
     /// running) and update our set of sagas that we believe to be running.
-    pub fn update_started_sagas(&mut self, log: &slog::Logger) {
-        let (new_sagas, disconnected) =
-            read_all_from_channel(&mut self.sagas_started_rx);
+    pub fn update_started_sagas(
+        &mut self,
+        log: &slog::Logger,
+        sagas_started_rx: &mut mpsc::UnboundedReceiver<steno::SagaId>,
+    ) {
+        let (new_sagas, disconnected) = read_all_from_channel(sagas_started_rx);
         if disconnected {
             warn!(
                 log,
