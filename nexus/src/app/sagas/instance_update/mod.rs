@@ -58,7 +58,7 @@ struct UpdatesRequired {
 #[derive(Debug, Deserialize, Serialize)]
 enum NetworkConfigUpdate {
     Delete,
-    Update(PropolisUuid),
+    Update { active_propolis_id: PropolisUuid, new_sled_id: Uuid },
 }
 
 impl UpdatesRequired {
@@ -157,11 +157,16 @@ impl UpdatesRequired {
             // creating these mappings, this path only needs to be taken if an
             // instance has changed sleds.
             if failed && destroy_active_vmm.is_none() {
-                network_config = Some(NetworkConfigUpdate::Update(
-                    PropolisUuid::from_untyped_uuid(
+                network_config = Some(NetworkConfigUpdate::Update {
+                    active_propolis_id: PropolisUuid::from_untyped_uuid(
                         migration.source_propolis_id,
                     ),
-                ));
+                    new_sled_id: snapshot
+                        .active_vmm
+                        .as_ref()
+                        .expect("if we're here, there must be an active VMM")
+                        .sled_id,
+                });
                 update_required = true;
             }
 
@@ -177,11 +182,16 @@ impl UpdatesRequired {
                     "target_propolis_id" => %migration.target_propolis_id,
                 );
 
-                network_config = Some(NetworkConfigUpdate::Update(
-                    PropolisUuid::from_untyped_uuid(
+                network_config = Some(NetworkConfigUpdate::Update {
+                    active_propolis_id: PropolisUuid::from_untyped_uuid(
                         migration.target_propolis_id,
                     ),
-                ));
+                    new_sled_id: snapshot
+                        .target_vmm
+                        .as_ref()
+                        .expect("if we're here, there must be a target VMM")
+                        .sled_id,
+                });
                 new_runtime.propolis_id = Some(migration.target_propolis_id);
                 // Even if the active VMM was destroyed (and we set the
                 // instance's state to `NoVmm` above), it has successfully
@@ -445,16 +455,7 @@ async fn siu_update_network_config(
                 .await
                 .map_err(ActionError::action_failed)?;
         }
-        NetworkConfigUpdate::Update(active_propolis_id) => {
-            // Look up the ID of the sled that the instance now resides on, so that we
-            // can look up its address.
-            let new_sled_id = osagactx
-                .datastore()
-                .vmm_fetch(&opctx, authz_instance, &active_propolis_id)
-                .await
-                .map_err(ActionError::action_failed)?
-                .sled_id;
-
+        NetworkConfigUpdate::Update { active_propolis_id, new_sled_id } => {
             info!(
                 osagactx.log(),
                 "instance update: ensuring updated instance network config";
