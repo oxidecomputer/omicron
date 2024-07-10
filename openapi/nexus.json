@@ -6634,8 +6634,8 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Update a BGP announce set. If the announce set exists this endpoint replaces",
-        "description": "the existing announce set with the one specified.",
+        "summary": "Update BGP announce set",
+        "description": "If the announce set exists, this endpoint replaces the existing announce set with the one specified.",
         "operationId": "networking_bgp_announce_set_update",
         "requestBody": {
           "content": {
