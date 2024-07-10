@@ -138,6 +138,12 @@ pub enum Error {
     #[error("Schema update versions must be sequential without gaps")]
     NonSequentialSchemaVersions,
 
+    #[error("Could not read timeseries_to_delete file")]
+    ReadTimeseriesToDelete {
+        #[source]
+        err: io::Error,
+    },
+
     #[cfg(any(feature = "sql", test))]
     #[error("SQL error")]
     Sql(#[from] sql::Error),
@@ -295,6 +301,20 @@ const DATABASE_TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.9f";
 
 // The name of the database storing all metric information.
 const DATABASE_NAME: &str = "oximeter";
+
+// The name of the oximeter cluster, in the case of a replicated database.
+//
+// This must match what is used in the replicated SQL files when created the
+// database itself, and the XML files describing the cluster.
+const CLUSTER_NAME: &str = "oximeter_cluster";
+
+// The name of the table storing database version information.
+const VERSION_TABLE_NAME: &str = "version";
+
+// During schema upgrades, it is possible to list timeseries that should be
+// deleted, rather than deleting the entire database. These must be listed one
+// per line, in the file inside the schema version directory with this name.
+const TIMESERIES_TO_DELETE_FILE: &str = "timeseries-to-delete.txt";
 
 // The output format used for the result of select queries
 //
