@@ -362,6 +362,28 @@ impl SagaRecovery {
         }
         .boxed())
     }
+
+    // Update persistent state based on whatever happened.
+    fn recovery_finish(
+        &mut self,
+        plan: &SagaRecoveryPlan,
+        execution: SagaRecoveryDone,
+    ) {
+        for saga_id in &plan.inferred_done {
+            assert!(self.sagas_to_ignore.remove(saga_id));
+        }
+
+        for success in execution.succeeded {
+            assert!(self.sagas_to_ignore.insert(success.saga_id));
+            self.recent_recoveries.append(success);
+        }
+
+        for failure in execution.failed {
+            self.recent_failures.append(failure);
+        }
+
+        self.remove_next = plan.maybe_done.iter().copied().collect();
+    }
 }
 
 impl BackgroundTask for SagaRecovery {
@@ -430,6 +452,7 @@ impl BackgroundTask for SagaRecovery {
             );
             let execution = self.recovery_execute(log, &plan).await;
             let last_pass = LastPass::Success(execution.to_last_pass_result());
+            self.recovery_finish(&plan, execution);
             self.activate_finish(last_pass)
         }
         .boxed()
@@ -543,7 +566,7 @@ impl<'a> SagaRecoveryPlan {
                     builder.saga_recovery_maybe_done(*running_saga_id)
                 }
 
-                Some(found_saga) => {
+                Some(_found_saga) => {
                     // The saga is in the ignore set and the database list of
                     // running sagas.  It may have been created in the lifetime
                     // of this program or we may have recovered it previously,
@@ -624,7 +647,6 @@ impl<'a> SagaRecoveryPlanBuilder<'a> {
         assert!(!self.skipped_running.contains(&saga_id));
         assert!(!self.maybe_done.contains(&saga_id));
         assert!(self.inferred_done.insert(saga_id));
-        // XXX-dap need to update the global state about these
     }
 
     /// Record that no action is needed for this saga in this recovery pass
@@ -861,7 +883,6 @@ fn update_sagas_started(
     for saga_id in new_sagas {
         info!(log, "observed saga start"; "saga_id" => %saga_id);
         assert!(set.insert(saga_id));
-        // XXX-dap need to also add to this set any recovered sagas
     }
     disconnected
 }
