@@ -2,10 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// XXX-dap see other XXXs -- particularly: updating global state (including
-// debug state but also critical state) based on what happened during planning
-// and execution
-// XXX-dap consider breaking into a separate directory with its own submodules
 // XXX-dap at the end, verify:
 // - counters (maybe plumb these into Oximeter?)
 // - task status reported by omdb
@@ -136,13 +132,11 @@
 //! point during this recovery pass and they can be safely ignored until the
 //! next pass.
 
+// XXX-dap clean up these names
 use super::recovery::SagaRecoveryDone;
 use super::recovery::SagaRecoveryDoneBuilder;
 use super::recovery::SagaRecoveryPlan;
-use super::status::DebuggingHistory;
-use super::status::LastPass;
-use super::status::RecoveryFailure;
-use super::status::RecoverySuccess;
+use super::recovery::SagaRecoveryRestState;
 use super::status::SagaRecoveryTaskStatus;
 use crate::app::background::BackgroundTask;
 use crate::app::sagas::ActionRegistry;
@@ -155,20 +149,10 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
-use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use uuid::Uuid;
-
-// These values are chosen to be large enough to likely cover the complete
-// history of saga recoveries, successful and otherwise.  They just need to be
-// finite so that this system doesn't use an unbounded amount of memory.
-/// Maximum number of successful recoveries to keep track of for debugging
-const N_SUCCESS_SAGA_HISTORY: usize = 128;
-/// Maximum number of recent failures to keep track of for debugging
-const N_FAILED_SAGA_HISTORY: usize = 128;
 
 /// Background task that recovers sagas assigned to this Nexus
 ///
@@ -189,20 +173,11 @@ pub struct SagaRecovery {
     sec_client: Arc<steno::SecClient>,
     registry: Arc<ActionRegistry>,
 
-    // for keeping track of what sagas are currently outstanding
-    // XXX-dap group into SagaRecoveryRestState and have a method for updating
-    // based on plan + execution?
-    // XXX-dap could be BTreeMap of some object saying created/resumed and when
-    sagas_to_ignore: BTreeSet<steno::SagaId>,
-    sagas_started_rx: mpsc::UnboundedReceiver<steno::SagaId>,
-    remove_next: Vec<steno::SagaId>,
+    /// recovery state persisted between passes
+    rest_state: SagaRecoveryRestState,
 
-    // for status reporting
-    // XXX-dap group into SagaRecoveryStatus and have a method for updating
-    // based on plan + execution?
-    recent_recoveries: DebuggingHistory<RecoverySuccess>,
-    recent_failures: DebuggingHistory<RecoveryFailure>,
-    last_pass: LastPass,
+    /// status reporting
+    status: SagaRecoveryTaskStatus,
 }
 
 impl SagaRecovery {
@@ -222,24 +197,9 @@ impl SagaRecovery {
             nexus,
             sec_client: sec,
             registry,
-            sagas_started_rx,
-            sagas_to_ignore: BTreeSet::new(),
-            remove_next: Vec::new(),
-            recent_recoveries: DebuggingHistory::new(N_SUCCESS_SAGA_HISTORY),
-            recent_failures: DebuggingHistory::new(N_FAILED_SAGA_HISTORY),
-            last_pass: LastPass::NeverStarted,
+            rest_state: SagaRecoveryRestState::new(sagas_started_rx),
+            status: SagaRecoveryTaskStatus::new(),
         }
-    }
-
-    fn activate_finish(&mut self, last_pass: LastPass) -> serde_json::Value {
-        self.last_pass = last_pass;
-
-        serde_json::to_value(SagaRecoveryTaskStatus {
-            recent_recoveries: self.recent_recoveries.clone(),
-            recent_failures: self.recent_failures.clone(),
-            last_pass: self.last_pass.clone(),
-        })
-        .unwrap()
     }
 
     async fn recovery_execute<'a>(
@@ -332,29 +292,6 @@ impl SagaRecovery {
         }
         .boxed())
     }
-
-    // Update persistent state based on whatever happened.
-    fn recovery_finish(
-        &mut self,
-        plan: &SagaRecoveryPlan,
-        execution: SagaRecoveryDone,
-    ) {
-        for saga_id in plan.sagas_inferred_done() {
-            assert!(self.sagas_to_ignore.remove(&saga_id));
-        }
-
-        let (succeeded, failed) = execution.into_results();
-        for success in succeeded {
-            assert!(self.sagas_to_ignore.insert(success.saga_id));
-            self.recent_recoveries.append(success);
-        }
-
-        for failure in failed {
-            self.recent_failures.append(failure);
-        }
-
-        self.remove_next = plan.sagas_maybe_done().collect();
-    }
 }
 
 impl BackgroundTask for SagaRecovery {
@@ -392,45 +329,26 @@ impl BackgroundTask for SagaRecovery {
             // was immediately created and showed up in our candidate list, we'd
             // erroneously conclude that it needed to be recovered when in fact
             // it was already running.
-            let disconnected = update_sagas_started(
-                log,
-                &mut self.sagas_to_ignore,
-                &mut self.sagas_started_rx,
-            );
-            if disconnected {
-                warn!(
-                    log,
-                    "sagas_started_rx disconnected (is Nexus shutting down?)"
-                );
-            }
+            self.rest_state.update_started_sagas(log);
 
-            // If we failed to fetch the list of in-progress sagas from the
-            // database, bail out now.  There's nothing more we can do.
-            let db_sagas = match result {
-                Ok(db_sagas) => db_sagas,
+            match result {
+                Ok(db_sagas) => {
+                    let plan =
+                        SagaRecoveryPlan::new(log, &self.rest_state, db_sagas);
+                    let execution = self.recovery_execute(log, &plan).await;
+                    self.rest_state.update_after_pass(&plan, &execution);
+                    self.status.update_after_pass(execution);
+                }
                 Err(error) => {
-                    return self.activate_finish(LastPass::Failed {
-                        message: InlineErrorChain::new(&error).to_string(),
-                    })
+                    self.status.update_after_failure(&error);
                 }
             };
 
-            let plan = SagaRecoveryPlan::new(
-                log,
-                &self.remove_next,
-                &mut self.sagas_to_ignore,
-                db_sagas,
-            );
-            let execution = self.recovery_execute(log, &plan).await;
-            let last_pass = LastPass::Success(execution.to_last_pass_result());
-            self.recovery_finish(&plan, execution);
-            self.activate_finish(last_pass)
+            serde_json::to_value(&self.status).unwrap()
         }
         .boxed()
     }
 }
-
-// Helpers
 
 /// List all in-progress sagas assigned to the given SEC
 async fn list_sagas_in_progress(
@@ -458,52 +376,4 @@ async fn list_sagas_in_progress(
         }
     };
     result
-}
-
-/// Update `set` with entries from `rx`
-///
-/// For more about this, see the comments above about how we keep track of sagas
-/// running in the current process
-fn update_sagas_started(
-    log: &slog::Logger,
-    set: &mut BTreeSet<steno::SagaId>,
-    rx: &mut mpsc::UnboundedReceiver<steno::SagaId>,
-) -> bool {
-    let (new_sagas, disconnected) = read_all_from_channel(rx);
-    if disconnected {
-        warn!(log, "sagas_started_rx disconnected (is Nexus shutting down?)");
-    }
-    for saga_id in new_sagas {
-        info!(log, "observed saga start"; "saga_id" => %saga_id);
-        assert!(set.insert(saga_id));
-    }
-    disconnected
-}
-
-/// Read all message that are currently available on the given channel (without
-/// blocking or waiting)
-///
-/// Returns the list of messages (as a `Vec`) plus a boolean that's true iff the
-/// channel is now disconnected.
-fn read_all_from_channel<T>(
-    rx: &mut mpsc::UnboundedReceiver<T>,
-) -> (Vec<T>, bool) {
-    let mut values = Vec::new();
-    let mut disconnected = false;
-
-    loop {
-        match rx.try_recv() {
-            Ok(value) => {
-                values.push(value);
-            }
-
-            Err(mpsc::error::TryRecvError::Empty) => break,
-            Err(mpsc::error::TryRecvError::Disconnected) => {
-                disconnected = true;
-                break;
-            }
-        }
-    }
-
-    (values, disconnected)
 }

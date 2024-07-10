@@ -16,6 +16,91 @@ use omicron_common::api::external::Error;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use tokio::sync::mpsc;
+
+/// Describes state related to saga recovery that needs to be maintained across
+/// multiple passes
+pub struct SagaRecoveryRestState {
+    // XXX-dap could be BTreeMap of some object saying created/resumed and when
+    sagas_started: BTreeSet<steno::SagaId>,
+    sagas_started_rx: mpsc::UnboundedReceiver<steno::SagaId>,
+    remove_next: Vec<steno::SagaId>,
+}
+
+impl SagaRecoveryRestState {
+    pub fn new(
+        sagas_started_rx: mpsc::UnboundedReceiver<steno::SagaId>,
+    ) -> SagaRecoveryRestState {
+        SagaRecoveryRestState {
+            sagas_started: BTreeSet::new(),
+            sagas_started_rx,
+            remove_next: Vec::new(),
+        }
+    }
+
+    /// Read messages from the channel (signaling sagas that have started
+    /// running) and update our set of sagas that we believe to be running.
+    pub fn update_started_sagas(&mut self, log: &slog::Logger) {
+        let (new_sagas, disconnected) =
+            read_all_from_channel(&mut self.sagas_started_rx);
+        if disconnected {
+            warn!(
+                log,
+                "sagas_started_rx disconnected (is Nexus shutting down?)"
+            );
+        }
+
+        for saga_id in new_sagas {
+            info!(log, "observed saga start"; "saga_id" => ?saga_id);
+            assert!(self.sagas_started.insert(saga_id));
+        }
+    }
+
+    /// Update based on the results of a recovery pass.
+    pub fn update_after_pass(
+        &mut self,
+        plan: &SagaRecoveryPlan,
+        execution: &SagaRecoveryDone,
+    ) {
+        for saga_id in plan.sagas_inferred_done() {
+            assert!(self.sagas_started.remove(&saga_id));
+        }
+
+        for saga_id in execution.sagas_recovered_successfully() {
+            assert!(self.sagas_started.insert(saga_id));
+        }
+
+        self.remove_next = plan.sagas_maybe_done().collect();
+    }
+}
+
+/// Read all message that are currently available on the given channel (without
+/// blocking or waiting)
+///
+/// Returns the list of messages (as a `Vec`) plus a boolean that's true iff the
+/// channel is now disconnected.
+fn read_all_from_channel<T>(
+    rx: &mut mpsc::UnboundedReceiver<T>,
+) -> (Vec<T>, bool) {
+    let mut values = Vec::new();
+    let mut disconnected = false;
+
+    loop {
+        match rx.try_recv() {
+            Ok(value) => {
+                values.push(value);
+            }
+
+            Err(mpsc::error::TryRecvError::Empty) => break,
+            Err(mpsc::error::TryRecvError::Disconnected) => {
+                disconnected = true;
+                break;
+            }
+        }
+    }
+
+    (values, disconnected)
+}
 
 /// Describes what should happen during a particular recovery pass
 ///
@@ -76,11 +161,12 @@ impl<'a> SagaRecoveryPlan {
     ///   `running_sagas_found`)
     pub fn new(
         log: &slog::Logger,
-        previously_maybe_done: &[steno::SagaId],
-        sagas_started: &mut BTreeSet<steno::SagaId>,
+        rest_state: &SagaRecoveryRestState,
         mut running_sagas_found: BTreeMap<steno::SagaId, nexus_db_model::Saga>,
     ) -> SagaRecoveryPlan {
         let mut builder = SagaRecoveryPlanBuilder::new(log);
+        let sagas_started = &rest_state.sagas_started;
+        let previously_maybe_done = &rest_state.remove_next;
 
         // First of all, remove finished sagas from our "ignore" set.
         //
@@ -165,12 +251,6 @@ impl<'a> SagaRecoveryPlan {
     ) -> impl Iterator<Item = (&steno::SagaId, &nexus_db_model::Saga)> + '_
     {
         self.needs_recovery.iter()
-    }
-
-    /// Iterate over the sagas that were skipped because they're already running
-    /// in this process
-    pub fn sagas_skipped(&self) -> impl Iterator<Item = steno::SagaId> + '_ {
-        self.skipped_running.iter().copied()
     }
 
     /// Iterate over the sagas that were inferred to be done
@@ -324,6 +404,13 @@ impl<'a> SagaRecoveryDone<'a> {
         }
     }
 
+    /// Iterate over the sagas that were successfully recovered during this pass
+    pub fn sagas_recovered_successfully(
+        &self,
+    ) -> impl Iterator<Item = steno::SagaId> + '_ {
+        self.succeeded.iter().map(|s| s.saga_id)
+    }
+
     pub fn into_results(self) -> (Vec<RecoverySuccess>, Vec<RecoveryFailure>) {
         (self.succeeded, self.failed)
     }
@@ -350,9 +437,7 @@ pub struct SagaRecoveryDoneBuilder<'a> {
 }
 
 impl<'a> SagaRecoveryDoneBuilder<'a> {
-    pub fn new(
-        plan: &'a SagaRecoveryPlan,
-    ) -> SagaRecoveryDoneBuilder<'a> {
+    pub fn new(plan: &'a SagaRecoveryPlan) -> SagaRecoveryDoneBuilder<'a> {
         SagaRecoveryDoneBuilder {
             plan,
             in_progress: BTreeMap::new(),
