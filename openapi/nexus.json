@@ -6630,12 +6630,13 @@
           }
         }
       },
-      "post": {
+      "put": {
         "tags": [
           "system/networking"
         ],
-        "summary": "Create new BGP announce set",
-        "operationId": "networking_bgp_announce_set_create",
+        "summary": "Update BGP announce set",
+        "description": "If the announce set exists, this endpoint replaces the existing announce set with the one specified.",
+        "operationId": "networking_bgp_announce_set_update",
         "requestBody": {
           "content": {
             "application/json": {

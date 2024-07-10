@@ -43,8 +43,12 @@ impl super::Nexus {
             )
             .await
         {
-            Ok(id) => self.switch_port_settings_update(opctx, id, params).await,
+            Ok(id) => {
+                info!(self.log, "updating port settings {id}");
+                self.switch_port_settings_update(opctx, id, params).await
+            }
             Err(_) => {
+                info!(self.log, "creating new switch port settings");
                 self.switch_port_settings_create(opctx, params, None).await
             }
         }
