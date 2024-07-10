@@ -20,10 +20,10 @@ const N_SUCCESS_SAGA_HISTORY: usize = 128;
 /// Maximum number of recent failures to keep track of for debugging
 const N_FAILED_SAGA_HISTORY: usize = 128;
 
-#[derive(Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Report {
-    recent_recoveries: DebuggingHistory<RecoverySuccess>,
-    recent_failures: DebuggingHistory<RecoveryFailure>,
+    pub recent_recoveries: DebuggingHistory<RecoverySuccess>,
+    pub recent_failures: DebuggingHistory<RecoveryFailure>,
     last_pass: LastPass,
 }
 
@@ -36,8 +36,13 @@ impl Report {
         }
     }
 
-    pub fn update_after_pass(&mut self, execution: recovery::ExecutionSummary) {
-        self.last_pass = LastPass::Success(execution.to_last_pass_result());
+    pub fn update_after_pass(
+        &mut self,
+        plan: &recovery::Plan,
+        execution: recovery::ExecutionSummary,
+    ) {
+        self.last_pass =
+            LastPass::Success(LastPassSuccess::new(plan, &execution));
 
         let (succeeded, failed) = execution.into_results();
 
@@ -57,27 +62,27 @@ impl Report {
     }
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct RecoverySuccess {
     pub time: DateTime<Utc>,
     pub saga_id: SagaId,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct RecoveryFailure {
     pub time: DateTime<Utc>,
     pub saga_id: SagaId,
     pub message: String,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub enum LastPass {
     NeverStarted,
     Failed { message: String },
     Success(LastPassSuccess),
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct LastPassSuccess {
     pub nfound: usize,
     pub nrecovered: usize,
@@ -86,10 +91,27 @@ pub struct LastPassSuccess {
     pub nremoved: usize,
 }
 
-#[derive(Clone, Serialize)]
+impl LastPassSuccess {
+    pub fn new(
+        plan: &recovery::Plan,
+        execution: &recovery::ExecutionSummary,
+    ) -> LastPassSuccess {
+        let nfound = plan.sagas_needing_recovery().count() + plan.nskipped();
+        LastPassSuccess {
+            nfound,
+            nrecovered: execution.succeeded.len(),
+            nfailed: execution.failed.len(),
+            nskipped: plan.nskipped(),
+            nremoved: plan.ninferred_done(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct DebuggingHistory<T> {
     size: usize,
-    ring: VecDeque<T>,
+    // XXX-dap should not be pub
+    pub ring: VecDeque<T>,
 }
 
 impl<T> DebuggingHistory<T> {

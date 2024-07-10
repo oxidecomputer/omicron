@@ -129,3 +129,206 @@ pub use task::SagaRecovery;
 mod recovery;
 mod status;
 mod task;
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use futures::FutureExt;
+    use omicron_common::api::external::Error;
+    use omicron_test_utils::dev::test_setup_log;
+    use std::collections::BTreeMap;
+    use steno::SagaId;
+    use tokio::sync::mpsc;
+    use uuid::Uuid;
+
+    // Test the following structures used together:
+    //
+    // - RestState
+    // - Plan
+    // - ExecutionSummary
+    // - Report
+    //
+    // The first three of these are used in a loop together and their exposed
+    // functionality is largely in terms of each other.  That makes them a
+    // little harder to test in isolation, but we can test them pretty
+    // well together.
+    #[tokio::test]
+    async fn test_basic() {
+        let logctx = test_setup_log("saga_recovery_basic");
+        let log = &logctx.log;
+
+        // Start with a blank slate.
+        let mut report = status::Report::new();
+        let mut rest_state = recovery::RestState::new();
+        let initial_rest_state = rest_state.clone();
+
+        // Now, go through a no-op recovery.
+        let (plan, summary, last_pass_result) = do_recovery_pass(
+            log,
+            &mut rest_state,
+            Vec::new(),
+            Vec::new(),
+            &|_| Ok(()),
+        );
+        assert_eq!(last_pass_result.nfound, 0);
+        assert_eq!(last_pass_result.nskipped, 0);
+        assert_eq!(last_pass_result.nremoved, 0);
+        assert_eq!(rest_state, initial_rest_state);
+        report.update_after_pass(&plan, summary);
+
+        // Great.  Now go through a somewhat general case of recovery:
+        // - start two sagas normally (i.e., as though they had been started
+        //   elsewhere in Nexus)
+        //   - one that also appears in the database
+        //     (this is the case where Nexus listed sagas after this new saga
+        //     started)
+        //   - one that does not appear in the database
+        //     (this is the case where Nexus listed sagas before this new saga
+        //     started)
+        // - at the same time, create two sagas that need to be recovered:
+        //   - one where recovery succeeds
+        //   - one where recovery fails
+        let sagas_started = make_saga_ids(2);
+        let sagas_to_recover = make_saga_ids(2);
+        let db_sagas = {
+            let mut db_sagas = sagas_to_recover.clone();
+            db_sagas.push(sagas_started[0]);
+            db_sagas
+        };
+        let ndb_sagas = db_sagas.len();
+        let (plan, summary, last_pass_result) = do_recovery_pass(
+            log,
+            &mut rest_state,
+            sagas_started,
+            db_sagas,
+            &|s| {
+                if s == sagas_to_recover[1] {
+                    Ok(())
+                } else {
+                    Err(Error::internal_error("test error"))
+                }
+            },
+        );
+        assert_eq!(ndb_sagas, last_pass_result.nfound);
+        assert_eq!(1, last_pass_result.nskipped);
+        assert_eq!(0, last_pass_result.nremoved);
+        assert_eq!(1, last_pass_result.nrecovered);
+        assert_eq!(1, last_pass_result.nfailed);
+        assert_eq!(
+            vec![sagas_to_recover[1]],
+            summary.sagas_recovered_successfully().collect::<Vec<_>>()
+        );
+        report.update_after_pass(&plan, summary);
+        assert_eq!(report.recent_recoveries.ring.len(), 1);
+        assert_eq!(
+            report.recent_recoveries.ring[0].saga_id,
+            sagas_to_recover[1]
+        );
+        assert_eq!(report.recent_failures.ring.len(), 1);
+        assert_eq!(report.recent_failures.ring[0].saga_id, sagas_to_recover[0]);
+
+        // XXX-dap working on this test -- see comment in the other file for
+        // some cases to cover, and also think through it from first principles.
+        // e.g., another pass should exercise cases where an ambiguous saga
+        // actually does finish and one where it doesn't?
+    }
+
+    const FAKE_SEC_ID: &str = "03082281-fb2e-4bfd-bce3-997c89a0db2d";
+    pub fn make_fake_saga(saga_id: SagaId) -> nexus_db_model::Saga {
+        let sec_id =
+            nexus_db_model::SecId::from(FAKE_SEC_ID.parse::<Uuid>().unwrap());
+        nexus_db_model::Saga::new(
+            sec_id,
+            steno::SagaCreateParams {
+                id: saga_id,
+                name: steno::SagaName::new("dummy"),
+                state: steno::SagaCachedState::Running,
+                dag: serde_json::Value::Null,
+            },
+        )
+    }
+
+    pub fn make_saga_ids(count: usize) -> Vec<SagaId> {
+        let mut rv = Vec::with_capacity(count);
+        for _ in 0..count {
+            rv.push(SagaId(Uuid::new_v4()));
+        }
+        // Essentially by coincidence, the values we're checking against
+        // are going to be sorted.  Sort this here for convenience.
+        rv.sort();
+        rv
+    }
+
+    /// Simulates one recovery pass
+    fn do_recovery_pass(
+        log: &slog::Logger,
+        rest_state: &mut recovery::RestState,
+        new_sagas_started: Vec<SagaId>,
+        sagas_found: Vec<SagaId>,
+        recovery_result: &dyn Fn(SagaId) -> Result<(), Error>,
+    ) -> (recovery::Plan, recovery::ExecutionSummary, status::LastPassSuccess)
+    {
+        // Simulate processing messages that the `new_sagas_started` sagas just
+        // started.
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        for saga_id in new_sagas_started {
+            tx.send(saga_id).unwrap();
+        }
+        rest_state.update_started_sagas(log, &mut rx);
+
+        // Generate fake database records for the sagas that the caller wants to
+        // pretend show up as running in the database.
+        let expected_nfound = sagas_found.len();
+        let fake_sagas_found: BTreeMap<_, _> = sagas_found
+            .into_iter()
+            .map(|saga_id| {
+                let saga = make_fake_saga(saga_id);
+                (saga_id, saga)
+            })
+            .collect();
+
+        // Start the recovery pass by planning what to do.
+        let plan = recovery::Plan::new(log, &rest_state, fake_sagas_found);
+
+        // Simulate execution using the callback to determine whether recovery
+        // for each saga succeeds or not.
+        //
+        // There are a lot of ways we could interleave execution here.  But in
+        // practice, the implementation we care about does these all serially.
+        // So that's what we test here.
+        let mut summary_builder = recovery::ExecutionSummaryBuilder::new();
+        let mut nok = 0;
+        let mut nerrors = 0;
+        for (saga_id, saga) in plan.sagas_needing_recovery() {
+            let saga_log = log.new(o!(
+                "saga_name" => saga.name.clone(),
+                "saga_id" => saga_id.to_string(),
+            ));
+
+            summary_builder.saga_recovery_start(*saga_id, saga_log);
+            match recovery_result(*saga_id) {
+                Ok(()) => {
+                    nok += 1;
+                    summary_builder.saga_recovery_success(
+                        *saga_id,
+                        futures::future::ready(Ok(())).boxed(),
+                    );
+                }
+                Err(error) => {
+                    nerrors += 1;
+                    summary_builder.saga_recovery_failure(*saga_id, &error);
+                }
+            }
+        }
+
+        let summary = summary_builder.build();
+        let last_pass = status::LastPassSuccess::new(&plan, &summary);
+        assert_eq!(last_pass.nfound, expected_nfound);
+        assert_eq!(last_pass.nrecovered, nok);
+        assert_eq!(last_pass.nfailed, nerrors);
+
+        // We can't tell from the information we have how many were skipped,
+        // removed, or ambiguous.  The caller verifies that.
+        (plan, summary, last_pass)
+    }
+}

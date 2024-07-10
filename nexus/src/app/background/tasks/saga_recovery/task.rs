@@ -201,12 +201,12 @@ impl SagaRecovery {
         }
     }
 
-    async fn recovery_execute<'a>(
+    async fn recovery_execute(
         &self,
-        bgtask_log: &'a slog::Logger,
-        plan: &'a recovery::Plan,
-    ) -> recovery::ExecutionSummary<'a> {
-        let mut builder = recovery::ExecutionSummaryBuilder::new(plan);
+        bgtask_log: &slog::Logger,
+        plan: &recovery::Plan,
+    ) -> recovery::ExecutionSummary {
+        let mut builder = recovery::ExecutionSummaryBuilder::new();
 
         for (saga_id, saga) in plan.sagas_needing_recovery() {
             let saga_log = self.nexus.log.new(o!(
@@ -337,7 +337,7 @@ impl BackgroundTask for SagaRecovery {
                         recovery::Plan::new(log, &self.rest_state, db_sagas);
                     let execution = self.recovery_execute(log, &plan).await;
                     self.rest_state.update_after_pass(&plan, &execution);
-                    self.status.update_after_pass(execution);
+                    self.status.update_after_pass(&plan, execution);
                 }
                 Err(error) => {
                     self.status.update_after_failure(&error);

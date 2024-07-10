@@ -5,7 +5,6 @@
 //! Guts of saga recovery
 // XXX-dap block comment goes here?  and maybe deserves review
 
-use super::status::LastPassSuccess;
 use super::status::RecoveryFailure;
 use super::status::RecoverySuccess;
 use chrono::{DateTime, Utc};
@@ -21,17 +20,20 @@ use tokio::sync::mpsc;
 
 /// Describes state related to saga recovery that needs to be maintained across
 /// multiple passes
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RestState {
     sagas_started: BTreeMap<SagaId, SagaStartInfo>,
     remove_next: Vec<SagaId>,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 #[allow(dead_code)]
 struct SagaStartInfo {
     time_observed: DateTime<Utc>,
     source: SagaStartSource,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum SagaStartSource {
     StartChannel,
     Recovered,
@@ -59,7 +61,7 @@ impl RestState {
 
         let time_observed = Utc::now();
         for saga_id in new_sagas {
-            info!(log, "observed saga start"; "saga_id" => ?saga_id);
+            info!(log, "observed saga start"; "saga_id" => %saga_id);
             assert!(self
                 .sagas_started
                 .insert(
@@ -133,10 +135,9 @@ fn read_all_from_channel<T>(
 /// Describes what should happen during a particular recovery pass
 ///
 /// This is constructed by the saga recovery background task via
-/// [`SagaRecoveryPlan::new()`].  That function uses
-/// [`SagaRecoveryPlanBuilder`].  This all seems a little overboard for such an
-/// internal structure but it helps separate concerns, particularly when it
-/// comes to testing.
+/// [`Plan::new()`].  That function uses [`PlanBuilder`].  This all seems a
+/// little overboard for such an internal structure but it helps separate
+/// concerns, particularly when it comes to testing.
 ///
 /// This structure is also much more detailed than it needs to be to support
 /// better observability and testing.
@@ -164,7 +165,7 @@ pub struct Plan {
     maybe_done: BTreeSet<SagaId>,
 }
 
-impl<'a> Plan {
+impl Plan {
     /// For a given saga recovery pass, determine what to do with each found
     /// saga
     ///
@@ -192,7 +193,7 @@ impl<'a> Plan {
         rest_state: &RestState,
         mut running_sagas_found: BTreeMap<SagaId, nexus_db_model::Saga>,
     ) -> Plan {
-        let mut builder = SagaRecoveryPlanBuilder::new(log);
+        let mut builder = PlanBuilder::new(log);
         let sagas_started = &rest_state.sagas_started;
         let previously_maybe_done = &rest_state.remove_next;
 
@@ -235,7 +236,7 @@ impl<'a> Plan {
                     // must have finished.  Rather than do that now, we'll just
                     // keep track of this list and take care of it in the next
                     // activation.
-                    builder.saga_recovery_maybe_done(*running_saga_id)
+                    builder.saga_maybe_done(*running_saga_id)
                 }
 
                 Some(_found_saga) => {
@@ -244,10 +245,7 @@ impl<'a> Plan {
                     // of this program or we may have recovered it previously,
                     // but either way, we don't have to do anything else with
                     // this one.
-                    builder.saga_recovery_not_needed(
-                        *running_saga_id,
-                        "already running",
-                    );
+                    builder.saga_recovery_not_needed(*running_saga_id);
                 }
             }
         }
@@ -290,10 +288,18 @@ impl<'a> Plan {
     pub fn sagas_maybe_done(&self) -> impl Iterator<Item = SagaId> + '_ {
         self.maybe_done.iter().copied()
     }
+
+    pub fn nskipped(&self) -> usize {
+        self.skipped_running.len()
+    }
+
+    pub fn ninferred_done(&self) -> usize {
+        self.inferred_done.len()
+    }
 }
 
-/// Internal helper used to construct `SagaRecoveryPlan`
-struct SagaRecoveryPlanBuilder<'a> {
+/// Internal helper used to construct `Plan`
+struct PlanBuilder<'a> {
     log: &'a slog::Logger,
     needs_recovery: BTreeMap<SagaId, nexus_db_model::Saga>,
     skipped_running: BTreeSet<SagaId>,
@@ -301,10 +307,10 @@ struct SagaRecoveryPlanBuilder<'a> {
     maybe_done: BTreeSet<SagaId>,
 }
 
-impl<'a> SagaRecoveryPlanBuilder<'a> {
-    /// Begin building a `SagaRecoveryPlan`
-    pub fn new(log: &'a slog::Logger) -> SagaRecoveryPlanBuilder {
-        SagaRecoveryPlanBuilder {
+impl<'a> PlanBuilder<'a> {
+    /// Begin building a `Plan`
+    pub fn new(log: &'a slog::Logger) -> PlanBuilder {
+        PlanBuilder {
             log,
             needs_recovery: BTreeMap::new(),
             skipped_running: BTreeSet::new(),
@@ -313,7 +319,7 @@ impl<'a> SagaRecoveryPlanBuilder<'a> {
         }
     }
 
-    /// Turn this into a `SagaRecoveryPlan`
+    /// Turn this into a `Plan`
     pub fn build(self) -> Plan {
         Plan {
             needs_recovery: self.needs_recovery,
@@ -341,16 +347,11 @@ impl<'a> SagaRecoveryPlanBuilder<'a> {
 
     /// Record that no action is needed for this saga in this recovery pass
     /// because it appears to already be running
-    pub fn saga_recovery_not_needed(
-        &mut self,
-        saga_id: SagaId,
-        reason: &'static str,
-    ) {
+    pub fn saga_recovery_not_needed(&mut self, saga_id: SagaId) {
         debug!(
             self.log,
-            "found saga that can be ignored";
-            "saga_id" => ?saga_id,
-            "reason" => reason,
+            "found saga that can be ignored (already running)";
+            "saga_id" => %saga_id,
         );
         assert!(!self.needs_recovery.contains_key(&saga_id));
         assert!(!self.inferred_done.contains(&saga_id));
@@ -366,11 +367,11 @@ impl<'a> SagaRecoveryPlanBuilder<'a> {
     /// solution is to only consider sagas done that are missing for two
     /// consecutive database queries with no intervening report that a saga with
     /// that id has just started.
-    pub fn saga_recovery_maybe_done(&mut self, saga_id: SagaId) {
+    pub fn saga_maybe_done(&mut self, saga_id: SagaId) {
         debug!(
             self.log,
             "found saga that may be done (will be sure on the next pass)";
-            "saga_id" => ?saga_id
+            "saga_id" => %saga_id
         );
         assert!(!self.needs_recovery.contains_key(&saga_id));
         assert!(!self.skipped_running.contains(&saga_id));
@@ -388,7 +389,7 @@ impl<'a> SagaRecoveryPlanBuilder<'a> {
         info!(
             self.log,
             "found saga that needs to be recovered";
-            "saga_id" => ?saga_id
+            "saga_id" => %saga_id
         );
         assert!(!self.skipped_running.contains(&saga_id));
         assert!(!self.inferred_done.contains(&saga_id));
@@ -403,32 +404,18 @@ impl<'a> SagaRecoveryPlanBuilder<'a> {
 /// `recovery_execute()`) via [`SagaRecoveryDoneBuilder::new()`].  This seems a
 /// little overboard for such an internal structure but it helps separate
 /// concerns, particularly when it comes to testing.
-pub struct ExecutionSummary<'a> {
-    /// plan from which this recovery was carried out
-    plan: &'a Plan,
+pub struct ExecutionSummary {
     /// list of sagas that were successfully recovered
-    succeeded: Vec<RecoverySuccess>,
+    pub succeeded: Vec<RecoverySuccess>,
     /// list of sagas that failed to be recovered
-    failed: Vec<RecoveryFailure>,
+    pub failed: Vec<RecoveryFailure>,
     /// list of Futures to enable the consumer to wait for all recovered sagas
     /// to complete
     #[cfg(test)]
     completion_futures: Vec<BoxFuture<'static, Result<(), Error>>>,
 }
 
-impl<'a> ExecutionSummary<'a> {
-    pub fn to_last_pass_result(&self) -> LastPassSuccess {
-        let plan = self.plan;
-        let nfound = plan.needs_recovery.len() + plan.skipped_running.len();
-        LastPassSuccess {
-            nfound,
-            nrecovered: self.succeeded.len(),
-            nfailed: self.failed.len(),
-            nskipped: plan.skipped_running.len(),
-            nremoved: plan.inferred_done.len(),
-        }
-    }
-
+impl ExecutionSummary {
     /// Iterate over the sagas that were successfully recovered during this pass
     pub fn sagas_recovered_successfully(
         &self,
@@ -452,8 +439,7 @@ impl<'a> ExecutionSummary<'a> {
     }
 }
 
-pub struct ExecutionSummaryBuilder<'a> {
-    plan: &'a Plan,
+pub struct ExecutionSummaryBuilder {
     in_progress: BTreeMap<SagaId, slog::Logger>,
     succeeded: Vec<RecoverySuccess>,
     failed: Vec<RecoveryFailure>,
@@ -461,10 +447,9 @@ pub struct ExecutionSummaryBuilder<'a> {
     completion_futures: Vec<BoxFuture<'static, Result<(), Error>>>,
 }
 
-impl<'a> ExecutionSummaryBuilder<'a> {
-    pub fn new(plan: &'a Plan) -> ExecutionSummaryBuilder<'a> {
+impl ExecutionSummaryBuilder {
+    pub fn new() -> ExecutionSummaryBuilder {
         ExecutionSummaryBuilder {
-            plan,
             in_progress: BTreeMap::new(),
             succeeded: Vec::new(),
             failed: Vec::new(),
@@ -473,14 +458,13 @@ impl<'a> ExecutionSummaryBuilder<'a> {
         }
     }
 
-    pub fn build(self) -> ExecutionSummary<'a> {
+    pub fn build(self) -> ExecutionSummary {
         assert!(
             self.in_progress.is_empty(),
             "attempted to build execution result while some recoveries are \
             still in progress"
         );
         ExecutionSummary {
-            plan: self.plan,
             succeeded: self.succeeded,
             failed: self.failed,
             #[cfg(test)]
@@ -502,6 +486,15 @@ impl<'a> ExecutionSummaryBuilder<'a> {
     pub fn saga_recovery_success(
         &mut self,
         saga_id: SagaId,
+        // XXX-dap Right now, the only test code we have calls this function
+        // separately.  If that remains the case, we can put this argument under
+        // cfg[test] and have the caller in task.rs not provide it and have
+        // recover_one not even provide it... but then in that case, there's no
+        // point in any of this machinery.
+        //
+        // On the other hand if we the higher-level tests end up using this,
+        // we'll need to figure out what to do with this since right now this
+        // argument is unused in non-test code.
         completion_future: BoxFuture<'static, Result<(), Error>>,
     ) {
         let saga_logger = self
@@ -526,5 +519,260 @@ impl<'a> ExecutionSummaryBuilder<'a> {
             saga_id,
             message: InlineErrorChain::new(error).to_string(),
         });
+    }
+}
+
+#[cfg(test)]
+mod test {
+    // XXX-dap test plan:
+    // RestState:
+    // - update_started_sagas():
+    //   - normal update (x2)
+    //   - empty channel
+    //   - disconnected channel
+    // - update_after_pass():
+    //   - come back to this
+    // XXX-dap write a stress test that furiously performs saga recovery a lot
+    // of times and ensures that each saga is recovered exactly once
+    use super::*;
+    use crate::app::background::tasks::saga_recovery::status;
+    use crate::app::background::tasks::saga_recovery::test::make_fake_saga;
+    use crate::app::background::tasks::saga_recovery::test::make_saga_ids;
+    use omicron_test_utils::dev::test_setup_log;
+    use std::sync::Arc;
+    use tokio::sync::Notify;
+
+    #[test]
+    fn test_read_all_from_channel() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        // If we send nothing on the channel, reading from it should return
+        // immediately, having found nothing.
+        let (numbers, disconnected) = read_all_from_channel::<u32>(&mut rx);
+        assert!(numbers.is_empty());
+        assert!(!disconnected);
+
+        // Send some numbers and make sure we get them back.
+        let expected_numbers = vec![1, 7, 0, 1];
+        for n in &expected_numbers {
+            tx.send(*n).unwrap();
+        }
+        let (numbers, disconnected) = read_all_from_channel(&mut rx);
+        assert_eq!(expected_numbers, numbers);
+        assert!(!disconnected);
+
+        // Send some more numbers and make sure we get them back.
+        let expected_numbers = vec![9, 7, 2, 0, 0, 6];
+        for n in &expected_numbers {
+            tx.send(*n).unwrap();
+        }
+
+        let (numbers, disconnected) = read_all_from_channel(&mut rx);
+        assert_eq!(expected_numbers, numbers);
+        assert!(!disconnected);
+
+        // Send just a few more, then disconnect the channel.
+        tx.send(128).unwrap();
+        drop(tx);
+        let (numbers, disconnected) = read_all_from_channel(&mut rx);
+        assert_eq!(vec![128], numbers);
+        assert!(disconnected);
+
+        // Also exercise the trivial case where the channel is disconnected
+        // before we read anything.
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        drop(tx);
+        let (numbers, disconnected) = read_all_from_channel::<u32>(&mut rx);
+        assert!(numbers.is_empty());
+        assert!(disconnected);
+    }
+
+    pub struct BasicPlanTestCase {
+        pub plan: Plan,
+        pub to_recover: Vec<SagaId>,
+        pub to_skip: Vec<SagaId>,
+        pub to_mark_done: Vec<SagaId>,
+        pub to_mark_maybe: Vec<SagaId>,
+    }
+
+    impl BasicPlanTestCase {
+        pub fn new(log: &slog::Logger) -> BasicPlanTestCase {
+            let to_recover = make_saga_ids(4);
+            let to_skip = make_saga_ids(3);
+            let to_mark_done = make_saga_ids(2);
+            let to_mark_maybe = make_saga_ids(1);
+
+            info!(log, "test setup";
+                "to_recover" => ?to_recover,
+                "to_skip" => ?to_skip,
+                "to_mark_done" => ?to_mark_done,
+                "to_mark_maybe" => ?to_mark_maybe,
+            );
+
+            let mut plan_builder = PlanBuilder::new(log);
+            for saga_id in &to_recover {
+                plan_builder
+                    .saga_recovery_needed(*saga_id, make_fake_saga(*saga_id));
+            }
+            for saga_id in &to_skip {
+                plan_builder.saga_recovery_not_needed(*saga_id);
+            }
+            for saga_id in &to_mark_done {
+                plan_builder.saga_infer_done(*saga_id);
+            }
+            for saga_id in &to_mark_maybe {
+                plan_builder.saga_maybe_done(*saga_id);
+            }
+            let plan = plan_builder.build();
+
+            BasicPlanTestCase {
+                plan,
+                to_recover,
+                to_skip,
+                to_mark_done,
+                to_mark_maybe,
+            }
+        }
+    }
+
+    #[test]
+    fn test_plan_basic() {
+        let logctx = test_setup_log("saga_recovery_plan_basic");
+
+        // Trivial initial case
+        let plan_builder = PlanBuilder::new(&logctx.log);
+        let plan = plan_builder.build();
+        assert_eq!(0, plan.sagas_needing_recovery().count());
+        assert_eq!(0, plan.sagas_inferred_done().count());
+        assert_eq!(0, plan.sagas_maybe_done().count());
+
+        // Basic case
+        let BasicPlanTestCase {
+            plan,
+            to_recover,
+            to_skip: _,
+            to_mark_done,
+            to_mark_maybe,
+        } = BasicPlanTestCase::new(&logctx.log);
+
+        let found_to_recover =
+            plan.sagas_needing_recovery().collect::<Vec<_>>();
+        assert_eq!(to_recover.len(), found_to_recover.len());
+        for (expected_saga_id, (found_saga_id, found_saga_record)) in
+            to_recover.into_iter().zip(found_to_recover.into_iter())
+        {
+            assert_eq!(expected_saga_id, *found_saga_id);
+            assert_eq!(expected_saga_id, found_saga_record.id.0);
+            assert_eq!("dummy", found_saga_record.name);
+        }
+        assert_eq!(
+            to_mark_done,
+            plan.sagas_inferred_done().collect::<Vec<_>>(),
+        );
+        assert_eq!(to_mark_maybe, plan.sagas_maybe_done().collect::<Vec<_>>(),);
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_execution_basic() {
+        let logctx = test_setup_log("saga_recovery_execution_basic");
+
+        // Trivial initial case
+        let plan_builder = PlanBuilder::new(&logctx.log);
+        let plan = plan_builder.build();
+        let summary_builder = ExecutionSummaryBuilder::new();
+        let summary = summary_builder.build();
+
+        assert_eq!(0, summary.sagas_recovered_successfully().count());
+        let last_pass = status::LastPassSuccess::new(&plan, &summary);
+        assert_eq!(0, last_pass.nfound);
+        assert_eq!(0, last_pass.nrecovered);
+        assert_eq!(0, last_pass.nfailed);
+        assert_eq!(0, last_pass.nskipped);
+        assert_eq!(0, last_pass.nremoved);
+
+        assert!(summary.wait_for_recovered_sagas_to_finish().await.is_ok());
+
+        // Test a non-trivial ExecutionSummary.
+        let BasicPlanTestCase {
+            plan,
+            mut to_recover,
+            to_skip,
+            to_mark_done,
+            to_mark_maybe: _,
+        } = BasicPlanTestCase::new(&logctx.log);
+        let mut summary_builder = ExecutionSummaryBuilder::new();
+        assert!(to_recover.len() >= 3, "someone changed the test case");
+
+        // Start recovery backwards, just to make sure there's not some implicit
+        // dependency on the order.  (We could shuffle, but then the test would
+        // be non-deterministic.)
+        for saga_id in to_recover.iter().rev() {
+            summary_builder.saga_recovery_start(*saga_id, logctx.log.clone());
+        }
+
+        // "Finish" recovery, in yet a different order (for the same reason as
+        // above).
+        //
+        // We want to test the success and failure cases.  We also want to test
+        // wait_for_recovered_sagas_to_finish(), so we'll provide futures whose
+        // completion we control precisely.
+        //
+        // Act like:
+        // - recovery for the last saga failed
+        // - recovery for the first saga completes successfully, but the saga
+        //   itself takes some time to finish
+        // - recovery for the other sagas completes successfully and the sagas
+        //   themselves complete immediately
+        to_recover.rotate_left(2);
+        let notify = Arc::new(Notify::new());
+        for (i, saga_id) in to_recover.iter().enumerate() {
+            if i == 0 {
+                let n = notify.clone();
+                summary_builder.saga_recovery_success(
+                    *saga_id,
+                    async move {
+                        n.notified().await;
+                        Ok(())
+                    }
+                    .boxed(),
+                );
+            } else if i == to_recover.len() - 1 {
+                summary_builder.saga_recovery_failure(
+                    *saga_id,
+                    &Error::internal_error("test error"),
+                );
+            } else {
+                summary_builder.saga_recovery_success(
+                    *saga_id,
+                    futures::future::ready(Ok(())).boxed(),
+                );
+            }
+        }
+
+        let summary = summary_builder.build();
+        assert_eq!(
+            to_recover.len() - 1,
+            summary.sagas_recovered_successfully().count()
+        );
+        let last_pass = status::LastPassSuccess::new(&plan, &summary);
+        assert_eq!(to_recover.len() + to_skip.len(), last_pass.nfound);
+        assert_eq!(to_recover.len() - 1, last_pass.nrecovered);
+        assert_eq!(1, last_pass.nfailed);
+        assert_eq!(to_skip.len(), last_pass.nskipped);
+        assert_eq!(to_mark_done.len(), last_pass.nremoved);
+
+        // The recovered sagas' completion futures should not yet be done.
+        let mut fut = summary.wait_for_recovered_sagas_to_finish();
+        let is_ready = (&mut fut).now_or_never();
+        assert!(is_ready.is_none());
+
+        // Simulate the last recovered sagas completing, then try again to wait
+        // for completion.  This should complete.
+        notify.notify_waiters();
+        let _ = fut.await;
+
+        logctx.cleanup_successful();
     }
 }
