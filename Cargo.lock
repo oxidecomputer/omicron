@@ -1614,7 +1614,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=6e0a232fd0b443c19f61f94bf02b7695505aa8e3#6e0a232fd0b443c19f61f94bf02b7695505aa8e3"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=8c5806d0bb3ac38efec716e22fe7cdcd424de09c#8c5806d0bb3ac38efec716e22fe7cdcd424de09c"
 dependencies = [
  "oxnet",
  "percent-encoding",
@@ -4313,7 +4313,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=6e0a232fd0b443c19f61f94bf02b7695505aa8e3#6e0a232fd0b443c19f61f94bf02b7695505aa8e3"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=8c5806d0bb3ac38efec716e22fe7cdcd424de09c#8c5806d0bb3ac38efec716e22fe7cdcd424de09c"
 dependencies = [
  "anyhow",
  "chrono",
@@ -8492,9 +8492,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.203"
+version = "1.0.204"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7253ab4de971e72fb7be983802300c30b5a7f0c2e56fab8abfc6a214307c0094"
+checksum = "bc76f558e0cbb2a839d37354c575f1dc3fdc6546b5be373ba43d95f231bf7c12"
 dependencies = [
  "serde_derive",
 ]
@@ -8539,9 +8539,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.203"
+version = "1.0.204"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "500cbc0ebeb6f46627f50f3f5811ccf6bf00643be300b4c3eabc0ef55dc5b5ba"
+checksum = "e0cd7e117be63d3c3678776753929474f3b04a43a080c744d6b0ae2a8c28e222"
 dependencies = [
  "proc-macro2",
  "quote",

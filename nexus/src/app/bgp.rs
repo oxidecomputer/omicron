@@ -53,17 +53,6 @@ impl super::Nexus {
         Ok(result)
     }
 
-    pub async fn bgp_create_announce_set(
-        &self,
-        opctx: &OpContext,
-        announce: &params::BgpAnnounceSetCreate,
-    ) -> CreateResult<(BgpAnnounceSet, Vec<BgpAnnouncement>)> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        let result =
-            self.db_datastore.bgp_create_announce_set(opctx, announce).await?;
-        Ok(result)
-    }
-
     pub async fn bgp_update_announce_set(
         &self,
         opctx: &OpContext,

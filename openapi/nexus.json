@@ -6634,43 +6634,9 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Update a BGP announce set",
+        "summary": "Update a BGP announce set. If the announce set exists this endpoint replaces",
+        "description": "the existing announce set with the one specified.",
         "operationId": "networking_bgp_announce_set_update",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BgpAnnounceSetCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BgpAnnounceSet"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "system/networking"
-        ],
-        "summary": "Create new BGP announce set",
-        "operationId": "networking_bgp_announce_set_create",
         "requestBody": {
           "content": {
             "application/json": {

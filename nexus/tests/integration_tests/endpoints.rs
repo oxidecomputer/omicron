@@ -2307,9 +2307,6 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_BGP_ANNOUNCE).unwrap(),
-                ),
                 AllowedMethod::Put(
                     serde_json::to_value(&*DEMO_BGP_ANNOUNCE).unwrap(),
                 ),
