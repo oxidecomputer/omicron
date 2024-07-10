@@ -6,9 +6,9 @@
 
 // Copyright 2024 Oxide Computer Company
 
-use super::{make_client, prepare_columns};
+use super::prepare_columns;
 use crate::sql::{function_allow_list, QueryResult, Table};
-use crate::{Client, QuerySummary};
+use crate::{make_client, Client, QuerySummary};
 use clap::Args;
 use dropshot::EmptyScanParams;
 use dropshot::WhichPage;
