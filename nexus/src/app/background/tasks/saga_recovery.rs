@@ -11,6 +11,8 @@
 // - task status reported by omdb
 // - log entries
 // XXX-dap TODO-coverage everything here
+// XXX-dap omdb support
+// XXX-dap TODO-doc everything here
 
 //! Saga recovery
 //!
@@ -195,8 +197,6 @@ pub struct SagaRecovery {
     last_pass: LastPass,
 }
 
-// XXX-dap TODO-doc
-// XXX-dap omdb
 #[derive(Clone, Serialize)]
 pub struct SagaRecoveryTaskStatus {
     recent_recoveries: DebuggingHistory<RecoverySuccess>,
@@ -204,7 +204,6 @@ pub struct SagaRecoveryTaskStatus {
     last_pass: LastPass,
 }
 
-// XXX-dap TODO-doc
 #[derive(Clone, Serialize)]
 pub struct RecoveryFailure {
     time: DateTime<Utc>,
@@ -218,7 +217,6 @@ pub struct RecoverySuccess {
     saga_id: SagaId,
 }
 
-// XXX-dap TODO-doc
 #[derive(Clone, Serialize)]
 pub enum LastPass {
     NeverStarted,
@@ -915,7 +913,6 @@ fn read_all_from_channel<T>(
     (values, disconnected)
 }
 
-// XXX-dap TODO-coverage
 #[derive(Clone, Serialize)]
 struct DebuggingHistory<T> {
     size: usize,
