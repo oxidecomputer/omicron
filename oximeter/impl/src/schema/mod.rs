@@ -190,6 +190,7 @@ pub enum Units {
     Count,
     Bytes,
     Seconds,
+    Nanoseconds,
 }
 
 /// The schema for a timeseries.

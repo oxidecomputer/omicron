@@ -19800,7 +19800,8 @@
         "enum": [
           "count",
           "bytes",
-          "seconds"
+          "seconds",
+          "nanoseconds"
         ]
       },
       "User": {

@@ -518,6 +518,9 @@ impl quote::ToTokens for Units {
             Units::Count => quote! { ::oximeter::schema::Units::Count },
             Units::Bytes => quote! { ::oximeter::schema::Units::Bytes },
             Units::Seconds => quote! { ::oximeter::schema::Units::Seconds },
+            Units::Nanoseconds => {
+                quote! { ::oximeter::schema::Units::Nanoseconds }
+            }
         };
         toks.to_tokens(tokens);
     }
