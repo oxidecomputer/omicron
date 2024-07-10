@@ -26,6 +26,7 @@ use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
+use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
@@ -71,6 +72,7 @@ use typed_rng::UuidRng;
 
 use super::external_networking::BuilderExternalNetworking;
 use super::external_networking::ExternalNetworkingChoice;
+use super::external_networking::ExternalSnatNetworkingChoice;
 use super::zones::is_already_expunged;
 use super::zones::BuilderZoneState;
 use super::zones::BuilderZonesConfig;
@@ -86,12 +88,14 @@ pub enum Error {
     NoAvailableZpool { sled_id: SledUuid, kind: ZoneKind },
     #[error("no Nexus zones exist in parent blueprint")]
     NoNexusZonesInParentBlueprint,
+    #[error("no Boundary NTP zones exist in parent blueprint")]
+    NoBoundaryNtpZonesInParentBlueprint,
     #[error("no external service IP addresses are available")]
     NoExternalServiceIpAvailable,
     #[error("no system MAC addresses are available")]
     NoSystemMacAddressAvailable,
-    #[error("exhausted available Nexus IP addresses")]
-    ExhaustedNexusIps,
+    #[error("exhausted available OPTE IP addresses for service {kind:?}")]
+    ExhaustedOpteIps { kind: ZoneKind },
     #[error(
         "invariant violation: found decommissioned sled with \
          {num_zones} non-expunged zones: {sled_id}"
@@ -101,7 +105,7 @@ pub enum Error {
         num_zones: usize,
     },
     #[error("programming error in planner")]
-    Planner(#[from] anyhow::Error),
+    Planner(#[source] anyhow::Error),
 }
 
 /// Describes whether an idempotent "ensure" operation resulted in action taken
@@ -498,9 +502,9 @@ impl<'a> BlueprintBuilder<'a> {
         change
             .expunge_zones(zones_to_expunge.keys().cloned().collect())
             .map_err(|error| {
-                anyhow!(error).context(format!(
+                Error::Planner(anyhow!(error).context(format!(
                     "for sled {sled_id}, error expunging zones"
-                ))
+                )))
             })?;
 
         // Finally, add comments describing what happened.
@@ -820,21 +824,19 @@ impl<'a> BlueprintBuilder<'a> {
                 ip: external_ip,
             };
 
-            let nic = {
-                NetworkInterface {
-                    id: self.rng.network_interface_rng.next(),
-                    kind: NetworkInterfaceKind::Service {
-                        id: nexus_id.into_untyped_uuid(),
-                    },
-                    name: format!("nexus-{nexus_id}").parse().unwrap(),
-                    ip: nic_ip,
-                    mac: nic_mac,
-                    subnet: nic_subnet,
-                    vni: Vni::SERVICES_VNI,
-                    primary: true,
-                    slot: 0,
-                    transit_ips: vec![],
-                }
+            let nic = NetworkInterface {
+                id: self.rng.network_interface_rng.next(),
+                kind: NetworkInterfaceKind::Service {
+                    id: nexus_id.into_untyped_uuid(),
+                },
+                name: format!("nexus-{nexus_id}").parse().unwrap(),
+                ip: nic_ip,
+                mac: nic_mac,
+                subnet: nic_subnet,
+                vni: Vni::SERVICES_VNI,
+                primary: true,
+                slot: 0,
+                transit_ips: vec![],
             };
 
             let ip = self.sled_alloc_ip(sled_id)?;
@@ -920,6 +922,140 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(EnsureMultiple::Changed { added: num_crdb_to_add, removed: 0 })
     }
 
+    pub fn sled_promote_internal_ntp_to_boundary_ntp(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> Result<EnsureMultiple, Error> {
+        // The upstream NTP/DNS servers and domain _should_ come from Nexus and
+        // be modifiable by the operator, but currently can only be set at RSS.
+        // We can only promote a new boundary NTP zone by copying these settings
+        // from an existing one.
+        let (ntp_servers, dns_servers, domain) = self
+            .parent_blueprint
+            .all_omicron_zones(BlueprintZoneFilter::All)
+            .find_map(|(_, z)| match &z.zone_type {
+                BlueprintZoneType::BoundaryNtp(zone_config) => Some((
+                    zone_config.ntp_servers.clone(),
+                    zone_config.dns_servers.clone(),
+                    zone_config.domain.clone(),
+                )),
+                _ => None,
+            })
+            .ok_or(Error::NoBoundaryNtpZonesInParentBlueprint)?;
+
+        self.sled_promote_internal_ntp_to_boundary_ntp_with_config(
+            sled_id,
+            ntp_servers,
+            dns_servers,
+            domain,
+        )
+    }
+
+    pub fn sled_promote_internal_ntp_to_boundary_ntp_with_config(
+        &mut self,
+        sled_id: SledUuid,
+        ntp_servers: Vec<String>,
+        dns_servers: Vec<IpAddr>,
+        domain: Option<String>,
+    ) -> Result<EnsureMultiple, Error> {
+        // Check the sled id and return an appropriate error if it's invalid.
+        let _ = self.sled_resources(sled_id)?;
+
+        let sled_zones = self.zones.change_sled_zones(sled_id);
+
+        // Find the internal NTP zone and expunge it.
+        //
+        // TODO-cleanup Is there ever a case where we might want to do some kind
+        // of graceful shutdown of an internal NTP zone? Seems unlikely...
+        let mut internal_ntp_zone_id_iter =
+            sled_zones.iter_zones().filter_map(|config| {
+                if matches!(
+                    config.zone().zone_type,
+                    BlueprintZoneType::InternalNtp(_)
+                ) {
+                    Some(config.zone().id)
+                } else {
+                    None
+                }
+            });
+
+        // We should have exactly one internal NTP zone.
+        let internal_ntp_zone_id =
+            internal_ntp_zone_id_iter.next().ok_or_else(|| {
+                Error::Planner(anyhow!(
+                    "cannot promote internal NTP zone on sled {sled_id}: \
+                     no internal NTP zone found"
+                ))
+            })?;
+        if !internal_ntp_zone_id_iter.next().is_none() {
+            return Err(Error::Planner(anyhow!(
+                "sled {sled_id} has multiple internal NTP zones"
+            )));
+        }
+        std::mem::drop(internal_ntp_zone_id_iter);
+
+        // Expunge the internal NTP zone.
+        sled_zones.expunge_zone(internal_ntp_zone_id).map_err(|error| {
+            Error::Planner(anyhow!(error).context(format!(
+                "error expunging internal NTP zone from sled {sled_id}"
+            )))
+        })?;
+
+        // Add the new boundary NTP zone.
+        let new_zone_id = self.rng.zone_rng.next();
+        let ExternalSnatNetworkingChoice {
+            snat_cfg,
+            nic_ip,
+            nic_subnet,
+            nic_mac,
+        } = self.external_networking.for_new_boundary_ntp()?;
+        let external_ip = OmicronZoneExternalSnatIp {
+            id: self.rng.external_ip_rng.next(),
+            snat_cfg,
+        };
+        let nic = NetworkInterface {
+            id: self.rng.network_interface_rng.next(),
+            kind: NetworkInterfaceKind::Service {
+                id: new_zone_id.into_untyped_uuid(),
+            },
+            name: format!("ntp-{new_zone_id}").parse().unwrap(),
+            ip: nic_ip,
+            mac: nic_mac,
+            subnet: nic_subnet,
+            vni: Vni::SERVICES_VNI,
+            primary: true,
+            slot: 0,
+            transit_ips: vec![],
+        };
+
+        let underlay_ip = self.sled_alloc_ip(sled_id)?;
+        let port = omicron_common::address::NTP_PORT;
+        let zone_type =
+            BlueprintZoneType::BoundaryNtp(blueprint_zone_type::BoundaryNtp {
+                address: SocketAddrV6::new(underlay_ip, port, 0, 0),
+                ntp_servers,
+                dns_servers,
+                domain,
+                nic,
+                external_ip,
+            });
+        let filesystem_pool =
+            self.sled_select_zpool(sled_id, zone_type.kind())?;
+
+        self.sled_add_zone(
+            sled_id,
+            BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id: new_zone_id,
+                underlay_address: underlay_ip,
+                filesystem_pool: Some(filesystem_pool),
+                zone_type,
+            },
+        )?;
+
+        Ok(EnsureMultiple::Changed { added: 1, removed: 1 })
+    }
+
     fn sled_add_zone(
         &mut self,
         sled_id: SledUuid,
@@ -930,8 +1066,10 @@ impl<'a> BlueprintBuilder<'a> {
 
         let sled_zones = self.zones.change_sled_zones(sled_id);
         sled_zones.add_zone(zone).map_err(|error| {
-            anyhow!(error)
-                .context(format!("error adding zone to sled {sled_id}"))
+            Error::Planner(
+                anyhow!(error)
+                    .context(format!("error adding zone to sled {sled_id}")),
+            )
         })?;
 
         Ok(())

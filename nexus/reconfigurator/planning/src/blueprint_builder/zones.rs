@@ -71,6 +71,31 @@ impl BuilderZonesConfig {
         Ok(())
     }
 
+    pub(super) fn expunge_zone(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+    ) -> Result<(), BuilderZonesConfigError> {
+        let zone = self
+            .zones
+            .iter_mut()
+            .find(|zone| zone.zone.id == zone_id)
+            .ok_or_else(|| {
+            let mut unmatched = BTreeSet::new();
+            unmatched.insert(zone_id);
+            BuilderZonesConfigError::ExpungeUnmatchedZones { unmatched }
+        })?;
+
+        // Check that the zone is expungeable. Typically, zones passed
+        // in here should have had this check done to them already, but
+        // in case they're not, or in case something else about those
+        // zones changed in between, check again.
+        is_already_expunged(&zone.zone, zone.state)?;
+        zone.zone.disposition = BlueprintZoneDisposition::Expunged;
+        zone.state = BuilderZoneState::Modified;
+
+        Ok(())
+    }
+
     pub(super) fn expunge_zones(
         &mut self,
         mut zones: BTreeSet<OmicronZoneUuid>,

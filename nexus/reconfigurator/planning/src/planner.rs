@@ -351,8 +351,9 @@ impl<'a> Planner<'a> {
         let mut zone_placement = None;
 
         for zone_kind in [
-            DiscretionaryOmicronZone::Nexus,
+            DiscretionaryOmicronZone::BoundaryNtp,
             DiscretionaryOmicronZone::CockroachDb,
+            DiscretionaryOmicronZone::Nexus,
         ] {
             let num_zones_to_add = self.num_additional_zones_needed(zone_kind);
             if num_zones_to_add == 0 {
@@ -361,22 +362,20 @@ impl<'a> Planner<'a> {
             // We need to add at least one zone; construct our `zone_placement`
             // (or reuse the existing one if a previous loop iteration already
             // created it).
-            let zone_placement = match zone_placement.as_mut() {
-                Some(zone_placement) => zone_placement,
-                None => {
-                    // This constructs a picture of the sleds as we currently
-                    // understand them, as far as which sleds have discretionary
-                    // zones. This will remain valid as we loop through the
-                    // `zone_kind`s in this function, as any zone additions will
-                    // update the `zone_placement` heap in-place.
-                    let current_discretionary_zones = self
-                        .input
-                        .all_sled_resources(SledFilter::Discretionary)
-                        .filter(|(sled_id, _)| {
-                            !sleds_waiting_for_ntp_zone.contains(&sled_id)
-                        })
-                        .map(|(sled_id, sled_resources)| {
-                            OmicronZonePlacementSledState {
+            let zone_placement = zone_placement.get_or_insert_with(|| {
+                // This constructs a picture of the sleds as we currently
+                // understand them, as far as which sleds have discretionary
+                // zones. This will remain valid as we loop through the
+                // `zone_kind`s in this function, as any zone additions will
+                // update the `zone_placement` heap in-place.
+                let current_discretionary_zones = self
+                    .input
+                    .all_sled_resources(SledFilter::Discretionary)
+                    .filter(|(sled_id, _)| {
+                        !sleds_waiting_for_ntp_zone.contains(&sled_id)
+                    })
+                    .map(|(sled_id, sled_resources)| {
+                        OmicronZonePlacementSledState {
                             sled_id,
                             num_zpools: sled_resources
                                 .all_zpools(ZpoolFilter::InService)
@@ -391,12 +390,9 @@ impl<'a> Planner<'a> {
                                 })
                                 .collect(),
                         }
-                        });
-                    zone_placement.insert(OmicronZonePlacement::new(
-                        current_discretionary_zones,
-                    ))
-                }
-            };
+                    });
+                OmicronZonePlacement::new(current_discretionary_zones)
+            });
             self.add_discretionary_zones(
                 zone_placement,
                 zone_kind,
@@ -426,7 +422,9 @@ impl<'a> Planner<'a> {
         }
 
         let target_count = match zone_kind {
-            DiscretionaryOmicronZone::BoundaryNtp => todo!(),
+            DiscretionaryOmicronZone::BoundaryNtp => {
+                self.input.target_boundary_ntp_zone_count()
+            }
             DiscretionaryOmicronZone::CockroachDb => {
                 self.input.target_cockroachdb_zone_count()
             }
@@ -502,7 +500,9 @@ impl<'a> Planner<'a> {
                     + additional_zone_count;
 
             let result = match kind {
-                DiscretionaryOmicronZone::BoundaryNtp => todo!(),
+                DiscretionaryOmicronZone::BoundaryNtp => self
+                    .blueprint
+                    .sled_promote_internal_ntp_to_boundary_ntp(sled_id)?,
                 DiscretionaryOmicronZone::CockroachDb => {
                     self.blueprint.sled_ensure_zone_multiple_cockroachdb(
                         sled_id,
@@ -517,10 +517,13 @@ impl<'a> Planner<'a> {
                 }
             };
             match result {
-                EnsureMultiple::Changed { added, removed: _ } => {
+                EnsureMultiple::Changed { added, removed } => {
                     info!(
-                        self.log, "will add {added} Nexus zone(s) to sled";
+                        self.log, "modified zones on sled";
                         "sled_id" => %sled_id,
+                        "kind" => ?kind,
+                        "added" => added,
+                        "removed" => removed,
                     );
                     new_zones_added += added;
                 }

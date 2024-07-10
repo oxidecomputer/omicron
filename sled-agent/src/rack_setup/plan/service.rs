@@ -15,9 +15,10 @@ use nexus_sled_agent_shared::inventory::{
 };
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
-    COCKROACHDB_REDUNDANCY, DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT,
-    DNS_REDUNDANCY, MAX_DNS_REDUNDANCY, MGD_PORT, MGS_PORT, NEXUS_REDUNDANCY,
-    NTP_PORT, NUM_SOURCE_NAT_PORTS, RSS_RESERVED_ADDRESSES, SLED_PREFIX,
+    BOUNDARY_NTP_REDUNDANCY, COCKROACHDB_REDUNDANCY, DENDRITE_PORT,
+    DNS_HTTP_PORT, DNS_PORT, DNS_REDUNDANCY, MAX_DNS_REDUNDANCY, MGD_PORT,
+    MGS_PORT, NEXUS_REDUNDANCY, NTP_PORT, NUM_SOURCE_NAT_PORTS,
+    RSS_RESERVED_ADDRESSES, SLED_PREFIX,
 };
 use omicron_common::api::external::{Generation, MacAddr, Vni};
 use omicron_common::api::internal::shared::{
@@ -47,9 +48,6 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::num::Wrapping;
 use thiserror::Error;
 use uuid::Uuid;
-
-// The number of boundary NTP servers to create from RSS.
-const BOUNDARY_NTP_COUNT: usize = 2;
 
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Oximeter.
@@ -734,7 +732,7 @@ impl Plan {
             let ntp_address = SocketAddrV6::new(address, NTP_PORT, 0, 0);
             let filesystem_pool = Some(sled.alloc_zpool_from_u2s()?);
 
-            let (zone_type, svcname) = if idx < BOUNDARY_NTP_COUNT {
+            let (zone_type, svcname) = if idx < BOUNDARY_NTP_REDUNDANCY {
                 boundary_ntp_servers
                     .push(Host::for_zone(Zone::Other(id)).fqdn());
                 let (nic, snat_cfg) = svc_port_builder.next_snat(id)?;

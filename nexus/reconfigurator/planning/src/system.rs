@@ -79,6 +79,7 @@ pub struct SystemDescription {
     sled_subnets: Box<dyn SubnetIterator>,
     available_non_scrimlet_slots: BTreeSet<u16>,
     available_scrimlet_slots: BTreeSet<u16>,
+    target_boundary_ntp_zone_count: usize,
     target_nexus_zone_count: usize,
     target_cockroachdb_zone_count: usize,
     target_cockroachdb_cluster_version: CockroachDbClusterVersion,
@@ -130,9 +131,11 @@ impl SystemDescription {
         // Policy defaults
         let target_nexus_zone_count = NEXUS_REDUNDANCY;
 
-        // TODO-cleanup This is wrong, but we don't currently set up any CRDB
-        // nodes in our fake system, so this prevents downstream test issues
-        // with the planner thinking our system is out of date from the gate.
+        // TODO-cleanup These are wrong, but we don't currently set up any
+        // boundary NTP or CRDB nodes in our fake system, so this prevents
+        // downstream test issues with the planner thinking our system is out of
+        // date from the gate.
+        let target_boundary_ntp_zone_count = 0;
         let target_cockroachdb_zone_count = 0;
 
         let target_cockroachdb_cluster_version =
@@ -151,6 +154,7 @@ impl SystemDescription {
             sled_subnets,
             available_non_scrimlet_slots,
             available_scrimlet_slots,
+            target_boundary_ntp_zone_count,
             target_nexus_zone_count,
             target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version,
@@ -319,6 +323,7 @@ impl SystemDescription {
     ) -> anyhow::Result<PlanningInputBuilder> {
         let policy = Policy {
             service_ip_pool_ranges: self.service_ip_pool_ranges.clone(),
+            target_boundary_ntp_zone_count: self.target_boundary_ntp_zone_count,
             target_nexus_zone_count: self.target_nexus_zone_count,
             target_cockroachdb_zone_count: self.target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version: self
