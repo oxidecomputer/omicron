@@ -132,12 +132,8 @@
 //! point during this recovery pass and they can be safely ignored until the
 //! next pass.
 
-// XXX-dap clean up these names
-use super::recovery::SagaRecoveryDone;
-use super::recovery::SagaRecoveryDoneBuilder;
-use super::recovery::SagaRecoveryPlan;
-use super::recovery::SagaRecoveryRestState;
-use super::status::SagaRecoveryTaskStatus;
+use super::recovery;
+use super::status;
 use crate::app::background::BackgroundTask;
 use crate::app::sagas::ActionRegistry;
 use crate::saga_interface::SagaContext;
@@ -174,10 +170,10 @@ pub struct SagaRecovery {
     registry: Arc<ActionRegistry>,
 
     /// recovery state persisted between passes
-    rest_state: SagaRecoveryRestState,
+    rest_state: recovery::RestState,
 
     /// status reporting
-    status: SagaRecoveryTaskStatus,
+    status: status::Report,
 }
 
 impl SagaRecovery {
@@ -197,17 +193,17 @@ impl SagaRecovery {
             nexus,
             sec_client: sec,
             registry,
-            rest_state: SagaRecoveryRestState::new(sagas_started_rx),
-            status: SagaRecoveryTaskStatus::new(),
+            rest_state: recovery::RestState::new(sagas_started_rx),
+            status: status::Report::new(),
         }
     }
 
     async fn recovery_execute<'a>(
         &self,
         bgtask_log: &'a slog::Logger,
-        plan: &'a SagaRecoveryPlan,
-    ) -> SagaRecoveryDone<'a> {
-        let mut builder = SagaRecoveryDoneBuilder::new(plan);
+        plan: &'a recovery::Plan,
+    ) -> recovery::ExecutionSummary<'a> {
+        let mut builder = recovery::ExecutionSummaryBuilder::new(plan);
 
         for (saga_id, saga) in plan.sagas_needing_recovery() {
             let saga_log = self.nexus.log.new(o!(
@@ -334,7 +330,7 @@ impl BackgroundTask for SagaRecovery {
             match result {
                 Ok(db_sagas) => {
                     let plan =
-                        SagaRecoveryPlan::new(log, &self.rest_state, db_sagas);
+                        recovery::Plan::new(log, &self.rest_state, db_sagas);
                     let execution = self.recovery_execute(log, &plan).await;
                     self.rest_state.update_after_pass(&plan, &execution);
                     self.status.update_after_pass(execution);

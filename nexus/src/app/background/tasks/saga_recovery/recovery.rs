@@ -20,18 +20,18 @@ use tokio::sync::mpsc;
 
 /// Describes state related to saga recovery that needs to be maintained across
 /// multiple passes
-pub struct SagaRecoveryRestState {
+pub struct RestState {
     // XXX-dap could be BTreeMap of some object saying created/resumed and when
     sagas_started: BTreeSet<steno::SagaId>,
     sagas_started_rx: mpsc::UnboundedReceiver<steno::SagaId>,
     remove_next: Vec<steno::SagaId>,
 }
 
-impl SagaRecoveryRestState {
+impl RestState {
     pub fn new(
         sagas_started_rx: mpsc::UnboundedReceiver<steno::SagaId>,
-    ) -> SagaRecoveryRestState {
-        SagaRecoveryRestState {
+    ) -> RestState {
+        RestState {
             sagas_started: BTreeSet::new(),
             sagas_started_rx,
             remove_next: Vec::new(),
@@ -59,8 +59,8 @@ impl SagaRecoveryRestState {
     /// Update based on the results of a recovery pass.
     pub fn update_after_pass(
         &mut self,
-        plan: &SagaRecoveryPlan,
-        execution: &SagaRecoveryDone,
+        plan: &Plan,
+        execution: &ExecutionSummary,
     ) {
         for saga_id in plan.sagas_inferred_done() {
             assert!(self.sagas_started.remove(&saga_id));
@@ -112,7 +112,7 @@ fn read_all_from_channel<T>(
 ///
 /// This structure is also much more detailed than it needs to be to support
 /// better observability and testing.
-pub struct SagaRecoveryPlan {
+pub struct Plan {
     /// sagas that need to be recovered
     needs_recovery: BTreeMap<steno::SagaId, nexus_db_model::Saga>,
 
@@ -136,7 +136,7 @@ pub struct SagaRecoveryPlan {
     maybe_done: BTreeSet<steno::SagaId>,
 }
 
-impl<'a> SagaRecoveryPlan {
+impl<'a> Plan {
     /// For a given saga recovery pass, determine what to do with each found
     /// saga
     ///
@@ -161,9 +161,9 @@ impl<'a> SagaRecoveryPlan {
     ///   `running_sagas_found`)
     pub fn new(
         log: &slog::Logger,
-        rest_state: &SagaRecoveryRestState,
+        rest_state: &RestState,
         mut running_sagas_found: BTreeMap<steno::SagaId, nexus_db_model::Saga>,
-    ) -> SagaRecoveryPlan {
+    ) -> Plan {
         let mut builder = SagaRecoveryPlanBuilder::new(log);
         let sagas_started = &rest_state.sagas_started;
         let previously_maybe_done = &rest_state.remove_next;
@@ -289,8 +289,8 @@ impl<'a> SagaRecoveryPlanBuilder<'a> {
     }
 
     /// Turn this into a `SagaRecoveryPlan`
-    pub fn build(self) -> SagaRecoveryPlan {
-        SagaRecoveryPlan {
+    pub fn build(self) -> Plan {
+        Plan {
             needs_recovery: self.needs_recovery,
             skipped_running: self.skipped_running,
             inferred_done: self.inferred_done,
@@ -378,9 +378,9 @@ impl<'a> SagaRecoveryPlanBuilder<'a> {
 /// `recovery_execute()`) via [`SagaRecoveryDoneBuilder::new()`].  This seems a
 /// little overboard for such an internal structure but it helps separate
 /// concerns, particularly when it comes to testing.
-pub struct SagaRecoveryDone<'a> {
+pub struct ExecutionSummary<'a> {
     /// plan from which this recovery was carried out
-    plan: &'a SagaRecoveryPlan,
+    plan: &'a Plan,
     /// list of sagas that were successfully recovered
     succeeded: Vec<RecoverySuccess>,
     /// list of sagas that failed to be recovered
@@ -391,7 +391,7 @@ pub struct SagaRecoveryDone<'a> {
     completion_futures: Vec<BoxFuture<'static, Result<(), Error>>>,
 }
 
-impl<'a> SagaRecoveryDone<'a> {
+impl<'a> ExecutionSummary<'a> {
     pub fn to_last_pass_result(&self) -> LastPassSuccess {
         let plan = self.plan;
         let nfound = plan.needs_recovery.len() + plan.skipped_running.len();
@@ -427,8 +427,8 @@ impl<'a> SagaRecoveryDone<'a> {
     }
 }
 
-pub struct SagaRecoveryDoneBuilder<'a> {
-    plan: &'a SagaRecoveryPlan,
+pub struct ExecutionSummaryBuilder<'a> {
+    plan: &'a Plan,
     in_progress: BTreeMap<steno::SagaId, slog::Logger>,
     succeeded: Vec<RecoverySuccess>,
     failed: Vec<RecoveryFailure>,
@@ -436,9 +436,9 @@ pub struct SagaRecoveryDoneBuilder<'a> {
     completion_futures: Vec<BoxFuture<'static, Result<(), Error>>>,
 }
 
-impl<'a> SagaRecoveryDoneBuilder<'a> {
-    pub fn new(plan: &'a SagaRecoveryPlan) -> SagaRecoveryDoneBuilder<'a> {
-        SagaRecoveryDoneBuilder {
+impl<'a> ExecutionSummaryBuilder<'a> {
+    pub fn new(plan: &'a Plan) -> ExecutionSummaryBuilder<'a> {
+        ExecutionSummaryBuilder {
             plan,
             in_progress: BTreeMap::new(),
             succeeded: Vec::new(),
@@ -448,13 +448,13 @@ impl<'a> SagaRecoveryDoneBuilder<'a> {
         }
     }
 
-    pub fn build(self) -> SagaRecoveryDone<'a> {
+    pub fn build(self) -> ExecutionSummary<'a> {
         assert!(
             self.in_progress.is_empty(),
             "attempted to build execution result while some recoveries are \
             still in progress"
         );
-        SagaRecoveryDone {
+        ExecutionSummary {
             plan: self.plan,
             succeeded: self.succeeded,
             failed: self.failed,

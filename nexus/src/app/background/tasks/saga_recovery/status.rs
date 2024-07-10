@@ -4,7 +4,7 @@
 
 //! Reporting status for the saga recovery background task
 
-use super::recovery::SagaRecoveryDone;
+use super::recovery;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::Error;
 use serde::Serialize;
@@ -21,22 +21,22 @@ const N_SUCCESS_SAGA_HISTORY: usize = 128;
 const N_FAILED_SAGA_HISTORY: usize = 128;
 
 #[derive(Clone, Serialize)]
-pub struct SagaRecoveryTaskStatus {
+pub struct Report {
     recent_recoveries: DebuggingHistory<RecoverySuccess>,
     recent_failures: DebuggingHistory<RecoveryFailure>,
     last_pass: LastPass,
 }
 
-impl SagaRecoveryTaskStatus {
-    pub fn new() -> SagaRecoveryTaskStatus {
-        SagaRecoveryTaskStatus {
+impl Report {
+    pub fn new() -> Report {
+        Report {
             recent_recoveries: DebuggingHistory::new(N_SUCCESS_SAGA_HISTORY),
             recent_failures: DebuggingHistory::new(N_FAILED_SAGA_HISTORY),
             last_pass: LastPass::NeverStarted,
         }
     }
 
-    pub fn update_after_pass(&mut self, execution: SagaRecoveryDone) {
+    pub fn update_after_pass(&mut self, execution: recovery::ExecutionSummary) {
         self.last_pass = LastPass::Success(execution.to_last_pass_result());
 
         let (succeeded, failed) = execution.into_results();
