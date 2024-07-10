@@ -4059,8 +4059,10 @@ async fn networking_bgp_config_delete(
         .await
 }
 
-/// Update a BGP announce set. If the announce set exists this endpoint replaces
-/// the existing announce set with the one specified.
+/// Update BGP announce set
+///
+/// If the announce set exists, this endpoint replaces the existing announce
+/// set with the one specified.
 #[endpoint {
     method = PUT,
     path = "/v1/system/networking/bgp-announce",
