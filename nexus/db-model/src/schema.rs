@@ -281,7 +281,7 @@ table! {
         multi_exit_discriminator -> Nullable<Int8>,
         local_pref -> Nullable<Int8>,
         enforce_first_as -> Bool,
-        vlan_id -> Nullable<Int8>,
+        vlan_id -> Nullable<Int4>,
     }
 }
 
