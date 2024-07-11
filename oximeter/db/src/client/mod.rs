@@ -1001,6 +1001,9 @@ impl Client {
             })
             .await?;
 
+        // This size is arbitrary, and just something to avoid enormous requests
+        // to ClickHouse. It's unlikely that we'll hit this in practice anyway,
+        // given that we have far fewer than 1000 timeseries today.
         const DELETE_BATCH_SIZE: usize = 1000;
         let maybe_on_cluster = if replicated {
             format!("ON CLUSTER {}", crate::CLUSTER_NAME)
@@ -1056,7 +1059,7 @@ impl Client {
                 .map(|line| line.trim().parse().map_err(Error::from))
                 .collect(),
             Err(e) if e.kind() == ErrorKind::NotFound => Ok(vec![]),
-            Err(err) => Err(Error::ReadTimeseriesToDelete { err }),
+            Err(err) => Err(Error::ReadTimeseriesToDeleteFile { err }),
         }
     }
 

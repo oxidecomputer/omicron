@@ -139,7 +139,7 @@ pub enum Error {
     NonSequentialSchemaVersions,
 
     #[error("Could not read timeseries_to_delete file")]
-    ReadTimeseriesToDelete {
+    ReadTimeseriesToDeleteFile {
         #[source]
         err: io::Error,
     },
