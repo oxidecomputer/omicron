@@ -249,6 +249,7 @@ impl InstanceAndVmmUpdate {
                         .set((
                             migration_dsl::target_state.eq(state),
                             migration_dsl::time_target_updated.eq(time_updated),
+                            migration_dsl::target_gen.eq(gen),
                         )),
                 );
                 Update {
@@ -280,6 +281,7 @@ impl InstanceAndVmmUpdate {
                         .set((
                             migration_dsl::source_state.eq(state),
                             migration_dsl::time_source_updated.eq(time_updated),
+                            migration_dsl::source_gen.eq(gen),
                         )),
                 );
                 Update {
