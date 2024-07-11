@@ -4887,6 +4887,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-saga-recovery"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "futures",
+ "nexus-auth",
+ "nexus-db-model",
+ "nexus-db-queries",
+ "nexus-test-utils",
+ "nexus-test-utils-macros",
+ "nexus-types",
+ "omicron-common",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "omicron-workspace-hack",
+ "once_cell",
+ "pq-sys",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "slog",
+ "slog-error-chain",
+ "steno",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-test-interface"
 version = "0.1.0"
 dependencies = [
@@ -5525,6 +5553,7 @@ dependencies = [
  "nexus-reconfigurator-execution",
  "nexus-reconfigurator-planning",
  "nexus-reconfigurator-preparation",
+ "nexus-saga-recovery",
  "nexus-test-interface",
  "nexus-test-utils",
  "nexus-test-utils-macros",

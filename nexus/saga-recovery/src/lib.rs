@@ -124,17 +124,16 @@
 //! point during this recovery pass and they can be safely ignored until the
 //! next pass.
 
-pub use task::SagaRecovery;
-
-mod recovery;
-mod status;
-mod task;
+// XXX-dap don't make these pub, just put the stuff in here
+pub mod recovery;
+pub mod status;
 
 #[cfg(test)]
 mod test {
     use super::*;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev::test_setup_log;
+    use slog::o;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use steno::SagaId;

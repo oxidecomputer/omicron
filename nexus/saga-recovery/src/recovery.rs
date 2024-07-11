@@ -9,6 +9,7 @@ use super::status::RecoveryFailure;
 use super::status::RecoverySuccess;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::Error;
+use slog::{debug, error, info, warn};
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -494,9 +495,9 @@ mod test {
     // XXX-dap write a stress test that furiously performs saga recovery a lot
     // of times and ensures that each saga is recovered exactly once
     use super::*;
-    use crate::app::background::tasks::saga_recovery::status;
-    use crate::app::background::tasks::saga_recovery::test::make_fake_saga;
-    use crate::app::background::tasks::saga_recovery::test::make_saga_ids;
+    use crate::status;
+    use crate::test::make_fake_saga;
+    use crate::test::make_saga_ids;
     use omicron_test_utils::dev::test_setup_log;
 
     #[test]

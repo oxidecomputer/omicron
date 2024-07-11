@@ -139,8 +139,6 @@
 //! point during this recovery pass and they can be safely ignored until the
 //! next pass.
 
-use super::recovery;
-use super::status;
 use crate::app::background::BackgroundTask;
 use crate::app::sagas::NexusSagaType;
 use crate::saga_interface::SagaContext;
@@ -150,6 +148,8 @@ use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_saga_recovery::recovery;
+use nexus_saga_recovery::status;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use std::collections::BTreeMap;
