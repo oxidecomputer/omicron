@@ -17,9 +17,9 @@ WITH
       UPDATE
         migration
       SET
-        target_state = $2, time_target_updated = $3
+        target_state = $2, time_target_updated = $3, target_gen = $4
       WHERE
-        (migration.id = $4 AND migration.target_propolis_id = $5) AND migration.target_gen < $6
+        (migration.id = $5 AND migration.target_propolis_id = $6) AND migration.target_gen < $7
       RETURNING
         id
     ),
@@ -40,7 +40,7 @@ WITH
           FROM
             migration
           WHERE
-            migration.id = $7 AND (migration.time_deleted IS NULL)
+            migration.id = $8 AND (migration.time_deleted IS NULL)
         )
           AS id
     ),
@@ -49,9 +49,9 @@ WITH
       UPDATE
         migration
       SET
-        source_state = $8, time_source_updated = $9
+        source_state = $9, time_source_updated = $10, source_gen = $11
       WHERE
-        (migration.id = $10 AND migration.source_propolis_id = $11) AND migration.source_gen < $12
+        (migration.id = $12 AND migration.source_propolis_id = $13) AND migration.source_gen < $14
       RETURNING
         id
     ),
@@ -63,15 +63,15 @@ WITH
         migration_out_found
         LEFT JOIN migration_out_updated ON migration_out_found.id = migration_out_updated.id
     ),
-  vmm_found AS (SELECT (SELECT vmm.id FROM vmm WHERE vmm.id = $13) AS id),
+  vmm_found AS (SELECT (SELECT vmm.id FROM vmm WHERE vmm.id = $15) AS id),
   vmm_updated
     AS (
       UPDATE
         vmm
       SET
-        time_state_updated = $14, state_generation = $15, state = $16
+        time_state_updated = $16, state_generation = $17, state = $18
       WHERE
-        ((vmm.time_deleted IS NULL) AND vmm.id = $17) AND vmm.state_generation < $18
+        ((vmm.time_deleted IS NULL) AND vmm.id = $19) AND vmm.state_generation < $20
       RETURNING
         id
     ),
