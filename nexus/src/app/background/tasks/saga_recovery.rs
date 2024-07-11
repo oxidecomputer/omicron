@@ -167,7 +167,10 @@ pub trait MakeSagaContext: Send + Sync {
 impl MakeSagaContext for Arc<Nexus> {
     type SagaType = NexusSagaType;
     fn make_saga_context(&self, log: slog::Logger) -> Arc<Arc<SagaContext>> {
-        // XXX-dap dig up the comment about the double Arc
+        // The extra `Arc` is a little ridiculous.  The problem is that Steno
+        // expects (in `sec_client.saga_resume()`) that the user-defined context
+        // will be wrapped in an `Arc`.  But we already use `Arc<SagaContext>`
+        // for our type.  Hence we need two Arcs.
         Arc::new(Arc::new(SagaContext::new(self.clone(), log)))
     }
 }
