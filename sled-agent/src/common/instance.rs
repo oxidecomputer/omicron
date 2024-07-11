@@ -240,13 +240,19 @@ impl InstanceStates {
                     m.gen = m.gen.next();
                 } else {
                     m.migration_id = id;
-                    m.gen = Generation::new();
+                    m.gen = Generation::new().next();
                 }
                 m.time_updated = now;
             } else {
                 *current = Some(MigrationRuntimeState {
                     migration_id: id,
-                    gen: Generation::new(),
+                    // We are creating a new migration record, but the state
+                    // will not be `Pending`, because we've actually gotten a
+                    // migration observation from Propolis. Therefore, we have
+                    // to advance the initial generation once to be ahead of
+                    // what the generation in the database is when Nexus creates
+                    // the initial migration record at generation 1.
+                    gen: Generation::new().next(),
                     state,
                     time_updated: now,
                 });
