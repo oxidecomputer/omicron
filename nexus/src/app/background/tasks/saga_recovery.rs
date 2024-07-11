@@ -13,7 +13,6 @@
 // Steno with read methods on SecStore?  also could have added purge option to
 // SEC and then relied on Steno to know if a thing was alive.  (can't do it
 // without a purge that's invoked by recovery)
-// XXX-dap when we consider a saga done, we should ask steno in order to confirm
 
 // XXX-dap this block comment is in two places
 //! Saga recovery
@@ -152,6 +151,7 @@ use omicron_common::api::external::InternalContext;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use steno::SagaId;
+use steno::SagaStateView;
 use tokio::sync::mpsc;
 
 // XXX-dap TODO-doc
@@ -260,7 +260,9 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
         // was immediately created and showed up in our candidate list, we'd
         // erroneously conclude that it needed to be recovered when in fact
         // it was already running.
-        self.rest_state.update_started_sagas(log, &mut self.sagas_started_rx);
+        let nstarted = self
+            .rest_state
+            .update_started_sagas(log, &mut self.sagas_started_rx);
 
         match result {
             Ok(db_sagas) => {
@@ -269,6 +271,7 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
                     &self.rest_state,
                     db_sagas,
                 );
+                self.recovery_check_done(log, &plan).await;
                 let (execution, future) =
                     self.recovery_execute(log, &plan).await;
                 self.rest_state.update_after_pass(&plan, &execution);
@@ -276,12 +279,51 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
                     nexus_saga_recovery::LastPassSuccess::new(
                         &plan, &execution,
                     );
-                self.status.update_after_pass(&plan, execution);
+                self.status.update_after_pass(&plan, execution, nstarted);
                 Some((future, last_pass_success))
             }
             Err(error) => {
-                self.status.update_after_failure(&error);
+                self.status.update_after_failure(&error, nstarted);
                 None
+            }
+        }
+    }
+
+    async fn recovery_check_done(
+        &mut self,
+        log: &slog::Logger,
+        plan: &nexus_saga_recovery::Plan,
+    ) {
+        // For any sagas that we now believe are done, let's check with Steno to
+        // be sure.  This is not strictly necessary because this should always
+        // be true.  But if for some reason it's not, that would be a serious
+        // issue and we'd want to know that.
+        for saga_id in plan.sagas_inferred_done() {
+            match self.sec_client.saga_get(saga_id).await {
+                Err(_) => {
+                    self.status.ntotal_sec_errors_missing += 1;
+                    error!(
+                        log,
+                        "SEC does not know about saga that we thought \
+                        had finished";
+                        "saga_id" => %saga_id
+                    );
+                }
+                Ok(saga_state) => {
+                    self.status.ntotal_sec_errors_bad_state += 1;
+                    match saga_state.state {
+                        SagaStateView::Done { .. } => (),
+                        _ => {
+                            error!(
+                                log,
+                                "we thought saga was done, but SEC reports a \
+                                different state";
+                                "saga_id" => %saga_id,
+                                "sec_state" => ?saga_state.state
+                            );
+                        }
+                    }
+                }
             }
         }
     }

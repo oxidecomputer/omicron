@@ -1093,6 +1093,31 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             ),
 
             Ok(report) => {
+                println!("    since Nexus started:");
+                println!(
+                    "        sagas recovered:         {:3}",
+                    report.ntotal_recovered
+                );
+                println!(
+                    "        sagas recovery errors:   {:3}",
+                    report.ntotal_failures,
+                );
+                println!(
+                    "        sagas observed started:  {:3}",
+                    report.ntotal_started
+                );
+                println!(
+                    "        sagas inferred finished: {:3}",
+                    report.ntotal_finished
+                );
+                println!(
+                    "        missing from SEC:        {:3}",
+                    report.ntotal_sec_errors_missing,
+                );
+                println!(
+                    "        bad state in SEC:        {:3}",
+                    report.ntotal_sec_errors_bad_state,
+                );
                 match report.last_pass {
                     LastPass::NeverStarted => {
                         println!("    never run");

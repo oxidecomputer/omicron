@@ -268,12 +268,13 @@ mod test {
         /// Simulate a saga recovery pass
         pub fn sim_recovery_pass(
             &mut self,
-        ) -> (recovery::Plan, recovery::Execution, status::LastPassSuccess)
+        ) -> (recovery::Plan, recovery::Execution, status::LastPassSuccess, usize)
         {
             let log = &self.log;
 
             // Simulate processing messages that the `new_sagas_started` sagas
             // just started.
+            let nstarted = self.started_sagas.len();
             let (tx, mut rx) = mpsc::unbounded_channel();
             for saga_id in self.started_sagas.drain(..) {
                 tx.send(saga_id).unwrap();
@@ -324,7 +325,7 @@ mod test {
 
             // We can't tell from the information we have how many were skipped,
             // removed, or ambiguous.  The caller verifies that.
-            (plan, execution, last_pass)
+            (plan, execution, last_pass, nstarted)
         }
     }
 
@@ -353,12 +354,17 @@ mod test {
         //
         // Now, go through a no-op recovery.
         //
-        let (plan, execution, last_pass_result) = sim.sim_recovery_pass();
+        let (plan, execution, last_pass_result, nstarted) =
+            sim.sim_recovery_pass();
         assert_eq!(last_pass_result.nfound, 0);
         assert_eq!(last_pass_result.nskipped, 0);
         assert_eq!(last_pass_result.nremoved, 0);
         assert_eq!(sim.rest_state, initial_rest_state);
-        report.update_after_pass(&plan, execution);
+        report.update_after_pass(&plan, execution, nstarted);
+        assert_eq!(report.ntotal_recovered, 0);
+        assert_eq!(report.ntotal_failures, 0);
+        assert_eq!(report.ntotal_started, 0);
+        assert_eq!(report.ntotal_finished, 0);
 
         //
         // Now, go through a somewhat general case of recovery.
@@ -394,7 +400,8 @@ mod test {
 
         // We're finally ready to carry out a simulation pass and verify what
         // happened with each of these sagas.
-        let (plan, execution, last_pass_success) = sim.sim_recovery_pass();
+        let (plan, execution, last_pass_success, nstarted) =
+            sim.sim_recovery_pass();
         // In the end, there should have been four sagas found in the database:
         // all of the above except for the one that finished.
         assert_eq!(4, last_pass_success.nfound);
@@ -424,14 +431,19 @@ mod test {
             vec![saga_started_and_finished, saga_started_after_listing];
         expected_maybe_done.sort();
         assert_eq!(maybe_done, expected_maybe_done);
-        report.update_after_pass(&plan, execution);
+        report.update_after_pass(&plan, execution, nstarted);
+        assert_eq!(report.ntotal_recovered, 1);
+        assert_eq!(report.ntotal_failures, 1);
+        assert_eq!(report.ntotal_started, 4);
+        assert_eq!(report.ntotal_finished, 0);
 
         //
         // Change nothing and run another pass.
         // This pass allows the system to determine that some sagas are now
         // done.
         //
-        let (plan, execution, last_pass_success) = sim.sim_recovery_pass();
+        let (plan, execution, last_pass_success, nstarted) =
+            sim.sim_recovery_pass();
         // There's now five sagas in-progress in the database: the same four as
         // above, plus the one that was started after the snapshot.
         assert_eq!(5, last_pass_success.nfound);
@@ -460,13 +472,18 @@ mod test {
         // might have been done last time is now clearly running because it
         // appears in this database listing.
         assert_eq!(0, plan.sagas_maybe_done().count());
-        report.update_after_pass(&plan, execution);
+        report.update_after_pass(&plan, execution, nstarted);
+        assert_eq!(report.ntotal_recovered, 1);
+        assert_eq!(report.ntotal_failures, 2);
+        assert_eq!(report.ntotal_started, 4);
+        assert_eq!(report.ntotal_finished, 1);
 
         //
         // Again, change nothing and run another pass.  This should be a steady
         // state: if we keep running passes from here, nothing should change.
         //
-        let (plan, execution, last_pass_success) = sim.sim_recovery_pass();
+        let (plan, execution, last_pass_success, nstarted) =
+            sim.sim_recovery_pass();
         // Same as above.
         assert_eq!(5, last_pass_success.nfound);
         assert_eq!(0, last_pass_success.nrecovered);
@@ -482,23 +499,33 @@ mod test {
         // removed.  We could tell this time.
         assert_eq!(0, last_pass_success.nremoved);
         assert_eq!(0, plan.sagas_inferred_done().count());
-        report.update_after_pass(&plan, execution);
+        report.update_after_pass(&plan, execution, nstarted);
+        assert_eq!(report.ntotal_recovered, 1);
+        assert_eq!(report.ntotal_failures, 3);
+        assert_eq!(report.ntotal_started, 4);
+        assert_eq!(report.ntotal_finished, 1);
 
         //
         // Once more and make sure nothing changes.
         //
         let previous_rest_state = sim.rest_state.clone();
         let previous_last_pass_success = last_pass_success.clone();
-        let (plan, execution, last_pass_success) = sim.sim_recovery_pass();
+        let (plan, execution, last_pass_success, nstarted) =
+            sim.sim_recovery_pass();
         assert_eq!(previous_rest_state, sim.rest_state);
         assert_eq!(previous_last_pass_success, last_pass_success);
-        report.update_after_pass(&plan, execution);
+        report.update_after_pass(&plan, execution, nstarted);
+        assert_eq!(report.ntotal_recovered, 1);
+        assert_eq!(report.ntotal_failures, 4);
+        assert_eq!(report.ntotal_started, 4);
+        assert_eq!(report.ntotal_finished, 1);
 
         //
         // This time, fix that saga whose recovery has been failing.
         //
         sim.sim_config_recovery_result(saga_recover_fail, false);
-        let (plan, execution, last_pass_success) = sim.sim_recovery_pass();
+        let (plan, execution, last_pass_success, nstarted) =
+            sim.sim_recovery_pass();
         // Same as above.
         assert_eq!(5, last_pass_success.nfound);
         assert_eq!(4, last_pass_success.nskipped);
@@ -512,13 +539,18 @@ mod test {
         assert_eq!(saga_recover_fail, execution.succeeded[0].saga_id);
         assert_eq!(0, last_pass_success.nfailed);
         assert_eq!(0, execution.failed.len());
-        report.update_after_pass(&plan, execution);
+        report.update_after_pass(&plan, execution, nstarted);
+        assert_eq!(report.ntotal_recovered, 2);
+        assert_eq!(report.ntotal_failures, 4);
+        assert_eq!(report.ntotal_started, 4);
+        assert_eq!(report.ntotal_finished, 1);
 
         //
         // After the next pass, we should have one more saga that seems to be
         // running.
         //
-        let (plan, execution, last_pass_success) = sim.sim_recovery_pass();
+        let (plan, execution, last_pass_success, nstarted) =
+            sim.sim_recovery_pass();
         // Same as above.
         assert_eq!(5, last_pass_success.nfound);
         assert_eq!(0, last_pass_success.nremoved);
@@ -531,17 +563,26 @@ mod test {
         assert_eq!(5, plan.nskipped());
         assert_eq!(0, last_pass_success.nrecovered);
         assert_eq!(0, execution.succeeded.len());
-        report.update_after_pass(&plan, execution);
+        report.update_after_pass(&plan, execution, nstarted);
+        assert_eq!(report.ntotal_recovered, 2);
+        assert_eq!(report.ntotal_failures, 4);
+        assert_eq!(report.ntotal_started, 4);
+        assert_eq!(report.ntotal_finished, 1);
 
         //
         // With another pass, nothing should differ.
         //
         let previous_rest_state = sim.rest_state.clone();
         let previous_last_pass_success = last_pass_success.clone();
-        let (plan, execution, last_pass_success) = sim.sim_recovery_pass();
+        let (plan, execution, last_pass_success, nstarted) =
+            sim.sim_recovery_pass();
         assert_eq!(previous_rest_state, sim.rest_state);
         assert_eq!(previous_last_pass_success, last_pass_success);
-        report.update_after_pass(&plan, execution);
+        report.update_after_pass(&plan, execution, nstarted);
+        assert_eq!(report.ntotal_recovered, 2);
+        assert_eq!(report.ntotal_failures, 4);
+        assert_eq!(report.ntotal_started, 4);
+        assert_eq!(report.ntotal_finished, 1);
 
         //
         // Now let's complete a couple of different sagas.
@@ -550,7 +591,8 @@ mod test {
         sim.sim_normal_saga_done(saga_started_normally_1);
         sim.sim_normal_saga_done(saga_started_after_listing);
         sim.sim_normal_saga_done(saga_recover_fail);
-        let (plan, execution, last_pass_success) = sim.sim_recovery_pass();
+        let (plan, execution, last_pass_success, nstarted) =
+            sim.sim_recovery_pass();
         assert_eq!(2, last_pass_success.nfound);
         assert_eq!(0, last_pass_success.nremoved);
         assert_eq!(0, plan.sagas_inferred_done().count());
@@ -561,12 +603,17 @@ mod test {
         assert_eq!(2, plan.nskipped());
         assert_eq!(0, last_pass_success.nrecovered);
         assert_eq!(0, execution.succeeded.len());
-        report.update_after_pass(&plan, execution);
+        report.update_after_pass(&plan, execution, nstarted);
+        assert_eq!(report.ntotal_recovered, 2);
+        assert_eq!(report.ntotal_failures, 4);
+        assert_eq!(report.ntotal_started, 4);
+        assert_eq!(report.ntotal_finished, 1);
 
         //
         // With another pass, we can remove those three that finished.
         //
-        let (plan, execution, last_pass_success) = sim.sim_recovery_pass();
+        let (plan, execution, last_pass_success, nstarted) =
+            sim.sim_recovery_pass();
         assert_eq!(2, last_pass_success.nfound);
         assert_eq!(3, last_pass_success.nremoved);
         assert_eq!(3, plan.sagas_inferred_done().count());
@@ -577,14 +624,19 @@ mod test {
         assert_eq!(2, plan.nskipped());
         assert_eq!(0, last_pass_success.nrecovered);
         assert_eq!(0, execution.succeeded.len());
-        report.update_after_pass(&plan, execution);
+        report.update_after_pass(&plan, execution, nstarted);
+        assert_eq!(report.ntotal_recovered, 2);
+        assert_eq!(report.ntotal_failures, 4);
+        assert_eq!(report.ntotal_started, 4);
+        assert_eq!(report.ntotal_finished, 4);
 
         //
         // Finish the last two sagas.
         //
         sim.sim_normal_saga_done(saga_started_normally_2);
         sim.sim_normal_saga_done(saga_recover_ok);
-        let (plan, execution, last_pass_success) = sim.sim_recovery_pass();
+        let (plan, execution, last_pass_success, nstarted) =
+            sim.sim_recovery_pass();
         assert_eq!(0, last_pass_success.nfound);
         assert_eq!(0, last_pass_success.nremoved);
         assert_eq!(0, plan.sagas_inferred_done().count());
@@ -595,12 +647,17 @@ mod test {
         assert_eq!(0, plan.nskipped());
         assert_eq!(0, last_pass_success.nrecovered);
         assert_eq!(0, execution.succeeded.len());
-        report.update_after_pass(&plan, execution);
+        report.update_after_pass(&plan, execution, nstarted);
+        assert_eq!(report.ntotal_recovered, 2);
+        assert_eq!(report.ntotal_failures, 4);
+        assert_eq!(report.ntotal_started, 4);
+        assert_eq!(report.ntotal_finished, 4);
 
         //
         // With another pass, remove those last two.
         //
-        let (plan, execution, last_pass_success) = sim.sim_recovery_pass();
+        let (plan, execution, last_pass_success, nstarted) =
+            sim.sim_recovery_pass();
         assert_eq!(0, last_pass_success.nfound);
         assert_eq!(2, last_pass_success.nremoved);
         assert_eq!(2, plan.sagas_inferred_done().count());
@@ -611,7 +668,11 @@ mod test {
         assert_eq!(0, plan.nskipped());
         assert_eq!(0, last_pass_success.nrecovered);
         assert_eq!(0, execution.succeeded.len());
-        report.update_after_pass(&plan, execution);
+        report.update_after_pass(&plan, execution, nstarted);
+        assert_eq!(report.ntotal_recovered, 2);
+        assert_eq!(report.ntotal_failures, 4);
+        assert_eq!(report.ntotal_started, 4);
+        assert_eq!(report.ntotal_finished, 6);
 
         // At this point, the rest state should match our existing rest state.
         // This is an extra check to make sure we're not leaking memory related

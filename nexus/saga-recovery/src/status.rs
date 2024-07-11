@@ -25,6 +25,13 @@ pub struct Report {
     pub recent_recoveries: DebuggingHistory<RecoverySuccess>,
     pub recent_failures: DebuggingHistory<RecoveryFailure>,
     pub last_pass: LastPass,
+
+    pub ntotal_recovered: usize,
+    pub ntotal_failures: usize,
+    pub ntotal_started: usize,
+    pub ntotal_finished: usize,
+    pub ntotal_sec_errors_missing: usize,
+    pub ntotal_sec_errors_bad_state: usize,
 }
 
 impl Report {
@@ -33,6 +40,12 @@ impl Report {
             recent_recoveries: DebuggingHistory::new(N_SUCCESS_SAGA_HISTORY),
             recent_failures: DebuggingHistory::new(N_FAILED_SAGA_HISTORY),
             last_pass: LastPass::NeverStarted,
+            ntotal_recovered: 0,
+            ntotal_failures: 0,
+            ntotal_started: 0,
+            ntotal_finished: 0,
+            ntotal_sec_errors_missing: 0,
+            ntotal_sec_errors_bad_state: 0,
         }
     }
 
@@ -40,6 +53,7 @@ impl Report {
         &mut self,
         plan: &recovery::Plan,
         execution: recovery::Execution,
+        nstarted: usize,
     ) {
         self.last_pass =
             LastPass::Success(LastPassSuccess::new(plan, &execution));
@@ -48,14 +62,20 @@ impl Report {
 
         for success in succeeded {
             self.recent_recoveries.append(success);
+            self.ntotal_recovered += 1;
         }
 
         for failure in failed {
             self.recent_failures.append(failure);
+            self.ntotal_failures += 1;
         }
+
+        self.ntotal_started += nstarted;
+        self.ntotal_finished += plan.ninferred_done();
     }
 
-    pub fn update_after_failure(&mut self, error: &Error) {
+    pub fn update_after_failure(&mut self, error: &Error, nstarted: usize) {
+        self.ntotal_started += nstarted;
         self.last_pass = LastPass::Failed {
             message: InlineErrorChain::new(error).to_string(),
         };

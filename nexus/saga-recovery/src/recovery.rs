@@ -51,7 +51,7 @@ impl RestState {
         &mut self,
         log: &slog::Logger,
         sagas_started_rx: &mut mpsc::UnboundedReceiver<SagaId>,
-    ) {
+    ) -> usize {
         let (new_sagas, disconnected) = read_all_from_channel(sagas_started_rx);
         if disconnected {
             warn!(
@@ -60,6 +60,7 @@ impl RestState {
             );
         }
 
+        let rv = new_sagas.len();
         let time_observed = Utc::now();
         for saga_id in new_sagas {
             info!(log, "observed saga start"; "saga_id" => %saga_id);
@@ -74,6 +75,7 @@ impl RestState {
                 )
                 .is_none());
         }
+        rv
     }
 
     /// Update based on the results of a recovery pass.
