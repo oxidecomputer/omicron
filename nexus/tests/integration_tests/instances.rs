@@ -853,6 +853,8 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     // Move source to "migrating".
     instance_single_step_on_sled(cptestctx, nexus, original_sled, instance_id)
         .await;
+    instance_single_step_on_sled(cptestctx, nexus, original_sled, instance_id)
+        .await;
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
     assert_eq!(migration.source_state, MigrationState::InProgress.into());
@@ -861,6 +863,8 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
     // Move target to "migrating".
+    instance_single_step_on_sled(cptestctx, nexus, dst_sled_id, instance_id)
+        .await;
     instance_single_step_on_sled(cptestctx, nexus, dst_sled_id, instance_id)
         .await;
 
@@ -877,7 +881,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
     assert_eq!(migration.source_state, MigrationState::Completed.into());
     assert_eq!(migration.target_state, MigrationState::InProgress.into());
-    let instance = instance_get(&client, &instance_url).await;
+    let instance = dbg!(instance_get(&client, &instance_url).await);
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
     // Move the target to "completed".
