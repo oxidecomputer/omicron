@@ -614,11 +614,26 @@ impl DataStore {
             .filter(vmm_dsl::state.eq_any(ALLOWED_ACTIVE_VMM_STATES))
             .select(vmm_dsl::instance_id);
 
-        let updated = diesel::update(dsl::instance)
+        diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(instance_id))
-            .filter(dsl::migration_id.is_null())
-            .filter(dsl::target_propolis_id.is_null())
+            // To ensure that saga actions that set migration IDs are
+            // idempotent, we update the row if the migration and target VMM IDs
+            // are not present *or* if they are already equal to the desired
+            // values. This way, we can use a `RETURNING` clause to fetch the
+            // current state after the update, rather than `check_if_exists`
+            // which returns the prior state, and still fail to update the
+            // record if another migration/target VMM ID is already there.
+            .filter(
+                dsl::migration_id
+                    .is_null()
+                    .or(dsl::migration_id.eq(Some(migration_id))),
+            )
+            .filter(
+                dsl::target_propolis_id
+                    .is_null()
+                    .or(dsl::target_propolis_id.eq(Some(target_propolis_id))),
+            )
             .filter(dsl::active_propolis_id.eq(src_propolis_id))
             .filter(dsl::id.eq_any(vmm_ok))
             .set((
@@ -628,90 +643,20 @@ impl DataStore {
                 dsl::state_generation.eq(dsl::state_generation + 1),
                 dsl::time_state_updated.eq(Utc::now()),
             ))
-            // TODO(eliza): it's too bad we can't do `check_if_exists` with both
-            // the instance and active VMM, so that we could return a nicer
-            // error in the case where the active VMM is in the wrong state...
-            .check_if_exists::<Instance>(instance_id.into_untyped_uuid())
-            .execute_and_check(&*self.pool_connection_authorized(&opctx).await?)
+            .returning(Instance::as_returning())
+            .get_result_async::<Instance>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
             .await
             .map_err(|e| {
                 public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::Instance,
-                        LookupType::ById(instance_id),
+                        LookupType::ById(instance_id.into_untyped_uuid()),
                     ),
                 )
-            })?;
-
-        match updated {
-            // If we updated the instance, that's great! Good job team!
-            UpdateAndQueryResult { status: UpdateStatus::Updated, found } => {
-                Ok(found)
-            }
-            // No update was performed because the migration ID has already been
-            // set to the ID we were trying to set it to. That's fine, count it
-            // as a success for saga action idempotency reasons.
-            UpdateAndQueryResult { found, .. }
-                if found.runtime_state.migration_id == Some(migration_id) =>
-            {
-                debug_assert_eq!(
-                    found.runtime_state.dst_propolis_id,
-                    Some(target_propolis_id)
-                );
-                debug_assert_eq!(
-                    found.runtime_state.propolis_id,
-                    Some(src_propolis_id)
-                );
-                Ok(found)
-            }
-
-            // On the other hand, if there was already a different migration ID,
-            // that means another migrate saga has already started a migration.
-            // Guess I'll die!
-            UpdateAndQueryResult {
-                found:
-                    Instance {
-                        runtime_state:
-                            InstanceRuntimeState {
-                                migration_id: Some(actual_migration_id),
-                                ..
-                            },
-                        ..
-                    },
-                ..
-            } => {
-                slog::info!(
-                    opctx.log,
-                    "failed to set instance migration IDs: a different migration ID was already set";
-                    "instance_id" => %instance_id,
-                    "desired_migration_id" => %migration_id,
-                    "actual_migration_id" => %actual_migration_id,
-                );
-                Err(Error::conflict("instance is already migrating"))
-            }
-            // If one of the other filters didn't match, our understanding of
-            // the instance's state is clearly pretty wromg.
-            UpdateAndQueryResult {
-                found: Instance { runtime_state, .. },
-                ..
-            } => {
-                slog::warn!(
-                    opctx.log,
-                    "failed to set instance migration IDs: invalid instance or VMM runtime state";
-                    "instance_id" => %instance_id,
-                    "desired_migration_id" => %migration_id,
-                    "desired_active_propolis_id" => %src_propolis_id,
-                    "desired_target_propolis_id" => %target_propolis_id,
-                    "actual_migration_id" => ?runtime_state.migration_id,
-                    "actual_active_propolis_id" => ?runtime_state.propolis_id,
-                    "actual_target_propolis_id" => ?runtime_state.dst_propolis_id,
-                );
-                Err(Error::conflict(
-                    "instance snapshot didn't match actual state",
-                ))
-            }
-        }
+            })
     }
 
     /// Unsets the migration IDs set by
