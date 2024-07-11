@@ -121,6 +121,28 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                     | VmmState::SagaUnwound,
                 ),
             ) => external::InstanceState::Stopping,
+            // - If there's an active migration ID for the instance, *always*
+            //   treat its state as "migration" regardless of the VMM's state.
+            //
+            //   This avoids an issue where an instance whose previous active
+            //   VMM has been destroyed as a result of a successful migration
+            //   out will appear to be "stopping" for the time between when that
+            //   VMM was reported destroyed and when the instance record was
+            //   updated to reflect the migration's completion.
+            //
+            //   Instead, we'll continue to report the instance's state as
+            //   "migrating" until an instance-update saga has resolved the
+            //   outcome of the migration, since only the instance-update saga
+            //   If the instance actually *has* stopped or failed before a
+            //   successful migration out, this is fine, because an
+            //   instance-update saga will come along and remove the active VMM
+            //   and migration IDs.
+            //
+            (InstanceState::Vmm, Some(_))
+                if value.instance.runtime_state.migration_id.is_some() =>
+            {
+                external::InstanceState::Migrating
+            }
             // - An instance with no VMM is always "stopped" (as long as it's
             //   not "starting" etc.)
             (InstanceState::NoVmm, _vmm_state) => {
