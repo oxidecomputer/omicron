@@ -15,6 +15,7 @@ use crate::bootstrap::rack_ops::{RackInitId, RackResetId};
 use crate::updates::ConfigUpdates;
 use crate::updates::{Component, UpdateManager};
 use bootstore::schemes::v0 as bootstore;
+use dropshot::ApiDescriptionRegisterError;
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseOk,
     HttpResponseUpdatedNoContent, RequestContext, TypedBody,
@@ -63,7 +64,7 @@ type BootstrapApiDescription = ApiDescription<BootstrapServerContext>;
 pub(crate) fn api() -> BootstrapApiDescription {
     fn register_endpoints(
         api: &mut BootstrapApiDescription,
-    ) -> Result<(), String> {
+    ) -> Result<(), ApiDescriptionRegisterError> {
         api.register(baseboard_get)?;
         api.register(components_get)?;
         api.register(rack_initialization_status)?;

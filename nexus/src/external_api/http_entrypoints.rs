@@ -14,7 +14,6 @@ use super::{
     },
 };
 use crate::{context::ApiContext, external_api::shared};
-use dropshot::HttpError;
 use dropshot::HttpResponseAccepted;
 use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
@@ -32,6 +31,7 @@ use dropshot::{
     channel, endpoint, WebsocketChannelResult, WebsocketConnection,
 };
 use dropshot::{ApiDescription, StreamingBody};
+use dropshot::{ApiDescriptionRegisterError, HttpError};
 use dropshot::{ApiEndpoint, EmptyScanParams};
 use ipnetwork::IpNetwork;
 use nexus_db_queries::db;
@@ -100,7 +100,9 @@ type NexusApiDescription = ApiDescription<ApiContext>;
 
 /// Returns a description of the external nexus API
 pub(crate) fn external_api() -> NexusApiDescription {
-    fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
+    fn register_endpoints(
+        api: &mut NexusApiDescription,
+    ) -> Result<(), ApiDescriptionRegisterError> {
         api.register(ping)?;
 
         api.register(system_policy_view)?;
@@ -368,7 +370,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
     fn register_experimental<T>(
         api: &mut NexusApiDescription,
         endpoint: T,
-    ) -> Result<(), String>
+    ) -> Result<(), ApiDescriptionRegisterError>
     where
         T: Into<ApiEndpoint<ApiContext>>,
     {
@@ -381,7 +383,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
 
     fn register_experimental_endpoints(
         api: &mut NexusApiDescription,
-    ) -> Result<(), String> {
+    ) -> Result<(), ApiDescriptionRegisterError> {
         register_experimental(api, probe_list)?;
         register_experimental(api, probe_view)?;
         register_experimental(api, probe_create)?;

@@ -5,9 +5,9 @@
 // Copyright 2022 Oxide Computer Company
 
 use dropshot::{
-    endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseHeaders,
-    HttpResponseOk, HttpResponseUpdatedNoContent, Path, RequestContext,
-    TypedBody,
+    endpoint, ApiDescription, ApiDescriptionRegisterError, FreeformBody,
+    HttpError, HttpResponseHeaders, HttpResponseOk,
+    HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody,
 };
 use hyper::{header, Body, StatusCode};
 use installinator_common::EventReport;
@@ -24,7 +24,7 @@ type ArtifactServerApiDesc = ApiDescription<ServerContext>;
 pub fn api() -> ArtifactServerApiDesc {
     fn register_endpoints(
         api: &mut ArtifactServerApiDesc,
-    ) -> Result<(), String> {
+    ) -> Result<(), ApiDescriptionRegisterError> {
         api.register(get_artifact_by_hash)?;
         api.register(report_progress)?;
         Ok(())
