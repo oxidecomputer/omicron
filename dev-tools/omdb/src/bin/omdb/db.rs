@@ -2795,7 +2795,12 @@ async fn cmd_db_validate_region_snapshots(
         use crucible_agent_client::types::State;
         use crucible_agent_client::Client as CrucibleAgentClient;
 
-        let url = format!("http://{}", dataset.address());
+        let Some(dataset_addr) = dataset.address() else {
+            eprintln!("Dataset {} missing an IP address", dataset.id());
+            continue;
+        };
+
+        let url = format!("http://{}", dataset_addr);
         let client = CrucibleAgentClient::new(&url);
 
         let actual_region_snapshots = client
@@ -2856,7 +2861,7 @@ async fn cmd_db_validate_region_snapshots(
                                     dataset_id: region_snapshot.dataset_id,
                                     region_id: region_snapshot.region_id,
                                     snapshot_id: region_snapshot.snapshot_id,
-                                    dataset_addr: dataset.address(),
+                                    dataset_addr,
                                     error: String::from(
                                         "region snapshot was deleted, please remove its record",
                                     ),
@@ -2871,7 +2876,7 @@ async fn cmd_db_validate_region_snapshots(
                                     dataset_id: region_snapshot.dataset_id,
                                     region_id: region_snapshot.region_id,
                                     snapshot_id: region_snapshot.snapshot_id,
-                                    dataset_addr: dataset.address(),
+                                    dataset_addr,
                                     error: String::from(
                                         "NEXUS BUG: region snapshot was deleted, but the higher level snapshot was not!",
                                     ),
@@ -2900,7 +2905,7 @@ async fn cmd_db_validate_region_snapshots(
                                 dataset_id: region_snapshot.dataset_id,
                                 region_id: region_snapshot.region_id,
                                 snapshot_id: region_snapshot.snapshot_id,
-                                dataset_addr: dataset.address(),
+                                dataset_addr,
                                 error: format!(
                                     "AGENT BUG: region snapshot was deleted but has a running snapshot in state {:?}!",
                                     running_snapshot.state,
@@ -2950,7 +2955,12 @@ async fn cmd_db_validate_region_snapshots(
         use crucible_agent_client::types::State;
         use crucible_agent_client::Client as CrucibleAgentClient;
 
-        let url = format!("http://{}", dataset.address());
+        let Some(dataset_addr) = dataset.address() else {
+            eprintln!("Dataset {} missing an IP address", dataset.id());
+            continue;
+        };
+
+        let url = format!("http://{}", dataset_addr);
         let client = CrucibleAgentClient::new(&url);
 
         let actual_region_snapshots = client
@@ -2968,7 +2978,7 @@ async fn cmd_db_validate_region_snapshots(
                     dataset_id: dataset.id(),
                     region_id: region.id(),
                     snapshot_id,
-                    dataset_addr: dataset.address(),
+                    dataset_addr,
                     error: String::from(
                         "Nexus does not know about this snapshot!",
                     ),
@@ -2993,7 +3003,7 @@ async fn cmd_db_validate_region_snapshots(
                             dataset_id: dataset.id(),
                             region_id: region.id(),
                             snapshot_id,
-                            dataset_addr: dataset.address(),
+                            dataset_addr,
                             error: String::from(
                                 "Nexus does not know about this running snapshot!"
                             ),

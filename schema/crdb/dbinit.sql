@@ -525,8 +525,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.dataset (
     pool_id UUID NOT NULL,
 
     /* Contact information for the dataset */
-    ip INET NOT NULL,
-    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
+    ip INET,
+    port INT4 CHECK (port BETWEEN 0 AND 65535),
 
     kind omicron.public.dataset_kind NOT NULL,
 
@@ -4143,7 +4143,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '82.0.0', NULL)
+    (TRUE, NOW(), NOW(), '83.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

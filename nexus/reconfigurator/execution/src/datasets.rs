@@ -71,7 +71,7 @@ pub(crate) async fn ensure_crucible_dataset_records_exist(
         let dataset = Dataset::new(
             id.into_untyped_uuid(),
             pool_id.into_untyped_uuid(),
-            *address,
+            Some(*address),
             DatasetKind::Crucible,
         );
         let maybe_inserted = datastore
