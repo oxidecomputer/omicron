@@ -1044,9 +1044,8 @@ async fn test_instance_migrate_v2p_and_routes(
     instance_simulate_on_sled(cptestctx, nexus, original_sled_id, instance_id)
         .await;
     instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
-    let instance = instance_get(&client, &instance_url).await;
+    instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
 
-    assert_eq!(instance.runtime.run_state, InstanceState::Running);
     let current_sled = nexus
         .instance_sled_id(&instance_id)
         .await
