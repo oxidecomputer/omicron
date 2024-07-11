@@ -23,7 +23,7 @@ use tokio::sync::mpsc;
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RestState {
     sagas_started: BTreeMap<SagaId, SagaStartInfo>,
-    remove_next: Vec<SagaId>,
+    remove_next: BTreeSet<SagaId>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -41,7 +41,10 @@ enum SagaStartSource {
 
 impl RestState {
     pub fn new() -> RestState {
-        RestState { sagas_started: BTreeMap::new(), remove_next: Vec::new() }
+        RestState {
+            sagas_started: BTreeMap::new(),
+            remove_next: BTreeSet::new(),
+        }
     }
 
     /// Read messages from the channel (signaling sagas that have started
@@ -101,6 +104,11 @@ impl RestState {
         }
 
         self.remove_next = plan.sagas_maybe_done().collect();
+    }
+
+    #[cfg(test)]
+    pub fn sagas_started(&self) -> Vec<SagaId> {
+        self.sagas_started.keys().copied().collect()
     }
 }
 
@@ -221,11 +229,15 @@ impl Plan {
         for running_saga_id in sagas_started.keys() {
             match running_sagas_found.remove(running_saga_id) {
                 None => {
-                    // The saga is in the ignore set, but not the database list
-                    // of running sagas.  It's possible that the saga has simply
-                    // finished.  And if the saga is definitely not running any
-                    // more, then we can remove it from the ignore set.  This is
-                    // important to keep that set from growing without bound.
+                    // If this saga is in `previously_maybe_done`, then we
+                    // processed it above already.  We know it's done.
+                    //
+                    // Otherwise, the saga is in the ignore set, but not the
+                    // database list of running sagas.  It's possible that the
+                    // saga has simply finished.  And if the saga is definitely
+                    // not running any more, then we can remove it from the
+                    // ignore set.  This is important to keep that set from
+                    // growing without bound.
                     //
                     // But it's also possible that the saga started immediately
                     // after the database query's snapshot, in which case we
@@ -236,7 +248,9 @@ impl Plan {
                     // must have finished.  Rather than do that now, we'll just
                     // keep track of this list and take care of it in the next
                     // activation.
-                    builder.saga_maybe_done(*running_saga_id)
+                    if !previously_maybe_done.contains(running_saga_id) {
+                        builder.saga_maybe_done(*running_saga_id)
+                    }
                 }
 
                 Some(_found_saga) => {
@@ -524,14 +538,6 @@ impl ExecutionSummaryBuilder {
 
 #[cfg(test)]
 mod test {
-    // XXX-dap test plan:
-    // RestState:
-    // - update_started_sagas():
-    //   - normal update (x2)
-    //   - empty channel
-    //   - disconnected channel
-    // - update_after_pass():
-    //   - come back to this
     // XXX-dap write a stress test that furiously performs saga recovery a lot
     // of times and ensures that each saga is recovered exactly once
     use super::*;

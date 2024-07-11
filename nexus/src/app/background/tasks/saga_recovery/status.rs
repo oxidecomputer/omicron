@@ -110,8 +110,7 @@ impl LastPassSuccess {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct DebuggingHistory<T> {
     size: usize,
-    // XXX-dap should not be pub
-    pub ring: VecDeque<T>,
+    ring: VecDeque<T>,
 }
 
 impl<T> DebuggingHistory<T> {
