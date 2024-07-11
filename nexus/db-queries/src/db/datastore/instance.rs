@@ -639,22 +639,21 @@ impl DataStore {
         diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(instance_id))
-            // To ensure that saga actions that set migration IDs are
-            // idempotent, we update the row if the migration and target VMM IDs
-            // are not present *or* if they are already equal to the desired
-            // values. This way, we can use a `RETURNING` clause to fetch the
-            // current state after the update, rather than `check_if_exists`
-            // which returns the prior state, and still fail to update the
-            // record if another migration/target VMM ID is already there.
             .filter(
-                dsl::migration_id
+                // To ensure that saga actions that set migration IDs are
+                // idempotent, we update the row if the migration and target
+                // VMM IDs are not present *or* if they are already equal to the
+                // desired values. This way, we can use a `RETURNING` clause to
+                // fetch the current state after the update, rather than
+                // `check_if_exists` which returns the prior state, and still
+                // fail to update the record if another migration/target VMM ID
+                // is already there.
+                (dsl::migration_id
                     .is_null()
-                    .or(dsl::migration_id.eq(Some(migration_id))),
-            )
-            .filter(
-                dsl::target_propolis_id
-                    .is_null()
-                    .or(dsl::target_propolis_id.eq(Some(target_propolis_id))),
+                    .and(dsl::target_propolis_id.is_null()))
+                .or(dsl::migration_id
+                    .eq(Some(migration_id))
+                    .and(dsl::target_propolis_id.eq(Some(target_propolis_id)))),
             )
             .filter(dsl::active_propolis_id.eq(src_propolis_id))
             .filter(dsl::id.eq_any(vmm_ok))
