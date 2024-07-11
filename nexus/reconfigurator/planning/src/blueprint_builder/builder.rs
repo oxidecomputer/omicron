@@ -993,7 +993,7 @@ impl<'a> BlueprintBuilder<'a> {
                      no internal NTP zone found"
                 ))
             })?;
-        if !internal_ntp_zone_id_iter.next().is_none() {
+        if internal_ntp_zone_id_iter.next().is_some() {
             return Err(Error::Planner(anyhow!(
                 "sled {sled_id} has multiple internal NTP zones"
             )));

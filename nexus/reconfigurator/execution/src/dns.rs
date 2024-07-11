@@ -1342,7 +1342,8 @@ mod test {
         .unwrap();
         let sled_id =
             blueprint.sleds().next().expect("expected at least one sled");
-        let nalready = builder.sled_num_zones_of_kind(sled_id, ZoneKind::Nexus);
+        let nalready =
+            builder.sled_num_running_zones_of_kind(sled_id, ZoneKind::Nexus);
         let rv = builder
             .sled_ensure_zone_multiple_nexus(sled_id, nalready + 1)
             .unwrap();
