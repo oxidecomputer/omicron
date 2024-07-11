@@ -5657,6 +5657,7 @@ dependencies = [
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-reconfigurator-preparation",
+ "nexus-saga-recovery",
  "nexus-test-utils",
  "nexus-test-utils-macros",
  "nexus-types",

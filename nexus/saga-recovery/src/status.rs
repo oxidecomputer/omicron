@@ -124,4 +124,16 @@ impl<T> DebuggingHistory<T> {
         }
         self.ring.push_back(t);
     }
+
+    pub fn len(&self) -> usize {
+        self.ring.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ring.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.ring.iter()
+    }
 }

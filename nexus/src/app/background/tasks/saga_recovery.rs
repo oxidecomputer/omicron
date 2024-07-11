@@ -7,7 +7,6 @@
 // - task status reported by omdb
 // - log entries
 // - test coverage
-// XXX-dap omdb support
 // XXX-dap TODO-doc everything here
 // XXX-dap sync with "main"
 // XXX-dap write up summary for PR, including the option of doing recovery in
@@ -16,7 +15,7 @@
 // without a purge that's invoked by recovery)
 // XXX-dap when we consider a saga done, we should ask steno in order to confirm
 
-/! XXX-dap this block comment is in two places
+// XXX-dap this block comment is in two places
 //! Saga recovery
 //!
 //! ## Review of distributed sagas

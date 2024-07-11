@@ -33,6 +33,7 @@ nexus-config.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
 nexus-reconfigurator-preparation.workspace = true
+nexus-saga-recovery.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
