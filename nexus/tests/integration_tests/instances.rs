@@ -838,6 +838,9 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(migration.target_state, MigrationState::Pending.into());
     assert_eq!(migration.source_state, MigrationState::Pending.into());
 
+    // Simulate the migration. We will use `instance_single_step_on_sled` to
+    // single-step both sled-agents through the migration state machine and
+    // ensure that the migration state looks nice at each step.
     instance_simulate_migration_source(
         cptestctx,
         nexus,
@@ -846,17 +849,41 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         migration_id,
     )
     .await;
-    // TODO(eliza): it would be nice to single-step both simulated sled agents
-    // through each migration phase and assert that we see all the intermediate
-    // states, instead of just letting them run straight to completion...
 
-    // Ensure that both sled agents report that the migration has completed.
+    // Move source to "migrating".
+    instance_single_step_on_sled(cptestctx, nexus, original_sled, instance_id)
+        .await;
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::InProgress.into());
+    assert_eq!(migration.target_state, MigrationState::Pending.into());
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
+
+    // Move target to "migrating".
+    instance_single_step_on_sled(cptestctx, nexus, dst_sled_id, instance_id)
+        .await;
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::InProgress.into());
+    assert_eq!(migration.target_state, MigrationState::InProgress.into());
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
+
+    // Move the source to "completed"
     instance_simulate_on_sled(cptestctx, nexus, original_sled, instance_id)
         .await;
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::Completed.into());
+    assert_eq!(migration.target_state, MigrationState::InProgress.into());
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
+
+    // Move the target to "completed".
     instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
 
-    let instance = instance_get(&client, &instance_url).await;
-    assert_eq!(instance.runtime.run_state, InstanceState::Running);
+    instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
 
     let current_sled = nexus
         .instance_sled_id(&instance_id)
