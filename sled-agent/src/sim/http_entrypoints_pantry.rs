@@ -5,8 +5,9 @@
 //! HTTP entrypoint functions for simulating the crucible pantry API.
 
 use dropshot::{
-    endpoint, ApiDescription, HttpError, HttpResponseDeleted, HttpResponseOk,
-    HttpResponseUpdatedNoContent, Path as TypedPath, RequestContext, TypedBody,
+    endpoint, ApiDescription, ApiDescriptionRegisterError, HttpError,
+    HttpResponseDeleted, HttpResponseOk, HttpResponseUpdatedNoContent,
+    Path as TypedPath, RequestContext, TypedBody,
 };
 use propolis_client::types::VolumeConstructionRequest;
 use schemars::JsonSchema;
@@ -21,7 +22,7 @@ type CruciblePantryApiDescription = ApiDescription<Arc<Pantry>>;
 pub fn api() -> CruciblePantryApiDescription {
     fn register_endpoints(
         api: &mut CruciblePantryApiDescription,
-    ) -> Result<(), String> {
+    ) -> Result<(), ApiDescriptionRegisterError> {
         api.register(attach)?;
         api.register(is_job_finished)?;
         api.register(job_result_ok)?;

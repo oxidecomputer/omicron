@@ -7,6 +7,7 @@
 use super::params::{OximeterInfo, RackInitializationRequest};
 use crate::context::ApiContext;
 use dropshot::ApiDescription;
+use dropshot::ApiDescriptionRegisterError;
 use dropshot::FreeformBody;
 use dropshot::HttpError;
 use dropshot::HttpResponseCreated;
