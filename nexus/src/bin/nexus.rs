@@ -17,7 +17,6 @@ use nexus_config::NexusConfig;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_nexus::run_openapi_external;
-use omicron_nexus::run_openapi_internal;
 use omicron_nexus::run_server;
 
 #[derive(Debug, Parser)]
