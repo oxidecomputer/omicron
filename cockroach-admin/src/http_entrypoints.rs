@@ -6,6 +6,7 @@ use crate::cockroach_cli::NodeDecommission;
 use crate::cockroach_cli::NodeStatus;
 use crate::context::ServerContext;
 use dropshot::endpoint;
+use dropshot::ApiDescriptionRegisterError;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::RequestContext;
@@ -19,7 +20,9 @@ use std::sync::Arc;
 type CrdbApiDescription = dropshot::ApiDescription<Arc<ServerContext>>;
 
 pub fn api() -> CrdbApiDescription {
-    fn register_endpoints(api: &mut CrdbApiDescription) -> Result<(), String> {
+    fn register_endpoints(
+        api: &mut CrdbApiDescription,
+    ) -> Result<(), ApiDescriptionRegisterError> {
         api.register(local_node_id)?;
         api.register(node_status)?;
         api.register(node_decommission)?;

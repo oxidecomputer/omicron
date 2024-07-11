@@ -2028,7 +2028,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.10.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#6a3f84ca5fd8d0c5c010cfe837efbe6b5d117d9d"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#9fef3961c0b89aa8ab8e186dc0c89f8f4f811eea"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2074,7 +2074,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.10.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#6a3f84ca5fd8d0c5c010cfe837efbe6b5d117d9d"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#9fef3961c0b89aa8ab8e186dc0c89f8f4f811eea"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -4026,7 +4026,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.5",
 ]
 
 [[package]]
