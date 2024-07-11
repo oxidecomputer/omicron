@@ -109,14 +109,10 @@ pub struct InstanceAndVmmUpdateResult {
     /// indicates whether the row was updated. `None` if the VMM was not found.
     pub vmm_status: Option<UpdateStatus>,
 
-    /// `Some(status)` if the inbound migration was found; the wrapped `UpdateStatus`
-    /// indicates whether the row was updated. `None` if the inbound migration
-    /// was not found, or no migration update was performed.
+    /// Indicates whether a migration-in update was performed.
     pub migration_in_status: RecordUpdateStatus,
 
-    /// `Some(status)` if the outbound migration was found; the wrapped `UpdateStatus`
-    /// indicates whether the row was updated. `None` if the inbound migration
-    /// was not found, or no migration update was performed.
+    /// Indicates whether a migration-out update was performed.
     pub migration_out_status: RecordUpdateStatus,
 }
 

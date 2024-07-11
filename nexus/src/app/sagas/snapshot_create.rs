@@ -2334,7 +2334,7 @@ mod test {
                             &Duration::from_secs(5),
                             &Duration::from_secs(300),
                         )
-                            .await.expect("instance did not advance to NoVmm after 400 seconds");
+                            .await.expect("instance did not advance to NoVmm after 300 seconds");
                         test_helpers::instance_delete_by_name(
                             cptestctx,
                             INSTANCE_NAME,
