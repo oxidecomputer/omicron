@@ -212,15 +212,18 @@ mod test {
                 entry.path().canonicalize().unwrap().display()
             );
             let contents = fs::read_to_string(entry.path()).unwrap();
-            let list = load_schema(&contents).unwrap_or_else(|_| {
+            let list = load_schema(&contents).unwrap_or_else(|e| {
                 panic!(
-                    "Expected a valid timeseries definition in {}",
-                    entry.path().canonicalize().unwrap().display()
+                    "Expected a valid timeseries definition in {}, \
+                    but found error: {}",
+                    entry.path().canonicalize().unwrap().display(),
+                    e,
                 )
             });
             println!("found {} schema", list.len());
             for schema in list.into_iter() {
                 let key = (schema.timeseries_name.clone(), schema.version);
+                println!(" {} v{}", key.0, key.1);
                 if let Some(dup) = all_schema.insert(key, schema.clone()) {
                     panic!(
                         "Timeseries '{}' version {} is duplicated.\

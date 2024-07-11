@@ -32,14 +32,6 @@ struct Args {
     )]
     openapi: bool,
 
-    #[clap(
-        short = 'I',
-        long = "openapi-internal",
-        help = "Print the internal OpenAPI Spec document and exit",
-        action
-    )]
-    openapi_internal: bool,
-
     #[clap(name = "CONFIG_FILE_PATH", action)]
     config_file_path: Option<Utf8PathBuf>,
 }
@@ -56,8 +48,6 @@ async fn do_run() -> Result<(), CmdError> {
 
     if args.openapi {
         run_openapi_external().map_err(|err| CmdError::Failure(anyhow!(err)))
-    } else if args.openapi_internal {
-        run_openapi_internal().map_err(|err| CmdError::Failure(anyhow!(err)))
     } else {
         let config_path = match args.config_file_path {
             Some(path) => path,

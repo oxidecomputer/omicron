@@ -126,8 +126,8 @@ pub fn error_for_enoent() -> String {
 ///
 /// This allows use to use expectorate to verify the shape of the CLI output.
 pub fn redact_variable(input: &str) -> String {
-    // Replace TCP port numbers.  We include the localhost characters to avoid
-    // catching any random sequence of numbers.
+    // Replace TCP port numbers. We include the localhost
+    // characters to avoid catching any random sequence of numbers.
     let s = regex::Regex::new(r"\[::1\]:\d{4,5}")
         .unwrap()
         .replace_all(&input, "[::1]:REDACTED_PORT")
@@ -189,6 +189,13 @@ pub fn redact_variable(input: &str) -> String {
         .replace_all(&s, "<REDACTED DURATION>s ago")
         .to_string();
 
+    // Replace interval (s).
+    let s = regex::Regex::new(r"\d+s")
+        .unwrap()
+        .replace_all(&s, "<REDACTED_DURATION>s")
+        .to_string();
+
+    // Replace interval (ms).
     let s = regex::Regex::new(r"\d+ms")
         .unwrap()
         .replace_all(&s, "<REDACTED DURATION>ms")

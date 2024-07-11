@@ -235,7 +235,7 @@ approx = "0.5.1"
 assert_matches = "1.5.0"
 assert_cmd = "2.0.14"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "ed7ab5ef0513ba303d33efd41d3e9e381169d59b" }
-async-trait = "0.1.80"
+async-trait = "0.1.81"
 atomicwrites = "0.4.3"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
@@ -338,8 +338,8 @@ macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 mockall = "0.12"
 newtype_derive = "0.1.6"
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "6e0a232fd0b443c19f61f94bf02b7695505aa8e3" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "6e0a232fd0b443c19f61f94bf02b7695505aa8e3" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "d1686c86f92ead77e07ddc6024837dee4a401d6d" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "d1686c86f92ead77e07ddc6024837dee4a401d6d" }
 multimap = "0.10.0"
 nexus-auth = { path = "nexus/auth" }
 nexus-client = { path = "clients/nexus-client" }
@@ -390,7 +390,7 @@ oso = "0.27"
 owo-colors = "4.0.0"
 oximeter = { path = "oximeter/oximeter" }
 oximeter-client = { path = "clients/oximeter-client" }
-oximeter-db = { path = "oximeter/db/" }
+oximeter-db = { path = "oximeter/db/", default-features = false }
 oximeter-collector = { path = "oximeter/collector" }
 oximeter-impl = { path = "oximeter/impl" }
 oximeter-instruments = { path = "oximeter/instruments" }
@@ -439,7 +439,7 @@ rustls = "0.22.2"
 rustls-pemfile = "2.1.2"
 rustyline = "14.0.0"
 samael = { version = "0.0.15", features = ["xmlsec"] }
-schemars = "0.8.16"
+schemars = "0.8.21"
 secrecy = "0.8.0"
 semver = { version = "1.0.23", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }

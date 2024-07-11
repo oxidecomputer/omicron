@@ -65,7 +65,10 @@ In the implementation crate:
 
 Next, perform the steps in <<add_to_manager>> below.
 
-Finally, remove the test which used to manage the document.
+Finally, remove:
+
+. The test which used to manage the document. The OpenAPI manager includes a test that will automatically run in CI.
+. The binary subcommand (typically called `openapi`) that generated the OpenAPI document. The test was the only practical use of this subcommand.
 
 === Adding the API crate to the manager [[add_to_manager]]
 

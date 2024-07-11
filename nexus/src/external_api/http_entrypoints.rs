@@ -278,7 +278,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_bgp_status)?;
         api.register(networking_bgp_imported_routes_ipv4)?;
         api.register(networking_bgp_config_delete)?;
-        api.register(networking_bgp_announce_set_create)?;
+        api.register(networking_bgp_announce_set_update)?;
         api.register(networking_bgp_announce_set_list)?;
         api.register(networking_bgp_announce_set_delete)?;
         api.register(networking_bgp_message_history)?;
@@ -4059,13 +4059,16 @@ async fn networking_bgp_config_delete(
         .await
 }
 
-/// Create new BGP announce set
+/// Update BGP announce set
+///
+/// If the announce set exists, this endpoint replaces the existing announce
+/// set with the one specified.
 #[endpoint {
-    method = POST,
+    method = PUT,
     path = "/v1/system/networking/bgp-announce",
     tags = ["system/networking"],
 }]
-async fn networking_bgp_announce_set_create(
+async fn networking_bgp_announce_set_update(
     rqctx: RequestContext<ApiContext>,
     config: TypedBody<params::BgpAnnounceSetCreate>,
 ) -> Result<HttpResponseCreated<BgpAnnounceSet>, HttpError> {
@@ -4074,7 +4077,7 @@ async fn networking_bgp_announce_set_create(
         let nexus = &apictx.context.nexus;
         let config = config.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let result = nexus.bgp_create_announce_set(&opctx, &config).await?;
+        let result = nexus.bgp_update_announce_set(&opctx, &config).await?;
         Ok(HttpResponseCreated::<BgpAnnounceSet>(result.0.into()))
     };
     apictx

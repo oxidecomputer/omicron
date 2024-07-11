@@ -7,27 +7,15 @@
 use async_bb8_diesel::AsyncConnection;
 use chrono::Utc;
 use diesel::result::Error as DieselError;
-use oximeter::{types::Sample, Metric, MetricsError, Target};
+use oximeter::{types::Sample, MetricsError};
 use rand::{thread_rng, Rng};
 use slog::{info, warn, Logger};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-// Identifies "which" transaction is retrying
-#[derive(Debug, Clone, Target)]
-struct DatabaseTransaction {
-    name: String,
-}
-
-// Identifies that a retry has occurred, and track how long
-// the transaction took (either since starting, or since the last
-// retry failure was recorded).
-#[derive(Debug, Clone, Metric)]
-struct RetryData {
-    #[datum]
-    latency: f64,
-    attempt: u32,
-}
+oximeter::use_timeseries!("database-transaction.toml");
+use database_transaction::DatabaseTransaction;
+use database_transaction::RetryData;
 
 // Collects all transaction retry samples
 #[derive(Debug, Default, Clone)]
@@ -156,7 +144,7 @@ impl RetryHelper {
 
         let _ = self.producer.append(
             &DatabaseTransaction { name: self.name.into() },
-            &RetryData { latency, attempt },
+            &RetryData { datum: latency, attempt },
         );
 
         // This backoff is not exponential, but I'm not sure we actually want

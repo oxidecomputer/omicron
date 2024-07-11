@@ -300,9 +300,9 @@ dependencies = [
 
 [[package]]
 name = "async-trait"
-version = "0.1.80"
+version = "0.1.81"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6fa2087f2753a7da8cc1c0dbfcf89579dd57458e36769de5ac750b4671737ca"
+checksum = "6e0c28dcc82d7c8ead5cb13beb15405b57b8546e93215673ff8ca0349a028107"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1614,7 +1614,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=6e0a232fd0b443c19f61f94bf02b7695505aa8e3#6e0a232fd0b443c19f61f94bf02b7695505aa8e3"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=d1686c86f92ead77e07ddc6024837dee4a401d6d#d1686c86f92ead77e07ddc6024837dee4a401d6d"
 dependencies = [
  "oxnet",
  "percent-encoding",
@@ -2028,7 +2028,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.10.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#6a3f84ca5fd8d0c5c010cfe837efbe6b5d117d9d"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#9fef3961c0b89aa8ab8e186dc0c89f8f4f811eea"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2074,7 +2074,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.10.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#6a3f84ca5fd8d0c5c010cfe837efbe6b5d117d9d"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#9fef3961c0b89aa8ab8e186dc0c89f8f4f811eea"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -4319,7 +4319,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=6e0a232fd0b443c19f61f94bf02b7695505aa8e3#6e0a232fd0b443c19f61f94bf02b7695505aa8e3"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=d1686c86f92ead77e07ddc6024837dee4a401d6d#d1686c86f92ead77e07ddc6024837dee4a401d6d"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5662,6 +5662,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oximeter-client",
+ "oximeter-db",
  "pq-sys",
  "ratatui",
  "reedline",
@@ -5676,6 +5677,7 @@ dependencies = [
  "textwrap",
  "tokio",
  "unicode-width",
+ "url",
  "uuid",
 ]
 
@@ -8533,9 +8535,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.203"
+version = "1.0.204"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7253ab4de971e72fb7be983802300c30b5a7f0c2e56fab8abfc6a214307c0094"
+checksum = "bc76f558e0cbb2a839d37354c575f1dc3fdc6546b5be373ba43d95f231bf7c12"
 dependencies = [
  "serde_derive",
 ]
@@ -8580,9 +8582,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.203"
+version = "1.0.204"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "500cbc0ebeb6f46627f50f3f5811ccf6bf00643be300b4c3eabc0ef55dc5b5ba"
+checksum = "e0cd7e117be63d3c3678776753929474f3b04a43a080c744d6b0ae2a8c28e222"
 dependencies = [
  "proc-macro2",
  "quote",

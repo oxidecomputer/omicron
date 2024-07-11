@@ -336,13 +336,7 @@ impl DataStore {
                     }
                 }
                 else {
-                    public_error_from_diesel(
-                        e,
-                        ErrorHandler::Conflict(
-                            ResourceType::SwitchPortSettings,
-                            params.identity.name.as_str(),
-                        ),
-                    )
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })
     }
@@ -1450,6 +1444,36 @@ async fn do_switch_port_settings_delete(
         .filter(bgp_peer::port_settings_id.eq(id))
         .execute_async(conn)
         .await?;
+
+    // delete allowed exports
+    use db::schema::switch_port_settings_bgp_peer_config_allow_export as allow_export;
+    use db::schema::switch_port_settings_bgp_peer_config_allow_export::dsl as allow_export_dsl;
+    diesel::delete(
+        allow_export_dsl::switch_port_settings_bgp_peer_config_allow_export,
+    )
+    .filter(allow_export::port_settings_id.eq(id))
+    .execute_async(conn)
+    .await?;
+
+    // delete allowed imports
+    use db::schema::switch_port_settings_bgp_peer_config_allow_import as allow_import;
+    use db::schema::switch_port_settings_bgp_peer_config_allow_import::dsl as allow_import_dsl;
+    diesel::delete(
+        allow_import_dsl::switch_port_settings_bgp_peer_config_allow_import,
+    )
+    .filter(allow_import::port_settings_id.eq(id))
+    .execute_async(conn)
+    .await?;
+
+    // delete communities
+    use db::schema::switch_port_settings_bgp_peer_config_communities as bgp_communities;
+    use db::schema::switch_port_settings_bgp_peer_config_communities::dsl as bgp_communities_dsl;
+    diesel::delete(
+        bgp_communities_dsl::switch_port_settings_bgp_peer_config_communities,
+    )
+    .filter(bgp_communities::port_settings_id.eq(id))
+    .execute_async(conn)
+    .await?;
 
     // delete address configs
     use db::schema::switch_port_settings_address_config::{

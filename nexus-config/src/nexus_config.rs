@@ -6,16 +6,14 @@
 //! at deployment time.
 
 use crate::PostgresConfigWithUrl;
-
-use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
-use omicron_common::address::RACK_PREFIX;
-use omicron_common::api::internal::shared::SwitchLocation;
-
 use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
+use omicron_common::address::RACK_PREFIX;
+use omicron_common::api::internal::shared::SwitchLocation;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;

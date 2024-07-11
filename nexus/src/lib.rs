@@ -65,16 +65,6 @@ pub fn run_openapi_external() -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-pub fn run_openapi_internal() -> Result<(), String> {
-    internal_api()
-        .openapi("Nexus internal API", "0.0.1")
-        .description("Nexus internal API")
-        .contact_url("https://oxide.computer")
-        .contact_email("api@oxide.computer")
-        .write(&mut std::io::stdout())
-        .map_err(|e| e.to_string())
-}
-
 /// A partially-initialized Nexus server, which exposes an internal interface,
 /// but is not ready to receive external requests.
 pub struct InternalServer {

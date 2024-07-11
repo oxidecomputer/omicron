@@ -36,6 +36,7 @@ http-instruments = [
     "dep:oximeter",
     "dep:schemars",
     "dep:serde",
+    "dep:slog",
     "dep:uuid"
 ]
 kstat = [
