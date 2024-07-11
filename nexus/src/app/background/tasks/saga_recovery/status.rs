@@ -7,7 +7,7 @@
 use super::recovery;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::Error;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use slog_error_chain::InlineErrorChain;
 use std::collections::VecDeque;
 use steno::SagaId;
@@ -20,11 +20,11 @@ const N_SUCCESS_SAGA_HISTORY: usize = 128;
 /// Maximum number of recent failures to keep track of for debugging
 const N_FAILED_SAGA_HISTORY: usize = 128;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Report {
     pub recent_recoveries: DebuggingHistory<RecoverySuccess>,
     pub recent_failures: DebuggingHistory<RecoveryFailure>,
-    last_pass: LastPass,
+    pub last_pass: LastPass,
 }
 
 impl Report {
@@ -62,27 +62,27 @@ impl Report {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct RecoverySuccess {
     pub time: DateTime<Utc>,
     pub saga_id: SagaId,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct RecoveryFailure {
     pub time: DateTime<Utc>,
     pub saga_id: SagaId,
     pub message: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum LastPass {
     NeverStarted,
     Failed { message: String },
     Success(LastPassSuccess),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct LastPassSuccess {
     pub nfound: usize,
     pub nrecovered: usize,
@@ -107,7 +107,7 @@ impl LastPassSuccess {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct DebuggingHistory<T> {
     size: usize,
     ring: VecDeque<T>,

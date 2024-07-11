@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Test-only helper function for detaching storage.
-// XXX-dap move out of db::DataStore?
 
 use crate::db;
 use async_trait::async_trait;

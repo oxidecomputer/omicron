@@ -9,6 +9,14 @@
 // XXX-dap TODO-coverage everything here
 // XXX-dap omdb support
 // XXX-dap TODO-doc everything here
+// XXX-dap sync with "main"
+// XXX-dap move guts to separate crate?
+// XXX-dap move debug thing to a trait?
+// XXX-dap write up summary for PR, including the option of doing recovery in
+// Steno with read methods on SecStore?  also could have added purge option to
+// SEC and then relied on Steno to know if a thing was alive.  (can't do it
+// without a purge that's invoked by recovery)
+// XXX-dap when we consider a saga done, we should ask steno in order to confirm
 
 //! Saga recovery
 //!
@@ -135,7 +143,7 @@
 use super::recovery;
 use super::status;
 use crate::app::background::BackgroundTask;
-use crate::app::sagas::ActionRegistry;
+use crate::app::sagas::NexusSagaType;
 use crate::saga_interface::SagaContext;
 use crate::Nexus;
 use futures::future::BoxFuture;
@@ -149,7 +157,24 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use steno::SagaId;
 use tokio::sync::mpsc;
-use uuid::Uuid;
+
+// XXX-dap TODO-doc
+pub trait MakeSagaContext: Send + Sync {
+    type SagaType: steno::SagaType;
+
+    fn make_saga_context(
+        &self,
+        log: slog::Logger,
+    ) -> Arc<<Self::SagaType as steno::SagaType>::ExecContextType>;
+}
+
+impl MakeSagaContext for Arc<Nexus> {
+    type SagaType = NexusSagaType;
+    fn make_saga_context(&self, log: slog::Logger) -> Arc<Arc<SagaContext>> {
+        // XXX-dap dig up the comment about the double Arc
+        Arc::new(Arc::new(SagaContext::new(self.clone(), log)))
+    }
+}
 
 /// Background task that recovers sagas assigned to this Nexus
 ///
@@ -158,7 +183,7 @@ use uuid::Uuid;
 /// case when a saga has been re-assigned to this Nexus (e.g., because some
 /// other Nexus has been expunged) and to handle retries for sagas whose
 /// previous recovery failed.
-pub struct SagaRecovery {
+pub struct SagaRecovery<N: MakeSagaContext> {
     datastore: Arc<DataStore>,
     /// Unique identifier for this Saga Execution Coordinator
     ///
@@ -166,9 +191,9 @@ pub struct SagaRecovery {
     sec_id: db::SecId,
     /// OpContext used for saga recovery
     saga_recovery_opctx: OpContext,
-    nexus: Arc<Nexus>,
+    maker: N,
     sec_client: Arc<steno::SecClient>,
-    registry: Arc<ActionRegistry>,
+    registry: Arc<steno::ActionRegistry<N::SagaType>>,
     sagas_started_rx: mpsc::UnboundedReceiver<SagaId>,
 
     /// recovery state persisted between passes
@@ -178,21 +203,21 @@ pub struct SagaRecovery {
     status: status::Report,
 }
 
-impl SagaRecovery {
+impl<N: MakeSagaContext> SagaRecovery<N> {
     pub fn new(
         datastore: Arc<DataStore>,
-        sec_id: Uuid,
+        sec_id: db::SecId,
         saga_recovery_opctx: OpContext,
-        nexus: Arc<Nexus>,
+        maker: N,
         sec: Arc<steno::SecClient>,
-        registry: Arc<ActionRegistry>,
+        registry: Arc<steno::ActionRegistry<N::SagaType>>,
         sagas_started_rx: mpsc::UnboundedReceiver<SagaId>,
-    ) -> SagaRecovery {
+    ) -> SagaRecovery<N> {
         SagaRecovery {
             datastore,
-            sec_id: db::SecId(sec_id),
+            sec_id,
             saga_recovery_opctx,
-            nexus,
+            maker,
             sec_client: sec,
             registry,
             sagas_started_rx,
@@ -201,15 +226,74 @@ impl SagaRecovery {
         }
     }
 
+    // XXX-dap TODO-doc like activate, but return information we can use to see
+    // what happened as well as completion future
+    async fn activate_internal(
+        &mut self,
+        opctx: &OpContext,
+    ) -> Option<(BoxFuture<'static, Result<(), Error>>, status::LastPassSuccess)>
+    {
+        let log = &opctx.log;
+        let datastore = &self.datastore;
+
+        // Fetch the list of not-yet-finished sagas that are assigned to
+        // this Nexus instance.
+        let result = list_sagas_in_progress(
+            &self.saga_recovery_opctx,
+            datastore,
+            self.sec_id,
+        )
+        .await;
+
+        // Process any newly-created sagas, adding them to our set of sagas
+        // to ignore during recovery.  We never want to try to recover a
+        // saga that was created within this Nexus's lifetime.
+        //
+        // We do this even if the previous step failed in order to avoid
+        // letting the channel queue build up.  In practice, it shouldn't
+        // really matter.
+        //
+        // But given that we're doing this, it's critical that we do it
+        // *after* having fetched the candidate sagas from the database.
+        // It's okay if one of these newly-created sagas doesn't show up in
+        // the candidate list (because it hadn't actually started at the
+        // point where we fetched the candidate list).  The reverse is not
+        // okay: if we did this step before fetching candidates, and a saga
+        // was immediately created and showed up in our candidate list, we'd
+        // erroneously conclude that it needed to be recovered when in fact
+        // it was already running.
+        self.rest_state.update_started_sagas(log, &mut self.sagas_started_rx);
+
+        match result {
+            Ok(db_sagas) => {
+                let plan = recovery::Plan::new(log, &self.rest_state, db_sagas);
+                let (execution, future) =
+                    self.recovery_execute(log, &plan).await;
+                self.rest_state.update_after_pass(&plan, &execution);
+                let last_pass_success =
+                    status::LastPassSuccess::new(&plan, &execution);
+                self.status.update_after_pass(&plan, execution);
+                Some((future, last_pass_success))
+            }
+            Err(error) => {
+                self.status.update_after_failure(&error);
+                None
+            }
+        }
+    }
+
     async fn recovery_execute(
         &self,
         bgtask_log: &slog::Logger,
         plan: &recovery::Plan,
-    ) -> recovery::ExecutionSummary {
+    ) -> (recovery::ExecutionSummary, BoxFuture<'static, Result<(), Error>>)
+    {
         let mut builder = recovery::ExecutionSummaryBuilder::new();
+        let mut completion_futures = Vec::new();
 
         for (saga_id, saga) in plan.sagas_needing_recovery() {
-            let saga_log = self.nexus.log.new(o!(
+            // XXX-dap used to be self.nexus.log.  Is this okay?
+            let saga_log = bgtask_log.new(o!(
                 "saga_name" => saga.name.clone(),
                 "saga_id" => saga_id.to_string(),
             ));
@@ -217,7 +301,8 @@ impl SagaRecovery {
             builder.saga_recovery_start(*saga_id, saga_log.clone());
             match self.recover_one_saga(bgtask_log, &saga_log, saga).await {
                 Ok(completion_future) => {
-                    builder.saga_recovery_success(*saga_id, completion_future);
+                    builder.saga_recovery_success(*saga_id);
+                    completion_futures.push(completion_future);
                 }
                 Err(error) => {
                     // It's essential that we not bail out early just because we
@@ -228,7 +313,12 @@ impl SagaRecovery {
             }
         }
 
-        builder.build()
+        let future = async {
+            futures::future::try_join_all(completion_futures).await?;
+            Ok(())
+        }
+        .boxed();
+        (builder.build(), future)
     }
 
     async fn recover_one_saga(
@@ -249,14 +339,7 @@ impl SagaRecovery {
             "saga_id" => %saga_id,
         );
 
-        // The extra `Arc` is a little ridiculous.  The problem is that Steno
-        // expects (in `sec_client.saga_resume()`) that the user-defined context
-        // will be wrapped in an `Arc`.  But we already use `Arc<SagaContext>`
-        // for our type.  Hence we need two Arcs.
-        let saga_context = Arc::new(Arc::new(SagaContext::new(
-            self.nexus.clone(),
-            saga_logger.clone(),
-        )));
+        let saga_context = self.maker.make_saga_context(saga_logger.clone());
         let saga_completion = self
             .sec_client
             .saga_resume(
@@ -293,57 +376,15 @@ impl SagaRecovery {
     }
 }
 
-impl BackgroundTask for SagaRecovery {
+impl<N: MakeSagaContext> BackgroundTask for SagaRecovery<N> {
     fn activate<'a>(
         &'a mut self,
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
-            let log = &opctx.log;
-            let datastore = &self.datastore;
-
-            // Fetch the list of not-yet-finished sagas that are assigned to
-            // this Nexus instance.
-            let result = list_sagas_in_progress(
-                &self.saga_recovery_opctx,
-                datastore,
-                self.sec_id,
-            )
-            .await;
-
-            // Process any newly-created sagas, adding them to our set of sagas
-            // to ignore during recovery.  We never want to try to recover a
-            // saga that was created within this Nexus's lifetime.
-            //
-            // We do this even if the previous step failed in order to avoid
-            // letting the channel queue build up.  In practice, it shouldn't
-            // really matter.
-            //
-            // But given that we're doing this, it's critical that we do it
-            // *after* having fetched the candidate sagas from the database.
-            // It's okay if one of these newly-created sagas doesn't show up in
-            // the candidate list (because it hadn't actually started at the
-            // point where we fetched the candidate list).  The reverse is not
-            // okay: if we did this step before fetching candidates, and a saga
-            // was immediately created and showed up in our candidate list, we'd
-            // erroneously conclude that it needed to be recovered when in fact
-            // it was already running.
-            self.rest_state
-                .update_started_sagas(log, &mut self.sagas_started_rx);
-
-            match result {
-                Ok(db_sagas) => {
-                    let plan =
-                        recovery::Plan::new(log, &self.rest_state, db_sagas);
-                    let execution = self.recovery_execute(log, &plan).await;
-                    self.rest_state.update_after_pass(&plan, &execution);
-                    self.status.update_after_pass(&plan, execution);
-                }
-                Err(error) => {
-                    self.status.update_after_failure(&error);
-                }
-            };
-
+            // We don't need the future that's returned by this function.
+            // That's only used by the test suite.
+            let _ = self.activate_internal(opctx).await;
             serde_json::to_value(&self.status).unwrap()
         }
         .boxed()
@@ -376,4 +417,439 @@ async fn list_sagas_in_progress(
         }
     };
     result
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use nexus_auth::authn;
+    use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::db::test_utils::UnpluggableCockroachDbSecStore;
+    use nexus_test_utils::{
+        db::test_setup_database, resource_helpers::create_project,
+    };
+    use nexus_test_utils_macros::nexus_test;
+    use nexus_types::internal_api::views::LastResult;
+    use omicron_test_utils::dev::{
+        self,
+        poll::{wait_for_condition, CondCheckError},
+    };
+    use once_cell::sync::Lazy;
+    use pretty_assertions::assert_eq;
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+    use steno::{
+        new_action_noop_undo, Action, ActionContext, ActionError,
+        ActionRegistry, DagBuilder, Node, SagaDag, SagaId, SagaName,
+        SagaResult, SagaType, SecClient,
+    };
+    use uuid::Uuid;
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    // Returns a Cockroach DB, as well as a "datastore" interface (which is the
+    // one more frequently used by Nexus).
+    //
+    // The caller is responsible for calling "cleanup().await" on the returned
+    // CockroachInstance - we would normally wrap this in a drop method, but it
+    // is async.
+    async fn new_db(
+        log: &slog::Logger,
+    ) -> (dev::db::CockroachInstance, Arc<db::DataStore>) {
+        let db = test_setup_database(&log).await;
+        let cfg = nexus_db_queries::db::Config { url: db.pg_config().clone() };
+        let pool = Arc::new(db::Pool::new(log, &cfg));
+        let db_datastore = Arc::new(
+            db::DataStore::new(&log, Arc::clone(&pool), None).await.unwrap(),
+        );
+        (db, db_datastore)
+    }
+
+    // The following is our "saga-under-test". It's a simple two-node operation
+    // that tracks how many times it has been called, and provides a mechanism
+    // for detaching storage to simulate power failure (and meaningfully
+    // recover).
+
+    #[derive(Debug)]
+    struct TestContext {
+        log: slog::Logger,
+
+        // Storage, and instructions on whether or not to detach it
+        // when executing the first saga action.
+        storage: Arc<UnpluggableCockroachDbSecStore>,
+        do_unplug: AtomicBool,
+
+        // Tracks of how many times each node has been reached.
+        n1_count: AtomicU32,
+        n2_count: AtomicU32,
+    }
+
+    impl TestContext {
+        fn new(
+            log: &slog::Logger,
+            storage: Arc<UnpluggableCockroachDbSecStore>,
+        ) -> Self {
+            TestContext {
+                log: log.clone(),
+                storage,
+                do_unplug: AtomicBool::new(false),
+
+                // Counters of how many times the nodes have been invoked.
+                n1_count: AtomicU32::new(0),
+                n2_count: AtomicU32::new(0),
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct TestOp;
+    impl SagaType for TestOp {
+        type ExecContextType = TestContext;
+    }
+
+    impl MakeSagaContext for Arc<TestContext> {
+        type SagaType = TestOp;
+        fn make_saga_context(&self, _log: slog::Logger) -> Arc<TestContext> {
+            self.clone()
+        }
+    }
+
+    static ACTION_N1: Lazy<Arc<dyn Action<TestOp>>> =
+        Lazy::new(|| new_action_noop_undo("n1_action", node_one));
+    static ACTION_N2: Lazy<Arc<dyn Action<TestOp>>> =
+        Lazy::new(|| new_action_noop_undo("n2_action", node_two));
+
+    fn registry_create() -> Arc<ActionRegistry<TestOp>> {
+        let mut registry = ActionRegistry::new();
+        registry.register(Arc::clone(&ACTION_N1));
+        registry.register(Arc::clone(&ACTION_N2));
+        Arc::new(registry)
+    }
+
+    fn saga_object_create() -> Arc<SagaDag> {
+        let mut builder = DagBuilder::new(SagaName::new("test-saga"));
+        builder.append(Node::action("n1_out", "NodeOne", ACTION_N1.as_ref()));
+        builder.append(Node::action("n2_out", "NodeTwo", ACTION_N2.as_ref()));
+        let dag = builder.build().unwrap();
+        Arc::new(SagaDag::new(dag, serde_json::Value::Null))
+    }
+
+    async fn node_one(ctx: ActionContext<TestOp>) -> Result<i32, ActionError> {
+        let uctx = ctx.user_data();
+        uctx.n1_count.fetch_add(1, Ordering::SeqCst);
+        info!(&uctx.log, "ACTION: node_one");
+        // If "do_unplug" is true, we detach storage.
+        //
+        // This prevents the SEC from successfully recording that
+        // this node completed, and acts like a crash.
+        if uctx.do_unplug.load(Ordering::SeqCst) {
+            info!(&uctx.log, "Unplugged storage");
+            uctx.storage.set_unplug(true);
+        }
+        Ok(1)
+    }
+
+    async fn node_two(ctx: ActionContext<TestOp>) -> Result<i32, ActionError> {
+        let uctx = ctx.user_data();
+        uctx.n2_count.fetch_add(1, Ordering::SeqCst);
+        info!(&uctx.log, "ACTION: node_two");
+        Ok(2)
+    }
+
+    // Helper function for setting up storage, SEC, and a test context object.
+    fn create_storage_sec_and_context(
+        log: &slog::Logger,
+        db_datastore: Arc<db::DataStore>,
+        sec_id: db::SecId,
+    ) -> (Arc<UnpluggableCockroachDbSecStore>, SecClient, Arc<TestContext>)
+    {
+        let storage = Arc::new(UnpluggableCockroachDbSecStore::new(
+            sec_id,
+            db_datastore,
+            log.new(o!("component" => "SecStore")),
+        ));
+        let sec_client =
+            steno::sec(log.new(o!("component" => "SEC")), storage.clone());
+        let uctx = Arc::new(TestContext::new(&log, storage.clone()));
+        (storage, sec_client, uctx)
+    }
+
+    // Helper function to run a basic saga that we can use to see which nodes
+    // ran and how many times.
+    async fn run_test_saga(
+        uctx: &Arc<TestContext>,
+        sec_client: &SecClient,
+    ) -> (SagaId, SagaResult) {
+        let saga_id = SagaId(Uuid::new_v4());
+        let future = sec_client
+            .saga_create(
+                saga_id,
+                uctx.clone(),
+                saga_object_create(),
+                registry_create(),
+            )
+            .await
+            .unwrap();
+        sec_client.saga_start(saga_id).await.unwrap();
+        (saga_id, future.await)
+    }
+
+    // Tests the basic case: recovery of a saga that appears (from its log) to
+    // be still running, and which is not currently running already.  In Nexus,
+    // this corresponds to the basic case where a saga was created in a previous
+    // Nexus lifetime and the current process knows nothing about it.
+    #[tokio::test]
+    async fn test_failure_during_saga_can_be_recovered() {
+        // Test setup
+        let logctx =
+            dev::test_setup_log("test_failure_during_saga_can_be_recovered");
+        let log = logctx.log.new(o!());
+        let (mut db, db_datastore) = new_db(&log).await;
+        let sec_id = db::SecId(uuid::Uuid::new_v4());
+        let (storage, sec_client, uctx) =
+            create_storage_sec_and_context(&log, db_datastore.clone(), sec_id);
+        let sec_log = log.new(o!("component" => "SEC"));
+        let opctx = OpContext::for_tests(
+            log,
+            Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
+        );
+        let saga_recovery_opctx =
+            opctx.child_with_authn(authn::Context::internal_saga_recovery());
+
+        // In order to recover a partially-created saga, we need a partial log.
+        // To create one, we'll run the saga normally, but configure it to
+        // unplug the datastore partway through so that the later log entries
+        // don't get written.  Note that the unplugged datastore completes
+        // operations successfully so that the saga will appeaer to complete
+        // successfully.
+        uctx.do_unplug.store(true, Ordering::SeqCst);
+        let (_, result) = run_test_saga(&uctx, &sec_client).await;
+        let output = result.kind.unwrap();
+        assert_eq!(output.lookup_node_output::<i32>("n1_out").unwrap(), 1);
+        assert_eq!(output.lookup_node_output::<i32>("n2_out").unwrap(), 2);
+        assert_eq!(uctx.n1_count.load(Ordering::SeqCst), 1);
+        assert_eq!(uctx.n2_count.load(Ordering::SeqCst), 1);
+
+        // Simulate a crash by terminating the SEC and creating a new one using
+        // the same storage system.
+        //
+        // Update uctx to prevent the storage system from detaching again.
+        sec_client.shutdown().await;
+        let sec_client = steno::sec(sec_log, storage.clone());
+        uctx.storage.set_unplug(false);
+        uctx.do_unplug.store(false, Ordering::SeqCst);
+
+        // Use our background task to recover the saga.  Observe that it re-runs
+        // operations and completes.
+        let sec_client = Arc::new(sec_client);
+        let (_, sagas_started_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut task = SagaRecovery::new(
+            db_datastore.clone(),
+            sec_id,
+            saga_recovery_opctx,
+            uctx.clone(),
+            sec_client.clone(),
+            registry_create(),
+            sagas_started_rx,
+        );
+
+        let Some((completion_future, last_pass_success)) =
+            task.activate_internal(&opctx).await
+        else {
+            panic!("saga recovery failed");
+        };
+
+        assert_eq!(last_pass_success.nrecovered, 1);
+        assert_eq!(last_pass_success.nfailed, 0);
+        assert_eq!(last_pass_success.nskipped, 0);
+
+        // Wait for the recovered saga to complete and make sure it re-ran the
+        // operations that we expected it to.
+        completion_future
+            .await
+            .expect("recovered saga to complete successfully");
+        assert_eq!(uctx.n1_count.load(Ordering::SeqCst), 2);
+        assert_eq!(uctx.n2_count.load(Ordering::SeqCst), 2);
+
+        // Test cleanup
+        drop(task);
+        let sec_client = Arc::try_unwrap(sec_client).unwrap();
+        sec_client.shutdown().await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    // Tests that a saga that has finished (as reflected in the database state)
+    // does not get recovered.
+    #[tokio::test]
+    async fn test_successful_saga_does_not_replay_during_recovery() {
+        // Test setup
+        let logctx = dev::test_setup_log(
+            "test_successful_saga_does_not_replay_during_recovery",
+        );
+        let log = logctx.log.new(o!());
+        let (mut db, db_datastore) = new_db(&log).await;
+        let sec_id = db::SecId(uuid::Uuid::new_v4());
+        let (storage, sec_client, uctx) =
+            create_storage_sec_and_context(&log, db_datastore.clone(), sec_id);
+        let sec_log = log.new(o!("component" => "SEC"));
+        let opctx = OpContext::for_tests(
+            log,
+            Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
+        );
+        let saga_recovery_opctx =
+            opctx.child_with_authn(authn::Context::internal_saga_recovery());
+
+        // Create and start a saga, which we expect to complete successfully.
+        let (_, result) = run_test_saga(&uctx, &sec_client).await;
+        let output = result.kind.unwrap();
+        assert_eq!(output.lookup_node_output::<i32>("n1_out").unwrap(), 1);
+        assert_eq!(output.lookup_node_output::<i32>("n2_out").unwrap(), 2);
+        assert_eq!(uctx.n1_count.load(Ordering::SeqCst), 1);
+        assert_eq!(uctx.n2_count.load(Ordering::SeqCst), 1);
+
+        // Simulate a crash by terminating the SEC and creating a new one using
+        // the same storage system.
+        sec_client.shutdown().await;
+        let sec_client = steno::sec(sec_log, storage.clone());
+
+        // Go through recovery.  We should not find or recover this saga.
+        let sec_client = Arc::new(sec_client);
+        let (_, sagas_started_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut task = SagaRecovery::new(
+            db_datastore.clone(),
+            sec_id,
+            saga_recovery_opctx,
+            uctx.clone(),
+            sec_client.clone(),
+            registry_create(),
+            sagas_started_rx,
+        );
+
+        let Some((_, last_pass_success)) = task.activate_internal(&opctx).await
+        else {
+            panic!("saga recovery failed");
+        };
+
+        assert_eq!(last_pass_success.nrecovered, 0);
+        assert_eq!(last_pass_success.nfailed, 0);
+        assert_eq!(last_pass_success.nskipped, 0);
+
+        // The nodes should not have been replayed.
+        assert_eq!(uctx.n1_count.load(Ordering::SeqCst), 1);
+        assert_eq!(uctx.n2_count.load(Ordering::SeqCst), 1);
+
+        // Test cleanup
+        drop(task);
+        let sec_client = Arc::try_unwrap(sec_client).unwrap();
+        sec_client.shutdown().await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    // Verify the plumbing that exists between regular saga creation and saga
+    // recovery.
+    #[nexus_test(server = crate::Server)]
+    async fn test_nexus_recovery(cptestctx: &ControlPlaneTestContext) {
+        let nexus = &cptestctx.server.server_context().nexus;
+
+        // This is tricky to do.  We're trying to make sure the plumbing is
+        // hooked up so that when a saga is created, the saga recovery task
+        // learns about it.  The purpose of that plumbing is to ensure that we
+        // don't try to recover a task that's already running.  It'd be ideal to
+        // test that directly, but we can't easily control execution well enough
+        // to ensure that the background task runs while the saga is still
+        // running.  However, even if we miss it (i.e., the background task only
+        // runs after the saga completes successfully), there's a side effect we
+        // can look for: the task should report the completed saga as "maybe
+        // done".  On the next activation, it should report that it's removed a
+        // saga from its internal state (because it saw that it was done).
+
+        // Wait for the task to run once.
+        let driver = nexus.background_tasks_driver.get().unwrap();
+        let task_name = driver
+            .tasks()
+            .find(|task_name| task_name.as_str() == "saga_recovery")
+            .expect("expected background task called \"saga_recovery\"");
+        let first_completed = wait_for_condition(
+            || async {
+                let status = driver.task_status(task_name);
+                let LastResult::Completed(completed) = status.last else {
+                    return Err(CondCheckError::<()>::NotYet);
+                };
+                Ok(completed)
+            },
+            &std::time::Duration::from_millis(250),
+            &std::time::Duration::from_secs(15),
+        )
+        .await
+        .unwrap();
+
+        // Make sure that it didn't find anything to do.
+        let status_raw = first_completed.details;
+        let status: status::Report =
+            serde_json::from_value(status_raw).unwrap();
+        let status::LastPass::Success(last_pass_success) = status.last_pass
+        else {
+            panic!("wrong last pass variant");
+        };
+        assert_eq!(last_pass_success.nfound, 0);
+        assert_eq!(last_pass_success.nrecovered, 0);
+        assert_eq!(last_pass_success.nfailed, 0);
+        assert_eq!(last_pass_success.nskipped, 0);
+
+        // Now kick off a saga -- any saga will do.  We don't even care if it
+        // works or not.  In practice, it will have finished by the time this
+        // call completes.
+        let _ = create_project(&cptestctx.external_client, "test").await;
+
+        // Activate the background task.  Wait for one pass.
+        nexus.background_tasks.task_saga_recovery.activate();
+        let _ = wait_for_condition(
+            || async {
+                let status = driver.task_status(task_name);
+                let LastResult::Completed(completed) = status.last else {
+                    panic!("task had completed before; how has it not now?");
+                };
+                if completed.iteration <= first_completed.iteration {
+                    return Err(CondCheckError::<()>::NotYet);
+                }
+                Ok(completed)
+            },
+            &std::time::Duration::from_millis(250),
+            &std::time::Duration::from_secs(15),
+        )
+        .await
+        .unwrap();
+
+        // Activate it again.  This should be enough for it to report having
+        // removed a saga from its state.
+        nexus.background_tasks.task_saga_recovery.activate();
+        let last_pass_success = wait_for_condition(
+            || async {
+                let status = driver.task_status(task_name);
+                let LastResult::Completed(completed) = status.last else {
+                    panic!("task had completed before; how has it not now?");
+                };
+
+                let status: status::Report =
+                    serde_json::from_value(completed.details).unwrap();
+                let status::LastPass::Success(last_pass_success) =
+                    status.last_pass
+                else {
+                    panic!("wrong last pass variant");
+                };
+                if last_pass_success.nremoved > 0 {
+                    return Ok(last_pass_success);
+                }
+
+                Err(CondCheckError::<()>::NotYet)
+            },
+            &std::time::Duration::from_millis(250),
+            &std::time::Duration::from_secs(15),
+        )
+        .await
+        .unwrap();
+
+        assert!(last_pass_success.nremoved > 0);
+    }
 }

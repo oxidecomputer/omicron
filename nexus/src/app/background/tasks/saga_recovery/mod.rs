@@ -133,7 +133,6 @@ mod task;
 #[cfg(test)]
 mod test {
     use super::*;
-    use futures::FutureExt;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeMap;
@@ -303,10 +302,7 @@ mod test {
                     );
                 } else {
                     nok += 1;
-                    summary_builder.saga_recovery_success(
-                        *saga_id,
-                        futures::future::ready(Ok(())).boxed(),
-                    );
+                    summary_builder.saga_recovery_success(*saga_id);
                 }
             }
 

@@ -656,7 +656,7 @@ impl BackgroundTasksInitializer {
         {
             let task_impl = Box::new(saga_recovery::SagaRecovery::new(
                 datastore,
-                args.nexus_id,
+                nexus_db_model::SecId(args.nexus_id),
                 args.saga_recovery_opctx,
                 args.saga_recovery_nexus,
                 args.saga_recovery_sec,

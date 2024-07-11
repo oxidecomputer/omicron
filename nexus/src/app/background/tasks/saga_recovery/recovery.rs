@@ -8,9 +8,6 @@
 use super::status::RecoveryFailure;
 use super::status::RecoverySuccess;
 use chrono::{DateTime, Utc};
-use futures::future::BoxFuture;
-#[cfg(test)]
-use futures::FutureExt;
 use omicron_common::api::external::Error;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -104,11 +101,6 @@ impl RestState {
         }
 
         self.remove_next = plan.sagas_maybe_done().collect();
-    }
-
-    #[cfg(test)]
-    pub fn sagas_started(&self) -> Vec<SagaId> {
-        self.sagas_started.keys().copied().collect()
     }
 }
 
@@ -423,10 +415,6 @@ pub struct ExecutionSummary {
     pub succeeded: Vec<RecoverySuccess>,
     /// list of sagas that failed to be recovered
     pub failed: Vec<RecoveryFailure>,
-    /// list of Futures to enable the consumer to wait for all recovered sagas
-    /// to complete
-    #[cfg(test)]
-    completion_futures: Vec<BoxFuture<'static, Result<(), Error>>>,
 }
 
 impl ExecutionSummary {
@@ -440,25 +428,12 @@ impl ExecutionSummary {
     pub fn into_results(self) -> (Vec<RecoverySuccess>, Vec<RecoveryFailure>) {
         (self.succeeded, self.failed)
     }
-
-    #[cfg(test)]
-    pub fn wait_for_recovered_sagas_to_finish(
-        self,
-    ) -> BoxFuture<'static, Result<(), Error>> {
-        async {
-            futures::future::try_join_all(self.completion_futures).await?;
-            Ok(())
-        }
-        .boxed()
-    }
 }
 
 pub struct ExecutionSummaryBuilder {
     in_progress: BTreeMap<SagaId, slog::Logger>,
     succeeded: Vec<RecoverySuccess>,
     failed: Vec<RecoveryFailure>,
-    #[cfg(test)]
-    completion_futures: Vec<BoxFuture<'static, Result<(), Error>>>,
 }
 
 impl ExecutionSummaryBuilder {
@@ -467,8 +442,6 @@ impl ExecutionSummaryBuilder {
             in_progress: BTreeMap::new(),
             succeeded: Vec::new(),
             failed: Vec::new(),
-            #[cfg(test)]
-            completion_futures: Vec::new(),
         }
     }
 
@@ -478,12 +451,7 @@ impl ExecutionSummaryBuilder {
             "attempted to build execution result while some recoveries are \
             still in progress"
         );
-        ExecutionSummary {
-            succeeded: self.succeeded,
-            failed: self.failed,
-            #[cfg(test)]
-            completion_futures: self.completion_futures,
-        }
+        ExecutionSummary { succeeded: self.succeeded, failed: self.failed }
     }
 
     /// Record that we've started recovering this saga
@@ -497,28 +465,13 @@ impl ExecutionSummaryBuilder {
     }
 
     /// Record that we've successfully recovered this saga
-    pub fn saga_recovery_success(
-        &mut self,
-        saga_id: SagaId,
-        // XXX-dap Right now, the only test code we have calls this function
-        // separately.  If that remains the case, we can put this argument under
-        // cfg[test] and have the caller in task.rs not provide it and have
-        // recover_one not even provide it... but then in that case, there's no
-        // point in any of this machinery.
-        //
-        // On the other hand if we the higher-level tests end up using this,
-        // we'll need to figure out what to do with this since right now this
-        // argument is unused in non-test code.
-        completion_future: BoxFuture<'static, Result<(), Error>>,
-    ) {
+    pub fn saga_recovery_success(&mut self, saga_id: SagaId) {
         let saga_logger = self
             .in_progress
             .remove(&saga_id)
             .expect("recovered saga should have previously started");
         info!(saga_logger, "recovered saga");
         self.succeeded.push(RecoverySuccess { time: Utc::now(), saga_id });
-        #[cfg(test)]
-        self.completion_futures.push(completion_future);
     }
 
     /// Record that we failed to recover this saga
@@ -545,8 +498,6 @@ mod test {
     use crate::app::background::tasks::saga_recovery::test::make_fake_saga;
     use crate::app::background::tasks::saga_recovery::test::make_saga_ids;
     use omicron_test_utils::dev::test_setup_log;
-    use std::sync::Arc;
-    use tokio::sync::Notify;
 
     #[test]
     fn test_read_all_from_channel() {
@@ -698,8 +649,6 @@ mod test {
         assert_eq!(0, last_pass.nskipped);
         assert_eq!(0, last_pass.nremoved);
 
-        assert!(summary.wait_for_recovered_sagas_to_finish().await.is_ok());
-
         // Test a non-trivial ExecutionSummary.
         let BasicPlanTestCase {
             plan,
@@ -719,41 +668,20 @@ mod test {
         }
 
         // "Finish" recovery, in yet a different order (for the same reason as
-        // above).
-        //
-        // We want to test the success and failure cases.  We also want to test
-        // wait_for_recovered_sagas_to_finish(), so we'll provide futures whose
-        // completion we control precisely.
+        // above).  We want to test the success and failure cases.
         //
         // Act like:
         // - recovery for the last saga failed
-        // - recovery for the first saga completes successfully, but the saga
-        //   itself takes some time to finish
-        // - recovery for the other sagas completes successfully and the sagas
-        //   themselves complete immediately
+        // - recovery for the other sagas completes successfully
         to_recover.rotate_left(2);
-        let notify = Arc::new(Notify::new());
         for (i, saga_id) in to_recover.iter().enumerate() {
-            if i == 0 {
-                let n = notify.clone();
-                summary_builder.saga_recovery_success(
-                    *saga_id,
-                    async move {
-                        n.notified().await;
-                        Ok(())
-                    }
-                    .boxed(),
-                );
-            } else if i == to_recover.len() - 1 {
+            if i == to_recover.len() - 1 {
                 summary_builder.saga_recovery_failure(
                     *saga_id,
                     &Error::internal_error("test error"),
                 );
             } else {
-                summary_builder.saga_recovery_success(
-                    *saga_id,
-                    futures::future::ready(Ok(())).boxed(),
-                );
+                summary_builder.saga_recovery_success(*saga_id);
             }
         }
 
@@ -768,16 +696,6 @@ mod test {
         assert_eq!(1, last_pass.nfailed);
         assert_eq!(to_skip.len(), last_pass.nskipped);
         assert_eq!(to_mark_done.len(), last_pass.nremoved);
-
-        // The recovered sagas' completion futures should not yet be done.
-        let mut fut = summary.wait_for_recovered_sagas_to_finish();
-        let is_ready = (&mut fut).now_or_never();
-        assert!(is_ready.is_none());
-
-        // Simulate the last recovered sagas completing, then try again to wait
-        // for completion.  This should complete.
-        notify.notify_waiters();
-        let _ = fut.await;
 
         logctx.cleanup_successful();
     }
