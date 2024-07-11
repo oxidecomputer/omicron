@@ -1,0 +1,136 @@
+format_version = 1
+
+[target]
+name = "ddm_session"
+description = "A session in a Delay-Driven Multipath (DDM) router"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "hostname", "interface", "rack_id", "sled_id" ] },
+]
+
+[[metrics]]
+name = "advertisements_received"
+description = "Total number of advertisements received from a peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "advertisements_sent"
+description = "Total number of advertisements sent to a peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "imported_tunnel_endpoints"
+description = "Current count of tunnel endpoints imported from a peer"
+units = "count"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "imported_underlay_prefixes"
+description = "Current count of underlay prefixes imported from a peer"
+units = "count"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "peer_address_changes"
+description = "Total number of times a peer changed its underlay address"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "peer_expirations"
+description = """\
+Total number of times a peer was expired because we received no \
+messages from it within the expiration threshold\
+"""
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "peer_sessions_established"
+description = "Total number of times a session was established with a peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "solicitations_received"
+description = "Total number of soliciation messages received from a peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "solicitations_sent"
+description = "Total number of soliciation messages sent to a peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "update_send_fail"
+description = "Total number of failures to send an update message to a peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "updates_received"
+description = "Total number of update messages received from a peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "updates_sent"
+description = "Total number of update messages sent to a peer"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[fields.hostname]
+type = "string"
+description = "The hostname of the machine running the DDM router"
+
+[fields.interface]
+type = "string"
+description = "The host interface on which the DDM session is running"
+
+[fields.rack_id]
+type = "uuid"
+description = "ID of the rack running the DDM router"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID of the sled running the DDM router"
