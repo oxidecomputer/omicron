@@ -733,7 +733,7 @@ mod test {
         // normal SRV records.
         let boundary_ntp_ips = blueprint_dns_zone
             .records
-            .remove(&format!("{BOUNDARY_NTP_DNS_NAME}.{DNS_ZONE}"))
+            .remove(BOUNDARY_NTP_DNS_NAME)
             .expect("missing boundary NTP DNS name")
             .into_iter()
             .map(|record| match record {
