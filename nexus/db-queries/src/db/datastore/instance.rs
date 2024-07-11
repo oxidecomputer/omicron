@@ -26,6 +26,7 @@ use crate::db::model::Name;
 use crate::db::model::Project;
 use crate::db::model::Sled;
 use crate::db::model::Vmm;
+use crate::db::model::VmmState;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateAndQueryResult;
@@ -581,15 +582,11 @@ impl DataStore {
         Ok(updated)
     }
 
-    /// Updates an instance record by setting the instance's migration ID.
-    //
-    // TODO-design It's tempting to return the updated state of the Instance
-    // here because it's convenient for consumers and by using a RETURNING
-    // clause, we could ensure that the "update" and "fetch" are atomic.
-    // But in the unusual case that we _don't_ update the row because our
-    // update is older than the one in the database, we would have to fetch
-    // the current state explicitly.  For now, we'll just require consumers
-    // to explicitly fetch the state if they want that.
+    /// Updates an instance record by setting the instance's migration ID to the
+    /// provided `migration_id` and the target VMM ID to the provided
+    /// `target_propolis_id`, if the instance does not currently have an active
+    /// migration, and the active VMM is in the [`VmmState::Running`] or
+    /// [`VmmState::Rebooting`] states.
     pub async fn instance_set_migration_ids(
         &self,
         opctx: &OpContext,
@@ -597,18 +594,33 @@ impl DataStore {
         src_propolis_id: PropolisUuid,
         migration_id: Uuid,
         target_propolis_id: PropolisUuid,
-    ) -> Result<bool, Error> {
+    ) -> Result<Instance, Error> {
         use db::schema::instance::dsl;
+        use db::schema::vmm::dsl as vmm_dsl;
+
+        // Only allow migrating out if the active VMM is running or rebooting.
+        const ALLOWED_ACTIVE_VMM_STATES: &[VmmState] =
+            &[VmmState::Running, VmmState::Rebooting];
 
         let instance_id = instance_id.into_untyped_uuid();
         let target_propolis_id = target_propolis_id.into_untyped_uuid();
         let src_propolis_id = src_propolis_id.into_untyped_uuid();
+
+        // Subquery for determining whether the active VMM is in a state where
+        // it can be migrated out of. This returns the VMM row's instance ID, so
+        // that we can use it in a `filter` on the update query.
+        let vmm_ok = vmm_dsl::vmm
+            .filter(vmm_dsl::id.eq(src_propolis_id))
+            .filter(vmm_dsl::state.eq_any(ALLOWED_ACTIVE_VMM_STATES))
+            .select(vmm_dsl::instance_id);
+
         let updated = diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(instance_id))
             .filter(dsl::migration_id.is_null())
             .filter(dsl::target_propolis_id.is_null())
             .filter(dsl::active_propolis_id.eq(src_propolis_id))
+            .filter(dsl::id.eq_any(vmm_ok))
             .set((
                 dsl::migration_id.eq(Some(migration_id)),
                 dsl::target_propolis_id.eq(Some(target_propolis_id)),
@@ -616,6 +628,9 @@ impl DataStore {
                 dsl::state_generation.eq(dsl::state_generation + 1),
                 dsl::time_state_updated.eq(Utc::now()),
             ))
+            // TODO(eliza): it's too bad we can't do `check_if_exists` with both
+            // the instance and active VMM, so that we could return a nicer
+            // error in the case where the active VMM is in the wrong state...
             .check_if_exists::<Instance>(instance_id.into_untyped_uuid())
             .execute_and_check(&*self.pool_connection_authorized(&opctx).await?)
             .await
@@ -631,12 +646,12 @@ impl DataStore {
 
         match updated {
             // If we updated the instance, that's great! Good job team!
-            UpdateAndQueryResult { status: UpdateStatus::Updated, .. } => {
-                Ok(true)
+            UpdateAndQueryResult { status: UpdateStatus::Updated, found } => {
+                Ok(found)
             }
             // No update was performed because the migration ID has already been
             // set to the ID we were trying to set it to. That's fine, count it
-            // as a success.
+            // as a success for saga action idempotency reasons.
             UpdateAndQueryResult { found, .. }
                 if found.runtime_state.migration_id == Some(migration_id) =>
             {
@@ -648,7 +663,7 @@ impl DataStore {
                     found.runtime_state.propolis_id,
                     Some(src_propolis_id)
                 );
-                Ok(false)
+                Ok(found)
             }
 
             // On the other hand, if there was already a different migration ID,
@@ -683,7 +698,7 @@ impl DataStore {
             } => {
                 slog::warn!(
                     opctx.log,
-                    "failed to set instance migration IDs: one of its Propolis IDs was what way we anticipated!";
+                    "failed to set instance migration IDs: invalid instance or VMM runtime state";
                     "instance_id" => %instance_id,
                     "desired_migration_id" => %migration_id,
                     "desired_active_propolis_id" => %src_propolis_id,
