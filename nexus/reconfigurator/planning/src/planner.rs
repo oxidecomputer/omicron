@@ -16,6 +16,7 @@ use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
@@ -144,8 +145,10 @@ impl<'a> Planner<'a> {
 
             // Check 2: have all this sled's zones been expunged? It's possible
             // we ourselves have made this change, which is fine.
-            let all_zones_expunged =
-                self.blueprint.current_sled_zones(sled_id).all(|zone| {
+            let all_zones_expunged = self
+                .blueprint
+                .current_sled_zones(sled_id, BlueprintZoneFilter::All)
+                .all(|zone| {
                     zone.disposition == BlueprintZoneDisposition::Expunged
                 });
 
@@ -187,7 +190,7 @@ impl<'a> Planner<'a> {
             if !commissioned_sled_ids.contains(&sled_id) {
                 let num_zones = self
                     .blueprint
-                    .current_sled_zones(sled_id)
+                    .current_sled_zones(sled_id, BlueprintZoneFilter::All)
                     .filter(|zone| {
                         zone.disposition != BlueprintZoneDisposition::Expunged
                     })
@@ -382,7 +385,10 @@ impl<'a> Planner<'a> {
                                 .count(),
                             discretionary_zones: self
                                 .blueprint
-                                .current_sled_zones(sled_id)
+                                .current_sled_zones(
+                                    sled_id,
+                                    BlueprintZoneFilter::ShouldBeRunning,
+                                )
                                 .filter_map(|zone| {
                                     DiscretionaryOmicronZone::from_zone_type(
                                         &zone.zone_type,
@@ -417,7 +423,7 @@ impl<'a> Planner<'a> {
         for sled_id in self.input.all_sled_ids(SledFilter::InService) {
             let num_zones_of_kind = self
                 .blueprint
-                .sled_num_zones_of_kind(sled_id, zone_kind.into());
+                .sled_num_running_zones_of_kind(sled_id, zone_kind.into());
             num_existing_kind_zones += num_zones_of_kind;
         }
 
@@ -495,9 +501,10 @@ impl<'a> Planner<'a> {
             // total zones go on a given sled, but we have a count of how many
             // we want to add. Construct a new target count. Maybe the builder
             // should provide a different interface here?
-            let new_total_zone_count =
-                self.blueprint.sled_num_zones_of_kind(sled_id, kind.into())
-                    + additional_zone_count;
+            let new_total_zone_count = self
+                .blueprint
+                .sled_num_running_zones_of_kind(sled_id, kind.into())
+                + additional_zone_count;
 
             let result = match kind {
                 DiscretionaryOmicronZone::BoundaryNtp => self
@@ -1394,10 +1401,17 @@ mod test {
         assert_eq!(diff.sleds_removed.len(), 0);
         assert_eq!(diff.sleds_modified.len(), 1);
 
-        // We should be removing all zones using this zpool
-        assert_eq!(diff.zones.added.len(), 0);
+        // We should be removing all zones using this zpool. Because we're
+        // removing the NTP zone, we should add a new one.
+        assert_eq!(diff.zones.added.len(), 1);
         assert_eq!(diff.zones.removed.len(), 0);
         assert_eq!(diff.zones.modified.len(), 1);
+
+        let (_zone_id, added_zones) = diff.zones.added.iter().next().unwrap();
+        assert_eq!(added_zones.zones.len(), 1);
+        for zone in &added_zones.zones {
+            assert_eq!(zone.kind(), ZoneKind::InternalNtp);
+        }
 
         let (_zone_id, modified_zones) =
             diff.zones.modified.iter().next().unwrap();

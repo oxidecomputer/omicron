@@ -750,8 +750,8 @@ fn cmd_blueprint_edit(
 
     let label = match args.edit_command {
         BlueprintEditCommands::AddNexus { sled_id } => {
-            let current =
-                builder.sled_num_zones_of_kind(sled_id, ZoneKind::Nexus);
+            let current = builder
+                .sled_num_running_zones_of_kind(sled_id, ZoneKind::Nexus);
             let added = builder
                 .sled_ensure_zone_multiple_nexus(sled_id, current + 1)
                 .context("failed to add Nexus zone")?;
@@ -762,8 +762,8 @@ fn cmd_blueprint_edit(
             format!("added Nexus zone to sled {}", sled_id)
         }
         BlueprintEditCommands::AddCockroach { sled_id } => {
-            let current =
-                builder.sled_num_zones_of_kind(sled_id, ZoneKind::CockroachDb);
+            let current = builder
+                .sled_num_running_zones_of_kind(sled_id, ZoneKind::CockroachDb);
             let added = builder
                 .sled_ensure_zone_multiple_cockroachdb(sled_id, current + 1)
                 .context("failed to add CockroachDB zone")?;

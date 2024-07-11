@@ -345,8 +345,9 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn current_sled_zones(
         &self,
         sled_id: SledUuid,
+        filter: BlueprintZoneFilter,
     ) -> impl Iterator<Item = &BlueprintZoneConfig> {
-        self.zones.current_sled_zones(sled_id).map(|(config, _)| config)
+        self.zones.current_sled_zones(sled_id, filter).map(|(config, _)| config)
     }
 
     /// Assemble a final [`Blueprint`] based on the contents of the builder
@@ -436,7 +437,8 @@ impl<'a> BlueprintBuilder<'a> {
         // Do any zones need to be marked expunged?
         let mut zones_to_expunge = BTreeMap::new();
 
-        let sled_zones = self.zones.current_sled_zones(sled_id);
+        let sled_zones =
+            self.zones.current_sled_zones(sled_id, BlueprintZoneFilter::All);
         for (zone_config, state) in sled_zones {
             let zone_id = zone_config.id;
             let log = log.new(o!(
@@ -624,7 +626,7 @@ impl<'a> BlueprintBuilder<'a> {
         // If there's already an NTP zone on this sled, do nothing.
         let has_ntp = self
             .zones
-            .current_sled_zones(sled_id)
+            .current_sled_zones(sled_id, BlueprintZoneFilter::ShouldBeRunning)
             .any(|(z, _)| z.zone_type.is_ntp());
         if has_ntp {
             return Ok(Ensure::NotNeeded);
@@ -691,8 +693,10 @@ impl<'a> BlueprintBuilder<'a> {
         let pool_name = ZpoolName::new_external(zpool_id);
 
         // If this sled already has a Crucible zone on this pool, do nothing.
-        let has_crucible_on_this_pool =
-            self.zones.current_sled_zones(sled_id).any(|(z, _)| {
+        let has_crucible_on_this_pool = self
+            .zones
+            .current_sled_zones(sled_id, BlueprintZoneFilter::ShouldBeRunning)
+            .any(|(z, _)| {
                 matches!(
                     &z.zone_type,
                     BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
@@ -743,13 +747,13 @@ impl<'a> BlueprintBuilder<'a> {
     ///
     /// This value may change before a blueprint is actually generated if
     /// further changes are made to the builder.
-    pub fn sled_num_zones_of_kind(
+    pub fn sled_num_running_zones_of_kind(
         &self,
         sled_id: SledUuid,
         kind: ZoneKind,
     ) -> usize {
         self.zones
-            .current_sled_zones(sled_id)
+            .current_sled_zones(sled_id, BlueprintZoneFilter::ShouldBeRunning)
             .filter(|(z, _)| z.zone_type.kind() == kind)
             .count()
     }
@@ -797,7 +801,8 @@ impl<'a> BlueprintBuilder<'a> {
         external_dns_servers: Vec<IpAddr>,
     ) -> Result<EnsureMultiple, Error> {
         // How many Nexus zones do we need to add?
-        let nexus_count = self.sled_num_zones_of_kind(sled_id, ZoneKind::Nexus);
+        let nexus_count =
+            self.sled_num_running_zones_of_kind(sled_id, ZoneKind::Nexus);
         let num_nexus_to_add = match desired_zone_count.checked_sub(nexus_count)
         {
             Some(0) => return Ok(EnsureMultiple::NotNeeded),
@@ -880,7 +885,7 @@ impl<'a> BlueprintBuilder<'a> {
     ) -> Result<EnsureMultiple, Error> {
         // How many CRDB zones do we need to add?
         let crdb_count =
-            self.sled_num_zones_of_kind(sled_id, ZoneKind::CockroachDb);
+            self.sled_num_running_zones_of_kind(sled_id, ZoneKind::CockroachDb);
         let num_crdb_to_add = match desired_zone_count.checked_sub(crdb_count) {
             Some(0) => return Ok(EnsureMultiple::NotNeeded),
             Some(n) => n,
@@ -967,8 +972,9 @@ impl<'a> BlueprintBuilder<'a> {
         //
         // TODO-cleanup Is there ever a case where we might want to do some kind
         // of graceful shutdown of an internal NTP zone? Seems unlikely...
-        let mut internal_ntp_zone_id_iter =
-            sled_zones.iter_zones().filter_map(|config| {
+        let mut internal_ntp_zone_id_iter = sled_zones
+            .iter_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .filter_map(|config| {
                 if matches!(
                     config.zone().zone_type,
                     BlueprintZoneType::InternalNtp(_)
@@ -1123,7 +1129,10 @@ impl<'a> BlueprintBuilder<'a> {
 
                 // Record each of the sled's zones' underlay addresses as
                 // allocated.
-                for (z, _) in self.zones.current_sled_zones(sled_id) {
+                for (z, _) in self
+                    .zones
+                    .current_sled_zones(sled_id, BlueprintZoneFilter::All)
+                {
                     allocator.reserve(z.underlay_address);
                 }
 
@@ -1152,7 +1161,9 @@ impl<'a> BlueprintBuilder<'a> {
         // sled already has a durable zone of that kind on the same zpool. Build
         // up a set of invalid zpools for this sled/kind pair.
         let mut skip_zpools = BTreeSet::new();
-        for zone_config in self.current_sled_zones(sled_id) {
+        for zone_config in self
+            .current_sled_zones(sled_id, BlueprintZoneFilter::ShouldBeRunning)
+        {
             if let Some(zpool) = zone_config.zone_type.durable_zpool() {
                 if zone_kind == zone_config.zone_type.kind() {
                     skip_zpools.insert(zpool);
@@ -1281,17 +1292,21 @@ impl<'a> BlueprintZonesBuilder<'a> {
     pub fn current_sled_zones(
         &self,
         sled_id: SledUuid,
+        filter: BlueprintZoneFilter,
     ) -> Box<dyn Iterator<Item = (&BlueprintZoneConfig, BuilderZoneState)> + '_>
     {
         if let Some(sled_zones) = self.changed_zones.get(&sled_id) {
-            Box::new(sled_zones.iter_zones().map(|z| (z.zone(), z.state())))
-        } else if let Some(parent_zones) = self.parent_zones.get(&sled_id) {
             Box::new(
-                parent_zones
-                    .zones
-                    .iter()
-                    .map(|z| (z, BuilderZoneState::Unchanged)),
+                sled_zones.iter_zones(filter).map(|z| (z.zone(), z.state())),
             )
+        } else if let Some(parent_zones) = self.parent_zones.get(&sled_id) {
+            Box::new(parent_zones.zones.iter().filter_map(move |z| {
+                if z.disposition.matches(filter) {
+                    Some((z, BuilderZoneState::Unchanged))
+                } else {
+                    None
+                }
+            }))
         } else {
             Box::new(std::iter::empty())
         }
