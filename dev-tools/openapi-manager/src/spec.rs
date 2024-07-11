@@ -7,7 +7,7 @@ use std::{fmt, io::Write};
 use anyhow::{Context, Result};
 use atomicwrites::AtomicFile;
 use camino::{Utf8Path, Utf8PathBuf};
-use dropshot::{ApiDescription, ApiDescriptionBuildError, StubContext};
+use dropshot::{ApiDescription, ApiDescriptionBuildErrors, StubContext};
 use fs_err as fs;
 use openapiv3::OpenAPI;
 
@@ -44,7 +44,7 @@ pub struct ApiSpec {
     /// The API description function, typically a reference to
     /// `stub_api_description`.
     pub api_description:
-        fn() -> Result<ApiDescription<StubContext>, ApiDescriptionBuildError>,
+        fn() -> Result<ApiDescription<StubContext>, ApiDescriptionBuildErrors>,
 
     /// The JSON filename to write the API description to.
     pub filename: String,
