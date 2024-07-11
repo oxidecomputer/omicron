@@ -1056,6 +1056,25 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(EnsureMultiple::Changed { added: 1, removed: 1 })
     }
 
+    pub fn sled_expunge_zone(
+        &mut self,
+        sled_id: SledUuid,
+        zone_id: OmicronZoneUuid,
+    ) -> Result<(), Error> {
+        // Check the sled id and return an appropriate error if it's invalid.
+        let _ = self.sled_resources(sled_id)?;
+
+        let sled_zones = self.zones.change_sled_zones(sled_id);
+        sled_zones.expunge_zone(zone_id).map_err(|error| {
+            Error::Planner(
+                anyhow!(error)
+                    .context("failed to expunge zone from sled {sled_id}"),
+            )
+        })?;
+
+        Ok(())
+    }
+
     fn sled_add_zone(
         &mut self,
         sled_id: SledUuid,

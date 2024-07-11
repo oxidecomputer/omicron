@@ -34,6 +34,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VnicUuid;
 use reedline::{Reedline, Signal};
@@ -435,6 +436,8 @@ enum BlueprintEditCommands {
     },
     /// add a CockroachDB instance to a particular sled
     AddCockroach { sled_id: SledUuid },
+    /// expunge a particular zone from a particular sled
+    ExpungeZone { sled_id: SledUuid, zone_id: OmicronZoneUuid },
 }
 
 #[derive(Debug, Args)]
@@ -769,6 +772,12 @@ fn cmd_blueprint_edit(
                 EnsureMultiple::Changed { added: 1, removed: 0 }
             );
             format!("added CockroachDB zone to sled {}", sled_id)
+        }
+        BlueprintEditCommands::ExpungeZone { sled_id, zone_id } => {
+            builder
+                .sled_expunge_zone(sled_id, zone_id)
+                .context("failed to expunge zone")?;
+            format!("expunged zone {zone_id} from sled {sled_id}")
         }
     };
 
