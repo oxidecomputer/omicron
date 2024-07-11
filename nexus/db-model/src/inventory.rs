@@ -7,10 +7,10 @@
 use crate::omicron_zone_config::{OmicronZone, OmicronZoneNic};
 use crate::schema::{
     hw_baseboard_id, inv_caboose, inv_collection, inv_collection_error,
-    inv_omicron_zone, inv_omicron_zone_nic, inv_physical_disk,
-    inv_root_of_trust, inv_root_of_trust_page, inv_service_processor,
-    inv_sled_agent, inv_sled_omicron_zones, inv_zpool, sw_caboose,
-    sw_root_of_trust_page,
+    inv_nvme_disk_firmware, inv_omicron_zone, inv_omicron_zone_nic,
+    inv_physical_disk, inv_root_of_trust, inv_root_of_trust_page,
+    inv_service_processor, inv_sled_agent, inv_sled_omicron_zones, inv_zpool,
+    sw_caboose, sw_root_of_trust_page,
 };
 use crate::typed_uuid::DbTypedUuid;
 use crate::PhysicalDiskKind;
@@ -32,7 +32,8 @@ use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZonesConfig,
 };
 use nexus_types::inventory::{
-    BaseboardId, Caboose, Collection, PowerState, RotPage, RotSlot,
+    BaseboardId, Caboose, Collection, PhysicalDiskFirmware, PowerState,
+    RotPage, RotSlot,
 };
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_uuid_kinds::CollectionKind;
@@ -881,16 +882,40 @@ impl InvPhysicalDisk {
     }
 }
 
-impl From<InvPhysicalDisk> for nexus_types::inventory::PhysicalDisk {
-    fn from(disk: InvPhysicalDisk) -> Self {
-        Self {
-            identity: omicron_common::disk::DiskIdentity {
-                vendor: disk.vendor,
-                serial: disk.serial,
-                model: disk.model,
-            },
-            variant: disk.variant.into(),
-            slot: disk.slot,
+/// See [`nexus_types::inventory::PhysicalDiskFirmware::Nvme`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_nvme_disk_firmware)]
+pub struct InvNvmeDiskFirmware {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub slot: i64,
+    pub active_slot: SqlU8,
+    pub next_active_slot: Option<SqlU8>,
+    pub number_of_slots: SqlU8,
+    pub slot1_is_read_only: bool,
+    pub slot_firmware_versions: Vec<Option<String>>,
+}
+
+impl InvNvmeDiskFirmware {
+    pub fn try_from_physical_disk(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        disk: nexus_types::inventory::PhysicalDisk,
+    ) -> Option<Self> {
+        match disk.firmware {
+            PhysicalDiskFirmware::Unknown => None,
+            PhysicalDiskFirmware::Nvme(firmware) => Some(Self {
+                inv_collection_id: inv_collection_id.into(),
+                sled_id: sled_id.into(),
+                slot: disk.slot,
+                active_slot: firmware.active_slot.into(),
+                next_active_slot: firmware
+                    .next_active_slot
+                    .map(|nas| nas.into()),
+                number_of_slots: firmware.number_of_slots.into(),
+                slot1_is_read_only: firmware.slot1_is_read_only,
+                slot_firmware_versions: firmware.slot_firmware_versions,
+            }),
         }
     }
 }
