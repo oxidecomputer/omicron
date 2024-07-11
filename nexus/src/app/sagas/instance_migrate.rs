@@ -365,24 +365,6 @@ async fn sim_set_migration_ids(
             dst_propolis_id,
         )
         .await
-        .map_err(ActionError::action_failed)?;
-
-    // Refetch the instance to make sure we have the correct thing to send to
-    // sled-agents.
-    // TODO(eliza): we *could* probably just munge the previous
-    // `InstanceRuntimeState` to have the migration IDs set, but...that feels
-    // sketchy. Doing another db query here to get the latest state is kinda sad
-    // but whatever.
-    let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())
-        .instance_id(db_instance.id())
-        .lookup_for(authz::Action::Read)
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    osagactx
-        .datastore()
-        .instance_refetch(&opctx, &authz_instance)
-        .await
         .map_err(ActionError::action_failed)
 }
 

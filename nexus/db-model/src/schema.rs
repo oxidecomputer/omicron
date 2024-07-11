@@ -425,6 +425,8 @@ table! {
     }
 }
 
+joinable!(instance -> vmm (active_propolis_id));
+
 table! {
     vmm (id) {
         id -> Uuid,

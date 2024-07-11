@@ -8,7 +8,7 @@ use serde::Serialize;
 use std::fmt;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug)]
+    #[derive(SqlType, Debug, Clone)]
     #[diesel(postgres_type(name = "vmm_state", schema = "public"))]
     pub struct VmmStateEnum;
 
