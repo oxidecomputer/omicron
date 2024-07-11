@@ -838,11 +838,6 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(migration.target_state, MigrationState::Pending.into());
     assert_eq!(migration.source_state, MigrationState::Pending.into());
 
-    // Explicitly simulate the migration action on the target. Simulated
-    // migrations always succeed. The state transition on the target is
-    // sufficient to move the instance back into a Running state (strictly
-    // speaking no further updates from the source are required if the target
-    // successfully takes over).
     instance_simulate_migration_source(
         cptestctx,
         nexus,
@@ -851,6 +846,10 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         migration_id,
     )
     .await;
+    // TODO(eliza): it would be nice to single-step both simulated sled agents
+    // through each migration phase and assert that we see all the intermediate
+    // states, instead of just letting them run straight to completion...
+
     // Ensure that both sled agents report that the migration has completed.
     instance_simulate_on_sled(cptestctx, nexus, original_sled, instance_id)
         .await;
