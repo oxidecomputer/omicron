@@ -124,9 +124,19 @@
 //! point during this recovery pass and they can be safely ignored until the
 //! next pass.
 
-// XXX-dap don't make these pub, just put the stuff in here
-pub mod recovery;
-pub mod status;
+mod recovery;
+mod status;
+
+pub use recovery::Execution;
+pub use recovery::ExecutionBuilder;
+pub use recovery::Plan;
+pub use recovery::RestState;
+pub use status::DebuggingHistory;
+pub use status::LastPass;
+pub use status::LastPassSuccess;
+pub use status::RecoveryFailure;
+pub use status::RecoverySuccess;
+pub use status::Report;
 
 #[cfg(test)]
 mod test {

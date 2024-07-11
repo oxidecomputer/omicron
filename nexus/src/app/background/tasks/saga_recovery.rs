@@ -6,17 +6,17 @@
 // - counters (maybe plumb these into Oximeter?)
 // - task status reported by omdb
 // - log entries
-// XXX-dap TODO-coverage everything here
+// - test coverage
 // XXX-dap omdb support
 // XXX-dap TODO-doc everything here
 // XXX-dap sync with "main"
-// XXX-dap move guts to separate crate?
 // XXX-dap write up summary for PR, including the option of doing recovery in
 // Steno with read methods on SecStore?  also could have added purge option to
 // SEC and then relied on Steno to know if a thing was alive.  (can't do it
 // without a purge that's invoked by recovery)
 // XXX-dap when we consider a saga done, we should ask steno in order to confirm
 
+/! XXX-dap this block comment is in two places
 //! Saga recovery
 //!
 //! ## Review of distributed sagas
@@ -148,8 +148,6 @@ use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
-use nexus_saga_recovery::recovery;
-use nexus_saga_recovery::status;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use std::collections::BTreeMap;
@@ -196,10 +194,10 @@ pub struct SagaRecovery<N: MakeSagaContext> {
     sagas_started_rx: mpsc::UnboundedReceiver<SagaId>,
 
     /// recovery state persisted between passes
-    rest_state: recovery::RestState,
+    rest_state: nexus_saga_recovery::RestState,
 
     /// status reporting
-    status: status::Report,
+    status: nexus_saga_recovery::Report,
 }
 
 impl<N: MakeSagaContext> SagaRecovery<N> {
@@ -220,8 +218,8 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
             sec_client: sec,
             registry,
             sagas_started_rx,
-            rest_state: recovery::RestState::new(),
-            status: status::Report::new(),
+            rest_state: nexus_saga_recovery::RestState::new(),
+            status: nexus_saga_recovery::Report::new(),
         }
     }
 
@@ -230,8 +228,10 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
     async fn activate_internal(
         &mut self,
         opctx: &OpContext,
-    ) -> Option<(BoxFuture<'static, Result<(), Error>>, status::LastPassSuccess)>
-    {
+    ) -> Option<(
+        BoxFuture<'static, Result<(), Error>>,
+        nexus_saga_recovery::LastPassSuccess,
+    )> {
         let log = &opctx.log;
         let datastore = &self.datastore;
 
@@ -265,12 +265,18 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
 
         match result {
             Ok(db_sagas) => {
-                let plan = recovery::Plan::new(log, &self.rest_state, db_sagas);
+                let plan = nexus_saga_recovery::Plan::new(
+                    log,
+                    &self.rest_state,
+                    db_sagas,
+                );
                 let (execution, future) =
                     self.recovery_execute(log, &plan).await;
                 self.rest_state.update_after_pass(&plan, &execution);
                 let last_pass_success =
-                    status::LastPassSuccess::new(&plan, &execution);
+                    nexus_saga_recovery::LastPassSuccess::new(
+                        &plan, &execution,
+                    );
                 self.status.update_after_pass(&plan, execution);
                 Some((future, last_pass_success))
             }
@@ -284,9 +290,10 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
     async fn recovery_execute(
         &self,
         bgtask_log: &slog::Logger,
-        plan: &recovery::Plan,
-    ) -> (recovery::Execution, BoxFuture<'static, Result<(), Error>>) {
-        let mut builder = recovery::ExecutionBuilder::new();
+        plan: &nexus_saga_recovery::Plan,
+    ) -> (nexus_saga_recovery::Execution, BoxFuture<'static, Result<(), Error>>)
+    {
+        let mut builder = nexus_saga_recovery::ExecutionBuilder::new();
         let mut completion_futures = Vec::new();
 
         for (saga_id, saga) in plan.sagas_needing_recovery() {
@@ -784,9 +791,10 @@ mod test {
 
         // Make sure that it didn't find anything to do.
         let status_raw = first_completed.details;
-        let status: status::Report =
+        let status: nexus_saga_recovery::Report =
             serde_json::from_value(status_raw).unwrap();
-        let status::LastPass::Success(last_pass_success) = status.last_pass
+        let nexus_saga_recovery::LastPass::Success(last_pass_success) =
+            status.last_pass
         else {
             panic!("wrong last pass variant");
         };
@@ -829,9 +837,9 @@ mod test {
                     panic!("task had completed before; how has it not now?");
                 };
 
-                let status: status::Report =
+                let status: nexus_saga_recovery::Report =
                     serde_json::from_value(completed.details).unwrap();
-                let status::LastPass::Success(last_pass_success) =
+                let nexus_saga_recovery::LastPass::Success(last_pass_success) =
                     status.last_pass
                 else {
                     panic!("wrong last pass variant");
