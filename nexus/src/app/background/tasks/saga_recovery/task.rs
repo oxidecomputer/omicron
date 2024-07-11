@@ -11,7 +11,6 @@
 // XXX-dap TODO-doc everything here
 // XXX-dap sync with "main"
 // XXX-dap move guts to separate crate?
-// XXX-dap move debug thing to a trait?
 // XXX-dap write up summary for PR, including the option of doing recovery in
 // Steno with read methods on SecStore?  also could have added purge option to
 // SEC and then relied on Steno to know if a thing was alive.  (can't do it

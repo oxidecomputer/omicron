@@ -108,20 +108,18 @@ impl LastPassSuccess {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(transparent)]
 pub struct DebuggingHistory<T> {
-    size: usize,
     ring: VecDeque<T>,
 }
 
 impl<T> DebuggingHistory<T> {
     pub fn new(size: usize) -> DebuggingHistory<T> {
-        DebuggingHistory { size, ring: VecDeque::with_capacity(size) }
+        DebuggingHistory { ring: VecDeque::with_capacity(size) }
     }
 
     pub fn append(&mut self, t: T) {
-        let len = self.ring.len();
-        assert!(len <= self.size);
-        if len == self.size {
+        if self.ring.len() == self.ring.capacity() {
             let _ = self.ring.pop_front();
         }
         self.ring.push_back(t);
