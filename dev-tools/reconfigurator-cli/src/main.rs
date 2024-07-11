@@ -781,7 +781,16 @@ fn cmd_blueprint_edit(
         }
     };
 
-    let new_blueprint = builder.build();
+    let mut new_blueprint = builder.build();
+
+    // We want to preserve the CockroachDB cluster settings from the parent
+    // blueprint.
+    new_blueprint
+        .cockroachdb_fingerprint
+        .clone_from(&blueprint.cockroachdb_fingerprint);
+    new_blueprint.cockroachdb_setting_preserve_downgrade =
+        blueprint.cockroachdb_setting_preserve_downgrade;
+
     let rv = format!(
         "blueprint {} created from blueprint {}: {}",
         new_blueprint.id, blueprint_id, label
