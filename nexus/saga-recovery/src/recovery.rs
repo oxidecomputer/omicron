@@ -77,11 +77,7 @@ impl RestState {
     }
 
     /// Update based on the results of a recovery pass.
-    pub fn update_after_pass(
-        &mut self,
-        plan: &Plan,
-        execution: &ExecutionSummary,
-    ) {
+    pub fn update_after_pass(&mut self, plan: &Plan, execution: &Execution) {
         let time_observed = Utc::now();
 
         for saga_id in plan.sagas_inferred_done() {
@@ -411,14 +407,14 @@ impl<'a> PlanBuilder<'a> {
 /// `recovery_execute()`) via [`SagaRecoveryDoneBuilder::new()`].  This seems a
 /// little overboard for such an internal structure but it helps separate
 /// concerns, particularly when it comes to testing.
-pub struct ExecutionSummary {
+pub struct Execution {
     /// list of sagas that were successfully recovered
     pub succeeded: Vec<RecoverySuccess>,
     /// list of sagas that failed to be recovered
     pub failed: Vec<RecoveryFailure>,
 }
 
-impl ExecutionSummary {
+impl Execution {
     /// Iterate over the sagas that were successfully recovered during this pass
     pub fn sagas_recovered_successfully(
         &self,
@@ -431,28 +427,28 @@ impl ExecutionSummary {
     }
 }
 
-pub struct ExecutionSummaryBuilder {
+pub struct ExecutionBuilder {
     in_progress: BTreeMap<SagaId, slog::Logger>,
     succeeded: Vec<RecoverySuccess>,
     failed: Vec<RecoveryFailure>,
 }
 
-impl ExecutionSummaryBuilder {
-    pub fn new() -> ExecutionSummaryBuilder {
-        ExecutionSummaryBuilder {
+impl ExecutionBuilder {
+    pub fn new() -> ExecutionBuilder {
+        ExecutionBuilder {
             in_progress: BTreeMap::new(),
             succeeded: Vec::new(),
             failed: Vec::new(),
         }
     }
 
-    pub fn build(self) -> ExecutionSummary {
+    pub fn build(self) -> Execution {
         assert!(
             self.in_progress.is_empty(),
             "attempted to build execution result while some recoveries are \
             still in progress"
         );
-        ExecutionSummary { succeeded: self.succeeded, failed: self.failed }
+        Execution { succeeded: self.succeeded, failed: self.failed }
     }
 
     /// Record that we've started recovering this saga
@@ -639,18 +635,18 @@ mod test {
         // Trivial initial case
         let plan_builder = PlanBuilder::new(&logctx.log);
         let plan = plan_builder.build();
-        let summary_builder = ExecutionSummaryBuilder::new();
-        let summary = summary_builder.build();
+        let execution_builder = ExecutionBuilder::new();
+        let execution = execution_builder.build();
 
-        assert_eq!(0, summary.sagas_recovered_successfully().count());
-        let last_pass = status::LastPassSuccess::new(&plan, &summary);
+        assert_eq!(0, execution.sagas_recovered_successfully().count());
+        let last_pass = status::LastPassSuccess::new(&plan, &execution);
         assert_eq!(0, last_pass.nfound);
         assert_eq!(0, last_pass.nrecovered);
         assert_eq!(0, last_pass.nfailed);
         assert_eq!(0, last_pass.nskipped);
         assert_eq!(0, last_pass.nremoved);
 
-        // Test a non-trivial ExecutionSummary.
+        // Test a non-trivial ExecutionDone
         let BasicPlanTestCase {
             plan,
             mut to_recover,
@@ -658,14 +654,14 @@ mod test {
             to_mark_done,
             to_mark_maybe: _,
         } = BasicPlanTestCase::new(&logctx.log);
-        let mut summary_builder = ExecutionSummaryBuilder::new();
+        let mut execution_builder = ExecutionBuilder::new();
         assert!(to_recover.len() >= 3, "someone changed the test case");
 
         // Start recovery backwards, just to make sure there's not some implicit
         // dependency on the order.  (We could shuffle, but then the test would
         // be non-deterministic.)
         for saga_id in to_recover.iter().rev() {
-            summary_builder.saga_recovery_start(*saga_id, logctx.log.clone());
+            execution_builder.saga_recovery_start(*saga_id, logctx.log.clone());
         }
 
         // "Finish" recovery, in yet a different order (for the same reason as
@@ -677,21 +673,21 @@ mod test {
         to_recover.rotate_left(2);
         for (i, saga_id) in to_recover.iter().enumerate() {
             if i == to_recover.len() - 1 {
-                summary_builder.saga_recovery_failure(
+                execution_builder.saga_recovery_failure(
                     *saga_id,
                     &Error::internal_error("test error"),
                 );
             } else {
-                summary_builder.saga_recovery_success(*saga_id);
+                execution_builder.saga_recovery_success(*saga_id);
             }
         }
 
-        let summary = summary_builder.build();
+        let execution = execution_builder.build();
         assert_eq!(
             to_recover.len() - 1,
-            summary.sagas_recovered_successfully().count()
+            execution.sagas_recovered_successfully().count()
         );
-        let last_pass = status::LastPassSuccess::new(&plan, &summary);
+        let last_pass = status::LastPassSuccess::new(&plan, &execution);
         assert_eq!(to_recover.len() + to_skip.len(), last_pass.nfound);
         assert_eq!(to_recover.len() - 1, last_pass.nrecovered);
         assert_eq!(1, last_pass.nfailed);

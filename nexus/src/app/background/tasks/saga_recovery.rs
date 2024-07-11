@@ -285,9 +285,8 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
         &self,
         bgtask_log: &slog::Logger,
         plan: &recovery::Plan,
-    ) -> (recovery::ExecutionSummary, BoxFuture<'static, Result<(), Error>>)
-    {
-        let mut builder = recovery::ExecutionSummaryBuilder::new();
+    ) -> (recovery::Execution, BoxFuture<'static, Result<(), Error>>) {
+        let mut builder = recovery::ExecutionBuilder::new();
         let mut completion_futures = Vec::new();
 
         for (saga_id, saga) in plan.sagas_needing_recovery() {

@@ -39,7 +39,7 @@ impl Report {
     pub fn update_after_pass(
         &mut self,
         plan: &recovery::Plan,
-        execution: recovery::ExecutionSummary,
+        execution: recovery::Execution,
     ) {
         self.last_pass =
             LastPass::Success(LastPassSuccess::new(plan, &execution));
@@ -94,7 +94,7 @@ pub struct LastPassSuccess {
 impl LastPassSuccess {
     pub fn new(
         plan: &recovery::Plan,
-        execution: &recovery::ExecutionSummary,
+        execution: &recovery::Execution,
     ) -> LastPassSuccess {
         let nfound = plan.sagas_needing_recovery().count() + plan.nskipped();
         LastPassSuccess {
