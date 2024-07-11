@@ -199,7 +199,7 @@ versions = [
 
 [[metrics]]
 name = "transition_to_session_setup"
-description = "Number of times our BGP peer has entered the open-sent state"
+description = "Number of times our BGP peer has entered the session-setup state"
 units = "count"
 datum_type = "cumulative_u64"
 versions = [
