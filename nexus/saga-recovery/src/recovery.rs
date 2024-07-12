@@ -2,8 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Guts of saga recovery
-// XXX-dap block comment goes here?  and maybe deserves review
+//! Guts of the saga recovery bookkeeping
 
 use super::status::RecoveryFailure;
 use super::status::RecoverySuccess;
@@ -20,10 +19,17 @@ use tokio::sync::mpsc;
 /// multiple passes
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RestState {
+    /// set of sagas that we believe may be running
+    ///
+    /// See the big block comment in the saga recovery background task for more
+    /// on how this works and why.
     sagas_started: BTreeMap<SagaId, SagaStartInfo>,
     remove_next: BTreeSet<SagaId>,
 }
 
+/// Describes how we learned that a particular saga might be running
+///
+/// This is only intended for debugging.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[allow(dead_code)]
 struct SagaStartInfo {
@@ -38,6 +44,7 @@ enum SagaStartSource {
 }
 
 impl RestState {
+    /// Returns initial at-rest state related to saga recovery
     pub fn new() -> RestState {
         RestState {
             sagas_started: BTreeMap::new(),
@@ -46,7 +53,10 @@ impl RestState {
     }
 
     /// Read messages from the channel (signaling sagas that have started
-    /// running) and update our set of sagas that we believe to be running.
+    /// running) and update the set of sagas that we believe may be running.
+    ///
+    /// See the big block comment in the saga recovery background task for more
+    /// on how this works and why.
     pub fn update_started_sagas(
         &mut self,
         log: &slog::Logger,
@@ -78,7 +88,7 @@ impl RestState {
         rv
     }
 
-    /// Update based on the results of a recovery pass.
+    /// Update the at-rest state based on the results of a recovery pass.
     pub fn update_after_pass(&mut self, plan: &Plan, execution: &Execution) {
         let time_observed = Utc::now();
 
@@ -134,9 +144,7 @@ fn read_all_from_channel<T>(
 /// Describes what should happen during a particular recovery pass
 ///
 /// This is constructed by the saga recovery background task via
-/// [`Plan::new()`].  That function uses [`PlanBuilder`].  This all seems a
-/// little overboard for such an internal structure but it helps separate
-/// concerns, particularly when it comes to testing.
+/// [`Plan::new()`].  That function uses `PlanBuilder`
 ///
 /// This structure is also much more detailed than it needs to be to support
 /// better observability and testing.
@@ -150,8 +158,8 @@ pub struct Plan {
     skipped_running: BTreeSet<SagaId>,
 
     /// sagas that we infer have finished because they were missing from two
-    /// consecutive database queries for in-progress sagas (with no intervening
-    /// message indicating that they had been started)
+    /// consecutive database queries for in-progress sagas with no intervening
+    /// message indicating that they had been started
     inferred_done: BTreeSet<SagaId>,
 
     /// sagas that may be done, but we can't tell yet.  These are sagas where we
@@ -170,12 +178,10 @@ impl Plan {
     ///
     /// This function accepts:
     ///
-    /// * `previously_maybe_done`: a list of sagas that we determined last time
-    ///   might be done, but we wouldn't be able to tell until this pass
-    /// * `sagas_started`: a set of sagas that have started or resumed running
-    ///   in this process
+    /// * `rest_state`: the at-rest saga recovery state from the end of the
+    ///   previous pass
     /// * `running_sagas_found`: a list of sagas that the database reports
-    ///   in-progress
+    ///   to be in progress
     ///
     /// It determines:
     ///
@@ -193,18 +199,17 @@ impl Plan {
         mut running_sagas_found: BTreeMap<SagaId, nexus_db_model::Saga>,
     ) -> Plan {
         let mut builder = PlanBuilder::new(log);
-        let sagas_started = &rest_state.sagas_started;
-        let previously_maybe_done = &rest_state.remove_next;
 
         // First of all, remove finished sagas from our "ignore" set.
         //
         // `previously_maybe_done` was computed the last time we ran and
         // contains sagas that either just started or already finished.  We
-        // couldn't really tell.  All we knew is that they were running
-        // in-memory but were not included in our database query for in-progress
-        // sagas.  At this point, though, we've done a second database query for
+        // couldn't tell.  All we knew is that they were running in-memory but
+        // were not included in our database query for in-progress sagas.  At
+        // this point, though, we've done a second database query for
         // in-progress sagas.  Any items that aren't in that list either cannot
         // still be running, so we can safely remove them from our ignore set.
+        let previously_maybe_done = &rest_state.remove_next;
         for saga_id in previously_maybe_done {
             if !running_sagas_found.contains_key(saga_id) {
                 builder.saga_infer_done(*saga_id);
@@ -214,9 +219,11 @@ impl Plan {
         // Figure out which of the candidate sagas can clearly be skipped.
         // Correctness here requires that the caller has already updated the set
         // of sagas that we're ignoring to include any that may have been
-        // created up to the beginning of the database query.  Since we now have
-        // the list of sagas that were not-finished in the database, we can
-        // compare these two sets.
+        // created up to the beginning of the database query.  (They do that by
+        // doing the database query first and then updating this set.)  Since we
+        // now have the list of sagas that were not-finished in the database, we
+        // can compare these two sets.
+        let sagas_started = &rest_state.sagas_started;
         for running_saga_id in sagas_started.keys() {
             match running_sagas_found.remove(running_saga_id) {
                 None => {
@@ -237,8 +244,8 @@ impl Plan {
                     // The way to resolve this is to do another database query
                     // for unfinished sagas.  If it's not in that list, the saga
                     // must have finished.  Rather than do that now, we'll just
-                    // keep track of this list and take care of it in the next
-                    // activation.
+                    // keep track of this list and take care of it on the next
+                    // pass.
                     if !previously_maybe_done.contains(running_saga_id) {
                         builder.saga_maybe_done(*running_saga_id)
                     }
@@ -263,12 +270,6 @@ impl Plan {
         // this to the ignore set (and waits for it to make it to the channel)
         // before writing the database record, and we read everything off that
         // channel and added it to the set before calling this function.
-        //
-        // Load and resume all these sagas serially.  Too much parallelism here
-        // could overload the database.  It wouldn't buy us much anyway to
-        // parallelize this since these operations should generally be quick,
-        // and there shouldn't be too many sagas outstanding, and Nexus has
-        // already crashed so they've experienced a bit of latency already.
         for (saga_id, saga) in running_sagas_found.into_iter() {
             builder.saga_recovery_needed(saga_id, saga);
         }
@@ -294,10 +295,13 @@ impl Plan {
         self.maybe_done.iter().copied()
     }
 
+    /// Returns how many in-progress sagas we ignored because they were already
+    /// running
     pub fn nskipped(&self) -> usize {
         self.skipped_running.len()
     }
 
+    /// Returns how many previously-in-progress sagas we now believe are done
     pub fn ninferred_done(&self) -> usize {
         self.inferred_done.len()
     }
@@ -406,9 +410,7 @@ impl<'a> PlanBuilder<'a> {
 /// Summarizes the results of executing a single saga recovery pass
 ///
 /// This is constructed by the saga recovery background task (in
-/// `recovery_execute()`) via [`SagaRecoveryDoneBuilder::new()`].  This seems a
-/// little overboard for such an internal structure but it helps separate
-/// concerns, particularly when it comes to testing.
+/// `recovery_execute()`) via [`ExecutionBuilder::new()`].
 pub struct Execution {
     /// list of sagas that were successfully recovered
     pub succeeded: Vec<RecoverySuccess>,
@@ -490,8 +492,6 @@ impl ExecutionBuilder {
 
 #[cfg(test)]
 mod test {
-    // XXX-dap write a stress test that furiously performs saga recovery a lot
-    // of times and ensures that each saga is recovered exactly once
     use super::*;
     use crate::status;
     use crate::test::make_fake_saga;
@@ -543,6 +543,7 @@ mod test {
         assert!(disconnected);
     }
 
+    /// Creates a `Plan` for testing that covers a variety of cases
     pub struct BasicPlanTestCase {
         pub plan: Plan,
         pub to_recover: Vec<SagaId>,
@@ -698,4 +699,7 @@ mod test {
 
         logctx.cleanup_successful();
     }
+
+    // More interesting tests are done at the crate level because they include
+    // stuff from the `status` module, too.
 }

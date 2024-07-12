@@ -7,14 +7,14 @@
 // - task status reported by omdb
 // - log entries
 // - test coverage
-// XXX-dap TODO-doc everything here
 // XXX-dap sync with "main"
 // XXX-dap write up summary for PR, including the option of doing recovery in
 // Steno with read methods on SecStore?  also could have added purge option to
 // SEC and then relied on Steno to know if a thing was alive.  (can't do it
 // without a purge that's invoked by recovery)
+// XXX-dap write a stress test that furiously performs saga recovery a lot
+// of times and ensures that each saga is recovered exactly once
 
-// XXX-dap this block comment is in two places
 //! Saga recovery
 //!
 //! ## Review of distributed sagas
@@ -125,17 +125,11 @@
 //! entirely by the task that's doing saga recovery.  We'll use a channel to
 //! trigger inserts when sagas are created elsewhere in Nexus.  What about
 //! deletes?  The recovery process can actually figure out on its own when a
-//! saga can be removed: if a saga was _not_ in the list of candidates to be
-//! recovered, then that means it's finished, and that means it can be deleted
-//! from the set.  Care must be taken to process things in the right order, but
-//! in the end it's pretty simple: the recovery process first fetches the
-//! candidate list of sagas, then processes all insertions that have come in
-//! over the channel and adds them to the set, then compares the set against the
-//! candidate list.  Sagas in the set and not in the list can be removed.  Sagas
-//! in the list and not in the set must be recovered.  Sagas in both the set and
-//! the list may or may not still be running, but they were running at some
-//! point during this recovery pass and they can be safely ignored until the
-//! next pass.
+//! saga can be removed: if a saga that was previously in the list of candidates
+//! to be recovered and is now no longer in that list, then that means it's
+//! finished, and that means it can be deleted from the set.  Care must be taken
+//! to process things in the right order.  These details are mostly handled by
+//! the separate [`nexus_saga_recovery`] crate.
 
 use crate::app::background::BackgroundTask;
 use crate::app::sagas::NexusSagaType;
@@ -154,34 +148,13 @@ use steno::SagaId;
 use steno::SagaStateView;
 use tokio::sync::mpsc;
 
-// XXX-dap TODO-doc
-pub trait MakeSagaContext: Send + Sync {
-    type SagaType: steno::SagaType;
-
-    fn make_saga_context(
-        &self,
-        log: slog::Logger,
-    ) -> Arc<<Self::SagaType as steno::SagaType>::ExecContextType>;
-}
-
-impl MakeSagaContext for Arc<Nexus> {
-    type SagaType = NexusSagaType;
-    fn make_saga_context(&self, log: slog::Logger) -> Arc<Arc<SagaContext>> {
-        // The extra `Arc` is a little ridiculous.  The problem is that Steno
-        // expects (in `sec_client.saga_resume()`) that the user-defined context
-        // will be wrapped in an `Arc`.  But we already use `Arc<SagaContext>`
-        // for our type.  Hence we need two Arcs.
-        Arc::new(Arc::new(SagaContext::new(self.clone(), log)))
-    }
-}
-
 /// Background task that recovers sagas assigned to this Nexus
 ///
 /// Normally, this task only does anything of note once, when Nexus starts up.
-/// However, it runs periodically and can be activated explicitly for the rare
-/// case when a saga has been re-assigned to this Nexus (e.g., because some
-/// other Nexus has been expunged) and to handle retries for sagas whose
-/// previous recovery failed.
+/// But it runs periodically and can be activated explicitly for the rare case
+/// when a saga has been re-assigned to this Nexus (e.g., because some other
+/// Nexus has been expunged) and to handle retries for sagas whose previous
+/// recovery failed.
 pub struct SagaRecovery<N: MakeSagaContext> {
     datastore: Arc<DataStore>,
     /// Unique identifier for this Saga Execution Coordinator
@@ -190,16 +163,38 @@ pub struct SagaRecovery<N: MakeSagaContext> {
     sec_id: db::SecId,
     /// OpContext used for saga recovery
     saga_recovery_opctx: OpContext,
-    maker: N,
-    sec_client: Arc<steno::SecClient>,
-    registry: Arc<steno::ActionRegistry<N::SagaType>>,
-    sagas_started_rx: mpsc::UnboundedReceiver<SagaId>,
 
+    // state required to resume a saga
+    /// handle to Steno, which actually resumes the saga
+    sec_client: Arc<steno::SecClient>,
+    /// generates the SagaContext for the saga
+    maker: N,
+    /// registry of actions that we need to provide to Steno
+    registry: Arc<steno::ActionRegistry<N::SagaType>>,
+
+    // state that we use during each recovery pass
+    /// channel on which we listen for sagas being started elsewhere in Nexus
+    sagas_started_rx: mpsc::UnboundedReceiver<SagaId>,
     /// recovery state persisted between passes
     rest_state: nexus_saga_recovery::RestState,
 
     /// status reporting
     status: nexus_saga_recovery::Report,
+}
+
+impl<N: MakeSagaContext> BackgroundTask for SagaRecovery<N> {
+    fn activate<'a>(
+        &'a mut self,
+        opctx: &'a OpContext,
+    ) -> BoxFuture<'a, serde_json::Value> {
+        async {
+            // We don't need the future that's returned by activate_internal().
+            // That's only used by the test suite.
+            let _ = self.activate_internal(opctx).await;
+            serde_json::to_value(&self.status).unwrap()
+        }
+        .boxed()
+    }
 }
 
 impl<N: MakeSagaContext> SagaRecovery<N> {
@@ -225,8 +220,10 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
         }
     }
 
-    // XXX-dap TODO-doc like activate, but return information we can use to see
-    // what happened as well as completion future
+    /// Invoked for each activation of the background task
+    ///
+    /// This internal version exists solely to expose some information about
+    /// what was recovered for testing.
     async fn activate_internal(
         &mut self,
         opctx: &OpContext,
@@ -292,15 +289,16 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
         }
     }
 
+    /// Check that for each saga that we inferred was done, Steno agrees
+    ///
+    /// This is not strictly necessary because this should always be true.  But
+    /// if for some reason it's not, that would be a serious issue and we'd want
+    /// to know that.
     async fn recovery_check_done(
         &mut self,
         log: &slog::Logger,
         plan: &nexus_saga_recovery::Plan,
     ) {
-        // For any sagas that we now believe are done, let's check with Steno to
-        // be sure.  This is not strictly necessary because this should always
-        // be true.  But if for some reason it's not, that would be a serious
-        // issue and we'd want to know that.
         for saga_id in plan.sagas_inferred_done() {
             match self.sec_client.saga_get(saga_id).await {
                 Err(_) => {
@@ -331,6 +329,7 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
         }
     }
 
+    /// Recovers the sagas described in `plan`
     async fn recovery_execute(
         &self,
         bgtask_log: &slog::Logger,
@@ -340,6 +339,11 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
         let mut builder = nexus_saga_recovery::ExecutionBuilder::new();
         let mut completion_futures = Vec::new();
 
+        // Load and resume all these sagas serially.  Too much parallelism here
+        // could overload the database.  It wouldn't buy us much anyway to
+        // parallelize this since these operations should generally be quick,
+        // and there shouldn't be too many sagas outstanding, and Nexus has
+        // already crashed so they've experienced a bit of latency already.
         for (saga_id, saga) in plan.sagas_needing_recovery() {
             // XXX-dap used to be self.nexus.log.  Is this okay?
             let saga_log = bgtask_log.new(o!(
@@ -425,21 +429,6 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
     }
 }
 
-impl<N: MakeSagaContext> BackgroundTask for SagaRecovery<N> {
-    fn activate<'a>(
-        &'a mut self,
-        opctx: &'a OpContext,
-    ) -> BoxFuture<'a, serde_json::Value> {
-        async {
-            // We don't need the future that's returned by this function.
-            // That's only used by the test suite.
-            let _ = self.activate_internal(opctx).await;
-            serde_json::to_value(&self.status).unwrap()
-        }
-        .boxed()
-    }
-}
-
 /// List all in-progress sagas assigned to the given SEC
 async fn list_sagas_in_progress(
     opctx: &OpContext,
@@ -466,6 +455,32 @@ async fn list_sagas_in_progress(
         }
     };
     result
+}
+
+/// Encapsulates the tiny bit of behavior associated with constructing a new
+/// saga context
+///
+/// This type exists so that the rest of the `SagaRecovery` task can avoid
+/// knowing directly about Nexus, which in turn allows us to test it with sagas
+/// that we control.
+pub trait MakeSagaContext: Send + Sync {
+    type SagaType: steno::SagaType;
+
+    fn make_saga_context(
+        &self,
+        log: slog::Logger,
+    ) -> Arc<<Self::SagaType as steno::SagaType>::ExecContextType>;
+}
+
+impl MakeSagaContext for Arc<Nexus> {
+    type SagaType = NexusSagaType;
+    fn make_saga_context(&self, log: slog::Logger) -> Arc<Arc<SagaContext>> {
+        // The extra `Arc` is a little ridiculous.  The problem is that Steno
+        // expects (in `sec_client.saga_resume()`) that the user-defined context
+        // will be wrapped in an `Arc`.  But we already use `Arc<SagaContext>`
+        // for our type.  Hence we need two Arcs.
+        Arc::new(Arc::new(SagaContext::new(self.clone(), log)))
+    }
 }
 
 #[cfg(test)]

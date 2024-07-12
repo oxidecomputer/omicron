@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Reporting status for the saga recovery background task
+//! Report status for the saga recovery background task
 
 use super::recovery;
 use chrono::{DateTime, Utc};
@@ -20,6 +20,7 @@ const N_SUCCESS_SAGA_HISTORY: usize = 128;
 /// Maximum number of recent failures to keep track of for debugging
 const N_FAILED_SAGA_HISTORY: usize = 128;
 
+/// Summarizes the status of saga recovery for debugging
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Report {
     pub recent_recoveries: DebuggingHistory<RecoverySuccess>,
@@ -49,6 +50,8 @@ impl Report {
         }
     }
 
+    /// Update the report after a single saga recovery pass where we at least
+    /// successfully constructed a plan
     pub fn update_after_pass(
         &mut self,
         plan: &recovery::Plan,
@@ -74,6 +77,9 @@ impl Report {
         self.ntotal_finished += plan.ninferred_done();
     }
 
+    /// Update the report after a saga recovery pass where we couldn't even
+    /// construct a plan (usually because we couldn't load state from the
+    /// database)
     pub fn update_after_failure(&mut self, error: &Error, nstarted: usize) {
         self.ntotal_started += nstarted;
         self.last_pass = LastPass::Failed {
@@ -95,13 +101,20 @@ pub struct RecoveryFailure {
     pub message: String,
 }
 
+/// Describes what happened during the last saga recovery pass
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum LastPass {
+    /// There has not been a saga recovery pass yet
     NeverStarted,
+    /// This pass failed to even construct a plan (usually because we couldn't
+    /// load state from the database)
     Failed { message: String },
+    /// This pass was at least partially successful
     Success(LastPassSuccess),
 }
 
+/// Describes what happened during a saga recovery pass where we at least
+/// managed to construct a plan
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct LastPassSuccess {
     pub nfound: usize,
@@ -127,6 +140,9 @@ impl LastPassSuccess {
     }
 }
 
+/// Debugging ringbuffer, storing arbitrary objects of type `T`
+// There surely exist faster and richer implementations.  At least this one's
+// pretty simple.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(transparent)]
 pub struct DebuggingHistory<T> {
