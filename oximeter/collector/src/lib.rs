@@ -409,4 +409,9 @@ impl Oximeter {
     pub fn collector_id(&self) -> &Uuid {
         &self.agent.id
     }
+
+    /// Return the address of the server.
+    pub fn server_address(&self) -> SocketAddr {
+        self.server.local_addr()
+    }
 }

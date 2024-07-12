@@ -61,6 +61,7 @@ service_firewall_propagation.period_secs = 300
 v2p_mapping_propagation.period_secs = 30
 instance_watcher.period_secs = 30
 abandoned_vmm_reaper.period_secs = 60
+lookup_region_port.period_secs = 60
 
 [default_region_allocation_strategy]
 # by default, allocate without requirement for distinct sleds.

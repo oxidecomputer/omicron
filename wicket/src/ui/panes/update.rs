@@ -178,7 +178,7 @@ pub struct UpdatePane {
 impl UpdatePane {
     pub fn new(log: &Logger) -> UpdatePane {
         let log = log.new(o!("component" => "UpdatePane"));
-        let mut tree_state = TreeState::default();
+        let tree_state = TreeState::default();
         let items = ALL_COMPONENT_IDS
             .iter()
             .enumerate()
@@ -187,7 +187,8 @@ impl UpdatePane {
                     .expect("no children so no duplicate identifiers")
             })
             .collect::<Vec<_>>();
-        tree_state.select_first(&items);
+        // `ensure_selection_matches_rack_state` will perform the initial
+        // selection on the update tree.
 
         UpdatePane {
             log,
@@ -1319,12 +1320,14 @@ impl UpdatePane {
     }
 
     // When we switch panes, we may have moved around in the rack. We want to
-    // ensure that the currently selected rack component in the  update tree
+    // ensure that the currently selected rack component in the update tree
     // matches what was selected in the rack or inventory views. We already do
     // the converse when on this pane and move around the tree.
     fn ensure_selection_matches_rack_state(&mut self, state: &State) {
-        let selected = self.tree_state.selected();
-        if state.rack_state.selected != ALL_COMPONENT_IDS[selected[0]] {
+        let tree_selected = self.tree_state.selected();
+        let should_reselect = tree_selected.is_empty()
+            || state.rack_state.selected != ALL_COMPONENT_IDS[tree_selected[0]];
+        if should_reselect {
             let index = ALL_COMPONENT_IDS
                 .iter()
                 .position(|&id| id == state.rack_state.selected)
@@ -1377,7 +1380,7 @@ impl UpdatePane {
         self.update_items(state);
 
         // Draw the contents
-        let tree = Tree::new(self.items.clone())
+        let tree = Tree::new(&self.items)
             .expect("tree does not have duplicate identifiers")
             .block(block.clone().borders(Borders::LEFT | Borders::RIGHT))
             .style(style::plain_text())
@@ -2486,13 +2489,13 @@ impl Control for UpdatePane {
 
         match cmd {
             Cmd::Up => {
-                self.tree_state.key_up(&self.items);
+                self.tree_state.key_up();
                 let selected = self.tree_state.selected();
                 state.rack_state.selected = ALL_COMPONENT_IDS[selected[0]];
                 Some(Action::Redraw)
             }
             Cmd::Down => {
-                self.tree_state.key_down(&self.items);
+                self.tree_state.key_down();
                 let selected = self.tree_state.selected();
                 state.rack_state.selected = ALL_COMPONENT_IDS[selected[0]];
                 Some(Action::Redraw)
@@ -2500,7 +2503,7 @@ impl Control for UpdatePane {
             Cmd::Collapse | Cmd::Left => {
                 // We always want something selected. If we close the root,
                 // we want to re-open it.
-                let selected = self.tree_state.selected();
+                let selected = self.tree_state.selected().to_vec();
                 self.tree_state.key_left();
                 if self.tree_state.selected().is_empty() {
                     self.tree_state.select(selected);
@@ -2523,12 +2526,12 @@ impl Control for UpdatePane {
                 Some(Action::Redraw)
             }
             Cmd::GotoTop => {
-                self.tree_state.select_first(&self.items);
+                self.tree_state.select_first();
                 state.rack_state.selected = ALL_COMPONENT_IDS[0];
                 Some(Action::Redraw)
             }
             Cmd::GotoBottom => {
-                self.tree_state.select_last(&self.items);
+                self.tree_state.select_last();
                 state.rack_state.selected =
                     ALL_COMPONENT_IDS[ALL_COMPONENT_IDS.len() - 1];
                 Some(Action::Redraw)

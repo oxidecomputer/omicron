@@ -84,7 +84,7 @@ petgraph = { version = "0.6.5", features = ["serde-1"] }
 postgres-types = { version = "0.2.6", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 predicates = { version = "3.1.0" }
 proc-macro2 = { version = "1.0.86" }
-regex = { version = "1.10.4" }
+regex = { version = "1.10.5" }
 regex-automata = { version = "0.4.6", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.3" }
 reqwest = { version = "0.11.27", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
@@ -92,8 +92,8 @@ ring = { version = "0.17.8", features = ["std"] }
 schemars = { version = "0.8.21", features = ["bytes", "chrono", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.23", features = ["serde"] }
-serde = { version = "1.0.203", features = ["alloc", "derive", "rc"] }
-serde_json = { version = "1.0.118", features = ["raw_value", "unbounded_depth"] }
+serde = { version = "1.0.204", features = ["alloc", "derive", "rc"] }
+serde_json = { version = "1.0.120", features = ["raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.5.0", features = ["inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
@@ -103,19 +103,19 @@ string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.68", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.36", features = ["formatting", "local-offset", "macros", "parsing"] }
-tokio = { version = "1.37.0", features = ["full", "test-util"] }
+tokio = { version = "1.38.0", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.10", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-stream = { version = "0.1.15", features = ["net"] }
 tokio-util = { version = "0.7.11", features = ["codec", "io-util"] }
 toml = { version = "0.7.8" }
-toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.13", features = ["serde"] }
+toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.14", features = ["serde"] }
 tracing = { version = "0.1.40", features = ["log"] }
 trust-dns-proto = { version = "0.22.0" }
 unicode-bidi = { version = "0.3.15" }
 unicode-normalization = { version = "0.1.23" }
 usdt = { version = "0.5.0" }
 usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
-uuid = { version = "1.8.0", features = ["serde", "v4"] }
+uuid = { version = "1.9.1", features = ["serde", "v4"] }
 yasna = { version = "0.5.2", features = ["bit-vec", "num-bigint", "std", "time"] }
 zerocopy = { version = "0.7.34", features = ["derive", "simd"] }
 zeroize = { version = "1.7.0", features = ["std", "zeroize_derive"] }
@@ -188,7 +188,7 @@ petgraph = { version = "0.6.5", features = ["serde-1"] }
 postgres-types = { version = "0.2.6", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 predicates = { version = "3.1.0" }
 proc-macro2 = { version = "1.0.86" }
-regex = { version = "1.10.4" }
+regex = { version = "1.10.5" }
 regex-automata = { version = "0.4.6", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.3" }
 reqwest = { version = "0.11.27", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
@@ -196,8 +196,8 @@ ring = { version = "0.17.8", features = ["std"] }
 schemars = { version = "0.8.21", features = ["bytes", "chrono", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.23", features = ["serde"] }
-serde = { version = "1.0.203", features = ["alloc", "derive", "rc"] }
-serde_json = { version = "1.0.118", features = ["raw_value", "unbounded_depth"] }
+serde = { version = "1.0.204", features = ["alloc", "derive", "rc"] }
+serde_json = { version = "1.0.120", features = ["raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.5.0", features = ["inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
@@ -209,12 +209,12 @@ syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extr
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.68", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.36", features = ["formatting", "local-offset", "macros", "parsing"] }
 time-macros = { version = "0.2.18", default-features = false, features = ["formatting", "parsing"] }
-tokio = { version = "1.37.0", features = ["full", "test-util"] }
+tokio = { version = "1.38.0", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.10", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-stream = { version = "0.1.15", features = ["net"] }
 tokio-util = { version = "0.7.11", features = ["codec", "io-util"] }
 toml = { version = "0.7.8" }
-toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.13", features = ["serde"] }
+toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.14", features = ["serde"] }
 tracing = { version = "0.1.40", features = ["log"] }
 trust-dns-proto = { version = "0.22.0" }
 unicode-bidi = { version = "0.3.15" }
@@ -222,7 +222,7 @@ unicode-normalization = { version = "0.1.23" }
 unicode-xid = { version = "0.2.4" }
 usdt = { version = "0.5.0" }
 usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
-uuid = { version = "1.8.0", features = ["serde", "v4"] }
+uuid = { version = "1.9.1", features = ["serde", "v4"] }
 yasna = { version = "0.5.2", features = ["bit-vec", "num-bigint", "std", "time"] }
 zerocopy = { version = "0.7.34", features = ["derive", "simd"] }
 zeroize = { version = "1.7.0", features = ["std", "zeroize_derive"] }

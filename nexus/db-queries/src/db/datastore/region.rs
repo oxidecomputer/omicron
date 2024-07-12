@@ -9,12 +9,18 @@ use super::RunnableQuery;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
+use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Dataset;
 use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::Region;
+use crate::db::model::SqlU16;
+use crate::db::pagination::paginated;
+use crate::db::pagination::Paginator;
+use crate::db::update_and_check::UpdateAndCheck;
+use crate::db::update_and_check::UpdateStatus;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
@@ -23,8 +29,11 @@ use nexus_types::external_api::params;
 use omicron_common::api::external;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::UpdateResult;
 use slog::Logger;
+use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 pub enum RegionAllocationFor {
@@ -433,6 +442,91 @@ impl DataStore {
             .load_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn region_set_port(
+        &self,
+        region_id: Uuid,
+        region_port: u16,
+    ) -> UpdateResult<()> {
+        use db::schema::region::dsl;
+
+        let conn = self.pool_connection_unauthorized().await?;
+
+        let updated = diesel::update(dsl::region)
+            .filter(dsl::id.eq(region_id))
+            .set(dsl::port.eq(Some::<SqlU16>(region_port.into())))
+            .check_if_exists::<Region>(region_id)
+            .execute_and_check(&conn)
+            .await;
+
+        match updated {
+            Ok(result) => match result.status {
+                UpdateStatus::Updated => Ok(()),
+
+                UpdateStatus::NotUpdatedButExists => {
+                    let record = result.found;
+
+                    if record.port() == Some(region_port) {
+                        Ok(())
+                    } else {
+                        Err(Error::conflict(format!(
+                            "region {region_id} port set to {:?}",
+                            record.port(),
+                        )))
+                    }
+                }
+            },
+
+            Err(e) => Err(public_error_from_diesel(e, ErrorHandler::Server)),
+        }
+    }
+
+    /// If a region's port was recorded, return its associated address,
+    /// otherwise return None.
+    pub async fn region_addr(
+        &self,
+        region_id: Uuid,
+    ) -> LookupResult<Option<SocketAddrV6>> {
+        let region = self.get_region(region_id).await?;
+
+        let Some(port) = region.port() else {
+            return Ok(None);
+        };
+
+        let dataset = self.dataset_get(region.dataset_id()).await?;
+
+        Ok(Some(SocketAddrV6::new(*dataset.address().ip(), port, 0, 0)))
+    }
+
+    pub async fn regions_missing_ports(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<Region> {
+        opctx.check_complex_operations_allowed()?;
+
+        let mut records = Vec::new();
+
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        while let Some(p) = paginator.next() {
+            use db::schema::region::dsl;
+
+            let batch = paginated(dsl::region, dsl::id, &p.current_pagparams())
+                .filter(dsl::port.is_null())
+                .select(Region::as_select())
+                .load_async::<Region>(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            paginator = p.found_batch(&batch, &|r| r.id());
+            records.extend(batch);
+        }
+
+        Ok(records)
     }
 }
 

@@ -11,6 +11,7 @@ omicron-rpaths.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+cockroach-admin-client.workspace = true
 dns-service-client.workspace = true
 chrono.workspace = true
 futures.workspace = true
