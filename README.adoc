@@ -181,15 +181,22 @@ By default, Cargo does not operate on the tests.  Cargo's check/build/clippy com
 Each service is a Dropshot server that presents an HTTP API. The description of
 that API is serialized as an
 https://github.com/OAI/OpenAPI-Specification[OpenAPI] document which we store
-in link:./openapi[`omicron/openapi`] and check in to this repo. In order to
-ensure that changes to those APIs are made intentionally, each service contains
-a test that validates that the current API matches. This allows us 1. to catch
-accidental changes as test failures and 2. to explicitly observe API changes
-during code review (and in the git history).
+in link:./openapi[`omicron/openapi`] and check in to this repo. Checking in
+these generated files allows us:
+
+. To catch accidental changes as test failures.
+. To explicitly observe API changes during code review (and in the git history).
 
 We also use these OpenAPI documents as the source for the clients we generate
 using https://github.com/oxidecomputer/progenitor[Progenitor]. Clients are
 automatically updated when the coresponding OpenAPI document is modified.
+
+There are currently two kinds of services based on how their corresponding documents are generated: *managed* and *unmanaged*. Eventually, all services within Omicron will transition to being managed.
+
+* A *managed* service is tracked by the `cargo xtask openapi` command, using Dropshot's relatively new API trait functionality.
+* An *unmanaged* service is defined the traditional way, by gluing together a set of implementation functions, and is tracked by an independent test.
+
+To check whether your document is managed, run `cargo xtask openapi list`: it will list out all managed OpenAPI documents. If your document is not on the list, it is unmanaged.
 
 Note that Omicron contains a nominally circular dependency:
 
@@ -201,7 +208,13 @@ Note that Omicron contains a nominally circular dependency:
 We effectively "break" this circular dependency by virtue of the OpenAPI
 documents being checked in.
 
-In general, changes any service API **require the following set of build steps**:
+==== Updating Managed Services
+
+See the documentation in link:./dev-tools/openapi-manager[`dev-tools/openapi-manager`] for more information.
+
+==== Updating Unmanaged Services
+
+In general, changes to unmanaged service APs **require the following set of build steps**:
 
 . Make changes to the service API.
 . Update the OpenAPI document by running the relevant test with overwrite set:

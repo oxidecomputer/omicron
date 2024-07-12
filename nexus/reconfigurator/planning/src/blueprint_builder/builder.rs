@@ -1317,7 +1317,7 @@ pub mod test {
             if let Some(dataset) = zone.zone_type.durable_dataset() {
                 let kind = zone.zone_type.kind();
                 if let Some(previous) = kinds_by_zpool
-                    .entry(dataset.pool_name.id())
+                    .entry(dataset.dataset.pool_name.id())
                     .or_default()
                     .insert(kind, zone.id)
                 {
@@ -1325,7 +1325,7 @@ pub mod test {
                         "zpool {} has two zones of kind {kind:?}: {} and {}\
                             \n\n\
                             blueprint: {}",
-                        dataset.pool_name,
+                        dataset.dataset.pool_name,
                         zone.id,
                         previous,
                         blueprint.display(),

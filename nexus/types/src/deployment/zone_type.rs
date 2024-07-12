@@ -9,6 +9,7 @@
 //! that is not needed by sled-agent.
 
 use super::OmicronZoneExternalIp;
+use crate::internal_api::params::DatasetKind;
 use omicron_common::api::internal::shared::NetworkInterface;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -16,6 +17,7 @@ use serde::Serialize;
 use sled_agent_client::types::OmicronZoneDataset;
 use sled_agent_client::types::OmicronZoneType;
 use sled_agent_client::ZoneKind;
+use std::net::SocketAddrV6;
 
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -38,7 +40,7 @@ impl BlueprintZoneType {
     pub fn durable_zpool(
         &self,
     ) -> Option<&omicron_common::zpool_name::ZpoolName> {
-        self.durable_dataset().map(|dataset| &dataset.pool_name)
+        self.durable_dataset().map(|dataset| &dataset.dataset.pool_name)
     }
 
     pub fn external_networking(
@@ -118,36 +120,48 @@ impl BlueprintZoneType {
         }
     }
 
-    /// Returns a durable dataset associated with this zone, if any exists.
-    pub fn durable_dataset(&self) -> Option<&OmicronZoneDataset> {
-        match self {
+    /// Returns the durable dataset associated with this zone, if any exists.
+    pub fn durable_dataset(&self) -> Option<DurableDataset<'_>> {
+        let (dataset, kind, &address) = match self {
             BlueprintZoneType::Clickhouse(
-                blueprint_zone_type::Clickhouse { dataset, .. },
-            )
-            | BlueprintZoneType::ClickhouseKeeper(
-                blueprint_zone_type::ClickhouseKeeper { dataset, .. },
-            )
-            | BlueprintZoneType::CockroachDb(
-                blueprint_zone_type::CockroachDb { dataset, .. },
-            )
-            | BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
+                blueprint_zone_type::Clickhouse { dataset, address },
+            ) => (dataset, DatasetKind::Clickhouse, address),
+            BlueprintZoneType::ClickhouseKeeper(
+                blueprint_zone_type::ClickhouseKeeper { dataset, address },
+            ) => (dataset, DatasetKind::ClickhouseKeeper, address),
+            BlueprintZoneType::CockroachDb(
+                blueprint_zone_type::CockroachDb { dataset, address },
+            ) => (dataset, DatasetKind::Cockroach, address),
+            BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
                 dataset,
-                ..
-            })
-            | BlueprintZoneType::ExternalDns(
-                blueprint_zone_type::ExternalDns { dataset, .. },
-            )
-            | BlueprintZoneType::InternalDns(
-                blueprint_zone_type::InternalDns { dataset, .. },
-            ) => Some(dataset),
+                address,
+            }) => (dataset, DatasetKind::Crucible, address),
+            BlueprintZoneType::ExternalDns(
+                blueprint_zone_type::ExternalDns {
+                    dataset, http_address, ..
+                },
+            ) => (dataset, DatasetKind::ExternalDns, http_address),
+            BlueprintZoneType::InternalDns(
+                blueprint_zone_type::InternalDns {
+                    dataset, http_address, ..
+                },
+            ) => (dataset, DatasetKind::InternalDns, http_address),
             // Transient-dataset-only zones
             BlueprintZoneType::BoundaryNtp(_)
             | BlueprintZoneType::CruciblePantry(_)
             | BlueprintZoneType::InternalNtp(_)
             | BlueprintZoneType::Nexus(_)
-            | BlueprintZoneType::Oximeter(_) => None,
-        }
+            | BlueprintZoneType::Oximeter(_) => return None,
+        };
+
+        Some(DurableDataset { dataset, kind, address })
     }
+}
+
+pub struct DurableDataset<'a> {
+    pub dataset: &'a OmicronZoneDataset,
+    pub kind: DatasetKind,
+    pub address: SocketAddrV6,
 }
 
 impl From<BlueprintZoneType> for OmicronZoneType {
