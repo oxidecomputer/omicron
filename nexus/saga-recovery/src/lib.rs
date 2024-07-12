@@ -654,5 +654,6 @@ mod test {
         // - the edge case built into our implementation where we learned that a
         //   saga was started before it appeared in the database
         //
+        logctx.cleanup_successful();
     }
 }
