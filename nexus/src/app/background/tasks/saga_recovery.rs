@@ -310,10 +310,10 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
                     );
                 }
                 Ok(saga_state) => {
-                    self.status.ntotal_sec_errors_bad_state += 1;
                     match saga_state.state {
                         SagaStateView::Done { .. } => (),
                         _ => {
+                            self.status.ntotal_sec_errors_bad_state += 1;
                             error!(
                                 log,
                                 "we thought saga was done, but SEC reports a \
