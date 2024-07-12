@@ -5,7 +5,7 @@
 use crate::schema::{
     bgp_announce_set, bgp_announcement, bgp_config, bgp_peer_view,
 };
-use crate::SqlU32;
+use crate::{SqlU16, SqlU32};
 use db_macros::Resource;
 use ipnetwork::IpNetwork;
 use nexus_types::external_api::params;
@@ -141,5 +141,5 @@ pub struct BgpPeerView {
     pub multi_exit_discriminator: Option<SqlU32>,
     pub local_pref: Option<SqlU32>,
     pub enforce_first_as: bool,
-    pub vlan_id: Option<SqlU32>,
+    pub vlan_id: Option<SqlU16>,
 }

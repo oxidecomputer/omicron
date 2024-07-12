@@ -49,12 +49,12 @@
 //!   or inject errors.
 
 use super::sagas::NexusSaga;
-use super::sagas::SagaInitError;
 use super::sagas::ACTION_REGISTRY;
 use crate::saga_interface::SagaContext;
 use crate::Nexus;
 use anyhow::Context;
 use futures::future::BoxFuture;
+use futures::FutureExt;
 use futures::StreamExt;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -66,10 +66,8 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use steno::DagBuilder;
 use steno::SagaDag;
 use steno::SagaId;
-use steno::SagaName;
 use steno::SagaResult;
 use steno::SagaResultOk;
 use uuid::Uuid;
@@ -79,12 +77,31 @@ use uuid::Uuid;
 pub(crate) fn create_saga_dag<N: NexusSaga>(
     params: N::Params,
 ) -> Result<SagaDag, Error> {
-    let builder = DagBuilder::new(SagaName::new(N::NAME));
-    let dag = N::make_saga_dag(&params, builder)?;
-    let params = serde_json::to_value(&params).map_err(|e| {
-        SagaInitError::SerializeError(String::from("saga params"), e)
-    })?;
-    Ok(SagaDag::new(dag, params))
+    N::prepare(&params)
+}
+
+/// Interface for kicking off sagas
+///
+/// See [`SagaExecutor`] for the implementation within Nexus.  Some tests use
+/// alternate implementations that don't actually run the sagas.
+pub(crate) trait StartSaga: Send + Sync {
+    /// Create a new saga (of type `N` with parameters `params`), start it
+    /// running, but do not wait for it to finish.
+    fn saga_start(&self, dag: SagaDag) -> BoxFuture<'_, Result<(), Error>>;
+}
+
+impl StartSaga for SagaExecutor {
+    fn saga_start(&self, dag: SagaDag) -> BoxFuture<'_, Result<(), Error>> {
+        async move {
+            let runnable_saga = self.saga_prepare(dag).await?;
+            // start() returns a future that can be used to wait for the saga to
+            // complete.  We don't need that here.  (Cancelling this has no
+            // effect on the running saga.)
+            let _ = runnable_saga.start().await?;
+            Ok(())
+        }
+        .boxed()
+    }
 }
 
 /// Handle to a self-contained subsystem for kicking off sagas
@@ -242,7 +259,6 @@ impl SagaExecutor {
         &self,
         params: N::Params,
     ) -> Result<SagaResultOk, Error> {
-        // Construct the DAG specific to this saga.
         let dag = create_saga_dag::<N>(params)?;
         let runnable_saga = self.saga_prepare(dag).await?;
         let running_saga = runnable_saga.start().await?;

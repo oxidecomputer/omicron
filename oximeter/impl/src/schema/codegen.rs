@@ -74,6 +74,186 @@ fn emit_target(schema: &TimeseriesSchema) -> TokenStream {
     emit_one(FieldSource::Target, schema)
 }
 
+/// Return true if all the fields in the schema are `Copy`.
+fn fields_are_copyable<'a>(
+    mut fields: impl Iterator<Item = &'a FieldSchema>,
+) -> bool {
+    // Do a positive match, to ensure new variants don't actually derive copy
+    // inappropriately. Better we clone, in that case.
+    fields.all(FieldSchema::is_copyable)
+}
+
+/// Return true if the datum type is copyable.
+fn datum_type_is_copyable(datum_type: DatumType) -> bool {
+    match datum_type {
+        DatumType::Bool
+        | DatumType::I8
+        | DatumType::U8
+        | DatumType::I16
+        | DatumType::U16
+        | DatumType::I32
+        | DatumType::U32
+        | DatumType::I64
+        | DatumType::U64
+        | DatumType::CumulativeI64
+        | DatumType::CumulativeU64
+        | DatumType::CumulativeF32
+        | DatumType::CumulativeF64
+        | DatumType::F32
+        | DatumType::F64 => true,
+        DatumType::String
+        | DatumType::Bytes
+        | DatumType::HistogramI8
+        | DatumType::HistogramU8
+        | DatumType::HistogramI16
+        | DatumType::HistogramU16
+        | DatumType::HistogramI32
+        | DatumType::HistogramU32
+        | DatumType::HistogramI64
+        | DatumType::HistogramU64
+        | DatumType::HistogramF32
+        | DatumType::HistogramF64 => false,
+    }
+}
+
+/// Return `true` if values of this datum are partially ordered (can derive
+/// `PartialOrd`.)
+fn datum_type_is_partially_ordered(datum_type: DatumType) -> bool {
+    match datum_type {
+        DatumType::Bool
+        | DatumType::I8
+        | DatumType::U8
+        | DatumType::I16
+        | DatumType::U16
+        | DatumType::I32
+        | DatumType::U32
+        | DatumType::I64
+        | DatumType::U64
+        | DatumType::String
+        | DatumType::Bytes
+        | DatumType::CumulativeI64
+        | DatumType::CumulativeU64
+        | DatumType::CumulativeF32
+        | DatumType::CumulativeF64
+        | DatumType::F32
+        | DatumType::F64 => true,
+        DatumType::HistogramI8
+        | DatumType::HistogramU8
+        | DatumType::HistogramI16
+        | DatumType::HistogramU16
+        | DatumType::HistogramI32
+        | DatumType::HistogramU32
+        | DatumType::HistogramI64
+        | DatumType::HistogramU64
+        | DatumType::HistogramF32
+        | DatumType::HistogramF64 => false,
+    }
+}
+
+/// Return `true` if values of this datum are totally ordered (can derive
+/// `Ord`.)
+fn datum_type_is_totally_ordered(datum_type: DatumType) -> bool {
+    match datum_type {
+        DatumType::Bool
+        | DatumType::I8
+        | DatumType::U8
+        | DatumType::I16
+        | DatumType::U16
+        | DatumType::I32
+        | DatumType::U32
+        | DatumType::I64
+        | DatumType::U64
+        | DatumType::String
+        | DatumType::Bytes
+        | DatumType::CumulativeI64
+        | DatumType::CumulativeU64
+        | DatumType::CumulativeF32
+        | DatumType::CumulativeF64 => true,
+        DatumType::F32
+        | DatumType::F64
+        | DatumType::HistogramI8
+        | DatumType::HistogramU8
+        | DatumType::HistogramI16
+        | DatumType::HistogramU16
+        | DatumType::HistogramI32
+        | DatumType::HistogramU32
+        | DatumType::HistogramI64
+        | DatumType::HistogramU64
+        | DatumType::HistogramF32
+        | DatumType::HistogramF64 => false,
+    }
+}
+
+/// Return `true` if values of this datum are hashable (can derive `Hash`).
+fn datum_type_is_hashable(datum_type: DatumType) -> bool {
+    match datum_type {
+        DatumType::Bool
+        | DatumType::I8
+        | DatumType::U8
+        | DatumType::I16
+        | DatumType::U16
+        | DatumType::I32
+        | DatumType::U32
+        | DatumType::I64
+        | DatumType::U64
+        | DatumType::String
+        | DatumType::Bytes
+        | DatumType::CumulativeI64
+        | DatumType::CumulativeU64
+        | DatumType::CumulativeF32
+        | DatumType::CumulativeF64 => true,
+        DatumType::F32
+        | DatumType::F64
+        | DatumType::HistogramI8
+        | DatumType::HistogramU8
+        | DatumType::HistogramI16
+        | DatumType::HistogramU16
+        | DatumType::HistogramI32
+        | DatumType::HistogramU32
+        | DatumType::HistogramI64
+        | DatumType::HistogramU64
+        | DatumType::HistogramF32
+        | DatumType::HistogramF64 => false,
+    }
+}
+
+fn compute_extra_derives(
+    source: FieldSource,
+    schema: &TimeseriesSchema,
+) -> TokenStream {
+    match source {
+        FieldSource::Target => {
+            if fields_are_copyable(schema.target_fields()) {
+                quote! { #[derive(Copy, Eq, Hash, Ord, PartialOrd)] }
+            } else {
+                quote! { #[derive(Eq, Hash, Ord, PartialOrd)] }
+            }
+        }
+        FieldSource::Metric => {
+            let mut derives = Vec::new();
+            if fields_are_copyable(schema.metric_fields())
+                && datum_type_is_copyable(schema.datum_type)
+            {
+                derives.push(quote! { Copy });
+            }
+            if datum_type_is_partially_ordered(schema.datum_type) {
+                derives.push(quote! { PartialOrd });
+                if datum_type_is_totally_ordered(schema.datum_type) {
+                    derives.push(quote! { Eq, Ord });
+                }
+            }
+            if datum_type_is_hashable(schema.datum_type) {
+                derives.push(quote! { Hash })
+            }
+            if derives.is_empty() {
+                quote! {}
+            } else {
+                quote! { #[derive(#(#derives),*)] }
+            }
+        }
+    }
+}
+
 fn emit_one(source: FieldSource, schema: &TimeseriesSchema) -> TokenStream {
     let name = match source {
         FieldSource::Target => schema.target_name(),
@@ -98,6 +278,7 @@ fn emit_one(source: FieldSource, schema: &TimeseriesSchema) -> TokenStream {
             }
         })
         .collect();
+    let extra_derives = compute_extra_derives(source, schema);
     let (oximeter_trait, maybe_datum, type_docstring) = match source {
         FieldSource::Target => (
             quote! {::oximeter::Target },
@@ -116,6 +297,7 @@ fn emit_one(source: FieldSource, schema: &TimeseriesSchema) -> TokenStream {
     quote! {
         #[doc = #type_docstring]
         #[derive(Clone, Debug, PartialEq, #oximeter_trait)]
+        #extra_derives
         pub struct #struct_name {
             #( #field_defs, )*
             #maybe_datum
@@ -335,6 +517,10 @@ impl quote::ToTokens for Units {
         let toks = match self {
             Units::Count => quote! { ::oximeter::schema::Units::Count },
             Units::Bytes => quote! { ::oximeter::schema::Units::Bytes },
+            Units::Seconds => quote! { ::oximeter::schema::Units::Seconds },
+            Units::Nanoseconds => {
+                quote! { ::oximeter::schema::Units::Nanoseconds }
+            }
         };
         toks.to_tokens(tokens);
     }
@@ -431,6 +617,7 @@ mod tests {
         let expected = quote! {
             #[doc = "a target"]
             #[derive(Clone, Debug, PartialEq, ::oximeter::Target)]
+            #[derive(Eq, Hash, Ord, PartialOrd)]
             pub struct Foo {
                 #[doc = "target field"]
                 pub f0: ::std::borrow::Cow<'static, str>,
@@ -438,6 +625,7 @@ mod tests {
 
             #[doc = "a metric"]
             #[derive(Clone, Debug, PartialEq, ::oximeter::Metric)]
+            #[derive(Copy, PartialOrd, Eq, Ord, Hash)]
             pub struct Bar {
                 #[doc = "metric field"]
                 pub f1: ::uuid::Uuid,
@@ -474,6 +662,7 @@ mod tests {
         let expected = quote! {
             #[doc = "a target"]
             #[derive(Clone, Debug, PartialEq, ::oximeter::Target)]
+            #[derive(Eq, Hash, Ord, PartialOrd)]
             pub struct Foo {
                 #[doc = "target field"]
                 pub f0: ::std::borrow::Cow<'static, str>,
@@ -481,11 +670,160 @@ mod tests {
 
             #[doc = "a metric"]
             #[derive(Clone, Debug, PartialEq, ::oximeter::Metric)]
+            #[derive(Copy, PartialOrd, Eq, Ord, Hash)]
             pub struct Bar {
                 pub datum: ::oximeter::types::Cumulative<u64>,
             }
         };
 
         assert_eq!(tokens.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn compute_extra_derives_respects_non_copy_fields() {
+        // Metric fields are not copy, even though datum is.
+        let schema = TimeseriesSchema {
+            timeseries_name: "foo:bar".parse().unwrap(),
+            description: TimeseriesDescription {
+                target: "a target".into(),
+                metric: "a metric".into(),
+            },
+            field_schema: BTreeSet::from([FieldSchema {
+                name: "f0".into(),
+                field_type: FieldType::String,
+                source: FieldSource::Metric,
+                description: "metric field".into(),
+            }]),
+            datum_type: DatumType::CumulativeU64,
+            version: NonZeroU8::new(1).unwrap(),
+            authz_scope: AuthzScope::Fleet,
+            units: Units::Bytes,
+            created: Utc::now(),
+        };
+        let tokens = compute_extra_derives(FieldSource::Metric, &schema);
+        assert_eq!(
+            tokens.to_string(),
+            quote! { #[derive(PartialOrd, Eq, Ord, Hash)] }.to_string(),
+            "Copy should not be derived for a datum type that is copy, \
+            when the fields themselves are not copy."
+        );
+    }
+
+    #[test]
+    fn compute_extra_derives_respects_non_copy_datum_types() {
+        // Fields are copy, but datum is not.
+        let schema = TimeseriesSchema {
+            timeseries_name: "foo:bar".parse().unwrap(),
+            description: TimeseriesDescription {
+                target: "a target".into(),
+                metric: "a metric".into(),
+            },
+            field_schema: BTreeSet::from([FieldSchema {
+                name: "f0".into(),
+                field_type: FieldType::Uuid,
+                source: FieldSource::Metric,
+                description: "metric field".into(),
+            }]),
+            datum_type: DatumType::String,
+            version: NonZeroU8::new(1).unwrap(),
+            authz_scope: AuthzScope::Fleet,
+            units: Units::Bytes,
+            created: Utc::now(),
+        };
+        let tokens = compute_extra_derives(FieldSource::Metric, &schema);
+        assert_eq!(
+            tokens.to_string(),
+            quote! { #[derive(PartialOrd, Eq, Ord, Hash)] }.to_string(),
+            "Copy should not be derived for a datum type that is not copy, \
+            when the fields themselves are copy."
+        );
+    }
+
+    #[test]
+    fn compute_extra_derives_respects_partially_ordered_datum_types() {
+        // No fields, datum is partially- but not totally-ordered.
+        let schema = TimeseriesSchema {
+            timeseries_name: "foo:bar".parse().unwrap(),
+            description: TimeseriesDescription {
+                target: "a target".into(),
+                metric: "a metric".into(),
+            },
+            field_schema: BTreeSet::from([FieldSchema {
+                name: "f0".into(),
+                field_type: FieldType::Uuid,
+                source: FieldSource::Target,
+                description: "target field".into(),
+            }]),
+            datum_type: DatumType::F64,
+            version: NonZeroU8::new(1).unwrap(),
+            authz_scope: AuthzScope::Fleet,
+            units: Units::Bytes,
+            created: Utc::now(),
+        };
+        let tokens = compute_extra_derives(FieldSource::Metric, &schema);
+        assert_eq!(
+            tokens.to_string(),
+            quote! { #[derive(Copy, PartialOrd)] }.to_string(),
+            "Should derive only PartialOrd for a metric type that is \
+            not totally-ordered."
+        );
+    }
+
+    #[test]
+    fn compute_extra_derives_respects_totally_ordered_datum_types() {
+        // No fields, datum is also totally-ordered
+        let schema = TimeseriesSchema {
+            timeseries_name: "foo:bar".parse().unwrap(),
+            description: TimeseriesDescription {
+                target: "a target".into(),
+                metric: "a metric".into(),
+            },
+            field_schema: BTreeSet::from([FieldSchema {
+                name: "f0".into(),
+                field_type: FieldType::Uuid,
+                source: FieldSource::Target,
+                description: "target field".into(),
+            }]),
+            datum_type: DatumType::U64,
+            version: NonZeroU8::new(1).unwrap(),
+            authz_scope: AuthzScope::Fleet,
+            units: Units::Bytes,
+            created: Utc::now(),
+        };
+        let tokens = compute_extra_derives(FieldSource::Metric, &schema);
+        assert_eq!(
+            tokens.to_string(),
+            quote! { #[derive(Copy, PartialOrd, Eq, Ord, Hash)] }.to_string(),
+            "Should derive Ord for a metric type that is totally-ordered."
+        );
+    }
+
+    #[test]
+    fn compute_extra_derives_respects_datum_type_with_no_extra_derives() {
+        // No metric fields, and histograms don't admit any other derives.
+        let schema = TimeseriesSchema {
+            timeseries_name: "foo:bar".parse().unwrap(),
+            description: TimeseriesDescription {
+                target: "a target".into(),
+                metric: "a metric".into(),
+            },
+            field_schema: BTreeSet::from([FieldSchema {
+                name: "f0".into(),
+                field_type: FieldType::String,
+                source: FieldSource::Target,
+                description: "target field".into(),
+            }]),
+            datum_type: DatumType::HistogramF64,
+            version: NonZeroU8::new(1).unwrap(),
+            authz_scope: AuthzScope::Fleet,
+            units: Units::Bytes,
+            created: Utc::now(),
+        };
+        let tokens = compute_extra_derives(FieldSource::Metric, &schema);
+        assert!(
+            tokens.is_empty(),
+            "A histogram has no extra derives, so a timeseries schema \
+            with no metric fields should also have no extra derives."
+        );
     }
 }

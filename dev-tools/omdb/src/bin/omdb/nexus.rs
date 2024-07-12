@@ -29,6 +29,7 @@ use nexus_client::types::SledSelector;
 use nexus_client::types::UninitializedSledId;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::deployment::Blueprint;
+use nexus_types::internal_api::background::LookupRegionPortStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
 use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::CollectionUuid;
@@ -1100,6 +1101,26 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
 
                 println!("    number of errors: {}", status.errors.len());
                 for line in &status.errors {
+                    println!("    > {line}");
+                }
+            }
+        };
+    } else if name == "lookup_region_port" {
+        match serde_json::from_value::<LookupRegionPortStatus>(details.clone())
+        {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+
+            Ok(LookupRegionPortStatus { found_port_ok, errors }) => {
+                println!("    total filled in ports: {}", found_port_ok.len());
+                for line in &found_port_ok {
+                    println!("    > {line}");
+                }
+
+                println!("    errors: {}", errors.len());
+                for line in &errors {
                     println!("    > {line}");
                 }
             }

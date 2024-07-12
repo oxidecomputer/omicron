@@ -8,6 +8,7 @@ use super::params::{OximeterInfo, RackInitializationRequest};
 use crate::context::ApiContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
+use dropshot::ApiDescriptionRegisterError;
 use dropshot::FreeformBody;
 use dropshot::HttpError;
 use dropshot::HttpResponseCreated;
@@ -69,7 +70,9 @@ type NexusApiDescription = ApiDescription<ApiContext>;
 
 /// Returns a description of the internal nexus API
 pub(crate) fn internal_api() -> NexusApiDescription {
-    fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
+    fn register_endpoints(
+        api: &mut NexusApiDescription,
+    ) -> Result<(), ApiDescriptionRegisterError> {
         api.register(sled_agent_get)?;
         api.register(sled_agent_put)?;
         api.register(sled_firewall_rules_request)?;

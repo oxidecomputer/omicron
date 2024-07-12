@@ -295,6 +295,8 @@ enum DbCommands {
     PhysicalDisks(PhysicalDisksArgs),
     /// Save the current Reconfigurator inputs to a file
     ReconfiguratorSave(ReconfiguratorSaveArgs),
+    /// Print information about regions
+    Region(RegionArgs),
     /// Query for information about region replacements, optionally manually
     /// triggering one.
     RegionReplacement(RegionReplacementArgs),
@@ -470,6 +472,18 @@ struct SledsArgs {
 }
 
 #[derive(Debug, Args)]
+struct RegionArgs {
+    #[command(subcommand)]
+    command: RegionCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum RegionCommands {
+    /// List regions that are still missing ports
+    ListRegionsMissingPorts,
+}
+
+#[derive(Debug, Args)]
 struct RegionReplacementArgs {
     #[command(subcommand)]
     command: RegionReplacementCommands,
@@ -627,6 +641,9 @@ impl DbArgs {
                 )
                 .await
             }
+            DbCommands::Region(RegionArgs {
+                command: RegionCommands::ListRegionsMissingPorts,
+            }) => cmd_db_region_missing_porst(&opctx, &datastore).await,
             DbCommands::RegionReplacement(RegionReplacementArgs {
                 command: RegionReplacementCommands::List(args),
             }) => {
@@ -1602,6 +1619,20 @@ async fn cmd_db_snapshot_info(
             .to_string();
 
         println!("{}", table);
+    }
+
+    Ok(())
+}
+
+/// List all regions still missing ports
+async fn cmd_db_region_missing_porst(
+    opctx: &OpContext,
+    datastore: &DataStore,
+) -> Result<(), anyhow::Error> {
+    let regions: Vec<Region> = datastore.regions_missing_ports(opctx).await?;
+
+    for region in regions {
+        println!("{:?}", region.id());
     }
 
     Ok(())
@@ -3280,7 +3311,7 @@ async fn cmd_db_inventory_physical_disks(
         slot: disk.slot,
         vendor: disk.vendor,
         model: disk.model.clone(),
-        serial: disk.model.clone(),
+        serial: disk.serial.clone(),
         variant: format!("{:?}", disk.variant),
     });
 
