@@ -15,17 +15,20 @@ use diesel::{
     BoolExpressionMethods, ExpressionMethods, QueryDsl, SelectableHelper,
 };
 use futures::future::BoxFuture;
+use nexus_db_model::InstanceState;
 use nexus_db_queries::{
     authz,
     context::OpContext,
     db::{datastore::InstanceAndActiveVmm, lookup::LookupPath, DataStore},
 };
 use nexus_types::identity::Resource;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::NameOrId;
+use omicron_test_utils::dev::poll;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use sled_agent_client::TestInterfaces as _;
 use slog::{info, warn, Logger};
-use std::{num::NonZeroU32, sync::Arc};
+use std::{num::NonZeroU32, sync::Arc, time::Duration};
 use steno::SagaDag;
 
 type ControlPlaneTestContext =
@@ -188,13 +191,27 @@ pub async fn instance_fetch(
     db_state
 }
 
-pub async fn instance_fetch_by_name(
+pub(crate) async fn instance_wait_for_state(
+    cptestctx: &ControlPlaneTestContext,
+    instance_id: InstanceUuid,
+    desired_state: InstanceState,
+) -> InstanceAndActiveVmm {
+    let opctx = test_opctx(&cptestctx);
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id.into_untyped_uuid())
+        .lookup_for(authz::Action::Read)
+        .await
+        .expect("test instance should be present in datastore");
+    instance_poll_state(cptestctx, &opctx, authz_instance, desired_state).await
+}
+
+pub async fn instance_wait_for_state_by_name(
     cptestctx: &ControlPlaneTestContext,
     name: &str,
     project_name: &str,
+    desired_state: InstanceState,
 ) -> InstanceAndActiveVmm {
-    let datastore = cptestctx.server.server_context().nexus.datastore().clone();
-
     let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
@@ -207,19 +224,67 @@ pub async fn instance_fetch_by_name(
         nexus.instance_lookup(&opctx, instance_selector).unwrap();
     let (_, _, authz_instance, ..) = instance_lookup.fetch().await.unwrap();
 
-    let db_state = datastore
-        .instance_fetch_with_vmm(&opctx, &authz_instance)
-        .await
-        .expect("test instance's info should be fetchable");
-
-    info!(&cptestctx.logctx.log, "fetched instance info from db";
-              "instance_name" => %name,
-              "project_name" => %project_name,
-              "instance_id" => %authz_instance.id(),
-              "instance_and_vmm" => ?db_state);
-
-    db_state
+    instance_poll_state(cptestctx, &opctx, authz_instance, desired_state).await
 }
+
+async fn instance_poll_state(
+    cptestctx: &ControlPlaneTestContext,
+    opctx: &OpContext,
+    authz_instance: authz::Instance,
+    desired_state: InstanceState,
+) -> InstanceAndActiveVmm {
+    const MAX_WAIT: Duration = Duration::from_secs(120);
+
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let log = &cptestctx.logctx.log;
+    let instance_id = authz_instance.id();
+
+    info!(
+        log,
+        "waiting for instance {instance_id} to transition to {desired_state}...";
+        "instance_id" => %instance_id,
+    );
+    let result = poll::wait_for_condition(
+        || async {
+            let db_state = datastore
+                .instance_fetch_with_vmm(&opctx, &authz_instance)
+                .await
+                .map_err(poll::CondCheckError::<Error>::Failed)?;
+
+            if db_state.instance.runtime().nexus_state == desired_state {
+                info!(
+                    log,
+                    "instance {instance_id} transitioned to {desired_state}";
+                    "instance_id" => %instance_id,
+                    "instance" => ?db_state.instance(),
+                    "active_vmm" => ?db_state.vmm(),
+                );
+                Ok(db_state)
+            } else {
+                info!(
+                    log,
+                    "instance {instance_id} has not yet transitioned to {desired_state}";
+                    "instance_id" => %instance_id,
+                    "instance" => ?db_state.instance(),
+                    "active_vmm" => ?db_state.vmm(),
+                );
+                Err(poll::CondCheckError::<Error>::NotYet)
+            }
+        },
+        &Duration::from_secs(1),
+        &MAX_WAIT,
+    )
+    .await;
+
+    match result {
+        Ok(i) => i,
+        Err(e) => panic!(
+            "instance {instance_id} did not transition to {desired_state} \
+             after {MAX_WAIT:?}: {e}"
+        ),
+    }
+}
+
 pub async fn no_virtual_provisioning_resource_records_exist(
     cptestctx: &ControlPlaneTestContext,
 ) -> bool {

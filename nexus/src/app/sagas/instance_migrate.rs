@@ -591,7 +591,6 @@ async fn sim_instance_migrate(
 
 #[cfg(test)]
 mod tests {
-    use crate::app::db::datastore::InstanceAndActiveVmm;
     use crate::app::sagas::test_helpers;
     use camino::Utf8Path;
     use dropshot::test_util::ClientTestContext;
@@ -605,8 +604,6 @@ mod tests {
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
     use omicron_sled_agent::sim::Server;
-    use omicron_test_utils::dev::poll;
-    use std::time::Duration;
 
     use super::*;
 
@@ -831,37 +828,19 @@ mod tests {
                     test_helpers::instance_stop(cptestctx, &instance_id).await;
                     test_helpers::instance_simulate(cptestctx, &instance_id)
                         .await;
-
                     // Wait until the instance has advanced to the `NoVmm`
-                    // state. This may not happen immediately, as the
-                    // `Nexus::cpapi_instances_put` API endpoint simply
-                    // writes the new VMM state to the database and *starts*
-                    // an `instance-update` saga, and the instance record
-                    // isn't updated until that saga completes.
-                    let new_state = poll::wait_for_condition(
-                        || async {
-                            let new_state = test_helpers::instance_fetch(
-                                cptestctx,
-                                instance_id,
-                            )
-                            .await;
-                            if new_state.instance().runtime().nexus_state == nexus_db_model::InstanceState::Vmm {
-                                Err(poll::CondCheckError::<InstanceAndActiveVmm>::NotYet)
-                            } else {
-                                Ok(new_state)
-                            }
-                        },
-                        &Duration::from_secs(5),
-                        &Duration::from_secs(300),
+                    // state. This may hot happen immediately, as an
+                    // instance-update saga must complete to update the
+                    // instance's state.
+                    let new_state = test_helpers::instance_wait_for_state(
+                        cptestctx,
+                        instance_id,
+                        nexus_db_model::InstanceState::NoVmm,
                     )
-                    .await.expect("instance did not transition to NoVmm state after 300 seconds");
+                    .await;
 
                     let new_instance = new_state.instance();
                     let new_vmm = new_state.vmm().as_ref();
-                    assert_eq!(
-                        new_instance.runtime().nexus_state,
-                        nexus_db_model::InstanceState::NoVmm,
-                    );
                     assert!(new_instance.runtime().propolis_id.is_none());
                     assert!(new_vmm.is_none());
 
