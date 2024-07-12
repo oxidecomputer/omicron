@@ -15638,14 +15638,6 @@
           }
         ]
       },
-      "IpKind": {
-        "type": "string",
-        "enum": [
-          "snat",
-          "floating",
-          "ephemeral"
-        ]
-      },
       "IpNet": {
         "x-rust-type": {
           "crate": "oxnet",
@@ -16871,7 +16863,7 @@
             "format": "ip"
           },
           "kind": {
-            "$ref": "#/components/schemas/IpKind"
+            "$ref": "#/components/schemas/ProbeExternalIpKind"
           },
           "last_port": {
             "type": "integer",
@@ -16884,6 +16876,14 @@
           "ip",
           "kind",
           "last_port"
+        ]
+      },
+      "ProbeExternalIpKind": {
+        "type": "string",
+        "enum": [
+          "snat",
+          "floating",
+          "ephemeral"
         ]
       },
       "ProbeInfo": {

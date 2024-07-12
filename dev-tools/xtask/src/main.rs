@@ -46,6 +46,11 @@ enum Cmds {
     /// Download binaries, OpenAPI specs, and other out-of-repo utilities.
     Download(download::DownloadArgs),
 
+    /// Manage OpenAPI specifications.
+    ///
+    /// For more information, see dev-tools/openapi-manager/README.adoc.
+    Openapi(external::External),
+
     #[cfg(target_os = "illumos")]
     /// Build a TUF repo
     Releng(external::External),
@@ -88,6 +93,7 @@ async fn main() -> Result<()> {
         Cmds::Clippy(args) => clippy::run_cmd(args),
         Cmds::CheckWorkspaceDeps => check_workspace_deps::run_cmd(),
         Cmds::Download(args) => download::run_cmd(args).await,
+        Cmds::Openapi(external) => external.exec_bin("openapi-manager"),
         #[cfg(target_os = "illumos")]
         Cmds::Releng(external) => {
             external.cargo_args(["--release"]).exec_bin("omicron-releng")
