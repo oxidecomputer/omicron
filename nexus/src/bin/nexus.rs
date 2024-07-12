@@ -26,7 +26,6 @@ struct Args {
         short = 'O',
         long = "openapi",
         help = "Print the external OpenAPI Spec document and exit",
-        conflicts_with = "openapi_internal",
         action
     )]
     openapi: bool,

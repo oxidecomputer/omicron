@@ -444,11 +444,11 @@ secrecy = "0.8.0"
 semver = { version = "1.0.23", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
 serde_human_bytes = { git = "https://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
-serde_json = "1.0.117"
+serde_json = "1.0.120"
 serde_path_to_error = "0.1.16"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
-serde_with = "3.7.0"
+serde_with = "3.8.3"
 sha2 = "0.10.8"
 sha3 = "0.10.8"
 shell-words = "1.1.0"
