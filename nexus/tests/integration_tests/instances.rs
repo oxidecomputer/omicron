@@ -5130,12 +5130,6 @@ async fn instance_simulate_on_sled(
 
 /// Simulates a migration source for the provided instance ID, sled ID, and
 /// migration ID.
-//
-// XXX(eliza): I had really wanted to have the migration target's simulated
-// sled-agent do this automagically when it's told to start a migration in, but
-// unfortunately, I wasn't able to figure out a way for it to get the simulated
-// *sled-agent*'s IP --- it just gets the Propolis IP in the migration target
-// params, and the propolis doesn't actually exist...
 async fn instance_simulate_migration_source(
     cptestctx: &ControlPlaneTestContext,
     nexus: &Arc<Nexus>,
