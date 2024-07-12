@@ -6,6 +6,8 @@ NOTE: For more information about API traits, see https://rfd.shared.oxide.comput
 
 Currently, a subset of OpenAPI documents is managed by this tool. Eventually, all of the OpenAPI documents in Omicron will be managed by this tool; work to make that happen is ongoing.
 
+To check whether your document is managed, run `cargo xtask openapi list`: it will list out all managed OpenAPI documents. If your document is not on the list, it is unmanaged.
+
 == Basic usage
 
 The OpenAPI manager is meant to be invoked via `cargo xtask openapi`. Currently, three commands are provided:
@@ -14,7 +16,7 @@ The OpenAPI manager is meant to be invoked via `cargo xtask openapi`. Currently,
 * `cargo xtask openapi check`: Check that all of the managed documents are up-to-date.
 * `cargo xtask openapi generate`: Update and generate OpenAPI documents.
 
-There is also a test which makes sure that all managed documents are up-to-date, and tells you to run `xtask openapi generate` if they aren't.
+There is also a test which makes sure that all managed documents are up-to-date, and tells you to run `cargo xtask openapi generate` if they aren't.
 
 === API crates [[api_crates]]
 
