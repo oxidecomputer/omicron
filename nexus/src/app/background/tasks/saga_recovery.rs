@@ -309,21 +309,19 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
                         "saga_id" => %saga_id
                     );
                 }
-                Ok(saga_state) => {
-                    match saga_state.state {
-                        SagaStateView::Done { .. } => (),
-                        _ => {
-                            self.status.ntotal_sec_errors_bad_state += 1;
-                            error!(
-                                log,
-                                "we thought saga was done, but SEC reports a \
-                                different state";
-                                "saga_id" => %saga_id,
-                                "sec_state" => ?saga_state.state
-                            );
-                        }
+                Ok(saga_state) => match saga_state.state {
+                    SagaStateView::Done { .. } => (),
+                    _ => {
+                        self.status.ntotal_sec_errors_bad_state += 1;
+                        error!(
+                            log,
+                            "we thought saga was done, but SEC reports a \
+                            different state";
+                            "saga_id" => %saga_id,
+                            "sec_state" => ?saga_state.state
+                        );
                     }
-                }
+                },
             }
         }
     }
