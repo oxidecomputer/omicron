@@ -136,6 +136,7 @@ mod tasks;
 pub use driver::Activator;
 pub use driver::Driver;
 pub use init::BackgroundTasks;
+pub use init::BackgroundTasksData;
 pub use init::BackgroundTasksInitializer;
 
 use futures::future::BoxFuture;

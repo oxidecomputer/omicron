@@ -27,6 +27,7 @@ use nexus_client::types::LastResult;
 use nexus_client::types::SledSelector;
 use nexus_client::types::UninitializedSledId;
 use nexus_db_queries::db::lookup::LookupPath;
+use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
@@ -1083,6 +1084,136 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 }
             }
         };
+    } else if name == "saga_recovery" {
+        match serde_json::from_value::<nexus_saga_recovery::Report>(
+            details.clone(),
+        ) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+
+            Ok(report) => {
+                println!("    since Nexus started:");
+                println!(
+                    "        sagas recovered:         {:3}",
+                    report.ntotal_recovered
+                );
+                println!(
+                    "        sagas recovery errors:   {:3}",
+                    report.ntotal_failures,
+                );
+                println!(
+                    "        sagas observed started:  {:3}",
+                    report.ntotal_started
+                );
+                println!(
+                    "        sagas inferred finished: {:3}",
+                    report.ntotal_finished
+                );
+                println!(
+                    "        missing from SEC:        {:3}",
+                    report.ntotal_sec_errors_missing,
+                );
+                println!(
+                    "        bad state in SEC:        {:3}",
+                    report.ntotal_sec_errors_bad_state,
+                );
+                match report.last_pass {
+                    LastPass::NeverStarted => {
+                        println!("    never run");
+                    }
+                    LastPass::Failed { message } => {
+                        println!("    last pass FAILED: {}", message);
+                    }
+                    LastPass::Success(success) => {
+                        println!("    last pass:");
+                        println!(
+                            "        found sagas: {:3} \
+                            (in-progress, assigned to this Nexus)",
+                            success.nfound
+                        );
+                        println!(
+                            "        recovered:   {:3} (successfully)",
+                            success.nrecovered
+                        );
+                        println!("        failed:      {:3}", success.nfailed);
+                        println!(
+                            "        skipped:     {:3} (already running)",
+                            success.nskipped
+                        );
+                        println!(
+                            "        removed:     {:3} (newly finished)",
+                            success.nskipped
+                        );
+                    }
+                };
+
+                if report.recent_recoveries.is_empty() {
+                    println!("    no recovered sagas");
+                } else {
+                    println!(
+                        "    recently recovered sagas ({}):",
+                        report.recent_recoveries.len()
+                    );
+
+                    #[derive(Tabled)]
+                    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+                    struct SagaRow {
+                        time: String,
+                        saga_id: String,
+                    }
+                    let table_rows =
+                        report.recent_recoveries.iter().map(|r| SagaRow {
+                            time: r
+                                .time
+                                .to_rfc3339_opts(SecondsFormat::Secs, true),
+                            saga_id: r.saga_id.to_string(),
+                        });
+                    let table = tabled::Table::new(table_rows)
+                        .with(tabled::settings::Style::empty())
+                        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                        .to_string();
+                    println!(
+                        "{}",
+                        textwrap::indent(&table.to_string(), "        ")
+                    );
+                }
+
+                if report.recent_failures.is_empty() {
+                    println!("    no saga recovery failures");
+                } else {
+                    println!(
+                        "    recent sagas recovery failures ({}):",
+                        report.recent_failures.len()
+                    );
+
+                    #[derive(Tabled)]
+                    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+                    struct SagaRow<'a> {
+                        time: String,
+                        saga_id: String,
+                        message: &'a str,
+                    }
+                    let table_rows =
+                        report.recent_failures.iter().map(|r| SagaRow {
+                            time: r
+                                .time
+                                .to_rfc3339_opts(SecondsFormat::Secs, true),
+                            saga_id: r.saga_id.to_string(),
+                            message: &r.message,
+                        });
+                    let table = tabled::Table::new(table_rows)
+                        .with(tabled::settings::Style::empty())
+                        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                        .to_string();
+                    println!(
+                        "{}",
+                        textwrap::indent(&table.to_string(), "        ")
+                    );
+                }
+            }
+        }
     } else if name == "lookup_region_port" {
         match serde_json::from_value::<LookupRegionPortStatus>(details.clone())
         {

@@ -106,6 +106,7 @@ use super::tasks::phantom_disks;
 use super::tasks::physical_disk_adoption;
 use super::tasks::region_replacement;
 use super::tasks::region_replacement_driver;
+use super::tasks::saga_recovery;
 use super::tasks::service_firewall_rules;
 use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
@@ -115,6 +116,8 @@ use super::Activator;
 use super::Driver;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::saga::StartSaga;
+use crate::app::sagas::ActionRegistry;
+use crate::Nexus;
 use nexus_config::BackgroundTaskConfig;
 use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
@@ -123,6 +126,7 @@ use nexus_db_queries::db::DataStore;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use tokio::sync::watch;
 use uuid::Uuid;
 
@@ -153,6 +157,7 @@ pub struct BackgroundTasks {
     pub task_service_firewall_propagation: Activator,
     pub task_abandoned_vmm_reaper: Activator,
     pub task_vpc_route_manager: Activator,
+    pub task_saga_recovery: Activator,
     pub task_lookup_region_port: Activator,
 
     // Handles to activate background tasks that do not get used by Nexus
@@ -231,6 +236,7 @@ impl BackgroundTasksInitializer {
             task_service_firewall_propagation: Activator::new(),
             task_abandoned_vmm_reaper: Activator::new(),
             task_vpc_route_manager: Activator::new(),
+            task_saga_recovery: Activator::new(),
             task_lookup_region_port: Activator::new(),
 
             task_internal_dns_propagation: Activator::new(),
@@ -246,22 +252,20 @@ impl BackgroundTasksInitializer {
     ///
     /// This function will wire up the `Activator`s in `background_tasks` to the
     /// corresponding tasks once they've been started.
-    #[allow(clippy::too_many_arguments)]
     pub fn start(
         self,
         background_tasks: &'_ BackgroundTasks,
-        opctx: OpContext,
-        datastore: Arc<DataStore>,
-        config: BackgroundTaskConfig,
-        rack_id: Uuid,
-        nexus_id: Uuid,
-        resolver: internal_dns::resolver::Resolver,
-        sagas: Arc<dyn StartSaga>,
-        producer_registry: ProducerRegistry,
+        args: BackgroundTasksData,
     ) -> Driver {
         let mut driver = self.driver;
-        let opctx = &opctx;
-        let producer_registry = &producer_registry;
+        let opctx = &args.opctx;
+        let datastore = args.datastore;
+        let config = args.config;
+        let rack_id = args.rack_id;
+        let nexus_id = args.nexus_id;
+        let resolver = args.resolver;
+        let sagas = args.saga_starter;
+        let producer_registry = &args.producer_registry;
 
         // This "let" construction helps catch mistakes where someone forgets to
         // wire up an activator to its corresponding background task.
@@ -291,6 +295,7 @@ impl BackgroundTasksInitializer {
             task_service_firewall_propagation,
             task_abandoned_vmm_reaper,
             task_vpc_route_manager,
+            task_saga_recovery,
             task_lookup_region_port,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
@@ -651,6 +656,29 @@ impl BackgroundTasksInitializer {
             activator: task_abandoned_vmm_reaper,
         });
 
+        // Background task: saga recovery
+        {
+            let task_impl = Box::new(saga_recovery::SagaRecovery::new(
+                datastore.clone(),
+                nexus_db_model::SecId(args.nexus_id),
+                args.saga_recovery_opctx,
+                args.saga_recovery_nexus,
+                args.saga_recovery_sec,
+                args.saga_recovery_registry,
+                args.saga_recovery_rx,
+            ));
+
+            driver.register(TaskDefinition {
+                name: "saga_recovery",
+                description: "recovers sagas assigned to this Nexus",
+                period: config.saga_recovery.period_secs,
+                task_impl,
+                opctx: opctx.child(BTreeMap::new()),
+                watchers: vec![],
+                activator: task_saga_recovery,
+            });
+        }
+
         driver.register(TaskDefinition {
             name: "lookup_region_port",
             description: "fill in missing ports for region records",
@@ -665,6 +693,39 @@ impl BackgroundTasksInitializer {
 
         driver
     }
+}
+
+pub struct BackgroundTasksData {
+    /// root `OpContext` used for background tasks
+    pub opctx: OpContext,
+    /// handle to `DataStore`, provided directly to many background tasks
+    pub datastore: Arc<DataStore>,
+    /// background task configuration
+    pub config: BackgroundTaskConfig,
+    /// rack identifier
+    pub rack_id: Uuid,
+    /// nexus identifier
+    pub nexus_id: Uuid,
+    /// internal DNS DNS resolver, used when tasks need to contact other
+    /// internal services
+    pub resolver: internal_dns::resolver::Resolver,
+    /// handle to saga subsystem for starting sagas
+    pub saga_starter: Arc<dyn StartSaga>,
+    /// Oximeter producer registry (for metrics)
+    pub producer_registry: ProducerRegistry,
+
+    /// `OpContext` used for carrying out saga recovery
+    ///
+    /// This may have fewer privileges than `opctx`.
+    pub saga_recovery_opctx: OpContext,
+    /// handle to `Nexus`, used to construct `SagaContext`s for recovered sagas
+    pub saga_recovery_nexus: Arc<Nexus>,
+    /// handle to Steno SEC client, used to recover sagas
+    pub saga_recovery_sec: Arc<steno::SecClient>,
+    /// Steno (saga) action registry
+    pub saga_recovery_registry: Arc<ActionRegistry>,
+    /// Channel for receiving notifications about newly-created sagas
+    pub saga_recovery_rx: mpsc::UnboundedReceiver<steno::SagaId>,
 }
 
 /// Starts the three DNS-propagation-related background tasks for either
