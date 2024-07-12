@@ -8,8 +8,7 @@ use super::collection::PokeMode;
 use crate::bootstrap::params::AddSledRequest;
 use crate::params::{
     DiskEnsureBody, InstanceEnsureBody, InstanceExternalIpBody,
-    InstancePutMigrationIdsBody, InstancePutStateBody,
-    InstancePutStateResponse, InstanceUnregisterResponse,
+    InstancePutStateBody, InstancePutStateResponse, InstanceUnregisterResponse,
     VpcFirewallRulesEnsureBody,
 };
 use dropshot::ApiDescription;
@@ -46,7 +45,6 @@ pub fn api() -> SledApiDescription {
     fn register_endpoints(
         api: &mut SledApiDescription,
     ) -> Result<(), ApiDescriptionRegisterError> {
-        api.register(instance_put_migration_ids)?;
         api.register(instance_put_state)?;
         api.register(instance_get_state)?;
         api.register(instance_register)?;
@@ -158,21 +156,6 @@ async fn instance_get_state(
     let sa = rqctx.context();
     let instance_id = path_params.into_inner().instance_id;
     Ok(HttpResponseOk(sa.instance_get_state(instance_id).await?))
-}
-
-#[endpoint {
-    method = PUT,
-    path = "/instances/{instance_id}/migration-ids",
-}]
-async fn instance_put_migration_ids(
-    _: RequestContext<Arc<SledAgent>>,
-    _: Path<InstancePathParam>,
-    _: TypedBody<InstancePutMigrationIdsBody>,
-) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
-    Err(HttpError::for_bad_request(
-        None,
-        "operation no longer supported".to_string(),
-    ))
 }
 
 #[endpoint {

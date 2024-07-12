@@ -419,49 +419,6 @@
         }
       }
     },
-    "/instances/{instance_id}/migration-ids": {
-      "put": {
-        "operationId": "instance_put_migration_ids",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/TypedUuidForInstanceKind"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstancePutMigrationIdsBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SledInstanceState"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/instances/{instance_id}/state": {
       "get": {
         "operationId": "instance_get_state",
@@ -3063,23 +3020,6 @@
           "silo_id"
         ]
       },
-      "InstanceMigrationSourceParams": {
-        "description": "Instance runtime state to update for a migration.",
-        "type": "object",
-        "properties": {
-          "dst_propolis_id": {
-            "$ref": "#/components/schemas/TypedUuidForPropolisKind"
-          },
-          "migration_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "dst_propolis_id",
-          "migration_id"
-        ]
-      },
       "InstanceMigrationTargetParams": {
         "description": "Parameters used when directing Propolis to initialize itself via live migration.",
         "type": "object",
@@ -3122,32 +3062,6 @@
           "hostname",
           "memory",
           "ncpus"
-        ]
-      },
-      "InstancePutMigrationIdsBody": {
-        "description": "The body of a request to set or clear the migration identifiers from a sled agent's instance state records.",
-        "type": "object",
-        "properties": {
-          "migration_params": {
-            "nullable": true,
-            "description": "The migration identifiers to set. If `None`, this operation clears the migration IDs.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceMigrationSourceParams"
-              }
-            ]
-          },
-          "old_runtime": {
-            "description": "The last instance runtime state known to this requestor. This request will succeed if either (a) the state generation in the sled agent's runtime state matches the generation in this record, or (b) the sled agent's runtime state matches what would result from applying this request to the caller's runtime state. This latter condition provides idempotency.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceRuntimeState"
-              }
-            ]
-          }
-        },
-        "required": [
-          "old_runtime"
         ]
       },
       "InstancePutStateBody": {
