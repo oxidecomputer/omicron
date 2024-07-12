@@ -256,6 +256,9 @@ impl Inner {
     // exist; and returns those.
     async fn bundle_directories(&self) -> Vec<Utf8PathBuf> {
         let resources = self.storage_handle.get_latest_disks().await;
+        // NOTE: These bundle directories are always stored on M.2s, so we don't
+        // need to worry about synchronizing with U.2 disk expungement at the
+        // callsite.
         let expected = resources.all_zone_bundle_directories();
         let mut out = Vec::with_capacity(expected.len());
         for each in expected.into_iter() {
@@ -426,12 +429,17 @@ impl ZoneBundler {
         zone: &RunningZone,
         cause: ZoneBundleCause,
     ) -> Result<ZoneBundleMetadata, BundleError> {
+        // NOTE: [Self::await_completion_of_prior_bundles] relies on this lock
+        // being held across this whole function. If we want more concurrency,
+        // we'll need to add a barrier-like mechanism to let callers know when
+        // prior bundles have completed.
         let inner = self.inner.lock().await;
         let storage_dirs = inner.bundle_directories().await;
         let resources = inner.storage_handle.get_latest_disks().await;
         let extra_log_dirs = resources
             .all_u2_mountpoints(U2_DEBUG_DATASET)
             .into_iter()
+            .map(|pool_path| pool_path.path)
             .collect();
         let context = ZoneBundleContext { cause, storage_dirs, extra_log_dirs };
         info!(
@@ -441,6 +449,14 @@ impl ZoneBundler {
             "context" => ?context,
         );
         create(&self.log, zone, &context).await
+    }
+
+    /// Awaits the completion of all prior calls to [ZoneBundler::create].
+    ///
+    /// This is critical for disk expungement, which wants to ensure that the
+    /// Sled Agent is no longer using devices after they have been expunged.
+    pub async fn await_completion_of_prior_bundles(&self) {
+        let _ = self.inner.lock().await;
     }
 
     /// Return the paths for all bundles of the provided zone and ID.

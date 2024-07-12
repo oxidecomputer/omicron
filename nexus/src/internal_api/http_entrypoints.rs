@@ -8,6 +8,7 @@ use super::params::{OximeterInfo, RackInitializationRequest};
 use crate::context::ApiContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
+use dropshot::ApiDescriptionRegisterError;
 use dropshot::FreeformBody;
 use dropshot::HttpError;
 use dropshot::HttpResponseCreated;
@@ -26,6 +27,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
+use nexus_types::external_api::params::PhysicalDiskPath;
 use nexus_types::external_api::params::SledSelector;
 use nexus_types::external_api::params::UninitializedSledId;
 use nexus_types::external_api::shared::UninitializedSled;
@@ -68,7 +70,9 @@ type NexusApiDescription = ApiDescription<ApiContext>;
 
 /// Returns a description of the internal nexus API
 pub(crate) fn internal_api() -> NexusApiDescription {
-    fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
+    fn register_endpoints(
+        api: &mut NexusApiDescription,
+    ) -> Result<(), ApiDescriptionRegisterError> {
         api.register(sled_agent_get)?;
         api.register(sled_agent_put)?;
         api.register(sled_firewall_rules_request)?;
@@ -110,6 +114,8 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(sled_list_uninitialized)?;
         api.register(sled_add)?;
         api.register(sled_expunge)?;
+
+        api.register(physical_disk_expunge)?;
 
         api.register(probes_get)?;
 
@@ -1079,6 +1085,30 @@ async fn sled_expunge(
         let previous_policy =
             nexus.sled_expunge(&opctx, sled.into_inner().sled).await?;
         Ok(HttpResponseOk(previous_policy))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Mark a physical disk as expunged
+///
+/// This is an irreversible process! It should only be called after
+/// sufficient warning to the operator.
+///
+/// This is idempotent.
+#[endpoint {
+    method = POST,
+    path = "/physical-disk/expunge",
+}]
+async fn physical_disk_expunge(
+    rqctx: RequestContext<ApiContext>,
+    disk: TypedBody<PhysicalDiskPath>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = &rqctx.context().context;
+    let nexus = &apictx.nexus;
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        nexus.physical_disk_expunge(&opctx, disk.into_inner()).await?;
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

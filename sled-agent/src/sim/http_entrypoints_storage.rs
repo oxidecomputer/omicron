@@ -9,8 +9,9 @@ use crucible_agent_client::types::{
     Snapshot,
 };
 use dropshot::{
-    endpoint, ApiDescription, HttpError, HttpResponseDeleted, HttpResponseOk,
-    Path as TypedPath, RequestContext, TypedBody,
+    endpoint, ApiDescription, ApiDescriptionRegisterError, HttpError,
+    HttpResponseDeleted, HttpResponseOk, Path as TypedPath, RequestContext,
+    TypedBody,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -24,7 +25,7 @@ type CrucibleAgentApiDescription = ApiDescription<Arc<CrucibleData>>;
 pub fn api() -> CrucibleAgentApiDescription {
     fn register_endpoints(
         api: &mut CrucibleAgentApiDescription,
-    ) -> Result<(), String> {
+    ) -> Result<(), ApiDescriptionRegisterError> {
         api.register(region_list)?;
         api.register(region_create)?;
         api.register(region_get)?;

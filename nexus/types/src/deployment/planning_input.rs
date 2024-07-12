@@ -340,7 +340,7 @@ impl SledDisk {
 }
 
 /// Filters that apply to disks.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, ValueEnum)]
 pub enum DiskFilter {
     /// All disks
     All,
@@ -355,15 +355,57 @@ impl DiskFilter {
         policy: PhysicalDiskPolicy,
         state: PhysicalDiskState,
     ) -> bool {
+        policy.matches(self) && state.matches(self)
+    }
+}
+
+impl PhysicalDiskPolicy {
+    /// Returns true if self matches the filter
+    pub fn matches(self, filter: DiskFilter) -> bool {
         match self {
-            DiskFilter::All => true,
-            DiskFilter::InService => match (policy, state) {
-                (PhysicalDiskPolicy::InService, PhysicalDiskState::Active) => {
-                    true
-                }
-                _ => false,
+            PhysicalDiskPolicy::InService => match filter {
+                DiskFilter::All => true,
+                DiskFilter::InService => true,
+            },
+            PhysicalDiskPolicy::Expunged => match filter {
+                DiskFilter::All => true,
+                DiskFilter::InService => false,
             },
         }
+    }
+
+    /// Returns all policies matching the given filter.
+    ///
+    /// This is meant for database access, and is generally paired with
+    /// [`PhysicalDiskState::all_matching`]. See `ApplyPhysicalDiskFilterExt` in
+    /// nexus-db-model.
+    pub fn all_matching(filter: DiskFilter) -> impl Iterator<Item = Self> {
+        Self::iter().filter(move |state| state.matches(filter))
+    }
+}
+
+impl PhysicalDiskState {
+    /// Returns true if self matches the filter
+    pub fn matches(self, filter: DiskFilter) -> bool {
+        match self {
+            PhysicalDiskState::Active => match filter {
+                DiskFilter::All => true,
+                DiskFilter::InService => true,
+            },
+            PhysicalDiskState::Decommissioned => match filter {
+                DiskFilter::All => true,
+                DiskFilter::InService => false,
+            },
+        }
+    }
+
+    /// Returns all state matching the given filter.
+    ///
+    /// This is meant for database access, and is generally paired with
+    /// [`PhysicalDiskPolicy::all_matching`]. See `ApplyPhysicalDiskFilterExt` in
+    /// nexus-db-model.
+    pub fn all_matching(filter: DiskFilter) -> impl Iterator<Item = Self> {
+        Self::iter().filter(move |state| state.matches(filter))
     }
 }
 

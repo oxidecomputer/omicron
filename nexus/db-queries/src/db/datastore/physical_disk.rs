@@ -26,7 +26,8 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
-use nexus_types::deployment::SledFilter;
+use nexus_db_model::ApplyPhysicalDiskFilterExt;
+use nexus_types::deployment::{DiskFilter, SledFilter};
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -278,11 +279,13 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
+        disk_filter: DiskFilter,
     ) -> ListResultVec<PhysicalDisk> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use db::schema::physical_disk::dsl;
         paginated(dsl::physical_disk, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
+            .physical_disk_filter(disk_filter)
             .select(PhysicalDisk::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
