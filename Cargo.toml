@@ -20,6 +20,7 @@ members = [
     "dev-tools/crdb-seed",
     "dev-tools/omdb",
     "dev-tools/omicron-dev",
+    "dev-tools/openapi-manager",
     "dev-tools/oxlog",
     "dev-tools/reconfigurator-cli",
     "dev-tools/releng",
@@ -46,6 +47,7 @@ members = [
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/defaults",
+    "nexus/internal-api",
     "nexus/inventory",
     "nexus/macros-common",
     "nexus/metrics-producer-gc",
@@ -109,6 +111,7 @@ default-members = [
     "dev-tools/crdb-seed",
     "dev-tools/omdb",
     "dev-tools/omicron-dev",
+    "dev-tools/openapi-manager",
     "dev-tools/oxlog",
     "dev-tools/reconfigurator-cli",
     "dev-tools/releng",
@@ -138,6 +141,7 @@ default-members = [
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/defaults",
+    "nexus/internal-api",
     "nexus/inventory",
     "nexus/macros-common",
     "nexus/metrics-producer-gc",
@@ -310,6 +314,7 @@ hyper = "0.14"
 hyper-rustls = "0.26.0"
 hyper-staticfile = "0.9.5"
 illumos-utils = { path = "illumos-utils" }
+indent_write = "2.2.0"
 indexmap = "2.2.6"
 indicatif = { version = "0.17.8", features = ["rayon"] }
 installinator = { path = "installinator" }
@@ -333,8 +338,8 @@ macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 mockall = "0.12"
 newtype_derive = "0.1.6"
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "d1686c86f92ead77e07ddc6024837dee4a401d6d" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "d1686c86f92ead77e07ddc6024837dee4a401d6d" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "1b385990e8648b221fd11f018f2a7ec425461c6c" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "1b385990e8648b221fd11f018f2a7ec425461c6c" }
 multimap = "0.10.0"
 nexus-auth = { path = "nexus/auth" }
 nexus-client = { path = "clients/nexus-client" }
@@ -344,6 +349,7 @@ nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-inventory = { path = "nexus/inventory" }
+nexus-internal-api = { path = "nexus/internal-api" }
 nexus-macros-common = { path = "nexus/macros-common" }
 nexus-metrics-producer-gc = { path = "nexus/metrics-producer-gc" }
 nexus-networking = { path = "nexus/networking" }
@@ -438,17 +444,18 @@ secrecy = "0.8.0"
 semver = { version = "1.0.23", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
 serde_human_bytes = { git = "https://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
-serde_json = "1.0.117"
+serde_json = "1.0.120"
 serde_path_to_error = "0.1.16"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
-serde_with = "3.7.0"
+serde_with = "3.8.3"
 sha2 = "0.10.8"
 sha3 = "0.10.8"
 shell-words = "1.1.0"
 signal-hook = "0.3"
 signal-hook-tokio = { version = "0.3", features = [ "futures-v0_3" ] }
 sigpipe = "0.1.3"
+similar = { version = "2.5.0", features = ["bytes"] }
 similar-asserts = "1.5.0"
 # Don't change sled's version on accident; sled's on-disk format is not yet
 # stable and requires manual migrations. In the limit this won't matter because

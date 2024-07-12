@@ -14,7 +14,6 @@ use super::{
     },
 };
 use crate::{context::ApiContext, external_api::shared};
-use dropshot::HttpError;
 use dropshot::HttpResponseAccepted;
 use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
@@ -32,15 +31,16 @@ use dropshot::{
     channel, endpoint, WebsocketChannelResult, WebsocketConnection,
 };
 use dropshot::{ApiDescription, StreamingBody};
+use dropshot::{ApiDescriptionRegisterError, HttpError};
 use dropshot::{ApiEndpoint, EmptyScanParams};
 use ipnetwork::IpNetwork;
+use nexus_db_queries::authz;
 use nexus_db_queries::db;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
-use nexus_db_queries::{authz, db::datastore::ProbeInfo};
-use nexus_types::external_api::shared::BfdStatus;
+use nexus_types::external_api::shared::{BfdStatus, ProbeInfo};
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
@@ -100,7 +100,9 @@ type NexusApiDescription = ApiDescription<ApiContext>;
 
 /// Returns a description of the external nexus API
 pub(crate) fn external_api() -> NexusApiDescription {
-    fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
+    fn register_endpoints(
+        api: &mut NexusApiDescription,
+    ) -> Result<(), ApiDescriptionRegisterError> {
         api.register(ping)?;
 
         api.register(system_policy_view)?;
@@ -368,7 +370,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
     fn register_experimental<T>(
         api: &mut NexusApiDescription,
         endpoint: T,
-    ) -> Result<(), String>
+    ) -> Result<(), ApiDescriptionRegisterError>
     where
         T: Into<ApiEndpoint<ApiContext>>,
     {
@@ -381,7 +383,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
 
     fn register_experimental_endpoints(
         api: &mut NexusApiDescription,
-    ) -> Result<(), String> {
+    ) -> Result<(), ApiDescriptionRegisterError> {
         register_experimental(api, probe_list)?;
         register_experimental(api, probe_view)?;
         register_experimental(api, probe_create)?;
@@ -7021,7 +7023,7 @@ async fn probe_list(
             probes,
             &|_, p: &ProbeInfo| match paginated_by {
                 PaginatedBy::Id(_) => NameOrId::Id(p.id),
-                PaginatedBy::Name(_) => NameOrId::Name(p.name.clone().into()),
+                PaginatedBy::Name(_) => NameOrId::Name(p.name.clone()),
             },
         )?))
     };

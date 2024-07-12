@@ -628,8 +628,8 @@
     },
     "/disk/{disk_id}/remove-read-only-parent": {
       "post": {
-        "summary": "Request removal of a read_only_parent from a disk",
-        "description": "This is a thin wrapper around the volume_remove_read_only_parent saga. All we are doing here is, given a disk UUID, figure out what the volume_id is for that disk, then use that to call the volume_remove_read_only_parent saga on it.",
+        "summary": "Request removal of a read_only_parent from a disk.",
+        "description": "This is a thin wrapper around the volume_remove_read_only_parent saga. All we are doing here is, given a disk UUID, figure out what the volume_id is for that disk, then use that to call the disk_remove_read_only_parent saga on it.",
         "operationId": "cpapi_disk_remove_read_only_parent",
         "parameters": [
           {
@@ -1347,7 +1347,7 @@
     },
     "/volume/{volume_id}/remove-read-only-parent": {
       "post": {
-        "summary": "Request removal of a read_only_parent from a volume",
+        "summary": "Request removal of a read_only_parent from a volume.",
         "description": "A volume can be created with the source data for that volume being another volume that attached as a \"read_only_parent\". In the background there exists a scrubber that will copy the data from the read_only_parent into the volume. When that scrubber has completed copying the data, this endpoint can be called to update the database that the read_only_parent is no longer needed for a volume and future attachments of this volume should not include that read_only_parent.",
         "operationId": "cpapi_volume_remove_read_only_parent",
         "parameters": [
@@ -3201,14 +3201,6 @@
           "time_updated"
         ]
       },
-      "IpKind": {
-        "type": "string",
-        "enum": [
-          "snat",
-          "floating",
-          "ephemeral"
-        ]
-      },
       "IpNet": {
         "x-rust-type": {
           "crate": "oxnet",
@@ -3940,7 +3932,7 @@
             "format": "ip"
           },
           "kind": {
-            "$ref": "#/components/schemas/IpKind"
+            "$ref": "#/components/schemas/ProbeExternalIpKind"
           },
           "last_port": {
             "type": "integer",
@@ -3953,6 +3945,14 @@
           "ip",
           "kind",
           "last_port"
+        ]
+      },
+      "ProbeExternalIpKind": {
+        "type": "string",
+        "enum": [
+          "snat",
+          "floating",
+          "ephemeral"
         ]
       },
       "ProbeInfo": {

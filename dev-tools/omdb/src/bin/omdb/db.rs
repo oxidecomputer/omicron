@@ -3237,7 +3237,7 @@ async fn cmd_db_inventory_physical_disks(
         slot: disk.slot,
         vendor: disk.vendor,
         model: disk.model.clone(),
-        serial: disk.model.clone(),
+        serial: disk.serial.clone(),
         variant: format!("{:?}", disk.variant),
     });
 
