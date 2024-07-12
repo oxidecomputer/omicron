@@ -6,16 +6,14 @@
 //! at deployment time.
 
 use crate::PostgresConfigWithUrl;
-
-use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
-use omicron_common::address::RACK_PREFIX;
-use omicron_common::api::internal::shared::SwitchLocation;
-
 use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
+use omicron_common::address::RACK_PREFIX;
+use omicron_common::api::internal::shared::SwitchLocation;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -385,6 +383,8 @@ pub struct BackgroundTaskConfig {
     pub v2p_mapping_propagation: V2PMappingPropagationConfig,
     /// configuration for abandoned VMM reaper task
     pub abandoned_vmm_reaper: AbandonedVmmReaperConfig,
+    /// configuration for lookup region port task
+    pub lookup_region_port: LookupRegionPortConfig,
 }
 
 #[serde_as]
@@ -569,6 +569,14 @@ pub struct AbandonedVmmReaperConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RegionReplacementDriverConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LookupRegionPortConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -816,6 +824,7 @@ mod test {
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60
+            lookup_region_port.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -962,7 +971,10 @@ mod test {
                         },
                         abandoned_vmm_reaper: AbandonedVmmReaperConfig {
                             period_secs: Duration::from_secs(60),
-                        }
+                        },
+                        lookup_region_port: LookupRegionPortConfig {
+                            period_secs: Duration::from_secs(60),
+                        },
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -1035,6 +1047,7 @@ mod test {
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60
+            lookup_region_port.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
             "##,

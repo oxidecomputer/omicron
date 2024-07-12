@@ -965,7 +965,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     communities: Vec::new(),
                                     allowed_export: ImportExportPolicy::NoFiltering,
                                     allowed_import: ImportExportPolicy::NoFiltering,
-                                    vlan_id: c.vlan_id.map(|x| x.0 as u16),
+                                    vlan_id: c.vlan_id.map(|x| x.0),
                                 }
                         }).collect(),
                         port: port.port_name.clone(),

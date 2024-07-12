@@ -1546,7 +1546,7 @@ impl super::Nexus {
     ) -> Result<(), Error> {
         notify_instance_updated(
             &self.datastore(),
-            &self.resolver().await,
+            self.resolver(),
             &self.opctx_alloc,
             opctx,
             &self.log,

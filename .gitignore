@@ -17,3 +17,4 @@ tags
 .falcon/*
 .img/*
 connectivity-report.json
+*.local

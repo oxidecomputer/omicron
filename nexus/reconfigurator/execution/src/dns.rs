@@ -457,6 +457,7 @@ mod test {
     use crate::overridables::Overridables;
     use crate::Sled;
     use dns_service_client::DnsDiff;
+    use internal_dns::resolver::Resolver;
     use internal_dns::ServiceName;
     use internal_dns::DNS_ZONE;
     use nexus_db_model::DnsGroup;
@@ -1150,6 +1151,7 @@ mod test {
 
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let log = &cptestctx.logctx.log;
         let opctx = OpContext::for_background(
             log.clone(),
@@ -1183,6 +1185,7 @@ mod test {
         crate::realize_blueprint_with_overrides(
             &opctx,
             datastore,
+            resolver,
             &blueprint,
             "test-suite",
             &overrides,
@@ -1207,6 +1210,7 @@ mod test {
             cptestctx,
             &opctx,
             datastore,
+            resolver,
             &blueprint,
             &overrides,
             "squidport",
@@ -1319,6 +1323,7 @@ mod test {
         crate::realize_blueprint_with_overrides(
             &opctx,
             datastore,
+            resolver,
             &blueprint2,
             "test-suite",
             &overrides,
@@ -1392,6 +1397,7 @@ mod test {
         crate::realize_blueprint_with_overrides(
             &opctx,
             datastore,
+            resolver,
             &blueprint2,
             "test-suite",
             &overrides,
@@ -1413,6 +1419,7 @@ mod test {
             &cptestctx,
             &opctx,
             datastore,
+            resolver,
             &blueprint2,
             &overrides,
             "tickety-boo",
@@ -1426,6 +1433,7 @@ mod test {
         crate::realize_blueprint_with_overrides(
             &opctx,
             datastore,
+            resolver,
             &blueprint2,
             "test-suite",
             &overrides,
@@ -1471,6 +1479,7 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
         opctx: &OpContext,
         datastore: &DataStore,
+        resolver: &Resolver,
         blueprint: &Blueprint,
         overrides: &Overridables,
         silo_name: &str,
@@ -1518,6 +1527,7 @@ mod test {
         crate::realize_blueprint_with_overrides(
             &opctx,
             datastore,
+            resolver,
             &blueprint,
             "test-suite",
             &overrides,

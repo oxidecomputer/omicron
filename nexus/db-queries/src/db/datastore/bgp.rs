@@ -314,6 +314,78 @@ impl DataStore {
             })
     }
 
+    pub async fn bgp_update_announce_set(
+        &self,
+        opctx: &OpContext,
+        announce: &params::BgpAnnounceSetCreate,
+    ) -> CreateResult<(BgpAnnounceSet, Vec<BgpAnnouncement>)> {
+        use db::schema::bgp_announce_set::dsl as announce_set_dsl;
+        use db::schema::bgp_announcement::dsl as bgp_announcement_dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        self.transaction_retry_wrapper("bgp_update_announce_set")
+            .transaction(&conn, |conn| async move {
+                let bas: BgpAnnounceSet = announce.clone().into();
+
+                // ensure the announce set exists
+                let found_as: Option<BgpAnnounceSet> =
+                    announce_set_dsl::bgp_announce_set
+                        .filter(
+                            announce_set_dsl::name
+                                .eq(Name::from(bas.name().clone())),
+                        )
+                        .filter(announce_set_dsl::time_deleted.is_null())
+                        .select(BgpAnnounceSet::as_select())
+                        .limit(1)
+                        .first_async(&conn)
+                        .await
+                        .ok();
+
+                let db_as = match found_as {
+                    Some(v) => v,
+                    None => {
+                        diesel::insert_into(announce_set_dsl::bgp_announce_set)
+                            .values(bas.clone())
+                            .returning(BgpAnnounceSet::as_returning())
+                            .get_result_async::<BgpAnnounceSet>(&conn)
+                            .await?
+                    }
+                };
+
+                // clear existing announcements
+                diesel::delete(bgp_announcement_dsl::bgp_announcement)
+                    .filter(
+                        bgp_announcement_dsl::announce_set_id.eq(db_as.id()),
+                    )
+                    .execute_async(&conn)
+                    .await?;
+
+                // repopulate announcements
+                let mut db_annoucements = Vec::new();
+                for a in &announce.announcement {
+                    let an = BgpAnnouncement {
+                        announce_set_id: db_as.id(),
+                        address_lot_block_id: bas.identity.id,
+                        network: a.network.into(),
+                    };
+                    let db_an = diesel::insert_into(
+                        bgp_announcement_dsl::bgp_announcement,
+                    )
+                    .values(an.clone())
+                    .returning(BgpAnnouncement::as_returning())
+                    .get_result_async::<BgpAnnouncement>(&conn)
+                    .await?;
+
+                    db_annoucements.push(db_an);
+                }
+
+                Ok((db_as, db_annoucements))
+            })
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     pub async fn bgp_create_announce_set(
         &self,
         opctx: &OpContext,

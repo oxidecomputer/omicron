@@ -46,32 +46,13 @@ use tokio::time::Sleep;
 // The `KstatSampler` generates some statistics about its own operation, mostly
 // for surfacing failures to collect and dropped samples.
 mod self_stats {
+    oximeter::use_timeseries!("kstat-sampler.toml");
     use super::BTreeMap;
     use super::Cumulative;
     use super::TargetId;
-
-    /// Information identifying this kstat sampler.
-    #[derive(Debug, oximeter::Target)]
-    pub struct KstatSampler {
-        /// The hostname (or zonename) of the host machine.
-        pub hostname: String,
-    }
-
-    /// The total number of samples dropped for a single target.
-    #[derive(Debug, oximeter::Metric)]
-    pub struct SamplesDropped {
-        /// The ID of the target being tracked.
-        pub target_id: u64,
-        /// The name of the target being tracked.
-        pub target_name: String,
-        pub datum: Cumulative<u64>,
-    }
-
-    /// The cumulative number of expired targets.
-    #[derive(Debug, oximeter::Metric)]
-    pub struct ExpiredTargets {
-        pub datum: Cumulative<u64>,
-    }
+    pub use kstat_sampler::ExpiredTargets;
+    pub use kstat_sampler::KstatSampler;
+    pub use kstat_sampler::SamplesDropped;
 
     #[derive(Debug)]
     pub struct SelfStats {
@@ -85,7 +66,7 @@ mod self_stats {
     impl SelfStats {
         pub fn new(hostname: String) -> Self {
             Self {
-                target: KstatSampler { hostname },
+                target: KstatSampler { hostname: hostname.into() },
                 drops: BTreeMap::new(),
                 expired: ExpiredTargets { datum: Cumulative::new(0) },
             }
@@ -797,7 +778,7 @@ impl KstatSamplerWorker {
             *drops += n_overflow_samples as u64;
             let metric = self_stats::SamplesDropped {
                 target_id: target_id.0,
-                target_name,
+                target_name: target_name.into(),
                 datum: *drops,
             };
             let sample = match Sample::new(&stats.target, &metric) {

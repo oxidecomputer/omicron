@@ -7,6 +7,7 @@
 use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use internal_dns::resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
@@ -18,6 +19,7 @@ use tokio::sync::watch;
 /// the state of the system based on the `Blueprint`.
 pub struct BlueprintExecutor {
     datastore: Arc<DataStore>,
+    resolver: Resolver,
     rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     nexus_label: String,
     tx: watch::Sender<usize>,
@@ -26,13 +28,14 @@ pub struct BlueprintExecutor {
 impl BlueprintExecutor {
     pub fn new(
         datastore: Arc<DataStore>,
+        resolver: Resolver,
         rx_blueprint: watch::Receiver<
             Option<Arc<(BlueprintTarget, Blueprint)>>,
         >,
         nexus_label: String,
     ) -> BlueprintExecutor {
         let (tx, _) = watch::channel(0);
-        BlueprintExecutor { datastore, rx_blueprint, nexus_label, tx }
+        BlueprintExecutor { datastore, resolver, rx_blueprint, nexus_label, tx }
     }
 
     pub fn watcher(&self) -> watch::Receiver<usize> {
@@ -76,6 +79,7 @@ impl BlueprintExecutor {
         let result = nexus_reconfigurator_execution::realize_blueprint(
             opctx,
             &self.datastore,
+            &self.resolver,
             blueprint,
             &self.nexus_label,
         )
@@ -186,6 +190,7 @@ mod test {
         // Set up the test.
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let opctx = OpContext::for_background(
             cptestctx.logctx.log.clone(),
             nexus.authz.clone(),
@@ -232,6 +237,7 @@ mod test {
         let (blueprint_tx, blueprint_rx) = watch::channel(None);
         let mut task = BlueprintExecutor::new(
             datastore.clone(),
+            resolver.clone(),
             blueprint_rx,
             String::from("test-suite"),
         );
