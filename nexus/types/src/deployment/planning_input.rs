@@ -457,11 +457,30 @@ pub enum SledFilter {
     // ---
     // Prefer to keep this list in alphabetical order.
     // ---
+    /// All sleds that the blueprint execution background task should attempt to
+    /// configure.
+    ///
+    /// In general, this is "all commissioned, non-expunged sleds", as blueprint
+    /// execution will attempt to manage any commissioned sleds present in the
+    /// rack.
+    BlueprintExecutionTarget,
+
     /// All sleds that are currently part of the control plane cluster.
     ///
     /// Intentionally omits decommissioned sleds, but is otherwise the filter to
     /// fetch "all sleds regardless of current policy or state".
     Commissioned,
+
+    /// Sleds on which discretionary services may be running.
+    ///
+    /// Note that this is a superset of `Discretionary` (eligible for
+    /// discretionary control plane services): it includes all sleds eligible
+    /// for discretionary services _and_ any sleds that are not eligible for new
+    /// services but might still be running existing services.
+    CouldBeRunningDiscretionaryServices,
+
+    /// Sleds on which instances may be running.
+    CouldBeRunningInstances,
 
     /// All sleds that were previously part of the control plane cluster but
     /// have been decommissioned.
@@ -474,15 +493,29 @@ pub enum SledFilter {
     /// Sleds that are eligible for discretionary services.
     Discretionary,
 
-    /// Sleds that are in service (even if they might not be eligible for
-    /// discretionary services).
-    InService,
+    /// Sleds that are eligible to host zpools.
+    EligibleForZpools,
+
+    /// Sleds that are eligible for mandatory services (e.g., NTP and a Crucible
+    /// zone for each U.2).
+    MandatoryServices,
+
+    /// Sleds that should be reported to an operator when they request the list
+    /// of sleds.
+    ///
+    /// This will not include uninitialized sleds, which must be listed
+    /// separately, nor will it include expunged sleds.
+    OperatorVisible,
 
     /// Sleds whose sled agents should be queried for inventory
     QueryDuringInventory,
 
     /// Sleds on which reservations can be created.
     ReservationCreate,
+
+    /// Sleds on which we expect to be able to reach sled-agent on the underlay
+    /// network.
+    SledAgentAvailable,
 
     /// Sleds which should be sent OPTE V2P mappings and Routing rules.
     VpcRouting,
@@ -535,34 +568,52 @@ impl SledPolicy {
             SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::Provisionable,
             } => match filter {
+                SledFilter::BlueprintExecutionTarget => true,
                 SledFilter::Commissioned => true,
+                SledFilter::CouldBeRunningDiscretionaryServices => true,
+                SledFilter::CouldBeRunningInstances => true,
                 SledFilter::Decommissioned => false,
                 SledFilter::Discretionary => true,
-                SledFilter::InService => true,
+                SledFilter::EligibleForZpools => true,
+                SledFilter::MandatoryServices => true,
+                SledFilter::OperatorVisible => true,
                 SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => true,
+                SledFilter::SledAgentAvailable => true,
                 SledFilter::VpcRouting => true,
                 SledFilter::VpcFirewall => true,
             },
             SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::NonProvisionable,
             } => match filter {
+                SledFilter::BlueprintExecutionTarget => true,
                 SledFilter::Commissioned => true,
+                SledFilter::CouldBeRunningDiscretionaryServices => true,
+                SledFilter::CouldBeRunningInstances => true,
                 SledFilter::Decommissioned => false,
                 SledFilter::Discretionary => false,
-                SledFilter::InService => true,
+                SledFilter::EligibleForZpools => true,
+                SledFilter::MandatoryServices => true,
+                SledFilter::OperatorVisible => true,
                 SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => false,
+                SledFilter::SledAgentAvailable => true,
                 SledFilter::VpcRouting => true,
                 SledFilter::VpcFirewall => true,
             },
             SledPolicy::Expunged => match filter {
+                SledFilter::BlueprintExecutionTarget => false,
                 SledFilter::Commissioned => true,
+                SledFilter::CouldBeRunningDiscretionaryServices => false,
+                SledFilter::CouldBeRunningInstances => false,
                 SledFilter::Decommissioned => true,
                 SledFilter::Discretionary => false,
-                SledFilter::InService => false,
+                SledFilter::EligibleForZpools => false,
+                SledFilter::MandatoryServices => false,
+                SledFilter::OperatorVisible => false,
                 SledFilter::QueryDuringInventory => false,
                 SledFilter::ReservationCreate => false,
+                SledFilter::SledAgentAvailable => false,
                 SledFilter::VpcRouting => false,
                 SledFilter::VpcFirewall => false,
             },
@@ -577,6 +628,14 @@ impl SledPolicy {
     pub fn all_matching(filter: SledFilter) -> impl Iterator<Item = Self> {
         Self::iter().filter(move |policy| policy.matches(filter))
     }
+
+    /// Returns all sub-policies of `SledPolicy::InService { .. }`.
+    pub fn all_in_service() -> impl Iterator<Item = Self> {
+        Self::iter().filter(|policy| match policy {
+            SledPolicy::InService { .. } => true,
+            SledPolicy::Expunged => false,
+        })
+    }
 }
 
 impl SledState {
@@ -589,22 +648,34 @@ impl SledState {
         // See `SledFilter::matches` above for some notes.
         match self {
             SledState::Active => match filter {
+                SledFilter::BlueprintExecutionTarget => true,
                 SledFilter::Commissioned => true,
+                SledFilter::CouldBeRunningDiscretionaryServices => true,
+                SledFilter::CouldBeRunningInstances => true,
                 SledFilter::Decommissioned => false,
                 SledFilter::Discretionary => true,
-                SledFilter::InService => true,
+                SledFilter::EligibleForZpools => true,
+                SledFilter::MandatoryServices => true,
+                SledFilter::OperatorVisible => true,
                 SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => true,
+                SledFilter::SledAgentAvailable => true,
                 SledFilter::VpcRouting => true,
                 SledFilter::VpcFirewall => true,
             },
             SledState::Decommissioned => match filter {
+                SledFilter::BlueprintExecutionTarget => false,
                 SledFilter::Commissioned => false,
+                SledFilter::CouldBeRunningDiscretionaryServices => false,
+                SledFilter::CouldBeRunningInstances => false,
                 SledFilter::Decommissioned => true,
                 SledFilter::Discretionary => false,
-                SledFilter::InService => false,
+                SledFilter::EligibleForZpools => false,
+                SledFilter::MandatoryServices => false,
+                SledFilter::OperatorVisible => false,
                 SledFilter::QueryDuringInventory => false,
                 SledFilter::ReservationCreate => false,
+                SledFilter::SledAgentAvailable => false,
                 SledFilter::VpcRouting => false,
                 SledFilter::VpcFirewall => false,
             },

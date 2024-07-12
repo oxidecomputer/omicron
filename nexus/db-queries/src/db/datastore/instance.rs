@@ -563,10 +563,10 @@ impl DataStore {
         })
     }
 
-    /// Lists all instances on in-service sleds with active Propolis VMM
-    /// processes, returning the instance along with the VMM on which it's
-    /// running, the sled on which the VMM is running, and the project that owns
-    /// the instance.
+    /// Lists all instances on sleds with active Propolis VMM processes,
+    /// returning the instance along with the VMM on which it's running, the
+    /// sled on which the VMM is running, and the project that owns the
+    /// instance.
     ///
     /// The query performed by this function is paginated by the sled's UUID.
     pub async fn instance_and_vmm_list_by_sled_agent(
@@ -583,7 +583,7 @@ impl DataStore {
 
         let result = paginated(sled_dsl::sled, sled_dsl::id, pagparams)
             .filter(sled_dsl::time_deleted.is_null())
-            .sled_filter(SledFilter::InService)
+            .sled_filter(SledFilter::CouldBeRunningInstances)
             .inner_join(
                 vmm_dsl::vmm
                     .on(vmm_dsl::sled_id
@@ -601,7 +601,7 @@ impl DataStore {
                             ),
                     ),
             )
-            .sled_filter(SledFilter::InService)
+            .sled_filter(SledFilter::CouldBeRunningInstances)
             .select((
                 Sled::as_select(),
                 Instance::as_select(),

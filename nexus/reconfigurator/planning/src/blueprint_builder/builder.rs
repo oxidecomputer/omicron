@@ -354,7 +354,7 @@ impl<'a> BlueprintBuilder<'a> {
             .into_zones_map(self.input.all_sled_ids(SledFilter::Commissioned));
         let blueprint_disks = self
             .disks
-            .into_disks_map(self.input.all_sled_ids(SledFilter::InService));
+            .into_disks_map(self.input.all_sled_ids(SledFilter::Commissioned));
         Blueprint {
             id: self.rng.blueprint_rng.next(),
             blueprint_zones,
@@ -1641,7 +1641,7 @@ pub mod test {
             assert!(builder.disks.parent_disks.is_empty());
 
             for (sled_id, sled_resources) in
-                input.all_sled_resources(SledFilter::InService)
+                input.all_sled_resources(SledFilter::Commissioned)
             {
                 assert_eq!(
                     builder
@@ -2067,7 +2067,7 @@ pub mod test {
 
         // Pick an arbitrary sled.
         let (target_sled_id, sled_resources) = input
-            .all_sled_resources(SledFilter::InService)
+            .all_sled_resources(SledFilter::Commissioned)
             .next()
             .expect("at least one sled");
 

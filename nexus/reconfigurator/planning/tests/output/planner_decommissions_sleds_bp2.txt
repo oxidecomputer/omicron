@@ -1,6 +1,43 @@
 blueprint  1ac2d88f-27dd-4506-8585-6b2be832528e
 parent:    516e80a3-b362-4fac-bd3c-4559717120dd
 
+  sled: a1b477db-b629-48eb-911d-1ccdafca75b9
+
+    physical disks at generation 1:
+    ----------------------------------------------------------------------
+    vendor        model        serial                                     
+    ----------------------------------------------------------------------
+    fake-vendor   fake-model   serial-069446b4-7881-49dc-838a-63a782d4896d
+    fake-vendor   fake-model   serial-20eba316-dffe-4516-9703-af561da19b0b
+    fake-vendor   fake-model   serial-426f4b6d-4a82-4106-bf4b-64ee86a2a5a4
+    fake-vendor   fake-model   serial-82daeef2-8641-4bf5-ac66-f7b5f62c48b6
+    fake-vendor   fake-model   serial-8e5feeb2-14f1-440f-a909-3c34aa8e129b
+    fake-vendor   fake-model   serial-942e2123-7c4e-4f6b-9317-1341fe212647
+    fake-vendor   fake-model   serial-97a5ce17-df5b-47e7-baf8-80ae710ce18e
+    fake-vendor   fake-model   serial-debc9fb6-bd58-4e4f-b8b8-6a9a07fcf25d
+    fake-vendor   fake-model   serial-f63a32a9-0659-43cf-8efc-8f34e7af9d45
+    fake-vendor   fake-model   serial-ffea118f-7715-4e21-8fc5-bb23cd0f59e8
+
+
+    omicron zones at generation 3:
+    ------------------------------------------------------------------------------------------
+    zone type      zone id                                disposition   underlay IP           
+    ------------------------------------------------------------------------------------------
+    crucible       1e1ed0cc-1adc-410f-943a-d1a3107de619   expunged      fd00:1122:3344:103::27
+    crucible       2307bbed-02ba-493b-89e3-46585c74c8fc   expunged      fd00:1122:3344:103::28
+    crucible       4e36b7ef-5684-4304-b7c3-3c31aaf83d4f   expunged      fd00:1122:3344:103::23
+    crucible       603e629d-2599-400e-b879-4134d4cc426e   expunged      fd00:1122:3344:103::2c
+    crucible       9179d6dc-387d-424e-8d62-ed59b2c728f6   expunged      fd00:1122:3344:103::2a
+    crucible       c28d7b4b-a259-45ad-945d-f19ca3c6964c   expunged      fd00:1122:3344:103::29
+    crucible       e29998e7-9ed2-46b6-bb70-4118159fe07f   expunged      fd00:1122:3344:103::26
+    crucible       f06e91a1-0c17-4cca-adbc-1c9b67bdb11d   expunged      fd00:1122:3344:103::2b
+    crucible       f11f5c60-1ac7-4630-9a3a-a9bc85c75203   expunged      fd00:1122:3344:103::25
+    crucible       f231e4eb-3fc9-4964-9d71-2c41644852d9   expunged      fd00:1122:3344:103::24
+    internal_ntp   c62b87b6-b98d-4d22-ba4f-cee4499e2ba8   expunged      fd00:1122:3344:103::21
+    nexus          6a70a233-1900-43c0-9c00-aa9d1f7adfbc   expunged      fd00:1122:3344:103::22
+
+
+
   sled: d67ce8f0-a691-4010-b414-420d82e80527
 
     physical disks at generation 1:
@@ -73,28 +110,6 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
     internal_ntp   f68846ad-4619-4747-8293-a2b4aeeafc5b   in service    fd00:1122:3344:102::21
     nexus          99c6401d-9796-4ae1-bf0c-9a097cf21c33   in service    fd00:1122:3344:102::22
     nexus          c8851a11-a4f7-4b21-9281-6182fd15dc8d   in service    fd00:1122:3344:102::2d
-
-
-
-!a1b477db-b629-48eb-911d-1ccdafca75b9
-WARNING: Zones exist without physical disks!
-    omicron zones at generation 3:
-    ------------------------------------------------------------------------------------------
-    zone type      zone id                                disposition   underlay IP           
-    ------------------------------------------------------------------------------------------
-    crucible       1e1ed0cc-1adc-410f-943a-d1a3107de619   expunged      fd00:1122:3344:103::27
-    crucible       2307bbed-02ba-493b-89e3-46585c74c8fc   expunged      fd00:1122:3344:103::28
-    crucible       4e36b7ef-5684-4304-b7c3-3c31aaf83d4f   expunged      fd00:1122:3344:103::23
-    crucible       603e629d-2599-400e-b879-4134d4cc426e   expunged      fd00:1122:3344:103::2c
-    crucible       9179d6dc-387d-424e-8d62-ed59b2c728f6   expunged      fd00:1122:3344:103::2a
-    crucible       c28d7b4b-a259-45ad-945d-f19ca3c6964c   expunged      fd00:1122:3344:103::29
-    crucible       e29998e7-9ed2-46b6-bb70-4118159fe07f   expunged      fd00:1122:3344:103::26
-    crucible       f06e91a1-0c17-4cca-adbc-1c9b67bdb11d   expunged      fd00:1122:3344:103::2b
-    crucible       f11f5c60-1ac7-4630-9a3a-a9bc85c75203   expunged      fd00:1122:3344:103::25
-    crucible       f231e4eb-3fc9-4964-9d71-2c41644852d9   expunged      fd00:1122:3344:103::24
-    internal_ntp   c62b87b6-b98d-4d22-ba4f-cee4499e2ba8   expunged      fd00:1122:3344:103::21
-    nexus          6a70a233-1900-43c0-9c00-aa9d1f7adfbc   expunged      fd00:1122:3344:103::22
-
 
 
  COCKROACHDB SETTINGS:
