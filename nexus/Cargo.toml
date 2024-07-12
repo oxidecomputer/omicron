@@ -45,6 +45,7 @@ macaddr.workspace = true
 # integration tests.
 nexus-client.workspace = true
 nexus-config.workspace = true
+nexus-internal-api.workspace = true
 nexus-networking.workspace = true
 nexus-test-interface.workspace = true
 num-integer.workspace = true
