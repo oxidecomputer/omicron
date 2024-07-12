@@ -2,18 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// XXX-dap at the end, verify:
-// - counters (maybe plumb these into Oximeter?)
-// - task status reported by omdb
-// - log entries
-// - test coverage
-// XXX-dap write up summary for PR, including the option of doing recovery in
-// Steno with read methods on SecStore?  also could have added purge option to
-// SEC and then relied on Steno to know if a thing was alive.  (can't do it
-// without a purge that's invoked by recovery)
-// XXX-dap write a stress test that furiously performs saga recovery a lot
-// of times and ensures that each saga is recovered exactly once
-
 //! Saga recovery
 //!
 //! ## Review of distributed sagas
