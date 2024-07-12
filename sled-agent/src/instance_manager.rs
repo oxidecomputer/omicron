@@ -603,7 +603,8 @@ impl InstanceManagerRunner {
                 info!(&self.log,
                       "registering new instance";
                       "instance_id" => ?instance_id);
-                let instance_log = self.log.new(o!());
+                let instance_log =
+                    self.log.new(o!("instance_id" => format!("{instance_id}")));
                 let ticket =
                     InstanceTicket::new(instance_id, self.terminate_tx.clone());
 
