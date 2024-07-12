@@ -246,8 +246,8 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Returns all physical disks that are out-of-service.
-    ///
+    /// Returns all physical disks that are out-of-service, but have non-deleted
+    /// zpools.
     pub async fn physical_disk_out_of_service_with_zpool_list(
         &self,
         opctx: &OpContext,
