@@ -1749,11 +1749,9 @@ mod test {
     use omicron_common::api::external::InstanceCpuCount;
     use omicron_common::api::external::Name;
     use omicron_common::api::external::NameOrId;
-    use omicron_test_utils::dev::poll;
     use sled_agent_client::types::CrucibleOpts;
     use sled_agent_client::TestInterfaces as SledAgentTestInterfaces;
     use std::str::FromStr;
-    use std::time::Duration;
 
     type DiskTest<'a> =
         nexus_test_utils::resource_helpers::DiskTest<'a, crate::Server>;
@@ -2317,24 +2315,13 @@ mod test {
                         // database and *starts* an `instance-update` saga, and
                         // the instance record isn't updated until that saga
                         // completes.
-                        poll::wait_for_condition(
-                            || async {
-                                let new_state = test_helpers::instance_fetch_by_name(
-                                    cptestctx,
-                                    INSTANCE_NAME,
-                                    PROJECT_NAME,
-                                )
-                                .await;
-                                if new_state.instance().runtime().nexus_state != nexus_db_model::InstanceState::NoVmm {
-                                    Err(poll::CondCheckError::<()>::NotYet)
-                                } else {
-                                    Ok(())
-                                }
-                            },
-                            &Duration::from_secs(5),
-                            &Duration::from_secs(300),
+                        test_helpers::instance_wait_for_state_by_name(
+                            cptestctx,
+                            INSTANCE_NAME,
+                            PROJECT_NAME,
+                            nexus_db_model::InstanceState::NoVmm,
                         )
-                            .await.expect("instance did not advance to NoVmm after 300 seconds");
+                        .await;
                         test_helpers::instance_delete_by_name(
                             cptestctx,
                             INSTANCE_NAME,
