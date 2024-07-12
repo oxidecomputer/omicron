@@ -242,7 +242,7 @@ async fn get_values_from_file<const N: usize>(
 
     let content = tokio::fs::read_to_string(&path)
         .await
-        .context("Failed to read {path}")?;
+        .with_context(|| format!("Failed to read {path}"))?;
     for line in content.lines() {
         let line = line.trim();
         let Some((key, value)) = line.split_once('=') else {
