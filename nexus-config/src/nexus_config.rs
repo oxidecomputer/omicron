@@ -1174,10 +1174,10 @@ mod test {
         let example_config = NexusConfig::from_file(config_path)
             .expect("example config file is not valid");
 
-        // The example config file should be valid.
+        // The second example config file should be valid.
         let config_path = "../nexus/examples/config-second.toml";
         println!("checking {:?}", config_path);
-        let example_config = NexusConfig::from_file(config_path)
+        let _ = NexusConfig::from_file(config_path)
             .expect("second example config file is not valid");
 
         // The config file used for the tests should also be valid.  The tests

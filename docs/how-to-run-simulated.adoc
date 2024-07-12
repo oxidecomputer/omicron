@@ -257,35 +257,47 @@ You'll need to note:
 * the TCP port for internal DNS  (`54025` here)
 * the TCP port in the CockroachDB URL (`43256` here)
 
-Next, you'll need to customize the Nexus configuration file.  Start with nexus/examples/config-second.toml (_not_ nexus/examples/config.toml, which uses various values that conflict with what `omicron-dev run-all` uses).  You should only need to modify the block at the top of the file:
+Next, you'll need to customize the Nexus configuration file.  Start with nexus/examples/config-second.toml (_not_ nexus/examples/config.toml, which uses various values that conflict with what `omicron-dev run-all` uses).  You should only need to modify the block at the **bottom** of the file:
 
 [source,toml]
 ----
 ################################################################################
-# INSTRUCTIONS: To run Nexus against an existing stack started with `omicron-dev
-# run-all`, you should only have to modify values in this section.
-#
-# Modify the port numbers below based on the output of `omicron-dev run-all`
+# INSTRUCTIONS: To run Nexus against an existing stack started with            #
+# `omicron-dev run-all`, you should only have to modify values in this 	       #
+# section. 								       #
+# 									       #
+# Modify the port numbers below based on the output of `omicron-dev run-all`   #
+################################################################################
+
+[mgd]
 # Look for "management gateway:    http://[::1]:42745 (switch0)"
 # The "http://" does not go in this string -- just the socket address.
-mgd.switch0.address = "[::1]:42745"
+switch0.address = "[::1]:57997"
 
 # Look for "management gateway:    http://[::1]:44345 (switch1)"
 # The "http://" does not go in this string -- just the socket address.
-mgd.switch1.address = "[::1]:44345"
+switch1.address = "[::1]:57200"
 
-# Look for "internal DNS:          [::1]:63080"
-deployment.internal_dns.address = "[::1]:63080"
+[deployment.internal_dns]
+# Look for "internal DNS:          [::1]:51571"
+# and adjust the port number below.
+address = "[::1]:51571"
+# You should not need to change this.
+type = "from_address"
 
-# Look for "cockroachdb URL:       postgresql://root@[::1]:36897/omicron?sslmode=disable"
-deployment.database.url = "postgresql://root@[::1]:36897/omicron?sslmode=disable"
+[deployment.database]
+# Look for "cockroachdb URL:       postgresql://root@[::1]:64123/omicron?sslmode=disable"
+# and adjust the port number below.
+url = "postgresql://root@[::1]:64123/omicron?sslmode=disable"
+# You should not need to change this.
+type = "from_url"
 ################################################################################
 ----
 
 So it's:
 
 * Copy the example config file: `cp nexus/examples/config-second.toml config-second.toml`
-* Edit those values: `vim config-second.toml`
+* Edit as described above: `vim config-second.toml`
 * Start Nexus like above, but with this config file: `cargo run --bin=nexus -- config-second.toml`
 
 === Using the stack
