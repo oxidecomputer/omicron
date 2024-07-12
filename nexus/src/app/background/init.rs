@@ -104,6 +104,7 @@ use super::tasks::metrics_producer_gc;
 use super::tasks::nat_cleanup;
 use super::tasks::phantom_disks;
 use super::tasks::physical_disk_adoption;
+use super::tasks::physical_disk_cleanup;
 use super::tasks::region_replacement;
 use super::tasks::region_replacement_driver;
 use super::tasks::service_firewall_rules;
@@ -140,6 +141,7 @@ pub struct BackgroundTasks {
     pub task_bfd_manager: Activator,
     pub task_inventory_collection: Activator,
     pub task_physical_disk_adoption: Activator,
+    pub task_physical_disk_cleanup: Activator,
     pub task_phantom_disks: Activator,
     pub task_blueprint_loader: Activator,
     pub task_blueprint_executor: Activator,
@@ -218,6 +220,7 @@ impl BackgroundTasksInitializer {
             task_bfd_manager: Activator::new(),
             task_inventory_collection: Activator::new(),
             task_physical_disk_adoption: Activator::new(),
+            task_physical_disk_cleanup: Activator::new(),
             task_phantom_disks: Activator::new(),
             task_blueprint_loader: Activator::new(),
             task_blueprint_executor: Activator::new(),
@@ -278,6 +281,7 @@ impl BackgroundTasksInitializer {
             task_bfd_manager,
             task_inventory_collection,
             task_physical_disk_adoption,
+            task_physical_disk_cleanup,
             task_phantom_disks,
             task_blueprint_loader,
             task_blueprint_executor,
@@ -453,7 +457,7 @@ impl BackgroundTasksInitializer {
             period: config.blueprints.period_secs_collect_crdb_node_ids,
             task_impl: Box::new(crdb_node_id_collector),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![Box::new(rx_blueprint)],
+            watchers: vec![Box::new(rx_blueprint.clone())],
             activator: task_crdb_node_id_collector,
         });
 
@@ -504,8 +508,26 @@ impl BackgroundTasksInitializer {
                 ),
             ),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![Box::new(inventory_watcher)],
+            watchers: vec![Box::new(inventory_watcher.clone())],
             activator: task_physical_disk_adoption,
+        });
+
+        driver.register(TaskDefinition {
+            name: "physical_disk_cleanup",
+            description:
+                "clean up expunged physical disks",
+            period: config.physical_disk_cleanup.period_secs,
+            task_impl: Box::new(
+                physical_disk_cleanup::PhysicalDiskCleanup::new(
+                    datastore.clone(),
+                    inventory_watcher.clone(),
+                    rx_blueprint.clone(),
+                    config.physical_disk_cleanup.disable,
+                ),
+            ),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(inventory_watcher), Box::new(rx_blueprint.clone())],
+            activator: task_physical_disk_cleanup,
         });
 
         driver.register(TaskDefinition {

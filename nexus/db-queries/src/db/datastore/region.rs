@@ -14,7 +14,6 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Dataset;
-use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::Region;
 use crate::db::model::SqlU16;
 use crate::db::pagination::paginated;
@@ -418,26 +417,20 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         use db::schema::dataset::dsl as dataset_dsl;
-        use db::schema::physical_disk::dsl as physical_disk_dsl;
         use db::schema::region::dsl as region_dsl;
-        use db::schema::zpool::dsl as zpool_dsl;
 
+        // Consider all regions with deleted datasets
         region_dsl::region
-            .filter(region_dsl::dataset_id.eq_any(
-                dataset_dsl::dataset
-                    .filter(dataset_dsl::time_deleted.is_null())
-                    .filter(dataset_dsl::pool_id.eq_any(
-                        zpool_dsl::zpool
-                            .filter(zpool_dsl::time_deleted.is_null())
-                            .filter(zpool_dsl::physical_disk_id.eq_any(
-                                physical_disk_dsl::physical_disk
-                                    .filter(physical_disk_dsl::disk_policy.eq(PhysicalDiskPolicy::Expunged))
-                                    .select(physical_disk_dsl::id)
-                            ))
-                            .select(zpool_dsl::id)
-                    ))
-                    .select(dataset_dsl::id)
-            ))
+            .left_join(
+                dataset_dsl::dataset.on(dataset_dsl::id.eq(region_dsl::dataset_id))
+            )
+            .filter(
+                // Dataset has been hard deleted
+                dataset_dsl::id.is_null().or(
+                    // Dataset has been soft deleted
+                    dataset_dsl::time_deleted.is_not_null(),
+                )
+            )
             .select(Region::as_select())
             .load_async(&*conn)
             .await

@@ -27,10 +27,13 @@ use diesel::upsert::excluded;
 use nexus_db_model::PhysicalDiskKind;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use uuid::Uuid;
 
 impl DataStore {
@@ -134,5 +137,42 @@ impl DataStore {
         }
 
         Ok(zpools)
+    }
+
+    /// Soft-deletes all datasets, then soft-deletes the zpool.
+    ///
+    /// This method is not transactional, but it reliably soft-deletes datasets
+    /// before the zpool.
+    pub async fn zpool_delete_self_and_all_datasets(
+        &self,
+        opctx: &OpContext,
+        zpool_id: ZpoolUuid,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let now = Utc::now();
+        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::zpool::dsl as zpool_dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let zpool_id = *zpool_id.as_untyped_uuid();
+        diesel::update(dataset_dsl::dataset)
+            .filter(dataset_dsl::time_deleted.is_null())
+            .filter(dataset_dsl::pool_id.eq(zpool_id))
+            .set(dataset_dsl::time_deleted.eq(now))
+            .execute_async(&*conn)
+            .await
+            .map(|_rows_modified| ())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        diesel::update(zpool_dsl::zpool)
+            .filter(zpool_dsl::id.eq(zpool_id))
+            .filter(zpool_dsl::time_deleted.is_null())
+            .set(zpool_dsl::time_deleted.eq(now))
+            .execute_async(&*conn)
+            .await
+            .map(|_rows_modified| ())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
     }
 }
