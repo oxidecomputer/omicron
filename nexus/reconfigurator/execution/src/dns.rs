@@ -1180,6 +1180,10 @@ mod test {
         blueprint.cockroachdb_setting_preserve_downgrade =
             CockroachDbPreserveDowngrade::DoNotModify;
 
+        // Record the zpools so we don't fail to ensure datasets (unrelated to
+        // DNS) during blueprint execution.
+        crate::tests::insert_zpool_records(datastore, &opctx, &blueprint).await;
+
         // Now, execute the initial blueprint.
         let overrides = Overridables::for_test(cptestctx);
         crate::realize_blueprint_with_overrides(
