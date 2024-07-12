@@ -3532,6 +3532,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "indent_write"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0cfe9645a18782869361d9c8732246be7b410ad4e919d3609ebabdac00ba12c3"
+
+[[package]]
 name = "indexmap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4721,6 +4727,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-internal-api"
+version = "0.1.0"
+dependencies = [
+ "dropshot",
+ "nexus-types",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-inventory"
 version = "0.1.0"
 dependencies = [
@@ -5522,6 +5542,7 @@ dependencies = [
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-defaults",
+ "nexus-internal-api",
  "nexus-inventory",
  "nexus-metrics-producer-gc",
  "nexus-networking",
@@ -5908,6 +5929,7 @@ dependencies = [
  "bit-vec",
  "bitflags 1.3.2",
  "bitflags 2.5.0",
+ "bstr 0.2.17",
  "bstr 1.9.1",
  "byteorder",
  "bytes",
@@ -6074,6 +6096,27 @@ dependencies = [
  "lazy_static",
  "openapiv3",
  "regex",
+]
+
+[[package]]
+name = "openapi-manager"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "atomicwrites",
+ "camino",
+ "clap",
+ "dropshot",
+ "fs-err",
+ "indent_write",
+ "nexus-internal-api",
+ "omicron-workspace-hack",
+ "openapi-lint",
+ "openapiv3",
+ "owo-colors",
+ "serde_json",
+ "similar",
+ "supports-color",
 ]
 
 [[package]]
