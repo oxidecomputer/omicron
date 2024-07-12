@@ -15,8 +15,8 @@ use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::pagination::Paginator;
+use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
 use nexus_types::identity::Asset;
 use omicron_uuid_kinds::CollectionUuid;
@@ -32,14 +32,16 @@ pub struct PhysicalDiskCleanup {
     datastore: Arc<DataStore>,
     disable: bool,
     rx_inventory_collection: watch::Receiver<Option<CollectionUuid>>,
-    rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>> ,
+    rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
 }
 
 impl PhysicalDiskCleanup {
     pub fn new(
         datastore: Arc<DataStore>,
         rx_inventory_collection: watch::Receiver<Option<CollectionUuid>>,
-        rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+        rx_blueprint: watch::Receiver<
+            Option<Arc<(BlueprintTarget, Blueprint)>>,
+        >,
         disable: bool,
     ) -> Self {
         PhysicalDiskCleanup {
@@ -81,7 +83,8 @@ impl BackgroundTask for PhysicalDiskCleanup {
                     .physical_disk_out_of_service_with_zpool_list(
                         opctx,
                         &p.current_pagparams(),
-                    ).await;
+                    )
+                    .await;
                 let batch = match maybe_batch {
                     Ok(batch) => batch,
                     Err(e) => {
@@ -102,23 +105,19 @@ impl BackgroundTask for PhysicalDiskCleanup {
                         "zpool_id" => zpool.id().to_string(),
                     );
 
-                    if let Err(e) = self.datastore.zpool_delete_self_and_all_datasets(
-                        opctx,
-                        ZpoolUuid::from_untyped_uuid(zpool.id()),
-                    ).await {
-                        slog::error!(
-                            log,
-                            "failed to delete zpool and datasets: {e}"
-                        );
-                        // Keep going to avoid errors
-                        disk_clear_errors += 1;
-                        continue;
-                    }
+                    let zpool_id = ZpoolUuid::from_untyped_uuid(zpool.id());
+                    let phys_disk_id =
+                        PhysicalDiskUuid::from_untyped_uuid(phys_disk.id());
 
-                    if let Err(e) = self.datastore.physical_disk_set_state_to_decommissioned(
-                        opctx,
-                        PhysicalDiskUuid::from_untyped_uuid(phys_disk.id())
-                    ).await {
+                    if let Err(e) = self
+                        .datastore
+                        .physical_disk_set_decommissioned(
+                            opctx,
+                            phys_disk_id,
+                            Some(zpool_id),
+                        )
+                        .await
+                    {
                         slog::error!(
                             log,
                             "failed to decommission physical disk: {e}"

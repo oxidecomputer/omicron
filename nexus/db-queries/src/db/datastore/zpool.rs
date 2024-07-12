@@ -140,20 +140,16 @@ impl DataStore {
     }
 
     /// Soft-deletes all datasets, then soft-deletes the zpool.
-    ///
-    /// This method is not transactional, but it reliably soft-deletes datasets
-    /// before the zpool.
-    pub async fn zpool_delete_self_and_all_datasets(
-        &self,
+    pub(crate) async fn zpool_delete_self_and_all_datasets_on_connection(
+        conn: &async_bb8_diesel::Connection<db::DbConnection>,
         opctx: &OpContext,
         zpool_id: ZpoolUuid,
     ) -> DeleteResult {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let now = Utc::now();
         use db::schema::dataset::dsl as dataset_dsl;
         use db::schema::zpool::dsl as zpool_dsl;
 
-        let conn = self.pool_connection_authorized(opctx).await?;
         let zpool_id = *zpool_id.as_untyped_uuid();
         diesel::update(dataset_dsl::dataset)
             .filter(dataset_dsl::time_deleted.is_null())

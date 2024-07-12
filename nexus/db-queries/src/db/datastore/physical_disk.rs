@@ -38,6 +38,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use uuid::Uuid;
 
 impl DataStore {
@@ -258,16 +259,15 @@ impl DataStore {
 
         paginated(dsl::physical_disk, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
-            // TODO(https://github.com/oxidecomputer/omicron/pull/5994): Use
-            // disk filter?
-            .filter(dsl::disk_policy.eq(PhysicalDiskPolicy::Expunged).or(
-                dsl::disk_state.eq(PhysicalDiskState::Decommissioned)
-            ))
+            .filter(
+                dsl::disk_policy
+                    .eq(PhysicalDiskPolicy::Expunged)
+                    .or(dsl::disk_state.eq(PhysicalDiskState::Decommissioned)),
+            )
             .inner_join(
-                zpool_dsl::zpool.on(
-                    zpool_dsl::physical_disk_id.eq(dsl::id)
-                        .and(zpool_dsl::time_deleted.is_null())
-                )
+                zpool_dsl::zpool.on(zpool_dsl::physical_disk_id
+                    .eq(dsl::id)
+                    .and(zpool_dsl::time_deleted.is_null())),
             )
             .select((PhysicalDisk::as_select(), Zpool::as_select()))
             .load_async(&*self.pool_connection_authorized(opctx).await?)
@@ -309,33 +309,48 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    pub async fn physical_disk_set_state_to_decommissioned(
+    /// Deletes all zpools and datasets provisioned to the physical disk,
+    /// then marks the physical disk as decommissioned.
+    pub async fn physical_disk_set_decommissioned(
         &self,
         opctx: &OpContext,
         id: PhysicalDiskUuid,
+        zpool_id: Option<ZpoolUuid>,
     ) -> Result<(), Error> {
+        // TODO: Probably need to put this thing in a txn?
+        // TODO: Probably could *call* this function during expungement; I'm not
+        // sure there's a good reason to delay.
+        // TODO: Also, check out the auto-expungement when disks are expunged by
+        // sled removal. That also may need updating.
         let conn = &*self.pool_connection_authorized(&opctx).await?;
         Self::physical_disk_set_state_to_decommissioned_on_connection(
-            &conn, opctx, id
-        ).await
+            &conn, opctx, id, zpool_id,
+        )
+        .await
     }
 
-    pub async fn physical_disk_set_state_to_decommissioned_on_connection(
+    // See: [Self::physical_disk_set_state_to_decommissioned]
+    async fn physical_disk_set_state_to_decommissioned_on_connection(
         conn: &async_bb8_diesel::Connection<db::DbConnection>,
         opctx: &OpContext,
         id: PhysicalDiskUuid,
+        zpool_id: Option<ZpoolUuid>,
     ) -> Result<(), Error> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         use db::schema::physical_disk::dsl;
+
+        if let Some(zpool_id) = zpool_id {
+            Self::zpool_delete_self_and_all_datasets_on_connection(
+                conn, opctx, zpool_id,
+            )
+            .await?;
+        }
 
         let id = *id.as_untyped_uuid();
         diesel::update(dsl::physical_disk)
             .filter(dsl::id.eq(id))
             .filter(dsl::time_deleted.is_null())
-            .set(
-                dsl::disk_state
-                    .eq(PhysicalDiskState::Decommissioned),
-            )
+            .set(dsl::disk_state.eq(PhysicalDiskState::Decommissioned))
             .execute_async(conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;

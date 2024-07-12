@@ -514,8 +514,7 @@ impl BackgroundTasksInitializer {
 
         driver.register(TaskDefinition {
             name: "physical_disk_cleanup",
-            description:
-                "clean up expunged physical disks",
+            description: "clean up expunged physical disks",
             period: config.physical_disk_cleanup.period_secs,
             task_impl: Box::new(
                 physical_disk_cleanup::PhysicalDiskCleanup::new(
@@ -526,7 +525,10 @@ impl BackgroundTasksInitializer {
                 ),
             ),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![Box::new(inventory_watcher), Box::new(rx_blueprint.clone())],
+            watchers: vec![
+                Box::new(inventory_watcher),
+                Box::new(rx_blueprint.clone()),
+            ],
             activator: task_physical_disk_cleanup,
         });
 

@@ -422,14 +422,15 @@ impl DataStore {
         // Consider all regions with deleted datasets
         region_dsl::region
             .left_join(
-                dataset_dsl::dataset.on(dataset_dsl::id.eq(region_dsl::dataset_id))
+                dataset_dsl::dataset
+                    .on(dataset_dsl::id.eq(region_dsl::dataset_id)),
             )
             .filter(
                 // Dataset has been hard deleted
                 dataset_dsl::id.is_null().or(
                     // Dataset has been soft deleted
                     dataset_dsl::time_deleted.is_not_null(),
-                )
+                ),
             )
             .select(Region::as_select())
             .load_async(&*conn)
