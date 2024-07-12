@@ -19,6 +19,7 @@ clap.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 highway.workspace = true
+num.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
 oximeter.workspace = true
@@ -42,10 +43,6 @@ workspace = true
 optional = true
 
 [dependencies.indexmap]
-workspace = true
-optional = true
-
-[dependencies.num]
 workspace = true
 optional = true
 
@@ -77,13 +74,13 @@ optional = true
 workspace = true
 optional = true
 
-[dependencies.tokio]
-workspace = true
-features = [ "rt-multi-thread", "macros" ]
-
 [dependencies.tabled]
 workspace = true
 optional = true
+
+[dependencies.tokio]
+workspace = true
+features = [ "rt-multi-thread", "macros" ]
 
 [dev-dependencies]
 expectorate.workspace = true
@@ -91,6 +88,7 @@ indexmap.workspace = true
 itertools.workspace = true
 omicron-test-utils.workspace = true
 slog-dtrace.workspace = true
+sqlformat.workspace = true
 sqlparser.workspace = true
 strum.workspace = true
 tempfile.workspace = true
@@ -107,7 +105,6 @@ sql = [
 ]
 oxql = [
     "dep:crossterm",
-    "dep:num",
     "dep:peg",
     "dep:reedline",
     "dep:tabled",

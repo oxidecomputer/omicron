@@ -248,6 +248,7 @@ pub(crate) mod test {
                 512_i64.try_into().unwrap(),
                 10,
                 10,
+                12345,
             )
         };
 

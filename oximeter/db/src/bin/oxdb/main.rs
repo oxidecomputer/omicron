@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Tool for developing against the Oximeter timeseries database, populating data and querying.
+//! CLI-Tool for developing against the Oximeter timeseries database, populating
+//! data and querying.
 
 // Copyright 2024 Oxide Computer Company
 
@@ -13,20 +14,13 @@ use oximeter::{
     types::{Cumulative, Sample},
     Metric, Target,
 };
-use oximeter_db::{query, Client, DbWrite};
+use oximeter_db::{make_client, query, Client, DbWrite};
 use slog::{debug, info, o, Drain, Level, Logger};
 use std::net::IpAddr;
-use std::net::SocketAddr;
 use uuid::Uuid;
 
-#[cfg(feature = "sql")]
-mod sql;
-
-#[cfg(feature = "oxql")]
-mod oxql;
-
-// Samples are inserted in chunks of this size, to avoid large allocations when inserting huge
-// numbers of timeseries.
+/// Samples are inserted in chunks of this size, to avoid large allocations when inserting huge
+/// numbers of timeseries.
 const INSERT_CHUNK_SIZE: usize = 100_000;
 
 /// A target identifying a single virtual machine instance
@@ -150,29 +144,15 @@ enum Subcommand {
     #[cfg(feature = "sql")]
     Sql {
         #[clap(flatten)]
-        opts: crate::sql::ShellOptions,
+        opts: oximeter_db::shells::sql::ShellOptions,
     },
 
     /// Enter the Oximeter Query Language shell for interactive querying.
     #[cfg(feature = "oxql")]
     Oxql {
         #[clap(flatten)]
-        opts: crate::oxql::ShellOptions,
+        opts: oximeter_db::shells::oxql::ShellOptions,
     },
-}
-
-async fn make_client(
-    address: IpAddr,
-    port: u16,
-    log: &Logger,
-) -> Result<Client, anyhow::Error> {
-    let address = SocketAddr::new(address, port);
-    let client = Client::new(address, &log);
-    client
-        .init_single_node_db()
-        .await
-        .context("Failed to initialize timeseries database")?;
-    Ok(client)
 }
 
 fn describe_data() {
@@ -368,11 +348,13 @@ async fn main() -> anyhow::Result<()> {
         }
         #[cfg(feature = "sql")]
         Subcommand::Sql { opts } => {
-            crate::sql::sql_shell(args.address, args.port, log, opts).await?
+            oximeter_db::shells::sql::shell(args.address, args.port, log, opts)
+                .await?
         }
         #[cfg(feature = "oxql")]
         Subcommand::Oxql { opts } => {
-            crate::oxql::oxql_shell(args.address, args.port, log, opts).await?
+            oximeter_db::shells::oxql::shell(args.address, args.port, log, opts)
+                .await?
         }
     }
     Ok(())

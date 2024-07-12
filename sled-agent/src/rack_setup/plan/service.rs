@@ -1133,6 +1133,8 @@ impl ServicePortBuilder {
         self.next_snat_port += NUM_SOURCE_NAT_PORTS;
         if self.next_snat_port.0 == 0 {
             self.next_snat_ip = None;
+        } else {
+            self.next_snat_ip = Some(snat_ip);
         }
 
         let snat_cfg =

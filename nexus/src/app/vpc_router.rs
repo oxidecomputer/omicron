@@ -204,37 +204,11 @@ impl super::Nexus {
             ));
         }
 
-        // Validate route destinations/targets at this stage:
-        // - mixed explicit v4 and v6 are disallowed.
-        // - users cannot specify 'Vpc' as a custom router dest/target.
-        // - users cannot specify 'Subnet' as a custom router target.
-        // - the only internet gateway we support today is 'outbound'.
-        match (&params.destination, &params.target) {
-            (RouteDestination::Ip(IpAddr::V4(_)), RouteTarget::Ip(IpAddr::V4(_)))
-            | (RouteDestination::Ip(IpAddr::V6(_)), RouteTarget::Ip(IpAddr::V6(_)))
-            | (RouteDestination::IpNet(IpNet::V4(_)), RouteTarget::Ip(IpAddr::V4(_)))
-            | (RouteDestination::IpNet(IpNet::V6(_)), RouteTarget::Ip(IpAddr::V6(_))) => {},
-
-            (RouteDestination::Ip(_), RouteTarget::Ip(_))
-            | (RouteDestination::IpNet(_), RouteTarget::Ip(_))
-                => return Err(Error::invalid_request(
-                    "cannot mix explicit IPv4 and IPv6 addresses between destination and target"
-                )),
-
-            (RouteDestination::Vpc(_), _) | (_, RouteTarget::Vpc(_)) => return Err(Error::invalid_request(
-                "VPCs cannot be used as a destination or target in custom routers"
-                )),
-
-            (_, RouteTarget::Subnet(_)) => return Err(Error::invalid_request(
-                "subnets cannot be used as a target in custom routers"
-                )),
-
-            (_, RouteTarget::InternetGateway(n)) if n.as_str() != "outbound" => return Err(Error::invalid_request(
-                "'outbound' is currently the only valid internet gateway"
-                )),
-
-            _ => {},
-        };
+        validate_user_route_targets(
+            &params.destination,
+            &params.target,
+            RouterRouteKind::Custom,
+        )?;
 
         let id = Uuid::new_v4();
         let route = db::model::RouterRoute::new(
@@ -297,6 +271,12 @@ impl super::Nexus {
             }
         }
 
+        validate_user_route_targets(
+            &params.destination,
+            &params.target,
+            db_route.kind.0,
+        )?;
+
         let out = self
             .db_datastore
             .router_update_route(&opctx, &authz_route, params.clone().into())
@@ -355,4 +335,44 @@ impl super::Nexus {
 
         Ok(())
     }
+}
+
+/// Validate route destinations/targets for a user-specified route:
+/// - mixed explicit v4 and v6 are disallowed.
+/// - users cannot specify 'Vpc' as a custom/default router dest/target.
+/// - users cannot specify 'Subnet' as a custom/default router target.
+/// - the only internet gateway we support today is 'outbound'.
+fn validate_user_route_targets(
+    dest: &RouteDestination,
+    target: &RouteTarget,
+    route_type: RouterRouteKind,
+) -> Result<(), Error> {
+    match (dest, target) {
+        (RouteDestination::Ip(IpAddr::V4(_)), RouteTarget::Ip(IpAddr::V4(_)))
+        | (RouteDestination::Ip(IpAddr::V6(_)), RouteTarget::Ip(IpAddr::V6(_)))
+        | (RouteDestination::IpNet(IpNet::V4(_)), RouteTarget::Ip(IpAddr::V4(_)))
+        | (RouteDestination::IpNet(IpNet::V6(_)), RouteTarget::Ip(IpAddr::V6(_))) => {},
+
+        (RouteDestination::Ip(_), RouteTarget::Ip(_))
+        | (RouteDestination::IpNet(_), RouteTarget::Ip(_))
+            => return Err(Error::invalid_request(
+                "cannot mix explicit IPv4 and IPv6 addresses between destination and target"
+            )),
+
+        (RouteDestination::Vpc(_), _) | (_, RouteTarget::Vpc(_)) => return Err(Error::invalid_request(
+            format!("users cannot specify VPCs as a destination or target in {route_type} routes")
+            )),
+
+        (_, RouteTarget::Subnet(_)) => return Err(Error::invalid_request(
+            format!("subnets cannot be used as a target in {route_type} routers")
+            )),
+
+        (_, RouteTarget::InternetGateway(n)) if n.as_str() != "outbound" => return Err(Error::invalid_request(
+            "'outbound' is currently the only valid internet gateway"
+            )),
+
+        _ => {},
+    };
+
+    Ok(())
 }

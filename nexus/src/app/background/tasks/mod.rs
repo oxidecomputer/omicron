@@ -15,6 +15,7 @@ pub mod dns_servers;
 pub mod external_endpoints;
 pub mod instance_watcher;
 pub mod inventory_collection;
+pub mod lookup_region_port;
 pub mod metrics_producer_gc;
 pub mod nat_cleanup;
 pub mod networking;

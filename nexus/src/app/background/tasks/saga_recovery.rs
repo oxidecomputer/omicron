@@ -7,7 +7,6 @@
 // - task status reported by omdb
 // - log entries
 // - test coverage
-// XXX-dap sync with "main"
 // XXX-dap write up summary for PR, including the option of doing recovery in
 // Steno with read methods on SecStore?  also could have added purge option to
 // SEC and then relied on Steno to know if a thing was alive.  (can't do it

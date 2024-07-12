@@ -371,10 +371,12 @@ impl FieldSelector {
     }
 }
 
-/// A stringly-typed selector for finding fields by name and comparsion with a given value.
+/// A stringly-typed selector for finding fields by name and comparsion with a
+/// given value.
 ///
-/// This is used internally to parse comparisons written as strings, such as from the `oxdb`
-/// command-line tool or from another external source (Nexus API, for example).
+/// This is used internally to parse comparisons written as strings, such as
+/// from the `oxdb` command-line tool or from another external
+/// source (Nexus API, for example).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StringFieldSelector {
     name: String,
