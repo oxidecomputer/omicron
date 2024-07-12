@@ -6,52 +6,74 @@
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
-use std::process::Command;
+use std::{collections::HashSet, process::Command};
 
 /// The default version of `cargo-hack` to install.
 /// We use a patch-floating version to avoid breaking the build when a new
 /// version is released (locally).
 const FLOAT_VERSION: &str = "~0.6.28";
 
+const CI_EXCLUDED_FEATURES: [&str; 2] = ["image-trampoline", "image-standard"];
+
 #[derive(Parser)]
 pub struct Args {
+    /// Run in CI mode, with a default set of features excluded.
+    #[clap(long, default_value_t = false)]
+    ci: bool,
     /// Features to exclude from the check.
-    #[clap(long)]
+    #[clap(long, value_name = "FEATURES")]
     exclude_features: Option<Vec<String>>,
     /// Depth of the feature powerset to check.
-    #[clap(long)]
+    #[clap(long, value_name = "NUM")]
     depth: Option<usize>,
     /// Error format passed to `cargo hack check`.
     #[clap(long, value_name = "FMT")]
     message_format: Option<String>,
-    /// Do not install `cargo-hack` before running the check.
-    #[clap(long, default_value_t = false)]
-    no_install: bool,
     /// Version of `cargo-hack` to install.
-    #[clap(long)]
-    version: Option<String>,
+    #[clap(long, value_name = "VERSION")]
+    install_version: Option<String>,
 }
 
 /// Run `cargo hack check`.
 pub fn run_cmd(args: Args) -> Result<()> {
-    if !args.no_install {
-        install_cargo_hack(args.version).unwrap();
+    // Install `cargo-hack` if the `install-version` was specified.
+    if let Some(version) = args.install_version {
+        install_cargo_hack(Some(version))?;
     }
 
     let cargo =
         std::env::var("CARGO").unwrap_or_else(|_| String::from("cargo"));
     let mut command = Command::new(&cargo);
 
+    // Add the `hack check` subcommand.
     command.args(&["hack", "check"]);
 
-    if let Some(features) = args.exclude_features {
-        let ex = format!("--exclude-features={}", features.join(","));
-        command.arg(ex);
+    // Add the `--exclude-features` flag if we are running in CI mode.
+    if args.ci {
+        let ex = if let Some(mut features) = args.exclude_features {
+            // Extend the list of features to exclude with the CI defaults.
+            features.extend(
+                CI_EXCLUDED_FEATURES.into_iter().map(|s| s.to_string()),
+            );
+
+            // Remove duplicates.
+            let excludes = features.into_iter().collect::<HashSet<_>>();
+
+            excludes.into_iter().collect::<Vec<_>>().join(",")
+        } else {
+            CI_EXCLUDED_FEATURES.join(",")
+        };
+
+        command.args(["--exclude-features", &ex]);
+    } else {
+        // Add "only" the `--exclude-features` flag if it was provided.
+        if let Some(features) = args.exclude_features {
+            command.args(["--exclude-features", &features.join(",")]);
+        }
     }
 
     if let Some(depth) = args.depth {
-        let depth = format!("depth={}", depth);
-        command.arg(depth);
+        command.args(&["--depth", &depth.to_string()]);
     }
 
     // Pass along the `--message-format` flag if it was provided.
@@ -62,11 +84,12 @@ pub fn run_cmd(args: Args) -> Result<()> {
     command
         // Make sure we check everything.
         .arg("--workspace")
+        // We want to check the binaries.
         .arg("--bins")
         // We want to check the feature powerset.
         .arg("--feature-powerset")
-        .arg("--no-dev-deps")
-        .arg("--exclude-no-default-features");
+        // We will not check the dev-dependencies, which should covered by tests.
+        .arg("--no-dev-deps");
 
     eprintln!(
         "running: {:?} {}",

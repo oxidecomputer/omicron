@@ -106,15 +106,13 @@ jobs:
       run: cat "$GITHUB_ENV"
     - name: Install Pre-Requisites
       run: ./tools/install_builder_prerequisites.sh -y
-    - name: Run `cargo check` for no-default-features
-      run: cargo check --workspace --bins --tests --no-default-features
     # Uses manifest for install
     - uses: taiki-e/install-action@v2
       with:
         tool: cargo-hack@${{ env.CARGO_HACK_VERSION }}
     - name: Run Check on Features (Feature-Powerset, No-Dev-Deps)
       timeout-minutes: 120 # 2 hours
-      run: cargo xtask check-features --no-install --exclude-features image-trampoline,image-standard
+      run: cargo xtask check-features --ci
 
   # This is just a test build of docs.  Publicly available docs are built via
   # the separate "rustdocs" repo.

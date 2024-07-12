@@ -6,8 +6,7 @@
 #: rust_toolchain = true
 #: output_rules = []
 
-# Run cargo check on illumos with feature-specifics like `no-default-features`
-# or `feature-powerset`.
+# Run the check-features `xtask` on illumos, testing compilation of feature combinations.
 
 set -o errexit
 set -o pipefail
@@ -28,13 +27,10 @@ source ./env.sh
 banner prerequisites
 ptime -m bash ./tools/install_builder_prerequisites.sh -y
 
-banner check
-export CARGO_INCREMENTAL=0
-ptime -m cargo check --workspace --bins --tests --no-default-features
-RUSTDOCFLAGS="--document-private-items -D warnings" ptime -m cargo doc --workspace --no-deps --no-default-features
-
 #
 # Check the feature set with the `cargo xtask check-features` command.
 #
-banner hack
-ptime -m timeout 2h cargo xtask check-features --version "$CARGO_HACK_VERSION" --exclude-features image-trampoline,image-standard
+banner hack-check
+export CARGO_INCREMENTAL=0
+ptime -m timeout 2h cargo xtask check-features --ci --install-version "$CARGO_HACK_VERSION"
+RUSTDOCFLAGS="--document-private-items -D warnings" ptime -m cargo doc --workspace --no-deps --no-default-features
