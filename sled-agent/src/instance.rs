@@ -695,8 +695,23 @@ impl InstanceRunner {
             Some(params) => {
                 let migration_id = self.state
                     .migration_in()
-                    // TODO(eliza): this is a bit of a shame; it would be nice
-                    // to refactor this code so we don't unwrap here.
+                    // TODO(eliza): This is a bit of an unfortunate dance: the
+                    // initial instance-ensure-registered request is what sends
+                    // the migration ID, but it's the subsequent
+                    // instance-ensure-state request (which we're handling here)
+                    // that includes migration the source VMM's UUID and IP
+                    // address. Because the API currently splits the migration
+                    // IDs between the instance-ensure-registered and
+                    // instance-ensure-state requests, we have to stash the
+                    // migration ID in an `Option` and `expect()` it here,
+                    // panicking if we get an instance-ensure-state request with
+                    // a source Propolis ID if the instance wasn't registered
+                    // with a migration in ID.
+                    //
+                    // This is kind of a shame. Eventually, we should consider
+                    // reworking the API ensure-state request contains the
+                    // migration ID, and we don't have to unwrap here. See:
+                    // https://github.com/oxidecomputer/omicron/issues/6073
                     .expect("if we have migration target params, we should also have a migration in")
                     .migration_id;
                 Some(propolis_client::types::InstanceMigrateInitiateRequest {

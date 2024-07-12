@@ -829,7 +829,7 @@ mod tests {
                     test_helpers::instance_simulate(cptestctx, &instance_id)
                         .await;
                     // Wait until the instance has advanced to the `NoVmm`
-                    // state. This may hot happen immediately, as an
+                    // state. This may not happen immediately, as an
                     // instance-update saga must complete to update the
                     // instance's state.
                     let new_state = test_helpers::instance_wait_for_state(
