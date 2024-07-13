@@ -361,8 +361,6 @@ pub struct BackgroundTaskConfig {
     pub inventory: InventoryConfig,
     /// configuration for physical disk adoption tasks
     pub physical_disk_adoption: PhysicalDiskAdoptionConfig,
-    /// configuration for physical disk cleanup tasks
-    pub physical_disk_cleanup: PhysicalDiskCleanupConfig,
     /// configuration for phantom disks task
     pub phantom_disks: PhantomDiskConfig,
     /// configuration for blueprint related tasks
@@ -438,20 +436,6 @@ pub struct PhysicalDiskAdoptionConfig {
     pub period_secs: Duration,
 
     /// A toggle to disable automated disk adoption.
-    ///
-    /// Default: Off
-    #[serde(default)]
-    pub disable: bool,
-}
-
-#[serde_as]
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct PhysicalDiskCleanupConfig {
-    /// period (in seconds) for periodic activations of this background task
-    #[serde_as(as = "DurationSeconds<u64>")]
-    pub period_secs: Duration,
-
-    /// A toggle to disable automated disk cleanup
     ///
     /// Default: Off
     #[serde(default)]
@@ -828,7 +812,6 @@ mod test {
             inventory.nkeep = 11
             inventory.disable = false
             physical_disk_adoption.period_secs = 30
-            physical_disk_cleanup.period_secs = 30
             phantom_disks.period_secs = 30
             blueprints.period_secs_load = 10
             blueprints.period_secs_execute = 60
@@ -953,10 +936,6 @@ mod test {
                             period_secs: Duration::from_secs(30),
                             disable: false,
                         },
-                        physical_disk_cleanup: PhysicalDiskCleanupConfig {
-                            period_secs: Duration::from_secs(30),
-                            disable: false,
-                        },
                         phantom_disks: PhantomDiskConfig {
                             period_secs: Duration::from_secs(30),
                         },
@@ -1056,7 +1035,6 @@ mod test {
             inventory.nkeep = 3
             inventory.disable = false
             physical_disk_adoption.period_secs = 30
-            physical_disk_cleanup.period_secs = 30
             phantom_disks.period_secs = 30
             blueprints.period_secs_load = 10
             blueprints.period_secs_execute = 60

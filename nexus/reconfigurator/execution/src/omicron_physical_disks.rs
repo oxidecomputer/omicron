@@ -10,13 +10,18 @@ use anyhow::Context;
 use futures::stream;
 use futures::StreamExt;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::pagination::Paginator;
+use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
+use nexus_types::identity::Asset;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use slog::info;
 use slog::o;
 use slog::warn;
 use std::collections::BTreeMap;
+use std::num::NonZeroU32;
 
 /// Idempotently ensure that the specified Omicron disks are deployed to the
 /// corresponding sleds
@@ -95,6 +100,81 @@ pub(crate) async fn deploy_disks(
     } else {
         Err(errors)
     }
+}
+
+const MAX_CLEANUP_BATCH: NonZeroU32 = unsafe {
+    // Safety: last time I checked, 100 was greater than zero.
+    NonZeroU32::new_unchecked(100)
+};
+
+/// Decommissions all disks which are currently expunged
+pub(crate) async fn decommission_expunged_disks(
+    opctx: &OpContext,
+    datastore: &DataStore,
+) -> Result<(), Vec<anyhow::Error>> {
+    datastore
+        .physical_disk_decommission_all_expunged(&opctx)
+        .await
+        .map_err(|e| vec![anyhow!(e)])?;
+    Ok(())
+}
+
+/// Cleans up old database state from decommissioned disks.
+///
+/// This involves removing zpools and datasets allocated
+/// to disks which are now decommissioned.
+pub(crate) async fn clean_up_decommissioned_disks(
+    opctx: &OpContext,
+    datastore: &DataStore,
+) -> Result<(), Vec<anyhow::Error>> {
+    let log = &opctx.log;
+
+    let mut errors = vec![];
+    let mut paginator = Paginator::new(MAX_CLEANUP_BATCH);
+    while let Some(p) = paginator.next() {
+        let maybe_batch = datastore
+            .zpool_on_decommissioned_disk_list(opctx, &p.current_pagparams())
+            .await;
+        let batch = match maybe_batch {
+            Ok(batch) => batch,
+            Err(e) => {
+                slog::error!(
+                    log,
+                    "list decommissioned zpools query failed: {e}"
+                );
+                errors.push(anyhow!(e));
+                return Err(errors);
+            }
+        };
+        paginator = p.found_batch(&batch, &|z| z.id());
+
+        let mut batch = batch.into_iter();
+        if let Some(zpool) = batch.next() {
+            info!(log,
+                "Found an out-of-service zpool";
+                "zpool_id" => zpool.id().to_string(),
+            );
+
+            let zpool_id = ZpoolUuid::from_untyped_uuid(zpool.id());
+
+            if let Err(e) = datastore
+                .zpool_delete_self_and_all_datasets(opctx, zpool_id)
+                .await
+            {
+                slog::error!(
+                    log,
+                    "failed to clean up decommissioned physical disk: {e}"
+                );
+                errors.push(anyhow!(e));
+                continue;
+            }
+        }
+    }
+
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

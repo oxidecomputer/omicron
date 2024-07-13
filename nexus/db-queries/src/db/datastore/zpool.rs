@@ -15,6 +15,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::PhysicalDisk;
+use crate::db::model::PhysicalDiskState;
 use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
@@ -140,6 +141,45 @@ impl DataStore {
     }
 
     /// Soft-deletes all datasets, then soft-deletes the zpool.
+    pub async fn zpool_delete_self_and_all_datasets(
+        &self,
+        opctx: &OpContext,
+        zpool_id: ZpoolUuid,
+    ) -> DeleteResult {
+        let conn = &*self.pool_connection_authorized(&opctx).await?;
+        Self::zpool_delete_self_and_all_datasets_on_connection(
+            &conn, opctx, zpool_id,
+        )
+        .await
+    }
+
+    /// Returns all (non-deleted) zpools on decommissioned disks
+    pub async fn zpool_on_decommissioned_disk_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<Zpool> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::physical_disk::dsl as physical_disk_dsl;
+        use db::schema::zpool::dsl as zpool_dsl;
+
+        paginated(zpool_dsl::zpool, zpool_dsl::id, pagparams)
+            .filter(zpool_dsl::time_deleted.is_null())
+            .inner_join(
+                physical_disk_dsl::physical_disk.on(physical_disk_dsl::id
+                    .eq(zpool_dsl::physical_disk_id)
+                    .and(
+                        physical_disk_dsl::disk_state
+                            .eq(PhysicalDiskState::Decommissioned),
+                    )),
+            )
+            .select(Zpool::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// See: [Self::zpool_delete_self_and_all_datasets]
     pub(crate) async fn zpool_delete_self_and_all_datasets_on_connection(
         conn: &async_bb8_diesel::Connection<db::DbConnection>,
         opctx: &OpContext,
@@ -155,7 +195,7 @@ impl DataStore {
             .filter(dataset_dsl::time_deleted.is_null())
             .filter(dataset_dsl::pool_id.eq(zpool_id))
             .set(dataset_dsl::time_deleted.eq(now))
-            .execute_async(&*conn)
+            .execute_async(conn)
             .await
             .map(|_rows_modified| ())
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -164,7 +204,7 @@ impl DataStore {
             .filter(zpool_dsl::id.eq(zpool_id))
             .filter(zpool_dsl::time_deleted.is_null())
             .set(zpool_dsl::time_deleted.eq(now))
-            .execute_async(&*conn)
+            .execute_async(conn)
             .await
             .map(|_rows_modified| ())
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;

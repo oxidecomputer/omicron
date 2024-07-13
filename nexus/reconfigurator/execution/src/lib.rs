@@ -227,6 +227,20 @@ where
     )
     .await?;
 
+    // This depends on the "deploy_disks" call earlier -- disk expungement is a
+    // statement of policy, but we need to be assured that the Sled Agent has
+    // stopped using that disk before we can mark its state as decommissioned.
+    omicron_physical_disks::decommission_expunged_disks(&opctx, datastore)
+        .await?;
+
+    // Regardless of how a disk was marked decommissioned, this is a signal we
+    // can delete old database tables (e.g., datasets, zpools) used by that disk.
+    //
+    // This depends on "decommission_sleds" and "decommission_expunged_disks",
+    // as each of those stages can mark disks decommissioned.
+    omicron_physical_disks::clean_up_decommissioned_disks(&opctx, datastore)
+        .await?;
+
     // This is likely to error if any cluster upgrades are in progress (which
     // can take some time), so it should remain at the end so that other parts
     // of the blueprint can progress normally.
@@ -241,6 +255,8 @@ where
 mod tests {
     use super::*;
     use nexus_db_model::Generation;
+    use nexus_db_model::PhysicalDisk;
+    use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
@@ -290,7 +306,7 @@ mod tests {
     // tests expect to be able to realize the the blueprint created from an
     // initial collection, and ensuring the zones' datasets exist requires first
     // inserting the sled and zpool records.
-    pub(crate) async fn insert_zpool_records(
+    pub(crate) async fn create_disks_for_zones_using_datasets(
         datastore: &DataStore,
         opctx: &OpContext,
         blueprint: &Blueprint,
@@ -304,12 +320,27 @@ mod tests {
                 continue;
             };
 
+            let physical_disk_id = Uuid::new_v4();
             let pool_id = dataset.dataset.pool_name.id();
+
+            let disk = PhysicalDisk::new(
+                physical_disk_id,
+                String::from("Oxide"),
+                format!("PhysDisk of {}", pool_id),
+                String::from("FakeDisk"),
+                PhysicalDiskKind::U2,
+                sled_id.into_untyped_uuid(),
+            );
+            datastore
+                .physical_disk_insert(&opctx, disk.clone())
+                .await
+                .expect("failed to upsert physical disk");
+
             if pool_inserted.insert(pool_id) {
                 let zpool = Zpool::new(
                     pool_id.into_untyped_uuid(),
                     sled_id.into_untyped_uuid(),
-                    Uuid::new_v4(), // physical_disk_id
+                    physical_disk_id,
                 );
                 datastore
                     .zpool_insert(opctx, zpool)

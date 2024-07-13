@@ -50,7 +50,6 @@ inventory.nkeep = 3
 inventory.disable = false
 phantom_disks.period_secs = 30
 physical_disk_adoption.period_secs = 30
-physical_disk_cleanup.period_secs = 30
 blueprints.period_secs_load = 10
 blueprints.period_secs_execute = 60
 blueprints.period_secs_collect_crdb_node_ids = 180

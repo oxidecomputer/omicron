@@ -102,10 +102,8 @@ inventory.nkeep = 3
 inventory.disable = false
 phantom_disks.period_secs = 30
 physical_disk_adoption.period_secs = 30
-physical_disk_cleanup.period_secs = 30
 # Disable automatic disk adoption to avoid interfering with tests.
 physical_disk_adoption.disable = true
-physical_disk_cleanup.disable = true
 blueprints.period_secs_load = 100
 blueprints.period_secs_execute = 600
 blueprints.period_secs_collect_crdb_node_ids = 600
