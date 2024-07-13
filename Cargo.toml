@@ -9,7 +9,7 @@ members = [
     "clients/dns-service-client",
     "clients/dpd-client",
     "clients/gateway-client",
-    "clients/installinator-artifact-client",
+    "clients/installinator-client",
     "clients/nexus-client",
     "clients/oxide-client",
     "clients/oximeter-client",
@@ -31,7 +31,7 @@ members = [
     "gateway-test-utils",
     "gateway",
     "illumos-utils",
-    "installinator-artifactd",
+    "installinator-api",
     "installinator-common",
     "installinator",
     "internal-dns-cli",
@@ -100,7 +100,7 @@ default-members = [
     "clients/dns-service-client",
     "clients/dpd-client",
     "clients/gateway-client",
-    "clients/installinator-artifact-client",
+    "clients/installinator-client",
     "clients/nexus-client",
     "clients/oxide-client",
     "clients/oximeter-client",
@@ -125,7 +125,7 @@ default-members = [
     "gateway-test-utils",
     "gateway",
     "illumos-utils",
-    "installinator-artifactd",
+    "installinator-api",
     "installinator-common",
     "installinator",
     "internal-dns-cli",
@@ -318,8 +318,8 @@ indent_write = "2.2.0"
 indexmap = "2.2.6"
 indicatif = { version = "0.17.8", features = ["rayon"] }
 installinator = { path = "installinator" }
-installinator-artifactd = { path = "installinator-artifactd" }
-installinator-artifact-client = { path = "clients/installinator-artifact-client" }
+installinator-api = { path = "installinator-api" }
+installinator-client = { path = "clients/installinator-client" }
 installinator-common = { path = "installinator-common" }
 internal-dns = { path = "internal-dns" }
 ipcc = { path = "ipcc" }

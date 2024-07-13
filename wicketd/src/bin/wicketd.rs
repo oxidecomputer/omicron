@@ -144,9 +144,8 @@ async fn do_run() -> Result<(), CmdError> {
                 .to_logger("wicketd")
                 .context("failed to initialize logger")
                 .map_err(CmdError::Failure)?;
-            let server = Server::start(log, args)
-                .await
-                .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+            let server =
+                Server::start(log, args).await.map_err(CmdError::Failure)?;
             server
                 .wait_for_finish()
                 .await
