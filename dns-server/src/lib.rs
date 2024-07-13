@@ -43,7 +43,6 @@
 //!    the persistent DNS data
 
 pub mod dns_server;
-pub mod dns_types;
 pub mod http_server;
 pub mod storage;
 

@@ -9,7 +9,7 @@ members = [
     "clients/dns-service-client",
     "clients/dpd-client",
     "clients/gateway-client",
-    "clients/installinator-artifact-client",
+    "clients/installinator-client",
     "clients/nexus-client",
     "clients/oxide-client",
     "clients/oximeter-client",
@@ -26,12 +26,13 @@ members = [
     "dev-tools/releng",
     "dev-tools/xtask",
     "dns-server",
+    "dns-server-api",
     "end-to-end-tests",
     "gateway-cli",
     "gateway-test-utils",
     "gateway",
     "illumos-utils",
-    "installinator-artifactd",
+    "installinator-api",
     "installinator-common",
     "installinator",
     "internal-dns-cli",
@@ -86,8 +87,9 @@ members = [
     "wicket-dbg",
     "wicket",
     "wicketd",
+    "wicketd-api",
     "workspace-hack",
-    "zone-setup",
+    "zone-setup", "wicketd-api", "dns-server-api",
 ]
 
 default-members = [
@@ -100,7 +102,7 @@ default-members = [
     "clients/dns-service-client",
     "clients/dpd-client",
     "clients/gateway-client",
-    "clients/installinator-artifact-client",
+    "clients/installinator-client",
     "clients/nexus-client",
     "clients/oxide-client",
     "clients/oximeter-client",
@@ -119,13 +121,14 @@ default-members = [
     # hakari to not work as well and build times to be longer.
     # See omicron#4392.
     "dns-server",
+    "dns-server-api",
     # Do not include end-to-end-tests in the list of default members, as its
     # tests only work on a deployed control plane.
     "gateway-cli",
     "gateway-test-utils",
     "gateway",
     "illumos-utils",
-    "installinator-artifactd",
+    "installinator-api",
     "installinator-common",
     "installinator",
     "internal-dns-cli",
@@ -180,6 +183,7 @@ default-members = [
     "wicket-dbg",
     "wicket",
     "wicketd",
+    "wicketd-api",
     "workspace-hack",
     "zone-setup",
 ]
@@ -279,6 +283,7 @@ derive-where = "1.2.7"
 diesel = { version = "2.1.6", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", branch = "main" }
 dns-server = { path = "dns-server" }
+dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { path = "clients/dpd-client" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
@@ -318,8 +323,8 @@ indent_write = "2.2.0"
 indexmap = "2.2.6"
 indicatif = { version = "0.17.8", features = ["rayon"] }
 installinator = { path = "installinator" }
-installinator-artifactd = { path = "installinator-artifactd" }
-installinator-artifact-client = { path = "clients/installinator-artifact-client" }
+installinator-api = { path = "installinator-api" }
+installinator-client = { path = "clients/installinator-client" }
 installinator-common = { path = "installinator-common" }
 internal-dns = { path = "internal-dns" }
 ipcc = { path = "ipcc" }
@@ -530,6 +535,7 @@ walkdir = "2.5"
 whoami = "1.5"
 wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }
+wicketd-api = { path = "wicketd-api" }
 wicketd-client = { path = "clients/wicketd-client" }
 zeroize = { version = "1.7.0", features = ["zeroize_derive", "std"] }
 zip = { version = "0.6.6", default-features = false, features = ["deflate","bzip2"] }

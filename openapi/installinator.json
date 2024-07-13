@@ -1,8 +1,8 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Oxide Installinator Artifact Server",
-    "description": "API for use by the installinator to retrieve artifacts",
+    "title": "Installinator API",
+    "description": "API for installinator to fetch artifacts and report progress",
     "contact": {
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"

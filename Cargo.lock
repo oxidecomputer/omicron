@@ -1929,6 +1929,7 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "clap",
+ "dns-server-api",
  "dns-service-client",
  "dropshot",
  "expectorate",
@@ -1956,6 +1957,17 @@ dependencies = [
  "trust-dns-resolver",
  "trust-dns-server",
  "uuid",
+]
+
+[[package]]
+name = "dns-server-api"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dropshot",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
 ]
 
 [[package]]
@@ -3606,7 +3618,7 @@ dependencies = [
  "hex-literal",
  "http 0.2.12",
  "illumos-utils",
- "installinator-artifact-client",
+ "installinator-client",
  "installinator-common",
  "ipcc",
  "itertools 0.12.1",
@@ -3638,7 +3650,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "installinator-artifact-client"
+name = "installinator-api"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dropshot",
+ "hyper 0.14.28",
+ "installinator-common",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+ "slog",
+ "uuid",
+]
+
+[[package]]
+name = "installinator-client"
 version = "0.1.0"
 dependencies = [
  "installinator-common",
@@ -3651,30 +3679,6 @@ dependencies = [
  "serde_json",
  "slog",
  "update-engine",
- "uuid",
-]
-
-[[package]]
-name = "installinator-artifactd"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "clap",
- "dropshot",
- "expectorate",
- "hyper 0.14.28",
- "installinator-common",
- "omicron-common",
- "omicron-test-utils",
- "omicron-workspace-hack",
- "openapi-lint",
- "openapiv3",
- "schemars",
- "serde",
- "serde_json",
- "slog",
- "subprocess",
  "uuid",
 ]
 
@@ -6106,9 +6110,11 @@ dependencies = [
  "atomicwrites",
  "camino",
  "clap",
+ "dns-server-api",
  "dropshot",
  "fs-err",
  "indent_write",
+ "installinator-api",
  "nexus-internal-api",
  "omicron-workspace-hack",
  "openapi-lint",
@@ -6117,6 +6123,7 @@ dependencies = [
  "serde_json",
  "similar",
  "supports-color",
+ "wicketd-api",
 ]
 
 [[package]]
@@ -11107,6 +11114,8 @@ name = "wicket-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "dpd-client",
+ "dropshot",
  "gateway-client",
  "maplit",
  "omicron-common",
@@ -11118,7 +11127,9 @@ dependencies = [
  "serde_json",
  "sha2",
  "sled-hardware-types",
+ "slog",
  "thiserror",
+ "tokio",
  "toml 0.8.14",
  "update-engine",
 ]
@@ -11176,8 +11187,8 @@ dependencies = [
  "hyper 0.14.28",
  "illumos-utils",
  "installinator",
- "installinator-artifact-client",
- "installinator-artifactd",
+ "installinator-api",
+ "installinator-client",
  "installinator-common",
  "internal-dns",
  "itertools 0.12.1",
@@ -11217,7 +11228,25 @@ dependencies = [
  "uuid",
  "wicket",
  "wicket-common",
+ "wicketd-api",
  "wicketd-client",
+]
+
+[[package]]
+name = "wicketd-api"
+version = "0.1.0"
+dependencies = [
+ "bootstrap-agent-client",
+ "dropshot",
+ "gateway-client",
+ "omicron-common",
+ "omicron-passwords",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+ "sled-hardware-types",
+ "slog",
+ "wicket-common",
 ]
 
 [[package]]
