@@ -153,7 +153,7 @@ impl DataStore {
         .await
     }
 
-    /// Returns all (non-deleted) zpools on decommissioned disks
+    /// Returns all (non-deleted) zpools on decommissioned (or deleted) disks
     pub async fn zpool_on_decommissioned_disk_list(
         &self,
         opctx: &OpContext,
@@ -165,13 +165,24 @@ impl DataStore {
 
         paginated(zpool_dsl::zpool, zpool_dsl::id, pagparams)
             .filter(zpool_dsl::time_deleted.is_null())
-            .inner_join(
-                physical_disk_dsl::physical_disk.on(physical_disk_dsl::id
-                    .eq(zpool_dsl::physical_disk_id)
-                    .and(
-                        physical_disk_dsl::disk_state
-                            .eq(PhysicalDiskState::Decommissioned),
-                    )),
+            // Note the LEFT JOIN here -- we want to see zpools where the
+            // physical disk has been deleted too.
+            .left_join(
+                physical_disk_dsl::physical_disk
+                    .on(physical_disk_dsl::id.eq(zpool_dsl::physical_disk_id)),
+            )
+            .filter(
+                // The physical disk has been either explicitly decommissioned,
+                // or has been deleted altogether.
+                physical_disk_dsl::disk_state
+                    .eq(PhysicalDiskState::Decommissioned)
+                    .or(physical_disk_dsl::id.is_null())
+                    .or(
+                        // NOTE: We should probably get rid of this altogether
+                        // (it's kinda implied by "Decommissioned", being a terminal
+                        // state) but this is an extra cautious statement.
+                        physical_disk_dsl::time_deleted.is_not_null(),
+                    ),
             )
             .select(Zpool::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
