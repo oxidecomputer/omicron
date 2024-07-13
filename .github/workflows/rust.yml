@@ -86,7 +86,6 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       CARGO_INCREMENTAL: 0
-      CARGO_HACK_VERSION: 0.6.28
     steps:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
@@ -99,18 +98,17 @@ jobs:
     - name: Report cargo version
       run: cargo --version
     - name: Update PATH
-      run: source "./env.sh"; echo "PATH=$PATH" >> "$GITHUB_ENV"
+      run: |
+        set -x
+        export PATH="./out/cargo-hack:$PATH"
+        source "./env.sh"; echo "PATH=$PATH" >> "$GITHUB_ENV"
     - name: Print PATH
       run: echo $PATH
     - name: Print GITHUB_ENV
       run: cat "$GITHUB_ENV"
     - name: Install Pre-Requisites
       run: ./tools/install_builder_prerequisites.sh -y
-    # Uses manifest for install
-    - uses: taiki-e/install-action@v2
-      with:
-        tool: cargo-hack@${{ env.CARGO_HACK_VERSION }}
-    - name: Run Check on Features (Feature-Powerset, No-Dev-Deps)
+    - name: Run Check on Feature Combinations (Feature-Powerset, No-Dev-Deps)
       timeout-minutes: 120 # 2 hours
       run: cargo xtask check-features --ci
 

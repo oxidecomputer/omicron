@@ -114,9 +114,13 @@ We check that certain system library dependencies are not leaked outside of thei
 
 === Checking feature flag combinations
 
-To ensure that varying combinations of features compile, run `cargo xtask check-features`, which executes the https://github.com/taiki-e/cargo-hack[`cargo hack`] subcommand under the hood. This `xtask` is run in CI using the `--ci` parameter , which automatically exludes certain `image-*` features that purposefully cause compiler errors if set.
+To ensure that varying combinations of features compile, run `cargo xtask check-features`, which executes the https://github.com/taiki-e/cargo-hack[`cargo hack`] subcommand under the hood.
 
-If you don't have `cargo hack` installed locally, run the the `xtask` with the `install-version <VERSION>` option, which will install it into your user's `.cargo` directory:
+This `xtask` is run in CI using the `--ci` parameter , which automatically exludes certain `image-*` features that purposefully cause compiler errors if set and uses a pre-built binary.
+
+If `cargo hack` is not already installed in omicron's `out/` directory, a pre-built binary will be installed automatically depending on your operating system and architecture.
+
+You can also run the the `xtask` with the `install-version <VERSION>` option, which will install the cargo subcommand into your user's `.cargo` directory:
 
 [source,text]
 ----

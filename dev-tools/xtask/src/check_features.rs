@@ -4,15 +4,12 @@
 
 //! Subcommand: cargo xtask check-features
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
+use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
 use std::{collections::HashSet, process::Command};
 
-/// The default version of `cargo-hack` to install.
-/// We use a patch-floating version to avoid breaking the build when a new
-/// version is released (locally).
-const FLOAT_VERSION: &str = "~0.6.28";
-
+const SUPPORTED_ARCHITECTURES: [&str; 1] = ["x86_64"];
 const CI_EXCLUDED_FEATURES: [&str; 2] = ["image-trampoline", "image-standard"];
 
 #[derive(Parser)]
@@ -29,27 +26,31 @@ pub struct Args {
     /// Error format passed to `cargo hack check`.
     #[clap(long, value_name = "FMT")]
     message_format: Option<String>,
-    /// Version of `cargo-hack` to install.
+    /// Version of `cargo-hack` to install. By default, we download a pre-built
+    /// version.
     #[clap(long, value_name = "VERSION")]
     install_version: Option<String>,
 }
 
 /// Run `cargo hack check`.
 pub fn run_cmd(args: Args) -> Result<()> {
-    // Install `cargo-hack` if the `install-version` was specified.
-    if let Some(version) = args.install_version {
-        install_cargo_hack(Some(version))?;
+    // We cannot specify both `--ci` and `--install-version`, as the former
+    // implies we are using a pre-built version.
+    if args.ci && args.install_version.is_some() {
+        bail!("cannot specify --ci and --install-version together");
     }
 
     let cargo =
         std::env::var("CARGO").unwrap_or_else(|_| String::from("cargo"));
+
     let mut command = Command::new(&cargo);
 
     // Add the `hack check` subcommand.
     command.args(&["hack", "check"]);
 
-    // Add the `--exclude-features` flag if we are running in CI mode.
     if args.ci {
+        install_prebuilt_cargo_hack(&cargo)?;
+
         let ex = if let Some(mut features) = args.exclude_features {
             // Extend the list of features to exclude with the CI defaults.
             features.extend(
@@ -64,8 +65,10 @@ pub fn run_cmd(args: Args) -> Result<()> {
             CI_EXCLUDED_FEATURES.join(",")
         };
 
+        // Add the `--exclude-features` flag if we are running in CI mode.
         command.args(["--exclude-features", &ex]);
     } else {
+        install_cargo_hack(&cargo, args.install_version)?;
         // Add "only" the `--exclude-features` flag if it was provided.
         if let Some(features) = args.exclude_features {
             command.args(["--exclude-features", &features.join(",")]);
@@ -91,47 +94,95 @@ pub fn run_cmd(args: Args) -> Result<()> {
         // We will not check the dev-dependencies, which should covered by tests.
         .arg("--no-dev-deps");
 
-    eprintln!(
-        "running: {:?} {}",
-        &cargo,
-        command
-            .get_args()
-            .map(|arg| format!("{:?}", arg.to_str().unwrap()))
-            .collect::<Vec<_>>()
-            .join(" ")
-    );
-
-    let exit_status = command
-        .spawn()
-        .context("failed to spawn child process")?
-        .wait()
-        .context("failed to wait for child process")?;
-
-    if !exit_status.success() {
-        bail!("check-features failed: {}", exit_status);
-    }
-
-    Ok(())
+    exec(command)
 }
 
-/// Install `cargo-hack` at the specified version or the default version.
-fn install_cargo_hack(version: Option<String>) -> Result<()> {
+/// The supported operating systems.
+enum Os {
+    Illumos,
+    Linux,
+    Mac,
+}
+
+/// Get the current OS.
+fn os_name() -> Result<Os> {
+    let os = match std::env::consts::OS {
+        "linux" => Os::Linux,
+        "macos" => Os::Mac,
+        "solaris" | "illumos" => Os::Illumos,
+        other => bail!("OS not supported: {other}"),
+    };
+    Ok(os)
+}
+
+/// Get the path to the `out` directory.
+fn out_dir() -> Utf8PathBuf {
+    if let Ok(omicron_dir) = std::env::var("OMICRON") {
+        Utf8Path::new(format!("{}/out/cargo-hack", omicron_dir).as_str())
+            .to_path_buf()
+    } else {
+        Utf8Path::new("out/cargo-hack").to_path_buf()
+    }
+}
+
+/// Install `cargo-hack` if the `install-version` was specified; otherwise,
+/// download a pre-built version if it's not already in our `out` directory.
+fn install_cargo_hack(cargo: &str, version: Option<String>) -> Result<()> {
+    if let Some(version) = version {
+        let mut command = Command::new(cargo);
+
+        eprintln!(
+            "installing cargo-hack at version {} to {}",
+            version,
+            env!("CARGO_HOME")
+        );
+        command.args(&["install", "cargo-hack", "--version", &version]);
+        exec(command)
+    } else if !out_dir().exists() {
+        install_prebuilt_cargo_hack(cargo)
+    } else {
+        let out_dir = out_dir();
+        eprintln!("cargo-hack found in {}", out_dir);
+        Ok(())
+    }
+}
+
+/// Download a pre-built version of `cargo-hack` to the `out` directory via the
+/// download `xtask`.
+fn install_prebuilt_cargo_hack(cargo: &str) -> Result<()> {
+    let mut command = Command::new(cargo);
+
+    let out_dir = out_dir();
+    eprintln!(
+        "cargo-hack not found in {}, downloading a pre-built version",
+        out_dir
+    );
+
+    let os = os_name()?;
+    match os {
+        Os::Illumos | Os::Linux | Os::Mac
+            if SUPPORTED_ARCHITECTURES.contains(&std::env::consts::ARCH) =>
+        {
+            // Download the pre-built version of `cargo-hack` via our
+            // download `xtask`.
+            command.args(&["xtask", "download", "cargo-hack"]);
+        }
+        _ => {
+            bail!(
+                "cargo-hack is not pre-built for this os {} / arch {}",
+                std::env::consts::OS,
+                std::env::consts::ARCH
+            );
+        }
+    }
+
+    exec(command)
+}
+
+/// Execute the command and check the exit status.
+fn exec(mut command: Command) -> Result<()> {
     let cargo =
         std::env::var("CARGO").unwrap_or_else(|_| String::from("cargo"));
-
-    let mut command = Command::new(&cargo);
-
-    if let Some(version) = version {
-        command.args(&["install", "cargo-hack", "--version", &version]);
-    } else {
-        command.args(&[
-            "install",
-            "cargo-hack",
-            "--locked",
-            "--version",
-            FLOAT_VERSION,
-        ]);
-    }
 
     eprintln!(
         "running: {:?} {}",
