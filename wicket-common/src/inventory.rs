@@ -6,7 +6,8 @@
 // where these types come from.
 pub use gateway_client::types::{
     RotSlot, RotState, SpComponentCaboose, SpComponentInfo,
-    SpComponentPresence, SpIdentifier, SpIgnition, SpState, SpType,
+    SpComponentPresence, SpIdentifier, SpIgnition, SpIgnitionSystemType,
+    SpState, SpType,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
