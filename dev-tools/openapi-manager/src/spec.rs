@@ -15,6 +15,18 @@ use openapiv3::OpenAPI;
 pub fn all_apis() -> Vec<ApiSpec> {
     vec![
         ApiSpec {
+            title: "Installinator API".to_string(),
+            version: "0.0.1".to_string(),
+            description: "API for installinator to fetch artifacts \
+                and report progress"
+                .to_string(),
+            boundary: ApiBoundary::Internal,
+            api_description:
+                installinator_api::installinator_api::stub_api_description,
+            filename: "installinator.json".to_string(),
+            extra_validation: None,
+        },
+        ApiSpec {
             title: "Nexus internal API".to_string(),
             version: "0.0.1".to_string(),
             description: "Nexus internal API".to_string(),
@@ -22,6 +34,16 @@ pub fn all_apis() -> Vec<ApiSpec> {
             api_description:
                 nexus_internal_api::nexus_internal_api_mod::stub_api_description,
             filename: "nexus-internal.json".to_string(),
+            extra_validation: None,
+        },
+        ApiSpec {
+            title: "Oxide Technician Port Control Service".to_string(),
+            version: "0.0.1".to_string(),
+            description: "API for use by the technician port TUI: wicket"
+                .to_string(),
+            boundary: ApiBoundary::Internal,
+            api_description: wicketd_api::wicketd_api_mod::stub_api_description,
+            filename: "wicketd.json".to_string(),
             extra_validation: None,
         },
         // Add your APIs here! Please keep this list sorted by filename.

@@ -16,7 +16,7 @@ use buf_list::BufList;
 use bytes::Bytes;
 use display_error_chain::DisplayErrorChain;
 use futures::{Stream, StreamExt};
-use installinator_artifact_client::ClientError;
+use installinator_client::ClientError;
 use installinator_common::{
     EventReport, InstallinatorProgressMetadata, StepContext, StepProgress,
 };

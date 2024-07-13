@@ -9,19 +9,16 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::oneshot;
-use update_engine::events::EventReport;
-use update_engine::GenericSpec;
+use wicket_common::preflight_check::EventBuffer;
+use wicket_common::preflight_check::EventReport;
 use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 
 mod uplink;
 
-pub(crate) type UplinkEventReport =
-    EventReport<GenericSpec<uplink::UplinkPreflightTerminalError>>;
-
 #[derive(Debug)]
 pub(crate) struct PreflightCheckerHandler {
     request_tx: flume::Sender<PreflightCheck>,
-    uplink_event_buffer: Arc<Mutex<Option<uplink::EventBuffer>>>,
+    uplink_event_buffer: Arc<Mutex<Option<EventBuffer>>>,
 }
 
 impl PreflightCheckerHandler {
@@ -78,12 +75,12 @@ impl PreflightCheckerHandler {
         Ok(())
     }
 
-    pub(crate) fn uplink_event_report(&self) -> Option<UplinkEventReport> {
+    pub(crate) fn uplink_event_report(&self) -> Option<EventReport> {
         self.uplink_event_buffer
             .lock()
             .unwrap()
             .as_ref()
-            .map(|event_buffer| event_buffer.generate_report().into_generic())
+            .map(|event_buffer| event_buffer.generate_report())
     }
 }
 
@@ -105,7 +102,7 @@ enum PreflightCheck {
 
 async fn preflight_task_main(
     request_rx: flume::Receiver<PreflightCheck>,
-    uplink_event_buffer: Arc<Mutex<Option<uplink::EventBuffer>>>,
+    uplink_event_buffer: Arc<Mutex<Option<EventBuffer>>>,
     log: Logger,
 ) {
     while let Ok(request) = request_rx.recv_async().await {
@@ -120,7 +117,7 @@ async fn preflight_task_main(
             } => {
                 // New preflight check: create a new event buffer.
                 *uplink_event_buffer.lock().unwrap() =
-                    Some(uplink::EventBuffer::new(16));
+                    Some(EventBuffer::new(16));
 
                 // We've cleared the shared event buffer; release our caller
                 // (they can now lock and check the event buffer while we run
