@@ -120,13 +120,6 @@ This `xtask` is run in CI using the `--ci` parameter , which automatically exlud
 
 If `cargo hack` is not already installed in omicron's `out/` directory, a pre-built binary will be installed automatically depending on your operating system and architecture.
 
-You can also run the the `xtask` with the `install-version <VERSION>` option, which will install the cargo subcommand into your user's `.cargo` directory:
-
-[source,text]
-----
-$ cargo xtask check-features --install-version 0.6.28
-----
-
 To limit the max number of simultaneous feature flags combined for checking, run the `xtask` with the `--depth <NUM>` flag:
 
 [source,text]

@@ -5,7 +5,7 @@
 //! Subcommand: cargo xtask check-features
 
 use anyhow::{bail, Result};
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8PathBuf;
 use clap::Parser;
 use std::{collections::HashSet, process::Command};
 
@@ -115,14 +115,18 @@ fn os_name() -> Result<Os> {
     Ok(os)
 }
 
-/// Get the path to the `out` directory.
+/// This is a workaround for the lack of a CARGO_WORKSPACE_DIR environment
+/// variable, as suggested in <https://github.com/rust-lang/cargo/issues/3946#issuecomment-1433384192>.
+/// A better workaround might be to set this in the `[env]` section of
+/// `.cargo/config.toml`.
+fn project_root() -> Utf8PathBuf {
+    Utf8PathBuf::from(&concat!(env!("CARGO_MANIFEST_DIR"), "/.."))
+}
+
+/// Get the path to the `out` directory from the project root/workspace
+/// directory.
 fn out_dir() -> Utf8PathBuf {
-    if let Ok(omicron_dir) = std::env::var("OMICRON") {
-        Utf8Path::new(format!("{}/out/cargo-hack", omicron_dir).as_str())
-            .to_path_buf()
-    } else {
-        Utf8Path::new("out/cargo-hack").to_path_buf()
-    }
+    project_root().join("out/cargo-hack")
 }
 
 /// Install `cargo-hack` if the `install-version` was specified; otherwise,
