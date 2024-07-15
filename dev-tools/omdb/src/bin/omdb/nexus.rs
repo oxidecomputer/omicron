@@ -1492,8 +1492,7 @@ impl ConfirmationPrompt {
             DefaultPromptSegment::Basic(message.to_string()),
             DefaultPromptSegment::Empty,
         );
-        if let Ok(reedline::Signal::Success(input)) =
-            self.0.read_line(&prompt)
+        if let Ok(reedline::Signal::Success(input)) = self.0.read_line(&prompt)
         {
             Ok(input)
         } else {
@@ -1501,7 +1500,11 @@ impl ConfirmationPrompt {
         }
     }
 
-    fn read_and_validate(&mut self, message: &str, expected: &str) -> Result<(), anyhow::Error> {
+    fn read_and_validate(
+        &mut self,
+        message: &str,
+        expected: &str,
+    ) -> Result<(), anyhow::Error> {
         let input = self.read(message)?;
         if input != expected {
             bail!("Aborting, input did not match expected value");
