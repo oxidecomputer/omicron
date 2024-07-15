@@ -1929,6 +1929,7 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "clap",
+ "dns-server-api",
  "dns-service-client",
  "dropshot",
  "expectorate",
@@ -1956,6 +1957,17 @@ dependencies = [
  "trust-dns-resolver",
  "trust-dns-server",
  "uuid",
+]
+
+[[package]]
+name = "dns-server-api"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dropshot",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
 ]
 
 [[package]]
@@ -6106,6 +6118,7 @@ dependencies = [
  "atomicwrites",
  "camino",
  "clap",
+ "dns-server-api",
  "dropshot",
  "fs-err",
  "indent_write",

@@ -15,6 +15,16 @@ use openapiv3::OpenAPI;
 pub fn all_apis() -> Vec<ApiSpec> {
     vec![
         ApiSpec {
+            title: "Internal DNS".to_string(),
+            version: "0.0.1".to_string(),
+            description: "API for the internal DNS server".to_string(),
+            boundary: ApiBoundary::Internal,
+            api_description:
+                dns_server_api::dns_server_api::stub_api_description,
+            filename: "dns-server.json".to_string(),
+            extra_validation: None,
+        },
+        ApiSpec {
             title: "Nexus internal API".to_string(),
             version: "0.0.1".to_string(),
             description: "Nexus internal API".to_string(),

@@ -26,6 +26,7 @@ members = [
     "dev-tools/releng",
     "dev-tools/xtask",
     "dns-server",
+    "dns-server-api",
     "end-to-end-tests",
     "gateway-cli",
     "gateway-test-utils",
@@ -119,6 +120,7 @@ default-members = [
     # hakari to not work as well and build times to be longer.
     # See omicron#4392.
     "dns-server",
+    "dns-server-api",
     # Do not include end-to-end-tests in the list of default members, as its
     # tests only work on a deployed control plane.
     "gateway-cli",
@@ -279,6 +281,7 @@ derive-where = "1.2.7"
 diesel = { version = "2.1.6", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", branch = "main" }
 dns-server = { path = "dns-server" }
+dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { path = "clients/dpd-client" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
