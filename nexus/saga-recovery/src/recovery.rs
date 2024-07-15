@@ -144,7 +144,7 @@ fn read_all_from_channel<T>(
 /// Describes what should happen during a particular recovery pass
 ///
 /// This is constructed by the saga recovery background task via
-/// [`Plan::new()`].  That function uses `PlanBuilder`
+/// [`Plan::new()`].
 ///
 /// This structure is also much more detailed than it needs to be to support
 /// better observability and testing.
@@ -318,7 +318,7 @@ struct PlanBuilder<'a> {
 
 impl<'a> PlanBuilder<'a> {
     /// Begin building a `Plan`
-    pub fn new(log: &'a slog::Logger) -> PlanBuilder {
+    fn new(log: &'a slog::Logger) -> PlanBuilder {
         PlanBuilder {
             log,
             needs_recovery: BTreeMap::new(),
@@ -329,7 +329,7 @@ impl<'a> PlanBuilder<'a> {
     }
 
     /// Turn this into a `Plan`
-    pub fn build(self) -> Plan {
+    fn build(self) -> Plan {
         Plan {
             needs_recovery: self.needs_recovery,
             skipped_running: self.skipped_running,
@@ -341,7 +341,7 @@ impl<'a> PlanBuilder<'a> {
     /// Record that this saga appears to be done, based on it being missing from
     /// two different database queries for in-progress sagas with no intervening
     /// indication that a saga with this id was started in the meantime
-    pub fn saga_infer_done(&mut self, saga_id: SagaId) {
+    fn saga_infer_done(&mut self, saga_id: SagaId) {
         info!(
             self.log,
             "found saga that appears to be done \
@@ -356,7 +356,7 @@ impl<'a> PlanBuilder<'a> {
 
     /// Record that no action is needed for this saga in this recovery pass
     /// because it appears to already be running
-    pub fn saga_recovery_not_needed(&mut self, saga_id: SagaId) {
+    fn saga_recovery_not_needed(&mut self, saga_id: SagaId) {
         debug!(
             self.log,
             "found saga that can be ignored (already running)";
@@ -376,7 +376,7 @@ impl<'a> PlanBuilder<'a> {
     /// solution is to only consider sagas done that are missing for two
     /// consecutive database queries with no intervening report that a saga with
     /// that id has just started.
-    pub fn saga_maybe_done(&mut self, saga_id: SagaId) {
+    fn saga_maybe_done(&mut self, saga_id: SagaId) {
         debug!(
             self.log,
             "found saga that may be done (will be sure on the next pass)";
@@ -390,7 +390,7 @@ impl<'a> PlanBuilder<'a> {
 
     /// Record that this saga needs to be recovered, based on it being "in
     /// progress" according to the database but not yet resumed in this process
-    pub fn saga_recovery_needed(
+    fn saga_recovery_needed(
         &mut self,
         saga_id: SagaId,
         saga: nexus_db_model::Saga,

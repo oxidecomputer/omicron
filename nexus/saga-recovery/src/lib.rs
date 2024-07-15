@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Saga recovery bookkeeping
+//! # Saga recovery bookkeeping
 //!
 //! If you're reading this, you first want to read the big block comment in the
 //! saga recovery background task.  It explains important background about what
@@ -52,19 +52,19 @@
 //!                                    |
 //!      2. list in-progress sagas     |
 //!                                    |
-//!      3. collect list of sagas  ------> use RestState::update_started_sagas()
-//!         started by Nexus           |
+//!      3. collect list of sagas  ------> use
+//!         started by Nexus           |   `RestState::update_started_sagas()`
 //!                                    |
-//!      4. make a plan  ----------------> use Plan::new()
+//!      4. make a plan  ----------------> use `Plan::new()`
 //!                                    |   This is where all the decisions
 //!                                    |   about saga recovery get made.
 //!                                    |
-//!      5. follow the plan -------------> use Plan::sagas_needing_recovery()
+//!      5. follow the plan -------------> use `Plan::sagas_needing_recovery()`
 //!                                    |
 //!         fetch details from db      |
 //!         load sagas into Steno      |
-//!                                    |   use ExecutionBuilder::new() to report
-//!                                    |   what's going on
+//!                                    |   use `ExecutionBuilder::new()` to
+//!                                    |   report what's going on
 //!                                    |
 //!      6. update `RestState` and ----->  use `RestState::update_after_pass()`
 //!         `Report`                   |   and `Report::update_after_pass()`

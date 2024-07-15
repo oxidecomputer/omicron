@@ -2,18 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// XXX-dap at the end, verify:
-// - counters (maybe plumb these into Oximeter?)
-// - task status reported by omdb
-// - log entries
-// - test coverage
-// XXX-dap write up summary for PR, including the option of doing recovery in
-// Steno with read methods on SecStore?  also could have added purge option to
-// SEC and then relied on Steno to know if a thing was alive.  (can't do it
-// without a purge that's invoked by recovery)
-// XXX-dap write a stress test that furiously performs saga recovery a lot
-// of times and ensures that each saga is recovered exactly once
-
 //! Saga recovery
 //!
 //! ## Review of distributed sagas
@@ -342,12 +330,7 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
         // and there shouldn't be too many sagas outstanding, and Nexus has
         // already crashed so they've experienced a bit of latency already.
         for (saga_id, saga) in plan.sagas_needing_recovery() {
-            // XXX-dap used to be self.nexus.log.  Is this okay?
-            let saga_log = bgtask_log.new(o!(
-                "saga_name" => saga.name.clone(),
-                "saga_id" => saga_id.to_string(),
-            ));
-
+            let saga_log = self.maker.make_saga_log(*saga_id, &saga.name);
             builder.saga_recovery_start(*saga_id, saga_log.clone());
             match self.recover_one_saga(bgtask_log, &saga_log, saga).await {
                 Ok(completion_future) => {
@@ -467,6 +450,8 @@ pub trait MakeSagaContext: Send + Sync {
         &self,
         log: slog::Logger,
     ) -> Arc<<Self::SagaType as steno::SagaType>::ExecContextType>;
+
+    fn make_saga_log(&self, id: SagaId, name: &str) -> slog::Logger;
 }
 
 impl MakeSagaContext for Arc<Nexus> {
@@ -477,6 +462,13 @@ impl MakeSagaContext for Arc<Nexus> {
         // will be wrapped in an `Arc`.  But we already use `Arc<SagaContext>`
         // for our type.  Hence we need two Arcs.
         Arc::new(Arc::new(SagaContext::new(self.clone(), log)))
+    }
+
+    fn make_saga_log(&self, id: SagaId, name: &str) -> slog::Logger {
+        self.log.new(o!(
+            "saga_name" => name.to_owned(),
+            "saga_id" => id.to_string(),
+        ))
     }
 }
 
@@ -571,6 +563,13 @@ mod test {
         type SagaType = TestOp;
         fn make_saga_context(&self, _log: slog::Logger) -> Arc<TestContext> {
             self.clone()
+        }
+
+        fn make_saga_log(&self, id: SagaId, name: &str) -> slog::Logger {
+            self.log.new(o!(
+                "saga_name" => name.to_owned(),
+                "saga_id" => id.to_string(),
+            ))
         }
     }
 
