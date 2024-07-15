@@ -105,7 +105,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RackInitId"
+                  "$ref": "#/components/schemas/TypedUuidForRackInitKind"
                 }
               }
             }
@@ -127,7 +127,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RackResetId"
+                  "$ref": "#/components/schemas/TypedUuidForRackResetKind"
                 }
               }
             }
@@ -837,10 +837,6 @@
           "speed400_g"
         ]
       },
-      "RackInitId": {
-        "type": "string",
-        "format": "uuid"
-      },
       "RackInitializeRequest": {
         "description": "Configuration for the \"rack setup service\".\n\nThe Rack Setup Service should be responsible for one-time setup actions, such as CockroachDB placement and initialization.  Without operator intervention, however, these actions need a way to be automated in our deployment.",
         "type": "object",
@@ -997,7 +993,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackInitId"
+                "$ref": "#/components/schemas/TypedUuidForRackInitKind"
               },
               "status": {
                 "type": "string",
@@ -1019,7 +1015,7 @@
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/RackInitId"
+                    "$ref": "#/components/schemas/TypedUuidForRackInitKind"
                   }
                 ]
               },
@@ -1038,7 +1034,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackInitId"
+                "$ref": "#/components/schemas/TypedUuidForRackInitKind"
               },
               "message": {
                 "type": "string"
@@ -1060,7 +1056,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackInitId"
+                "$ref": "#/components/schemas/TypedUuidForRackInitKind"
               },
               "status": {
                 "type": "string",
@@ -1078,7 +1074,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackResetId"
+                "$ref": "#/components/schemas/TypedUuidForRackResetKind"
               },
               "status": {
                 "type": "string",
@@ -1100,7 +1096,7 @@
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/RackResetId"
+                    "$ref": "#/components/schemas/TypedUuidForRackResetKind"
                   }
                 ]
               },
@@ -1119,7 +1115,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackResetId"
+                "$ref": "#/components/schemas/TypedUuidForRackResetKind"
               },
               "message": {
                 "type": "string"
@@ -1141,7 +1137,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackResetId"
+                "$ref": "#/components/schemas/TypedUuidForRackResetKind"
               },
               "status": {
                 "type": "string",
@@ -1156,10 +1152,6 @@
             ]
           }
         ]
-      },
-      "RackResetId": {
-        "type": "string",
-        "format": "uuid"
       },
       "RecoverySiloConfig": {
         "description": "RecoverySiloConfig\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"silo_name\", \"user_name\", \"user_password_hash\" ], \"properties\": { \"silo_name\": { \"$ref\": \"#/components/schemas/Name\" }, \"user_name\": { \"$ref\": \"#/components/schemas/UserId\" }, \"user_password_hash\": { \"$ref\": \"#/components/schemas/NewPasswordHash\" } } } ``` </details>",
@@ -1233,6 +1225,14 @@
             ]
           }
         ]
+      },
+      "TypedUuidForRackInitKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForRackResetKind": {
+        "type": "string",
+        "format": "uuid"
       },
       "UplinkAddressConfig": {
         "type": "object",
