@@ -9,7 +9,7 @@ members = [
     "clients/dns-service-client",
     "clients/dpd-client",
     "clients/gateway-client",
-    "clients/installinator-artifact-client",
+    "clients/installinator-client",
     "clients/nexus-client",
     "clients/oxide-client",
     "clients/oximeter-client",
@@ -26,12 +26,13 @@ members = [
     "dev-tools/releng",
     "dev-tools/xtask",
     "dns-server",
+    "dns-server-api",
     "end-to-end-tests",
     "gateway-cli",
     "gateway-test-utils",
     "gateway",
     "illumos-utils",
-    "installinator-artifactd",
+    "installinator-api",
     "installinator-common",
     "installinator",
     "internal-dns-cli",
@@ -100,7 +101,7 @@ default-members = [
     "clients/dns-service-client",
     "clients/dpd-client",
     "clients/gateway-client",
-    "clients/installinator-artifact-client",
+    "clients/installinator-client",
     "clients/nexus-client",
     "clients/oxide-client",
     "clients/oximeter-client",
@@ -119,13 +120,14 @@ default-members = [
     # hakari to not work as well and build times to be longer.
     # See omicron#4392.
     "dns-server",
+    "dns-server-api",
     # Do not include end-to-end-tests in the list of default members, as its
     # tests only work on a deployed control plane.
     "gateway-cli",
     "gateway-test-utils",
     "gateway",
     "illumos-utils",
-    "installinator-artifactd",
+    "installinator-api",
     "installinator-common",
     "installinator",
     "internal-dns-cli",
@@ -279,6 +281,7 @@ derive-where = "1.2.7"
 diesel = { version = "2.1.6", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", branch = "main" }
 dns-server = { path = "dns-server" }
+dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { path = "clients/dpd-client" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
@@ -318,8 +321,8 @@ indent_write = "2.2.0"
 indexmap = "2.2.6"
 indicatif = { version = "0.17.8", features = ["rayon"] }
 installinator = { path = "installinator" }
-installinator-artifactd = { path = "installinator-artifactd" }
-installinator-artifact-client = { path = "clients/installinator-artifact-client" }
+installinator-api = { path = "installinator-api" }
+installinator-client = { path = "clients/installinator-client" }
 installinator-common = { path = "installinator-common" }
 internal-dns = { path = "internal-dns" }
 ipcc = { path = "ipcc" }
@@ -480,7 +483,7 @@ sp-sim = { path = "sp-sim" }
 sprockets-common = { git = "https://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-host = { git = "https://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-rot = { git = "https://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
-sqlformat = "0.2.3"
+sqlformat = "0.2.4"
 sqlparser = { version = "0.45.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
 # Please do not change the Steno version to a Git dependency.  It makes it
