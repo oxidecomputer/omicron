@@ -24,6 +24,7 @@ use nexus_client::types::BackgroundTask;
 use nexus_client::types::BackgroundTasksActivateRequest;
 use nexus_client::types::CurrentStatus;
 use nexus_client::types::LastResult;
+use nexus_client::types::PhysicalDiskPath;
 use nexus_client::types::SledSelector;
 use nexus_client::types::UninitializedSledId;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -33,6 +34,7 @@ use nexus_types::internal_api::background::RegionReplacementDriverStatus;
 use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use reedline::DefaultPrompt;
 use reedline::DefaultPromptSegment;
@@ -256,6 +258,8 @@ enum SledsCommands {
     Add(SledAddArgs),
     /// Expunge a sled (DANGEROUS)
     Expunge(SledExpungeArgs),
+    /// Expunge a disk (DANGEROUS)
+    ExpungeDisk(DiskExpungeArgs),
 }
 
 #[derive(Debug, Args)]
@@ -275,6 +279,17 @@ struct SledExpungeArgs {
 
     /// sled ID
     sled_id: SledUuid,
+}
+
+#[derive(Debug, Args)]
+struct DiskExpungeArgs {
+    // expunge is _extremely_ dangerous, so we also require a database
+    // connection to perform some safety checks
+    #[clap(flatten)]
+    db_url_opts: DbUrlOptions,
+
+    /// Physical disk ID
+    physical_disk_id: PhysicalDiskUuid,
 }
 
 impl NexusArgs {
@@ -400,6 +415,13 @@ impl NexusArgs {
             }) => {
                 let token = omdb.check_allow_destructive()?;
                 cmd_nexus_sled_expunge(&client, args, omdb, log, token).await
+            }
+            NexusCommands::Sleds(SledsArgs {
+                command: SledsCommands::ExpungeDisk(args),
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_sled_expunge_disk(&client, args, omdb, log, token)
+                    .await
             }
         }
     }
@@ -1458,6 +1480,39 @@ async fn cmd_nexus_sled_add(
     Ok(())
 }
 
+struct ConfirmationPrompt(Reedline);
+
+impl ConfirmationPrompt {
+    fn new() -> Self {
+        Self(Reedline::create())
+    }
+
+    fn read(&mut self, message: &str) -> Result<String, anyhow::Error> {
+        let prompt = DefaultPrompt::new(
+            DefaultPromptSegment::Basic(message.to_string()),
+            DefaultPromptSegment::Empty,
+        );
+        if let Ok(reedline::Signal::Success(input)) = self.0.read_line(&prompt)
+        {
+            Ok(input)
+        } else {
+            bail!("expungement aborted")
+        }
+    }
+
+    fn read_and_validate(
+        &mut self,
+        message: &str,
+        expected: &str,
+    ) -> Result<(), anyhow::Error> {
+        let input = self.read(message)?;
+        if input != expected {
+            bail!("Aborting, input did not match expected value");
+        }
+        Ok(())
+    }
+}
+
 /// Runs `omdb nexus sleds expunge`
 async fn cmd_nexus_sled_expunge(
     client: &nexus_client::Client,
@@ -1487,20 +1542,7 @@ async fn cmd_nexus_sled_expunge(
         .with_context(|| format!("failed to find sled {}", args.sled_id))?;
 
     // Helper to get confirmation messages from the user.
-    let mut line_editor = Reedline::create();
-    let mut read_with_prompt = move |message: &str| {
-        let prompt = DefaultPrompt::new(
-            DefaultPromptSegment::Basic(message.to_string()),
-            DefaultPromptSegment::Empty,
-        );
-        if let Ok(reedline::Signal::Success(input)) =
-            line_editor.read_line(&prompt)
-        {
-            Ok(input)
-        } else {
-            bail!("expungement aborted")
-        }
-    };
+    let mut prompt = ConfirmationPrompt::new();
 
     // Now check whether its sled-agent or SP were found in the most recent
     // inventory collection.
@@ -1530,11 +1572,7 @@ async fn cmd_nexus_sled_expunge(
                      proceed anyway?",
                     args.sled_id, collection.time_done,
                 );
-                let confirm = read_with_prompt("y/N")?;
-                if confirm != "y" {
-                    eprintln!("expungement not confirmed: aborting");
-                    return Ok(());
-                }
+                prompt.read_and_validate("y/N", "y")?;
             }
         }
         None => {
@@ -1552,11 +1590,7 @@ async fn cmd_nexus_sled_expunge(
         args.sled_id,
         sled.serial_number(),
     );
-    let confirm = read_with_prompt("sled serial number")?;
-    if confirm != sled.serial_number() {
-        eprintln!("sled serial number not confirmed: aborting");
-        return Ok(());
-    }
+    prompt.read_and_validate("sled serial number", sled.serial_number())?;
 
     let old_policy = client
         .sled_expunge(&SledSelector { sled: args.sled_id.into_untyped_uuid() })
@@ -1567,5 +1601,120 @@ async fn cmd_nexus_sled_expunge(
         "expunged sled {} (previous policy: {old_policy:?})",
         args.sled_id
     );
+    Ok(())
+}
+
+/// Runs `omdb nexus sleds expunge-disk`
+async fn cmd_nexus_sled_expunge_disk(
+    client: &nexus_client::Client,
+    args: &DiskExpungeArgs,
+    omdb: &Omdb,
+    log: &slog::Logger,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    use nexus_db_queries::context::OpContext;
+
+    let datastore = args.db_url_opts.connect(omdb, log).await?;
+    let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+    let opctx = &opctx;
+
+    // First, we need to look up the disk so we can lookup identity information.
+    let (_authz_physical_disk, physical_disk) =
+        LookupPath::new(opctx, &datastore)
+            .physical_disk(args.physical_disk_id.into_untyped_uuid())
+            .fetch()
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to find physical disk {}",
+                    args.physical_disk_id
+                )
+            })?;
+
+    // Helper to get confirmation messages from the user.
+    let mut prompt = ConfirmationPrompt::new();
+
+    // Now check whether its sled-agent was found in the most recent
+    // inventory collection.
+    match datastore
+        .inventory_get_latest_collection(opctx)
+        .await
+        .context("loading latest collection")?
+    {
+        Some(collection) => {
+            let disk_identity = omicron_common::disk::DiskIdentity {
+                vendor: physical_disk.vendor.clone(),
+                serial: physical_disk.serial.clone(),
+                model: physical_disk.model.clone(),
+            };
+
+            let mut sleds_containing_disk = vec![];
+
+            for (sled_id, sled_agent) in collection.sled_agents {
+                for sled_disk in sled_agent.disks {
+                    if sled_disk.identity == disk_identity {
+                        sleds_containing_disk.push(sled_id);
+                    }
+                }
+            }
+
+            match sleds_containing_disk.len() {
+                0 => {}
+                1 => {
+                    eprintln!(
+                        "WARNING: physical disk {} is PRESENT in the most \
+                         recent inventory collection (spotted at {}). Although \
+                         expunging a running disk is supported, it is safer \
+                         to expunge a disk from a system where it has been \
+                         removed. Are you sure you want to proceed anyway?",
+                        args.physical_disk_id, collection.time_done,
+                    );
+                    prompt.read_and_validate("y/N", "y")?;
+                }
+                _ => {
+                    // This should be impossible due to a unique database index,
+                    // "vendor_serial_model_unique".
+                    //
+                    // Even if someone tried moving a disk, it would need to be
+                    // decommissioned before being re-commissioned elsewhere.
+                    //
+                    // However, we still print out an error message here in the
+                    // (unlikely) even that it happens anyway.
+                    eprintln!(
+                        "ERROR: physical disk {} is PRESENT MULTIPLE TIMES in \
+                        the most recent inventory collection (spotted at {}).
+                        This should not be possible, and is an indication of a \
+                        database issue.",
+                        args.physical_disk_id, collection.time_done,
+                    );
+                    bail!("Physical Disk appeared on multiple sleds");
+                }
+            }
+        }
+        None => {
+            eprintln!(
+                "ERROR: cannot verify the physical disk inventory status \
+                 because there are no inventory collections present. Please \
+                 ensure that inventory may be collected."
+            );
+            bail!("No inventory");
+        }
+    }
+
+    eprintln!(
+        "WARNING: This operation will PERMANENTLY and IRRECOVABLY mark physical disk \
+        {} ({}) expunged. To proceed, type the physical disk's serial number.",
+        args.physical_disk_id,
+        physical_disk.serial,
+    );
+    prompt.read_and_validate("disk serial number", &physical_disk.serial)?;
+
+    client
+        .physical_disk_expunge(&PhysicalDiskPath {
+            disk_id: args.physical_disk_id.into_untyped_uuid(),
+        })
+        .await
+        .context("expunging disk")?;
+    eprintln!("expunged disk {}", args.physical_disk_id);
     Ok(())
 }
