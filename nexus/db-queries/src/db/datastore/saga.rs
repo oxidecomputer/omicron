@@ -144,7 +144,7 @@ impl DataStore {
     pub async fn saga_fetch_log_batched(
         &self,
         opctx: &OpContext,
-        saga: &db::saga_types::Saga,
+        saga_id: db::saga_types::SagaId,
     ) -> Result<Vec<steno::SagaNodeEvent>, Error> {
         let mut events = vec![];
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
@@ -156,7 +156,7 @@ impl DataStore {
                 (dsl::node_id, dsl::event_type),
                 &p.current_pagparams(),
             )
-            .filter(dsl::saga_id.eq(saga.id))
+            .filter(dsl::saga_id.eq(saga_id))
             .select(db::saga_types::SagaNodeEvent::as_select())
             .load_async(&*conn)
             .await
@@ -308,18 +308,11 @@ mod test {
             .expect("Failed to insert test setup data");
 
         // List them, expect to see them all in order by ID.
-        //
-        // Note that we need to make up a saga to see this, but the
-        // part of it that actually matters is the ID.
-        let params = steno::SagaCreateParams {
-            id: saga_id,
-            name: steno::SagaName::new("test saga"),
-            dag: serde_json::value::Value::Null,
-            state: steno::SagaCachedState::Running,
-        };
-        let saga = db::model::saga_types::Saga::new(sec_id, params);
         let observed_nodes = datastore
-            .saga_fetch_log_batched(&opctx, &saga)
+            .saga_fetch_log_batched(
+                &opctx,
+                nexus_db_model::saga_types::SagaId::from(saga_id),
+            )
             .await
             .expect("Failed to list nodes of unfinished saga");
         inserted_nodes.sort_by_key(|a| (a.node_id, a.event_type.clone()));
@@ -356,21 +349,15 @@ mod test {
         let logctx = dev::test_setup_log("test_list_no_unfinished_nodes");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
-        let sec_id = db::SecId(uuid::Uuid::new_v4());
         let saga_id = steno::SagaId(Uuid::new_v4());
-
-        let params = steno::SagaCreateParams {
-            id: saga_id,
-            name: steno::SagaName::new("test saga"),
-            dag: serde_json::value::Value::Null,
-            state: steno::SagaCachedState::Running,
-        };
-        let saga = db::model::saga_types::Saga::new(sec_id, params);
 
         // Test that this returns "no nodes" rather than throwing some "not
         // found" error.
         let observed_nodes = datastore
-            .saga_fetch_log_batched(&opctx, &saga)
+            .saga_fetch_log_batched(
+                &opctx,
+                nexus_db_model::saga_types::SagaId::from(saga_id),
+            )
             .await
             .expect("Failed to list nodes of unfinished saga");
         assert_eq!(observed_nodes.len(), 0);

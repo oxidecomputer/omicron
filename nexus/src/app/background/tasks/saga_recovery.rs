@@ -371,7 +371,7 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
         let saga_id: SagaId = saga.id.into();
 
         let log_events = datastore
-            .saga_fetch_log_batched(&self.saga_recovery_opctx, saga)
+            .saga_fetch_log_batched(&self.saga_recovery_opctx, saga.id)
             .await
             .with_internal_context(|| format!("recovering saga {saga_id}"))?;
         trace!(bgtask_logger, "recovering saga: loaded log";
