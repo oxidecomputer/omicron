@@ -5,5 +5,6 @@
 mod server;
 mod store;
 
-pub(crate) use self::server::WicketdArtifactServer;
+pub(crate) use self::server::WicketdInstallinatorApiImpl;
+pub(crate) use self::server::WicketdInstallinatorContext;
 pub(crate) use self::store::WicketdArtifactStore;
