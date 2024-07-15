@@ -94,6 +94,10 @@ omicron-dev: external DNS:          [::1]:54342
 
 === Running the pieces by hand
 
+There are many reasons it's useful to run the pieces of the stack by hand, especially during development and debugging: to test stopping and starting a component while the rest of the stack remains online; to run one component in a custom environment; to use a custom binary; to use a custom config file; to run under the debugger or with extra tracing enabled; etc.
+
+CAUTION: This process does not currently work.  See https://github.com/oxidecomputer/omicron/issues/4421[omicron#4421] for details.  The pieces here may still be useful for reference.
+
 . Start CockroachDB using `omicron-dev db-run`:
 +
 [source,text]
@@ -181,6 +185,8 @@ omicron-dev: using /tmp/.tmpFH6v8h and /tmp/.tmpkUjDji for ClickHouse data stora
 $ cargo run --bin=nexus -- nexus/examples/config.toml
 ----
 Nexus can also serve the web console. Instructions for downloading (or building) the console's static assets and pointing Nexus to them are https://github.com/oxidecomputer/console/blob/main/docs/serve-from-nexus.md[here]. Without console assets, Nexus will still start and run normally as an API. A few link:./nexus/src/external_api/console_api.rs[console-specific routes] will 404.
++
+CAUTION: This step does not currently work.  See https://github.com/oxidecomputer/omicron/issues/4421[omicron#4421] for details.
 
 . `dns-server` is run similar to Nexus, except that the bind addresses are specified on the command line:
 +
@@ -207,9 +213,98 @@ Dec 02 18:00:01.093 DEBG registered endpoint, path: /producers, method: POST, lo
 ...
 ----
 
+=== Using both `omicron-dev run-all` and running Nexus manually
+
+While it's often useful to run _some_ part of the stack by hand (see above), if you only want to run your own Nexus, one option is to run `omicron-dev run-all` first to get a whole simulated stack up, then run a second Nexus by hand with a custom config file.
+
+To do this, first run `omicron-dev run-all`:
+
+[source,text]
+----
+$ cargo run --bin=omicron-dev -- run-all
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.95s
+     Running `target/debug/omicron-dev run-all`
+omicron-dev: setting up all services ... 
+log file: /dangerzone/omicron_tmp/omicron-dev-omicron-dev.29765.0.log
+note: configured to log to "/dangerzone/omicron_tmp/omicron-dev-omicron-dev.29765.0.log"
+DB URL: postgresql://root@[::1]:43256/omicron?sslmode=disable
+DB address: [::1]:43256
+log file: /dangerzone/omicron_tmp/omicron-dev-omicron-dev.29765.2.log
+note: configured to log to "/dangerzone/omicron_tmp/omicron-dev-omicron-dev.29765.2.log"
+log file: /dangerzone/omicron_tmp/omicron-dev-omicron-dev.29765.3.log
+note: configured to log to "/dangerzone/omicron_tmp/omicron-dev-omicron-dev.29765.3.log"
+omicron-dev: services are running.
+omicron-dev: nexus external API:    127.0.0.1:12220
+omicron-dev: nexus internal API:    [::1]:12221
+omicron-dev: cockroachdb pid:       29769
+omicron-dev: cockroachdb URL:       postgresql://root@[::1]:43256/omicron?sslmode=disable
+omicron-dev: cockroachdb directory: /dangerzone/omicron_tmp/.tmpikyLO8
+omicron-dev: internal DNS HTTP:     http://[::1]:39841
+omicron-dev: internal DNS:          [::1]:54025
+omicron-dev: external DNS name:     oxide-dev.test
+omicron-dev: external DNS HTTP:     http://[::1]:63482
+omicron-dev: external DNS:          [::1]:45276
+omicron-dev:   e.g. `dig @::1 -p 45276 test-suite-silo.sys.oxide-dev.test`
+omicron-dev: management gateway:    http://[::1]:49188 (switch0)
+omicron-dev: management gateway:    http://[::1]:39352 (switch1)
+omicron-dev: silo name:             test-suite-silo
+omicron-dev: privileged user name:  test-privileged
+----
+
+You'll need to note:
+
+* the TCP ports for the two management gateways (`49188` and `39352` here for switch0 and switch1, respectively)
+* the TCP port for internal DNS  (`54025` here)
+* the TCP port in the CockroachDB URL (`43256` here)
+
+Next, you'll need to customize the Nexus configuration file.  Start with nexus/examples/config-second.toml (_not_ nexus/examples/config.toml, which uses various values that conflict with what `omicron-dev run-all` uses).  You should only need to modify the block at the **bottom** of the file:
+
+[source,toml]
+----
+################################################################################
+# INSTRUCTIONS: To run Nexus against an existing stack started with            #
+# `omicron-dev run-all`, you should only have to modify values in this 	       #
+# section. 								       #
+# 									       #
+# Modify the port numbers below based on the output of `omicron-dev run-all`   #
+################################################################################
+
+[mgd]
+# Look for "management gateway:    http://[::1]:49188 (switch0)"
+# The "http://" does not go in this string -- just the socket address.
+switch0.address = "[::1]:49188"
+
+# Look for "management gateway:    http://[::1]:39352 (switch1)"
+# The "http://" does not go in this string -- just the socket address.
+switch1.address = "[::1]:39352"
+
+[deployment.internal_dns]
+# Look for "internal DNS:          [::1]:54025"
+# and adjust the port number below.
+address = "[::1]:54025"
+# You should not need to change this.
+type = "from_address"
+
+[deployment.database]
+# Look for "cockroachdb URL:       postgresql://root@[::1]:43256/omicron?sslmode=disable"
+# and adjust the port number below.
+url = "postgresql://root@[::1]:43256/omicron?sslmode=disable"
+# You should not need to change this.
+type = "from_url"
+################################################################################
+----
+
+So it's:
+
+* Copy the example config file: `cp nexus/examples/config-second.toml config-second.toml`
+* Edit as described above: `vim config-second.toml`
+* Start Nexus like above, but with this config file: `cargo run --bin=nexus -- config-second.toml`
+
+=== Using the stack
+
 Once everything is up and running, you can use the system in a few ways:
 
-* Use the browser-based console.  The Nexus log output will show what IP address and port it's listening on.  This is also configured in the config file.  If you're using the defaults, you can reach the console at `http://127.0.0.1:12220/projects`.  Depending on the environment where you're running this, you may need an ssh tunnel or the like to reach this from your browser.
+* Use the browser-based console.  The Nexus log output will show what IP address and port it's listening on.  This is also configured in the config file.  If you're using the defaults with `omicron-dev run-all`, you can reach the console at `http://127.0.0.1:12220/projects`.  If you ran a second Nexus using the `config-second.toml` config file, it will be on port `12222` instead (because that config file specifies port 12222).  Depending on the environment where you're running this, you may need an ssh tunnel or the like to reach this from your browser.
 * Use the xref:cli.adoc[`oxide` CLI].
 
 == Running with TLS
