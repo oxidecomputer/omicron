@@ -1480,6 +1480,36 @@ async fn cmd_nexus_sled_add(
     Ok(())
 }
 
+struct ConfirmationPrompt(Reedline);
+
+impl ConfirmationPrompt {
+    fn new() -> Self {
+        Self(Reedline::create())
+    }
+
+    fn read(&mut self, message: &str) -> Result<String, anyhow::Error> {
+        let prompt = DefaultPrompt::new(
+            DefaultPromptSegment::Basic(message.to_string()),
+            DefaultPromptSegment::Empty,
+        );
+        if let Ok(reedline::Signal::Success(input)) =
+            self.0.read_line(&prompt)
+        {
+            Ok(input)
+        } else {
+            bail!("expungement aborted")
+        }
+    }
+
+    fn read_and_validate(&mut self, message: &str, expected: &str) -> Result<(), anyhow::Error> {
+        let input = self.read(message)?;
+        if input != expected {
+            bail!("Aborting, input did not match expected value");
+        }
+        Ok(())
+    }
+}
+
 /// Runs `omdb nexus sleds expunge`
 async fn cmd_nexus_sled_expunge(
     client: &nexus_client::Client,
@@ -1509,20 +1539,7 @@ async fn cmd_nexus_sled_expunge(
         .with_context(|| format!("failed to find sled {}", args.sled_id))?;
 
     // Helper to get confirmation messages from the user.
-    let mut line_editor = Reedline::create();
-    let mut read_with_prompt = move |message: &str| {
-        let prompt = DefaultPrompt::new(
-            DefaultPromptSegment::Basic(message.to_string()),
-            DefaultPromptSegment::Empty,
-        );
-        if let Ok(reedline::Signal::Success(input)) =
-            line_editor.read_line(&prompt)
-        {
-            Ok(input)
-        } else {
-            bail!("expungement aborted")
-        }
-    };
+    let mut prompt = ConfirmationPrompt::new();
 
     // Now check whether its sled-agent or SP were found in the most recent
     // inventory collection.
@@ -1552,11 +1569,7 @@ async fn cmd_nexus_sled_expunge(
                      proceed anyway?",
                     args.sled_id, collection.time_done,
                 );
-                let confirm = read_with_prompt("y/N")?;
-                if confirm != "y" {
-                    eprintln!("expungement not confirmed: aborting");
-                    return Ok(());
-                }
+                prompt.read_and_validate("y/N", "y")?;
             }
         }
         None => {
@@ -1574,11 +1587,7 @@ async fn cmd_nexus_sled_expunge(
         args.sled_id,
         sled.serial_number(),
     );
-    let confirm = read_with_prompt("sled serial number")?;
-    if confirm != sled.serial_number() {
-        eprintln!("sled serial number not confirmed: aborting");
-        return Ok(());
-    }
+    prompt.read_and_validate("sled serial number", sled.serial_number())?;
 
     let old_policy = client
         .sled_expunge(&SledSelector { sled: args.sled_id.into_untyped_uuid() })
@@ -1620,20 +1629,7 @@ async fn cmd_nexus_sled_expunge_disk(
             })?;
 
     // Helper to get confirmation messages from the user.
-    let mut line_editor = Reedline::create();
-    let mut read_with_prompt = move |message: &str| {
-        let prompt = DefaultPrompt::new(
-            DefaultPromptSegment::Basic(message.to_string()),
-            DefaultPromptSegment::Empty,
-        );
-        if let Ok(reedline::Signal::Success(input)) =
-            line_editor.read_line(&prompt)
-        {
-            Ok(input)
-        } else {
-            bail!("expungement aborted")
-        }
-    };
+    let mut prompt = ConfirmationPrompt::new();
 
     // Now check whether its sled-agent was found in the most recent
     // inventory collection.
@@ -1664,17 +1660,13 @@ async fn cmd_nexus_sled_expunge_disk(
                 1 => {
                     eprintln!(
                         "WARNING: physical disk {} is PRESENT in the most \
-                         recent inventory collection (spotted at {}). It is \
-                         dangerous to expunge a disk that is still running, and \
-                         safer to expunge a disk from a system where it has been \
+                         recent inventory collection (spotted at {}). Although \
+                         expunging a running disk is supported, it is safer \
+                         to expunge a disk from a system where it has been \
                          removed. Are you sure you want to proceed anyway?",
                         args.physical_disk_id, collection.time_done,
                     );
-                    let confirm = read_with_prompt("y/N")?;
-                    if confirm != "y" {
-                        eprintln!("expungement not confirmed: aborting");
-                        return Ok(());
-                    }
+                    prompt.read_and_validate("y/N", "y")?;
                 }
                 _ => {
                     // This should be impossible due to a unique database index,
@@ -1698,10 +1690,9 @@ async fn cmd_nexus_sled_expunge_disk(
         }
         None => {
             eprintln!(
-                "ERROR: cannot verify that the physical disk inventory status \
+                "ERROR: cannot verify the physical disk inventory status \
                  because there are no inventory collections present. Please \
-                 make sure that the physical disk has been physically removed, \
-                 or ensure that inventory may be collected."
+                 ensure that inventory may be collected."
             );
             bail!("No inventory");
         }
@@ -1713,11 +1704,7 @@ async fn cmd_nexus_sled_expunge_disk(
         args.physical_disk_id,
         physical_disk.serial,
     );
-    let confirm = read_with_prompt("disk serial number")?;
-    if confirm != physical_disk.serial {
-        eprintln!("disk serial number not confirmed: aborting");
-        return Ok(());
-    }
+    prompt.read_and_validate("disk serial number", &physical_disk.serial)?;
 
     client
         .physical_disk_expunge(&PhysicalDiskPath {
