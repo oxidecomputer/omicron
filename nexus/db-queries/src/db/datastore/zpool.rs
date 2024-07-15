@@ -140,7 +140,13 @@ impl DataStore {
         Ok(zpools)
     }
 
-    /// Soft-deletes all datasets, then soft-deletes the zpool.
+    /// Soft-deletes the Zpools and cleans up all associated DB resources.
+    ///
+    /// In order:
+    /// - Finds all regions referencing the datasets within this Zpool. Updates
+    /// them to reference a "NULL" dataset_id.
+    /// - Finds all datasets within the zpool. Soft-deletes them.
+    /// - Soft-deletes the zpool itself.
     pub async fn zpool_delete_self_and_all_datasets(
         &self,
         opctx: &OpContext,
@@ -199,9 +205,33 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let now = Utc::now();
         use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::region::dsl as region_dsl;
         use db::schema::zpool::dsl as zpool_dsl;
 
         let zpool_id = *zpool_id.as_untyped_uuid();
+
+        // Get the IDs of all datasets to-be-deleted
+        let dataset_ids: Vec<Uuid> = dataset_dsl::dataset
+            .filter(dataset_dsl::time_deleted.is_null())
+            .filter(dataset_dsl::pool_id.eq(zpool_id))
+            .select(dataset_dsl::id)
+            .load_async(conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        // Update all regions currently using these datasets
+        diesel::update(region_dsl::region)
+            .filter(region_dsl::dataset_id.eq_any(dataset_ids))
+            .set((
+                region_dsl::dataset_id.eq(Option::<Uuid>::None),
+                region_dsl::time_modified.eq(Utc::now()),
+            ))
+            .execute_async(conn)
+            .await
+            .map(|_rows_modified| ())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        // Ensure the datasets are deleted
         diesel::update(dataset_dsl::dataset)
             .filter(dataset_dsl::time_deleted.is_null())
             .filter(dataset_dsl::pool_id.eq(zpool_id))
@@ -211,6 +241,7 @@ impl DataStore {
             .map(|_rows_modified| ())
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
+        // Ensure the zpool is deleted
         diesel::update(zpool_dsl::zpool)
             .filter(zpool_dsl::id.eq(zpool_id))
             .filter(zpool_dsl::time_deleted.is_null())

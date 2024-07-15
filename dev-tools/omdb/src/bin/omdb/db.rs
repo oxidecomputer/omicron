@@ -3016,7 +3016,7 @@ async fn cmd_db_validate_region_snapshots(
                 dsl::region
                     .inner_join(
                         dataset_dsl::dataset
-                            .on(dsl::dataset_id.eq(dataset_dsl::id)),
+                            .on(dsl::dataset_id.eq(dataset_dsl::id.nullable())),
                     )
                     .select((Dataset::as_select(), Region::as_select()))
                     .get_results_async(&conn)

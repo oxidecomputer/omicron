@@ -791,7 +791,7 @@ impl DataStore {
             )
             .inner_join(
                 dataset_dsl::dataset
-                    .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
+                    .on(region_dsl::dataset_id.eq(dataset_dsl::id.nullable())),
             )
             // where there either are no region snapshots, or the region
             // snapshot volume references have gone to zero
@@ -1560,10 +1560,9 @@ impl DataStore {
                         region_dsl::id
                             .eq_any(crucible_resources.regions.clone()),
                     )
-                    .inner_join(
-                        dataset_dsl::dataset
-                            .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
-                    )
+                    .inner_join(dataset_dsl::dataset.on(
+                        region_dsl::dataset_id.eq(dataset_dsl::id.nullable()),
+                    ))
                     .select((Dataset::as_select(), Region::as_select()))
                     .get_results_async::<(Dataset, Region)>(&*conn)
                     .await

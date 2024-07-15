@@ -1580,7 +1580,7 @@ async fn test_region_allocation_for_snapshot(
 
             let region_snapshots: Vec<db::model::RegionSnapshot> =
                 dsl::region_snapshot
-                    .filter(dsl::dataset_id.eq(region.dataset_id()))
+                    .filter(dsl::dataset_id.eq(region.dataset_id().unwrap()))
                     .filter(dsl::snapshot_id.eq(snapshot.identity.id))
                     .select(db::model::RegionSnapshot::as_select())
                     .load_async::<db::model::RegionSnapshot>(&*conn)

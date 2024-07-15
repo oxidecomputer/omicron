@@ -480,11 +480,18 @@ async fn srrs_get_old_region_address(
                 .await
                 .map_err(ActionError::action_failed)?;
 
+            let Some(dataset_id) = db_region.dataset_id() else {
+                return Err(ActionError::action_failed(format!(
+                    "region {} is missing dataset (was expunged)",
+                    db_region.id(),
+                )));
+            };
+
             let targets = osagactx
                 .datastore()
                 .get_dataset_rw_regions_in_volume(
                     &opctx,
-                    db_region.dataset_id(),
+                    dataset_id,
                     db_region.volume_id(),
                 )
                 .await
@@ -500,7 +507,7 @@ async fn srrs_get_old_region_address(
                 Err(ActionError::action_failed(format!(
                     "{} regions match dataset {} in volume {}",
                     targets.len(),
-                    db_region.dataset_id(),
+                    dataset_id,
                     db_region.volume_id(),
                 )))
             }

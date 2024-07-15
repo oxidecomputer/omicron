@@ -108,7 +108,10 @@ impl super::Nexus {
 
         let dataset = {
             let region = self.datastore().get_region(region_id).await?;
-            self.datastore().dataset_get(region.dataset_id()).await?
+            let Some(dataset_id) = region.dataset_id() else {
+                return Err(Error::Gone);
+            };
+            self.datastore().dataset_get(dataset_id).await?
         };
 
         let Some(returned_region) =

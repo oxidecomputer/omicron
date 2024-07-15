@@ -14,6 +14,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Dataset;
+use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::Region;
 use crate::db::model::SqlU16;
 use crate::db::pagination::paginated;
@@ -68,7 +69,7 @@ impl DataStore {
             .filter(region_dsl::volume_id.eq(volume_id))
             .inner_join(
                 dataset_dsl::dataset
-                    .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
+                    .on(region_dsl::dataset_id.eq(dataset_dsl::id.nullable())),
             )
             .select((Dataset::as_select(), Region::as_select()))
     }
@@ -314,10 +315,12 @@ impl DataStore {
                     let datasets = diesel::delete(region_dsl::region)
                         .filter(region_dsl::id.eq_any(region_ids))
                         .returning(region_dsl::dataset_id)
-                        .get_results_async::<Uuid>(&conn).await?;
+                        .get_results_async::<Option<Uuid>>(&conn).await?;
 
                     // Update datasets to which the regions belonged.
                     for dataset in datasets {
+                        let Some(dataset) = dataset else { continue; };
+
                         let dataset_total_occupied_size: Option<
                             diesel::pg::data_types::PgNumeric,
                         > = region_dsl::region
@@ -417,22 +420,43 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::physical_disk::dsl as physical_disk_dsl;
         use db::schema::region::dsl as region_dsl;
+        use db::schema::zpool::dsl as zpool_dsl;
 
-        // Consider all regions with deleted datasets
-        region_dsl::region
-            .left_join(
+        // Consider all regions with datasets on expunged disks.
+        //
+        // This case triggers for physical disks which are expunged,
+        // but not yet decommissioned.
+        let expunged_regions = region_dsl::region
+            .filter(region_dsl::dataset_id.eq_any(
                 dataset_dsl::dataset
-                    .on(dataset_dsl::id.eq(region_dsl::dataset_id)),
-            )
-            .filter(
-                // Dataset has been hard deleted
-                dataset_dsl::id.is_null().or(
-                    // Dataset has been soft deleted
-                    dataset_dsl::time_deleted.is_not_null(),
-                ),
-            )
-            .select(Region::as_select())
+                    .filter(dataset_dsl::time_deleted.is_null())
+                    .filter(dataset_dsl::pool_id.eq_any(
+                        zpool_dsl::zpool
+                            .filter(zpool_dsl::time_deleted.is_null())
+                            .filter(zpool_dsl::physical_disk_id.eq_any(
+                                physical_disk_dsl::physical_disk
+                                    .filter(physical_disk_dsl::disk_policy.eq(PhysicalDiskPolicy::Expunged))
+                                    .select(physical_disk_dsl::id)
+                            ))
+                            .select(zpool_dsl::id)
+                    ))
+                    .select(dataset_dsl::id.nullable())
+            ))
+            .select(Region::as_select());
+
+        // Consider all regions with dataset on decommissioned disks.
+        //
+        // As disks are decommissioned, this "dataset_id" field is set to NULL
+        // so we can quickly identify these regions, even though the underlying
+        // datasets + zpools are deleted.
+        let decommissioned_regions = region_dsl::region
+            .filter(region_dsl::dataset_id.is_null())
+            .select(Region::as_select());
+
+        expunged_regions
+            .union(decommissioned_regions)
             .load_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -487,8 +511,11 @@ impl DataStore {
         let Some(port) = region.port() else {
             return Ok(None);
         };
+        let Some(dataset_id) = region.dataset_id() else {
+            return Ok(None);
+        };
 
-        let dataset = self.dataset_get(region.dataset_id()).await?;
+        let dataset = self.dataset_get(dataset_id).await?;
 
         Ok(Some(SocketAddrV6::new(*dataset.address().ip(), port, 0, 0)))
     }

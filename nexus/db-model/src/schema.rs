@@ -1038,7 +1038,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
 
-        dataset_id -> Uuid,
+        dataset_id -> Nullable<Uuid>,
         volume_id -> Uuid,
 
         block_size -> Int8,

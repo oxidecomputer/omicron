@@ -565,8 +565,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.region (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
 
-    /* FK into the dataset table */
-    dataset_id UUID NOT NULL,
+    /*
+     * FK into the dataset table
+     * A "NULL" value implies the underlying dataset has been expunged.
+     */
+    dataset_id UUID,
 
     /* FK into the volume table */
     volume_id UUID NOT NULL,
@@ -4143,7 +4146,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '82.0.0', NULL)
+    (TRUE, NOW(), NOW(), '83.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
