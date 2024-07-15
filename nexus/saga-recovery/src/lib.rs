@@ -165,6 +165,7 @@ mod test {
         /// lifetime (and so needs to be recovered).
         pub fn sim_previously_running_saga(&mut self) -> SagaId {
             let saga_id = SagaId(Uuid::new_v4());
+            println!("sim: recording previously-running saga {saga_id}");
             self.db_list.insert(saga_id, make_fake_saga(saga_id));
             saga_id
         }
@@ -173,6 +174,7 @@ mod test {
         /// request)
         pub fn sim_normal_saga_start(&mut self) -> SagaId {
             let saga_id = SagaId(Uuid::new_v4());
+            println!("sim: starting saga {saga_id}");
             self.db_list.insert(saga_id, make_fake_saga(saga_id));
             self.started_sagas.push(saga_id);
             saga_id
@@ -180,6 +182,7 @@ mod test {
 
         /// Pretend that Nexus finished running the given saga
         pub fn sim_normal_saga_done(&mut self, saga_id: SagaId) {
+            println!("sim: finishing saga {saga_id}");
             assert!(
                 self.db_list.remove(&saga_id).is_some(),
                 "simulated saga finished, but it wasn't running"
@@ -197,6 +200,10 @@ mod test {
             saga_id: SagaId,
             fail: bool,
         ) {
+            println!(
+                "sim: configuring saga {saga_id} recovery to {}",
+                if fail { "fail" } else { "succeed" }
+            );
             if fail {
                 self.injected_recovery_errors.insert(saga_id);
             } else {
@@ -218,6 +225,7 @@ mod test {
         /// The _next_ recovery pass will use the latest database state unless
         /// this function is called again.
         pub fn snapshot_db(&mut self) {
+            println!("sim: snapshotting database");
             assert!(
                 self.snapshot_db_list.is_none(),
                 "multiple snapshots created between recovery passes"
@@ -231,6 +239,8 @@ mod test {
         ) -> (recovery::Plan, recovery::Execution, status::LastPassSuccess, usize)
         {
             let log = &self.log;
+
+            println!("sim: starting recovery pass");
 
             // Simulate processing messages that the `new_sagas_started` sagas
             // just started.
@@ -282,6 +292,8 @@ mod test {
             assert_eq!(last_pass.nfailed, nerrors);
 
             self.rest_state.update_after_pass(&plan, &execution);
+
+            println!("sim: recovery pass result: {:?}", last_pass);
 
             // We can't tell from the information we have how many were skipped,
             // removed, or ambiguous.  The caller verifies that.
@@ -338,6 +350,7 @@ mod test {
         // We create two so we can exercise success and failure cases for
         // recovery.
         //
+        println!("test: general recovery case");
         let saga_recover_ok = sim.sim_previously_running_saga();
         let saga_recover_fail = sim.sim_previously_running_saga();
         sim.sim_config_recovery_result(saga_recover_fail, true);
@@ -405,6 +418,7 @@ mod test {
         // This pass allows the system to determine that some sagas are now
         // done.
         //
+        println!("test: recovery pass after no changes (1)");
         let (plan, execution, last_pass_success, nstarted) =
             sim.sim_recovery_pass();
         // There's now five sagas in-progress in the database: the same four as
@@ -445,6 +459,7 @@ mod test {
         // Again, change nothing and run another pass.  This should be a steady
         // state: if we keep running passes from here, nothing should change.
         //
+        println!("test: recovery pass after no changes (2)");
         let (plan, execution, last_pass_success, nstarted) =
             sim.sim_recovery_pass();
         // Same as above.
@@ -471,6 +486,7 @@ mod test {
         //
         // Once more and make sure nothing changes.
         //
+        println!("test: recovery pass after no changes (3)");
         let previous_rest_state = sim.rest_state.clone();
         let previous_last_pass_success = last_pass_success.clone();
         let (plan, execution, last_pass_success, nstarted) =
@@ -486,6 +502,7 @@ mod test {
         //
         // This time, fix that saga whose recovery has been failing.
         //
+        println!("test: recovery pass after removing injected error");
         sim.sim_config_recovery_result(saga_recover_fail, false);
         let (plan, execution, last_pass_success, nstarted) =
             sim.sim_recovery_pass();
@@ -512,6 +529,7 @@ mod test {
         // After the next pass, we should have one more saga that seems to be
         // running.
         //
+        println!("test: recovery pass after no changes (4)");
         let (plan, execution, last_pass_success, nstarted) =
             sim.sim_recovery_pass();
         // Same as above.
@@ -535,6 +553,7 @@ mod test {
         //
         // With another pass, nothing should differ.
         //
+        println!("test: recovery pass after no changes (5)");
         let previous_rest_state = sim.rest_state.clone();
         let previous_last_pass_success = last_pass_success.clone();
         let (plan, execution, last_pass_success, nstarted) =
@@ -551,6 +570,7 @@ mod test {
         // Now let's complete a couple of different sagas.
         // It'll take two passes for the system to be sure they're done.
         //
+        println!("test: recovery pass after completing some sagas");
         sim.sim_normal_saga_done(saga_started_normally_1);
         sim.sim_normal_saga_done(saga_started_after_listing);
         sim.sim_normal_saga_done(saga_recover_fail);
@@ -575,6 +595,7 @@ mod test {
         //
         // With another pass, we can remove those three that finished.
         //
+        println!("test: recovery pass after no changes (6)");
         let (plan, execution, last_pass_success, nstarted) =
             sim.sim_recovery_pass();
         assert_eq!(2, last_pass_success.nfound);
@@ -596,6 +617,7 @@ mod test {
         //
         // Finish the last two sagas.
         //
+        println!("test: recovery pass after completing remaining sagas");
         sim.sim_normal_saga_done(saga_started_normally_2);
         sim.sim_normal_saga_done(saga_recover_ok);
         let (plan, execution, last_pass_success, nstarted) =
@@ -619,6 +641,7 @@ mod test {
         //
         // With another pass, remove those last two.
         //
+        println!("test: recovery pass after no changes (7)");
         let (plan, execution, last_pass_success, nstarted) =
             sim.sim_recovery_pass();
         assert_eq!(0, last_pass_success.nfound);

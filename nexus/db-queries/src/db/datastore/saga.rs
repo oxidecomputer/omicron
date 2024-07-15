@@ -110,7 +110,7 @@ impl DataStore {
     pub async fn saga_list_recovery_candidates_batched(
         &self,
         opctx: &OpContext,
-        sec_id: &db::saga_types::SecId,
+        sec_id: db::saga_types::SecId,
     ) -> Result<Vec<db::saga_types::Saga>, Error> {
         let mut sagas = vec![];
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
@@ -125,7 +125,7 @@ impl DataStore {
                             steno::SagaCachedState::Done,
                         ),
                     ))
-                    .filter(dsl::current_sec.eq(*sec_id))
+                    .filter(dsl::current_sec.eq(sec_id))
                     .select(db::saga_types::Saga::as_select())
                     .load_async(&*conn)
                     .await
@@ -229,7 +229,7 @@ mod test {
 
         // List them, expect to see them all in order by ID.
         let mut observed_sagas = datastore
-            .saga_list_recovery_candidates_batched(&opctx, &sec_id)
+            .saga_list_recovery_candidates_batched(&opctx, sec_id)
             .await
             .expect("Failed to list unfinished sagas");
         inserted_sagas.sort_by_key(|a| a.id);
@@ -333,12 +333,14 @@ mod test {
         // The steno::SagaNodeEvent type doesn't implement PartialEq, so we need
         // to do this a little manually.
         assert_eq!(inserted_nodes.len(), observed_nodes.len());
-        for i in 0..inserted_nodes.len() {
-            assert_eq!(inserted_nodes[i].saga_id, observed_nodes[i].saga_id);
-            assert_eq!(inserted_nodes[i].node_id, observed_nodes[i].node_id);
+        for (inserted, observed) in
+            inserted_nodes.iter().zip(observed_nodes.iter())
+        {
+            assert_eq!(inserted.saga_id, observed.saga_id);
+            assert_eq!(inserted.node_id, observed.node_id);
             assert_eq!(
-                inserted_nodes[i].event_type.label(),
-                observed_nodes[i].event_type.label()
+                inserted.event_type.label(),
+                observed.event_type.label()
             );
         }
 

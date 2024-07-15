@@ -83,10 +83,12 @@
 //! to a different Nexus) and (2) not yet finished.  But that could include
 //! sagas in one of three groups:
 //!
-//! 1. Sagas from a previous Nexus [Unix process] lifetime that have not yet
-//!    been recovered in this lifetime.  These **should** be recovered.
-//! 2. Sagas from a previous Nexus [Unix process] lifetime that have already
-//!    been recovered in this lifetime.  These **should not** be recovered.
+//! 1. Sagas from a previous Nexus lifetime (i.e., a different Unix process)
+//!    that have not yet been recovered in this lifetime.  These **should** be
+//!    recovered.
+//! 2. Sagas from a previous Nexus lifetime (i.e., a different Unix process)
+//!    that have already been recovered in this lifetime.  These **should not**
+//!    be recovered.
 //! 3. Sagas that were created in this Nexus lifetime.  These **should not** be
 //!    recovered.
 //!
@@ -418,7 +420,7 @@ async fn list_sagas_in_progress(
     let log = &opctx.log;
     debug!(log, "listing candidate sagas for recovery");
     let result = datastore
-        .saga_list_recovery_candidates_batched(&opctx, &sec_id)
+        .saga_list_recovery_candidates_batched(&opctx, sec_id)
         .await
         .internal_context("listing in-progress sagas for saga recovery")
         .map(|list| {
