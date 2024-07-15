@@ -319,6 +319,7 @@ impl DataStore {
 
                     // Update datasets to which the regions belonged.
                     for dataset in datasets {
+                        // If the dataset has already been deleted, skip it.
                         let Some(dataset) = dataset else { continue; };
 
                         let dataset_total_occupied_size: Option<

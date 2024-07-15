@@ -189,7 +189,7 @@ impl DataStore {
     ) -> LookupResult<bool> {
         let conn = self.pool_connection_unauthorized().await?;
 
-        let dataset = {
+        let Some(dataset) = ({
             use db::schema::dataset::dsl;
 
             dsl::dataset
@@ -197,9 +197,12 @@ impl DataStore {
                 .select(Dataset::as_select())
                 .first_async::<Dataset>(&*conn)
                 .await
+                .optional()
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?
+        }) else {
+            return Ok(false);
         };
 
         let zpool = {
