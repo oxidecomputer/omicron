@@ -16,6 +16,7 @@ dns-server-api.workspace = true
 dropshot.workspace = true
 fs-err.workspace = true
 indent_write.workspace = true
+installinator-api.workspace = true
 nexus-internal-api.workspace = true
 omicron-workspace-hack.workspace = true
 openapiv3.workspace = true
