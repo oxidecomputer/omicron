@@ -2,7 +2,12 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Internal DNS",
-    "version": "v0.1.0"
+    "description": "API for the internal DNS server",
+    "contact": {
+      "url": "https://oxide.computer",
+      "email": "api@oxide.computer"
+    },
+    "version": "0.0.1"
   },
   "paths": {
     "/config": {
