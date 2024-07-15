@@ -25,13 +25,14 @@ bit-set = { version = "0.5.3" }
 bit-vec = { version = "0.6.3" }
 bitflags-dff4ba8e3ae991db = { package = "bitflags", version = "1.3.2" }
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.5.0", default-features = false, features = ["serde", "std"] }
-bstr = { version = "1.9.1" }
+bstr-6f8ce4dd05d13bba = { package = "bstr", version = "0.2.17" }
+bstr-dff4ba8e3ae991db = { package = "bstr", version = "1.9.1" }
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.6.0", features = ["serde"] }
 chrono = { version = "0.4.38", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.5.4", features = ["cargo", "derive", "env", "wrap_help"] }
-clap_builder = { version = "4.5.2", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+clap = { version = "4.5.9", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.5.9", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 console = { version = "0.15.8" }
 const-oid = { version = "0.9.6", default-features = false, features = ["db", "std"] }
 crossbeam-epoch = { version = "0.9.18" }
@@ -95,13 +96,13 @@ semver = { version = "1.0.23", features = ["serde"] }
 serde = { version = "1.0.204", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.120", features = ["raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
-similar = { version = "2.5.0", features = ["inline", "unicode"] }
+similar = { version = "2.5.0", features = ["bytes", "inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
 smallvec = { version = "1.13.2", default-features = false, features = ["const_new"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.68", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.71", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.36", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1.38.0", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.10", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
@@ -129,13 +130,14 @@ bit-set = { version = "0.5.3" }
 bit-vec = { version = "0.6.3" }
 bitflags-dff4ba8e3ae991db = { package = "bitflags", version = "1.3.2" }
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.5.0", default-features = false, features = ["serde", "std"] }
-bstr = { version = "1.9.1" }
+bstr-6f8ce4dd05d13bba = { package = "bstr", version = "0.2.17" }
+bstr-dff4ba8e3ae991db = { package = "bstr", version = "1.9.1" }
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.6.0", features = ["serde"] }
 chrono = { version = "0.4.38", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.5.4", features = ["cargo", "derive", "env", "wrap_help"] }
-clap_builder = { version = "4.5.2", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+clap = { version = "4.5.9", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.5.9", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 console = { version = "0.15.8" }
 const-oid = { version = "0.9.6", default-features = false, features = ["db", "std"] }
 crossbeam-epoch = { version = "0.9.18" }
@@ -199,14 +201,14 @@ semver = { version = "1.0.23", features = ["serde"] }
 serde = { version = "1.0.204", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.120", features = ["raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
-similar = { version = "2.5.0", features = ["inline", "unicode"] }
+similar = { version = "2.5.0", features = ["bytes", "inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
 smallvec = { version = "1.13.2", default-features = false, features = ["const_new"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extra-traits", "fold", "full", "visit"] }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.68", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.71", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.36", features = ["formatting", "local-offset", "macros", "parsing"] }
 time-macros = { version = "0.2.18", default-features = false, features = ["formatting", "parsing"] }
 tokio = { version = "1.38.0", features = ["full", "test-util"] }

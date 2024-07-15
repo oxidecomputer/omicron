@@ -16,7 +16,7 @@ pub struct WicketdTestContext {
     // this way.
     pub wicketd_raw_client: ClientTestContext,
     pub artifact_addr: SocketAddrV6,
-    pub artifact_client: installinator_artifact_client::Client,
+    pub artifact_client: installinator_client::Client,
     pub server: wicketd::Server,
     pub gateway: GatewayTestContext,
 }
@@ -62,14 +62,15 @@ impl WicketdTestContext {
             )
         };
 
-        let artifact_addr = assert_ipv6(server.artifact_server.local_addr());
+        let artifact_addr =
+            assert_ipv6(server.installinator_server.local_addr());
         let artifact_client = {
             let endpoint = format!(
                 "http://[{}]:{}",
                 artifact_addr.ip(),
                 artifact_addr.port()
             );
-            installinator_artifact_client::Client::new(
+            installinator_client::Client::new(
                 &endpoint,
                 log.new(slog::o!("component" => "artifact test client")),
             )

@@ -17,7 +17,6 @@ use nexus_config::NexusConfig;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_nexus::run_openapi_external;
-use omicron_nexus::run_openapi_internal;
 use omicron_nexus::run_server;
 
 #[derive(Debug, Parser)]
@@ -27,18 +26,9 @@ struct Args {
         short = 'O',
         long = "openapi",
         help = "Print the external OpenAPI Spec document and exit",
-        conflicts_with = "openapi_internal",
         action
     )]
     openapi: bool,
-
-    #[clap(
-        short = 'I',
-        long = "openapi-internal",
-        help = "Print the internal OpenAPI Spec document and exit",
-        action
-    )]
-    openapi_internal: bool,
 
     #[clap(name = "CONFIG_FILE_PATH", action)]
     config_file_path: Option<Utf8PathBuf>,
@@ -56,8 +46,6 @@ async fn do_run() -> Result<(), CmdError> {
 
     if args.openapi {
         run_openapi_external().map_err(|err| CmdError::Failure(anyhow!(err)))
-    } else if args.openapi_internal {
-        run_openapi_internal().map_err(|err| CmdError::Failure(anyhow!(err)))
     } else {
         let config_path = match args.config_file_path {
             Some(path) => path,

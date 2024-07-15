@@ -2,12 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
+use std::process::ExitCode;
 
-//! User provided dropshot server context
+use clap::Parser;
+use openapi_manager::App;
 
-use crate::store::ArtifactStore;
-
-pub struct ServerContext {
-    pub(crate) artifact_store: ArtifactStore,
+fn main() -> ExitCode {
+    let app = App::parse();
+    app.exec().unwrap()
 }
