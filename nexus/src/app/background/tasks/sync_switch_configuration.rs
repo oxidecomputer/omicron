@@ -63,6 +63,7 @@ use std::{
 };
 
 const DPD_TAG: Option<&'static str> = Some(OMICRON_DPD_TAG);
+const PHY0: &str = "phy0";
 
 // This is more of an implementation detail of the BGP implementation. It
 // defines the maximum time the peering engine will wait for external messages
@@ -999,7 +1000,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             .communities_for_peer(
                                 opctx,
                                 port.port_settings_id.unwrap(),
-                                &peer.port,
+                                PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
                                 IpNetwork::from(IpAddr::from(peer.addr))
                             ).await {
                                 Ok(cs) => cs.iter().map(|c| c.community.0).collect(),
@@ -1017,7 +1018,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         let allow_import = match self.datastore.allow_import_for_peer(
                             opctx,
                             port.port_settings_id.unwrap(),
-                            &peer.port,
+                            PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
                             IpNetwork::from(IpAddr::from(peer.addr)),
                         ).await {
                             Ok(cs) => cs,
@@ -1041,7 +1042,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         let allow_export = match self.datastore.allow_export_for_peer(
                             opctx,
                             port.port_settings_id.unwrap(),
-                            &peer.port,
+                            PHY0, //TODO https://github.com/oxidecomputer/omicron/issues/3062
                             IpNetwork::from(IpAddr::from(peer.addr)),
                         ).await {
                             Ok(cs) => cs,
