@@ -270,25 +270,25 @@ Next, you'll need to customize the Nexus configuration file.  Start with nexus/e
 ################################################################################
 
 [mgd]
-# Look for "management gateway:    http://[::1]:42745 (switch0)"
+# Look for "management gateway:    http://[::1]:49188 (switch0)"
 # The "http://" does not go in this string -- just the socket address.
-switch0.address = "[::1]:57997"
+switch0.address = "[::1]:49188"
 
-# Look for "management gateway:    http://[::1]:44345 (switch1)"
+# Look for "management gateway:    http://[::1]:39352 (switch1)"
 # The "http://" does not go in this string -- just the socket address.
-switch1.address = "[::1]:57200"
+switch1.address = "[::1]:39352"
 
 [deployment.internal_dns]
-# Look for "internal DNS:          [::1]:51571"
+# Look for "internal DNS:          [::1]:54025"
 # and adjust the port number below.
-address = "[::1]:51571"
+address = "[::1]:54025"
 # You should not need to change this.
 type = "from_address"
 
 [deployment.database]
-# Look for "cockroachdb URL:       postgresql://root@[::1]:64123/omicron?sslmode=disable"
+# Look for "cockroachdb URL:       postgresql://root@[::1]:43256/omicron?sslmode=disable"
 # and adjust the port number below.
-url = "postgresql://root@[::1]:64123/omicron?sslmode=disable"
+url = "postgresql://root@[::1]:43256/omicron?sslmode=disable"
 # You should not need to change this.
 type = "from_url"
 ################################################################################
@@ -304,7 +304,7 @@ So it's:
 
 Once everything is up and running, you can use the system in a few ways:
 
-* Use the browser-based console.  The Nexus log output will show what IP address and port it's listening on.  This is also configured in the config file.  If you're using the defaults with `omicron-dev run-all`, you can reach the console at `http://127.0.0.1:12220/projects`.  If you ran a second Nexus, it will be on port `12222` instead.  Depending on the environment where you're running this, you may need an ssh tunnel or the like to reach this from your browser.
+* Use the browser-based console.  The Nexus log output will show what IP address and port it's listening on.  This is also configured in the config file.  If you're using the defaults with `omicron-dev run-all`, you can reach the console at `http://127.0.0.1:12220/projects`.  If you ran a second Nexus using the `config-second.toml` config file, it will be on port `12222` instead (because that config file specifies port 12222).  Depending on the environment where you're running this, you may need an ssh tunnel or the like to reach this from your browser.
 * Use the xref:cli.adoc[`oxide` CLI].
 
 == Running with TLS

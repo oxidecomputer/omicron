@@ -156,25 +156,25 @@ type = "random_with_distinct_sleds"
 ################################################################################
 
 [mgd]
-# Look for "management gateway:    http://[::1]:42745 (switch0)"
+# Look for "management gateway:    http://[::1]:49188 (switch0)"
 # The "http://" does not go in this string -- just the socket address.
-switch0.address = "[::1]:57997"
+switch0.address = "[::1]:49188"
 
-# Look for "management gateway:    http://[::1]:44345 (switch1)"
+# Look for "management gateway:    http://[::1]:39352 (switch1)"
 # The "http://" does not go in this string -- just the socket address.
-switch1.address = "[::1]:57200"
+switch1.address = "[::1]:39352"
 
 [deployment.internal_dns]
-# Look for "internal DNS:          [::1]:51571"
+# Look for "internal DNS:          [::1]:54025"
 # and adjust the port number below.
-address = "[::1]:51571"
+address = "[::1]:54025"
 # You should not need to change this.
 type = "from_address"
 
 [deployment.database]
-# Look for "cockroachdb URL:       postgresql://root@[::1]:64123/omicron?sslmode=disable"
+# Look for "cockroachdb URL:       postgresql://root@[::1]:43256/omicron?sslmode=disable"
 # and adjust the port number below.
-url = "postgresql://root@[::1]:64123/omicron?sslmode=disable"
+url = "postgresql://root@[::1]:43256/omicron?sslmode=disable"
 # You should not need to change this.
 type = "from_url"
 ################################################################################
