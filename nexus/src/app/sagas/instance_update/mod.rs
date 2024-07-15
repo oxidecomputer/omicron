@@ -737,3 +737,131 @@ async fn unlock_instance_inner(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::app::sagas::test_helpers;
+    use crate::external_api::params;
+    use chrono::Utc;
+    use dropshot::test_util::ClientTestContext;
+    use nexus_db_model::VmmRuntimeState;
+    use nexus_db_queries::db::lookup::LookupPath;
+    use nexus_test_utils::resource_helpers::{
+        create_default_ip_pool, create_project, object_create,
+    };
+    use nexus_test_utils_macros::nexus_test;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::PropolisUuid;
+    use uuid::Uuid;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    const PROJECT_NAME: &str = "test-project";
+    const INSTANCE_NAME: &str = "test-instance";
+
+    async fn setup_test_project(client: &ClientTestContext) -> Uuid {
+        create_default_ip_pool(&client).await;
+        let project = create_project(&client, PROJECT_NAME).await;
+        project.identity.id
+    }
+
+    async fn create_instance(
+        client: &ClientTestContext,
+    ) -> omicron_common::api::external::Instance {
+        use omicron_common::api::external::{
+            ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
+        };
+        let instances_url = format!("/v1/instances?project={}", PROJECT_NAME);
+        object_create(
+            client,
+            &instances_url,
+            &params::InstanceCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: INSTANCE_NAME.parse().unwrap(),
+                    description: format!("instance {:?}", INSTANCE_NAME),
+                },
+                ncpus: InstanceCpuCount(2),
+                memory: ByteCount::from_gibibytes_u32(2),
+                hostname: INSTANCE_NAME.parse().unwrap(),
+                user_data: b"#cloud-config".to_vec(),
+                ssh_public_keys: Some(Vec::new()),
+                network_interfaces:
+                    params::InstanceNetworkInterfaceAttachment::None,
+                external_ips: vec![],
+                disks: vec![],
+                start: true,
+            },
+        )
+        .await
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_active_vmm_destroyed_succeeds(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore =
+            cptestctx.server.server_context().nexus.datastore().clone();
+        let _project_id = setup_test_project(&client).await;
+
+        let opctx = test_helpers::test_opctx(cptestctx);
+        let instance = create_instance(client).await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+        // Poke the instance to get it into the Running state.
+        test_helpers::instance_simulate(cptestctx, &instance_id).await;
+
+        // Now, destroy the active VMM
+        let state = test_helpers::instance_fetch(cptestctx, instance_id).await;
+        let vmm = state.vmm().as_ref().unwrap();
+        let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
+        datastore
+            .vmm_update_runtime(
+                &vmm_id,
+                &VmmRuntimeState {
+                    time_state_updated: Utc::now(),
+                    gen: Generation(vmm.runtime.gen.0.next()),
+                    state: VmmState::Destroyed,
+                },
+            )
+            .await
+            .unwrap();
+
+        let (_, _, authz_instance, ..) = LookupPath::new(&opctx, &datastore)
+            .instance_id(instance_id.into_untyped_uuid())
+            .fetch()
+            .await
+            .expect("test instance should be present in datastore");
+
+        // run the instance-update saga
+        nexus
+            .sagas
+            .saga_execute::<SagaInstanceUpdate>(Params {
+                serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+                authz_instance,
+            })
+            .await
+            .expect("update saga should succeed");
+
+        // TODO(eliza): it would be nicer if we ensured that the start saga
+        // kicked off by the transition to `Running` completed *before* going to
+        // Destroyed, so we can guarantee that the saga that _we_ run performs
+        // the update. Figure that out.
+        test_helpers::instance_wait_for_state(
+            cptestctx,
+            instance_id,
+            InstanceState::NoVmm,
+        )
+        .await;
+        assert!(
+            test_helpers::no_virtual_provisioning_resource_records_exist(
+                cptestctx
+            )
+            .await
+        );
+        assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx).await);
+    }
+}
