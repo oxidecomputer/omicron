@@ -21,6 +21,8 @@ use nexus_types::external_api::{params, views::VpcSubnet};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Ipv6NetExt;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use oxnet::Ipv6Net;
 
 type ControlPlaneTestContext =
@@ -55,7 +57,8 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
     let instance_url =
         format!("/v1/instances/{instance_name}?project={project_name}");
     let instance = create_instance(client, &project_name, instance_name).await;
-    instance_simulate(nexus, &instance.identity.id).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    instance_simulate(nexus, &instance_id).await;
     let err: HttpErrorResponseBody = NexusRequest::expect_failure(
         &client,
         StatusCode::BAD_REQUEST,
@@ -76,7 +79,7 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
 
     // Stop and then delete the instance
     instance_post(client, instance_name, InstanceOp::Stop).await;
-    instance_simulate(&nexus, &instance.identity.id).await;
+    instance_simulate(&nexus, &instance_id).await;
     NexusRequest::object_delete(&client, &instance_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -176,6 +179,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
         },
         ipv4_block,
         ipv6_block: Some(ipv6_block),
+        custom_router: None,
     };
     let subnet: VpcSubnet =
         NexusRequest::objects_post(client, &subnets_url, &new_subnet)
@@ -227,6 +231,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
         },
         ipv4_block,
         ipv6_block: Some(ipv6_block),
+        custom_router: None,
     };
     let expected_error = format!(
         "IP address range '{}' conflicts with an existing subnet",
@@ -254,6 +259,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
         },
         ipv4_block: other_ipv4_block,
         ipv6_block: other_ipv6_block,
+        custom_router: None,
     };
     let error: dropshot::HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &subnets_url)
@@ -298,6 +304,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
         },
         ipv4_block,
         ipv6_block: None,
+        custom_router: None,
     };
     let subnet2: VpcSubnet =
         NexusRequest::objects_post(client, &subnets_url, &new_subnet)
@@ -326,6 +333,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
             name: Some("new-name".parse().unwrap()),
             description: Some("another description".to_string()),
         },
+        custom_router: None,
     };
     NexusRequest::object_put(client, &subnet_url, Some(&update_params))
         .authn_as(AuthnMode::PrivilegedUser)

@@ -9,7 +9,6 @@
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::ConfigDropshot;
-use dropshot::ConfigLogging;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpServer;
@@ -41,6 +40,13 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use thiserror::Error;
 use uuid::Uuid;
+
+// Our public interface depends directly or indirectly on these types; we
+// export them so that consumers need not depend on dropshot themselves and
+// to simplify how we stage incompatible upgrades.
+pub use dropshot::ConfigLogging;
+pub use dropshot::ConfigLoggingIfExists;
+pub use dropshot::ConfigLoggingLevel;
 
 #[derive(Debug, Clone, Error)]
 pub enum Error {

@@ -14,7 +14,6 @@ use super::{
     },
 };
 use crate::{context::ApiContext, external_api::shared};
-use dropshot::HttpError;
 use dropshot::HttpResponseAccepted;
 use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
@@ -32,15 +31,16 @@ use dropshot::{
     channel, endpoint, WebsocketChannelResult, WebsocketConnection,
 };
 use dropshot::{ApiDescription, StreamingBody};
+use dropshot::{ApiDescriptionRegisterError, HttpError};
 use dropshot::{ApiEndpoint, EmptyScanParams};
 use ipnetwork::IpNetwork;
+use nexus_db_queries::authz;
 use nexus_db_queries::db;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
-use nexus_db_queries::{authz, db::datastore::ProbeInfo};
-use nexus_types::external_api::shared::BfdStatus;
+use nexus_types::external_api::shared::{BfdStatus, ProbeInfo};
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
@@ -100,7 +100,9 @@ type NexusApiDescription = ApiDescription<ApiContext>;
 
 /// Returns a description of the external nexus API
 pub(crate) fn external_api() -> NexusApiDescription {
-    fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
+    fn register_endpoints(
+        api: &mut NexusApiDescription,
+    ) -> Result<(), ApiDescriptionRegisterError> {
         api.register(ping)?;
 
         api.register(system_policy_view)?;
@@ -278,7 +280,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_bgp_status)?;
         api.register(networking_bgp_imported_routes_ipv4)?;
         api.register(networking_bgp_config_delete)?;
-        api.register(networking_bgp_announce_set_create)?;
+        api.register(networking_bgp_announce_set_update)?;
         api.register(networking_bgp_announce_set_list)?;
         api.register(networking_bgp_announce_set_delete)?;
         api.register(networking_bgp_message_history)?;
@@ -368,7 +370,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
     fn register_experimental<T>(
         api: &mut NexusApiDescription,
         endpoint: T,
-    ) -> Result<(), String>
+    ) -> Result<(), ApiDescriptionRegisterError>
     where
         T: Into<ApiEndpoint<ApiContext>>,
     {
@@ -381,7 +383,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
 
     fn register_experimental_endpoints(
         api: &mut NexusApiDescription,
-    ) -> Result<(), String> {
+    ) -> Result<(), ApiDescriptionRegisterError> {
         register_experimental(api, probe_list)?;
         register_experimental(api, probe_view)?;
         register_experimental(api, probe_create)?;
@@ -4059,13 +4061,16 @@ async fn networking_bgp_config_delete(
         .await
 }
 
-/// Create new BGP announce set
+/// Update BGP announce set
+///
+/// If the announce set exists, this endpoint replaces the existing announce
+/// set with the one specified.
 #[endpoint {
-    method = POST,
+    method = PUT,
     path = "/v1/system/networking/bgp-announce",
     tags = ["system/networking"],
 }]
-async fn networking_bgp_announce_set_create(
+async fn networking_bgp_announce_set_update(
     rqctx: RequestContext<ApiContext>,
     config: TypedBody<params::BgpAnnounceSetCreate>,
 ) -> Result<HttpResponseCreated<BgpAnnounceSet>, HttpError> {
@@ -4074,7 +4079,7 @@ async fn networking_bgp_announce_set_create(
         let nexus = &apictx.context.nexus;
         let config = config.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let result = nexus.bgp_create_announce_set(&opctx, &config).await?;
+        let result = nexus.bgp_update_announce_set(&opctx, &config).await?;
         Ok(HttpResponseCreated::<BgpAnnounceSet>(result.0.into()))
     };
     apictx
@@ -5446,7 +5451,6 @@ async fn vpc_firewall_rules_update(
     method = GET,
     path = "/v1/vpc-routers",
     tags = ["vpcs"],
-    unpublished = true,
 }]
 async fn vpc_router_list(
     rqctx: RequestContext<ApiContext>,
@@ -5486,7 +5490,6 @@ async fn vpc_router_list(
     method = GET,
     path = "/v1/vpc-routers/{router}",
     tags = ["vpcs"],
-    unpublished = true,
 }]
 async fn vpc_router_view(
     rqctx: RequestContext<ApiContext>,
@@ -5520,7 +5523,6 @@ async fn vpc_router_view(
     method = POST,
     path = "/v1/vpc-routers",
     tags = ["vpcs"],
-    unpublished = true,
 }]
 async fn vpc_router_create(
     rqctx: RequestContext<ApiContext>,
@@ -5556,7 +5558,6 @@ async fn vpc_router_create(
     method = DELETE,
     path = "/v1/vpc-routers/{router}",
     tags = ["vpcs"],
-    unpublished = true,
 }]
 async fn vpc_router_delete(
     rqctx: RequestContext<ApiContext>,
@@ -5590,7 +5591,6 @@ async fn vpc_router_delete(
     method = PUT,
     path = "/v1/vpc-routers/{router}",
     tags = ["vpcs"],
-    unpublished = true,
 }]
 async fn vpc_router_update(
     rqctx: RequestContext<ApiContext>,
@@ -5630,7 +5630,6 @@ async fn vpc_router_update(
     method = GET,
     path = "/v1/vpc-router-routes",
     tags = ["vpcs"],
-    unpublished = true,
 }]
 async fn vpc_router_route_list(
     rqctx: RequestContext<ApiContext>,
@@ -5672,7 +5671,6 @@ async fn vpc_router_route_list(
     method = GET,
     path = "/v1/vpc-router-routes/{route}",
     tags = ["vpcs"],
-    unpublished = true,
 }]
 async fn vpc_router_route_view(
     rqctx: RequestContext<ApiContext>,
@@ -5704,12 +5702,11 @@ async fn vpc_router_route_view(
         .await
 }
 
-/// Create router
+/// Create route
 #[endpoint {
     method = POST,
     path = "/v1/vpc-router-routes",
     tags = ["vpcs"],
-    unpublished = true,
 }]
 async fn vpc_router_route_create(
     rqctx: RequestContext<ApiContext>,
@@ -5745,7 +5742,6 @@ async fn vpc_router_route_create(
     method = DELETE,
     path = "/v1/vpc-router-routes/{route}",
     tags = ["vpcs"],
-    unpublished = true,
 }]
 async fn vpc_router_route_delete(
     rqctx: RequestContext<ApiContext>,
@@ -5781,7 +5777,6 @@ async fn vpc_router_route_delete(
     method = PUT,
     path = "/v1/vpc-router-routes/{route}",
     tags = ["vpcs"],
-    unpublished = true,
 }]
 async fn vpc_router_route_update(
     rqctx: RequestContext<ApiContext>,
@@ -7028,7 +7023,7 @@ async fn probe_list(
             probes,
             &|_, p: &ProbeInfo| match paginated_by {
                 PaginatedBy::Id(_) => NameOrId::Id(p.id),
-                PaginatedBy::Name(_) => NameOrId::Name(p.name.clone().into()),
+                PaginatedBy::Name(_) => NameOrId::Name(p.name.clone()),
             },
         )?))
     };

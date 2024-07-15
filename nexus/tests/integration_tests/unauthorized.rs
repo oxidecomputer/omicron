@@ -18,13 +18,14 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::http_testing::TestResponse;
-use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 use omicron_uuid_kinds::ZpoolUuid;
 use once_cell::sync::Lazy;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
+type DiskTest<'a> =
+    nexus_test_utils::resource_helpers::DiskTest<'a, omicron_nexus::Server>;
 
 // This test hits a list Nexus API endpoints using both unauthenticated and
 // unauthorized requests to make sure we get the expected behavior (generally:
@@ -56,9 +57,10 @@ type ControlPlaneTestContext =
 #[nexus_test]
 async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
     let mut disk_test = DiskTest::new(cptestctx).await;
+    let sled_id = cptestctx.first_sled();
     disk_test
         .add_zpool_with_dataset_ext(
-            cptestctx,
+            sled_id,
             nexus_test_utils::PHYSICAL_DISK_UUID.parse().unwrap(),
             ZpoolUuid::new_v4(),
             uuid::Uuid::new_v4(),
@@ -426,6 +428,7 @@ async fn verify_endpoint(
             allowed,
             AllowedMethod::Get
                 | AllowedMethod::GetUnimplemented
+                | AllowedMethod::GetVolatile
                 | AllowedMethod::GetWebsocket
         )
     });
@@ -459,6 +462,22 @@ async fn verify_endpoint(
             .execute()
             .await
             .unwrap();
+            None
+        }
+        Some(AllowedMethod::GetVolatile) => {
+            // Same thing as `Get`, but avoid returning the output to prevent
+            // the resource change detection ahead.
+            info!(log, "test: privileged GET (volatile output)");
+            record_operation(WhichTest::PrivilegedGet(Some(
+                &http::StatusCode::OK,
+            )));
+            NexusRequest::object_get(client, uri.as_str())
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await
+                .unwrap_or_else(|e| panic!("Failed to GET: {uri}: {e}"))
+                .parsed_body::<serde_json::Value>()
+                .unwrap();
             None
         }
         Some(AllowedMethod::GetWebsocket) => {

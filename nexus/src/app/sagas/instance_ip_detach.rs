@@ -15,6 +15,7 @@ use nexus_db_model::IpAttachState;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::views;
 use omicron_common::api::external::NameOrId;
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid, SledUuid};
 use ref_cast::RefCast;
 use serde::Deserialize;
 use serde::Serialize;
@@ -71,13 +72,12 @@ async fn siid_begin_detach_ip(
         &params.serialized_authn,
     );
 
+    let instance_id =
+        InstanceUuid::from_untyped_uuid(params.authz_instance.id());
     match &params.delete_params {
         params::ExternalIpDetach::Ephemeral => {
             let eip = datastore
-                .instance_lookup_ephemeral_ip(
-                    &opctx,
-                    params.authz_instance.id(),
-                )
+                .instance_lookup_ephemeral_ip(&opctx, instance_id)
                 .await
                 .map_err(ActionError::action_failed)?;
 
@@ -86,7 +86,7 @@ async fn siid_begin_detach_ip(
                     .begin_deallocate_ephemeral_ip(
                         &opctx,
                         eph_ip.id,
-                        params.authz_instance.id(),
+                        instance_id,
                     )
                     .await
                     .map_err(ActionError::action_failed)
@@ -118,7 +118,7 @@ async fn siid_begin_detach_ip(
                 .floating_ip_begin_detach(
                     &opctx,
                     &authz_fip,
-                    params.authz_instance.id(),
+                    instance_id,
                     false,
                 )
                 .await
@@ -155,7 +155,7 @@ async fn siid_begin_detach_ip_undo(
 
 async fn siid_get_instance_state(
     sagactx: NexusActionContext,
-) -> Result<Option<Uuid>, ActionError> {
+) -> Result<Option<SledUuid>, ActionError> {
     let params = sagactx.saga_params::<Params>()?;
     instance_ip_get_instance_state(
         &sagactx,
@@ -168,7 +168,7 @@ async fn siid_get_instance_state(
 
 async fn siid_nat(sagactx: NexusActionContext) -> Result<(), ActionError> {
     let params = sagactx.saga_params::<Params>()?;
-    let sled_id = sagactx.lookup::<Option<Uuid>>("instance_state")?;
+    let sled_id = sagactx.lookup::<Option<SledUuid>>("instance_state")?;
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
     instance_ip_remove_nat(
         &sagactx,
@@ -184,7 +184,7 @@ async fn siid_nat_undo(
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
-    let sled_id = sagactx.lookup::<Option<Uuid>>("instance_state")?;
+    let sled_id = sagactx.lookup::<Option<SledUuid>>("instance_state")?;
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
     if let Err(e) = instance_ip_add_nat(
         &sagactx,
@@ -205,7 +205,7 @@ async fn siid_update_opte(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let params = sagactx.saga_params::<Params>()?;
-    let sled_id = sagactx.lookup::<Option<Uuid>>("instance_state")?;
+    let sled_id = sagactx.lookup::<Option<SledUuid>>("instance_state")?;
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
     instance_ip_remove_opte(
         &sagactx,
@@ -221,7 +221,7 @@ async fn siid_update_opte_undo(
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
-    let sled_id = sagactx.lookup::<Option<Uuid>>("instance_state")?;
+    let sled_id = sagactx.lookup::<Option<SledUuid>>("instance_state")?;
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
     if let Err(e) = instance_ip_add_opte(
         &sagactx,
@@ -390,10 +390,11 @@ pub(crate) mod test {
         let _ = ip_manip_test_setup(&client).await;
         let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
 
         crate::app::sagas::test_helpers::instance_simulate(
             cptestctx,
-            &instance.identity.id,
+            &instance_id,
         )
         .await;
 
@@ -401,17 +402,16 @@ pub(crate) mod test {
 
         for use_float in [false, true] {
             let params = new_test_params(&opctx, datastore, use_float).await;
-
-            let dag = create_saga_dag::<SagaInstanceIpDetach>(params).unwrap();
-            let saga = nexus.create_runnable_saga(dag).await.unwrap();
-            nexus.run_saga(saga).await.expect("Detach saga should succeed");
+            nexus
+                .sagas
+                .saga_execute::<SagaInstanceIpDetach>(params)
+                .await
+                .expect("Detach saga should succeed");
         }
-
-        let instance_id = instance.id();
 
         // Sled agent has removed its records of the external IPs.
         let mut eips = sled_agent.external_ips.lock().await;
-        let my_eips = eips.entry(instance_id).or_default();
+        let my_eips = eips.entry(instance_id.into_untyped_uuid()).or_default();
         assert!(my_eips.is_empty());
 
         // DB only has record for SNAT.
@@ -460,7 +460,10 @@ pub(crate) mod test {
 
         // Instance still has one Ephemeral IP, and one Floating IP.
         let db_eips = datastore
-            .instance_lookup_external_ips(&opctx, instance_id)
+            .instance_lookup_external_ips(
+                &opctx,
+                InstanceUuid::from_untyped_uuid(instance_id),
+            )
             .await
             .unwrap();
         assert_eq!(db_eips.len(), 3);
@@ -492,7 +495,7 @@ pub(crate) mod test {
 
         crate::app::sagas::test_helpers::instance_simulate(
             cptestctx,
-            &instance.identity.id,
+            &InstanceUuid::from_untyped_uuid(instance.identity.id),
         )
         .await;
 
@@ -526,7 +529,7 @@ pub(crate) mod test {
 
         crate::app::sagas::test_helpers::instance_simulate(
             cptestctx,
-            &instance.identity.id,
+            &InstanceUuid::from_untyped_uuid(instance.identity.id),
         )
         .await;
 
@@ -563,7 +566,7 @@ pub(crate) mod test {
 
         crate::app::sagas::test_helpers::instance_simulate(
             cptestctx,
-            &instance.identity.id,
+            &InstanceUuid::from_untyped_uuid(instance.identity.id),
         )
         .await;
 

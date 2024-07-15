@@ -31,7 +31,7 @@ use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use omicron_uuid_kinds::{ExternalIpKind, SledKind};
+use omicron_uuid_kinds::{ExternalIpKind, SledKind, ZpoolKind};
 use uuid::Uuid;
 
 /// See [`nexus_types::deployment::Blueprint`].
@@ -248,6 +248,7 @@ pub struct BpOmicronZone {
     disposition: DbBpZoneDisposition,
 
     pub external_ip_id: Option<DbTypedUuid<ExternalIpKind>>,
+    pub filesystem_pool: Option<DbTypedUuid<ZpoolKind>>,
 }
 
 impl BpOmicronZone {
@@ -264,6 +265,7 @@ impl BpOmicronZone {
             sled_id,
             blueprint_zone.id.into_untyped_uuid(),
             blueprint_zone.underlay_address,
+            blueprint_zone.filesystem_pool.as_ref().map(|pool| pool.id()),
             &blueprint_zone.zone_type.clone().into(),
             external_ip_id,
         )?;
@@ -291,6 +293,10 @@ impl BpOmicronZone {
             snat_last_port: zone.snat_last_port,
             disposition: to_db_bp_zone_disposition(blueprint_zone.disposition),
             external_ip_id: zone.external_ip_id.map(From::from),
+            filesystem_pool: blueprint_zone
+                .filesystem_pool
+                .as_ref()
+                .map(|pool| pool.id().into()),
         })
     }
 
@@ -302,6 +308,7 @@ impl BpOmicronZone {
             sled_id: self.sled_id.into(),
             id: self.id,
             underlay_address: self.underlay_address,
+            filesystem_pool: self.filesystem_pool.map(|id| id.into()),
             zone_type: self.zone_type,
             primary_service_ip: self.primary_service_ip,
             primary_service_port: self.primary_service_port,

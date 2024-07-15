@@ -7,6 +7,7 @@
 // Copyright 2024 Oxide Computer Company
 
 use crate::query::StringFieldSelector;
+use anyhow::Context as _;
 use chrono::DateTime;
 use chrono::Utc;
 use dropshot::EmptyScanParams;
@@ -23,22 +24,26 @@ pub use oximeter::Sample;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use slog::Logger;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::io;
+use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use thiserror::Error;
 
 mod client;
 pub mod model;
-#[cfg(feature = "oxql")]
+#[cfg(any(feature = "oxql", test))]
 pub mod oxql;
 pub mod query;
+#[cfg(any(feature = "oxql", feature = "sql", test))]
+pub mod shells;
 #[cfg(any(feature = "sql", test))]
 pub mod sql;
 
-#[cfg(feature = "oxql")]
+#[cfg(any(feature = "oxql", test))]
 pub use client::oxql::OxqlResult;
 pub use client::query_summary::QuerySummary;
 pub use client::Client;
@@ -160,6 +165,12 @@ impl From<model::DbTimeseriesSchema> for TimeseriesSchema {
                 schema.timeseries_name.as_str(),
             )
             .expect("Invalid timeseries name in database"),
+            // TODO-cleanup: Fill these in from the values in the database. See
+            // https://github.com/oxidecomputer/omicron/issues/5942.
+            description: Default::default(),
+            version: oximeter::schema::default_schema_version(),
+            authz_scope: oximeter::schema::AuthzScope::Fleet,
+            units: oximeter::schema::Units::Count,
             field_schema: schema.field_schema.into(),
             datum_type: schema.datum_type.into(),
             created: schema.created,
@@ -234,11 +245,31 @@ pub struct TimeseriesPageSelector {
     pub offset: NonZeroU32,
 }
 
+/// Create a client to the timeseries database, and ensure the database exists.
+pub async fn make_client(
+    address: IpAddr,
+    port: u16,
+    log: &Logger,
+) -> Result<Client, anyhow::Error> {
+    let address = SocketAddr::new(address, port);
+    let client = Client::new(address, &log);
+    client
+        .init_single_node_db()
+        .await
+        .context("Failed to initialize timeseries database")?;
+    Ok(client)
+}
+
 pub(crate) type TimeseriesKey = u64;
 
+// TODO-cleanup: Add the timeseries version in to the computation of the key.
+// This will require a full drop of the database, since we're changing the
+// sorting key and the timeseries key on each past sample. See
+// https://github.com/oxidecomputer/omicron/issues/5942 for more details.
 pub(crate) fn timeseries_key(sample: &Sample) -> TimeseriesKey {
     timeseries_key_for(
         &sample.timeseries_name,
+        // sample.timeseries_version
         sample.sorted_target_fields(),
         sample.sorted_metric_fields(),
         sample.measurement.datum_type(),
@@ -389,11 +420,13 @@ mod tests {
             name: String::from("later"),
             field_type: FieldType::U64,
             source: FieldSource::Target,
+            description: String::new(),
         };
         let metric_field = FieldSchema {
             name: String::from("earlier"),
             field_type: FieldType::U64,
             source: FieldSource::Metric,
+            description: String::new(),
         };
         let timeseries_name: TimeseriesName = "foo:bar".parse().unwrap();
         let datum_type = DatumType::U64;
@@ -401,6 +434,10 @@ mod tests {
             [target_field.clone(), metric_field.clone()].into_iter().collect();
         let expected_schema = TimeseriesSchema {
             timeseries_name: timeseries_name.clone(),
+            description: Default::default(),
+            version: oximeter::schema::default_schema_version(),
+            authz_scope: oximeter::schema::AuthzScope::Fleet,
+            units: oximeter::schema::Units::Count,
             field_schema,
             datum_type,
             created: Utc::now(),

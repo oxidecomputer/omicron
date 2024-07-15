@@ -150,7 +150,7 @@ pub struct UpdatePane {
     /// TODO: Move following  state into global `State` so that recorder snapshots
     /// capture all state.
     ///
-    /// TODO: The <usize> generic parameter is carried over from earlier versions
+    /// TODO: The usize generic parameter is carried over from earlier versions
     /// of tui-tree-widget, but there's likely a better index type.
     tree_state: TreeState<usize>,
     items: Vec<TreeItem<'static, usize>>,
@@ -178,7 +178,7 @@ pub struct UpdatePane {
 impl UpdatePane {
     pub fn new(log: &Logger) -> UpdatePane {
         let log = log.new(o!("component" => "UpdatePane"));
-        let mut tree_state = TreeState::default();
+        let tree_state = TreeState::default();
         let items = ALL_COMPONENT_IDS
             .iter()
             .enumerate()
@@ -187,7 +187,8 @@ impl UpdatePane {
                     .expect("no children so no duplicate identifiers")
             })
             .collect::<Vec<_>>();
-        tree_state.select_first(&items);
+        // `ensure_selection_matches_rack_state` will perform the initial
+        // selection on the update tree.
 
         UpdatePane {
             log,
@@ -1319,12 +1320,14 @@ impl UpdatePane {
     }
 
     // When we switch panes, we may have moved around in the rack. We want to
-    // ensure that the currently selected rack component in the  update tree
+    // ensure that the currently selected rack component in the update tree
     // matches what was selected in the rack or inventory views. We already do
     // the converse when on this pane and move around the tree.
     fn ensure_selection_matches_rack_state(&mut self, state: &State) {
-        let selected = self.tree_state.selected();
-        if state.rack_state.selected != ALL_COMPONENT_IDS[selected[0]] {
+        let tree_selected = self.tree_state.selected();
+        let should_reselect = tree_selected.is_empty()
+            || state.rack_state.selected != ALL_COMPONENT_IDS[tree_selected[0]];
+        if should_reselect {
             let index = ALL_COMPONENT_IDS
                 .iter()
                 .position(|&id| id == state.rack_state.selected)
@@ -1377,7 +1380,7 @@ impl UpdatePane {
         self.update_items(state);
 
         // Draw the contents
-        let tree = Tree::new(self.items.clone())
+        let tree = Tree::new(&self.items)
             .expect("tree does not have duplicate identifiers")
             .block(block.clone().borders(Borders::LEFT | Borders::RIGHT))
             .style(style::plain_text())
@@ -1711,6 +1714,7 @@ struct ComponentForceUpdateSelectionState {
 }
 
 struct ForceUpdateSelectionState {
+    rot_bootloader: Option<ComponentForceUpdateSelectionState>,
     rot: Option<ComponentForceUpdateSelectionState>,
     sp: Option<ComponentForceUpdateSelectionState>,
 }
@@ -1722,6 +1726,7 @@ impl From<&'_ State> for ForceUpdateSelectionState {
         let inventory = &state.inventory;
         let update_item = &state.update_state.items[&component_id];
 
+        let mut rot_bootloader = None;
         let mut rot = None;
         let mut sp = None;
 
@@ -1737,6 +1742,22 @@ impl From<&'_ State> for ForceUpdateSelectionState {
             let installed_version =
                 active_installed_version(&component_id, component, inventory);
             match component {
+                UpdateComponent::RotBootloader => {
+                    assert!(
+                        rot_bootloader.is_none(),
+                        "update item contains multiple RoT bootloader entries"
+                    );
+                    if artifact_version == installed_version {
+                        rot_bootloader =
+                            Some(ComponentForceUpdateSelectionState {
+                                version: artifact_version,
+                                toggled_on: state
+                                    .force_update_state
+                                    .force_update_rot_bootloader,
+                                selected: false, // set below
+                            });
+                    }
+                }
                 UpdateComponent::Rot => {
                     assert!(
                         rot.is_none(),
@@ -1773,28 +1794,63 @@ impl From<&'_ State> for ForceUpdateSelectionState {
 
         // If we only have one force-updateable component, mark it as selected;
         // otherwise, respect the option currently selected in `State`.
-        match (rot.as_mut(), sp.as_mut()) {
-            (Some(rot), None) => rot.selected = true,
-            (None, Some(sp)) => sp.selected = true,
-            (Some(rot), Some(sp)) => {
+        match (rot_bootloader.as_mut(), rot.as_mut(), sp.as_mut()) {
+            (Some(rot_bootloader), None, None) => {
+                rot_bootloader.selected = true
+            }
+            (None, Some(rot), None) => rot.selected = true,
+            (None, None, Some(sp)) => sp.selected = true,
+            // Two selected
+            (Some(rot_bootloader), Some(rot), None) => {
+                if state.force_update_state.selected_component()
+                    == UpdateComponent::RotBootloader
+                {
+                    rot_bootloader.selected = true
+                } else {
+                    rot.selected = true
+                }
+            }
+            (None, Some(rot), Some(sp)) => {
                 if state.force_update_state.selected_component()
                     == UpdateComponent::Rot
                 {
-                    rot.selected = true;
+                    rot.selected = true
                 } else {
-                    sp.selected = true;
+                    sp.selected = true
                 }
             }
-            (None, None) => (),
+            (Some(rot_bootloader), None, Some(sp)) => {
+                if state.force_update_state.selected_component()
+                    == UpdateComponent::RotBootloader
+                {
+                    rot_bootloader.selected = true
+                } else {
+                    sp.selected = true
+                }
+            }
+            // All three
+            (Some(rot_bootloader), Some(rot), Some(sp)) => {
+                match state.force_update_state.selected_component() {
+                    UpdateComponent::Rot => rot.selected = true,
+                    UpdateComponent::Sp => sp.selected = true,
+                    UpdateComponent::RotBootloader => {
+                        rot_bootloader.selected = true
+                    }
+                    _ => (),
+                }
+            }
+            (None, None, None) => (),
         }
 
-        Self { rot, sp }
+        Self { rot_bootloader, rot, sp }
     }
 }
 
 impl ForceUpdateSelectionState {
     fn num_spans(&self) -> usize {
-        usize::from(self.rot.is_some()) + usize::from(self.sp.is_some())
+        usize::from(self.rot.is_some())
+            + usize::from(self.sp.is_some())
+            + usize::from(self.rot_bootloader.is_some())
     }
 
     fn next_component(&self, state: &mut State) {
@@ -1826,6 +1882,13 @@ impl ForceUpdateSelectionState {
             state.force_update_state.toggle(UpdateComponent::Rot);
         } else if self.sp.as_ref().map(|sp| sp.selected).unwrap_or(false) {
             state.force_update_state.toggle(UpdateComponent::Sp);
+        } else if self
+            .rot_bootloader
+            .as_ref()
+            .map(|rot_bootloader| rot_bootloader.selected)
+            .unwrap_or(false)
+        {
+            state.force_update_state.toggle(UpdateComponent::RotBootloader);
         }
     }
 
@@ -1850,6 +1913,9 @@ impl ForceUpdateSelectionState {
         }
 
         let mut spans = Vec::new();
+        if let Some(rot_bootloader) = self.rot_bootloader.as_ref() {
+            spans.push(make_spans("RoT Bootloader", rot_bootloader));
+        }
         if let Some(rot) = self.rot.as_ref() {
             spans.push(make_spans("RoT", rot));
         }
@@ -2201,6 +2267,10 @@ fn active_installed_version(
 ) -> String {
     let component = inventory.get_inventory(id);
     match update_component {
+        UpdateComponent::RotBootloader => component.map_or_else(
+            || "UNKNOWN".to_string(),
+            |component| component.stage0_version(),
+        ),
         UpdateComponent::Sp => component.map_or_else(
             || "UNKNOWN".to_string(),
             |component| component.sp_version_active(),
@@ -2254,6 +2324,26 @@ fn all_installed_versions(
                 ]
             },
         ),
+        UpdateComponent::RotBootloader => component.map_or_else(
+            || {
+                vec![InstalledVersion {
+                    title: base_title.into(),
+                    version: "UNKNOWN".into(),
+                }]
+            },
+            |component| {
+                vec![
+                    InstalledVersion {
+                        title: base_title.into(),
+                        version: component.stage0_version().into(),
+                    },
+                    InstalledVersion {
+                        title: format!("{base_title}_NEXT").into(),
+                        version: component.stage0next_version().into(),
+                    },
+                ]
+            },
+        ),
         UpdateComponent::Rot => component.map_or_else(
             || {
                 vec![InstalledVersion {
@@ -2301,6 +2391,9 @@ fn artifact_version(
     versions: &BTreeMap<KnownArtifactKind, SemverVersion>,
 ) -> String {
     let artifact = match (id, component) {
+        (ComponentId::Sled(_), UpdateComponent::RotBootloader) => {
+            KnownArtifactKind::GimletRotBootloader
+        }
         (ComponentId::Sled(_), UpdateComponent::Rot) => {
             KnownArtifactKind::GimletRot
         }
@@ -2310,11 +2403,17 @@ fn artifact_version(
         (ComponentId::Sled(_), UpdateComponent::Host) => {
             KnownArtifactKind::Host
         }
+        (ComponentId::Switch(_), UpdateComponent::RotBootloader) => {
+            KnownArtifactKind::SwitchRotBootloader
+        }
         (ComponentId::Switch(_), UpdateComponent::Rot) => {
             KnownArtifactKind::SwitchRot
         }
         (ComponentId::Switch(_), UpdateComponent::Sp) => {
             KnownArtifactKind::SwitchSp
+        }
+        (ComponentId::Psc(_), UpdateComponent::RotBootloader) => {
+            KnownArtifactKind::PscRotBootloader
         }
         (ComponentId::Psc(_), UpdateComponent::Rot) => {
             KnownArtifactKind::PscRot
@@ -2363,7 +2462,7 @@ impl Control for UpdatePane {
                 [
                     Constraint::Length(3),
                     Constraint::Length(3),
-                    Constraint::Length(6),
+                    Constraint::Length(8),
                     Constraint::Min(0),
                     Constraint::Length(3),
                 ]
@@ -2390,13 +2489,13 @@ impl Control for UpdatePane {
 
         match cmd {
             Cmd::Up => {
-                self.tree_state.key_up(&self.items);
+                self.tree_state.key_up();
                 let selected = self.tree_state.selected();
                 state.rack_state.selected = ALL_COMPONENT_IDS[selected[0]];
                 Some(Action::Redraw)
             }
             Cmd::Down => {
-                self.tree_state.key_down(&self.items);
+                self.tree_state.key_down();
                 let selected = self.tree_state.selected();
                 state.rack_state.selected = ALL_COMPONENT_IDS[selected[0]];
                 Some(Action::Redraw)
@@ -2404,7 +2503,7 @@ impl Control for UpdatePane {
             Cmd::Collapse | Cmd::Left => {
                 // We always want something selected. If we close the root,
                 // we want to re-open it.
-                let selected = self.tree_state.selected();
+                let selected = self.tree_state.selected().to_vec();
                 self.tree_state.key_left();
                 if self.tree_state.selected().is_empty() {
                     self.tree_state.select(selected);
@@ -2427,12 +2526,12 @@ impl Control for UpdatePane {
                 Some(Action::Redraw)
             }
             Cmd::GotoTop => {
-                self.tree_state.select_first(&self.items);
+                self.tree_state.select_first();
                 state.rack_state.selected = ALL_COMPONENT_IDS[0];
                 Some(Action::Redraw)
             }
             Cmd::GotoBottom => {
-                self.tree_state.select_last(&self.items);
+                self.tree_state.select_last();
                 state.rack_state.selected =
                     ALL_COMPONENT_IDS[ALL_COMPONENT_IDS.len() - 1];
                 Some(Action::Redraw)

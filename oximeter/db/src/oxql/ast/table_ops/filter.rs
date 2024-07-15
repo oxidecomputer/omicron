@@ -16,10 +16,10 @@ use crate::oxql::point::DataType;
 use crate::oxql::point::MetricType;
 use crate::oxql::point::Points;
 use crate::oxql::point::ValueArray;
-use crate::oxql::query::special_idents;
 use crate::oxql::Error;
 use crate::oxql::Table;
 use crate::oxql::Timeseries;
+use crate::shells::special_idents;
 use chrono::DateTime;
 use chrono::Utc;
 use oximeter::FieldType;
@@ -61,7 +61,7 @@ impl core::str::FromStr for Filter {
 const EXPR_COMPLEXITY_ITERATIVE_LIMIT: usize = 32;
 
 // A crude limit on expression complexity, governing how many times we
-// recurisvely apply a DNF simplification before bailing out.
+// recursively apply a DNF simplification before bailing out.
 const EXPR_COMPLEXITY_RECURSIVE_LIMIT: usize = 32;
 
 impl Filter {
@@ -298,11 +298,11 @@ impl Filter {
             // You give nothing, you get nothing.
             return Ok(tables.to_vec());
         };
-        let ident_names = self.ident_names();
 
         // There are extra, implied names that depend on the data type of the
         // timeseries itself, check those as well.
         let extras = implicit_field_names(first_timeseries);
+        let ident_names = self.ident_names();
         let not_valid = ident_names
             .iter()
             .filter(|&&name| {
@@ -316,7 +316,13 @@ impl Filter {
             valid for its input timeseries. Invalid identifiers: {:?}, \
             timeseries fields: {:?}",
             not_valid,
-            ident_names.union(&extras),
+            first_timeseries
+                .fields
+                .keys()
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>()
+                .union(&extras)
+                .collect::<BTreeSet<_>>(),
         );
 
         // Filter each input table in succession.
@@ -512,8 +518,9 @@ fn implicit_field_names(
                 MetricType::Gauge,
                 DataType::IntegerDistribution | DataType::DoubleDistribution,
             ) => {
-                out.insert(special_idents::BINS);
-                out.insert(special_idents::COUNTS);
+                special_idents::DISTRIBUTION_IDENTS.iter().for_each(|ident| {
+                    out.insert(ident);
+                });
             }
             // Scalars, either delta or cumulatives.
             (
@@ -528,8 +535,9 @@ fn implicit_field_names(
                 MetricType::Delta | MetricType::Cumulative,
                 DataType::IntegerDistribution | DataType::DoubleDistribution,
             ) => {
-                out.insert(special_idents::BINS);
-                out.insert(special_idents::COUNTS);
+                special_idents::DISTRIBUTION_IDENTS.iter().for_each(|ident| {
+                    out.insert(ident);
+                });
                 out.insert(special_idents::START_TIME);
             }
             // Impossible combinations
@@ -1351,6 +1359,29 @@ mod tests {
         assert!(
             filt.apply(&[table]).is_ok(),
             "It's not an error to filter an empty table"
+        );
+    }
+
+    #[test]
+    fn test_error_message_with_invalid_field_names() {
+        let ts = Timeseries::new(
+            std::iter::once((String::from("foo"), FieldValue::U8(0))),
+            DataType::Double,
+            MetricType::Gauge,
+        )
+        .unwrap();
+        let table = Table::from_timeseries("foo", std::iter::once(ts)).unwrap();
+        let filt = query_parser::filter_expr("bar == 0").unwrap();
+        let msg = filt
+            .apply(&[table])
+            .expect_err(
+                "Applying a filter with a name that doesn't appear \
+                in the timeseries should be an error",
+            )
+            .to_string();
+        println!("{msg}");
+        assert!(
+            msg.contains(r#"timeseries fields: {"datum", "foo", "timestamp"}"#)
         );
     }
 }

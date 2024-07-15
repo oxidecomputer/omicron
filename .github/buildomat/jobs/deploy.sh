@@ -2,7 +2,7 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-2.0-opte-0.31"
+#: target = "lab-2.0-opte-0.32"
 #: output_rules = [
 #:  "%/var/svc/log/oxide-sled-agent:default.log*",
 #:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log*",
@@ -30,9 +30,15 @@ set -o xtrace
 #
 _exit_trap() {
 	local status=$?
+	set +o errexit
+
+	#
+	# Stop cron in all zones (to stop logadm log rotation)
+	#
+	pfexec svcadm -Z disable -s cron
+
 	[[ $status -eq 0 ]] && exit 0
 
-	set +o errexit
 	set -o xtrace
 	banner evidence
 	zoneadm list -civ
@@ -238,7 +244,7 @@ infra_ip_last = \"$UPLINK_IP\"
 		/^routes/c\\
 routes = \\[{nexthop = \"$GATEWAY_IP\", destination = \"0.0.0.0/0\"}\\]
 		/^addresses/c\\
-addresses = \\[\"$UPLINK_IP/24\"\\]
+addresses = \\[{address = \"$UPLINK_IP/24\"} \\]
 	}
 " pkg/config-rss.toml
 diff -u pkg/config-rss.toml{~,} || true

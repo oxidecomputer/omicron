@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::DiskFirmware;
 use crate::{
     DendriteAsic, DiskVariant, HardwareUpdate, SledMode, UnparsedDisk,
 };
@@ -56,6 +57,18 @@ enum Error {
 
     #[error("Failed to issue request to sysconf: {0}")]
     SysconfError(#[from] sysconf::Error),
+
+    #[error("Failed to init nvme handle: {0}")]
+    NvmeHandleInit(#[from] libnvme::NvmeInitError),
+
+    #[error("libnvme error: {0}")]
+    Nvme(#[from] libnvme::NvmeError),
+
+    #[error("libnvme controller error: {0}")]
+    NvmeController(#[from] libnvme::controller::NvmeControllerError),
+
+    #[error("Failed to get NVMe Controller's firmware log page: {0}")]
+    FirmwareLogPage(#[from] libnvme::firmware::FirmwareLogPageError),
 }
 
 const GIMLET_ROOT_NODE_NAME: &str = "Oxide,Gimlet";
@@ -105,7 +118,7 @@ impl TryFrom<i64> for BootStorageUnit {
 // A snapshot of information about the underlying hardware
 struct HardwareSnapshot {
     tofino: TofinoSnapshot,
-    disks: HashSet<UnparsedDisk>,
+    disks: HashMap<DiskIdentity, UnparsedDisk>,
     baseboard: Baseboard,
 }
 
@@ -151,7 +164,7 @@ impl HardwareSnapshot {
         let tofino = get_tofino_snapshot(log, &mut device_info);
 
         // Monitor for block devices.
-        let mut disks = HashSet::new();
+        let mut disks = HashMap::new();
         let mut node_walker = device_info.walk_driver("blkdev");
         while let Some(node) =
             node_walker.next().transpose().map_err(Error::DevInfo)?
@@ -184,7 +197,7 @@ enum TofinoView {
 // which services are currently executing.
 struct HardwareView {
     tofino: TofinoView,
-    disks: HashSet<UnparsedDisk>,
+    disks: HashMap<DiskIdentity, UnparsedDisk>,
     baseboard: Option<Baseboard>,
     online_processor_count: u32,
     usable_physical_ram_bytes: u64,
@@ -199,7 +212,7 @@ impl HardwareView {
     fn new() -> Result<Self, Error> {
         Ok(Self {
             tofino: TofinoView::Real(TofinoSnapshot::new()),
-            disks: HashSet::new(),
+            disks: HashMap::new(),
             baseboard: None,
             online_processor_count: sysconf::online_processor_count()?,
             usable_physical_ram_bytes: sysconf::usable_physical_ram_bytes()?,
@@ -209,7 +222,7 @@ impl HardwareView {
     fn new_stub_tofino(active: bool) -> Result<Self, Error> {
         Ok(Self {
             tofino: TofinoView::Stub { active },
-            disks: HashSet::new(),
+            disks: HashMap::new(),
             baseboard: None,
             online_processor_count: sysconf::online_processor_count()?,
             usable_physical_ram_bytes: sysconf::usable_physical_ram_bytes()?,
@@ -250,17 +263,38 @@ impl HardwareView {
         polled_hw: &HardwareSnapshot,
         updates: &mut Vec<HardwareUpdate>,
     ) {
-        // In old set, not in new set.
-        let removed = self.disks.difference(&polled_hw.disks);
-        // In new set, not in old set.
-        let added = polled_hw.disks.difference(&self.disks);
+        let mut added = Vec::new();
+        let mut removed = Vec::new();
+        let mut updated = Vec::new();
+
+        // Find new or updated disks.
+        for (key, value) in &polled_hw.disks {
+            match self.disks.get(&key) {
+                Some(found) => {
+                    if value != found {
+                        updated.push(value.clone());
+                    }
+                }
+                None => added.push(value.clone()),
+            }
+        }
+
+        // Find disks which have been removed.
+        for (key, value) in &self.disks {
+            if !polled_hw.disks.contains_key(key) {
+                removed.push(value.clone());
+            }
+        }
 
         use HardwareUpdate::*;
         for disk in removed {
-            updates.push(DiskRemoved(disk.clone()));
+            updates.push(DiskRemoved(disk));
         }
         for disk in added {
-            updates.push(DiskAdded(disk.clone()));
+            updates.push(DiskAdded(disk));
+        }
+        for disk in updated {
+            updates.push(DiskUpdated(disk));
         }
 
         self.disks.clone_from(&polled_hw.disks);
@@ -424,7 +458,7 @@ fn find_properties<'a, const N: usize>(
 
 fn poll_blkdev_node(
     log: &Logger,
-    disks: &mut HashSet<UnparsedDisk>,
+    disks: &mut HashMap<DiskIdentity, UnparsedDisk>,
     node: Node<'_>,
     boot_storage_unit: BootStorageUnit,
 ) -> Result<(), Error> {
@@ -492,15 +526,21 @@ fn poll_blkdev_node(
         return Err(Error::UnrecognizedSlot { slot });
     };
 
+    // XXX See https://github.com/oxidecomputer/meta/issues/443
+    // Temporarily providing static data until the issue is resolved.
+    let firmware =
+        DiskFirmware::new(1, None, true, vec![Some("meta-443".to_string())]);
+
     let disk = UnparsedDisk::new(
         Utf8PathBuf::from(&devfs_path),
         dev_path,
         slot,
         variant,
-        device_id,
+        device_id.clone(),
         slot_is_boot_disk(slot, boot_storage_unit),
+        firmware.clone(),
     );
-    disks.insert(disk);
+    disks.insert(device_id, disk);
     Ok(())
 }
 
@@ -546,8 +586,11 @@ fn poll_device_tree(
                 // UnparsedDisks. Add those to the HardwareSnapshot here if they
                 // are missing (which they will be for non-gimlets).
                 for observed_disk in nongimlet_observed_disks {
-                    if !inner.disks.contains(observed_disk) {
-                        inner.disks.insert(observed_disk.clone());
+                    let identity = observed_disk.identity();
+                    if !inner.disks.contains_key(identity) {
+                        inner
+                            .disks
+                            .insert(identity.clone(), observed_disk.clone());
                     }
                 }
             }
@@ -707,7 +750,7 @@ impl HardwareManager {
         self.inner.lock().unwrap().usable_physical_ram_bytes
     }
 
-    pub fn disks(&self) -> HashSet<UnparsedDisk> {
+    pub fn disks(&self) -> HashMap<DiskIdentity, UnparsedDisk> {
         self.inner.lock().unwrap().disks.clone()
     }
 

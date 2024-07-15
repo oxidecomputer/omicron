@@ -3,10 +3,12 @@ use anyhow::{anyhow, Result};
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::params::VpcFirewallRule;
-use illumos_utils::opte::{DhcpCfg, PortManager};
+use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::Zones;
-use nexus_client::types::{ProbeExternalIp, ProbeInfo};
+use nexus_client::types::{
+    BackgroundTasksActivateRequest, ProbeExternalIp, ProbeInfo,
+};
 use omicron_common::api::external::{
     VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRulePriority,
     VpcFirewallRuleStatus,
@@ -179,24 +181,44 @@ impl ProbeManagerInner {
                     }
                 };
 
-                self.add(target.difference(&current)).await;
+                let n_added = self.add(target.difference(&current)).await;
                 self.remove(current.difference(&target)).await;
                 self.check(current.intersection(&target)).await;
+
+                // If we have created some new probes, we may need the control plane
+                // to provide us with valid routes for the VPC the probe belongs to.
+                if n_added > 0 {
+                    if let Err(e) = self
+                        .nexus_client
+                        .client()
+                        .bgtask_activate(&BackgroundTasksActivateRequest {
+                            bgtask_names: vec!["vpc_route_manager".into()],
+                        })
+                        .await
+                    {
+                        error!(self.log, "get routes for probe: {e}");
+                    }
+                }
             }
         })
     }
 
     /// Add a set of probes to this sled.
-    async fn add<'a, I>(self: &Arc<Self>, probes: I)
+    ///
+    /// Returns the number of inserted probes.
+    async fn add<'a, I>(self: &Arc<Self>, probes: I) -> usize
     where
         I: Iterator<Item = &'a ProbeState>,
     {
+        let mut i = 0;
         for probe in probes {
             info!(self.log, "adding probe {}", probe.id);
             if let Err(e) = self.add_probe(probe).await {
                 error!(self.log, "add probe: {e}");
             }
+            i += 1;
         }
+        i
     }
 
     /// Add a probe to this sled. This sets up resources for the probe zone
@@ -223,12 +245,12 @@ impl ProbeManagerInner {
             .get(0)
             .ok_or(anyhow!("expected an external ip"))?;
 
-        let port = self.port_manager.create_port(
-            &nic,
-            None,
-            Some(eip.ip),
-            &[], // floating ips
-            &[VpcFirewallRule {
+        let port = self.port_manager.create_port(PortCreateParams {
+            nic,
+            source_nat: None,
+            ephemeral_ip: Some(eip.ip),
+            floating_ips: &[],
+            firewall_rules: &[VpcFirewallRule {
                 status: VpcFirewallRuleStatus::Enabled,
                 direction: VpcFirewallRuleDirection::Inbound,
                 targets: vec![nic.clone()],
@@ -238,8 +260,9 @@ impl ProbeManagerInner {
                 action: VpcFirewallRuleAction::Allow,
                 priority: VpcFirewallRulePriority(100),
             }],
-            DhcpCfg::default(),
-        )?;
+            dhcp_config: DhcpCfg::default(),
+            is_service: false,
+        })?;
 
         let installed_zone = ZoneBuilderFactory::default()
             .builder()

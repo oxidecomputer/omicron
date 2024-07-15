@@ -22,11 +22,11 @@ use nexus_db_queries::{
 };
 use nexus_types::identity::Resource;
 use omicron_common::api::external::NameOrId;
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use sled_agent_client::TestInterfaces as _;
 use slog::{info, warn, Logger};
 use std::{num::NonZeroU32, sync::Arc};
 use steno::SagaDag;
-use uuid::Uuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -40,14 +40,14 @@ pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
 
 pub(crate) async fn instance_start(
     cptestctx: &ControlPlaneTestContext,
-    id: &Uuid,
+    id: &InstanceUuid,
 ) {
     let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
         nexus_types::external_api::params::InstanceSelector {
             project: None,
-            instance: NameOrId::from(*id),
+            instance: NameOrId::from(id.into_untyped_uuid()),
         };
 
     let instance_lookup =
@@ -60,14 +60,14 @@ pub(crate) async fn instance_start(
 
 pub(crate) async fn instance_stop(
     cptestctx: &ControlPlaneTestContext,
-    id: &Uuid,
+    id: &InstanceUuid,
 ) {
     let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
         nexus_types::external_api::params::InstanceSelector {
             project: None,
-            instance: NameOrId::from(*id),
+            instance: NameOrId::from(id.into_untyped_uuid()),
         };
 
     let instance_lookup =
@@ -122,7 +122,7 @@ pub(crate) async fn instance_delete_by_name(
 
 pub(crate) async fn instance_simulate(
     cptestctx: &ControlPlaneTestContext,
-    instance_id: &Uuid,
+    instance_id: &InstanceUuid,
 ) {
     info!(&cptestctx.logctx.log, "Poking simulated instance";
           "instance_id" => %instance_id);
@@ -133,7 +133,7 @@ pub(crate) async fn instance_simulate(
         .unwrap()
         .expect("instance must be on a sled to simulate a state change");
 
-    sa.instance_finish_transition(*instance_id).await;
+    sa.instance_finish_transition(instance_id.into_untyped_uuid()).await;
 }
 
 pub(crate) async fn instance_simulate_by_name(
@@ -157,7 +157,7 @@ pub(crate) async fn instance_simulate_by_name(
         nexus.instance_lookup(&opctx, instance_selector).unwrap();
     let (.., instance) = instance_lookup.fetch().await.unwrap();
     let sa = nexus
-        .instance_sled_by_id(&instance.id())
+        .instance_sled_by_id(&InstanceUuid::from_untyped_uuid(instance.id()))
         .await
         .unwrap()
         .expect("instance must be on a sled to simulate a state change");
@@ -166,12 +166,12 @@ pub(crate) async fn instance_simulate_by_name(
 
 pub async fn instance_fetch(
     cptestctx: &ControlPlaneTestContext,
-    instance_id: Uuid,
+    instance_id: InstanceUuid,
 ) -> InstanceAndActiveVmm {
     let datastore = cptestctx.server.server_context().nexus.datastore().clone();
     let opctx = test_opctx(&cptestctx);
     let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(instance_id)
+        .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::Read)
         .await
         .expect("test instance should be present in datastore");
@@ -261,7 +261,7 @@ pub(crate) async fn actions_succeed_idempotently(
     nexus: &Arc<Nexus>,
     dag: SagaDag,
 ) {
-    let runnable_saga = nexus.create_runnable_saga(dag.clone()).await.unwrap();
+    let runnable_saga = nexus.sagas.saga_prepare(dag.clone()).await.unwrap();
     for node in dag.get_nodes() {
         nexus
             .sec()
@@ -277,7 +277,12 @@ pub(crate) async fn actions_succeed_idempotently(
             .unwrap();
     }
 
-    nexus.run_saga(runnable_saga).await.expect("Saga should have succeeded");
+    runnable_saga
+        .run_to_completion()
+        .await
+        .expect("Saga should have started")
+        .into_omicron_result()
+        .expect("Saga should have succeeded");
 }
 
 /// Tests that a saga `S` functions properly when any of its nodes fails and
@@ -346,7 +351,7 @@ pub(crate) async fn action_failure_can_unwind<'a, S, B, A>(
         );
 
         let runnable_saga =
-            nexus.create_runnable_saga(dag.clone()).await.unwrap();
+            nexus.sagas.saga_prepare(dag.clone()).await.unwrap();
 
         nexus
             .sec()
@@ -354,12 +359,14 @@ pub(crate) async fn action_failure_can_unwind<'a, S, B, A>(
             .await
             .unwrap();
 
-        let saga_error = nexus
-            .run_saga_raw_result(runnable_saga)
+        let saga_result = runnable_saga
+            .run_to_completion()
             .await
             .expect("saga should have started successfully")
-            .kind
-            .expect_err("saga execution should have failed");
+            .into_raw_result();
+
+        let saga_error =
+            saga_result.kind.expect_err("saga execution should have failed");
 
         assert_eq!(saga_error.error_node_name, *node.name());
 
@@ -447,7 +454,7 @@ pub(crate) async fn action_failure_can_unwind_idempotently<'a, S, B, A>(
         );
 
         let runnable_saga =
-            nexus.create_runnable_saga(dag.clone()).await.unwrap();
+            nexus.sagas.saga_prepare(dag.clone()).await.unwrap();
 
         nexus
             .sec()
@@ -468,10 +475,11 @@ pub(crate) async fn action_failure_can_unwind_idempotently<'a, S, B, A>(
             .await
             .unwrap();
 
-        let saga_error = nexus
-            .run_saga_raw_result(runnable_saga)
+        let saga_error = runnable_saga
+            .run_to_completion()
             .await
             .expect("saga should have started successfully")
+            .into_raw_result()
             .kind
             .expect_err("saga execution should have failed");
 

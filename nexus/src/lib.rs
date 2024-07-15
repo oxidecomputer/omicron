@@ -57,18 +57,8 @@ extern crate slog;
 /// to stdout.
 pub fn run_openapi_external() -> Result<(), String> {
     external_api()
-        .openapi("Oxide Region API", "20240502.0")
+        .openapi("Oxide Region API", "20240710.0")
         .description("API for interacting with the Oxide control plane")
-        .contact_url("https://oxide.computer")
-        .contact_email("api@oxide.computer")
-        .write(&mut std::io::stdout())
-        .map_err(|e| e.to_string())
-}
-
-pub fn run_openapi_internal() -> Result<(), String> {
-    internal_api()
-        .openapi("Nexus internal API", "0.0.1")
-        .description("Nexus internal API")
         .contact_url("https://oxide.computer")
         .contact_email("api@oxide.computer")
         .write(&mut std::io::stdout())

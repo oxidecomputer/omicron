@@ -7,6 +7,7 @@
 //! See `nexus_reconfigurator_planning` crate-level docs for background.
 
 use anyhow::{anyhow, Context};
+use internal_dns::resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
@@ -76,6 +77,7 @@ impl From<nexus_db_model::Sled> for Sled {
 pub async fn realize_blueprint<S>(
     opctx: &OpContext,
     datastore: &DataStore,
+    resolver: &Resolver,
     blueprint: &Blueprint,
     nexus_label: S,
 ) -> Result<(), Vec<anyhow::Error>>
@@ -85,6 +87,7 @@ where
     realize_blueprint_with_overrides(
         opctx,
         datastore,
+        resolver,
         blueprint,
         nexus_label,
         &Default::default(),
@@ -95,6 +98,7 @@ where
 pub async fn realize_blueprint_with_overrides<S>(
     opctx: &OpContext,
     datastore: &DataStore,
+    resolver: &Resolver,
     blueprint: &Blueprint,
     nexus_label: S,
     overrides: &Overridables,
@@ -183,7 +187,7 @@ where
     .context("failed to plumb service firewall rules to sleds")
     .map_err(|err| vec![err])?;
 
-    datasets::ensure_crucible_dataset_records_exist(
+    datasets::ensure_dataset_records_exist(
         &opctx,
         datastore,
         blueprint
@@ -204,6 +208,14 @@ where
     .await
     .map_err(|e| vec![anyhow!("{}", InlineErrorChain::new(&e))])?;
 
+    omicron_zones::clean_up_expunged_zones(
+        &opctx,
+        datastore,
+        resolver,
+        blueprint.all_omicron_zones(BlueprintZoneFilter::Expunged),
+    )
+    .await?;
+
     sled_state::decommission_sleds(
         &opctx,
         datastore,
@@ -223,4 +235,87 @@ where
         .map_err(|err| vec![err])?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_db_model::Generation;
+    use nexus_db_model::SledBaseboard;
+    use nexus_db_model::SledSystemHardware;
+    use nexus_db_model::SledUpdate;
+    use nexus_db_model::Zpool;
+    use std::collections::BTreeSet;
+    use uuid::Uuid;
+
+    // Helper function to insert sled records from an initial blueprint. Some
+    // tests expect to be able to realize the the blueprint created from an
+    // initial collection, and ensuring the zones' datasets exist requires first
+    // inserting the sled and zpool records.
+    pub(crate) async fn insert_sled_records(
+        datastore: &DataStore,
+        blueprint: &Blueprint,
+    ) {
+        let rack_id = Uuid::new_v4();
+        let mut sleds_inserted = BTreeSet::new();
+
+        for sled_id in blueprint.blueprint_zones.keys().copied() {
+            if sleds_inserted.insert(sled_id) {
+                let sled = SledUpdate::new(
+                    sled_id.into_untyped_uuid(),
+                    "[::1]:0".parse().unwrap(),
+                    SledBaseboard {
+                        serial_number: format!("test-{sled_id}"),
+                        part_number: "test-sled".to_string(),
+                        revision: 0,
+                    },
+                    SledSystemHardware {
+                        is_scrimlet: false,
+                        usable_hardware_threads: 128,
+                        usable_physical_ram: (64 << 30).try_into().unwrap(),
+                        reservoir_size: (16 << 30).try_into().unwrap(),
+                    },
+                    rack_id,
+                    Generation::new(),
+                );
+                datastore
+                    .sled_upsert(sled)
+                    .await
+                    .expect("failed to upsert sled");
+            }
+        }
+    }
+
+    // Helper function to insert zpool records from an initial blueprint. Some
+    // tests expect to be able to realize the the blueprint created from an
+    // initial collection, and ensuring the zones' datasets exist requires first
+    // inserting the sled and zpool records.
+    pub(crate) async fn insert_zpool_records(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        blueprint: &Blueprint,
+    ) {
+        let mut pool_inserted = BTreeSet::new();
+
+        for (sled_id, config) in
+            blueprint.all_omicron_zones(BlueprintZoneFilter::All)
+        {
+            let Some(dataset) = config.zone_type.durable_dataset() else {
+                continue;
+            };
+
+            let pool_id = dataset.dataset.pool_name.id();
+            if pool_inserted.insert(pool_id) {
+                let zpool = Zpool::new(
+                    pool_id.into_untyped_uuid(),
+                    sled_id.into_untyped_uuid(),
+                    Uuid::new_v4(), // physical_disk_id
+                );
+                datastore
+                    .zpool_insert(opctx, zpool)
+                    .await
+                    .expect("failed to upsert zpool");
+            }
+        }
+    }
 }

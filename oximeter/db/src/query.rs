@@ -249,7 +249,7 @@ impl SelectQueryBuilder {
         T: Target,
         M: Metric,
     {
-        let schema = TimeseriesSchema::new(target, metric);
+        let schema = TimeseriesSchema::new(target, metric)?;
         let mut builder = Self::new(&schema);
         let target_fields =
             target.field_names().iter().zip(target.field_values());
@@ -371,10 +371,12 @@ impl FieldSelector {
     }
 }
 
-/// A stringly-typed selector for finding fields by name and comparsion with a given value.
+/// A stringly-typed selector for finding fields by name and comparsion with a
+/// given value.
 ///
-/// This is used internally to parse comparisons written as strings, such as from the `oxdb`
-/// command-line tool or from another external source (Nexus API, for example).
+/// This is used internally to parse comparisons written as strings, such as
+/// from the `oxdb` command-line tool or from another external
+/// source (Nexus API, for example).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StringFieldSelector {
     name: String,
@@ -777,16 +779,22 @@ mod tests {
     fn test_select_query_builder_filter_raw() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
+            description: Default::default(),
+            version: oximeter::schema::default_schema_version(),
+            authz_scope: oximeter::schema::AuthzScope::Fleet,
+            units: oximeter::schema::Units::Count,
             field_schema: [
                 FieldSchema {
                     name: "f0".to_string(),
                     field_type: FieldType::I64,
                     source: FieldSource::Target,
+                    description: String::new(),
                 },
                 FieldSchema {
                     name: "f1".to_string(),
                     field_type: FieldType::Bool,
                     source: FieldSource::Target,
+                    description: String::new(),
                 },
             ]
             .into_iter()
@@ -910,6 +918,10 @@ mod tests {
     fn test_select_query_builder_no_fields() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
+            description: Default::default(),
+            version: oximeter::schema::default_schema_version(),
+            authz_scope: oximeter::schema::AuthzScope::Fleet,
+            units: oximeter::schema::Units::Count,
             field_schema: BTreeSet::new(),
             datum_type: DatumType::I64,
             created: Utc::now(),
@@ -932,6 +944,10 @@ mod tests {
     fn test_select_query_builder_limit_offset() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
+            description: Default::default(),
+            version: oximeter::schema::default_schema_version(),
+            authz_scope: oximeter::schema::AuthzScope::Fleet,
+            units: oximeter::schema::Units::Count,
             field_schema: BTreeSet::new(),
             datum_type: DatumType::I64,
             created: Utc::now(),
@@ -1002,16 +1018,22 @@ mod tests {
     fn test_select_query_builder_no_selectors() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
+            description: Default::default(),
+            version: oximeter::schema::default_schema_version(),
+            authz_scope: oximeter::schema::AuthzScope::Fleet,
+            units: oximeter::schema::Units::Count,
             field_schema: [
                 FieldSchema {
                     name: "f0".to_string(),
                     field_type: FieldType::I64,
                     source: FieldSource::Target,
+                    description: String::new(),
                 },
                 FieldSchema {
                     name: "f1".to_string(),
                     field_type: FieldType::Bool,
                     source: FieldSource::Target,
+                    description: String::new(),
                 },
             ]
             .into_iter()
@@ -1065,16 +1087,22 @@ mod tests {
     fn test_select_query_builder_field_selectors() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
+            description: Default::default(),
+            version: oximeter::schema::default_schema_version(),
+            authz_scope: oximeter::schema::AuthzScope::Fleet,
+            units: oximeter::schema::Units::Count,
             field_schema: [
                 FieldSchema {
                     name: "f0".to_string(),
                     field_type: FieldType::I64,
                     source: FieldSource::Target,
+                    description: String::new(),
                 },
                 FieldSchema {
                     name: "f1".to_string(),
                     field_type: FieldType::Bool,
                     source: FieldSource::Target,
+                    description: String::new(),
                 },
             ]
             .into_iter()
@@ -1116,16 +1144,22 @@ mod tests {
     fn test_select_query_builder_full() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
+            description: Default::default(),
+            version: oximeter::schema::default_schema_version(),
+            authz_scope: oximeter::schema::AuthzScope::Fleet,
+            units: oximeter::schema::Units::Count,
             field_schema: [
                 FieldSchema {
                     name: "f0".to_string(),
                     field_type: FieldType::I64,
                     source: FieldSource::Target,
+                    description: String::new(),
                 },
                 FieldSchema {
                     name: "f1".to_string(),
                     field_type: FieldType::Bool,
                     source: FieldSource::Target,
+                    description: String::new(),
                 },
             ]
             .into_iter()

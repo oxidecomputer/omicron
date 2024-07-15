@@ -22,6 +22,7 @@ camino.workspace = true
 camino-tempfile.workspace = true
 clap.workspace = true
 chrono.workspace = true
+cockroach-admin-client.workspace = true
 crucible-agent-client.workspace = true
 crucible-pantry-client.workspace = true
 dns-service-client.workspace = true
@@ -44,13 +45,14 @@ macaddr.workspace = true
 # integration tests.
 nexus-client.workspace = true
 nexus-config.workspace = true
+nexus-internal-api.workspace = true
 nexus-networking.workspace = true
 nexus-test-interface.workspace = true
 num-integer.workspace = true
 once_cell.workspace = true
 openssl.workspace = true
 oximeter-client.workspace = true
-oximeter-db.workspace = true
+oximeter-db = { workspace = true, default-features = false, features = [ "oxql" ] }
 oxnet.workspace = true
 parse-display.workspace = true
 paste.workspace = true
@@ -118,6 +120,7 @@ hyper-rustls.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true
 hubtools.workspace = true
+nexus-db-queries = { workspace = true, features = ["testing"] }
 nexus-test-utils-macros.workspace = true
 nexus-test-utils.workspace = true
 omicron-sled-agent.workspace = true
@@ -133,7 +136,7 @@ rcgen.workspace = true
 regex.workspace = true
 similar-asserts.workspace = true
 sp-sim.workspace = true
-rustls = { workspace = true }
+rustls.workspace = true
 subprocess.workspace = true
 term.workspace = true
 trust-dns-resolver.workspace = true

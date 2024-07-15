@@ -115,7 +115,7 @@ pub enum ConfigError {
     Parse {
         path: Utf8PathBuf,
         #[source]
-        err: toml::de::Error,
+        err: anyhow::Error,
     },
     #[error("Loading certificate: {0}")]
     Certificate(#[source] anyhow::Error),
@@ -130,8 +130,9 @@ impl Config {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(&path)
             .map_err(|err| ConfigError::Io { path: path.into(), err })?;
-        let config = toml::from_str(&contents)
-            .map_err(|err| ConfigError::Parse { path: path.into(), err })?;
+        let config = toml::from_str(&contents).map_err(|err| {
+            ConfigError::Parse { path: path.into(), err: err.into() }
+        })?;
         Ok(config)
     }
 

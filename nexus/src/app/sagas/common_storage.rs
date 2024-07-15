@@ -7,6 +7,7 @@
 use super::*;
 
 use crate::Nexus;
+use crucible_pantry_client::types::VolumeConstructionRequest;
 use internal_dns::ServiceName;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -23,7 +24,6 @@ pub(crate) async fn get_pantry_address(
 ) -> Result<SocketAddrV6, ActionError> {
     nexus
         .resolver()
-        .await
         .lookup_socket_v6(ServiceName::CruciblePantry)
         .await
         .map_err(|e| e.to_string())
@@ -60,7 +60,7 @@ pub(crate) async fn call_pantry_attach_for_disk(
         disk.volume_id,
     );
 
-    let volume_construction_request: crucible_pantry_client::types::VolumeConstructionRequest =
+    let volume_construction_request: VolumeConstructionRequest =
         serde_json::from_str(&disk_volume.data()).map_err(|e| {
             ActionError::action_failed(Error::internal_error(&format!(
                 "failed to deserialize disk {} volume data: {}",

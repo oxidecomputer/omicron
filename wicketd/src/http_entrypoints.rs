@@ -18,6 +18,7 @@ use bootstrap_agent_client::types::RackOperationStatus;
 use bootstrap_agent_client::types::RackResetId;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
+use dropshot::ApiDescriptionRegisterError;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
@@ -59,7 +60,7 @@ type WicketdApiDescription = ApiDescription<ServerContext>;
 pub fn api() -> WicketdApiDescription {
     fn register_endpoints(
         api: &mut WicketdApiDescription,
-    ) -> Result<(), String> {
+    ) -> Result<(), ApiDescriptionRegisterError> {
         api.register(get_bootstrap_sleds)?;
         api.register(get_rss_config)?;
         api.register(put_rss_config)?;
@@ -697,6 +698,12 @@ pub(crate) struct StartUpdateOptions {
     /// This is used for testing.
     pub(crate) test_step_seconds: Option<u64>,
 
+    /// If passed in, simulates a result for the RoT Bootloader update.
+    ///
+    /// This is used for testing.
+    pub(crate) test_simulate_rot_bootloader_result:
+        Option<UpdateSimulatedResult>,
+
     /// If passed in, simulates a result for the RoT update.
     ///
     /// This is used for testing.
@@ -709,7 +716,10 @@ pub(crate) struct StartUpdateOptions {
 
     /// If true, skip the check on the current RoT version and always update it
     /// regardless of whether the update appears to be neeeded.
-    #[allow(dead_code)] // TODO actually use this
+    pub(crate) skip_rot_bootloader_version_check: bool,
+
+    /// If true, skip the check on the current RoT version and always update it
+    /// regardless of whether the update appears to be neeeded.
     pub(crate) skip_rot_version_check: bool,
 
     /// If true, skip the check on the current SP version and always update it

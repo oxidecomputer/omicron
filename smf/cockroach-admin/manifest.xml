@@ -22,6 +22,7 @@
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
   <property_group name='config' type='application'>
+    <propval name='zone_id' type='astring' value='unknown' />
     <propval name='cockroach_address' type='astring' value='unknown' />
     <propval name='http_address' type='astring' value='unknown' />
   </property_group>

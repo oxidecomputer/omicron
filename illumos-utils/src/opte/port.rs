@@ -7,23 +7,30 @@
 use crate::opte::Gateway;
 use crate::opte::Vni;
 use macaddr::MacAddr6;
+use omicron_common::api::external;
+use omicron_common::api::internal::shared::RouterId;
+use omicron_common::api::internal::shared::RouterKind;
+use oxnet::IpNet;
 use std::net::IpAddr;
 use std::sync::Arc;
 
 #[derive(Debug)]
-struct PortInner {
-    // Name of the port as identified by OPTE
-    name: String,
-    // IP address within the VPC Subnet
-    ip: IpAddr,
-    // VPC-private MAC address
-    mac: MacAddr6,
-    // Emulated PCI slot for the guest NIC, passed to Propolis
-    slot: u8,
-    // Geneve VNI for the VPC
-    vni: Vni,
-    // Information about the virtual gateway, aka OPTE
-    gateway: Gateway,
+pub struct PortData {
+    /// Name of the port as identified by OPTE
+    pub(crate) name: String,
+    /// IP address within the VPC Subnet
+    pub(crate) ip: IpAddr,
+    /// VPC-private MAC address
+    pub(crate) mac: MacAddr6,
+    /// Emulated PCI slot for the guest NIC, passed to Propolis
+    pub(crate) slot: u8,
+    /// Geneve VNI for the VPC
+    pub(crate) vni: Vni,
+    /// Subnet the port belong to within the VPC.
+    pub(crate) subnet: IpNet,
+    /// Information about the virtual gateway, aka OPTE
+    pub(crate) gateway: Gateway,
+    /// Name of the VNIC the OPTE port is bound to.
     // TODO-remove(#2932): Remove this once we can put Viona directly on top of an
     // OPTE port device.
     //
@@ -33,7 +40,18 @@ struct PortInner {
     // https://github.com/oxidecomputer/opte/issues/178 for more details. This
     // can be changed back to a real VNIC when that is resolved, and the Drop
     // impl below can simplify to just call `drop(self.vnic)`.
-    vnic: String,
+    pub(crate) vnic: String,
+}
+
+#[derive(Debug)]
+struct PortInner(PortData);
+
+impl core::ops::Deref for PortInner {
+    type Target = PortData;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 #[cfg(target_os = "illumos")]
@@ -83,26 +101,8 @@ pub struct Port {
 }
 
 impl Port {
-    pub fn new(
-        name: String,
-        ip: IpAddr,
-        mac: MacAddr6,
-        slot: u8,
-        vni: Vni,
-        gateway: Gateway,
-        vnic: String,
-    ) -> Self {
-        Self {
-            inner: Arc::new(PortInner {
-                name,
-                ip,
-                mac,
-                slot,
-                vni,
-                gateway,
-                vnic,
-            }),
-        }
+    pub fn new(data: PortData) -> Self {
+        Self { inner: Arc::new(PortInner(data)) }
     }
 
     pub fn ip(&self) -> &IpAddr {
@@ -126,11 +126,28 @@ impl Port {
         &self.inner.vni
     }
 
+    pub fn subnet(&self) -> &IpNet {
+        &self.inner.subnet
+    }
+
     pub fn vnic_name(&self) -> &str {
         &self.inner.vnic
     }
 
     pub fn slot(&self) -> u8 {
         self.inner.slot
+    }
+
+    pub fn system_router_key(&self) -> RouterId {
+        // Unwrap safety: both of these VNI types represent validated u24s.
+        let vni = external::Vni::try_from(self.vni().as_u32()).unwrap();
+        RouterId { vni, kind: RouterKind::System }
+    }
+
+    pub fn custom_router_key(&self) -> RouterId {
+        RouterId {
+            kind: RouterKind::Custom(*self.subnet()),
+            ..self.system_router_key()
+        }
     }
 }

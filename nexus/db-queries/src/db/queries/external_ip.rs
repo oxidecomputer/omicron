@@ -895,6 +895,7 @@ mod tests {
     use omicron_test_utils::dev::db::CockroachInstance;
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use sled_agent_client::ZoneKind;
     use std::net::IpAddr;
@@ -1000,8 +1001,8 @@ mod tests {
             .expect("Failed to create IP Pool range");
         }
 
-        async fn create_instance(&self, name: &str) -> Uuid {
-            let instance_id = Uuid::new_v4();
+        async fn create_instance(&self, name: &str) -> InstanceUuid {
+            let instance_id = InstanceUuid::new_v4();
             let project_id = Uuid::new_v4();
             let instance = Instance::new(instance_id, project_id, &InstanceCreate {
                 identity: IdentityMetadataCreateParams { name: String::from(name).parse().unwrap(), description: format!("instance {}", name) },
@@ -1062,7 +1063,7 @@ mod tests {
             (0..super::MAX_PORT).step_by(NUM_SOURCE_NAT_PORTS.into())
         {
             let id = Uuid::new_v4();
-            let instance_id = Uuid::new_v4();
+            let instance_id = InstanceUuid::new_v4();
             let ip = context
                 .db_datastore
                 .allocate_instance_snat_ip(
@@ -1079,7 +1080,7 @@ mod tests {
         }
 
         // The next allocation should fail, due to IP exhaustion
-        let instance_id = Uuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
         let err = context
             .db_datastore
             .allocate_instance_snat_ip(
@@ -1212,7 +1213,7 @@ mod tests {
         // Allocate two addresses
         let mut ips = Vec::with_capacity(2);
         for (expected_ip, expected_first_port) in external_ips.clone().take(2) {
-            let instance_id = Uuid::new_v4();
+            let instance_id = InstanceUuid::new_v4();
             let ip = context
                 .db_datastore
                 .allocate_instance_snat_ip(
@@ -1240,7 +1241,7 @@ mod tests {
 
         // Allocate a new one, ensure it's the same as the first one we
         // released.
-        let instance_id = Uuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
         let ip = context
             .db_datastore
             .allocate_instance_snat_ip(
@@ -1267,7 +1268,7 @@ mod tests {
 
         // Allocate one more, ensure it's the next chunk after the second one
         // from the original loop.
-        let instance_id = Uuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
         let ip = context
             .db_datastore
             .allocate_instance_snat_ip(
@@ -1579,7 +1580,7 @@ mod tests {
         context.create_ip_pool("default", range, true).await;
 
         // Create one SNAT IP address.
-        let instance_id = Uuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
         let id = Uuid::new_v4();
         let ip = context
             .db_datastore

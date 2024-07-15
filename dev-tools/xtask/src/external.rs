@@ -52,14 +52,17 @@ impl External {
         self
     }
 
-    pub fn exec(mut self, bin_target: impl AsRef<OsStr>) -> Result<()> {
-        let error = self
-            .command
-            .arg("--bin")
-            .arg(bin_target)
-            .arg("--")
-            .args(self.args)
-            .exec();
+    pub fn exec_example(self, example_target: impl AsRef<OsStr>) -> Result<()> {
+        self.exec_common("--example", example_target.as_ref())
+    }
+
+    pub fn exec_bin(self, bin_target: impl AsRef<OsStr>) -> Result<()> {
+        self.exec_common("--bin", bin_target.as_ref())
+    }
+
+    fn exec_common(mut self, kind: &'static str, target: &OsStr) -> Result<()> {
+        let error =
+            self.command.arg(kind).arg(target).arg("--").args(self.args).exec();
         Err(error).context("failed to exec `cargo run`")
     }
 }

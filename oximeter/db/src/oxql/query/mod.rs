@@ -25,31 +25,6 @@ use chrono::DateTime;
 use chrono::Utc;
 use std::time::Duration;
 
-/// Special identifiers for column names or other widely-used values.
-pub mod special_idents {
-    use oximeter::DatumType;
-
-    pub const TIMESTAMP: &str = "timestamp";
-    pub const START_TIME: &str = "start_time";
-    pub const DATUM: &str = "datum";
-    pub const BINS: &str = "bins";
-    pub const COUNTS: &str = "counts";
-    pub const DATETIME64: &str = "DateTime64";
-    pub const ARRAYU64: &str = "Array[u64]";
-
-    pub fn array_type_name_from_histogram_type(
-        type_: DatumType,
-    ) -> Option<String> {
-        if !type_.is_histogram() {
-            return None;
-        }
-        Some(format!(
-            "Array[{}]",
-            type_.to_string().strip_prefix("Histogram").unwrap().to_lowercase(),
-        ))
-    }
-}
-
 /// A parsed OxQL query.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Query {

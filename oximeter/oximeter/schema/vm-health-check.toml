@@ -1,0 +1,87 @@
+format_version = 1
+
+[target]
+name = "virtual_machine"
+description = "A virtual machine instance"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "rack_id", "nexus_id", "instance_id", "silo_id", "project_id", "vmm_id", "sled_agent_id", "sled_agent_ip", "sled_agent_port" ] },
+]
+
+[[metrics]]
+name = "check"
+description = "The number of successful checks of an instance's health"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "state", "reason" ] }
+]
+
+[[metrics]]
+name = "incomplete_check"
+description = "The number of unsuccessful checks of an instance's health"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "failure_reason" ] }
+]
+
+[fields.rack_id]
+type = "uuid"
+description = "The rack ID of the Nexus process which performed the health check"
+
+[fields.nexus_id]
+type = "uuid"
+description = "The ID of the Nexus process which performed the health check"
+
+[fields.instance_id]
+type = "uuid"
+description = "The instance's ID"
+
+[fields.silo_id]
+type = "uuid"
+description = "The ID of the instance's silo"
+
+[fields.project_id]
+type = "uuid"
+description = "The ID of the instance's project"
+
+[fields.vmm_id]
+type = "uuid"
+description = "The VMM ID of the instance's virtual machine manager"
+
+[fields.sled_agent_id]
+type = "uuid"
+description = "The ID of the sled-agent managing the instance"
+
+[fields.sled_agent_ip]
+type = "ip_addr"
+description = "The IP address of the sled-agent managing the instance"
+
+[fields.sled_agent_port]
+type = "u16"
+description = "The port of the sled-agent managing the instance"
+
+[fields.state]
+type = "string"
+description = """
+The string representation of the instance's state as understood by \
+the VMM. If the check failed, this will generally be "failed"."""
+
+[fields.reason]
+type = "string"
+description = """
+Why the instance was marked as being in this state.
+
+If an instance was marked as "failed" due to a check failure, this \
+will be a string representation of the failure reason. Otherwise, if \
+the check was successful, this will be "success". Note that this may \
+be "success" even if the instance's state is "failed", which \
+indicates that we successfully queried the instance's state from the \
+sled-agent, and the *sled-agent* reported that the instance has \
+failed -- which is distinct from the instance watcher marking an \
+instance as failed due to a failed check."""
+
+[fields.failure_reason]
+type = "string"
+description = "The reason why the instance healh check failed"

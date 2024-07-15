@@ -59,7 +59,8 @@ impl super::Nexus {
             authz_silo,
         };
         let saga_outputs = self
-            .execute_saga::<sagas::project_create::SagaProjectCreate>(
+            .sagas
+            .saga_execute::<sagas::project_create::SagaProjectCreate>(
                 saga_params,
             )
             .await?;

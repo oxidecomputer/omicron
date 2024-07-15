@@ -10,6 +10,7 @@ use crate::blueprint_builder::BlueprintBuilder;
 use crate::blueprint_builder::Ensure;
 use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::Error;
+use crate::blueprint_builder::Operation;
 use crate::planner::omicron_zone_placement::PlacementError;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneConfig;
@@ -25,6 +26,7 @@ use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_client::ZoneKind;
 use slog::error;
 use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
@@ -32,7 +34,7 @@ use std::collections::BTreeSet;
 use std::hash::Hash;
 use std::str::FromStr;
 
-use self::omicron_zone_placement::DiscretionaryOmicronZone;
+pub(crate) use self::omicron_zone_placement::DiscretionaryOmicronZone;
 use self::omicron_zone_placement::OmicronZonePlacement;
 use self::omicron_zone_placement::OmicronZonePlacementSledState;
 
@@ -228,16 +230,19 @@ impl<'a> Planner<'a> {
         {
             // First, we need to ensure that sleds are using their expected
             // disks. This is necessary before we can allocate any zones.
-            if self.blueprint.sled_ensure_disks(sled_id, &sled_resources)?
-                == Ensure::Added
+            if let EnsureMultiple::Changed { added, removed } =
+                self.blueprint.sled_ensure_disks(sled_id, &sled_resources)?
             {
                 info!(
                     &self.log,
                     "altered physical disks";
                     "sled_id" => %sled_id
                 );
-                self.blueprint
-                    .comment(&format!("sled {}: altered disks", sled_id));
+                self.blueprint.record_operation(Operation::UpdateDisks {
+                    sled_id,
+                    added,
+                    removed,
+                });
 
                 // Note that this doesn't actually need to short-circuit the
                 // rest of the blueprint planning, as long as during execution
@@ -254,8 +259,10 @@ impl<'a> Planner<'a> {
                     "found sled missing NTP zone (will add one)";
                     "sled_id" => %sled_id
                 );
-                self.blueprint
-                    .comment(&format!("sled {}: add NTP zone", sled_id));
+                self.blueprint.record_operation(Operation::AddZone {
+                    sled_id,
+                    kind: ZoneKind::BoundaryNtp,
+                });
                 // Don't make any other changes to this sled.  However, this
                 // change is compatible with any other changes to other sleds,
                 // so we can "continue" here rather than "break".
@@ -298,7 +305,8 @@ impl<'a> Planner<'a> {
                 continue;
             }
 
-            // Every provisionable zpool on the sled should have a Crucible zone on it.
+            // Every provisionable zpool on the sled should have a Crucible zone
+            // on it.
             let mut ncrucibles_added = 0;
             for zpool_id in sled_resources.all_zpools(ZpoolFilter::InService) {
                 if self
@@ -323,75 +331,140 @@ impl<'a> Planner<'a> {
                 // (Yes, it's currently the last thing in the loop, but being
                 // explicit here means we won't forget to do this when more code
                 // is added below.)
-                self.blueprint.comment(&format!("sled {}: add zones", sled_id));
+                self.blueprint.record_operation(Operation::AddZone {
+                    sled_id,
+                    kind: ZoneKind::Crucible,
+                });
                 continue;
             }
         }
 
-        self.ensure_correct_number_of_nexus_zones(&sleds_waiting_for_ntp_zone)?;
+        self.do_plan_add_discretionary_zones(&sleds_waiting_for_ntp_zone)
+    }
+
+    fn do_plan_add_discretionary_zones(
+        &mut self,
+        sleds_waiting_for_ntp_zone: &BTreeSet<SledUuid>,
+    ) -> Result<(), Error> {
+        // We usually don't need to construct an `OmicronZonePlacement` to add
+        // discretionary zones, so defer its creation until it's needed.
+        let mut zone_placement = None;
+
+        for zone_kind in [
+            DiscretionaryOmicronZone::Nexus,
+            DiscretionaryOmicronZone::CockroachDb,
+        ] {
+            let num_zones_to_add = self.num_additional_zones_needed(zone_kind);
+            if num_zones_to_add == 0 {
+                continue;
+            }
+            // We need to add at least one zone; construct our `zone_placement`
+            // (or reuse the existing one if a previous loop iteration already
+            // created it).
+            let zone_placement = match zone_placement.as_mut() {
+                Some(zone_placement) => zone_placement,
+                None => {
+                    // This constructs a picture of the sleds as we currently
+                    // understand them, as far as which sleds have discretionary
+                    // zones. This will remain valid as we loop through the
+                    // `zone_kind`s in this function, as any zone additions will
+                    // update the `zone_placement` heap in-place.
+                    let current_discretionary_zones = self
+                        .input
+                        .all_sled_resources(SledFilter::Discretionary)
+                        .filter(|(sled_id, _)| {
+                            !sleds_waiting_for_ntp_zone.contains(&sled_id)
+                        })
+                        .map(|(sled_id, sled_resources)| {
+                            OmicronZonePlacementSledState {
+                            sled_id,
+                            num_zpools: sled_resources
+                                .all_zpools(ZpoolFilter::InService)
+                                .count(),
+                            discretionary_zones: self
+                                .blueprint
+                                .current_sled_zones(sled_id)
+                                .filter_map(|zone| {
+                                    DiscretionaryOmicronZone::from_zone_type(
+                                        &zone.zone_type,
+                                    )
+                                })
+                                .collect(),
+                        }
+                        });
+                    zone_placement.insert(OmicronZonePlacement::new(
+                        current_discretionary_zones,
+                    ))
+                }
+            };
+            self.add_discretionary_zones(
+                zone_placement,
+                zone_kind,
+                num_zones_to_add,
+            )?;
+        }
 
         Ok(())
     }
 
-    fn ensure_correct_number_of_nexus_zones(
+    // Given the current blueprint state and policy, returns the number of
+    // additional zones needed of the given `zone_kind` to satisfy the policy.
+    fn num_additional_zones_needed(
         &mut self,
-        sleds_waiting_for_ntp_zone: &BTreeSet<SledUuid>,
-    ) -> Result<(), Error> {
-        // Count the number of Nexus zones on all in-service sleds. This will
-        // include sleds that are in service but not eligible for new services,
-        // but will not include sleds that have been expunged or decommissioned.
-        let mut num_total_nexus = 0;
+        zone_kind: DiscretionaryOmicronZone,
+    ) -> usize {
+        // Count the number of `kind` zones on all in-service sleds. This
+        // will include sleds that are in service but not eligible for new
+        // services, but will not include sleds that have been expunged or
+        // decommissioned.
+        let mut num_existing_kind_zones = 0;
         for sled_id in self.input.all_sled_ids(SledFilter::InService) {
-            let num_nexus = self.blueprint.sled_num_nexus_zones(sled_id);
-            num_total_nexus += num_nexus;
+            let num_zones_of_kind = self
+                .blueprint
+                .sled_num_zones_of_kind(sled_id, zone_kind.into());
+            num_existing_kind_zones += num_zones_of_kind;
         }
 
-        // TODO-correctness What should we do if we have _too many_ Nexus
-        // instances? For now, just log it the number of zones any time we have
-        // at least the minimum number.
-        let mut nexus_to_add = self
-            .input
-            .target_nexus_zone_count()
-            .saturating_sub(num_total_nexus);
-        if nexus_to_add == 0 {
+        let target_count = match zone_kind {
+            DiscretionaryOmicronZone::Nexus => {
+                self.input.target_nexus_zone_count()
+            }
+            DiscretionaryOmicronZone::CockroachDb => {
+                self.input.target_cockroachdb_zone_count()
+            }
+        };
+
+        // TODO-correctness What should we do if we have _too many_
+        // `zone_kind` zones? For now, just log it the number of zones any
+        // time we have at least the minimum number.
+        let num_zones_to_add =
+            target_count.saturating_sub(num_existing_kind_zones);
+        if num_zones_to_add == 0 {
             info!(
-                self.log, "sufficient Nexus zones exist in plan";
-                "desired_count" => self.input.target_nexus_zone_count(),
-                "current_count" => num_total_nexus,
+                self.log, "sufficient {zone_kind:?} zones exist in plan";
+                "desired_count" => target_count,
+                "current_count" => num_existing_kind_zones,
             );
-            return Ok(());
         }
+        num_zones_to_add
+    }
 
-        let mut zone_placement = OmicronZonePlacement::new(
-            self.input
-                .all_sled_resources(SledFilter::Discretionary)
-                .filter(|(sled_id, _)| {
-                    !sleds_waiting_for_ntp_zone.contains(&sled_id)
-                })
-                .map(|(sled_id, sled_resources)| {
-                    OmicronZonePlacementSledState {
-                        sled_id,
-                        num_zpools: sled_resources
-                            .all_zpools(ZpoolFilter::InService)
-                            .count(),
-                        discretionary_zones: self
-                            .blueprint
-                            .current_sled_zones(sled_id)
-                            .filter_map(|zone| {
-                                DiscretionaryOmicronZone::from_zone_type(
-                                    &zone.zone_type,
-                                )
-                            })
-                            .collect(),
-                    }
-                }),
-        );
-
-        // Build a map of sled -> new nexus zones to add.
+    // Attempts to place `num_zones_to_add` new zones of `kind`.
+    //
+    // It is not an error if there are too few eligible sleds to start a
+    // sufficient number of zones; instead, we'll log a warning and start as
+    // many as we can (up to `num_zones_to_add`).
+    fn add_discretionary_zones(
+        &mut self,
+        zone_placement: &mut OmicronZonePlacement,
+        kind: DiscretionaryOmicronZone,
+        mut num_zones_to_add: usize,
+    ) -> Result<(), Error> {
+        // Build a map of sled -> new zones to add.
         let mut sleds_to_change: BTreeMap<SledUuid, usize> = BTreeMap::new();
 
-        for i in 0..nexus_to_add {
-            match zone_placement.place_zone(DiscretionaryOmicronZone::Nexus) {
+        for i in 0..num_zones_to_add {
+            match zone_placement.place_zone(kind) {
                 Ok(sled_id) => {
                     *sleds_to_change.entry(sled_id).or_default() += 1;
                 }
@@ -402,14 +475,14 @@ impl<'a> Planner<'a> {
                     // able to produce blueprints to achieve that status.
                     warn!(
                         self.log,
-                        "failed to place all new desired Nexus instances";
+                        "failed to place all new desired {kind:?} zones";
                         "placed" => i,
-                        "wanted_to_place" => nexus_to_add,
+                        "wanted_to_place" => num_zones_to_add,
                     );
 
-                    // Adjust `nexus_to_add` downward so it's consistent with
-                    // the number of Nexuses we're actually adding.
-                    nexus_to_add = i;
+                    // Adjust `num_zones_to_add` downward so it's consistent
+                    // with the number of zones we're actually adding.
+                    num_zones_to_add = i;
 
                     break;
                 }
@@ -417,30 +490,43 @@ impl<'a> Planner<'a> {
         }
 
         // For each sled we need to change, actually do so.
-        let mut total_added = 0;
-        for (sled_id, additional_nexus_count) in sleds_to_change {
+        let mut new_zones_added = 0;
+        for (sled_id, additional_zone_count) in sleds_to_change {
             // TODO-cleanup This is awkward: the builder wants to know how many
-            // total Nexus zones go on a given sled, but we have a count of how
-            // many we want to add. Construct a new target count. Maybe the
-            // builder should provide a different interface here?
-            let new_nexus_count = self.blueprint.sled_num_nexus_zones(sled_id)
-                + additional_nexus_count;
-            match self
-                .blueprint
-                .sled_ensure_zone_multiple_nexus(sled_id, new_nexus_count)?
-            {
-                EnsureMultiple::Added(n) => {
+            // total zones go on a given sled, but we have a count of how many
+            // we want to add. Construct a new target count. Maybe the builder
+            // should provide a different interface here?
+            let new_total_zone_count =
+                self.blueprint.sled_num_zones_of_kind(sled_id, kind.into())
+                    + additional_zone_count;
+
+            let result = match kind {
+                DiscretionaryOmicronZone::Nexus => {
+                    self.blueprint.sled_ensure_zone_multiple_nexus(
+                        sled_id,
+                        new_total_zone_count,
+                    )?
+                }
+                DiscretionaryOmicronZone::CockroachDb => {
+                    self.blueprint.sled_ensure_zone_multiple_cockroachdb(
+                        sled_id,
+                        new_total_zone_count,
+                    )?
+                }
+            };
+            match result {
+                EnsureMultiple::Changed { added, removed: _ } => {
                     info!(
-                        self.log, "will add {n} Nexus zone(s) to sled";
+                        self.log, "will add {added} Nexus zone(s) to sled";
                         "sled_id" => %sled_id,
                     );
-                    total_added += n;
+                    new_zones_added += added;
                 }
                 // This is only possible if we asked the sled to ensure the same
                 // number of zones it already has, but that's impossible based
                 // on the way we built up `sleds_to_change`.
                 EnsureMultiple::NotNeeded => unreachable!(
-                    "sled on which we added Nexus zones did not add any"
+                    "sled on which we added {kind:?} zones did not add any"
                 ),
             }
         }
@@ -449,8 +535,8 @@ impl<'a> Planner<'a> {
         // arrived here, we think we've added the number of Nexus zones we
         // needed to.
         assert_eq!(
-            total_added, nexus_to_add,
-            "internal error counting Nexus zones"
+            new_zones_added, num_zones_to_add,
+            "internal error counting {kind:?} zones"
         );
 
         Ok(())
@@ -586,8 +672,16 @@ pub(crate) fn zone_needs_expungement(
     }
 
     // Should we expunge the zone because durable storage is gone?
-    if let Some(durable_storage_zpool) = zone_config.zone_type.zpool() {
+    if let Some(durable_storage_zpool) = zone_config.zone_type.durable_zpool() {
         let zpool_id = durable_storage_zpool.id();
+        if !sled_details.resources.zpool_is_provisionable(&zpool_id) {
+            return Some(ZoneExpungeReason::DiskExpunged);
+        }
+    };
+
+    // Should we expunge the zone because transient storage is gone?
+    if let Some(ref filesystem_zpool) = zone_config.filesystem_pool {
+        let zpool_id = filesystem_zpool.id();
         if !sled_details.resources.zpool_is_provisionable(&zpool_id) {
             return Some(ZoneExpungeReason::DiskExpunged);
         }
@@ -644,6 +738,7 @@ mod test {
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_client::ZoneKind;
+    use std::collections::HashMap;
     use std::mem;
     use typed_rng::TypedUuidRng;
 
@@ -918,7 +1013,7 @@ mod test {
             1
         );
 
-        // Now run the planner.  It should add additional Nexus instances to the
+        // Now run the planner.  It should add additional Nexus zones to the
         // one sled we have.
         let mut builder = input.into_builder();
         builder.policy_mut().target_nexus_zone_count = 5;
@@ -1118,8 +1213,9 @@ mod test {
     }
 
     #[test]
-    fn test_disk_expungement_removes_zones() {
-        static TEST_NAME: &str = "planner_disk_expungement_removes_zones";
+    fn test_disk_expungement_removes_zones_durable_zpool() {
+        static TEST_NAME: &str =
+            "planner_disk_expungement_removes_zones_durable_zpool";
         let logctx = test_setup_log(TEST_NAME);
 
         // Create an example system with a single sled
@@ -1135,9 +1231,30 @@ mod test {
         // The example system should be assigning crucible zones to each
         // in-service disk. When we expunge one of these disks, the planner
         // should remove the associated zone.
+        //
+        // Find a disk which is only used by a single zone, if one exists.
+        //
+        // If we don't do this, we might select a physical disk supporting
+        // multiple zones of distinct types.
+        let mut zpool_by_zone_usage = HashMap::new();
+        for zones in blueprint1.blueprint_zones.values() {
+            for zone in &zones.zones {
+                let pool = zone.filesystem_pool.as_ref().unwrap();
+                zpool_by_zone_usage
+                    .entry(pool.id())
+                    .and_modify(|count| *count += 1)
+                    .or_insert_with(|| 1);
+            }
+        }
         let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
-        let (_, disk) =
-            sled_details.resources.zpools.iter_mut().next().unwrap();
+        let (_, disk) = sled_details
+            .resources
+            .zpools
+            .iter_mut()
+            .find(|(zpool_id, _disk)| {
+                *zpool_by_zone_usage.get(*zpool_id).unwrap() == 1
+            })
+            .expect("Couldn't find zpool only used by a single zone");
         disk.policy = PhysicalDiskPolicy::Expunged;
 
         let input = builder.build();
@@ -1180,6 +1297,113 @@ mod test {
             BlueprintZoneDisposition::Expunged,
             "Should have expunged this zone"
         );
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_disk_expungement_removes_zones_transient_filesystem() {
+        static TEST_NAME: &str =
+            "planner_disk_expungement_removes_zones_transient_filesystem";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Create an example system with a single sled
+        let (collection, input, blueprint1) =
+            example(&logctx.log, TEST_NAME, 1);
+
+        let mut builder = input.into_builder();
+
+        // Aside: Avoid churning on the quantity of Nexus zones - we're okay
+        // staying at one.
+        builder.policy_mut().target_nexus_zone_count = 1;
+
+        // Find whatever pool NTP was using
+        let pool_to_expunge = blueprint1
+            .blueprint_zones
+            .iter()
+            .find_map(|(_, zones_config)| {
+                for zone_config in &zones_config.zones {
+                    if zone_config.zone_type.is_ntp() {
+                        return zone_config.filesystem_pool.clone();
+                    }
+                }
+                None
+            })
+            .expect("No NTP zone pool?");
+
+        // This is mostly for test stability across "example system" changes:
+        // Find how many other zones are using this same zpool.
+        let zones_using_zpool = blueprint1.blueprint_zones.iter().fold(
+            0,
+            |acc, (_, zones_config)| {
+                let mut zones_using_zpool = 0;
+                for zone_config in &zones_config.zones {
+                    if let Some(pool) = &zone_config.filesystem_pool {
+                        if pool == &pool_to_expunge {
+                            zones_using_zpool += 1;
+                            continue;
+                        }
+                    }
+                    if let Some(pool) = zone_config.zone_type.durable_zpool() {
+                        if pool == &pool_to_expunge {
+                            zones_using_zpool += 1;
+                            continue;
+                        }
+                    }
+                }
+                acc + zones_using_zpool
+            },
+        );
+        assert!(
+            zones_using_zpool > 0,
+            "We should be expunging at least one zone using this zpool"
+        );
+
+        // For that pool, find the physical disk behind it, and mark it
+        // expunged.
+        let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
+        let disk = sled_details
+            .resources
+            .zpools
+            .get_mut(&pool_to_expunge.id())
+            .unwrap();
+        disk.policy = PhysicalDiskPolicy::Expunged;
+
+        let input = builder.build();
+
+        let blueprint2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &input,
+            "test: expunge a disk with a zone on top",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("failed to plan");
+
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        println!("1 -> 2 (expunge a disk):\n{}", diff.display());
+        assert_eq!(diff.sleds_added.len(), 0);
+        assert_eq!(diff.sleds_removed.len(), 0);
+        assert_eq!(diff.sleds_modified.len(), 1);
+
+        // We should be removing all zones using this zpool
+        assert_eq!(diff.zones.added.len(), 0);
+        assert_eq!(diff.zones.removed.len(), 0);
+        assert_eq!(diff.zones.modified.len(), 1);
+
+        let (_zone_id, modified_zones) =
+            diff.zones.modified.iter().next().unwrap();
+        assert_eq!(modified_zones.zones.len(), zones_using_zpool);
+        for modified_zone in &modified_zones.zones {
+            assert_eq!(
+                modified_zone.zone.disposition(),
+                BlueprintZoneDisposition::Expunged,
+                "Should have expunged this zone"
+            );
+        }
 
         logctx.cleanup_successful();
     }

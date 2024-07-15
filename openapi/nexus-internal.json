@@ -628,8 +628,8 @@
     },
     "/disk/{disk_id}/remove-read-only-parent": {
       "post": {
-        "summary": "Request removal of a read_only_parent from a disk",
-        "description": "This is a thin wrapper around the volume_remove_read_only_parent saga. All we are doing here is, given a disk UUID, figure out what the volume_id is for that disk, then use that to call the volume_remove_read_only_parent saga on it.",
+        "summary": "Request removal of a read_only_parent from a disk.",
+        "description": "This is a thin wrapper around the volume_remove_read_only_parent saga. All we are doing here is, given a disk UUID, figure out what the volume_id is for that disk, then use that to call the disk_remove_read_only_parent saga on it.",
         "operationId": "cpapi_disk_remove_read_only_parent",
         "parameters": [
           {
@@ -1347,7 +1347,7 @@
     },
     "/volume/{volume_id}/remove-read-only-parent": {
       "post": {
-        "summary": "Request removal of a read_only_parent from a volume",
+        "summary": "Request removal of a read_only_parent from a volume.",
         "description": "A volume can be created with the source data for that volume being another volume that attached as a \"read_only_parent\". In the background there exists a scrubber that will copy the data from the read_only_parent into the volume. When that scrubber has completed copying the data, this endpoint can be called to update the database that the read_only_parent is no longer needed for a volume and future attachments of this volume should not include that read_only_parent.",
         "operationId": "cpapi_volume_remove_read_only_parent",
         "parameters": [
@@ -1567,6 +1567,7 @@
           "checker": {
             "nullable": true,
             "description": "Checker to apply to incoming messages.",
+            "default": null,
             "type": "string"
           },
           "originate": {
@@ -1579,6 +1580,7 @@
           "shaper": {
             "nullable": true,
             "description": "Shaper to apply to outgoing messages.",
+            "default": null,
             "type": "string"
           }
         },
@@ -1676,6 +1678,7 @@
           "local_pref": {
             "nullable": true,
             "description": "Apply a local preference to routes received from this peer.",
+            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -1683,11 +1686,13 @@
           "md5_auth_key": {
             "nullable": true,
             "description": "Use the given key for TCP-MD5 authentication with the peer.",
+            "default": null,
             "type": "string"
           },
           "min_ttl": {
             "nullable": true,
             "description": "Require messages from a peer have a minimum IP time to live field.",
+            "default": null,
             "type": "integer",
             "format": "uint8",
             "minimum": 0
@@ -1695,6 +1700,7 @@
           "multi_exit_discriminator": {
             "nullable": true,
             "description": "Apply the provided multi-exit discriminator (MED) updates sent to the peer.",
+            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -1706,6 +1712,7 @@
           "remote_asn": {
             "nullable": true,
             "description": "Require that a peer has a specified ASN.",
+            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -1713,6 +1720,7 @@
           "vlan_id": {
             "nullable": true,
             "description": "Associate a VLAN ID with a BGP peer session.",
+            "default": null,
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -1956,6 +1964,14 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/BlueprintZoneDisposition"
+              }
+            ]
+          },
+          "filesystem_pool": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ZpoolName"
               }
             ]
           },
@@ -3145,8 +3161,11 @@
           "dst_propolis_id": {
             "nullable": true,
             "description": "If a migration is active, the ID of the target VMM.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              }
+            ]
           },
           "gen": {
             "description": "Generation number for this state.",
@@ -3165,8 +3184,11 @@
           "propolis_id": {
             "nullable": true,
             "description": "The instance's currently active VMM ID.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              }
+            ]
           },
           "time_updated": {
             "description": "Timestamp for this information.",
@@ -3177,14 +3199,6 @@
         "required": [
           "gen",
           "time_updated"
-        ]
-      },
-      "IpKind": {
-        "type": "string",
-        "enum": [
-          "snat",
-          "floating",
-          "ephemeral"
         ]
       },
       "IpNet": {
@@ -3428,9 +3442,91 @@
         "minLength": 5,
         "maxLength": 17
       },
+      "MigrationRole": {
+        "oneOf": [
+          {
+            "description": "This update concerns the source VMM of a migration.",
+            "type": "string",
+            "enum": [
+              "source"
+            ]
+          },
+          {
+            "description": "This update concerns the target VMM of a migration.",
+            "type": "string",
+            "enum": [
+              "target"
+            ]
+          }
+        ]
+      },
+      "MigrationRuntimeState": {
+        "description": "An update from a sled regarding the state of a migration, indicating the role of the VMM whose migration state was updated.",
+        "type": "object",
+        "properties": {
+          "gen": {
+            "$ref": "#/components/schemas/Generation"
+          },
+          "migration_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "$ref": "#/components/schemas/MigrationRole"
+          },
+          "state": {
+            "$ref": "#/components/schemas/MigrationState"
+          },
+          "time_updated": {
+            "description": "Timestamp for the migration state update.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "gen",
+          "migration_id",
+          "role",
+          "state",
+          "time_updated"
+        ]
+      },
+      "MigrationState": {
+        "description": "The state of an instance's live migration.",
+        "oneOf": [
+          {
+            "description": "The migration has not started for this VMM.",
+            "type": "string",
+            "enum": [
+              "pending"
+            ]
+          },
+          {
+            "description": "The migration is in progress.",
+            "type": "string",
+            "enum": [
+              "in_progress"
+            ]
+          },
+          {
+            "description": "The migration has failed.",
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          },
+          {
+            "description": "The migration has completed.",
+            "type": "string",
+            "enum": [
+              "completed"
+            ]
+          }
+        ]
+      },
       "Name": {
         "title": "A name unique within the parent collection",
-        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
+        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
         "type": "string",
         "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,
@@ -3467,6 +3563,13 @@
           },
           "subnet": {
             "$ref": "#/components/schemas/IpNet"
+          },
+          "transit_ips": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNet"
+            }
           },
           "vni": {
             "$ref": "#/components/schemas/Vni"
@@ -3724,14 +3827,14 @@
           "vendor"
         ]
       },
-      "PortConfigV1": {
+      "PortConfigV2": {
         "type": "object",
         "properties": {
           "addresses": {
-            "description": "This port's addresses.",
+            "description": "This port's addresses and optional vlan IDs",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/IpNet"
+              "$ref": "#/components/schemas/UplinkAddressConfig"
             }
           },
           "autoneg": {
@@ -3829,7 +3932,7 @@
             "format": "ip"
           },
           "kind": {
-            "$ref": "#/components/schemas/IpKind"
+            "$ref": "#/components/schemas/ProbeExternalIpKind"
           },
           "last_port": {
             "type": "integer",
@@ -3842,6 +3945,14 @@
           "ip",
           "kind",
           "last_port"
+        ]
+      },
+      "ProbeExternalIpKind": {
+        "type": "string",
+        "enum": [
+          "snat",
+          "floating",
+          "ephemeral"
         ]
       },
       "ProbeInfo": {
@@ -4048,7 +4159,7 @@
             "description": "Initial rack network configuration",
             "allOf": [
               {
-                "$ref": "#/components/schemas/RackNetworkConfigV1"
+                "$ref": "#/components/schemas/RackNetworkConfigV2"
               }
             ]
           },
@@ -4083,7 +4194,7 @@
           "zpools"
         ]
       },
-      "RackNetworkConfigV1": {
+      "RackNetworkConfigV2": {
         "description": "Initial network configuration",
         "type": "object",
         "properties": {
@@ -4116,7 +4227,7 @@
             "description": "Uplinks for connecting the rack to external networks",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/PortConfigV1"
+              "$ref": "#/components/schemas/PortConfigV2"
             }
           },
           "rack_subnet": {
@@ -4257,6 +4368,7 @@
           "vlan_id": {
             "nullable": true,
             "description": "The VLAN id associated with this route.",
+            "default": null,
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -4572,10 +4684,22 @@
               }
             ]
           },
+          "migration_state": {
+            "nullable": true,
+            "description": "The current state of any in-progress migration for this instance, as understood by this sled.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MigrationRuntimeState"
+              }
+            ]
+          },
           "propolis_id": {
             "description": "The ID of the VMM whose state is being reported.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              }
+            ]
           },
           "vmm_state": {
             "description": "The most recent state of the sled's VMM process.",
@@ -4814,6 +4938,10 @@
         "type": "string",
         "format": "uuid"
       },
+      "TypedUuidForPropolisKind": {
+        "type": "string",
+        "format": "uuid"
+      },
       "TypedUuidForSledKind": {
         "type": "string",
         "format": "uuid"
@@ -4890,6 +5018,25 @@
           "items"
         ]
       },
+      "UplinkAddressConfig": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "$ref": "#/components/schemas/IpNet"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id (if any) associated with this address.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "address"
+        ]
+      },
       "UpstairsRepairType": {
         "type": "string",
         "enum": [
@@ -4899,7 +5046,7 @@
       },
       "UserId": {
         "title": "A name unique within the parent collection",
-        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
+        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
         "type": "string",
         "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,

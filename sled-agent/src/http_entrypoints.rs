@@ -20,10 +20,10 @@ use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
 use display_error_chain::DisplayErrorChain;
 use dropshot::{
-    endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseCreated,
-    HttpResponseDeleted, HttpResponseHeaders, HttpResponseOk,
-    HttpResponseUpdatedNoContent, Path, Query, RequestContext, StreamingBody,
-    TypedBody,
+    endpoint, ApiDescription, ApiDescriptionRegisterError, FreeformBody,
+    HttpError, HttpResponseCreated, HttpResponseDeleted, HttpResponseHeaders,
+    HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query, RequestContext,
+    StreamingBody, TypedBody,
 };
 use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use installinator_common::M2Slot;
@@ -31,7 +31,10 @@ use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, SledInstanceState, UpdateArtifactId,
 };
-use omicron_common::api::internal::shared::SwitchPorts;
+use omicron_common::api::internal::shared::{
+    ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
+};
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::DiskVariant;
@@ -43,7 +46,9 @@ type SledApiDescription = ApiDescription<SledAgent>;
 
 /// Returns a description of the sled agent API
 pub fn api() -> SledApiDescription {
-    fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
+    fn register_endpoints(
+        api: &mut SledApiDescription,
+    ) -> Result<(), ApiDescriptionRegisterError> {
         api.register(disk_put)?;
         api.register(cockroachdb_init)?;
         api.register(instance_issue_disk_snapshot_request)?;
@@ -85,6 +90,8 @@ pub fn api() -> SledApiDescription {
         api.register(host_os_write_status_delete)?;
         api.register(inventory)?;
         api.register(bootstore_status)?;
+        api.register(list_vpc_routes)?;
+        api.register(set_vpc_routes)?;
 
         Ok(())
     }
@@ -414,7 +421,7 @@ async fn cockroachdb_init(
 /// Path parameters for Instance requests (sled agent API)
 #[derive(Deserialize, JsonSchema)]
 struct InstancePathParam {
-    instance_id: Uuid,
+    instance_id: InstanceUuid,
 }
 
 #[endpoint {
@@ -614,7 +621,7 @@ async fn instance_issue_disk_snapshot_request(
     let body = body.into_inner();
 
     sa.instance_issue_disk_snapshot_request(
-        path_params.instance_id,
+        InstanceUuid::from_untyped_uuid(path_params.instance_id),
         path_params.disk_id,
         body.snapshot_id,
     )
@@ -1023,4 +1030,30 @@ async fn bootstore_status(
         })?
         .into();
     Ok(HttpResponseOk(status))
+}
+
+/// Get the current versions of VPC routing rules.
+#[endpoint {
+    method = GET,
+    path = "/vpc-routes",
+}]
+async fn list_vpc_routes(
+    request_context: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<Vec<ResolvedVpcRouteState>>, HttpError> {
+    let sa = request_context.context();
+    Ok(HttpResponseOk(sa.list_vpc_routes()))
+}
+
+/// Update VPC routing rules.
+#[endpoint {
+    method = PUT,
+    path = "/vpc-routes",
+}]
+async fn set_vpc_routes(
+    request_context: RequestContext<SledAgent>,
+    body: TypedBody<Vec<ResolvedVpcRouteSet>>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = request_context.context();
+    sa.set_vpc_routes(body.into_inner())?;
+    Ok(HttpResponseUpdatedNoContent())
 }

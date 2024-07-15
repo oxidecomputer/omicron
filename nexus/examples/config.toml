@@ -5,7 +5,7 @@
 [console]
 # Directory for static assets. Absolute path or relative to CWD.
 static_dir = "out/console-assets"
-session_idle_timeout_minutes = 480      # 6 hours
+session_idle_timeout_minutes = 480 # 8 hours
 session_absolute_timeout_minutes = 1440 # 24 hours
 
 # List of authentication schemes to support.
@@ -110,14 +110,17 @@ phantom_disks.period_secs = 30
 physical_disk_adoption.period_secs = 30
 blueprints.period_secs_load = 10
 blueprints.period_secs_execute = 60
+blueprints.period_secs_collect_crdb_node_ids = 180
 sync_service_zone_nat.period_secs = 30
 switch_port_settings_manager.period_secs = 30
 region_replacement.period_secs = 30
+region_replacement_driver.period_secs = 10
 # How frequently to query the status of active instances.
 instance_watcher.period_secs = 30
 service_firewall_propagation.period_secs = 300
 v2p_mapping_propagation.period_secs = 30
 abandoned_vmm_reaper.period_secs = 60
+lookup_region_port.period_secs = 60
 
 [default_region_allocation_strategy]
 # allocate region on 3 random distinct zpools, on 3 random distinct sleds.

@@ -179,9 +179,9 @@ networking_allow_list_view               GET      /v1/system/networking/allow-li
 networking_bfd_disable                   POST     /v1/system/networking/bfd-disable
 networking_bfd_enable                    POST     /v1/system/networking/bfd-enable
 networking_bfd_status                    GET      /v1/system/networking/bfd-status
-networking_bgp_announce_set_create       POST     /v1/system/networking/bgp-announce
 networking_bgp_announce_set_delete       DELETE   /v1/system/networking/bgp-announce
 networking_bgp_announce_set_list         GET      /v1/system/networking/bgp-announce
+networking_bgp_announce_set_update       PUT      /v1/system/networking/bgp-announce
 networking_bgp_config_create             POST     /v1/system/networking/bgp
 networking_bgp_config_delete             DELETE   /v1/system/networking/bgp
 networking_bgp_config_list               GET      /v1/system/networking/bgp
@@ -232,6 +232,16 @@ vpc_delete                               DELETE   /v1/vpcs/{vpc}
 vpc_firewall_rules_update                PUT      /v1/vpc-firewall-rules
 vpc_firewall_rules_view                  GET      /v1/vpc-firewall-rules
 vpc_list                                 GET      /v1/vpcs
+vpc_router_create                        POST     /v1/vpc-routers
+vpc_router_delete                        DELETE   /v1/vpc-routers/{router}
+vpc_router_list                          GET      /v1/vpc-routers
+vpc_router_route_create                  POST     /v1/vpc-router-routes
+vpc_router_route_delete                  DELETE   /v1/vpc-router-routes/{route}
+vpc_router_route_list                    GET      /v1/vpc-router-routes
+vpc_router_route_update                  PUT      /v1/vpc-router-routes/{route}
+vpc_router_route_view                    GET      /v1/vpc-router-routes/{route}
+vpc_router_update                        PUT      /v1/vpc-routers/{router}
+vpc_router_view                          GET      /v1/vpc-routers/{router}
 vpc_subnet_create                        POST     /v1/vpc-subnets
 vpc_subnet_delete                        DELETE   /v1/vpc-subnets/{subnet}
 vpc_subnet_list                          GET      /v1/vpc-subnets
