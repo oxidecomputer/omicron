@@ -12,7 +12,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use installinator_api::EventReportStatus;
+use installinator_artifactd::EventReportStatus;
 use tokio::sync::{oneshot, watch};
 use update_engine::events::StepEventIsTerminal;
 use uuid::Uuid;

@@ -4,7 +4,7 @@
 
 use std::{net::SocketAddr, time::Duration};
 
-use installinator_client::ClientError;
+use installinator_artifact_client::ClientError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

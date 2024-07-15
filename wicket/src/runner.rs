@@ -22,7 +22,7 @@ use tokio::sync::mpsc::{
     unbounded_channel, UnboundedReceiver, UnboundedSender,
 };
 use tokio::time::{interval, Duration};
-use wicket_common::rack_update::AbortUpdateOptions;
+use wicketd_client::types::AbortUpdateOptions;
 
 use crate::events::EventReportMap;
 use crate::helpers::get_update_test_error;

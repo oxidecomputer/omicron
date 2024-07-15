@@ -5,16 +5,17 @@
 //! The collection of tasks used for interacting with MGS and maintaining
 //! runtime state.
 
+use crate::{RackV1Inventory, SpInventory};
 use futures::StreamExt;
-use gateway_client::types::SpIgnition;
+use gateway_client::types::{SpIdentifier, SpIgnition};
+use schemars::JsonSchema;
+use serde::Serialize;
 use slog::{info, o, warn, Logger};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddrV6;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Duration, Instant};
 use tokio_stream::StreamMap;
-use wicket_common::inventory::{RackV1Inventory, SpIdentifier, SpInventory};
-use wicketd_api::GetInventoryResponse;
 
 use self::inventory::{
     FetchedIgnitionState, FetchedSpData, IgnitionPresence,
@@ -49,6 +50,15 @@ enum MgsRequest {
 #[derive(Debug, Clone)]
 pub struct MgsHandle {
     tx: tokio::sync::mpsc::Sender<MgsRequest>,
+}
+
+/// The response to a `get_inventory` call: the inventory known to wicketd, or a
+/// notification that data is unavailable.
+#[derive(Clone, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case", tag = "type", content = "data")]
+pub enum GetInventoryResponse {
+    Response { inventory: RackV1Inventory, mgs_last_seen: Duration },
+    Unavailable,
 }
 
 /// Channel errors result only from system shutdown.

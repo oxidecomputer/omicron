@@ -12,6 +12,7 @@ use crate::MgsHandle;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Result;
+use gateway_client::types::SpIdentifier;
 use internal_dns::resolver::Resolver;
 use sled_hardware_types::Baseboard;
 use slog::info;
@@ -20,7 +21,6 @@ use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::OnceLock;
-use wicket_common::inventory::SpIdentifier;
 
 /// Shared state used by API handlers
 pub struct ServerContext {

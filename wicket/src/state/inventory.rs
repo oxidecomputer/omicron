@@ -11,9 +11,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::iter::Iterator;
-use wicket_common::inventory::{
+use wicket_common::rack_update::SpType;
+use wicketd_client::types::{
     RackV1Inventory, RotInventory, RotSlot, SpComponentCaboose,
-    SpComponentInfo, SpIgnition, SpState, SpType,
+    SpComponentInfo, SpIgnition, SpState,
 };
 
 pub static ALL_COMPONENT_IDS: Lazy<Vec<ComponentId>> = Lazy::new(|| {
@@ -172,23 +173,18 @@ impl Component {
     }
 
     pub fn stage0_version(&self) -> String {
-        version_or_unknown(self.sp().rot.as_ref().and_then(|rot| {
-            // caboose_stage0 is an Option<Option<SpComponentCaboose>>, so we
-            // need to unwrap it twice, effectively. flatten would be nice but
-            // it doesn't work on Option<&Option<T>>, which is what we end up
-            // with.
-            rot.caboose_stage0.as_ref().map_or(None, |x| x.as_ref())
-        }))
+        version_or_unknown(
+            self.sp().rot.as_ref().and_then(|rot| rot.caboose_stage0.as_ref()),
+        )
     }
 
     pub fn stage0next_version(&self) -> String {
-        version_or_unknown(self.sp().rot.as_ref().and_then(|rot| {
-            // caboose_stage0next is an Option<Option<SpComponentCaboose>>, so we
-            // need to unwrap it twice, effectively. flatten would be nice but
-            // it doesn't work on Option<&Option<T>>, which is what we end up
-            // with.
-            rot.caboose_stage0next.as_ref().map_or(None, |x| x.as_ref())
-        }))
+        version_or_unknown(
+            self.sp()
+                .rot
+                .as_ref()
+                .and_then(|rot| rot.caboose_stage0next.as_ref()),
+        )
     }
 }
 

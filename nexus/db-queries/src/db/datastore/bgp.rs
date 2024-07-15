@@ -572,14 +572,14 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         port_settings_id: Uuid,
-        interface_name: &String,
+        interface_name: &str,
         addr: IpNetwork,
     ) -> ListResultVec<SwitchPortBgpPeerConfigCommunity> {
         use db::schema::switch_port_settings_bgp_peer_config_communities::dsl;
 
         let results = dsl::switch_port_settings_bgp_peer_config_communities
             .filter(dsl::port_settings_id.eq(port_settings_id))
-            .filter(dsl::interface_name.eq(interface_name.clone()))
+            .filter(dsl::interface_name.eq(interface_name.to_owned()))
             .filter(dsl::addr.eq(addr))
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -592,7 +592,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         port_settings_id: Uuid,
-        interface_name: &String,
+        interface_name: &str,
         addr: IpNetwork,
     ) -> LookupResult<Option<Vec<SwitchPortBgpPeerConfigAllowExport>>> {
         use db::schema::switch_port_settings_bgp_peer_config as db_peer;
@@ -619,7 +619,8 @@ impl DataStore {
                     dsl::switch_port_settings_bgp_peer_config_allow_export
                         .filter(db_allow::port_settings_id.eq(port_settings_id))
                         .filter(
-                            db_allow::interface_name.eq(interface_name.clone()),
+                            db_allow::interface_name
+                                .eq(interface_name.to_owned()),
                         )
                         .filter(db_allow::addr.eq(addr))
                         .load_async(&conn)
@@ -637,7 +638,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         port_settings_id: Uuid,
-        interface_name: &String,
+        interface_name: &str,
         addr: IpNetwork,
     ) -> LookupResult<Option<Vec<SwitchPortBgpPeerConfigAllowImport>>> {
         use db::schema::switch_port_settings_bgp_peer_config as db_peer;
@@ -664,7 +665,8 @@ impl DataStore {
                     dsl::switch_port_settings_bgp_peer_config_allow_import
                         .filter(db_allow::port_settings_id.eq(port_settings_id))
                         .filter(
-                            db_allow::interface_name.eq(interface_name.clone()),
+                            db_allow::interface_name
+                                .eq(interface_name.to_owned()),
                         )
                         .filter(db_allow::addr.eq(addr))
                         .load_async(&conn)

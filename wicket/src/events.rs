@@ -8,11 +8,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::time::{Duration, SystemTime};
-use wicket_common::inventory::RackV1Inventory;
 use wicket_common::update_events::EventReport;
 use wicketd_client::types::{
     ArtifactId, CurrentRssUserConfig, GetLocationResponse, IgnitionCommand,
-    RackOperationStatus, SemverVersion,
+    RackOperationStatus, RackV1Inventory, SemverVersion,
 };
 
 /// Event report type returned by the get_artifacts_and_event_reports API call.

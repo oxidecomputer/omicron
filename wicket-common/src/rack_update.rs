@@ -4,79 +4,90 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use std::{collections::BTreeSet, time::Duration};
+use std::{collections::BTreeSet, fmt};
 
-use dropshot::HttpError;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::inventory::SpIdentifier;
-
-#[derive(Clone, Debug, Default, JsonSchema, Deserialize, Serialize)]
-pub struct StartUpdateOptions {
-    /// If passed in, fails the update with a simulated error.
-    pub test_error: Option<UpdateTestError>,
-
-    /// If passed in, creates a test step that lasts these many seconds long.
-    ///
-    /// This is used for testing.
-    pub test_step_seconds: Option<u64>,
-
-    /// If passed in, simulates a result for the RoT Bootloader update.
-    ///
-    /// This is used for testing.
-    pub test_simulate_rot_bootloader_result: Option<UpdateSimulatedResult>,
-
-    /// If passed in, simulates a result for the RoT update.
-    ///
-    /// This is used for testing.
-    pub test_simulate_rot_result: Option<UpdateSimulatedResult>,
-
-    /// If passed in, simulates a result for the SP update.
-    ///
-    /// This is used for testing.
-    pub test_simulate_sp_result: Option<UpdateSimulatedResult>,
-
-    /// If true, skip the check on the current RoT version and always update it
-    /// regardless of whether the update appears to be neeeded.
-    pub skip_rot_bootloader_version_check: bool,
-
-    /// If true, skip the check on the current RoT version and always update it
-    /// regardless of whether the update appears to be neeeded.
-    pub skip_rot_version_check: bool,
-
-    /// If true, skip the check on the current SP version and always update it
-    /// regardless of whether the update appears to be neeeded.
-    pub skip_sp_version_check: bool,
+// TODO: unify this with the one in gateway http_entrypoints.rs.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+pub struct SpIdentifier {
+    #[serde(rename = "type")]
+    pub type_: SpType,
+    pub slot: u32,
 }
 
-/// A simulated result for a component update.
-///
-/// Used by [`StartUpdateOptions`].
-#[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum UpdateSimulatedResult {
-    Success,
-    Warning,
-    Skipped,
-    Failure,
+impl From<SpIdentifier> for gateway_client::types::SpIdentifier {
+    fn from(value: SpIdentifier) -> Self {
+        Self { type_: value.type_.into(), slot: value.slot }
+    }
 }
 
-#[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
-pub struct ClearUpdateStateOptions {
-    /// If passed in, fails the clear update state operation with a simulated
-    /// error.
-    pub test_error: Option<UpdateTestError>,
+impl From<gateway_client::types::SpIdentifier> for SpIdentifier {
+    fn from(value: gateway_client::types::SpIdentifier) -> Self {
+        Self { type_: value.type_.into(), slot: value.slot }
+    }
 }
 
-#[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
-pub struct AbortUpdateOptions {
-    /// The message to abort the update with.
-    pub message: String,
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum SpType {
+    Switch,
+    Sled,
+    Power,
+}
 
-    /// If passed in, fails the force cancel update operation with a simulated
-    /// error.
-    pub test_error: Option<UpdateTestError>,
+impl From<SpType> for gateway_client::types::SpType {
+    fn from(value: SpType) -> Self {
+        match value {
+            SpType::Switch => Self::Switch,
+            SpType::Sled => Self::Sled,
+            SpType::Power => Self::Power,
+        }
+    }
+}
+
+impl From<gateway_client::types::SpType> for SpType {
+    fn from(value: gateway_client::types::SpType) -> Self {
+        match value {
+            gateway_client::types::SpType::Switch => Self::Switch,
+            gateway_client::types::SpType::Sled => Self::Sled,
+            gateway_client::types::SpType::Power => Self::Power,
+        }
+    }
+}
+
+impl fmt::Display for SpType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SpType::Switch => write!(f, "switch"),
+            SpType::Sled => write!(f, "sled"),
+            SpType::Power => write!(f, "power"),
+        }
+    }
 }
 
 #[derive(
@@ -88,48 +99,4 @@ pub struct ClearUpdateStateResponse {
 
     /// The SPs that had no update state to clear.
     pub no_update_data: BTreeSet<SpIdentifier>,
-}
-
-#[derive(
-    Copy, Clone, Debug, JsonSchema, Deserialize, Serialize, PartialEq, Eq,
-)]
-#[serde(rename_all = "snake_case", tag = "kind", content = "content")]
-pub enum UpdateTestError {
-    /// Simulate an error where the operation fails to complete.
-    Fail,
-
-    /// Simulate an issue where the operation times out.
-    Timeout {
-        /// The number of seconds to time out after.
-        secs: u64,
-    },
-}
-
-impl UpdateTestError {
-    pub async fn into_http_error(
-        self,
-        log: &slog::Logger,
-        reason: &str,
-    ) -> HttpError {
-        let message = self.into_error_string(log, reason).await;
-        HttpError::for_bad_request(None, message)
-    }
-
-    pub async fn into_error_string(
-        self,
-        log: &slog::Logger,
-        reason: &str,
-    ) -> String {
-        match self {
-            UpdateTestError::Fail => {
-                format!("Simulated failure while {reason}")
-            }
-            UpdateTestError::Timeout { secs } => {
-                slog::info!(log, "Simulating timeout while {reason}");
-                // 15 seconds should be enough to cause a timeout.
-                tokio::time::sleep(Duration::from_secs(secs)).await;
-                "XXX request should time out before this is hit".into()
-            }
-        }
-    }
 }

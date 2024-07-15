@@ -17,7 +17,7 @@ use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
 use std::collections::BTreeMap;
-use wicket_common::inventory::SpIgnition;
+use wicketd_client::types::SpIgnition;
 
 #[derive(Debug, Clone)]
 pub struct Rack<'a> {

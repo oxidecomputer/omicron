@@ -22,6 +22,9 @@ use omicron_common::api::internal::shared::PortSpeed as OmicronPortSpeed;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::OMICRON_DPD_TAG;
 use oxnet::IpNet;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
 use slog::error;
 use slog::o;
 use slog::Logger;
@@ -33,6 +36,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
+use thiserror::Error;
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use trust_dns_resolver::config::NameServerConfigGroup;
@@ -41,16 +45,7 @@ use trust_dns_resolver::config::ResolverOpts;
 use trust_dns_resolver::error::ResolveError;
 use trust_dns_resolver::error::ResolveErrorKind;
 use trust_dns_resolver::TokioAsyncResolver;
-use wicket_common::preflight_check::EventBuffer;
-use wicket_common::preflight_check::StepContext;
-use wicket_common::preflight_check::StepProgress;
-use wicket_common::preflight_check::StepResult;
-use wicket_common::preflight_check::StepSkipped;
-use wicket_common::preflight_check::StepSuccess;
-use wicket_common::preflight_check::StepWarning;
-use wicket_common::preflight_check::UpdateEngine;
-use wicket_common::preflight_check::UplinkPreflightStepId;
-use wicket_common::preflight_check::UplinkPreflightTerminalError;
+use update_engine::StepSpec;
 use wicket_common::rack_setup::UserSpecifiedPortConfig;
 use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 
@@ -869,6 +864,73 @@ enum RoutingFailure {
 struct RoutingSuccess {
     level2: L2Success,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "id", rename_all = "snake_case")]
+pub(super) enum UplinkPreflightStepId {
+    ConfigureSwitch,
+    WaitForL1Link,
+    ConfigureAddress,
+    ConfigureRouting,
+    CheckExternalDnsConnectivity,
+    CheckExternalNtpConnectivity,
+    CleanupRouting,
+    CleanupAddress,
+    CleanupL1,
+}
+
+type DpdError = dpd_client::Error<dpd_client::types::Error>;
+
+#[derive(Debug, Error)]
+pub(crate) enum UplinkPreflightTerminalError {
+    #[error("invalid port name: {0}")]
+    InvalidPortName(String),
+    #[error("failed to connect to dpd to check for current configuration")]
+    GetCurrentConfig(#[source] DpdError),
+    #[error("uplink already configured - is rack already initialized?")]
+    UplinkAlreadyConfigured,
+    #[error("failed to create port {port_id:?}")]
+    ConfigurePort {
+        #[source]
+        err: DpdError,
+        port_id: PortId,
+    },
+    #[error(
+        "failed to remove host OS route {destination} -> {nexthop}: {err}"
+    )]
+    RemoveHostRoute { err: String, destination: IpNet, nexthop: IpAddr },
+    #[error("failed to remove uplink SMF property {property:?}: {err}")]
+    RemoveSmfProperty { property: String, err: String },
+    #[error("failed to refresh uplink service config: {0}")]
+    RefreshUplinkSmf(String),
+    #[error("failed to clear settings for port {port_id:?}")]
+    UnconfigurePort {
+        #[source]
+        err: DpdError,
+        port_id: PortId,
+    },
+}
+
+impl update_engine::AsError for UplinkPreflightTerminalError {
+    fn as_error(&self) -> &(dyn std::error::Error + 'static) {
+        self
+    }
+}
+
+#[derive(JsonSchema)]
+pub(super) enum UplinkPreflightCheckSpec {}
+
+impl StepSpec for UplinkPreflightCheckSpec {
+    type Component = String;
+    type StepId = UplinkPreflightStepId;
+    type StepMetadata = ();
+    type ProgressMetadata = String;
+    type CompletionMetadata = Vec<String>;
+    type SkippedMetadata = ();
+    type Error = UplinkPreflightTerminalError;
+}
+
+update_engine::define_update_engine!(pub(super) UplinkPreflightCheckSpec);
 
 #[derive(Debug, Default)]
 struct DnsLookupStep {

@@ -4,6 +4,8 @@
 
 // Copyright 2024 Oxide Computer Company
 
+pub use gateway_client::types::SpIdentifier as GatewaySpIdentifier;
+pub use gateway_client::types::SpType as GatewaySpType;
 use omicron_common::address;
 use omicron_common::api::external::ImportExportPolicy;
 use omicron_common::api::external::Name;
@@ -33,8 +35,6 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
-
-use crate::inventory::SpIdentifier;
 
 /// The subset of `RackInitializeRequest` that the user fills in as clear text
 /// (e.g., via an uploaded config file).
@@ -84,7 +84,10 @@ pub struct PutRssUserConfigInsensitive {
     Ord,
 )]
 pub struct BootstrapSledDescription {
-    pub id: SpIdentifier,
+    // TODO: We currently use gateway-client's SpIdentifier here, not our own,
+    // to avoid wicketd-client getting an "SpIdentifier2". We really do need to
+    // unify this type once and forever.
+    pub id: GatewaySpIdentifier,
     pub baseboard: Baseboard,
     /// The sled's bootstrap address, if the host is on and we've discovered it
     /// on the bootstrap network.

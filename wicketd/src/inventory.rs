@@ -2,25 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Re-export these types from gateway_client, so that users are oblivious to
-// where these types come from.
-pub use gateway_client::types::{
-    RotSlot, RotState, SpComponentCaboose, SpComponentInfo,
-    SpComponentPresence, SpIdentifier, SpIgnition, SpIgnitionSystemType,
-    SpState, SpType,
+//! Rack inventory for display by wicket
+
+use gateway_client::types::{
+    RotSlot, SpComponentCaboose, SpComponentInfo, SpIdentifier, SpIgnition,
+    SpState,
 };
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-
-/// The current state of the v1 Rack as known to wicketd
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "inventory", rename_all = "snake_case")]
-pub struct RackV1Inventory {
-    pub sps: Vec<SpInventory>,
-}
+use serde::Serialize;
 
 /// SP-related data
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(tag = "sp_inventory", rename_all = "snake_case")]
 pub struct SpInventory {
     pub id: SpIdentifier,
@@ -50,7 +42,7 @@ impl SpInventory {
 }
 
 /// RoT-related data that isn't already supplied in [`SpState`].
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(tag = "sp_inventory", rename_all = "snake_case")]
 pub struct RotInventory {
     pub active: RotSlot,
@@ -60,4 +52,11 @@ pub struct RotInventory {
     // `None` indicates we don't need to read
     pub caboose_stage0: Option<Option<SpComponentCaboose>>,
     pub caboose_stage0next: Option<Option<SpComponentCaboose>>,
+}
+
+/// The current state of the v1 Rack as known to wicketd
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(tag = "inventory", rename_all = "snake_case")]
+pub struct RackV1Inventory {
+    pub sps: Vec<SpInventory>,
 }

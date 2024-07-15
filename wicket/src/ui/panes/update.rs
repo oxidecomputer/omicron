@@ -33,12 +33,11 @@ use update_engine::{
     AbortReason, CompletionReason, ExecutionStatus, FailureReason, StepKey,
     TerminalKind, WillNotBeRunReason,
 };
-use wicket_common::inventory::RotSlot;
 use wicket_common::update_events::{
     EventBuffer, EventReport, ProgressEvent, StepOutcome, StepStatus,
     UpdateComponent,
 };
-use wicketd_client::types::SemverVersion;
+use wicketd_client::types::{RotSlot, SemverVersion};
 
 const MAX_COLUMN_WIDTH: u16 = 25;
 

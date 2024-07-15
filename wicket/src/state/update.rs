@@ -4,7 +4,6 @@
 
 use anyhow::Result;
 use ratatui::style::Style;
-use wicket_common::rack_update::{ClearUpdateStateOptions, StartUpdateOptions};
 use wicket_common::update_events::{
     EventReport, ProgressEventKind, StepEventKind, UpdateComponent,
     UpdateStepId,
@@ -19,7 +18,9 @@ use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::fmt::Display;
-use wicketd_client::types::{ArtifactId, SemverVersion};
+use wicketd_client::types::{
+    ArtifactId, ClearUpdateStateOptions, SemverVersion, StartUpdateOptions,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RackUpdateState {

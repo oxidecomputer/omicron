@@ -7,6 +7,7 @@
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpComponentInfo;
+use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpIgnition;
 use gateway_client::types::SpState;
 use gateway_messages::SpComponent;
@@ -20,8 +21,8 @@ use tokio::time::interval;
 use tokio::time::Duration;
 use tokio::time::Instant;
 use tokio_stream::wrappers::ReceiverStream;
-use wicket_common::inventory::RotInventory;
-use wicket_common::inventory::SpIdentifier;
+
+use crate::inventory::RotInventory;
 
 // Frequency at which we fetch state from our local ignition controller (via our
 // local sidecar SP) for the ignition state of all ignition targets in the rack.

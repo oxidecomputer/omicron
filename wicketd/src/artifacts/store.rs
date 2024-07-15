@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::http_entrypoints::InstallableArtifacts;
 use omicron_common::api::external::SemverVersion;
 use omicron_common::update::ArtifactHashId;
 use slog::Logger;
@@ -10,7 +11,6 @@ use std::sync::Mutex;
 use update_common::artifacts::ArtifactsWithPlan;
 use update_common::artifacts::ExtractedArtifactDataHandle;
 use update_common::artifacts::UpdatePlan;
-use wicketd_api::InstallableArtifacts;
 
 /// The artifact store for wicketd.
 ///
