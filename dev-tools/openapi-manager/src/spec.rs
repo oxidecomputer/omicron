@@ -15,23 +15,43 @@ use openapiv3::OpenAPI;
 pub fn all_apis() -> Vec<ApiSpec> {
     vec![
         ApiSpec {
-            title: "Internal DNS".to_string(),
-            version: "0.0.1".to_string(),
-            description: "API for the internal DNS server".to_string(),
+            title: "Internal DNS",
+            version: "0.0.1",
+            description: "API for the internal DNS server",
             boundary: ApiBoundary::Internal,
             api_description:
                 dns_server_api::dns_server_api::stub_api_description,
-            filename: "dns-server.json".to_string(),
+            filename: "dns-server.json",
             extra_validation: None,
         },
         ApiSpec {
-            title: "Nexus internal API".to_string(),
-            version: "0.0.1".to_string(),
-            description: "Nexus internal API".to_string(),
+            title: "Installinator API",
+            version: "0.0.1",
+            description: "API for installinator to fetch artifacts \
+                and report progress",
+            boundary: ApiBoundary::Internal,
+            api_description:
+                installinator_api::installinator_api::stub_api_description,
+            filename: "installinator.json",
+            extra_validation: None,
+        },
+        ApiSpec {
+            title: "Nexus internal API",
+            version: "0.0.1",
+            description: "Nexus internal API",
             boundary: ApiBoundary::Internal,
             api_description:
                 nexus_internal_api::nexus_internal_api_mod::stub_api_description,
-            filename: "nexus-internal.json".to_string(),
+            filename: "nexus-internal.json",
+            extra_validation: None,
+        },
+        ApiSpec {
+            title: "Oxide Technician Port Control Service",
+            version: "0.0.1",
+            description: "API for use by the technician port TUI: wicket",
+            boundary: ApiBoundary::Internal,
+            api_description: wicketd_api::wicketd_api_mod::stub_api_description,
+            filename: "wicketd.json",
             extra_validation: None,
         },
         // Add your APIs here! Please keep this list sorted by filename.
@@ -40,13 +60,13 @@ pub fn all_apis() -> Vec<ApiSpec> {
 
 pub struct ApiSpec {
     /// The title.
-    pub title: String,
+    pub title: &'static str,
 
     /// The version.
-    pub version: String,
+    pub version: &'static str,
 
     /// The description string.
-    pub description: String,
+    pub description: &'static str,
 
     /// Whether this API is internal or external.
     pub boundary: ApiBoundary,
@@ -57,7 +77,7 @@ pub struct ApiSpec {
         fn() -> Result<ApiDescription<StubContext>, ApiDescriptionBuildErrors>,
 
     /// The JSON filename to write the API description to.
-    pub filename: String,
+    pub filename: &'static str,
 
     /// Extra validation to perform on the OpenAPI spec, if any.
     pub extra_validation: Option<fn(&OpenAPI) -> anyhow::Result<()>>,
