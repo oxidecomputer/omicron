@@ -138,6 +138,7 @@ pub use driver::Driver;
 pub use init::BackgroundTasks;
 pub use init::BackgroundTasksData;
 pub use init::BackgroundTasksInitializer;
+pub use tasks::saga_recovery::SagaRecoveryHelpers;
 
 use futures::future::BoxFuture;
 use nexus_auth::context::OpContext;

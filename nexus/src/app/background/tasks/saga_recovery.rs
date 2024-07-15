@@ -137,6 +137,15 @@ use steno::SagaId;
 use steno::SagaStateView;
 use tokio::sync::mpsc;
 
+/// Helpers used for saga recovery
+pub struct SagaRecoveryHelpers<N: MakeSagaContext> {
+    pub recovery_opctx: OpContext,
+    pub maker: N,
+    pub sec_client: Arc<steno::SecClient>,
+    pub registry: Arc<steno::ActionRegistry<N::SagaType>>,
+    pub sagas_started_rx: mpsc::UnboundedReceiver<SagaId>,
+}
+
 /// Background task that recovers sagas assigned to this Nexus
 ///
 /// Normally, this task only does anything of note once, when Nexus starts up.
@@ -190,20 +199,16 @@ impl<N: MakeSagaContext> SagaRecovery<N> {
     pub fn new(
         datastore: Arc<DataStore>,
         sec_id: db::SecId,
-        saga_recovery_opctx: OpContext,
-        maker: N,
-        sec: Arc<steno::SecClient>,
-        registry: Arc<steno::ActionRegistry<N::SagaType>>,
-        sagas_started_rx: mpsc::UnboundedReceiver<SagaId>,
+        helpers: SagaRecoveryHelpers<N>,
     ) -> SagaRecovery<N> {
         SagaRecovery {
             datastore,
             sec_id,
-            saga_recovery_opctx,
-            maker,
-            sec_client: sec,
-            registry,
-            sagas_started_rx,
+            saga_recovery_opctx: helpers.recovery_opctx,
+            maker: helpers.maker,
+            sec_client: helpers.sec_client,
+            registry: helpers.registry,
+            sagas_started_rx: helpers.sagas_started_rx,
             rest_state: nexus_saga_recovery::RestState::new(),
             status: nexus_saga_recovery::Report::new(),
         }
@@ -707,11 +712,13 @@ mod test {
         let mut task = SagaRecovery::new(
             db_datastore.clone(),
             sec_id,
-            saga_recovery_opctx,
-            uctx.clone(),
-            sec_client.clone(),
-            registry_create(),
-            sagas_started_rx,
+            SagaRecoveryHelpers {
+                recovery_opctx: saga_recovery_opctx,
+                maker: uctx.clone(),
+                sec_client: sec_client.clone(),
+                registry: registry_create(),
+                sagas_started_rx,
+            },
         );
 
         let Some((completion_future, last_pass_success)) =
@@ -780,11 +787,13 @@ mod test {
         let mut task = SagaRecovery::new(
             db_datastore.clone(),
             sec_id,
-            saga_recovery_opctx,
-            uctx.clone(),
-            sec_client.clone(),
-            registry_create(),
-            sagas_started_rx,
+            SagaRecoveryHelpers {
+                recovery_opctx: saga_recovery_opctx,
+                maker: uctx.clone(),
+                sec_client: sec_client.clone(),
+                registry: registry_create(),
+                sagas_started_rx,
+            },
         );
 
         let Some((_, last_pass_success)) = task.activate_internal(&opctx).await

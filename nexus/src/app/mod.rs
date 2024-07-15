@@ -91,6 +91,7 @@ pub(crate) mod sagas;
 
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 
+use crate::app::background::SagaRecoveryHelpers;
 use nexus_db_model::AllSchemaVersions;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 use tokio::sync::mpsc;
@@ -526,11 +527,13 @@ impl Nexus {
                     saga_starter: task_nexus.sagas.clone(),
                     producer_registry: task_registry,
 
-                    saga_recovery_opctx,
-                    saga_recovery_nexus: task_nexus.clone(),
-                    saga_recovery_sec: sec_client.clone(),
-                    saga_recovery_registry: sagas::ACTION_REGISTRY.clone(),
-                    saga_recovery_rx,
+                    saga_recovery: SagaRecoveryHelpers {
+                        recovery_opctx: saga_recovery_opctx,
+                        maker: task_nexus.clone(),
+                        sec_client: sec_client.clone(),
+                        registry: sagas::ACTION_REGISTRY.clone(),
+                        sagas_started_rx: saga_recovery_rx,
+                    },
                 },
             );
 

@@ -116,7 +116,6 @@ use super::Activator;
 use super::Driver;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::saga::StartSaga;
-use crate::app::sagas::ActionRegistry;
 use crate::Nexus;
 use nexus_config::BackgroundTaskConfig;
 use nexus_config::DnsTasksConfig;
@@ -126,7 +125,6 @@ use nexus_db_queries::db::DataStore;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 use tokio::sync::watch;
 use uuid::Uuid;
 
@@ -661,11 +659,7 @@ impl BackgroundTasksInitializer {
             let task_impl = Box::new(saga_recovery::SagaRecovery::new(
                 datastore.clone(),
                 nexus_db_model::SecId(args.nexus_id),
-                args.saga_recovery_opctx,
-                args.saga_recovery_nexus,
-                args.saga_recovery_sec,
-                args.saga_recovery_registry,
-                args.saga_recovery_rx,
+                args.saga_recovery,
             ));
 
             driver.register(TaskDefinition {
@@ -713,19 +707,8 @@ pub struct BackgroundTasksData {
     pub saga_starter: Arc<dyn StartSaga>,
     /// Oximeter producer registry (for metrics)
     pub producer_registry: ProducerRegistry,
-
-    /// `OpContext` used for carrying out saga recovery
-    ///
-    /// This may have fewer privileges than `opctx`.
-    pub saga_recovery_opctx: OpContext,
-    /// handle to `Nexus`, used to construct `SagaContext`s for recovered sagas
-    pub saga_recovery_nexus: Arc<Nexus>,
-    /// handle to Steno SEC client, used to recover sagas
-    pub saga_recovery_sec: Arc<steno::SecClient>,
-    /// Steno (saga) action registry
-    pub saga_recovery_registry: Arc<ActionRegistry>,
-    /// Channel for receiving notifications about newly-created sagas
-    pub saga_recovery_rx: mpsc::UnboundedReceiver<steno::SagaId>,
+    /// Helpers for saga recovery
+    pub saga_recovery: saga_recovery::SagaRecoveryHelpers<Arc<Nexus>>,
 }
 
 /// Starts the three DNS-propagation-related background tasks for either
