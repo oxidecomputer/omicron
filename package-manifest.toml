@@ -643,8 +643,8 @@ only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "dendrite"
 # TODO: Set to images from main branch. Testing out with images from my PR for now.
-source.commit = "e058ad924378bdd7e27a169dda299867472a0503"
-source.sha256 = "16798a450f33800e004f915442f6b603f547a6bf16312c26faf087853aec6c4a"
+source.commit = "84831440e2fe026ce6705608b5393cd0baef4337"
+source.sha256 = "c4fb4920e5bfcff5588ed75966c8f889e7e1e2749ced65cc43d27239a172bef4"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -669,8 +669,8 @@ only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "dendrite"
 # TODO: Set to images from main branch. Testing out with images from my PR for now.
-source.commit = "e058ad924378bdd7e27a169dda299867472a0503"
-source.sha256 = "8545ddd844653c8ba917ba0eaabf6ec9effc140ea1e16bd1f5f2838c083729d5"
+source.commit = "84831440e2fe026ce6705608b5393cd0baef4337"
+source.sha256 = "29071f9c16905b500d2b3947966a2ab71c788dac5883ef60de1061d675f60161"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -688,8 +688,8 @@ only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "dendrite"
 # TODO: Set to images from main branch. Testing out with images from my PR for now.
-source.commit = "e058ad924378bdd7e27a169dda299867472a0503"
-source.sha256 = "d9c1460eb3de99d3303f56b014278eef804cfd3c1bef585cd9b516f6670997f7"
+source.commit = "84831440e2fe026ce6705608b5393cd0baef4337"
+source.sha256 = "679f6c80ea43f59d5b3339f95441cfacb2fa8d66d0d76e2fffe6186e1a8b0163"
 output.type = "zone"
 output.intermediate_only = true
 
