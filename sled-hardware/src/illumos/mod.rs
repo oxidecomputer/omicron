@@ -59,7 +59,7 @@ enum Error {
     #[error("Failed to issue request to sysconf: {0}")]
     SysconfError(#[from] sysconf::Error),
 
-    #[error("Node {node} missing device insance")]
+    #[error("Node {node} missing device instance")]
     MissingNvmeDevinfoInstance { node: String },
 
     #[error("Failed to init nvme handle: {0}")]
