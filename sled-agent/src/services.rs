@@ -1371,7 +1371,7 @@ impl ServiceManager {
             })
         })?;
 
-        let opte_interface = port.vnic_name();
+        let opte_interface = port.name();
         let opte_gateway = port.gateway().ip().to_string();
         let opte_ip = port.ip().to_string();
 
