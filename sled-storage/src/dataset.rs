@@ -311,7 +311,6 @@ pub(crate) async fn ensure_zpool_has_datasets(
             if let Ok(epoch) = epoch_str.parse::<u64>() {
                 epoch
             } else {
-                println!(">>>> {epoch_str}");
                 return Err(DatasetError::CannotParseEpochProperty(
                     dataset.to_string(),
                 ));
