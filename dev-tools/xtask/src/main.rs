@@ -10,6 +10,7 @@ use anyhow::{Context, Result};
 use cargo_metadata::Metadata;
 use clap::{Parser, Subcommand};
 
+mod check_features;
 mod check_workspace_deps;
 mod clippy;
 mod download;
@@ -38,6 +39,8 @@ enum Cmds {
     /// Run Argon2 hash with specific parameters (quick performance check)
     Argon2(external::External),
 
+    /// Check that all features are flagged correctly
+    CheckFeatures(check_features::Args),
     /// Check that dependencies are not duplicated in any packages in the
     /// workspace
     CheckWorkspaceDeps,
@@ -91,6 +94,7 @@ async fn main() -> Result<()> {
             external.cargo_args(["--release"]).exec_example("argon2")
         }
         Cmds::Clippy(args) => clippy::run_cmd(args),
+        Cmds::CheckFeatures(args) => check_features::run_cmd(args),
         Cmds::CheckWorkspaceDeps => check_workspace_deps::run_cmd(),
         Cmds::Download(args) => download::run_cmd(args).await,
         Cmds::Openapi(external) => external.exec_bin("openapi-manager"),

@@ -10,7 +10,7 @@
 # (that we want to check) is conditionally-compiled on illumos only.
 #
 # Note that `cargo clippy` includes `cargo check, so this ends up checking all
-# of our code.
+# of our (default) code.
 
 set -o errexit
 set -o pipefail
