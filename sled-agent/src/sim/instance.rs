@@ -211,7 +211,8 @@ impl SimInstanceInner {
             InstanceStateRequested::Stopped => {
                 match self.next_resting_state() {
                     VmmState::Starting => {
-                        self.state.terminate_rudely();
+                        let mark_failed = false;
+                        self.state.terminate_rudely(mark_failed);
                     }
                     VmmState::Running => self.queue_graceful_stop(),
                     // Idempotently allow requests to stop an instance that is
@@ -363,7 +364,8 @@ impl SimInstanceInner {
     /// Simulates rude termination by moving the instance to the Destroyed state
     /// immediately and clearing the queue of pending state transitions.
     fn terminate(&mut self) -> SledInstanceState {
-        self.state.terminate_rudely();
+        let mark_failed = false;
+        self.state.terminate_rudely(mark_failed);
         self.queue.clear();
         self.destroyed = true;
         self.state.sled_instance_state()

@@ -14,7 +14,7 @@ use nexus_types::{
         Blueprint, BlueprintMetadata, BlueprintTarget, BlueprintTargetSet,
     },
     external_api::{
-        params::{SledSelector, UninitializedSledId},
+        params::{PhysicalDiskPath, SledSelector, UninitializedSledId},
         shared::{ProbeInfo, UninitializedSled},
         views::SledPolicy,
     },
@@ -471,6 +471,21 @@ pub trait NexusInternalApi {
         rqctx: RequestContext<Self::Context>,
         sled: TypedBody<SledSelector>,
     ) -> Result<HttpResponseOk<SledPolicy>, HttpError>;
+
+    /// Mark a physical disk as expunged
+    ///
+    /// This is an irreversible process! It should only be called after
+    /// sufficient warning to the operator.
+    ///
+    /// This is idempotent.
+    #[endpoint {
+        method = POST,
+        path = "/physical-disk/expunge",
+    }]
+    async fn physical_disk_expunge(
+        rqctx: RequestContext<Self::Context>,
+        disk: TypedBody<PhysicalDiskPath>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Get all the probes associated with a given sled.
     #[endpoint {
