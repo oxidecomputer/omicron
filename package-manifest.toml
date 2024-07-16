@@ -639,8 +639,10 @@ only_for_targets.image = "standard"
 # 1. Build the zone image manually
 #   1a. cd <dendrite tree>
 #   1b. cargo build --features=tofino_stub --release
-#   1c. cargo xtask dist -o -r --features tofino_stub
+#   1c. cargo xtask dist --format omicron --release --features tofino_stub
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out
+# 3. Change the below `source.type` key to `"manual"` and comment out or remove
+# the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
 source.commit = "e83f4f164fd3dbb2100989a399a4fa087232ac36"
@@ -664,8 +666,10 @@ only_for_targets.image = "standard"
 # 1. Build the zone image manually
 #   1a. cd <dendrite tree>
 #   1b. cargo build --features=tofino_asic --release
-#   1c. cargo xtask dist -o -r --features tofino_asic
+#   1c. cargo xtask dist --format omicron --release --features tofino_asic
 # 2. Copy the output zone image from dendrite/out to omicron/out
+# 3. Change the below `source.type` key to `"manual"` and comment out or remove
+# the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
 source.commit = "e83f4f164fd3dbb2100989a399a4fa087232ac36"
@@ -682,8 +686,10 @@ only_for_targets.image = "standard"
 # 1. Build the zone image manually
 #   1a. cd <dendrite tree>
 #   1b. cargo build --features=softnpu --release
-#   1c. cargo xtask dist -o -r --features softnpu
+#   1c. cargo xtask dist --format omicron --release --features softnpu
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out/dendrite-softnpu.tar.gz
+# 3. Change the below `source.type` key to `"manual"` and comment out or remove
+# the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
 source.commit = "e83f4f164fd3dbb2100989a399a4fa087232ac36"
