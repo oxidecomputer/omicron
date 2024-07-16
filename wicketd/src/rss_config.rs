@@ -130,7 +130,7 @@ impl CurrentRssConfig {
                 let baseboard = Baseboard::new_gimlet(
                     state.serial_number.clone(),
                     state.model.clone(),
-                    state.revision.into(),
+                    state.revision,
                 );
                 let bootstrap_ip = bootstrap_sleds.get(&baseboard).copied();
                 Some(BootstrapSledDescription {

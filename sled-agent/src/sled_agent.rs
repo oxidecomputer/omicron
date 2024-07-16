@@ -1197,20 +1197,15 @@ impl SledAgent {
     /// interested in the switch identifiers, MGS is the current best way to do
     /// that, by asking for the local switch's slot, and then that switch's SP
     /// state.
-    pub(crate) async fn sled_identifiers(
-        &self,
-    ) -> Result<SledIdentifiers, Error> {
+    pub(crate) async fn sled_identifiers(&self) -> SledIdentifiers {
         let baseboard = self.inner.hardware.baseboard();
-        Ok(SledIdentifiers {
+        SledIdentifiers {
             rack_id: self.inner.start_request.body.rack_id,
             sled_id: self.inner.id,
             model: baseboard.model().to_string(),
-            revision: baseboard
-                .revision()
-                .try_into()
-                .map_err(|_| Error::UnexpectedRevision(baseboard.revision()))?,
+            revision: baseboard.revision(),
             serial: baseboard.identifier().to_string(),
-        })
+        }
     }
 
     /// Return basic information about ourselves: identity and status
