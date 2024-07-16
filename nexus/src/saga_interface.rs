@@ -13,7 +13,7 @@ use std::sync::Arc;
 // TODO-design Should this be the same thing as ServerContext?  It's
 // very analogous, but maybe there's utility in having separate views for the
 // HTTP server and sagas.
-pub(crate) struct SagaContext {
+pub struct SagaContext {
     nexus: Arc<Nexus>,
     log: Logger,
 }

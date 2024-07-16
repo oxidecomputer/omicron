@@ -5,7 +5,7 @@
 //! Utilities for managing Zpools.
 
 use crate::{execute, ExecutionError, PFEXEC};
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use std::str::FromStr;
 
 pub use omicron_common::zpool_name::ZpoolName;
@@ -180,6 +180,19 @@ impl FromStr for ZpoolInfo {
 
 /// Wraps commands for interacting with ZFS pools.
 pub struct Zpool {}
+
+/// A path which exists within a pool.
+///
+/// By storing these types together, it's possible to answer
+/// whether or not a path exists on a particular device.
+// Technically we could re-derive the pool name from the path,
+// but that involves some string parsing, and honestly I'd just
+// Rather Not.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct PathInPool {
+    pub pool: Option<ZpoolName>,
+    pub path: Utf8PathBuf,
+}
 
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zpool {

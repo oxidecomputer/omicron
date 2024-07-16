@@ -6,11 +6,11 @@
 
 use self::external_endpoints::NexusCertResolver;
 use self::saga::SagaExecutor;
+use crate::app::background::BackgroundTasksData;
 use crate::app::oximeter::LazyTimeseriesClient;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
-use crate::saga_interface::SagaContext;
 use crate::DropshotServer;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
@@ -91,8 +91,10 @@ pub(crate) mod sagas;
 
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 
+use crate::app::background::SagaRecoveryHelpers;
 use nexus_db_model::AllSchemaVersions;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
+use tokio::sync::mpsc;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
 //      ephemeral (so bounded in saga by design).
@@ -132,11 +134,8 @@ pub struct Nexus {
     /// handle to global authz information
     authz: Arc<authz::Authz>,
 
-    /// saga execution coordinator
+    /// saga execution coordinator (SEC)
     sagas: Arc<SagaExecutor>,
-
-    /// Task representing completion of recovered Sagas
-    recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
 
     /// External dropshot servers
     external_server: std::sync::Mutex<Option<DropshotServer>>,
@@ -248,9 +247,34 @@ impl Nexus {
             sec_store,
         ));
 
+        // It's a bit of a red flag to use an unbounded channel.
+        //
+        // This particular channel is used to send a Uuid from the saga executor
+        // to the saga recovery background task each time a saga is started.
+        //
+        // The usual argument for keeping a channel bounded is to ensure
+        // backpressure.  But we don't really want that here.  These items don't
+        // represent meaningful work for the saga recovery task, such that if it
+        // were somehow processing these slowly, we'd want to slow down the saga
+        // dispatch process.  Under normal conditions, we'd expect this queue to
+        // grow as we dispatch new sagas until the saga recovery task runs, at
+        // which point the queue will quickly be drained.  The only way this
+        // could really grow without bound is if the saga recovery task gets
+        // completely wedged and stops receiving these messages altogether.  In
+        // this case, the maximum size this queue could grow over time is the
+        // number of sagas we can launch in that time.  That's not ever likely
+        // to be a significant amount of memory.
+        //
+        // We could put our money where our mouth is: pick a sufficiently large
+        // bound and panic if we reach it.  But "sufficiently large" depends on
+        // the saga creation rate and the period of the saga recovery background
+        // task.  If someone changed the config, they'd have to remember to
+        // update this here.  This doesn't seem worth it.
+        let (saga_create_tx, saga_recovery_rx) = mpsc::unbounded_channel();
         let sagas = Arc::new(SagaExecutor::new(
             Arc::clone(&sec_client),
             log.new(o!("component" => "SagaExecutor")),
+            saga_create_tx,
         ));
 
         let client_state = dpd_client::ClientState {
@@ -420,7 +444,6 @@ impl Nexus {
             db_datastore: Arc::clone(&db_datastore),
             authz: Arc::clone(&authz),
             sagas,
-            recovery_task: std::sync::Mutex::new(None),
             external_server: std::sync::Mutex::new(None),
             techport_external_server: std::sync::Mutex::new(None),
             internal_server: std::sync::Mutex::new(None),
@@ -462,26 +485,12 @@ impl Nexus {
         // TODO-cleanup all the extra Arcs here seems wrong
         let nexus = Arc::new(nexus);
         nexus.sagas.set_nexus(nexus.clone());
-        let opctx = OpContext::for_background(
+        let saga_recovery_opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
             Arc::clone(&authz),
             authn::Context::internal_saga_recovery(),
             Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
-        let saga_logger = nexus.log.new(o!("saga_type" => "recovery"));
-        let recovery_task = db::recover(
-            opctx,
-            my_sec_id,
-            Arc::new(Arc::new(SagaContext::new(
-                Arc::clone(&nexus),
-                saga_logger,
-            ))),
-            Arc::clone(&db_datastore),
-            Arc::clone(&sec_client),
-            sagas::ACTION_REGISTRY.clone(),
-        );
-
-        *nexus.recovery_task.lock().unwrap() = Some(recovery_task);
 
         // Wait to start background tasks until after the populate step
         // finishes.  Among other things, the populate step installs role
@@ -508,14 +517,24 @@ impl Nexus {
 
             let driver = background_tasks_initializer.start(
                 &task_nexus.background_tasks,
-                background_ctx,
-                db_datastore,
-                task_config.pkg.background_tasks,
-                rack_id,
-                task_config.deployment.id,
-                resolver,
-                task_nexus.sagas.clone(),
-                task_registry,
+                BackgroundTasksData {
+                    opctx: background_ctx,
+                    datastore: db_datastore,
+                    config: task_config.pkg.background_tasks,
+                    rack_id,
+                    nexus_id: task_config.deployment.id,
+                    resolver,
+                    saga_starter: task_nexus.sagas.clone(),
+                    producer_registry: task_registry,
+
+                    saga_recovery: SagaRecoveryHelpers {
+                        recovery_opctx: saga_recovery_opctx,
+                        maker: task_nexus.clone(),
+                        sec_client: sec_client.clone(),
+                        registry: sagas::ACTION_REGISTRY.clone(),
+                        sagas_started_rx: saga_recovery_rx,
+                    },
+                },
             );
 
             if let Err(_) = task_nexus.background_tasks_driver.set(driver) {

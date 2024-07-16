@@ -584,7 +584,7 @@ impl StorageManager {
             // Identify which disks should be managed by the control
             // plane, and adopt all requested disks into the control plane
             // in a background task (see: [Self::manage_disks]).
-            self.resources.set_config(&ledger.data().disks);
+            self.resources.set_config(&ledger.data());
         } else {
             info!(self.log, "KeyManager ready, but no ledger detected");
         }
@@ -681,7 +681,7 @@ impl StorageManager {
 
         // Identify which disks should be managed by the control
         // plane, and adopt all requested disks into the control plane.
-        self.resources.set_config(&config.disks);
+        self.resources.set_config(&config);
 
         // Actually try to "manage" those disks, which may involve formatting
         // zpools and conforming partitions to those expected by the control
@@ -825,7 +825,7 @@ mod tests {
     use crate::dataset::DatasetKind;
     use crate::disk::RawSyntheticDisk;
     use crate::manager_test_harness::StorageManagerTestHarness;
-    use crate::resources::{DiskManagementError, ManagedDisk};
+    use crate::resources::DiskManagementError;
 
     use super::*;
     use camino_tempfile::tempdir_in;
@@ -999,21 +999,17 @@ mod tests {
 
         // Now let's verify we saw the correct firmware update.
         for rd in &raw_disks {
-            let managed =
-                all_disks_gen2.values.get(rd.identity()).expect("disk exists");
-            match managed {
-                ManagedDisk::ExplicitlyManaged(disk)
-                | ManagedDisk::ImplicitlyManaged(disk) => {
-                    assert_eq!(
-                        disk.firmware(),
-                        rd.firmware(),
-                        "didn't see firmware update"
-                    );
-                }
-                ManagedDisk::Unmanaged(disk) => {
-                    assert_eq!(disk, rd, "didn't see firmware update");
-                }
-            }
+            let firmware = all_disks_gen2
+                .iter_all()
+                .find_map(|(identity, _, _, fw)| {
+                    if identity == rd.identity() {
+                        Some(fw)
+                    } else {
+                        None
+                    }
+                })
+                .expect("disk exists");
+            assert_eq!(firmware, rd.firmware(), "didn't see firmware update");
         }
 
         harness.cleanup().await;
@@ -1236,7 +1232,8 @@ mod tests {
 
         let expected: HashSet<_> =
             disks.iter().skip(1).take(3).map(|d| d.identity()).collect();
-        let actual: HashSet<_> = all_disks.values.keys().collect();
+        let actual: HashSet<_> =
+            all_disks.iter_all().map(|(identity, _, _, _)| identity).collect();
         assert_eq!(expected, actual);
 
         // Ensure the same set of disks and make sure no change occurs
@@ -1251,7 +1248,10 @@ mod tests {
             .await
             .unwrap();
         let all_disks2 = harness.handle().get_latest_disks().await;
-        assert_eq!(all_disks.values, all_disks2.values);
+        assert_eq!(
+            all_disks.iter_all().collect::<Vec<_>>(),
+            all_disks2.iter_all().collect::<Vec<_>>()
+        );
 
         // Add a disjoint set of disks and see that only they come through
         harness
@@ -1266,7 +1266,8 @@ mod tests {
         let all_disks = harness.handle().get_latest_disks().await;
         let expected: HashSet<_> =
             disks.iter().skip(4).take(5).map(|d| d.identity()).collect();
-        let actual: HashSet<_> = all_disks.values.keys().collect();
+        let actual: HashSet<_> =
+            all_disks.iter_all().map(|(identity, _, _, _)| identity).collect();
         assert_eq!(expected, actual);
 
         harness.cleanup().await;
