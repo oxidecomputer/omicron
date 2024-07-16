@@ -746,6 +746,7 @@ mod test {
     use super::*;
     use crate::app::db::model::Instance;
     use crate::app::db::model::VmmRuntimeState;
+    use crate::app::saga::create_saga_dag;
     use crate::app::sagas::test_helpers;
     use crate::external_api::params;
     use chrono::Utc;
@@ -767,6 +768,26 @@ mod test {
 
     const PROJECT_NAME: &str = "test-project";
     const INSTANCE_NAME: &str = "test-instance";
+
+    // Most Nexus sagas have test suites that follow a simple formula: there's
+    // usually a `test_saga_basic_usage_succeeds` that just makes sure the saga
+    // basically works, and then a `test_actions_succeed_idempotently` test that
+    // does the same thing, but runs every action twice. Then, there's usually a
+    // `test_action_failures_can_unwind` test, and often also a
+    // `test_action_failures_can_unwind_idempotently` test.
+    //
+    // For the instance-update saga, the test suite is a bit more complicated.
+    // This saga will do a number of different things depending on the ways in
+    // which the instance's migration and VMM records have changed since the
+    // last update. Therefore, we want to test all of the possible branches
+    // through the saga:
+    //
+    // 1. active VMM destroyed
+    // 2. migration source completed
+    // 3. migration target completed
+    // 4. migration source VMM completed and was destroyed,
+    // 5. migration target failed
+    // 6. migration source failed
 
     async fn setup_test_project(client: &ClientTestContext) -> Uuid {
         create_default_ip_pool(&client).await;
@@ -861,14 +882,12 @@ mod test {
         .unwrap()
     }
 
-    #[nexus_test(server = crate::Server)]
-    async fn test_active_vmm_destroyed_succeeds(
+    async fn setup_active_vmm_destroyed_test(
         cptestctx: &ControlPlaneTestContext,
-    ) {
+    ) -> (InstanceAndActiveVmm, Params) {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let datastore =
-            cptestctx.server.server_context().nexus.datastore().clone();
+        let datastore = nexus.datastore().clone();
         let _project_id = setup_test_project(&client).await;
 
         let opctx = test_helpers::test_opctx(cptestctx);
@@ -931,22 +950,29 @@ mod test {
             .fetch()
             .await
             .expect("test instance should be present in datastore");
+        let params = Params {
+            authz_instance,
+            serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+        };
+        (state, params)
+    }
 
-        // Run the instance-update saga and wait for the update to complete.
-        nexus
-            .sagas
-            .saga_execute::<SagaInstanceUpdate>(Params {
-                serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
-                authz_instance,
-            })
-            .await
-            .expect("update saga should succeed");
-        let state = wait_for_update(cptestctx, state.instance()).await;
+    async fn verify_active_vmm_destroyed(
+        cptestctx: &ControlPlaneTestContext,
+        instance_id: Uuid,
+    ) {
+        let state = test_helpers::instance_fetch(
+            cptestctx,
+            InstanceUuid::from_untyped_uuid(instance_id),
+        )
+        .await;
 
         // The instance's active VMM has been destroyed, so its state should
         // transition to `NoVmm`, and its active VMM ID should be unlinked. The
         // virtual provisioning and sled resources allocated to the instance
         // should be deallocated.
+        assert_instance_unlocked(state.instance());
+        assert!(state.vmm().is_none());
         let instance_runtime = state.instance().runtime();
         assert_eq!(instance_runtime.nexus_state, InstanceState::NoVmm);
         assert!(instance_runtime.propolis_id.is_none());
@@ -961,5 +987,92 @@ mod test {
             test_helpers::no_sled_resource_instance_records_exist(cptestctx)
                 .await
         );
+    }
+
+    #[track_caller]
+    fn assert_instance_unlocked(instance: &Instance) {
+        assert_eq!(
+            instance.updater_id, None,
+            "instance updater lock should have been released"
+        )
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_active_vmm_destroyed_succeeds(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let (state, params) = setup_active_vmm_destroyed_test(cptestctx).await;
+
+        // Run the instance-update saga.
+        let nexus = &cptestctx.server.server_context().nexus;
+        nexus
+            .sagas
+            .saga_execute::<SagaInstanceUpdate>(params)
+            .await
+            .expect("update saga should succeed");
+
+        // Assert that the saga properly cleaned up the active VMM's resources.
+        verify_active_vmm_destroyed(cptestctx, state.instance().id()).await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_active_vmm_destroyed_actions_succeed_idempotently(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let (state, params) = setup_active_vmm_destroyed_test(cptestctx).await;
+
+        // Build the saga DAG with the provided test parameters
+        let dag = create_saga_dag::<SagaInstanceUpdate>(params).unwrap();
+
+        crate::app::sagas::test_helpers::actions_succeed_idempotently(
+            &cptestctx.server.server_context().nexus,
+            dag,
+        )
+        .await;
+
+        // Assert that the saga properly cleaned up the active VMM's resources.
+        verify_active_vmm_destroyed(cptestctx, state.instance().id()).await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_active_vmm_destroyed_action_failure_can_unwind(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let (state, Params { serialized_authn, authz_instance }) =
+            setup_active_vmm_destroyed_test(cptestctx).await;
+        let instance_id =
+            InstanceUuid::from_untyped_uuid(state.instance().id());
+
+        test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
+            &cptestctx.server.server_context().nexus,
+            || {
+                Box::pin(async {
+                    Params {
+                        serialized_authn: serialized_authn.clone(),
+                        authz_instance: authz_instance.clone(),
+                    }
+                })
+            },
+            || {
+                Box::pin({
+                    async {
+                        let state = test_helpers::instance_fetch(
+                            cptestctx,
+                            instance_id,
+                        )
+                        .await;
+                        // Unlike most other sagas, we actually don't unwind the
+                        // work performed by an update saga, as we would prefer
+                        // that at least some of it succeeds. The only thing
+                        // that *needs* to be rolled back when an
+                        // instance-update saga fails is that the updater lock
+                        // *MUST* be released so that a subsequent saga can run.
+                        assert_instance_unlocked(state.instance());
+                    }
+                })
+            },
+            &cptestctx.logctx.log,
+        )
+        .await;
     }
 }
