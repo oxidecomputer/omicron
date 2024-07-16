@@ -384,8 +384,13 @@
       devShells.x86_64-linux.default =
         pkgs.mkShell.override
           {
-            # use Clang as the C compiler for all C libraries
-            stdenv = pkgs.clangStdenv;
+            stdenv =
+              # use Mold as the linker rather than ld, for faster builds. Mold
+              # to require substantially less memory to link Nexus and its
+              # avoiding swapping on memory-constrained dev systems.
+              pkgs.stdenvAdapters.useMoldLinker
+                # use Clang as the C compiler for all C libraries.
+                pkgs.clangStdenv;
           }
           {
             inherit buildInputs;
