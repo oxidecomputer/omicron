@@ -42,6 +42,7 @@ use crate::db::queries::vpc::InsertVpcQuery;
 use crate::db::queries::vpc::VniSearchIter;
 use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
 use crate::db::queries::vpc_subnet::SubnetError;
+use crate::db::queries::vpc_subnet::VPC_SUBNET_PRIMARY_KEY_CONSTRAINT;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -841,12 +842,29 @@ impl DataStore {
             .await
             .map_err(SubnetError::External)?;
 
-        diesel::insert_into(dsl::vpc_subnet)
+        // NOTE: It would be really nice to use Diesel's
+        // `on_conflict(id).do_nothing()` syntax here. Unfortunately, that's not
+        // possible, because it requires implementing the private trait
+        // `IntoConflictValueClause.`
+        //
+        // Instead, we detect a PK violation manually, and ignore it.
+        let result = diesel::insert_into(dsl::vpc_subnet)
             .values(values)
             .returning(VpcSubnet::as_returning())
             .get_result_async(&*conn)
-            .await
-            .map_err(|e| SubnetError::from_diesel(e, &subnet))
+            .await;
+        match result {
+            Ok(subnet) => Ok(subnet),
+            Err(DieselError::DatabaseError(
+                DatabaseErrorKind::UniqueViolation,
+                info,
+            )) if info.constraint_name()
+                == Some(VPC_SUBNET_PRIMARY_KEY_CONSTRAINT) =>
+            {
+                Ok(subnet)
+            }
+            Err(e) => Err(SubnetError::from_diesel(e, &subnet)),
+        }
     }
 
     pub async fn vpc_delete_subnet(

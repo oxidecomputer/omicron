@@ -185,6 +185,7 @@ impl super::Nexus {
                         // Overlapping IPv4 ranges, which is always a client error.
                         Err(result.unwrap_err().into_external())
                     }
+                    Err(SubnetError::SameIdWithDifferentIpBlock(e)) => Err(e),
                     Err(SubnetError::External(e)) => Err(e),
                     Ok((.., subnet)) => Ok(subnet),
                 }

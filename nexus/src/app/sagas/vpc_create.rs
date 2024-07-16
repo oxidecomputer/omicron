@@ -388,6 +388,7 @@ async fn svc_create_subnet(
                         found overlapping IP address ranges",
                 )
             }
+            SubnetError::SameIdWithDifferentIpBlock(e) => e,
             SubnetError::External(e) => e,
         })
         .map_err(ActionError::action_failed)
