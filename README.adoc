@@ -112,6 +112,21 @@ cargo nextest run
 
 We check that certain system library dependencies are not leaked outside of their intended binaries via `cargo xtask verify-libraries` in CI. If you are adding a new dependency on a illumos/helios library it is recommended that you update xref:.cargo/xtask.toml[] with an allow list of where you expect the dependency to show up. For example some libraries such as `libnvme.so.1` are only available in the global zone and therefore will not be present in any other zone. This check is here to help us catch any leakage before we go to deploy on a rack. You can inspect a compiled binary in the target directory for what it requires by using `elfedit` - for example `elfedit -r -e 'dyn:tag NEEDED' /path/to/omicron/target/debug/sled-agent`.
 
+=== Checking feature flag combinations
+
+To ensure that varying combinations of features compile, run `cargo xtask check-features`, which executes the https://github.com/taiki-e/cargo-hack[`cargo hack`] subcommand under the hood.
+
+This `xtask` is run in CI using the `--ci` parameter , which automatically exludes certain `image-*` features that purposefully cause compiler errors if set and uses a pre-built binary.
+
+If `cargo hack` is not already installed in omicron's `out/` directory, a pre-built binary will be installed automatically depending on your operating system and architecture.
+
+To limit the max number of simultaneous feature flags combined for checking, run the `xtask` with the `--depth <NUM>` flag:
+
+[source,text]
+----
+$ cargo xtask check-features --depth 2
+----
+
 === Rust packages in Omicron
 
 NOTE: The term "package" is overloaded: most programming languages and operating systems have their own definitions of a package.  On top of that, Omicron bundles up components into our own kind of "package" that gets delivered via the install and update systems.  These are described in the `package-manifest.toml` file in the root of the repo.  In this section, we're just concerned with Rust packages.

@@ -50,7 +50,7 @@ pub mod common_storage;
 mod test_helpers;
 
 #[derive(Debug)]
-pub(crate) struct NexusSagaType;
+pub struct NexusSagaType;
 impl steno::SagaType for NexusSagaType {
     type ExecContextType = Arc<SagaContext>;
 }
