@@ -2,6 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Instance Update Saga
+//!
+//! # Theory of Operation
 use super::{
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
     ACTION_GENERATE_ID,
@@ -741,18 +744,22 @@ async fn unlock_instance_inner(
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::app::db::model::Instance;
+    use crate::app::db::model::VmmRuntimeState;
     use crate::app::sagas::test_helpers;
     use crate::external_api::params;
     use chrono::Utc;
     use dropshot::test_util::ClientTestContext;
-    use nexus_db_model::VmmRuntimeState;
+    use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
     use nexus_db_queries::db::lookup::LookupPath;
     use nexus_test_utils::resource_helpers::{
         create_default_ip_pool, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use omicron_test_utils::dev::poll;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PropolisUuid;
+    use std::time::Duration;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -797,6 +804,63 @@ mod test {
         .await
     }
 
+    /// Wait for an update saga to complete for the provided `instance`.
+    async fn wait_for_update(
+        cptestctx: &ControlPlaneTestContext,
+        instance: &Instance,
+    ) -> InstanceAndActiveVmm {
+        // I'd be pretty surprised if an update saga takes longer than a minute
+        // to complete in a unit test. If a saga hasn't run, failing the test in
+        // a timely manner is helpful, so making this *too* long could be annoying...
+        const MAX_WAIT: Duration = Duration::from_secs(60);
+
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
+        let initial_gen = instance.updater_gen;
+        let log = &cptestctx.logctx.log;
+
+        info!(
+            log,
+            "waiting for instance update to complete...";
+            "instance_id" => %instance_id,
+            "initial_gen" => ?initial_gen,
+        );
+
+        poll::wait_for_condition(
+            || async {
+                let state =
+                    test_helpers::instance_fetch(cptestctx, instance_id).await;
+                let instance = state.instance();
+                if instance.updater_gen > initial_gen
+                    && instance.updater_id.is_none()
+                {
+                    info!(
+                        log,
+                        "instance update completed!";
+                        "instance_id" => %instance_id,
+                        "initial_gen" => ?initial_gen,
+                        "current_gen" => ?instance.updater_gen,
+                    );
+                    return Ok(state);
+                }
+
+                info!(
+                    log,
+                    "instance update has not yet completed...";
+                    "instance_id" => %instance_id,
+                    "initial_gen" => ?initial_gen,
+                    "current_gen" => ?instance.updater_gen,
+                    "current_updater" => ?instance.updater_id,
+                );
+                Err(poll::CondCheckError::NotYet::<()>)
+            },
+            // A lot can happen in one second...
+            &Duration::from_secs(1),
+            &MAX_WAIT,
+        )
+        .await
+        .unwrap()
+    }
+
     #[nexus_test(server = crate::Server)]
     async fn test_active_vmm_destroyed_succeeds(
         cptestctx: &ControlPlaneTestContext,
@@ -812,10 +876,16 @@ mod test {
         let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
         // Poke the instance to get it into the Running state.
+        let state = test_helpers::instance_fetch(cptestctx, instance_id).await;
         test_helpers::instance_simulate(cptestctx, &instance_id).await;
+        // Wait for the instance update saga triggered by a transition to
+        // Running to complete.
+        // TODO(eliza): it would be a bit nicer if `notify_instance_updated` was
+        // smarter about determining whether it should try to start an update
+        // saga, since this update doesn't actually do anything...
+        let state = wait_for_update(cptestctx, state.instance()).await;
 
         // Now, destroy the active VMM
-        let state = test_helpers::instance_fetch(cptestctx, instance_id).await;
         let vmm = state.vmm().as_ref().unwrap();
         let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
         datastore
@@ -836,7 +906,7 @@ mod test {
             .await
             .expect("test instance should be present in datastore");
 
-        // run the instance-update saga
+        // Run the instance-update saga and wait for the update to complete.
         nexus
             .sagas
             .saga_execute::<SagaInstanceUpdate>(Params {
@@ -845,17 +915,12 @@ mod test {
             })
             .await
             .expect("update saga should succeed");
+        let state = wait_for_update(cptestctx, state.instance()).await;
 
-        // TODO(eliza): it would be nicer if we ensured that the start saga
-        // kicked off by the transition to `Running` completed *before* going to
-        // Destroyed, so we can guarantee that the saga that _we_ run performs
-        // the update. Figure that out.
-        test_helpers::instance_wait_for_state(
-            cptestctx,
-            instance_id,
-            InstanceState::NoVmm,
-        )
-        .await;
+        assert_eq!(
+            state.instance().runtime().nexus_state,
+            InstanceState::NoVmm
+        );
         assert!(
             test_helpers::no_virtual_provisioning_resource_records_exist(
                 cptestctx

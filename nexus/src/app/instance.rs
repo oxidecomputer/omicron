@@ -1918,6 +1918,14 @@ pub(crate) async fn notify_instance_updated(
     // If the instance or VMM records in the database have changed as a result
     // of this update, prepare an `instance-update` saga to ensure that the
     // changes are reflected by the instance record.
+    //
+    // TODO(eliza): it would be nice to be smarter about determining whether we
+    // need to run a saga here. We don't need to run an instance-update saga
+    // *every* time a VMM or migration has been updated. instead, we should only
+    // trigger them if any side of the migration has *terminated*, or if the
+    // active VMM state transitioned to Destroyed. Eliding unnecessary start
+    // sagas would reduce updater lock contention and allow the necessary sagas
+    // to run in a timelier manner.
     let updated = vmm_updated || migration_updated.unwrap_or(false);
     if updated {
         let (.., authz_instance) = LookupPath::new(&opctx, datastore)
