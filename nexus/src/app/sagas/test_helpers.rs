@@ -347,6 +347,37 @@ pub async fn no_virtual_provisioning_collection_records_using_instances(
         .unwrap()
 }
 
+pub async fn no_sled_resource_instance_records_exist(
+    cptestctx: &ControlPlaneTestContext,
+) -> bool {
+    use nexus_db_queries::db::model::SledResource;
+    use nexus_db_queries::db::model::SledResourceKind;
+    use nexus_db_queries::db::schema::sled_resource::dsl;
+
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+    datastore
+        .transaction_retry_wrapper("no_sled_resource_instance_records_exist")
+        .transaction(&conn, |conn| async move {
+            conn.batch_execute_async(
+                nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+            )
+            .await
+            .unwrap();
+
+            Ok(dsl::sled_resource
+                .filter(dsl::kind.eq(SledResourceKind::Instance))
+                .select(SledResource::as_select())
+                .get_results_async::<SledResource>(&conn)
+                .await
+                .unwrap()
+                .is_empty())
+        })
+        .await
+        .unwrap()
+}
+
 /// Tests that the saga described by `dag` succeeds if each of its nodes is
 /// repeated.
 ///
