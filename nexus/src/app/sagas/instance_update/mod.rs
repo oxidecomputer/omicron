@@ -882,6 +882,97 @@ mod test {
         .unwrap()
     }
 
+    #[track_caller]
+    fn assert_instance_unlocked(instance: &Instance) {
+        assert_eq!(
+            instance.updater_id, None,
+            "instance updater lock should have been released"
+        )
+    }
+
+    // === Active VMM destroyed tests ====
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_active_vmm_destroyed_succeeds(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let (state, params) = setup_active_vmm_destroyed_test(cptestctx).await;
+
+        // Run the instance-update saga.
+        let nexus = &cptestctx.server.server_context().nexus;
+        nexus
+            .sagas
+            .saga_execute::<SagaInstanceUpdate>(params)
+            .await
+            .expect("update saga should succeed");
+
+        // Assert that the saga properly cleaned up the active VMM's resources.
+        verify_active_vmm_destroyed(cptestctx, state.instance().id()).await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_active_vmm_destroyed_actions_succeed_idempotently(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let (state, params) = setup_active_vmm_destroyed_test(cptestctx).await;
+
+        // Build the saga DAG with the provided test parameters
+        let dag = create_saga_dag::<SagaInstanceUpdate>(params).unwrap();
+
+        crate::app::sagas::test_helpers::actions_succeed_idempotently(
+            &cptestctx.server.server_context().nexus,
+            dag,
+        )
+        .await;
+
+        // Assert that the saga properly cleaned up the active VMM's resources.
+        verify_active_vmm_destroyed(cptestctx, state.instance().id()).await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_active_vmm_destroyed_action_failure_can_unwind(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let (state, Params { serialized_authn, authz_instance }) =
+            setup_active_vmm_destroyed_test(cptestctx).await;
+        let instance_id =
+            InstanceUuid::from_untyped_uuid(state.instance().id());
+
+        test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
+            &cptestctx.server.server_context().nexus,
+            || {
+                Box::pin(async {
+                    Params {
+                        serialized_authn: serialized_authn.clone(),
+                        authz_instance: authz_instance.clone(),
+                    }
+                })
+            },
+            || {
+                Box::pin({
+                    async {
+                        let state = test_helpers::instance_fetch(
+                            cptestctx,
+                            instance_id,
+                        )
+                        .await;
+                        // Unlike most other sagas, we actually don't unwind the
+                        // work performed by an update saga, as we would prefer
+                        // that at least some of it succeeds. The only thing
+                        // that *needs* to be rolled back when an
+                        // instance-update saga fails is that the updater lock
+                        // *MUST* be released so that a subsequent saga can run.
+                        assert_instance_unlocked(state.instance());
+                    }
+                })
+            },
+            &cptestctx.logctx.log,
+        )
+        .await;
+    }
+
+    // --- test helpers ---
+
     async fn setup_active_vmm_destroyed_test(
         cptestctx: &ControlPlaneTestContext,
     ) -> (InstanceAndActiveVmm, Params) {
@@ -987,92 +1078,5 @@ mod test {
             test_helpers::no_sled_resource_instance_records_exist(cptestctx)
                 .await
         );
-    }
-
-    #[track_caller]
-    fn assert_instance_unlocked(instance: &Instance) {
-        assert_eq!(
-            instance.updater_id, None,
-            "instance updater lock should have been released"
-        )
-    }
-
-    #[nexus_test(server = crate::Server)]
-    async fn test_active_vmm_destroyed_succeeds(
-        cptestctx: &ControlPlaneTestContext,
-    ) {
-        let (state, params) = setup_active_vmm_destroyed_test(cptestctx).await;
-
-        // Run the instance-update saga.
-        let nexus = &cptestctx.server.server_context().nexus;
-        nexus
-            .sagas
-            .saga_execute::<SagaInstanceUpdate>(params)
-            .await
-            .expect("update saga should succeed");
-
-        // Assert that the saga properly cleaned up the active VMM's resources.
-        verify_active_vmm_destroyed(cptestctx, state.instance().id()).await;
-    }
-
-    #[nexus_test(server = crate::Server)]
-    async fn test_active_vmm_destroyed_actions_succeed_idempotently(
-        cptestctx: &ControlPlaneTestContext,
-    ) {
-        let (state, params) = setup_active_vmm_destroyed_test(cptestctx).await;
-
-        // Build the saga DAG with the provided test parameters
-        let dag = create_saga_dag::<SagaInstanceUpdate>(params).unwrap();
-
-        crate::app::sagas::test_helpers::actions_succeed_idempotently(
-            &cptestctx.server.server_context().nexus,
-            dag,
-        )
-        .await;
-
-        // Assert that the saga properly cleaned up the active VMM's resources.
-        verify_active_vmm_destroyed(cptestctx, state.instance().id()).await;
-    }
-
-    #[nexus_test(server = crate::Server)]
-    async fn test_active_vmm_destroyed_action_failure_can_unwind(
-        cptestctx: &ControlPlaneTestContext,
-    ) {
-        let (state, Params { serialized_authn, authz_instance }) =
-            setup_active_vmm_destroyed_test(cptestctx).await;
-        let instance_id =
-            InstanceUuid::from_untyped_uuid(state.instance().id());
-
-        test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
-            &cptestctx.server.server_context().nexus,
-            || {
-                Box::pin(async {
-                    Params {
-                        serialized_authn: serialized_authn.clone(),
-                        authz_instance: authz_instance.clone(),
-                    }
-                })
-            },
-            || {
-                Box::pin({
-                    async {
-                        let state = test_helpers::instance_fetch(
-                            cptestctx,
-                            instance_id,
-                        )
-                        .await;
-                        // Unlike most other sagas, we actually don't unwind the
-                        // work performed by an update saga, as we would prefer
-                        // that at least some of it succeeds. The only thing
-                        // that *needs* to be rolled back when an
-                        // instance-update saga fails is that the updater lock
-                        // *MUST* be released so that a subsequent saga can run.
-                        assert_instance_unlocked(state.instance());
-                    }
-                })
-            },
-            &cptestctx.logctx.log,
-        )
-        .await;
     }
 }
