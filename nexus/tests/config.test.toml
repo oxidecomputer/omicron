@@ -37,7 +37,7 @@ max_vpc_ipv4_subnet_prefix = 29
 [deployment]
 # Identifier for this instance of Nexus.
 # NOTE: The test suite always overrides this.
-id = "e6bff1ff-24fb-49dc-a54e-c6a350cd4d6c"
+id = "913233fe-92a8-4635-9572-183f495429c4"
 rack_id = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc"
 techport_external_server_port = 0
 
@@ -119,6 +119,7 @@ instance_watcher.period_secs = 30
 service_firewall_propagation.period_secs = 300
 v2p_mapping_propagation.period_secs = 30
 abandoned_vmm_reaper.period_secs = 60
+saga_recovery.period_secs = 600
 lookup_region_port.period_secs = 60
 
 [default_region_allocation_strategy]

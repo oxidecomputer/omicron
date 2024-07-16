@@ -18,6 +18,7 @@ use bootstrap_agent_client::types::RackOperationStatus;
 use bootstrap_agent_client::types::RackResetId;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
+use dropshot::ApiDescriptionRegisterError;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
@@ -59,7 +60,7 @@ type WicketdApiDescription = ApiDescription<ServerContext>;
 pub fn api() -> WicketdApiDescription {
     fn register_endpoints(
         api: &mut WicketdApiDescription,
-    ) -> Result<(), String> {
+    ) -> Result<(), ApiDescriptionRegisterError> {
         api.register(get_bootstrap_sleds)?;
         api.register(get_rss_config)?;
         api.register(put_rss_config)?;

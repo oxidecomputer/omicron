@@ -6,8 +6,7 @@ Arguments:
   [CONFIG_FILE_PATH]  
 
 Options:
-  -O, --openapi           Print the external OpenAPI Spec document and exit
-  -I, --openapi-internal  Print the internal OpenAPI Spec document and exit
-  -h, --help              Print help
+  -O, --openapi  Print the external OpenAPI Spec document and exit
+  -h, --help     Print help
 
 nexus: CONFIG_FILE_PATH is required

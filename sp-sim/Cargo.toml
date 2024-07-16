@@ -20,7 +20,6 @@ omicron-common.workspace = true
 serde.workspace = true
 slog.workspace = true
 slog-dtrace.workspace = true
-sprockets-rot.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 toml.workspace = true

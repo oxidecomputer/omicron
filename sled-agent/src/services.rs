@@ -57,7 +57,7 @@ use illumos_utils::running_zone::{
 };
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
-use illumos_utils::zpool::ZpoolName;
+use illumos_utils::zpool::{PathInPool, ZpoolName};
 use illumos_utils::{execute, PFEXEC};
 use internal_dns::resolver::Resolver;
 use itertools::Itertools;
@@ -445,6 +445,11 @@ impl OmicronZonesConfigLocal {
 /// Combines the Nexus-provided `OmicronZoneConfig` (which describes what Nexus
 /// wants for this zone) with any locally-determined configuration (like the
 /// path to the root filesystem)
+//
+// NOTE: Although the path to the root filesystem is not exactly equal to the
+// ZpoolName, it is derivable from it, and the ZpoolName for the root filesystem
+// is now being supplied as a part of OmicronZoneConfig. Therefore, this struct
+// is less necessary than it has been historically.
 #[derive(
     Clone,
     Debug,
@@ -551,10 +556,15 @@ impl<'a> ZoneArgs<'a> {
     }
 
     /// Return the root filesystem path for this zone
-    pub fn root(&self) -> &Utf8Path {
+    pub fn root(&self) -> PathInPool {
         match self {
-            ZoneArgs::Omicron(zone_config) => &zone_config.root,
-            ZoneArgs::Switch(zone_request) => &zone_request.root,
+            ZoneArgs::Omicron(zone_config) => PathInPool {
+                pool: zone_config.zone.filesystem_pool.clone(),
+                path: zone_config.root.clone(),
+            },
+            ZoneArgs::Switch(zone_request) => {
+                PathInPool { pool: None, path: zone_request.root.clone() }
+            }
         }
     }
 }
@@ -1436,7 +1446,7 @@ impl ServiceManager {
         let all_disks = self.inner.storage.get_latest_disks().await;
         if let Some((_, boot_zpool)) = all_disks.boot_disk() {
             zone_image_paths.push(boot_zpool.dataset_mountpoint(
-                &all_disks.mount_config.root,
+                &all_disks.mount_config().root,
                 INSTALL_DATASET,
             ));
         }
@@ -1462,7 +1472,7 @@ impl ServiceManager {
         let installed_zone = zone_builder
             .with_log(self.inner.log.clone())
             .with_underlay_vnic_allocator(&self.inner.underlay_vnic_allocator)
-            .with_zone_root_path(&request.root())
+            .with_zone_root_path(request.root())
             .with_zone_image_paths(zone_image_paths.as_slice())
             .with_zone_type(&zone_type_str)
             .with_datasets(datasets.as_slice())
@@ -2904,7 +2914,8 @@ impl ServiceManager {
             )
             .await?;
 
-        let config = OmicronZoneConfigLocal { zone: zone.clone(), root };
+        let config =
+            OmicronZoneConfigLocal { zone: zone.clone(), root: root.path };
 
         let runtime = self
             .initialize_zone(
@@ -3172,7 +3183,7 @@ impl ServiceManager {
 
         // Collect information that's necessary to start new zones
         let storage = self.inner.storage.get_latest_disks().await;
-        let mount_config = &storage.mount_config;
+        let mount_config = storage.mount_config();
         let all_u2_pools = storage.all_u2_zpools();
         let time_is_synchronized =
             match self.timesync_get_locked(&existing_zones).await {
@@ -3289,7 +3300,7 @@ impl ServiceManager {
         mount_config: &MountConfig,
         zone: &OmicronZoneConfig,
         all_u2_pools: &Vec<ZpoolName>,
-    ) -> Result<Utf8PathBuf, Error> {
+    ) -> Result<PathInPool, Error> {
         let name = zone.zone_name();
 
         // If the caller has requested a specific durable dataset,
@@ -3368,7 +3379,9 @@ impl ServiceManager {
                 device: format!("zpool: {filesystem_pool}"),
             });
         }
-        Ok(filesystem_pool.dataset_mountpoint(&mount_config.root, ZONE_DATASET))
+        let path = filesystem_pool
+            .dataset_mountpoint(&mount_config.root, ZONE_DATASET);
+        Ok(PathInPool { pool: Some(filesystem_pool), path })
     }
 
     pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {

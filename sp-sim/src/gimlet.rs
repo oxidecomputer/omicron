@@ -6,7 +6,6 @@ use crate::config::GimletConfig;
 use crate::config::SpComponentConfig;
 use crate::helpers::rot_slot_id_from_u16;
 use crate::helpers::rot_slot_id_to_u16;
-use crate::rot::RotSprocketExt;
 use crate::serial_number_padded;
 use crate::server;
 use crate::server::SimSpHandler;
@@ -38,9 +37,6 @@ use gateway_messages::{version, MessageKind};
 use gateway_messages::{ComponentDetails, Message, MgsError, StartupOptions};
 use gateway_messages::{DiscoverResponse, IgnitionState, PowerState};
 use slog::{debug, error, info, warn, Logger};
-use sprockets_rot::common::msgs::{RotRequestV1, RotResponseV1};
-use sprockets_rot::common::Ed25519PublicKey;
-use sprockets_rot::{RotSprocket, RotSprocketError};
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::iter;
@@ -88,8 +84,6 @@ pub enum SimSpHandledRequest {
 }
 
 pub struct Gimlet {
-    rot: Mutex<RotSprocket>,
-    manufacturing_public_key: Ed25519PublicKey,
     local_addrs: Option<[SocketAddrV6; 2]>,
     handler: Option<Arc<TokioMutex<Handler>>>,
     serial_console_addrs: HashMap<String, SocketAddrV6>,
@@ -116,10 +110,6 @@ impl SimulatedSp for Gimlet {
         )
     }
 
-    fn manufacturing_public_key(&self) -> Ed25519PublicKey {
-        self.manufacturing_public_key
-    }
-
     fn local_addr(&self, port: SpPort) -> Option<SocketAddrV6> {
         let i = match port {
             SpPort::One => 0,
@@ -133,13 +123,6 @@ impl SimulatedSp for Gimlet {
         if let Ok(()) = self.commands.send(Command::SetResponsiveness(r, tx)) {
             rx.await.unwrap();
         }
-    }
-
-    fn rot_request(
-        &self,
-        request: RotRequestV1,
-    ) -> Result<RotResponseV1, RotSprocketError> {
-        self.rot.lock().unwrap().handle_deserialized(request)
     }
 
     async fn last_sp_update_data(&self) -> Option<Box<[u8]>> {
@@ -201,16 +184,11 @@ impl Gimlet {
         let (commands, commands_rx) = mpsc::unbounded_channel();
         let last_request_handled = Arc::default();
 
-        let (manufacturing_public_key, rot) =
-            RotSprocket::bootstrap_from_config(&gimlet.common);
-
         // Weird case - if we don't have any bind addresses, we're only being
         // created to simulate an RoT, so go ahead and return without actually
         // starting a simulated SP.
         let Some(bind_addrs) = gimlet.common.bind_addrs else {
             return Ok(Self {
-                rot: Mutex::new(rot),
-                manufacturing_public_key,
                 local_addrs: None,
                 handler: None,
                 serial_console_addrs,
@@ -299,8 +277,6 @@ impl Gimlet {
             .push(task::spawn(async move { inner.run().await.unwrap() }));
 
         Ok(Self {
-            rot: Mutex::new(rot),
-            manufacturing_public_key,
             local_addrs: Some(local_addrs),
             handler: Some(handler),
             serial_console_addrs,

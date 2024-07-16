@@ -17,6 +17,7 @@ use crate::ServerContext;
 use base64::Engine;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
+use dropshot::ApiDescriptionRegisterError;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
@@ -1677,7 +1678,7 @@ type GatewayApiDescription = ApiDescription<Arc<ServerContext>>;
 pub fn api() -> GatewayApiDescription {
     fn register_endpoints(
         api: &mut GatewayApiDescription,
-    ) -> Result<(), String> {
+    ) -> Result<(), ApiDescriptionRegisterError> {
         api.register(sp_get)?;
         api.register(sp_startup_options_get)?;
         api.register(sp_startup_options_set)?;

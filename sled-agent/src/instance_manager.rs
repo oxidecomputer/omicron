@@ -24,14 +24,16 @@ use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::ZoneBuilderFactory;
+use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use sled_storage::manager::StorageHandle;
+use sled_storage::resources::AllDisks;
 use slog::Logger;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
@@ -119,6 +121,7 @@ impl InstanceManager {
             instances: BTreeMap::new(),
             vnic_allocator: VnicAllocator::new("Instance", etherstub),
             port_manager,
+            storage_generation: None,
             storage,
             zone_bundler,
             zone_builder_factory,
@@ -325,6 +328,23 @@ impl InstanceManager {
             .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
         rx.await?
     }
+
+    /// Marks instances failed unless they're using storage from `disks`.
+    ///
+    /// This function looks for transient zone filesystem usage on expunged
+    /// zpools.
+    pub async fn use_only_these_disks(
+        &self,
+        disks: AllDisks,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::OnlyUseDisks { disks, tx })
+            .await
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
+        rx.await?
+    }
 }
 
 // Most requests that can be sent to the "InstanceManagerRunner" task.
@@ -384,6 +404,10 @@ enum InstanceManagerRequest {
         instance_id: InstanceUuid,
         tx: oneshot::Sender<Result<SledInstanceState, Error>>,
     },
+    OnlyUseDisks {
+        disks: AllDisks,
+        tx: oneshot::Sender<Result<(), Error>>,
+    },
 }
 
 // Requests that the instance manager stop processing information about a
@@ -420,6 +444,7 @@ struct InstanceManagerRunner {
 
     vnic_allocator: VnicAllocator<Etherstub>,
     port_manager: PortManager,
+    storage_generation: Option<Generation>,
     storage: StorageHandle,
     zone_bundler: ZoneBundler,
     zone_builder_factory: ZoneBuilderFactory,
@@ -493,6 +518,10 @@ impl InstanceManagerRunner {
                             // serialize with the requests that actually update
                             // the state...
                             self.get_instance_state(tx, instance_id).await
+                        },
+                        Some(OnlyUseDisks { disks, tx } ) => {
+                            self.use_only_these_disks(disks).await;
+                            tx.send(Ok(())).map_err(|_| Error::FailedSendClientClosed)
                         },
                         None => {
                             warn!(self.log, "InstanceManager's request channel closed; shutting down");
@@ -638,7 +667,8 @@ impl InstanceManagerRunner {
 
         // Otherwise, we pipeline the request, and send it to the instance,
         // where it can receive an appropriate response.
-        instance.terminate(tx).await?;
+        let mark_failed = false;
+        instance.terminate(tx, mark_failed).await?;
         Ok(())
     }
 
@@ -774,6 +804,56 @@ impl InstanceManagerRunner {
         let state = instance.current_state().await?;
         tx.send(Ok(state)).map_err(|_| Error::FailedSendClientClosed)?;
         Ok(())
+    }
+
+    async fn use_only_these_disks(&mut self, disks: AllDisks) {
+        // Consider the generation number on the incoming request to avoid
+        // applying old requests.
+        let requested_generation = *disks.generation();
+        if let Some(last_gen) = self.storage_generation {
+            if last_gen >= requested_generation {
+                // This request looks old, ignore it.
+                info!(self.log, "use_only_these_disks: Ignoring request";
+                    "last_gen" => ?last_gen, "requested_gen" => ?requested_generation);
+                return;
+            }
+        }
+        self.storage_generation = Some(requested_generation);
+        info!(self.log, "use_only_these_disks: Processing new request";
+            "gen" => ?requested_generation);
+
+        let u2_set: HashSet<_> = disks.all_u2_zpools().into_iter().collect();
+
+        let mut to_remove = vec![];
+        for (id, (_, instance)) in self.instances.iter() {
+            // If we can read the filesystem pool, consider it. Otherwise, move
+            // on, to prevent blocking the cleanup of other instances.
+            let Ok(Some(filesystem_pool)) =
+                instance.get_filesystem_zpool().await
+            else {
+                info!(self.log, "use_only_these_disks: Cannot read filesystem pool"; "instance_id" => ?id);
+                continue;
+            };
+            if !u2_set.contains(&filesystem_pool) {
+                to_remove.push(*id);
+            }
+        }
+
+        for id in to_remove {
+            info!(self.log, "use_only_these_disks: Removing instance"; "instance_id" => ?id);
+            if let Some((_, instance)) = self.instances.remove(&id) {
+                let (tx, rx) = oneshot::channel();
+                let mark_failed = true;
+                if let Err(e) = instance.terminate(tx, mark_failed).await {
+                    warn!(self.log, "use_only_these_disks: Failed to request instance removal"; "err" => ?e);
+                    continue;
+                }
+
+                if let Err(e) = rx.await {
+                    warn!(self.log, "use_only_these_disks: Failed while removing instance"; "err" => ?e);
+                }
+            }
+        }
     }
 }
 

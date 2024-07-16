@@ -1,13 +1,12 @@
 use dropshot::HttpErrorResponseBody;
 use http::{Method, StatusCode};
-use nexus_db_queries::db::datastore::ProbeInfo;
 use nexus_test_utils::{
     http_testing::{AuthnMode, NexusRequest},
     resource_helpers::{create_default_ip_pool, create_project},
     SLED_AGENT_UUID,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::ProbeCreate;
+use nexus_types::external_api::{params::ProbeCreate, shared::ProbeInfo};
 use omicron_common::api::external::{IdentityMetadataCreateParams, Probe};
 
 type ControlPlaneTestContext =

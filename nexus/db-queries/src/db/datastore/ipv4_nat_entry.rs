@@ -10,7 +10,7 @@ use diesel::prelude::*;
 use diesel::sql_types::BigInt;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::Ipv4NatChange;
-use nexus_db_model::Ipv4NatEntryView;
+use nexus_types::internal_api::views::Ipv4NatEntryView;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;

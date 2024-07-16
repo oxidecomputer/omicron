@@ -20,10 +20,10 @@ use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
 use display_error_chain::DisplayErrorChain;
 use dropshot::{
-    endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseCreated,
-    HttpResponseDeleted, HttpResponseHeaders, HttpResponseOk,
-    HttpResponseUpdatedNoContent, Path, Query, RequestContext, StreamingBody,
-    TypedBody,
+    endpoint, ApiDescription, ApiDescriptionRegisterError, FreeformBody,
+    HttpError, HttpResponseCreated, HttpResponseDeleted, HttpResponseHeaders,
+    HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query, RequestContext,
+    StreamingBody, TypedBody,
 };
 use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use installinator_common::M2Slot;
@@ -46,7 +46,9 @@ type SledApiDescription = ApiDescription<SledAgent>;
 
 /// Returns a description of the sled agent API
 pub fn api() -> SledApiDescription {
-    fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
+    fn register_endpoints(
+        api: &mut SledApiDescription,
+    ) -> Result<(), ApiDescriptionRegisterError> {
         api.register(disk_put)?;
         api.register(cockroachdb_init)?;
         api.register(instance_issue_disk_snapshot_request)?;

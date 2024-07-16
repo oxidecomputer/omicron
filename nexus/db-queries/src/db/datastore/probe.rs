@@ -1,5 +1,3 @@
-use std::net::IpAddr;
-
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
@@ -15,6 +13,7 @@ use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::Probe;
 use nexus_db_model::VpcSubnet;
+use nexus_types::external_api::shared::ProbeInfo;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
@@ -31,34 +30,6 @@ use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
-pub struct ProbeInfo {
-    pub id: Uuid,
-    pub name: Name,
-    sled: Uuid,
-    pub external_ips: Vec<ProbeExternalIp>,
-    pub interface: NetworkInterface,
-}
-
-#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
-pub struct ProbeExternalIp {
-    ip: IpAddr,
-    first_port: u16,
-    last_port: u16,
-    kind: IpKind,
-}
-
-impl From<nexus_db_model::ExternalIp> for ProbeExternalIp {
-    fn from(value: nexus_db_model::ExternalIp) -> Self {
-        Self {
-            ip: value.ip.ip(),
-            first_port: value.first_port.0,
-            last_port: value.last_port.0,
-            kind: value.kind.into(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -141,7 +112,7 @@ impl super::DataStore {
 
             result.push(ProbeInfo {
                 id: probe.id(),
-                name: probe.name().clone().into(),
+                name: probe.name().clone(),
                 sled: probe.sled,
                 interface,
                 external_ips,
@@ -184,7 +155,7 @@ impl super::DataStore {
 
         Ok(ProbeInfo {
             id: probe.id(),
-            name: probe.name().clone().into(),
+            name: probe.name().clone(),
             sled: probe.sled,
             interface,
             external_ips,

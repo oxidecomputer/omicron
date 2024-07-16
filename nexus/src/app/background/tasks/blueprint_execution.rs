@@ -120,11 +120,12 @@ mod test {
     use httptest::responders::status_code;
     use httptest::Expectation;
     use nexus_db_model::{
-        ByteCount, SledBaseboard, SledSystemHardware, SledUpdate,
+        ByteCount, SledBaseboard, SledSystemHardware, SledUpdate, Zpool,
     };
     use nexus_db_queries::authn;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::{
         blueprint_zone_type, Blueprint, BlueprintPhysicalDisksConfig,
         BlueprintTarget, BlueprintZoneConfig, BlueprintZoneDisposition,
@@ -306,6 +307,26 @@ mod test {
             BTreeMap::new(),
             generation,
         );
+
+        // Insert records for the zpools backing the datasets in these zones.
+        for (sled_id, config) in
+            blueprint.1.all_omicron_zones(BlueprintZoneFilter::All)
+        {
+            let Some(dataset) = config.zone_type.durable_dataset() else {
+                continue;
+            };
+
+            let pool_id = dataset.dataset.pool_name.id();
+            let zpool = Zpool::new(
+                pool_id.into_untyped_uuid(),
+                sled_id.into_untyped_uuid(),
+                Uuid::new_v4(), // physical_disk_id
+            );
+            datastore
+                .zpool_insert(&opctx, zpool)
+                .await
+                .expect("failed to upsert zpool");
+        }
 
         blueprint_tx.send(Some(Arc::new(blueprint.clone()))).unwrap();
 
