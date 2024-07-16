@@ -88,6 +88,7 @@ members = [
     "wicket-dbg",
     "wicket",
     "wicketd",
+    "wicketd-api",
     "workspace-hack",
     "zone-setup",
 ]
@@ -184,6 +185,7 @@ default-members = [
     "wicket-dbg",
     "wicket",
     "wicketd",
+    "wicketd-api",
     "workspace-hack",
     "zone-setup",
 ]
@@ -533,6 +535,7 @@ walkdir = "2.5"
 whoami = "1.5"
 wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }
+wicketd-api = { path = "wicketd-api" }
 wicketd-client = { path = "clients/wicketd-client" }
 zeroize = { version = "1.7.0", features = ["zeroize_derive", "std"] }
 zip = { version = "0.6.6", default-features = false, features = ["deflate","bzip2"] }

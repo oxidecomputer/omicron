@@ -6119,6 +6119,7 @@ dependencies = [
  "serde_json",
  "similar",
  "supports-color",
+ "wicketd-api",
 ]
 
 [[package]]
@@ -11054,6 +11055,8 @@ name = "wicket-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "dpd-client",
+ "dropshot",
  "gateway-client",
  "maplit",
  "omicron-common",
@@ -11065,7 +11068,9 @@ dependencies = [
  "serde_json",
  "sha2",
  "sled-hardware-types",
+ "slog",
  "thiserror",
+ "tokio",
  "toml 0.8.14",
  "update-engine",
 ]
@@ -11164,7 +11169,25 @@ dependencies = [
  "uuid",
  "wicket",
  "wicket-common",
+ "wicketd-api",
  "wicketd-client",
+]
+
+[[package]]
+name = "wicketd-api"
+version = "0.1.0"
+dependencies = [
+ "bootstrap-agent-client",
+ "dropshot",
+ "gateway-client",
+ "omicron-common",
+ "omicron-passwords",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+ "sled-hardware-types",
+ "slog",
+ "wicket-common",
 ]
 
 [[package]]
