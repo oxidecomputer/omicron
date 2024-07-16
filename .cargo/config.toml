@@ -8,6 +8,7 @@
 # CI scripts:
 # - .github/buildomat/build-and-test.sh
 # - .github/buildomat/jobs/clippy.sh
+# - .github/buildomat/jobs/check-features.sh
 # - .github/workflows/rust.yml
 #
 [build]

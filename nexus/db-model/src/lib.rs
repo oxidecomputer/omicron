@@ -176,6 +176,7 @@ pub use region_replacement_step::*;
 pub use region_snapshot::*;
 pub use role_assignment::*;
 pub use role_builtin::*;
+pub use saga_types::*;
 pub use schema_versions::*;
 pub use semver_version::*;
 pub use service_kind::*;

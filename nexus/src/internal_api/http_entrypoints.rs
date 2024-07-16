@@ -24,6 +24,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
+use nexus_types::external_api::params::PhysicalDiskPath;
 use nexus_types::external_api::params::SledSelector;
 use nexus_types::external_api::params::UninitializedSledId;
 use nexus_types::external_api::shared::ProbeInfo;
@@ -820,6 +821,24 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let previous_policy =
                 nexus.sled_expunge(&opctx, sled.into_inner().sled).await?;
             Ok(HttpResponseOk(previous_policy))
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn physical_disk_expunge(
+        rqctx: RequestContext<Self::Context>,
+        disk: TypedBody<PhysicalDiskPath>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            nexus.physical_disk_expunge(&opctx, disk.into_inner()).await?;
+            Ok(HttpResponseUpdatedNoContent())
         };
         apictx
             .internal_latencies
