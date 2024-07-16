@@ -880,10 +880,36 @@ mod test {
         test_helpers::instance_simulate(cptestctx, &instance_id).await;
         // Wait for the instance update saga triggered by a transition to
         // Running to complete.
-        // TODO(eliza): it would be a bit nicer if `notify_instance_updated` was
-        // smarter about determining whether it should try to start an update
-        // saga, since this update doesn't actually do anything...
         let state = wait_for_update(cptestctx, state.instance()).await;
+        // The instance should have an active VMM.
+        let instance_runtime = state.instance().runtime();
+        assert_eq!(instance_runtime.nexus_state, InstanceState::Vmm);
+        assert!(instance_runtime.propolis_id.is_some());
+        // Once we destroy the active VMM, we'll assert that the virtual
+        // provisioning and sled resource records it owns have been deallocated.
+        // In order to ensure we're actually testing the correct thing, let's
+        // make sure that those records exist now --- if not, the assertions
+        // later won't mean anything!
+        assert!(
+            !test_helpers::no_virtual_provisioning_resource_records_exist(
+                cptestctx
+            )
+            .await,
+            "we can't assert that a destroyed VMM instance update deallocates \
+             virtual provisioning records if none exist!",
+        );
+        assert!(
+            !test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx)
+                .await,
+            "we can't assert that a destroyed VMM instance update deallocates \
+             virtual provisioning records if none exist!",
+        );
+        assert!(
+            !test_helpers::no_sled_resource_instance_records_exist(cptestctx)
+                .await,
+            "we can't assert that a destroyed VMM instance update deallocates \
+             sled resource records if none exist!"
+        );
 
         // Now, destroy the active VMM
         let vmm = state.vmm().as_ref().unwrap();
@@ -917,10 +943,13 @@ mod test {
             .expect("update saga should succeed");
         let state = wait_for_update(cptestctx, state.instance()).await;
 
-        assert_eq!(
-            state.instance().runtime().nexus_state,
-            InstanceState::NoVmm
-        );
+        // The instance's active VMM has been destroyed, so its state should
+        // transition to `NoVmm`, and its active VMM ID should be unlinked. The
+        // virtual provisioning and sled resources allocated to the instance
+        // should be deallocated.
+        let instance_runtime = state.instance().runtime();
+        assert_eq!(instance_runtime.nexus_state, InstanceState::NoVmm);
+        assert!(instance_runtime.propolis_id.is_none());
         assert!(
             test_helpers::no_virtual_provisioning_resource_records_exist(
                 cptestctx
@@ -928,5 +957,9 @@ mod test {
             .await
         );
         assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx).await);
+        assert!(
+            test_helpers::no_sled_resource_instance_records_exist(cptestctx)
+                .await
+        );
     }
 }
