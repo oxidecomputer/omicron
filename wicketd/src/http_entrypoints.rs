@@ -408,7 +408,7 @@ impl WicketdApi for WicketdApiImpl {
                     Baseboard::new_gimlet(
                         state.serial_number.clone(),
                         state.model.clone(),
-                        i64::from(state.revision),
+                        state.revision,
                     )
                 });
             } else if let (Some(sled_baseboard), Some(state)) =
@@ -416,7 +416,7 @@ impl WicketdApi for WicketdApiImpl {
             {
                 if sled_baseboard.identifier() == state.serial_number
                     && sled_baseboard.model() == state.model
-                    && sled_baseboard.revision() == i64::from(state.revision)
+                    && sled_baseboard.revision() == state.revision
                 {
                     sled_id = Some(sp.id);
                 }
@@ -531,7 +531,7 @@ impl WicketdApi for WicketdApiImpl {
                 Some(baseboard) => {
                     if baseboard.identifier() == sp_state.serial_number
                         && baseboard.model() == sp_state.model
-                        && baseboard.revision() == i64::from(sp_state.revision)
+                        && baseboard.revision() == sp_state.revision
                     {
                         self_update = Some(*target);
                         continue;

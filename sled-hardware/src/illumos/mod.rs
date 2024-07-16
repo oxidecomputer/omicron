@@ -162,7 +162,7 @@ impl HardwareSnapshot {
         let baseboard = Baseboard::new_gimlet(
             string_from_property(&properties[0])?,
             string_from_property(&properties[1])?,
-            i64_from_property(&properties[2])?,
+            u32_from_property(&properties[2])?,
         );
         let boot_storage_unit =
             BootStorageUnit::try_from(i64_from_property(&properties[3])?)?;
@@ -410,6 +410,21 @@ fn get_parent_node<'a>(
         )));
     }
     Ok(parent)
+}
+
+/// Convert a property to a `u32` if possible, passing through an `i64`.
+///
+/// Returns an error if either:
+///
+/// - The actual devinfo property isn't an integer type.
+/// - The value does not fit in a `u32`.
+fn u32_from_property(prop: &Property<'_>) -> Result<u32, Error> {
+    i64_from_property(prop).and_then(|val| {
+        u32::try_from(val).map_err(|_| Error::UnexpectedPropertyType {
+            name: prop.name(),
+            ty: "u32".to_string(),
+        })
+    })
 }
 
 fn i64_from_property(prop: &Property<'_>) -> Result<i64, Error> {

@@ -1021,12 +1021,7 @@ async fn inventory(
 async fn sled_identifiers(
     request_context: RequestContext<SledAgent>,
 ) -> Result<HttpResponseOk<SledIdentifiers>, HttpError> {
-    request_context
-        .context()
-        .sled_identifiers()
-        .await
-        .map(HttpResponseOk)
-        .map_err(HttpError::from)
+    Ok(HttpResponseOk(request_context.context().sled_identifiers().await))
 }
 
 /// Get the internal state of the local bootstore node

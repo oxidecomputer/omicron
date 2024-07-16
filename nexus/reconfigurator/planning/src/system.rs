@@ -521,7 +521,7 @@ impl Sled {
                     sled_agent_client::types::Baseboard::Gimlet {
                         identifier: serial.clone(),
                         model: model.clone(),
-                        revision: i64::from(revision),
+                        revision,
                     }
                 }
                 SledHardware::Pc => sled_agent_client::types::Baseboard::Pc {
@@ -591,7 +591,7 @@ impl Sled {
             .map(|sledhw| sled_agent_client::types::Baseboard::Gimlet {
                 identifier: sledhw.baseboard_id.serial_number.clone(),
                 model: sledhw.baseboard_id.part_number.clone(),
-                revision: i64::from(sledhw.sp.baseboard_revision),
+                revision: sledhw.sp.baseboard_revision,
             })
             .unwrap_or(sled_agent_client::types::Baseboard::Unknown);
 
