@@ -23,6 +23,7 @@ pub mod phantom_disks;
 pub mod physical_disk_adoption;
 pub mod region_replacement;
 pub mod region_replacement_driver;
+pub mod saga_recovery;
 pub mod service_firewall_rules;
 pub mod sync_service_zone_nat;
 pub mod sync_switch_configuration;
