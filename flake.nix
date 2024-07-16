@@ -9,7 +9,7 @@
     };
   };
 
-  outputs = { self, nixpkgs, rust-overlay, ... }:
+  outputs = { nixpkgs, rust-overlay, ... }:
     let
       overlays = [ (import rust-overlay) ];
       pkgs = import nixpkgs {
