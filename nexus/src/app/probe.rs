@@ -1,9 +1,9 @@
 use nexus_db_model::Probe;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::datastore::ProbeInfo;
 use nexus_db_queries::db::lookup;
 use nexus_types::external_api::params;
+use nexus_types::external_api::shared::ProbeInfo;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::{

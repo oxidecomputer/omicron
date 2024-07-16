@@ -340,7 +340,7 @@ impl SledDisk {
 }
 
 /// Filters that apply to disks.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, ValueEnum)]
 pub enum DiskFilter {
     /// All disks
     All,
@@ -355,15 +355,57 @@ impl DiskFilter {
         policy: PhysicalDiskPolicy,
         state: PhysicalDiskState,
     ) -> bool {
+        policy.matches(self) && state.matches(self)
+    }
+}
+
+impl PhysicalDiskPolicy {
+    /// Returns true if self matches the filter
+    pub fn matches(self, filter: DiskFilter) -> bool {
         match self {
-            DiskFilter::All => true,
-            DiskFilter::InService => match (policy, state) {
-                (PhysicalDiskPolicy::InService, PhysicalDiskState::Active) => {
-                    true
-                }
-                _ => false,
+            PhysicalDiskPolicy::InService => match filter {
+                DiskFilter::All => true,
+                DiskFilter::InService => true,
+            },
+            PhysicalDiskPolicy::Expunged => match filter {
+                DiskFilter::All => true,
+                DiskFilter::InService => false,
             },
         }
+    }
+
+    /// Returns all policies matching the given filter.
+    ///
+    /// This is meant for database access, and is generally paired with
+    /// [`PhysicalDiskState::all_matching`]. See `ApplyPhysicalDiskFilterExt` in
+    /// nexus-db-model.
+    pub fn all_matching(filter: DiskFilter) -> impl Iterator<Item = Self> {
+        Self::iter().filter(move |state| state.matches(filter))
+    }
+}
+
+impl PhysicalDiskState {
+    /// Returns true if self matches the filter
+    pub fn matches(self, filter: DiskFilter) -> bool {
+        match self {
+            PhysicalDiskState::Active => match filter {
+                DiskFilter::All => true,
+                DiskFilter::InService => true,
+            },
+            PhysicalDiskState::Decommissioned => match filter {
+                DiskFilter::All => true,
+                DiskFilter::InService => false,
+            },
+        }
+    }
+
+    /// Returns all state matching the given filter.
+    ///
+    /// This is meant for database access, and is generally paired with
+    /// [`PhysicalDiskPolicy::all_matching`]. See `ApplyPhysicalDiskFilterExt` in
+    /// nexus-db-model.
+    pub fn all_matching(filter: DiskFilter) -> impl Iterator<Item = Self> {
+        Self::iter().filter(move |state| state.matches(filter))
     }
 }
 
@@ -484,8 +526,8 @@ pub enum SledFilter {
     /// Sleds on which reservations can be created.
     ReservationCreate,
 
-    /// Sleds which should be sent OPTE V2P mappings.
-    V2PMapping,
+    /// Sleds which should be sent OPTE V2P mappings and Routing rules.
+    VpcRouting,
 
     /// Sleds which should be sent VPC firewall rules.
     VpcFirewall,
@@ -541,7 +583,7 @@ impl SledPolicy {
                 SledFilter::InService => true,
                 SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => true,
-                SledFilter::V2PMapping => true,
+                SledFilter::VpcRouting => true,
                 SledFilter::VpcFirewall => true,
             },
             SledPolicy::InService {
@@ -553,7 +595,7 @@ impl SledPolicy {
                 SledFilter::InService => true,
                 SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => false,
-                SledFilter::V2PMapping => true,
+                SledFilter::VpcRouting => true,
                 SledFilter::VpcFirewall => true,
             },
             SledPolicy::Expunged => match filter {
@@ -563,7 +605,7 @@ impl SledPolicy {
                 SledFilter::InService => false,
                 SledFilter::QueryDuringInventory => false,
                 SledFilter::ReservationCreate => false,
-                SledFilter::V2PMapping => false,
+                SledFilter::VpcRouting => false,
                 SledFilter::VpcFirewall => false,
             },
         }
@@ -595,7 +637,7 @@ impl SledState {
                 SledFilter::InService => true,
                 SledFilter::QueryDuringInventory => true,
                 SledFilter::ReservationCreate => true,
-                SledFilter::V2PMapping => true,
+                SledFilter::VpcRouting => true,
                 SledFilter::VpcFirewall => true,
             },
             SledState::Decommissioned => match filter {
@@ -605,7 +647,7 @@ impl SledState {
                 SledFilter::InService => false,
                 SledFilter::QueryDuringInventory => false,
                 SledFilter::ReservationCreate => false,
-                SledFilter::V2PMapping => false,
+                SledFilter::VpcRouting => false,
                 SledFilter::VpcFirewall => false,
             },
         }

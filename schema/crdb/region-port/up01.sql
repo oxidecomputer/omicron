@@ -1,0 +1,2 @@
+ALTER TABLE omicron.public.region
+    ADD COLUMN IF NOT EXISTS port INT4 DEFAULT NULL;

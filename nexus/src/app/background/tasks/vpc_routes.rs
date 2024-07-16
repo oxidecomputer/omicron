@@ -59,7 +59,7 @@ impl BackgroundTask for VpcRouteManager {
 
             let sleds = match self
                 .datastore
-                .sled_list_all_batched(opctx, SledFilter::InService)
+                .sled_list_all_batched(opctx, SledFilter::VpcRouting)
                 .await
             {
                 Ok(v) => v,

@@ -70,6 +70,7 @@ use steno::SagaDag;
 use steno::SagaId;
 use steno::SagaResult;
 use steno::SagaResultOk;
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 /// Given a particular kind of Nexus saga (the type parameter `N`) and
@@ -111,14 +112,16 @@ pub(crate) struct SagaExecutor {
     sec_client: Arc<steno::SecClient>,
     log: slog::Logger,
     nexus: OnceLock<Arc<Nexus>>,
+    saga_create_tx: mpsc::UnboundedSender<steno::SagaId>,
 }
 
 impl SagaExecutor {
     pub(crate) fn new(
         sec_client: Arc<steno::SecClient>,
         log: slog::Logger,
+        saga_create_tx: mpsc::UnboundedSender<steno::SagaId>,
     ) -> SagaExecutor {
-        SagaExecutor { sec_client, log, nexus: OnceLock::new() }
+        SagaExecutor { sec_client, log, nexus: OnceLock::new(), saga_create_tx }
     }
 
     // This is a little gross.  We want to hang the SagaExecutor off of Nexus,
@@ -189,6 +192,19 @@ impl SagaExecutor {
             nexus.clone(),
             saga_logger.clone(),
         )));
+
+        // Tell the recovery task about this.  It's critical that we send this
+        // message before telling Steno about this saga.  It's not critical that
+        // the task _receive_ this message synchronously.  See the comments in
+        // the recovery task implementation for details.
+        self.saga_create_tx.send(saga_id).map_err(
+            |_: mpsc::error::SendError<SagaId>| {
+                Error::internal_error(
+                    "cannot create saga: recovery task not listening \
+                     (is Nexus shutting down?)",
+                )
+            },
+        )?;
 
         // Tell Steno about it.  This does not start it running yet.
         info!(saga_logger, "preparing saga");

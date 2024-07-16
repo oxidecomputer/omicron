@@ -6,12 +6,16 @@
 
 use crate::config::MountConfig;
 use crate::dataset::{DatasetError, M2_DEBUG_DATASET};
-use crate::disk::{Disk, DiskError, OmicronPhysicalDiskConfig, RawDisk};
+use crate::disk::{
+    Disk, DiskError, OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig,
+    RawDisk,
+};
 use crate::error::Error;
 use camino::Utf8PathBuf;
 use cfg_if::cfg_if;
-use illumos_utils::zpool::ZpoolName;
+use illumos_utils::zpool::{PathInPool, ZpoolName};
 use key_manager::StorageKeyRequester;
+use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
@@ -102,7 +106,7 @@ impl DisksManagementResult {
 // the request of the broader control plane. This enum encompasses that duality,
 // by representing all disks that can exist, managed or not.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ManagedDisk {
+pub(crate) enum ManagedDisk {
     // A disk explicitly managed by the control plane.
     //
     // This includes U.2s which Nexus has told us to format and use.
@@ -119,6 +123,11 @@ pub enum ManagedDisk {
     // This disk should be treated as "read-only" until we're explicitly told to
     // use it.
     Unmanaged(RawDisk),
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct AllDisksInner {
+    values: BTreeMap<DiskIdentity, ManagedDisk>,
 }
 
 /// The disks, keyed by their identity, managed by the sled agent.
@@ -139,16 +148,28 @@ pub enum ManagedDisk {
 /// gets cloned or dropped.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct AllDisks {
-    pub values: Arc<BTreeMap<DiskIdentity, ManagedDisk>>,
-    pub mount_config: MountConfig,
+    // This generation corresponds to the generation supplied in
+    // [OmicronPhysicalDisksConfig].
+    generation: Generation,
+    inner: Arc<AllDisksInner>,
+    mount_config: MountConfig,
 }
 
 impl AllDisks {
+    /// Returns the latest generation number of this set of disks.
+    pub fn generation(&self) -> &Generation {
+        &self.generation
+    }
+
+    pub fn mount_config(&self) -> &MountConfig {
+        &self.mount_config
+    }
+
     /// Returns the identity of the boot disk.
     ///
     /// If this returns `None`, we have not processed the boot disk yet.
     pub fn boot_disk(&self) -> Option<(DiskIdentity, ZpoolName)> {
-        for (id, disk) in self.values.iter() {
+        for (id, disk) in self.inner.values.iter() {
             if let ManagedDisk::ImplicitlyManaged(disk) = disk {
                 if disk.is_boot_disk() {
                     return Some((id.clone(), disk.zpool_name().clone()));
@@ -179,18 +200,21 @@ impl AllDisks {
     }
 
     /// Returns all mountpoints within all U.2s for a particular dataset.
-    pub fn all_u2_mountpoints(&self, dataset: &str) -> Vec<Utf8PathBuf> {
+    pub fn all_u2_mountpoints(&self, dataset: &str) -> Vec<PathInPool> {
         self.all_u2_zpools()
-            .iter()
-            .map(|zpool| {
-                zpool.dataset_mountpoint(&self.mount_config.root, dataset)
+            .into_iter()
+            .map(|pool| {
+                let path =
+                    pool.dataset_mountpoint(&self.mount_config.root, dataset);
+                PathInPool { pool: Some(pool), path }
             })
             .collect()
     }
 
     /// Returns all zpools managed by the control plane
     pub fn get_all_zpools(&self) -> Vec<(ZpoolName, DiskVariant)> {
-        self.values
+        self.inner
+            .values
             .values()
             .filter_map(|disk| match disk {
                 ManagedDisk::ExplicitlyManaged(disk)
@@ -206,7 +230,8 @@ impl AllDisks {
     //
     // Only returns zpools from disks actively being managed.
     fn all_zpools(&self, variant: DiskVariant) -> Vec<ZpoolName> {
-        self.values
+        self.inner
+            .values
             .values()
             .filter_map(|disk| match disk {
                 ManagedDisk::ExplicitlyManaged(disk)
@@ -231,7 +256,7 @@ impl AllDisks {
 
     /// Returns an iterator over all managed disks.
     pub fn iter_managed(&self) -> impl Iterator<Item = (&DiskIdentity, &Disk)> {
-        self.values.iter().filter_map(|(identity, disk)| match disk {
+        self.inner.values.iter().filter_map(|(identity, disk)| match disk {
             ManagedDisk::ExplicitlyManaged(disk) => Some((identity, disk)),
             ManagedDisk::ImplicitlyManaged(disk) => Some((identity, disk)),
             _ => None,
@@ -243,7 +268,7 @@ impl AllDisks {
         &self,
     ) -> impl Iterator<Item = (&DiskIdentity, DiskVariant, i64, &DiskFirmware)>
     {
-        self.values.iter().map(|(identity, disk)| match disk {
+        self.inner.values.iter().map(|(identity, disk)| match disk {
             ManagedDisk::ExplicitlyManaged(disk) => {
                 (identity, disk.variant(), disk.slot(), disk.firmware())
             }
@@ -284,8 +309,11 @@ impl StorageResources {
         mount_config: MountConfig,
         key_requester: StorageKeyRequester,
     ) -> Self {
-        let disks =
-            AllDisks { values: Arc::new(BTreeMap::new()), mount_config };
+        let disks = AllDisks {
+            generation: Generation::new(),
+            inner: Arc::new(AllDisksInner { values: BTreeMap::new() }),
+            mount_config,
+        };
         Self {
             log: log.new(o!("component" => "StorageResources")),
             key_requester,
@@ -310,8 +338,14 @@ impl StorageResources {
     /// Does not attempt to manage any of the physical disks previously
     /// observed. To synchronize the "set of requested disks" with the "set of
     /// observed disks", call [Self::synchronize_disk_management].
-    pub fn set_config(&mut self, config: &Vec<OmicronPhysicalDiskConfig>) {
+    pub fn set_config(&mut self, config: &OmicronPhysicalDisksConfig) {
+        let our_gen = &mut self.disks.generation;
+        if *our_gen > config.generation {
+            return;
+        }
+        *our_gen = config.generation;
         self.control_plane_disks = config
+            .disks
             .iter()
             .map(|disk| (disk.identity.clone(), disk.clone()))
             .collect();
@@ -336,14 +370,14 @@ impl StorageResources {
         &mut self,
     ) -> DisksManagementResult {
         let mut updated = false;
-        let disks = Arc::make_mut(&mut self.disks.values);
+        let disks = Arc::make_mut(&mut self.disks.inner);
         info!(self.log, "Synchronizing disk managment");
 
         // "Unmanage" all disks no longer requested by the control plane.
         //
         // This updates the reported sets of "managed" disks, and performs no
         // other modifications to the underlying storage.
-        for (identity, managed_disk) in &mut *disks {
+        for (identity, managed_disk) in &mut disks.values {
             match managed_disk {
                 // This leaves the presence of the disk still in "Self", but
                 // downgrades the disk to an unmanaged status.
@@ -365,7 +399,7 @@ impl StorageResources {
         // configuration.
         let mut result = DisksManagementResult::default();
         for (identity, config) in &self.control_plane_disks {
-            let Some(managed_disk) = disks.get_mut(identity) else {
+            let Some(managed_disk) = disks.values.get_mut(identity) else {
                 warn!(
                     self.log,
                     "Control plane disk requested, but not detected within sled";
@@ -496,11 +530,11 @@ impl StorageResources {
 
         // This is a trade-off for simplicity even though we may be potentially
         // cloning data before we know if there is a write action to perform.
-        let disks = Arc::make_mut(&mut self.disks.values);
+        let disks = Arc::make_mut(&mut self.disks.inner);
 
         // First check if there are any updates we need to apply to existing
         // managed disks.
-        if let Some(managed) = disks.get_mut(&disk_identity) {
+        if let Some(managed) = disks.values.get_mut(&disk_identity) {
             let mut updated = false;
             match managed {
                 ManagedDisk::ExplicitlyManaged(mdisk)
@@ -532,7 +566,9 @@ impl StorageResources {
         // If there's no update then we are inserting a new disk.
         match disk.variant() {
             DiskVariant::U2 => {
-                disks.insert(disk_identity, ManagedDisk::Unmanaged(disk));
+                disks
+                    .values
+                    .insert(disk_identity, ManagedDisk::Unmanaged(disk));
             }
             DiskVariant::M2 => {
                 let managed_disk = Disk::new(
@@ -543,12 +579,13 @@ impl StorageResources {
                     Some(&self.key_requester),
                 )
                 .await?;
-                disks.insert(
+                disks.values.insert(
                     disk_identity,
                     ManagedDisk::ImplicitlyManaged(managed_disk),
                 );
             }
         }
+
         self.disk_updates.send_replace(self.disks.clone());
 
         Ok(())
@@ -562,7 +599,7 @@ impl StorageResources {
     /// are only added once.
     pub(crate) fn remove_disk(&mut self, id: &DiskIdentity) {
         info!(self.log, "Removing disk"; "identity" => ?id);
-        let Some(entry) = self.disks.values.get(id) else {
+        let Some(entry) = self.disks.inner.values.get(id) else {
             info!(self.log, "Disk not found by id, exiting"; "identity" => ?id);
             return;
         };
@@ -589,7 +626,9 @@ impl StorageResources {
         }
 
         // Safe to unwrap as we just checked the key existed above
-        Arc::make_mut(&mut self.disks.values).remove(id).unwrap();
+        let disks = Arc::make_mut(&mut self.disks.inner);
+        disks.values.remove(id).unwrap();
+
         self.disk_updates.send_replace(self.disks.clone());
     }
 }

@@ -19,7 +19,7 @@ pub use self::table::Table;
 pub use self::table::Timeseries;
 pub use anyhow::Error;
 
-// Format a PEG parsing error into a nice anyhow error.
+/// Format a PEG parsing error into a nice anyhow error.
 fn fmt_parse_error(source: &str, err: PegError<LineCol>) -> Error {
     use std::fmt::Write;
     let mut out =
