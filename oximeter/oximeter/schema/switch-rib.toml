@@ -1,0 +1,30 @@
+format_version = 1
+
+[target]
+name = "switch_rib"
+description = "Maghemite router routing information base"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "hostname", "link_id", "rack_id" ] }
+]
+
+[[metrics]]
+name = "active_routes"
+description = "The number of currently active routes"
+units = "count
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[fields.hostname]
+type = "string"
+description = "Name of the host running the Oxide router"
+
+[fields.rack_id]
+type = "uuid"
+description = "ID of the rack of the sled running the Oxide router"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID of the sled running the Oxide router"
