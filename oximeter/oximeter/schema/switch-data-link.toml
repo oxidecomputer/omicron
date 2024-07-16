@@ -1,0 +1,222 @@
+format_version = 1
+
+[target]
+name = "switch_data_link"
+description = "A network data link on an Oxide switch"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "rack_id", "sled_id", "sled_model", "sled_revision", "sled_serial", "switch_id", "switch_model", "switch_revision", "switch_serial" ] },
+]
+
+[[metrics]]
+name = "bytes_sent"
+description = "Total number of bytes sent on the data link"
+units = "bytes"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[[metrics]]
+name = "bytes_received"
+description = "Total number of bytes received on the data link"
+units = "bytes"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[[metrics]]
+name = "errors_sent"
+description = "Total number of errors when sending on the data link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[[metrics]]
+name = "errors_received"
+description = "Total number of packets for the data link dropped due to any error"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[[metrics]]
+name = "receive_crc_error_drops"
+description = "Total number of packets for the data link dropped due to CRC errors"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[[metrics]]
+name = "receive_buffer_full_drops"
+description = "Total number of packets for the data link dropped due to ASIC buffer congestion"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[[metrics]]
+name = "packets_sent"
+description = "Total number of packets sent on the data link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[[metrics]]
+name = "packets_received"
+description = "Total number of packets received on the data link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[[metrics]]
+name = "packets_received"
+description = "Total number of packets received on the data link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[[metrics]]
+name = "link_up"
+description = "Reports whether the link is currently up"
+units = "none"
+datum_type = "bool"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[[metrics]]
+name = "link_fsm"
+description = """\
+Total entries into each state of the autonegotation / \
+link-training finite state machine\
+"""
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id", "state" ] }
+]
+
+[[metrics]]
+name = "pcs_bad_sync_headers"
+description = "Total number of bad PCS sync headers on the data link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[[metrics]]
+name = "pcs_errored_blocks"
+description = "Total number of PCS error blocks on the data link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[[metrics]]
+name = "pcs_block_lock_loss"
+description = "Total number of detected losses of block-lock on the data link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[[metrics]]
+name = "pcs_high_ber"
+description = "Total number of high bit-error-rate events on the data link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[[metrics]]
+name = "pcs_valid_errors"
+description = "Total number of valid error events on the data link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[[metrics]]
+name = "pcs_invalid_errors"
+description = "Total number of invalid error events on the data link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[[metrics]]
+name = "pcs_unknown_errors"
+description = "Total number of unknown error events on the data link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[fields.rack_id]
+type = "uuid"
+description = "ID of the rack the link's switch is in"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID of the sled managing the link's switch"
+
+[fields.sled_model]
+type = "string"
+description = "Model number of the sled managing the link's switch"
+
+[fields.sled_revision]
+type = "u32"
+description = "Revision number of the sled managing the link's switch"
+
+[fields.sled_serial]
+type = "string"
+description = "Serial number of the sled managing the link's switch"
+
+[fields.switch_id]
+type = "uuid"
+description = "ID of the switch the link is on"
+
+[fields.switch_model]
+type = "string"
+description = "The model number switch the link is on"
+
+[fields.switch_revision]
+type = "u32"
+description = "Revision number of the switch the link is on"
+
+[fields.switch_serial]
+type = "string"
+description = "Serial number of the switch the link is on"
+
+[fields.port_id]
+type = "string"
+description = "Physical switch port the link is on"
+
+[fields.link_id]
+type = "u8"
+description = "ID of the link within its switch port"
+
+[fields.state]
+type = "string"
+description = "Name of the data link FSM state"
