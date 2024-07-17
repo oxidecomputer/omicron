@@ -222,6 +222,7 @@ impl Server {
             bind_address: server_info.address,
             request_body_max_bytes,
             default_handler_task_mode: dropshot::HandlerTaskMode::Detached,
+            log_headers: vec![],
         };
         let server = Self::build_dropshot_server(&log, &registry, &dropshot)?;
 

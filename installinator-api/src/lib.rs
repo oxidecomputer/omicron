@@ -131,6 +131,7 @@ pub fn default_config(bind_address: std::net::SocketAddr) -> ConfigDropshot {
         // available in omicron.
         request_body_max_bytes: 4 * 1024 * 1024,
         default_handler_task_mode: HandlerTaskMode::Detached,
+        log_headers: vec![],
     }
 }
 
@@ -153,6 +154,7 @@ pub fn make_server_starter<T: InstallinatorApi>(
         // available in omicron.
         request_body_max_bytes: 4 * 1024 * 1024,
         default_handler_task_mode: HandlerTaskMode::Detached,
+        log_headers: vec![],
     };
 
     let api = crate::installinator_api::api_description::<T>()?;

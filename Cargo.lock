@@ -2034,7 +2034,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.10.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#9fef3961c0b89aa8ab8e186dc0c89f8f4f811eea"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#7b594d01f47ca783c5d4a25ca2b256602580fe92"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2080,7 +2080,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.10.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#9fef3961c0b89aa8ab8e186dc0c89f8f4f811eea"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#7b594d01f47ca783c5d4a25ca2b256602580fe92"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -3274,7 +3274,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.7",
+ "socket2 0.4.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -4002,7 +4002,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.5",
 ]
 
 [[package]]
@@ -6008,6 +6008,7 @@ dependencies = [
  "similar",
  "slog",
  "smallvec 1.13.2",
+ "socket2 0.5.7",
  "spin 0.9.8",
  "string_cache",
  "subtle",
@@ -10742,9 +10743,9 @@ checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
 
 [[package]]
 name = "uuid"
-version = "1.9.1"
+version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5de17fd2f7da591098415cff336e12965a28061ddace43b59cb3c430179c9439"
+checksum = "81dfa00651efa65069b0b6b651f4aaa31ba9e3c3ce0137aaad053604ee7e0314"
 dependencies = [
  "getrandom 0.2.14",
  "serde",
