@@ -41,7 +41,7 @@ use crate::job::Jobs;
 /// to as "v8", "version 8", or "release 8" to customers). The use of semantic
 /// versioning is mostly to hedge for perhaps wanting something more granular in
 /// the future.
-const BASE_VERSION: Version = Version::new(9, 0, 0);
+const BASE_VERSION: Version = Version::new(10, 0, 0);
 
 const RETRY_ATTEMPTS: usize = 3;
 
@@ -56,13 +56,14 @@ enum InstallMethod {
 }
 
 /// Packages to install or bundle in the host OS image.
-const HOST_IMAGE_PACKAGES: [(&str, InstallMethod); 7] = [
+const HOST_IMAGE_PACKAGES: [(&str, InstallMethod); 8] = [
     ("mg-ddm-gz", InstallMethod::Install),
     ("omicron-sled-agent", InstallMethod::Install),
     ("overlay", InstallMethod::Bundle),
     ("oxlog", InstallMethod::Install),
     ("propolis-server", InstallMethod::Bundle),
     ("pumpkind-gz", InstallMethod::Install),
+    ("crucible-dtrace", InstallMethod::Install),
     ("switch-asic", InstallMethod::Bundle),
 ];
 /// Packages to install or bundle in the recovery (trampoline) OS image.

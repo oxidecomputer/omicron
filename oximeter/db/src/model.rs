@@ -109,6 +109,10 @@ pub(crate) struct DbFieldList {
     pub types: Vec<DbFieldType>,
     #[serde(rename = "fields.source")]
     pub sources: Vec<DbFieldSource>,
+    // TODO-completeness: Populate the description from the database here. See
+    // https://github.com/oxidecomputer/omicron/issues/5942 for more details.
+    //#[serde(rename = "fields.description")]
+    //pub descriptions: Vec<String>,
 }
 
 impl From<DbFieldList> for BTreeSet<FieldSchema> {
@@ -121,6 +125,7 @@ impl From<DbFieldList> for BTreeSet<FieldSchema> {
                 name,
                 field_type: ty.into(),
                 source: source.into(),
+                description: String::new(),
             })
             .collect()
     }
@@ -149,6 +154,9 @@ pub(crate) struct DbTimeseriesSchema {
     pub datum_type: DbDatumType,
     #[serde(with = "serde_timestamp")]
     pub created: DateTime<Utc>,
+    // TODO-completeness: Add the authorization scope, version, and units once
+    // they are tracked in the database. See
+    // https://github.com/oxidecomputer/omicron/issues/5942 for more details.
 }
 
 impl From<TimeseriesSchema> for DbTimeseriesSchema {
@@ -613,7 +621,7 @@ declare_histogram_measurement_row! { HistogramF64MeasurementRow, DbHistogram<f64
 fn unroll_from_source(sample: &Sample) -> BTreeMap<String, Vec<String>> {
     let mut out = BTreeMap::new();
     for field in sample.fields() {
-        let timeseries_name = sample.timeseries_name.clone();
+        let timeseries_name = sample.timeseries_name.to_string();
         let timeseries_key = crate::timeseries_key(sample);
         let field_name = field.name.clone();
         let (table_name, row_string) = match &field.value {
@@ -761,7 +769,11 @@ pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
     let timeseries_name = sample.timeseries_name.clone();
     let timeseries_key = crate::timeseries_key(sample);
     let measurement = &sample.measurement;
-    unroll_measurement_row_impl(timeseries_name, timeseries_key, measurement)
+    unroll_measurement_row_impl(
+        timeseries_name.to_string(),
+        timeseries_key,
+        measurement,
+    )
 }
 
 /// Given a sample's measurement, return a table name and row to insert.
@@ -1930,11 +1942,13 @@ mod tests {
                 name: String::from("field0"),
                 field_type: FieldType::I64,
                 source: FieldSource::Target,
+                description: String::new(),
             },
             FieldSchema {
                 name: String::from("field1"),
                 field_type: FieldType::IpAddr,
                 source: FieldSource::Metric,
+                description: String::new(),
             },
         ]
         .into_iter()
@@ -1975,7 +1989,7 @@ mod tests {
         assert_eq!(out["oximeter.fields_i64"].len(), 1);
         let unpacked: StringFieldRow =
             serde_json::from_str(&out["oximeter.fields_string"][0]).unwrap();
-        assert_eq!(unpacked.timeseries_name, sample.timeseries_name);
+        assert_eq!(sample.timeseries_name, unpacked.timeseries_name);
         let field = sample.target_fields().next().unwrap();
         assert_eq!(unpacked.field_name, field.name);
         if let FieldValue::String(v) = &field.value {

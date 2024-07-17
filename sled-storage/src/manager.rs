@@ -8,9 +8,7 @@ use std::collections::HashSet;
 
 use crate::config::MountConfig;
 use crate::dataset::{DatasetName, CONFIG_DATASET};
-use crate::disk::{
-    OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig, RawDisk,
-};
+use crate::disk::{OmicronPhysicalDisksConfig, RawDisk};
 use crate::error::Error;
 use crate::resources::{AllDisks, DisksManagementResult, StorageResources};
 use camino::Utf8PathBuf;
@@ -101,6 +99,10 @@ pub(crate) enum StorageRequest {
         raw_disk: RawDisk,
         tx: DebugIgnore<oneshot::Sender<Result<(), Error>>>,
     },
+    DetectedRawDiskUpdate {
+        raw_disk: RawDisk,
+        tx: DebugIgnore<oneshot::Sender<Result<(), Error>>>,
+    },
     DetectedRawDiskRemoval {
         raw_disk: RawDisk,
         tx: DebugIgnore<oneshot::Sender<Result<(), Error>>>,
@@ -178,6 +180,27 @@ impl StorageHandle {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(StorageRequest::DetectedRawDiskRemoval {
+                raw_disk,
+                tx: tx.into(),
+            })
+            .await
+            .unwrap();
+
+        rx.map(|result| result.unwrap())
+    }
+
+    /// Updates a disk, if it's tracked by the storage manager, as well
+    /// as any associated zpools.
+    ///
+    /// Returns a future which completes once the notification has been
+    /// processed. Awaiting this future is optional.
+    pub async fn detected_raw_disk_update(
+        &self,
+        raw_disk: RawDisk,
+    ) -> impl Future<Output = Result<(), Error>> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(StorageRequest::DetectedRawDiskUpdate {
                 raw_disk,
                 tx: tx.into(),
             })
@@ -388,6 +411,13 @@ impl StorageManager {
                 }
                 let _ = tx.0.send(result);
             }
+            StorageRequest::DetectedRawDiskUpdate { raw_disk, tx } => {
+                let result = self.detected_raw_disk_update(raw_disk).await;
+                if let Err(ref err) = &result {
+                    warn!(self.log, "Failed to apply raw disk update"; "err" => ?err);
+                }
+                let _ = tx.0.send(result);
+            }
             StorageRequest::DetectedRawDiskRemoval { raw_disk, tx } => {
                 self.detected_raw_disk_removal(raw_disk);
                 let _ = tx.0.send(Ok(()));
@@ -475,7 +505,7 @@ impl StorageManager {
         // coordination with the control plane at large.
         let needs_synchronization =
             matches!(raw_disk.variant(), DiskVariant::U2);
-        self.resources.insert_disk(raw_disk).await?;
+        self.resources.insert_or_update_disk(raw_disk).await?;
 
         if needs_synchronization {
             match self.state {
@@ -499,6 +529,18 @@ impl StorageManager {
         }
 
         Ok(())
+    }
+
+    /// Updates some information about the underlying disk within this sled.
+    ///
+    /// Things that can currently be updated:
+    /// - DiskFirmware
+    async fn detected_raw_disk_update(
+        &mut self,
+        raw_disk: RawDisk,
+    ) -> Result<(), Error> {
+        // We aren't worried about synchronizing as the disk should already be managed.
+        self.resources.insert_or_update_disk(raw_disk).await
     }
 
     async fn load_ledger(&self) -> Option<Ledger<OmicronPhysicalDisksConfig>> {
@@ -542,92 +584,12 @@ impl StorageManager {
             // Identify which disks should be managed by the control
             // plane, and adopt all requested disks into the control plane
             // in a background task (see: [Self::manage_disks]).
-            self.resources.set_config(&ledger.data().disks);
+            self.resources.set_config(&ledger.data());
         } else {
             info!(self.log, "KeyManager ready, but no ledger detected");
-            let mut synthetic_config =
-                self.resources.get_config().values().cloned().collect();
-            // TODO(https://github.com/oxidecomputer/omicron/issues/5328): Once
-            // we are confident that we have migrated to a world where this
-            // ledger is universally used, we should remove the following
-            // kludge. The sled agent should not need to "self-manage" anything!
-            let changed = self
-                .self_manage_disks_with_zpools(&mut synthetic_config)
-                .await?;
-            if !changed {
-                info!(self.log, "No disks to be automatically managed");
-                return Ok(());
-            }
-            info!(self.log, "auto-managed disks"; "count" => synthetic_config.len());
-            self.resources.set_config(&synthetic_config);
         }
 
         Ok(())
-    }
-
-    // NOTE: What follows is an exceptional case: one where we have
-    // no record of "Control Plane Physical Disks", but we have zpools
-    // on our U.2s, and we want to use them regardless.
-    //
-    // THIS WOULD NORMALLY BE INCORRECT BEHAVIOR. In the future, these
-    // zpools will not be "automatically imported", and instead, we'll
-    // let Nexus decide whether or not to reformat the disks.
-    //
-    // However, because we are transitioning from "the set of disks /
-    // zpools is implicit" to a world where that set is explicit, this
-    // is a necessary transitional tool.
-    //
-    // Returns "true" if the synthetic_config has changed.
-    async fn self_manage_disks_with_zpools(
-        &mut self,
-        synthetic_config: &mut Vec<OmicronPhysicalDiskConfig>,
-    ) -> Result<bool, Error> {
-        let mut changed = false;
-        for (identity, disk) in self.resources.disks().values.iter() {
-            match disk {
-                crate::resources::ManagedDisk::Unmanaged(raw) => {
-                    let zpool_path = match raw.u2_zpool_path() {
-                        Ok(zpool_path) => zpool_path,
-                        Err(err) => {
-                            info!(self.log, "Cannot find zpool path"; "identity" => ?identity, "err" => ?err);
-                            continue;
-                        }
-                    };
-
-                    let zpool_name =
-                        match sled_hardware::disk::check_if_zpool_exists(
-                            &zpool_path,
-                        ) {
-                            Ok(zpool_name) => zpool_name,
-                            Err(err) => {
-                                info!(self.log, "Zpool does not exist"; "identity" => ?identity, "err" => ?err);
-                                continue;
-                            }
-                        };
-
-                    info!(self.log, "Found existing zpool on device without ledger";
-                        "identity" => ?identity,
-                        "zpool" => ?zpool_name);
-
-                    // We found an unmanaged disk with a zpool, even though
-                    // we have no prior record of a ledger of control-plane
-                    // disks.
-                    synthetic_config.push(
-                        // These disks don't have a control-plane UUID --
-                        // report "nil" until they're overwritten with real
-                        // values.
-                        OmicronPhysicalDiskConfig {
-                            identity: identity.clone(),
-                            id: Uuid::nil(),
-                            pool_id: zpool_name.id(),
-                        },
-                    );
-                    changed = true;
-                }
-                _ => continue,
-            }
-        }
-        Ok(changed)
     }
 
     // Makes an U.2 disk managed by the control plane within [`StorageResources`].
@@ -719,7 +681,7 @@ impl StorageManager {
 
         // Identify which disks should be managed by the control
         // plane, and adopt all requested disks into the control plane.
-        self.resources.set_config(&config.disks);
+        self.resources.set_config(&config);
 
         // Actually try to "manage" those disks, which may involve formatting
         // zpools and conforming partitions to those expected by the control
@@ -776,7 +738,7 @@ impl StorageManager {
             .resources
             .disks()
             .iter_all()
-            .filter_map(|(id, _variant, _slot)| {
+            .filter_map(|(id, _variant, _slot, _firmware)| {
                 if !all_ids.contains(id) {
                     Some(id.clone())
                 } else {
@@ -867,10 +829,9 @@ mod tests {
 
     use super::*;
     use camino_tempfile::tempdir_in;
-    use omicron_common::api::external::Generation;
     use omicron_common::ledger;
     use omicron_test_utils::dev::test_setup_log;
-    use omicron_uuid_kinds::ZpoolUuid;
+    use sled_hardware::DiskFirmware;
     use std::sync::atomic::Ordering;
     use uuid::Uuid;
 
@@ -996,6 +957,60 @@ mod tests {
         assert_eq!(2, all_disks.iter_all().collect::<Vec<_>>().len());
         assert_eq!(0, all_disks.all_u2_zpools().len());
         assert_eq!(1, all_disks.all_m2_zpools().len());
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn update_rawdisk_firmware() {
+        const FW_REV: &str = "firmware-2.0";
+        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
+        let logctx = test_setup_log("update_u2_firmware");
+        let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
+        harness.handle().key_manager_ready().await;
+
+        // Add a representative scenario for a small sled: a U.2 and M.2.
+        let mut raw_disks =
+            harness.add_vdevs(&["u2_under_test.vdev", "m2_helping.vdev"]).await;
+
+        // This disks should exist, but only the M.2 should have a zpool.
+        let all_disks_gen1 = harness.handle().get_latest_disks().await;
+
+        for rd in &mut raw_disks {
+            if let RawDisk::Synthetic(ref mut disk) = rd {
+                let mut slots = disk.firmware.slots().to_vec();
+                // "Install" a new firmware version into slot2
+                slots.push(Some(FW_REV.to_string()));
+                disk.firmware = DiskFirmware::new(
+                    disk.firmware.active_slot(),
+                    disk.firmware.next_active_slot(),
+                    disk.firmware.slot1_read_only(),
+                    slots,
+                );
+            }
+            harness.update_vdev(rd).await;
+        }
+
+        let all_disks_gen2 = harness.handle().get_latest_disks().await;
+
+        // Disks should now be different due to the mock firmware update.
+        assert_ne!(all_disks_gen1, all_disks_gen2);
+
+        // Now let's verify we saw the correct firmware update.
+        for rd in &raw_disks {
+            let firmware = all_disks_gen2
+                .iter_all()
+                .find_map(|(identity, _, _, fw)| {
+                    if identity == rd.identity() {
+                        Some(fw)
+                    } else {
+                        None
+                    }
+                })
+                .expect("disk exists");
+            assert_eq!(firmware, rd.firmware(), "didn't see firmware update");
+        }
 
         harness.cleanup().await;
         logctx.cleanup_successful();
@@ -1217,7 +1232,8 @@ mod tests {
 
         let expected: HashSet<_> =
             disks.iter().skip(1).take(3).map(|d| d.identity()).collect();
-        let actual: HashSet<_> = all_disks.values.keys().collect();
+        let actual: HashSet<_> =
+            all_disks.iter_all().map(|(identity, _, _, _)| identity).collect();
         assert_eq!(expected, actual);
 
         // Ensure the same set of disks and make sure no change occurs
@@ -1232,7 +1248,10 @@ mod tests {
             .await
             .unwrap();
         let all_disks2 = harness.handle().get_latest_disks().await;
-        assert_eq!(all_disks.values, all_disks2.values);
+        assert_eq!(
+            all_disks.iter_all().collect::<Vec<_>>(),
+            all_disks2.iter_all().collect::<Vec<_>>()
+        );
 
         // Add a disjoint set of disks and see that only they come through
         harness
@@ -1247,7 +1266,8 @@ mod tests {
         let all_disks = harness.handle().get_latest_disks().await;
         let expected: HashSet<_> =
             disks.iter().skip(4).take(5).map(|d| d.identity()).collect();
-        let actual: HashSet<_> = all_disks.values.keys().collect();
+        let actual: HashSet<_> =
+            all_disks.iter_all().map(|(identity, _, _, _)| identity).collect();
         assert_eq!(expected, actual);
 
         harness.cleanup().await;
@@ -1283,154 +1303,6 @@ mod tests {
             .upsert_filesystem(dataset_id, dataset_name)
             .await
             .unwrap();
-
-        harness.cleanup().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn ledgerless_to_ledgered_migration() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
-        let logctx = test_setup_log("ledgerless_to_ledgered_migration");
-        let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
-
-        // Test setup: Create two U.2s and an M.2
-        let raw_disks = harness
-            .add_vdevs(&[
-                "u2_under_test.vdev",
-                "u2_that_shows_up_late.vdev",
-                "m2_helping.vdev",
-            ])
-            .await;
-
-        // First, we format the U.2s to have a zpool. This should work, even
-        // without looping in the StorageManager.
-        let first_u2 = &raw_disks[0];
-        let first_pool_id = ZpoolUuid::new_v4();
-        let _disk = crate::disk::Disk::new(
-            &logctx.log,
-            &harness.mount_config(),
-            first_u2.clone(),
-            Some(first_pool_id),
-            Some(harness.key_requester()),
-        )
-        .await
-        .expect("Failed to format U.2");
-
-        let second_u2 = &raw_disks[1];
-        let second_pool_id = ZpoolUuid::new_v4();
-        let _disk = crate::disk::Disk::new(
-            &logctx.log,
-            &harness.mount_config(),
-            second_u2.clone(),
-            Some(second_pool_id),
-            Some(harness.key_requester()),
-        )
-        .await
-        .expect("Failed to format U.2");
-
-        // Because we did that formatting "behind the back" of the
-        // StorageManager, we should see no evidence of the U.2 being managed.
-        //
-        // This currently matches the format of "existing systems, which were
-        // initialized before the storage ledger was created".
-
-        // We should still see no ledger.
-        let result = harness.handle().omicron_physical_disks_list().await;
-        assert!(matches!(result, Err(Error::LedgerNotFound)), "{:?}", result);
-
-        // We should also not see any managed U.2s.
-        let disks = harness.handle().get_latest_disks().await;
-        assert!(disks.all_u2_zpools().is_empty());
-
-        // Leave one of the U.2s attached, but "remove" the other one.
-        harness.remove_vdev(second_u2).await;
-
-        // When the system activates, we should see a single Zpool, and
-        // "auto-manage" it.
-        harness.handle().key_manager_ready().await;
-
-        // It might take a moment for synchronization to be handled by the
-        // background task, but we'll eventually see the U.2 zpool.
-        //
-        // This is the equivalent of us "loading a zpool, even though
-        // it was not backed by a ledger".
-        let tt = TimeTravel::new();
-        tt.enough_to_start_synchronization().await;
-        while harness
-            .handle_mut()
-            .wait_for_changes()
-            .await
-            .all_u2_zpools()
-            .is_empty()
-        {
-            info!(&logctx.log, "Waiting for U.2 to automatically show up");
-        }
-        let u2s = harness.handle().get_latest_disks().await.all_u2_zpools();
-        assert_eq!(u2s.len(), 1, "{:?}", u2s);
-
-        // If we attach the second U.2 -- the equivalent of it appearing after
-        // the key manager is ready -- it'll also be included in the set of
-        // auto-maanged U.2s.
-        harness.add_vdev_as(second_u2.clone()).await;
-        tt.enough_to_start_synchronization().await;
-        while harness
-            .handle_mut()
-            .wait_for_changes()
-            .await
-            .all_u2_zpools()
-            .len()
-            == 1
-        {
-            info!(&logctx.log, "Waiting for U.2 to automatically show up");
-        }
-        let u2s = harness.handle().get_latest_disks().await.all_u2_zpools();
-        assert_eq!(u2s.len(), 2, "{:?}", u2s);
-
-        // This is the equivalent of the "/omicron-physical-disks GET" API,
-        // which Nexus might use to contact this sled.
-        //
-        // This means that we'll bootstrap the sled successfully, but report a
-        // 404 if nexus asks us for the latest configuration.
-        let result = harness.handle().omicron_physical_disks_list().await;
-        assert!(matches!(result, Err(Error::LedgerNotFound),), "{:?}", result);
-
-        // At this point, Nexus may want to explicitly tell sled agent which
-        // disks it should use. This is the equivalent of invoking
-        // "/omicron-physical-disks PUT".
-        let mut disks = vec![
-            OmicronPhysicalDiskConfig {
-                identity: first_u2.identity().clone(),
-                id: Uuid::new_v4(),
-                pool_id: first_pool_id,
-            },
-            OmicronPhysicalDiskConfig {
-                identity: second_u2.identity().clone(),
-                id: Uuid::new_v4(),
-                pool_id: second_pool_id,
-            },
-        ];
-        // Sort the disks to ensure the "output" matches the "input" when we
-        // query later.
-        disks.sort_by(|a, b| a.identity.partial_cmp(&b.identity).unwrap());
-        let config =
-            OmicronPhysicalDisksConfig { generation: Generation::new(), disks };
-        let result = harness
-            .handle()
-            .omicron_physical_disks_ensure(config.clone())
-            .await
-            .expect("Failed to ensure disks with 'new' Config");
-        assert!(!result.has_error(), "{:?}", result);
-
-        let observed_config = harness
-            .handle()
-            .omicron_physical_disks_list()
-            .await
-            .expect("Failed to retreive config after ensuring it");
-        assert_eq!(observed_config, config);
-
-        let u2s = harness.handle().get_latest_disks().await.all_u2_zpools();
-        assert_eq!(u2s.len(), 2, "{:?}", u2s);
 
         harness.cleanup().await;
         logctx.cleanup_successful();

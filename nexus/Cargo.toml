@@ -45,13 +45,15 @@ macaddr.workspace = true
 # integration tests.
 nexus-client.workspace = true
 nexus-config.workspace = true
+nexus-internal-api.workspace = true
 nexus-networking.workspace = true
+nexus-saga-recovery.workspace = true
 nexus-test-interface.workspace = true
 num-integer.workspace = true
 once_cell.workspace = true
 openssl.workspace = true
 oximeter-client.workspace = true
-oximeter-db.workspace = true
+oximeter-db = { workspace = true, default-features = false, features = [ "oxql" ] }
 oxnet.workspace = true
 parse-display.workspace = true
 paste.workspace = true
@@ -135,7 +137,7 @@ rcgen.workspace = true
 regex.workspace = true
 similar-asserts.workspace = true
 sp-sim.workspace = true
-rustls = { workspace = true }
+rustls.workspace = true
 subprocess.workspace = true
 term.workspace = true
 trust-dns-resolver.workspace = true

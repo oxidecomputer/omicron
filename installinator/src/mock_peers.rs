@@ -16,7 +16,7 @@ use std::{
 use anyhow::{bail, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
-use installinator_artifact_client::{ClientError, ResponseValue};
+use installinator_client::{ClientError, ResponseValue};
 use installinator_common::EventReport;
 use omicron_common::update::ArtifactHashId;
 use proptest::prelude::*;
@@ -342,7 +342,7 @@ impl MockPeer {
                 tokio::time::sleep(after).await;
                 _ = sender
                     .send(Err(ClientError::ErrorResponse(ResponseValue::new(
-                        installinator_artifact_client::types::Error {
+                        installinator_client::types::Error {
                             error_code: None,
                             message: format!("not-found error after {after:?}"),
                             request_id: "mock-request-id".to_owned(),
@@ -356,7 +356,7 @@ impl MockPeer {
                 tokio::time::sleep(after).await;
                 _ = sender
                     .send(Err(ClientError::ErrorResponse(ResponseValue::new(
-                        installinator_artifact_client::types::Error {
+                        installinator_client::types::Error {
                             error_code: None,
                             message: format!("forbidden error after {after:?}"),
                             request_id: "mock-request-id".to_owned(),
@@ -526,7 +526,7 @@ impl PeersImpl for MockReportPeers {
             Ok(())
         } else if peer == Self::invalid_peer() {
             Err(ClientError::ErrorResponse(ResponseValue::new(
-                installinator_artifact_client::types::Error {
+                installinator_client::types::Error {
                     error_code: None,
                     message: "invalid peer => HTTP 422".to_owned(),
                     request_id: "mock-request-id".to_owned(),

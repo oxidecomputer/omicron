@@ -1,13 +1,10 @@
-use std::net::{Ipv4Addr, Ipv6Addr};
-
 use super::MacAddr;
 use crate::{
     schema::ipv4_nat_changes, schema::ipv4_nat_entry, Ipv4Net, Ipv6Net, SqlU16,
     Vni,
 };
 use chrono::{DateTime, Utc};
-use omicron_common::api::external;
-use schemars::JsonSchema;
+use nexus_types::internal_api::views::Ipv4NatEntryView;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
@@ -62,19 +59,6 @@ pub struct Ipv4NatChange {
     pub vni: Vni,
     pub mac: MacAddr,
     pub version: i64,
-    pub deleted: bool,
-}
-
-/// NAT Record
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-pub struct Ipv4NatEntryView {
-    pub external_address: Ipv4Addr,
-    pub first_port: u16,
-    pub last_port: u16,
-    pub sled_address: Ipv6Addr,
-    pub vni: external::Vni,
-    pub mac: external::MacAddr,
-    pub gen: i64,
     pub deleted: bool,
 }
 

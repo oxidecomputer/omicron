@@ -9,50 +9,20 @@
 use crate::ProducerEndpoint;
 use oximeter::types::Cumulative;
 use oximeter::types::ProducerResultsItem;
-use oximeter::Metric;
 use oximeter::MetricsError;
 use oximeter::Sample;
-use oximeter::Target;
 use reqwest::StatusCode;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::net::IpAddr;
 use std::time::Duration;
-use uuid::Uuid;
+
+oximeter::use_timeseries!("oximeter-collector.toml");
+pub use self::oximeter_collector::Collections;
+pub use self::oximeter_collector::FailedCollections;
+pub use self::oximeter_collector::OximeterCollector;
 
 /// The interval on which we report self statistics
 pub const COLLECTION_INTERVAL: Duration = Duration::from_secs(60);
-
-/// A target representing a single oximeter collector.
-#[derive(Clone, Copy, Debug, Target)]
-pub struct OximeterCollector {
-    /// The collector's ID.
-    pub collector_id: Uuid,
-    /// The collector server's IP address.
-    pub collector_ip: IpAddr,
-    /// The collector server's port.
-    pub collector_port: u16,
-}
-
-/// The number of successful collections from a single producer.
-#[derive(Clone, Debug, Metric)]
-pub struct Collections {
-    /// The producer's ID.
-    pub producer_id: Uuid,
-    /// The producer's IP address.
-    pub producer_ip: IpAddr,
-    /// The producer's port.
-    pub producer_port: u16,
-    /// The base route in the producer server used to collect metrics.
-    ///
-    /// The full route is `{base_route}/{producer_id}`.
-    ///
-    // TODO-cleanup: This is no longer relevant, but removing it entirely
-    // relies on nonexistent functionality for updating timeseries schema. When
-    // that lands, we should remove this.
-    pub base_route: String,
-    pub datum: Cumulative<u64>,
-}
 
 /// Small enum to help understand why oximeter failed to collect from a
 /// producer.
@@ -90,30 +60,6 @@ impl FailureReason {
     }
 }
 
-/// The number of failed collections from a single producer.
-#[derive(Clone, Debug, Metric)]
-pub struct FailedCollections {
-    /// The producer's ID.
-    pub producer_id: Uuid,
-    /// The producer's IP address.
-    pub producer_ip: IpAddr,
-    /// The producer's port.
-    pub producer_port: u16,
-    /// The base route in the producer server used to collect metrics.
-    ///
-    /// The full route is `{base_route}/{producer_id}`.
-    ///
-    // TODO-cleanup: This is no longer relevant, but removing it entirely
-    // relies on nonexistent functionality for updating timeseries schema. When
-    // that lands, we should remove this.
-    pub base_route: String,
-    /// The reason we could not collect.
-    //
-    // NOTE: This should always be generated through a `FailureReason`.
-    pub reason: Cow<'static, str>,
-    pub datum: Cumulative<u64>,
-}
-
 /// Oximeter collection statistics maintained by each collection task.
 #[derive(Clone, Debug)]
 pub struct CollectionTaskStats {
@@ -133,7 +79,7 @@ impl CollectionTaskStats {
                 producer_id: producer.id,
                 producer_ip: producer.address.ip(),
                 producer_port: producer.address.port(),
-                base_route: String::new(),
+                base_route: "".into(),
                 datum: Cumulative::new(0),
             },
             failed_collections: BTreeMap::new(),
@@ -176,15 +122,8 @@ impl CollectionTaskStats {
 
 #[cfg(test)]
 mod tests {
-    use super::Collections;
-    use super::Cumulative;
-    use super::FailedCollections;
     use super::FailureReason;
-    use super::OximeterCollector;
     use super::StatusCode;
-    use oximeter::schema::SchemaSet;
-    use std::net::IpAddr;
-    use std::net::Ipv6Addr;
 
     #[test]
     fn test_failure_reason_serialization() {
@@ -196,51 +135,5 @@ mod tests {
         for (variant, as_str) in data.iter() {
             assert_eq!(variant.to_string(), *as_str);
         }
-    }
-
-    const fn collector() -> OximeterCollector {
-        OximeterCollector {
-            collector_id: uuid::uuid!("cfebaa5f-3ba9-4bb5-9145-648d287df78a"),
-            collector_ip: IpAddr::V6(Ipv6Addr::LOCALHOST),
-            collector_port: 12345,
-        }
-    }
-
-    fn collections() -> Collections {
-        Collections {
-            producer_id: uuid::uuid!("718452ab-7cca-42f6-b8b1-1aaaa1b09104"),
-            producer_ip: IpAddr::V6(Ipv6Addr::LOCALHOST),
-            producer_port: 12345,
-            base_route: String::new(),
-            datum: Cumulative::new(0),
-        }
-    }
-
-    fn failed_collections() -> FailedCollections {
-        FailedCollections {
-            producer_id: uuid::uuid!("718452ab-7cca-42f6-b8b1-1aaaa1b09104"),
-            producer_ip: IpAddr::V6(Ipv6Addr::LOCALHOST),
-            producer_port: 12345,
-            base_route: String::new(),
-            reason: FailureReason::Unreachable.as_string(),
-            datum: Cumulative::new(0),
-        }
-    }
-
-    // Check that the self-stat timeseries schema have not changed.
-    #[test]
-    fn test_no_schema_changes() {
-        let collector = collector();
-        let collections = collections();
-        let failed = failed_collections();
-        let mut set = SchemaSet::default();
-        assert!(set.insert_checked(&collector, &collections).is_none());
-        assert!(set.insert_checked(&collector, &failed).is_none());
-
-        const PATH: &'static str = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/output/self-stat-schema.json"
-        );
-        set.assert_contents(PATH);
     }
 }

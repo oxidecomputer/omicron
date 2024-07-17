@@ -19,6 +19,6 @@ paste.workspace = true
 [features]
 default = ["std"]
 serde = ["newtype-uuid/serde"]
-schemars08 = ["newtype-uuid/schemars08", "schemars"]
+schemars08 = ["newtype-uuid/schemars08", "schemars", "std"]
 std = ["newtype-uuid/std"]
 uuid-v4 = ["newtype-uuid/v4"]

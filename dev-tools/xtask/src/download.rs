@@ -17,6 +17,7 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::OnceLock;
 use std::time::Duration;
+use strum::Display;
 use strum::EnumIter;
 use strum::IntoEnumIterator;
 use tar::Archive;
@@ -25,6 +26,9 @@ use tokio::process::Command;
 
 const BUILDOMAT_URL: &'static str =
     "https://buildomat.eng.oxide.computer/public/file";
+const CARGO_HACK_URL: &'static str =
+    "https://github.com/taiki-e/cargo-hack/releases/download";
+
 const RETRY_ATTEMPTS: usize = 3;
 
 /// What is being downloaded?
@@ -43,6 +47,9 @@ const RETRY_ATTEMPTS: usize = 3;
 enum Target {
     /// Download all targets
     All,
+
+    /// `cargo hack` binary
+    CargoHack,
 
     /// Clickhouse binary
     Clickhouse,
@@ -124,6 +131,7 @@ pub async fn run_cmd(args: DownloadArgs) -> Result<()> {
                     Target::All => {
                         bail!("We should have already filtered this 'All' target out?");
                     }
+                    Target::CargoHack => downloader.download_cargo_hack().await,
                     Target::Clickhouse => downloader.download_clickhouse().await,
                     Target::Cockroach => downloader.download_cockroach().await,
                     Target::Console => downloader.download_console().await,
@@ -151,10 +159,17 @@ pub async fn run_cmd(args: DownloadArgs) -> Result<()> {
     Ok(())
 }
 
+#[derive(Display)]
 enum Os {
     Illumos,
     Linux,
     Mac,
+}
+
+#[derive(Display)]
+enum Arch {
+    X86_64,
+    Aarch64,
 }
 
 impl Os {
@@ -175,6 +190,15 @@ fn os_name() -> Result<Os> {
         other => bail!("OS not supported: {other}"),
     };
     Ok(os)
+}
+
+fn arch() -> Result<Arch> {
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => Arch::X86_64,
+        "aarch64" => Arch::Aarch64,
+        other => bail!("Architecture not supported: {other}"),
+    };
+    Ok(arch)
 }
 
 struct Downloader<'a> {
@@ -218,7 +242,7 @@ async fn get_values_from_file<const N: usize>(
 
     let content = tokio::fs::read_to_string(&path)
         .await
-        .context("Failed to read {path}")?;
+        .with_context(|| format!("Failed to read {path}"))?;
     for line in content.lines() {
         let line = line.trim();
         let Some((key, value)) = line.split_once('=') else {
@@ -255,23 +279,6 @@ async fn streaming_download(url: &str, path: &Utf8Path) -> Result<()> {
         tarball.write_all(chunk.as_ref()).await?;
     }
     Ok(())
-}
-
-/// Returns the hex, lowercase md5 checksum of a file at `path`.
-async fn md5_checksum(path: &Utf8Path) -> Result<String> {
-    let mut buf = vec![0u8; 65536];
-    let mut file = tokio::fs::File::open(path).await?;
-    let mut ctx = md5::Context::new();
-    loop {
-        let n = file.read(&mut buf).await?;
-        if n == 0 {
-            break;
-        }
-        ctx.write_all(&buf[0..n])?;
-    }
-
-    let digest = ctx.compute();
-    Ok(format!("{digest:x}"))
 }
 
 /// Returns the hex, lowercase sha2 checksum of a file at `path`.
@@ -382,14 +389,12 @@ async fn set_permissions(path: &Utf8Path, mode: u32) -> Result<()> {
 }
 
 enum ChecksumAlgorithm {
-    Md5,
     Sha2,
 }
 
 impl ChecksumAlgorithm {
     async fn checksum(&self, path: &Utf8Path) -> Result<String> {
         match self {
-            ChecksumAlgorithm::Md5 => md5_checksum(path).await,
             ChecksumAlgorithm::Sha2 => sha2_checksum(path).await,
         }
     }
@@ -451,6 +456,59 @@ async fn download_file_and_verify(
 }
 
 impl<'a> Downloader<'a> {
+    async fn download_cargo_hack(&self) -> Result<()> {
+        let os = os_name()?;
+        let arch = arch()?;
+
+        let download_dir = self.output_dir.join("downloads");
+        let destination_dir = self.output_dir.join("cargo-hack");
+
+        let checksums_path = self.versions_dir.join("cargo_hack_checksum");
+        let [checksum] = get_values_from_file(
+            [&format!("CIDL_SHA256_{}", os.env_name())],
+            &checksums_path,
+        )
+        .await?;
+
+        let versions_path = self.versions_dir.join("cargo_hack_version");
+        let version = tokio::fs::read_to_string(&versions_path)
+            .await
+            .context("Failed to read version from {versions_path}")?;
+        let version = version.trim();
+
+        let (platform, supported_arch) = match (os, arch) {
+            (Os::Illumos, Arch::X86_64) => ("unknown-illumos", "x86_64"),
+            (Os::Linux, Arch::X86_64) => ("unknown-linux-gnu", "x86_64"),
+            (Os::Linux, Arch::Aarch64) => ("unknown-linux-gnu", "aarch64"),
+            (Os::Mac, Arch::X86_64) => ("apple-darwin", "x86_64"),
+            (Os::Mac, Arch::Aarch64) => ("apple-darwin", "aarch64"),
+            (os, arch) => bail!("Unsupported OS/arch: {os}/{arch}"),
+        };
+
+        let tarball_filename =
+            format!("cargo-hack-{supported_arch}-{platform}.tar.gz");
+        let tarball_url =
+            format!("{CARGO_HACK_URL}/v{version}/{tarball_filename}");
+
+        let tarball_path = download_dir.join(&tarball_filename);
+
+        tokio::fs::create_dir_all(&download_dir).await?;
+        tokio::fs::create_dir_all(&destination_dir).await?;
+
+        download_file_and_verify(
+            &self.log,
+            &tarball_path,
+            &tarball_url,
+            ChecksumAlgorithm::Sha2,
+            &checksum,
+        )
+        .await?;
+
+        unpack_tarball(&self.log, &tarball_path, &destination_dir).await?;
+
+        Ok(())
+    }
+
     async fn download_clickhouse(&self) -> Result<()> {
         let os = os_name()?;
 
@@ -459,7 +517,7 @@ impl<'a> Downloader<'a> {
 
         let checksums_path = self.versions_dir.join("clickhouse_checksums");
         let [checksum] = get_values_from_file(
-            [&format!("CIDL_MD5_{}", os.env_name())],
+            [&format!("CIDL_SHA256_{}", os.env_name())],
             &checksums_path,
         )
         .await?;
@@ -491,7 +549,7 @@ impl<'a> Downloader<'a> {
             &self.log,
             &tarball_path,
             &tarball_url,
-            ChecksumAlgorithm::Md5,
+            ChecksumAlgorithm::Sha2,
             &checksum,
         )
         .await?;

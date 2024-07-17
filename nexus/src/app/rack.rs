@@ -360,9 +360,9 @@ impl super::Nexus {
 
         // TODO
         // configure rack networking / boundary services here
-        // Currently calling some of the apis directly, but should we be using sagas
-        // going forward via self.run_saga()? Note that self.create_runnable_saga and
-        // self.execute_saga are currently not available within this scope.
+        // Currently calling some of the apis directly, but should we be using
+        // sagas going forward via self.sagas.saga_execute()? Note that
+        // this may not be available within this scope.
         info!(log, "Recording Rack Network Configuration");
         let address_lot_name = Name::from_str(INFRA_LOT).map_err(|e| {
             Error::internal_error(&format!(
@@ -778,7 +778,7 @@ impl super::Nexus {
                         baseboard: Baseboard {
                             serial: k.serial_number.clone(),
                             part: k.part_number.clone(),
-                            revision: v.baseboard_revision.into(),
+                            revision: v.baseboard_revision,
                         },
                         rack_id: self.rack_id,
                         cubby: v.sp_slot,

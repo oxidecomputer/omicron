@@ -1,0 +1,42 @@
+format_version = 1
+
+[target]
+name = "kstat_sampler"
+description = "A software object sampling kernel statistics"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "hostname" ] },
+]
+
+[[metrics]]
+name = "samples_dropped"
+description = "Total number of samples dropped for a single tracked target"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "target_id", "target_name" ] }
+]
+
+[[metrics]]
+name = "expired_targets"
+description = """\
+Total number of targets that have expired. Targets may expire \
+after either a limited number of unsuccessful sampling attempts, \
+or after a duration of unsuccessful sampling."""
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[fields.hostname]
+type = "string"
+description = "The hostname (or zonename) of the machine hosting the sampler"
+
+[fields.target_id]
+type = "u64"
+description = "The unique ID of the target being tracked"
+
+[fields.target_name]
+type = "string"
+description = "The name of the target being tracked"

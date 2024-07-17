@@ -100,6 +100,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH};
 use tokio::sync::mpsc::Receiver;
+use tokio::sync::oneshot;
 use zone::{Zone, ZoneError};
 
 const ZFS_PROP_USED: &str = "used";
@@ -175,6 +176,7 @@ enum DumpSetupCmd {
         dump_slices: Vec<DumpSlicePath>,
         debug_datasets: Vec<DebugZpool>,
         core_datasets: Vec<CoreZpool>,
+        update_complete_tx: oneshot::Sender<()>,
     },
 }
 
@@ -222,6 +224,12 @@ impl DumpSetup {
         Self { tx, mount_config, _poller, log }
     }
 
+    /// Given the set of all managed disks, updates the dump device location
+    /// for logs and dumps.
+    ///
+    /// This function returns only once this request has been handled, which
+    /// can be used as a signal by callers that any "old disks" are no longer
+    /// being used by [DumpSetup].
     pub(crate) async fn update_dumpdev_setup(
         &self,
         disks: impl Iterator<Item = &Disk>,
@@ -279,16 +287,22 @@ impl DumpSetup {
             }
         }
 
+        let (tx, rx) = oneshot::channel();
         if let Err(err) = self
             .tx
             .send(DumpSetupCmd::UpdateDumpdevSetup {
                 dump_slices: m2_dump_slices,
                 debug_datasets: u2_debug_datasets,
                 core_datasets: m2_core_datasets,
+                update_complete_tx: tx,
             })
             .await
         {
             error!(log, "DumpSetup channel closed: {:?}", err.0);
+        };
+
+        if let Err(err) = rx.await {
+            error!(log, "DumpSetup failed to await update"; "err" => ?err);
         }
     }
 }
@@ -504,6 +518,14 @@ impl DumpSetupWorker {
 
     async fn poll_file_archival(mut self) {
         info!(self.log, "DumpSetup poll loop started.");
+
+        // A oneshot which helps callers track when updates have propagated.
+        //
+        // This is particularly useful for disk expungement, when a caller
+        // wants to ensure that the dump device is no longer accessing an
+        // old device.
+        let mut evaluation_and_archiving_complete_tx = None;
+
         loop {
             match tokio::time::timeout(ARCHIVAL_INTERVAL, self.rx.recv()).await
             {
@@ -511,7 +533,10 @@ impl DumpSetupWorker {
                     dump_slices,
                     debug_datasets,
                     core_datasets,
+                    update_complete_tx,
                 })) => {
+                    evaluation_and_archiving_complete_tx =
+                        Some(update_complete_tx);
                     self.update_disk_loadout(
                         dump_slices,
                         debug_datasets,
@@ -536,6 +561,12 @@ impl DumpSetupWorker {
             // and then do the actual archiving.
             if let Err(err) = self.archive_files().await {
                 error!(self.log, "Failed to archive debug/dump files: {err:?}");
+            }
+
+            if let Some(tx) = evaluation_and_archiving_complete_tx.take() {
+                if let Err(err) = tx.send(()) {
+                    error!(self.log, "DumpDevice failed to notify caller"; "err" => ?err);
+                }
             }
         }
     }

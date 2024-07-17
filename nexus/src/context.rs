@@ -143,7 +143,7 @@ impl ServerContext {
         let authz = Arc::new(authz::Authz::new(&log));
         let create_tracker = |name: &str| {
             let target = HttpService {
-                name: name.to_string(),
+                name: name.to_string().into(),
                 id: config.deployment.id,
             };
             const START_LATENCY_DECADE: i16 = -6;

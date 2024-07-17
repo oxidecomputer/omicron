@@ -1,0 +1,65 @@
+format_version = 1
+
+[target]
+name = "virtual_machine"
+description = "A guest virtual machine instance"
+authz_scope = "project"
+versions = [
+    { version = 1, fields = [ "instance_id", "project_id", "silo_id" ] },
+]
+
+[[metrics]]
+name = "vcpu_usage"
+description = "Cumulative time each vCPU has spent in a state"
+units = "nanoseconds"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "state", "vcpu_id" ] }
+]
+
+[[metrics]]
+name = "reset"
+description = "Cumulative number of times the virtual machine has been reset"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "pv_panic_guest_handled"
+description = "Cumulative number of times a PVPANIC event was handled by the guest"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "pv_panic_host_handled"
+description = "Cumulative number of times a PVPANIC event was handled by the host"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[fields.instance_id]
+type = "uuid"
+description = "ID of the virtual machine instance"
+
+[fields.project_id]
+type = "uuid"
+description = "ID of the virtual machine instance's project"
+
+[fields.silo_id]
+type = "uuid"
+description = "ID of the virtual machine instance's silo"
+
+[fields.state]
+type = "string"
+description = "The state of the vCPU"
+
+[fields.vcpu_id]
+type = "u32"
+description = "The ID of the vCPU"

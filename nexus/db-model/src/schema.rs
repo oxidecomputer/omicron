@@ -281,7 +281,7 @@ table! {
         multi_exit_discriminator -> Nullable<Int8>,
         local_pref -> Nullable<Int8>,
         enforce_first_as -> Bool,
-        vlan_id -> Nullable<Int8>,
+        vlan_id -> Nullable<Int4>,
     }
 }
 
@@ -511,6 +511,7 @@ table! {
         ip -> Inet,
         slot -> Int2,
         is_primary -> Bool,
+        transit_ips -> Array<Inet>,
     }
 }
 
@@ -529,6 +530,7 @@ table! {
         ip -> Inet,
         slot -> Int2,
         is_primary -> Bool,
+        transit_ips -> Array<Inet>,
     }
 }
 joinable!(instance_network_interface -> instance (instance_id));
@@ -1042,6 +1044,8 @@ table! {
         block_size -> Int8,
         blocks_per_extent -> Int8,
         extent_count -> Int8,
+
+        port -> Nullable<Int4>,
     }
 }
 
@@ -1106,6 +1110,7 @@ table! {
         rcgen -> Int8,
         ipv4_block -> Inet,
         ipv6_block -> Inet,
+        custom_router_id -> Nullable<Uuid>,
     }
 }
 
@@ -1120,6 +1125,7 @@ table! {
         kind -> crate::VpcRouterKindEnum,
         vpc_id -> Uuid,
         rcgen -> Int8,
+        resolved_version -> Int8,
     }
 }
 
@@ -1472,6 +1478,7 @@ table! {
         snat_ip -> Nullable<Inet>,
         snat_first_port -> Nullable<Int4>,
         snat_last_port -> Nullable<Int4>,
+        filesystem_pool -> Nullable<Uuid>,
     }
 }
 
@@ -1588,6 +1595,7 @@ table! {
         snat_last_port -> Nullable<Int4>,
         disposition -> crate::DbBpZoneDispositionEnum,
         external_ip_id -> Nullable<Uuid>,
+        filesystem_pool -> Nullable<Uuid>,
     }
 }
 
@@ -1758,6 +1766,7 @@ table! {
 table! {
     migration (id) {
         id -> Uuid,
+        instance_id -> Uuid,
         time_created -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         source_state -> crate::MigrationStateEnum,

@@ -6,16 +6,14 @@
 //! at deployment time.
 
 use crate::PostgresConfigWithUrl;
-
-use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
-use omicron_common::address::RACK_PREFIX;
-use omicron_common::api::internal::shared::SwitchLocation;
-
 use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
+use omicron_common::address::RACK_PREFIX;
+use omicron_common::api::internal::shared::SwitchLocation;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -373,8 +371,10 @@ pub struct BackgroundTaskConfig {
     pub bfd_manager: BfdManagerConfig,
     /// configuration for the switch port settings manager task
     pub switch_port_settings_manager: SwitchPortSettingsManagerConfig,
-    /// configuration for region replacement task
+    /// configuration for region replacement starter task
     pub region_replacement: RegionReplacementConfig,
+    /// configuration for region replacement driver task
+    pub region_replacement_driver: RegionReplacementDriverConfig,
     /// configuration for instance watcher task
     pub instance_watcher: InstanceWatcherConfig,
     /// configuration for service VPC firewall propagation task
@@ -383,6 +383,10 @@ pub struct BackgroundTaskConfig {
     pub v2p_mapping_propagation: V2PMappingPropagationConfig,
     /// configuration for abandoned VMM reaper task
     pub abandoned_vmm_reaper: AbandonedVmmReaperConfig,
+    /// configuration for saga recovery task
+    pub saga_recovery: SagaRecoveryConfig,
+    /// configuration for lookup region port task
+    pub lookup_region_port: LookupRegionPortConfig,
 }
 
 #[serde_as]
@@ -559,6 +563,30 @@ pub struct V2PMappingPropagationConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct AbandonedVmmReaperConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SagaRecoveryConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RegionReplacementDriverConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LookupRegionPortConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -801,10 +829,13 @@ mod test {
             sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
+            region_replacement_driver.period_secs = 30
             instance_watcher.period_secs = 30
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60
+            saga_recovery.period_secs = 60
+            lookup_region_port.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -935,6 +966,10 @@ mod test {
                         region_replacement: RegionReplacementConfig {
                             period_secs: Duration::from_secs(30),
                         },
+                        region_replacement_driver:
+                            RegionReplacementDriverConfig {
+                                period_secs: Duration::from_secs(30),
+                            },
                         instance_watcher: InstanceWatcherConfig {
                             period_secs: Duration::from_secs(30),
                         },
@@ -947,7 +982,13 @@ mod test {
                         },
                         abandoned_vmm_reaper: AbandonedVmmReaperConfig {
                             period_secs: Duration::from_secs(60),
-                        }
+                        },
+                        saga_recovery: SagaRecoveryConfig {
+                            period_secs: Duration::from_secs(60),
+                        },
+                        lookup_region_port: LookupRegionPortConfig {
+                            period_secs: Duration::from_secs(60),
+                        },
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -1015,10 +1056,13 @@ mod test {
             sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
+            region_replacement_driver.period_secs = 30
             instance_watcher.period_secs = 30
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60
+            saga_recovery.period_secs = 60
+            lookup_region_port.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
             "##,
@@ -1144,6 +1188,12 @@ mod test {
         println!("checking {:?}", config_path);
         let example_config = NexusConfig::from_file(config_path)
             .expect("example config file is not valid");
+
+        // The second example config file should be valid.
+        let config_path = "../nexus/examples/config-second.toml";
+        println!("checking {:?}", config_path);
+        let _ = NexusConfig::from_file(config_path)
+            .expect("second example config file is not valid");
 
         // The config file used for the tests should also be valid.  The tests
         // won't clear the runway anyway if this file isn't valid.  But it's

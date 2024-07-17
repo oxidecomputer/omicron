@@ -33,10 +33,12 @@ nexus-config.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
 nexus-reconfigurator-preparation.workspace = true
+nexus-saga-recovery.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 oximeter-client.workspace = true
+oximeter-db = { workspace = true, default-features = false, features = [ "oxql" ] }
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 ratatui.workspace = true
@@ -51,6 +53,7 @@ tabled.workspace = true
 textwrap.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 unicode-width.workspace = true
+url.workspace = true
 uuid.workspace = true
 ipnetwork.workspace = true
 omicron-workspace-hack.workspace = true

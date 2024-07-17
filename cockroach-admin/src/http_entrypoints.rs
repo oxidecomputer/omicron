@@ -2,12 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::cockroach_cli::NodeDecommission;
 use crate::cockroach_cli::NodeStatus;
 use crate::context::ServerContext;
 use dropshot::endpoint;
+use dropshot::ApiDescriptionRegisterError;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::RequestContext;
+use dropshot::TypedBody;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -17,9 +20,12 @@ use std::sync::Arc;
 type CrdbApiDescription = dropshot::ApiDescription<Arc<ServerContext>>;
 
 pub fn api() -> CrdbApiDescription {
-    fn register_endpoints(api: &mut CrdbApiDescription) -> Result<(), String> {
-        api.register(node_id)?;
+    fn register_endpoints(
+        api: &mut CrdbApiDescription,
+    ) -> Result<(), ApiDescriptionRegisterError> {
+        api.register(local_node_id)?;
         api.register(node_status)?;
+        api.register(node_decommission)?;
         Ok(())
     }
 
@@ -53,7 +59,7 @@ async fn node_status(
 /// CockroachDB Node ID
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct NodeId {
+pub struct LocalNodeId {
     /// The ID of this Omicron zone.
     ///
     /// This is included to ensure correctness even if a socket address on a
@@ -75,11 +81,33 @@ pub struct NodeId {
     method = GET,
     path = "/node/id",
 }]
-async fn node_id(
+async fn local_node_id(
     rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<NodeId>, HttpError> {
+) -> Result<HttpResponseOk<LocalNodeId>, HttpError> {
     let ctx = rqctx.context();
     let node_id = ctx.node_id().await?.to_string();
     let zone_id = ctx.zone_id();
-    Ok(HttpResponseOk(NodeId { zone_id, node_id }))
+    Ok(HttpResponseOk(LocalNodeId { zone_id, node_id }))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct NodeId {
+    pub node_id: String,
+}
+
+/// Decommission a node from the CRDB cluster
+#[endpoint {
+    method = POST,
+    path = "/node/decommission",
+}]
+async fn node_decommission(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    body: TypedBody<NodeId>,
+) -> Result<HttpResponseOk<NodeDecommission>, HttpError> {
+    let ctx = rqctx.context();
+    let NodeId { node_id } = body.into_inner();
+    let decommission_status =
+        ctx.cockroach_cli().node_decommission(&node_id).await?;
+    Ok(HttpResponseOk(decommission_status))
 }

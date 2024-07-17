@@ -51,6 +51,11 @@ progenitor::generate_api!(
         NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
         PortFec = omicron_common::api::internal::shared::PortFec,
         PortSpeed = omicron_common::api::internal::shared::PortSpeed,
+        RouterId = omicron_common::api::internal::shared::RouterId,
+        ResolvedVpcRoute = omicron_common::api::internal::shared::ResolvedVpcRoute,
+        ResolvedVpcRouteSet = omicron_common::api::internal::shared::ResolvedVpcRouteSet,
+        RouterTarget = omicron_common::api::internal::shared::RouterTarget,
+        RouterVersion = omicron_common::api::internal::shared::RouterVersion,
         SourceNatConfig = omicron_common::api::internal::shared::SourceNatConfig,
         SwitchLocation = omicron_common::api::external::SwitchLocation,
         TypedUuidForInstanceKind = omicron_uuid_kinds::InstanceUuid,
@@ -584,6 +589,36 @@ impl From<omicron_common::api::internal::shared::NetworkInterfaceKind>
             Instance { id } => Self::Instance(id),
             Service { id } => Self::Service(id),
             Probe { id } => Self::Probe(id),
+        }
+    }
+}
+
+impl From<omicron_common::api::internal::shared::SledIdentifiers>
+    for types::SledIdentifiers
+{
+    fn from(
+        value: omicron_common::api::internal::shared::SledIdentifiers,
+    ) -> Self {
+        Self {
+            model: value.model,
+            rack_id: value.rack_id,
+            revision: value.revision,
+            serial: value.serial,
+            sled_id: value.sled_id,
+        }
+    }
+}
+
+impl From<types::SledIdentifiers>
+    for omicron_common::api::internal::shared::SledIdentifiers
+{
+    fn from(value: types::SledIdentifiers) -> Self {
+        Self {
+            model: value.model,
+            rack_id: value.rack_id,
+            revision: value.revision,
+            serial: value.serial,
+            sled_id: value.sled_id,
         }
     }
 }

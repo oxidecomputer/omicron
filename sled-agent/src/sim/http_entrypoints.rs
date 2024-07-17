@@ -12,7 +12,6 @@ use crate::params::{
     InstancePutStateResponse, InstanceUnregisterResponse, Inventory,
     OmicronPhysicalDisksConfig, OmicronZonesConfig, VpcFirewallRulesEnsureBody,
 };
-use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
@@ -20,11 +19,14 @@ use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
+use dropshot::{endpoint, ApiDescriptionRegisterError};
 use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
-use omicron_common::api::internal::shared::SwitchPorts;
+use omicron_common::api::internal::shared::{
+    ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
+};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -38,7 +40,9 @@ type SledApiDescription = ApiDescription<Arc<SledAgent>>;
 
 /// Returns a description of the sled agent API
 pub fn api() -> SledApiDescription {
-    fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
+    fn register_endpoints(
+        api: &mut SledApiDescription,
+    ) -> Result<(), ApiDescriptionRegisterError> {
         api.register(instance_put_migration_ids)?;
         api.register(instance_put_state)?;
         api.register(instance_get_state)?;
@@ -64,6 +68,8 @@ pub fn api() -> SledApiDescription {
         api.register(omicron_zones_get)?;
         api.register(omicron_zones_put)?;
         api.register(sled_add)?;
+        api.register(list_vpc_routes)?;
+        api.register(set_vpc_routes)?;
 
         Ok(())
     }
@@ -506,5 +512,29 @@ async fn sled_add(
     _rqctx: RequestContext<Arc<SledAgent>>,
     _body: TypedBody<AddSledRequest>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = GET,
+    path = "/vpc-routes",
+}]
+async fn list_vpc_routes(
+    rqctx: RequestContext<Arc<SledAgent>>,
+) -> Result<HttpResponseOk<Vec<ResolvedVpcRouteState>>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(sa.list_vpc_routes().await))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/vpc-routes",
+}]
+async fn set_vpc_routes(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    body: TypedBody<Vec<ResolvedVpcRouteSet>>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    sa.set_vpc_routes(body.into_inner()).await;
     Ok(HttpResponseUpdatedNoContent())
 }
