@@ -219,7 +219,7 @@ pub struct VpcFirewallRule {
 const MAX_FW_RULES_PER_VPC: usize = 1024;
 
 /// Cap on targets and on each type of filter
-const MAX_FW_RULE_PARTS: usize = 128;
+const MAX_FW_RULE_PARTS: usize = 256;
 
 fn ensure_max_len<T>(
     items: &Vec<T>,

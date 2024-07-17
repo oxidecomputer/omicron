@@ -384,7 +384,7 @@ async fn test_firewall_rules_max_lengths(cptestctx: &ControlPlaneTestContext) {
     // TARGETS
     ///////////////////////
 
-    let max_parts: usize = 128;
+    let max_parts: usize = 256;
 
     let target = VpcFirewallRuleTarget::Vpc("default".parse().unwrap());
 

@@ -5410,7 +5410,13 @@ async fn vpc_firewall_rules_view(
         .await
 }
 
+// Note: the limits in the below comment come from the firewall rules model
+// file, nexus/db-model/src/vpc_firewall_rule.rs.
+
 /// Replace firewall rules
+///
+/// The maximum number of rules is 1024. The maximum number of targets and each
+/// type of filter is 256.
 #[endpoint {
     method = PUT,
     path = "/v1/vpc-firewall-rules",
