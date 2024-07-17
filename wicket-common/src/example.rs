@@ -6,7 +6,6 @@
 
 use std::{collections::BTreeSet, net::Ipv6Addr};
 
-use gateway_client::types::{SpIdentifier, SpType};
 use maplit::{btreemap, btreeset};
 use omicron_common::{
     address::{IpRange, Ipv4Range},
@@ -19,11 +18,14 @@ use omicron_common::{
 };
 use sled_hardware_types::Baseboard;
 
-use crate::rack_setup::{
-    BgpAuthKeyId, BootstrapSledDescription, CurrentRssUserConfigInsensitive,
-    PutRssUserConfigInsensitive, UserSpecifiedBgpPeerConfig,
-    UserSpecifiedImportExportPolicy, UserSpecifiedPortConfig,
-    UserSpecifiedRackNetworkConfig,
+use crate::{
+    inventory::{SpIdentifier, SpType},
+    rack_setup::{
+        BgpAuthKeyId, BootstrapSledDescription,
+        CurrentRssUserConfigInsensitive, PutRssUserConfigInsensitive,
+        UserSpecifiedBgpPeerConfig, UserSpecifiedImportExportPolicy,
+        UserSpecifiedPortConfig, UserSpecifiedRackNetworkConfig,
+    },
 };
 
 /// A collection of example data structures.

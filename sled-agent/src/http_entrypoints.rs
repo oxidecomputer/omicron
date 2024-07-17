@@ -20,10 +20,10 @@ use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
 use display_error_chain::DisplayErrorChain;
 use dropshot::{
-    endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseCreated,
-    HttpResponseDeleted, HttpResponseHeaders, HttpResponseOk,
-    HttpResponseUpdatedNoContent, Path, Query, RequestContext, StreamingBody,
-    TypedBody,
+    endpoint, ApiDescription, ApiDescriptionRegisterError, FreeformBody,
+    HttpError, HttpResponseCreated, HttpResponseDeleted, HttpResponseHeaders,
+    HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query, RequestContext,
+    StreamingBody, TypedBody,
 };
 use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use installinator_common::M2Slot;
@@ -32,7 +32,7 @@ use omicron_common::api::internal::nexus::{
     DiskRuntimeState, SledInstanceState, UpdateArtifactId,
 };
 use omicron_common::api::internal::shared::{
-    ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
+    ResolvedVpcRouteSet, ResolvedVpcRouteState, SledIdentifiers, SwitchPorts,
 };
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use schemars::JsonSchema;
@@ -46,7 +46,9 @@ type SledApiDescription = ApiDescription<SledAgent>;
 
 /// Returns a description of the sled agent API
 pub fn api() -> SledApiDescription {
-    fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
+    fn register_endpoints(
+        api: &mut SledApiDescription,
+    ) -> Result<(), ApiDescriptionRegisterError> {
         api.register(disk_put)?;
         api.register(cockroachdb_init)?;
         api.register(instance_issue_disk_snapshot_request)?;
@@ -87,6 +89,7 @@ pub fn api() -> SledApiDescription {
         api.register(host_os_write_status_get)?;
         api.register(host_os_write_status_delete)?;
         api.register(inventory)?;
+        api.register(sled_identifiers)?;
         api.register(bootstore_status)?;
         api.register(list_vpc_routes)?;
         api.register(set_vpc_routes)?;
@@ -1008,6 +1011,17 @@ async fn inventory(
 ) -> Result<HttpResponseOk<Inventory>, HttpError> {
     let sa = request_context.context();
     Ok(HttpResponseOk(sa.inventory().await?))
+}
+
+/// Fetch sled identifiers
+#[endpoint {
+    method = GET,
+    path = "/sled-identifiers",
+}]
+async fn sled_identifiers(
+    request_context: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<SledIdentifiers>, HttpError> {
+    Ok(HttpResponseOk(request_context.context().sled_identifiers().await))
 }
 
 /// Get the internal state of the local bootstore node

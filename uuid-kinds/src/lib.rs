@@ -2,11 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#![cfg_attr(not(feature = "std"), no_std)]
-
 //! A registry for UUID kinds used in Omicron and related projects.
 //!
 //! See this crate's `README.adoc` for more information.
+
+#![cfg_attr(not(feature = "std"), no_std)]
 
 // Export these types so that other users don't have to pull in newtype-uuid.
 #[doc(no_inline)]

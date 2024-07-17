@@ -39,9 +39,10 @@ use omicron_common::api::internal::shared::{
     NetworkInterface, SourceNatConfig,
 };
 use omicron_common::backoff;
+use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid};
 use propolis_client::Client as PropolisClient;
-use rand::prelude::SliceRandom;
+use rand::prelude::IteratorRandom;
 use rand::SeedableRng;
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::manager::StorageHandle;
@@ -214,6 +215,9 @@ enum InstanceRequest {
     RequestZoneBundle {
         tx: oneshot::Sender<Result<ZoneBundleMetadata, BundleError>>,
     },
+    GetFilesystemPool {
+        tx: oneshot::Sender<Option<ZpoolName>>,
+    },
     CurrentState {
         tx: oneshot::Sender<SledInstanceState>,
     },
@@ -227,6 +231,7 @@ enum InstanceRequest {
         tx: oneshot::Sender<Result<SledInstanceState, ManagerError>>,
     },
     Terminate {
+        mark_failed: bool,
         tx: oneshot::Sender<Result<InstanceUnregisterResponse, ManagerError>>,
     },
     IssueSnapshotRequest {
@@ -391,7 +396,8 @@ impl InstanceRunner {
                         // of the sender alive in "self.tx_monitor".
                         None => {
                             warn!(self.log, "Instance 'VMM monitor' channel closed; shutting down");
-                            self.terminate().await;
+                            let mark_failed = true;
+                            self.terminate(mark_failed).await;
                         },
                     }
 
@@ -403,6 +409,10 @@ impl InstanceRunner {
                     let result = match request {
                         Some(RequestZoneBundle { tx }) => {
                             tx.send(self.request_zone_bundle().await)
+                                .map_err(|_| Error::FailedSendClientClosed)
+                        },
+                        Some(GetFilesystemPool { tx } ) => {
+                            tx.send(self.get_filesystem_zpool())
                                 .map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(CurrentState{ tx }) => {
@@ -424,9 +434,9 @@ impl InstanceRunner {
                             )
                             .map_err(|_| Error::FailedSendClientClosed)
                         },
-                        Some(Terminate { tx }) => {
+                        Some(Terminate { mark_failed, tx }) => {
                             tx.send(Ok(InstanceUnregisterResponse {
-                                updated_runtime: Some(self.terminate().await)
+                                updated_runtime: Some(self.terminate(mark_failed).await)
                             }))
                             .map_err(|_| Error::FailedSendClientClosed)
                         },
@@ -449,7 +459,8 @@ impl InstanceRunner {
                         },
                         None => {
                             warn!(self.log, "Instance request channel closed; shutting down");
-                            self.terminate().await;
+                            let mark_failed = false;
+                            self.terminate(mark_failed).await;
                             break;
                         },
                     };
@@ -609,8 +620,8 @@ impl InstanceRunner {
             Some(InstanceAction::Destroy) => {
                 info!(self.log, "terminating VMM that has exited";
                       "instance_id" => %self.id());
-
-                self.terminate().await;
+                let mark_failed = false;
+                self.terminate(mark_failed).await;
                 Reaction::Terminate
             }
             None => Reaction::Continue,
@@ -651,9 +662,7 @@ impl InstanceRunner {
         let nics = running_zone
             .opte_ports()
             .map(|port| propolis_client::types::NetworkInterfaceRequest {
-                // TODO-correctness: Remove `.vnic()` call when we use the port
-                // directly.
-                name: port.vnic_name().to_string(),
+                name: port.name().to_string(),
                 slot: propolis_client::types::Slot(port.slot()),
             })
             .collect();
@@ -1059,6 +1068,17 @@ impl Instance {
         Ok(())
     }
 
+    pub async fn get_filesystem_zpool(
+        &self,
+    ) -> Result<Option<ZpoolName>, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(InstanceRequest::GetFilesystemPool { tx })
+            .await
+            .map_err(|_| Error::FailedSendChannelClosed)?;
+        Ok(rx.await?)
+    }
+
     pub async fn current_state(&self) -> Result<SledInstanceState, Error> {
         let (tx, rx) = oneshot::channel();
         self.tx
@@ -1113,9 +1133,10 @@ impl Instance {
     pub async fn terminate(
         &self,
         tx: oneshot::Sender<Result<InstanceUnregisterResponse, ManagerError>>,
+        mark_failed: bool,
     ) -> Result<(), Error> {
         self.tx
-            .send(InstanceRequest::Terminate { tx })
+            .send(InstanceRequest::Terminate { mark_failed, tx })
             .await
             .map_err(|_| Error::FailedSendChannelClosed)?;
         Ok(())
@@ -1180,6 +1201,13 @@ impl InstanceRunner {
         }
     }
 
+    fn get_filesystem_zpool(&self) -> Option<ZpoolName> {
+        let Some(run_state) = &self.running_state else {
+            return None;
+        };
+        run_state.running_zone.root_zpool().map(|p| p.clone())
+    }
+
     fn current_state(&self) -> SledInstanceState {
         self.state.sled_instance_state()
     }
@@ -1228,7 +1256,8 @@ impl InstanceRunner {
                 // This case is morally equivalent to starting Propolis and then
                 // rudely terminating it before asking it to do anything. Update
                 // the VMM and instance states accordingly.
-                self.state.terminate_rudely();
+                let mark_failed = false;
+                self.state.terminate_rudely(mark_failed);
             }
             setup_result?;
         }
@@ -1255,7 +1284,8 @@ impl InstanceRunner {
                 // this happens, generate an instance record bearing the
                 // "Destroyed" state and return it to the caller.
                 if self.running_state.is_none() {
-                    self.terminate().await;
+                    let mark_failed = false;
+                    self.terminate(mark_failed).await;
                     (None, None)
                 } else {
                     (
@@ -1343,20 +1373,22 @@ impl InstanceRunner {
         // configured VNICs.
         let zname = propolis_zone_name(self.propolis_id());
         let mut rng = rand::rngs::StdRng::from_entropy();
-        let root = self
+        let latest_disks = self
             .storage
             .get_latest_disks()
             .await
-            .all_u2_mountpoints(ZONE_DATASET)
+            .all_u2_mountpoints(ZONE_DATASET);
+
+        let root = latest_disks
+            .into_iter()
             .choose(&mut rng)
-            .ok_or_else(|| Error::U2NotFound)?
-            .clone();
+            .ok_or_else(|| Error::U2NotFound)?;
         let installed_zone = self
             .zone_builder_factory
             .builder()
             .with_log(self.log.clone())
             .with_underlay_vnic_allocator(&self.vnic_allocator)
-            .with_zone_root_path(&root)
+            .with_zone_root_path(root)
             .with_zone_image_paths(&["/opt/oxide".into()])
             .with_zone_type("propolis-server")
             .with_unique_name(self.propolis_id().into_untyped_uuid())
@@ -1453,9 +1485,9 @@ impl InstanceRunner {
         Ok(PropolisSetup { client, running_zone })
     }
 
-    async fn terminate(&mut self) -> SledInstanceState {
+    async fn terminate(&mut self, mark_failed: bool) -> SledInstanceState {
         self.terminate_inner().await;
-        self.state.terminate_rudely();
+        self.state.terminate_rudely(mark_failed);
 
         // This causes the "run" task to exit on the next iteration.
         self.should_terminate = true;

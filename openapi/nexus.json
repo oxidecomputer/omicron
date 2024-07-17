@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "20240710.0"
+    "version": "20240821.0"
   },
   "paths": {
     "/device/auth": {
@@ -6719,12 +6719,13 @@
           }
         }
       },
-      "post": {
+      "put": {
         "tags": [
           "system/networking"
         ],
-        "summary": "Create new BGP announce set",
-        "operationId": "networking_bgp_announce_set_create",
+        "summary": "Update BGP announce set",
+        "description": "If the announce set exists, this endpoint replaces the existing announce set with the one specified.",
+        "operationId": "networking_bgp_announce_set_update",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8490,7 +8491,7 @@
           {
             "in": "query",
             "name": "vpc",
-            "description": "Name or ID of the VPC, only required if `subnet` is provided as a `Name`",
+            "description": "Name or ID of the VPC, only required if `router` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -8547,7 +8548,7 @@
           {
             "in": "query",
             "name": "vpc",
-            "description": "Name or ID of the VPC, only required if `subnet` is provided as a `Name`",
+            "description": "Name or ID of the VPC, only required if `router` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -8620,7 +8621,7 @@
           {
             "in": "query",
             "name": "vpc",
-            "description": "Name or ID of the VPC, only required if `subnet` is provided as a `Name`",
+            "description": "Name or ID of the VPC, only required if `router` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -8680,7 +8681,7 @@
           {
             "in": "query",
             "name": "vpc",
-            "description": "Name or ID of the VPC, only required if `subnet` is provided as a `Name`",
+            "description": "Name or ID of the VPC, only required if `router` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -8750,7 +8751,7 @@
           {
             "in": "query",
             "name": "vpc",
-            "description": "Name or ID of the VPC, only required if `subnet` is provided as a `Name`",
+            "description": "Name or ID of the VPC, only required if `router` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -10085,7 +10086,8 @@
           },
           "revision": {
             "type": "integer",
-            "format": "int64"
+            "format": "uint32",
+            "minimum": 0
           },
           "serial": {
             "type": "string"
@@ -15710,14 +15712,6 @@
           }
         ]
       },
-      "IpKind": {
-        "type": "string",
-        "enum": [
-          "snat",
-          "floating",
-          "ephemeral"
-        ]
-      },
       "IpNet": {
         "x-rust-type": {
           "crate": "oxnet",
@@ -16943,7 +16937,7 @@
             "format": "ip"
           },
           "kind": {
-            "$ref": "#/components/schemas/IpKind"
+            "$ref": "#/components/schemas/ProbeExternalIpKind"
           },
           "last_port": {
             "type": "integer",
@@ -16956,6 +16950,14 @@
           "ip",
           "kind",
           "last_port"
+        ]
+      },
+      "ProbeExternalIpKind": {
+        "type": "string",
+        "enum": [
+          "snat",
+          "floating",
+          "ephemeral"
         ]
       },
       "ProbeInfo": {
@@ -19871,7 +19873,9 @@
         "type": "string",
         "enum": [
           "count",
-          "bytes"
+          "bytes",
+          "seconds",
+          "nanoseconds"
         ]
       },
       "User": {

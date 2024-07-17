@@ -123,6 +123,7 @@ impl Drop for StorageManagerTestHarness {
 impl StorageManagerTestHarness {
     /// Creates a new StorageManagerTestHarness with no associated disks.
     pub async fn new(log: &Logger) -> Self {
+        #[cfg(all(test, feature = "testing"))]
         illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let tmp = camino_tempfile::tempdir_in("/var/tmp")
             .expect("Failed to make temporary directory");

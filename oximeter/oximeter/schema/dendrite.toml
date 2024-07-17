@@ -1,0 +1,58 @@
+format_version = 1
+
+[target]
+name = "dendrite"
+description = "Oxide switch management daemon"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "rack_id", "sled_model", "sled_revision", "sled_id", "sled_serial" ] },
+]
+
+[[metrics]]
+name = "sample_collection_duration"
+description = "Duration spent collecting all timeseries samples"
+units = "seconds"
+datum_type = "f64"
+versions = [
+    # Note: The sample collection time includes the time spent querying the
+    # switch for its statistics, which is why these fields are included.
+    # Dendrite may eventually report statistics about itself, or other aspects
+    # not related to the switch, so they belong here, not the target.
+    { added_in = 1, fields = [ "switch_model", "switch_revision", "switch_id", "switch_serial" ] }
+]
+
+[fields.rack_id]
+type = "uuid"
+description = "ID of the rack containing the switch"
+
+[fields.sled_model]
+type = "string"
+description = "The model of the sled managing the switch"
+
+[fields.sled_revision]
+type = "u32"
+description = "Revision number of the sled managing the switch"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID of the sled managing the switch"
+
+[fields.sled_serial]
+type = "string"
+description = "Serial number of the sled managing the switch"
+
+[fields.switch_model]
+type = "string"
+description = "The model of the switch being managed"
+
+[fields.switch_revision]
+type = "u32"
+description = "Revision number of the switch being managed"
+
+[fields.switch_id]
+type = "uuid"
+description = "ID of the switch being managed"
+
+[fields.switch_serial]
+type = "string"
+description = "Serial number of the switch being managed"

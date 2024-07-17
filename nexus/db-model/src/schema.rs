@@ -281,7 +281,7 @@ table! {
         multi_exit_discriminator -> Nullable<Int8>,
         local_pref -> Nullable<Int8>,
         enforce_first_as -> Bool,
-        vlan_id -> Nullable<Int8>,
+        vlan_id -> Nullable<Int4>,
     }
 }
 
@@ -1044,6 +1044,8 @@ table! {
         block_size -> Int8,
         blocks_per_extent -> Int8,
         extent_count -> Int8,
+
+        port -> Nullable<Int4>,
     }
 }
 

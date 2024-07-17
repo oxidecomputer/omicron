@@ -77,6 +77,7 @@ pub use planning_input::ZpoolFilter;
 pub use sled_agent_client::ZoneKind;
 pub use zone_type::blueprint_zone_type;
 pub use zone_type::BlueprintZoneType;
+pub use zone_type::DurableDataset;
 
 use blueprint_display::{
     constants::*, BpDiffState, BpGeneration, BpOmicronZonesSubtableSchema,

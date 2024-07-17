@@ -259,7 +259,7 @@ pub struct SubnetSelector {
 pub struct RouterSelector {
     /// Name or ID of the project, only required if `vpc` is provided as a `Name`
     pub project: Option<NameOrId>,
-    /// Name or ID of the VPC, only required if `subnet` is provided as a `Name`
+    /// Name or ID of the VPC, only required if `router` is provided as a `Name`
     pub vpc: Option<NameOrId>,
     /// Name or ID of the router
     pub router: NameOrId,
@@ -269,7 +269,7 @@ pub struct RouterSelector {
 pub struct OptionalRouterSelector {
     /// Name or ID of the project, only required if `vpc` is provided as a `Name`
     pub project: Option<NameOrId>,
-    /// Name or ID of the VPC, only required if `subnet` is provided as a `Name`
+    /// Name or ID of the VPC, only required if `router` is provided as a `Name`
     pub vpc: Option<NameOrId>,
     /// Name or ID of the router
     pub router: Option<NameOrId>,
@@ -279,7 +279,7 @@ pub struct OptionalRouterSelector {
 pub struct RouteSelector {
     /// Name or ID of the project, only required if `vpc` is provided as a `Name`
     pub project: Option<NameOrId>,
-    /// Name or ID of the VPC, only required if `subnet` is provided as a `Name`
+    /// Name or ID of the VPC, only required if `router` is provided as a `Name`
     pub vpc: Option<NameOrId>,
     /// Name or ID of the router, only required if `route` is provided as a `Name`
     pub router: Option<NameOrId>,
