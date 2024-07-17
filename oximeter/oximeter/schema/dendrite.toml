@@ -23,23 +23,23 @@ versions = [
 
 [fields.rack_id]
 type = "uuid"
-description = "ID of the rack running Dendrite"
+description = "ID of the rack containing the switch"
 
 [fields.sled_model]
 type = "string"
-description = "The model of the sled running Dendrite"
+description = "The model of the sled managing the switch"
 
 [fields.sled_revision]
 type = "u32"
-description = "Revision number of the sled running Dendrite"
+description = "Revision number of the sled managing the switch"
 
 [fields.sled_id]
 type = "uuid"
-description = "ID of the sled running Dendrite"
+description = "ID of the sled managing the switch"
 
 [fields.sled_serial]
 type = "string"
-description = "Serial number of the sled running Dendrite"
+description = "Serial number of the sled managing the switch"
 
 [fields.switch_model]
 type = "string"
