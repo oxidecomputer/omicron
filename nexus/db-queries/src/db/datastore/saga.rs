@@ -67,6 +67,28 @@ impl DataStore {
         Ok(())
     }
 
+    /// Update the state of a saga in the database.
+    ///
+    /// This function is meant to be called in a loop, so that in the event of
+    /// network flakiness, the operation is retried until successful.
+    ///
+    /// ## About conflicts
+    ///
+    /// Currently, if the value of `saga_state` in the database is the same as
+    /// the value we're trying to set it to, the update will be a no-op. That
+    /// is okay, because at any time only one SEC will update the saga. (For
+    /// now, we're implementing saga adoption only in cases where the original
+    /// SEC/Nexus has been expunged.)
+    ///
+    /// However, in the future, it may be possible for multiple SECs to try and
+    /// update the same saga, and overwrite each other's state. For example,
+    /// one SEC might try and update the state to Running while the other one
+    /// updates it to Done. That case would have to be carefully considered and
+    /// tested here, probably using the (currently unused)
+    /// `current_adopt_generation` field to enable optimistic concurrency.
+    ///
+    /// To reiterate, we are *not* considering the case where several SECs try
+    /// to update the same saga. That will be a future enhancement.
     pub async fn saga_update_state(
         &self,
         saga_id: steno::SagaId,
@@ -74,26 +96,6 @@ impl DataStore {
         current_sec: db::saga_types::SecId,
         current_adopt_generation: Generation,
     ) -> Result<(), Error> {
-        // About conflicts
-        // ---------------
-        //
-        // This function is meant to be called in a loop, so that in the event
-        // of network flakiness, the operation is retried until successful.
-        // Currently, if the value of `saga_state` in the database is the same
-        // as the value we're trying to set it to, the update will be a no-op.
-        // That is okay, because at any time only one SEC will update the saga.
-        // (For now, we're implementing saga adoption only in cases where the
-        // original SEC/Nexus has been expunged.)
-        //
-        // However, in the future, it may be possible for multiple SECs to try
-        // and update the same saga, and overwrite each other's state. For
-        // example, one SEC might try and update the state to Running while the
-        // other one updates it to Done. That case would have to be carefully
-        // considered and tested here, probably using the (currently unused)
-        // `current_adopt_generation` field to enable optimistic locking.
-        //
-        // To reiterate, we are *not* considering the case where several SECs
-        // try to update the same saga. That will be a future enhancement.
         use db::schema::saga::dsl;
 
         let saga_id: db::saga_types::SagaId = saga_id.into();

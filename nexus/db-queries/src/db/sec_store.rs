@@ -152,7 +152,7 @@ where
                     "call_count" => call_count,
                     "total_duration" => ?total_duration,
                 );
-            } else if total_duration > Duration::from_secs(20) {
+            } else if total_duration > WARN_DURATION {
                 warn!(
                     &log,
                     "server error while {description}, retrying";
@@ -174,3 +174,7 @@ where
     .await
     .expect("the above backoff retries forever")
 }
+
+/// Threshold at which logs about server errors during retries switch from INFO
+/// to WARN.
+const WARN_DURATION: Duration = Duration::from_secs(20);
