@@ -23,7 +23,7 @@ versions = [
 
 [fields.rack_id]
 type = "uuid"
-description = "ID of the sled running Dendrite"
+description = "ID of the rack running Dendrite"
 
 [fields.sled_model]
 type = "string"
