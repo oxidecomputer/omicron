@@ -17,7 +17,6 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
-use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
@@ -41,6 +40,12 @@ use uuid::Uuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
+type DiskTest<'a> =
+    nexus_test_utils::resource_helpers::DiskTest<'a, omicron_nexus::Server>;
+type DiskTestBuilder<'a> = nexus_test_utils::resource_helpers::DiskTestBuilder<
+    'a,
+    omicron_nexus::Server,
+>;
 
 const PROJECT_NAME: &str = "springfield-squidport-disks";
 
@@ -2159,8 +2164,17 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
     let datastore = nexus.datastore();
 
     // Four zpools, one dataset each
-    let mut disk_test = DiskTest::new(&cptestctx).await;
-    disk_test.add_zpool_with_dataset(&cptestctx).await;
+    let disk_test = DiskTestBuilder::new(&cptestctx)
+        .on_specific_sled(cptestctx.first_sled())
+        .with_zpool_count(4)
+        .build()
+        .await;
+
+    let mut iter = disk_test.zpools();
+    let zpool0 = iter.next().expect("Expected four zpools");
+    let zpool1 = iter.next().expect("Expected four zpools");
+    let zpool2 = iter.next().expect("Expected four zpools");
+    let zpool3 = iter.next().expect("Expected four zpools");
 
     // This bug occurs when region_snapshot records share a snapshot_addr, so
     // insert those here manually.
@@ -2169,38 +2183,38 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
     let region_snapshots = vec![
         // first snapshot-create
         (
-            disk_test.zpools[0].datasets[0].id,
+            zpool0.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
             String::from("[fd00:1122:3344:101:7]:19016"),
         ),
         (
-            disk_test.zpools[1].datasets[0].id,
+            zpool1.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
             String::from("[fd00:1122:3344:102:7]:19016"),
         ),
         (
-            disk_test.zpools[2].datasets[0].id,
+            zpool2.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
             String::from("[fd00:1122:3344:103:7]:19016"),
         ),
         // second snapshot-create
         (
-            disk_test.zpools[0].datasets[0].id,
+            zpool0.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
             String::from("[fd00:1122:3344:101:7]:19016"), // duplicate!
         ),
         (
-            disk_test.zpools[3].datasets[0].id,
+            zpool3.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
             String::from("[fd00:1122:3344:104:7]:19016"),
         ),
         (
-            disk_test.zpools[2].datasets[0].id,
+            zpool2.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
             String::from("[fd00:1122:3344:103:7]:19017"),
@@ -2460,9 +2474,10 @@ async fn test_disk_create_saga_unwinds_correctly(
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
     // Set the third agent to fail creating the region
-    let zpool = &disk_test.zpools[2];
+    let zpool = &disk_test.zpools().nth(2).expect("Expected three zpools");
     let dataset = &zpool.datasets[0];
-    disk_test
+    cptestctx
+        .sled_agent
         .sled_agent
         .get_crucible_dataset(zpool.id, dataset.id)
         .await
@@ -2528,9 +2543,11 @@ async fn test_snapshot_create_saga_unwinds_correctly(
     let _disk: Disk = object_create(client, &disks_url, &base_disk).await;
 
     // Set the third agent to fail creating the region for the snapshot
-    let zpool = &disk_test.zpools[2];
+    let zpool =
+        &disk_test.zpools().nth(2).expect("Expected at least three zpools");
     let dataset = &zpool.datasets[0];
-    disk_test
+    cptestctx
+        .sled_agent
         .sled_agent
         .get_crucible_dataset(zpool.id, dataset.id)
         .await

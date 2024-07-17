@@ -77,6 +77,7 @@ pub use planning_input::ZpoolFilter;
 pub use sled_agent_client::ZoneKind;
 pub use zone_type::blueprint_zone_type;
 pub use zone_type::BlueprintZoneType;
+pub use zone_type::DurableDataset;
 
 use blueprint_display::{
     constants::*, BpDiffState, BpGeneration, BpOmicronZonesSubtableSchema,
@@ -623,6 +624,7 @@ pub struct BlueprintZoneConfig {
 
     pub id: OmicronZoneUuid,
     pub underlay_address: Ipv6Addr,
+    pub filesystem_pool: Option<ZpoolName>,
     pub zone_type: BlueprintZoneType,
 }
 
@@ -873,6 +875,7 @@ impl BlueprintZoneConfig {
             disposition,
             id: OmicronZoneUuid::from_untyped_uuid(config.id),
             underlay_address: config.underlay_address,
+            filesystem_pool: config.filesystem_pool,
             zone_type,
         })
     }
@@ -883,6 +886,7 @@ impl From<BlueprintZoneConfig> for OmicronZoneConfig {
         Self {
             id: z.id.into_untyped_uuid(),
             underlay_address: z.underlay_address,
+            filesystem_pool: z.filesystem_pool,
             zone_type: z.zone_type.into(),
         }
     }
@@ -931,6 +935,7 @@ impl BlueprintZoneDisposition {
         match self {
             Self::InService => match filter {
                 BlueprintZoneFilter::All => true,
+                BlueprintZoneFilter::Expunged => false,
                 BlueprintZoneFilter::ShouldBeRunning => true,
                 BlueprintZoneFilter::ShouldBeExternallyReachable => true,
                 BlueprintZoneFilter::ShouldBeInInternalDns => true,
@@ -938,6 +943,7 @@ impl BlueprintZoneDisposition {
             },
             Self::Quiesced => match filter {
                 BlueprintZoneFilter::All => true,
+                BlueprintZoneFilter::Expunged => false,
 
                 // Quiesced zones are still running.
                 BlueprintZoneFilter::ShouldBeRunning => true,
@@ -954,6 +960,7 @@ impl BlueprintZoneDisposition {
             },
             Self::Expunged => match filter {
                 BlueprintZoneFilter::All => true,
+                BlueprintZoneFilter::Expunged => true,
                 BlueprintZoneFilter::ShouldBeRunning => false,
                 BlueprintZoneFilter::ShouldBeExternallyReachable => false,
                 BlueprintZoneFilter::ShouldBeInInternalDns => false,
@@ -997,6 +1004,9 @@ pub enum BlueprintZoneFilter {
     // ---
     /// All zones.
     All,
+
+    /// Zones that have been expunged.
+    Expunged,
 
     /// Zones that are desired to be in the RUNNING state
     ShouldBeRunning,

@@ -49,12 +49,12 @@
 //!   or inject errors.
 
 use super::sagas::NexusSaga;
-use super::sagas::SagaInitError;
 use super::sagas::ACTION_REGISTRY;
 use crate::saga_interface::SagaContext;
 use crate::Nexus;
 use anyhow::Context;
 use futures::future::BoxFuture;
+use futures::FutureExt;
 use futures::StreamExt;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -66,12 +66,11 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use steno::DagBuilder;
 use steno::SagaDag;
 use steno::SagaId;
-use steno::SagaName;
 use steno::SagaResult;
 use steno::SagaResultOk;
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 /// Given a particular kind of Nexus saga (the type parameter `N`) and
@@ -79,12 +78,31 @@ use uuid::Uuid;
 pub(crate) fn create_saga_dag<N: NexusSaga>(
     params: N::Params,
 ) -> Result<SagaDag, Error> {
-    let builder = DagBuilder::new(SagaName::new(N::NAME));
-    let dag = N::make_saga_dag(&params, builder)?;
-    let params = serde_json::to_value(&params).map_err(|e| {
-        SagaInitError::SerializeError(String::from("saga params"), e)
-    })?;
-    Ok(SagaDag::new(dag, params))
+    N::prepare(&params)
+}
+
+/// Interface for kicking off sagas
+///
+/// See [`SagaExecutor`] for the implementation within Nexus.  Some tests use
+/// alternate implementations that don't actually run the sagas.
+pub(crate) trait StartSaga: Send + Sync {
+    /// Create a new saga (of type `N` with parameters `params`), start it
+    /// running, but do not wait for it to finish.
+    fn saga_start(&self, dag: SagaDag) -> BoxFuture<'_, Result<(), Error>>;
+}
+
+impl StartSaga for SagaExecutor {
+    fn saga_start(&self, dag: SagaDag) -> BoxFuture<'_, Result<(), Error>> {
+        async move {
+            let runnable_saga = self.saga_prepare(dag).await?;
+            // start() returns a future that can be used to wait for the saga to
+            // complete.  We don't need that here.  (Cancelling this has no
+            // effect on the running saga.)
+            let _ = runnable_saga.start().await?;
+            Ok(())
+        }
+        .boxed()
+    }
 }
 
 /// Handle to a self-contained subsystem for kicking off sagas
@@ -94,14 +112,16 @@ pub(crate) struct SagaExecutor {
     sec_client: Arc<steno::SecClient>,
     log: slog::Logger,
     nexus: OnceLock<Arc<Nexus>>,
+    saga_create_tx: mpsc::UnboundedSender<steno::SagaId>,
 }
 
 impl SagaExecutor {
     pub(crate) fn new(
         sec_client: Arc<steno::SecClient>,
         log: slog::Logger,
+        saga_create_tx: mpsc::UnboundedSender<steno::SagaId>,
     ) -> SagaExecutor {
-        SagaExecutor { sec_client, log, nexus: OnceLock::new() }
+        SagaExecutor { sec_client, log, nexus: OnceLock::new(), saga_create_tx }
     }
 
     // This is a little gross.  We want to hang the SagaExecutor off of Nexus,
@@ -173,6 +193,19 @@ impl SagaExecutor {
             saga_logger.clone(),
         )));
 
+        // Tell the recovery task about this.  It's critical that we send this
+        // message before telling Steno about this saga.  It's not critical that
+        // the task _receive_ this message synchronously.  See the comments in
+        // the recovery task implementation for details.
+        self.saga_create_tx.send(saga_id).map_err(
+            |_: mpsc::error::SendError<SagaId>| {
+                Error::internal_error(
+                    "cannot create saga: recovery task not listening \
+                     (is Nexus shutting down?)",
+                )
+            },
+        )?;
+
         // Tell Steno about it.  This does not start it running yet.
         info!(saga_logger, "preparing saga");
         let saga_completion_future = self
@@ -242,7 +275,6 @@ impl SagaExecutor {
         &self,
         params: N::Params,
     ) -> Result<SagaResultOk, Error> {
-        // Construct the DAG specific to this saga.
         let dag = create_saga_dag::<N>(params)?;
         let runnable_saga = self.saga_prepare(dag).await?;
         let running_saga = runnable_saga.start().await?;
@@ -307,10 +339,22 @@ pub(crate) struct RunningSaga {
 }
 
 impl RunningSaga {
-    /// Waits until this saga stops executing
+    /// Waits until the saga stops executing
     ///
-    /// Normally, the saga will have finished successfully or failed and unwound
-    /// completely.  If unwinding fails, it will be _stuck_ instead.
+    /// This function waits until the saga stops executing because one of the
+    /// following three things happens:
+    ///
+    /// 1. The saga completes successfully
+    ///    ([`nexus_types::internal_api::views::SagaState::Succeeded`]).
+    /// 2. The saga fails and unwinding completes without errors
+    ///    ([`nexus_types::internal_api::views::SagaState::Failed`]).
+    /// 3. The saga fails and then an error is encountered during unwinding
+    ///    ([`nexus_types::internal_api::views::SagaState::Stuck`]).
+    ///
+    /// Steno continues running the saga (and this function continues waiting)
+    /// until one of those three things happens.  Once any of those things
+    /// happens, the saga is no longer running and this function returns a
+    /// `StoppedSaga` that you can use to inspect more precisely what happened.
     pub(crate) async fn wait_until_stopped(self) -> StoppedSaga {
         let result = self.saga_completion_future.await;
         info!(self.log, "saga finished"; "saga_result" => ?result);

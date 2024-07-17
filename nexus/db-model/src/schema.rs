@@ -281,7 +281,7 @@ table! {
         multi_exit_discriminator -> Nullable<Int8>,
         local_pref -> Nullable<Int8>,
         enforce_first_as -> Bool,
-        vlan_id -> Nullable<Int8>,
+        vlan_id -> Nullable<Int4>,
     }
 }
 
@@ -1044,6 +1044,8 @@ table! {
         block_size -> Int8,
         blocks_per_extent -> Int8,
         extent_count -> Int8,
+
+        port -> Nullable<Int4>,
     }
 }
 
@@ -1476,6 +1478,7 @@ table! {
         snat_ip -> Nullable<Inet>,
         snat_first_port -> Nullable<Int4>,
         snat_last_port -> Nullable<Int4>,
+        filesystem_pool -> Nullable<Uuid>,
     }
 }
 
@@ -1592,6 +1595,7 @@ table! {
         snat_last_port -> Nullable<Int4>,
         disposition -> crate::DbBpZoneDispositionEnum,
         external_ip_id -> Nullable<Uuid>,
+        filesystem_pool -> Nullable<Uuid>,
     }
 }
 
@@ -1762,6 +1766,7 @@ table! {
 table! {
     migration (id) {
         id -> Uuid,
+        instance_id -> Uuid,
         time_created -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         source_state -> crate::MigrationStateEnum,

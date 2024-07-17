@@ -57,7 +57,7 @@ use illumos_utils::running_zone::{
 };
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
-use illumos_utils::zpool::ZpoolName;
+use illumos_utils::zpool::{PathInPool, ZpoolName};
 use illumos_utils::{execute, PFEXEC};
 use internal_dns::resolver::Resolver;
 use itertools::Itertools;
@@ -445,6 +445,11 @@ impl OmicronZonesConfigLocal {
 /// Combines the Nexus-provided `OmicronZoneConfig` (which describes what Nexus
 /// wants for this zone) with any locally-determined configuration (like the
 /// path to the root filesystem)
+//
+// NOTE: Although the path to the root filesystem is not exactly equal to the
+// ZpoolName, it is derivable from it, and the ZpoolName for the root filesystem
+// is now being supplied as a part of OmicronZoneConfig. Therefore, this struct
+// is less necessary than it has been historically.
 #[derive(
     Clone,
     Debug,
@@ -551,10 +556,15 @@ impl<'a> ZoneArgs<'a> {
     }
 
     /// Return the root filesystem path for this zone
-    pub fn root(&self) -> &Utf8Path {
+    pub fn root(&self) -> PathInPool {
         match self {
-            ZoneArgs::Omicron(zone_config) => &zone_config.root,
-            ZoneArgs::Switch(zone_request) => &zone_request.root,
+            ZoneArgs::Omicron(zone_config) => PathInPool {
+                pool: zone_config.zone.filesystem_pool.clone(),
+                path: zone_config.root.clone(),
+            },
+            ZoneArgs::Switch(zone_request) => {
+                PathInPool { pool: None, path: zone_request.root.clone() }
+            }
         }
     }
 }
@@ -1361,7 +1371,7 @@ impl ServiceManager {
             })
         })?;
 
-        let opte_interface = port.vnic_name();
+        let opte_interface = port.name();
         let opte_gateway = port.gateway().ip().to_string();
         let opte_ip = port.ip().to_string();
 
@@ -1436,7 +1446,7 @@ impl ServiceManager {
         let all_disks = self.inner.storage.get_latest_disks().await;
         if let Some((_, boot_zpool)) = all_disks.boot_disk() {
             zone_image_paths.push(boot_zpool.dataset_mountpoint(
-                &all_disks.mount_config.root,
+                &all_disks.mount_config().root,
                 INSTALL_DATASET,
             ));
         }
@@ -1462,7 +1472,7 @@ impl ServiceManager {
         let installed_zone = zone_builder
             .with_log(self.inner.log.clone())
             .with_underlay_vnic_allocator(&self.inner.underlay_vnic_allocator)
-            .with_zone_root_path(&request.root())
+            .with_zone_root_path(request.root())
             .with_zone_image_paths(zone_image_paths.as_slice())
             .with_zone_type(&zone_type_str)
             .with_datasets(datasets.as_slice())
@@ -2098,6 +2108,7 @@ impl ServiceManager {
                             },
                         underlay_address,
                         id,
+                        ..
                     },
                 ..
             }) => {
@@ -2903,7 +2914,8 @@ impl ServiceManager {
             )
             .await?;
 
-        let config = OmicronZoneConfigLocal { zone: zone.clone(), root };
+        let config =
+            OmicronZoneConfigLocal { zone: zone.clone(), root: root.path };
 
         let runtime = self
             .initialize_zone(
@@ -3171,7 +3183,7 @@ impl ServiceManager {
 
         // Collect information that's necessary to start new zones
         let storage = self.inner.storage.get_latest_disks().await;
-        let mount_config = &storage.mount_config;
+        let mount_config = storage.mount_config();
         let all_u2_pools = storage.all_u2_zpools();
         let time_is_synchronized =
             match self.timesync_get_locked(&existing_zones).await {
@@ -3288,16 +3300,16 @@ impl ServiceManager {
         mount_config: &MountConfig,
         zone: &OmicronZoneConfig,
         all_u2_pools: &Vec<ZpoolName>,
-    ) -> Result<Utf8PathBuf, Error> {
+    ) -> Result<PathInPool, Error> {
         let name = zone.zone_name();
 
-        // For each new zone request, we pick a U.2 to store the zone
-        // filesystem. Note: This isn't known to Nexus right now, so it's a
-        // local-to-sled decision.
+        // If the caller has requested a specific durable dataset,
+        // ensure that it is encrypted and that it exists.
         //
-        // Currently, the zone filesystem should be destroyed between
-        // reboots, so it's fine to make this decision locally.
-        let root = if let Some(dataset) = zone.dataset_name() {
+        // Typically, the transient filesystem pool will be placed on the same
+        // zpool as the durable dataset (to reduce the fault domain), but that
+        // decision belongs to Nexus, and is not enforced here.
+        if let Some(dataset) = zone.dataset_name() {
             // Check that the dataset is actually ready to be used.
             let [zoned, canmount, encryption] =
                 illumos_utils::zfs::Zfs::get_values(
@@ -3327,11 +3339,6 @@ impl ServiceManager {
                 check_property("encryption", encryption, "aes-256-gcm")?;
             }
 
-            // If the zone happens to already manage a dataset, then
-            // we co-locate the zone dataset on the same zpool.
-            //
-            // This slightly reduces the underlying fault domain for the
-            // service.
             let data_pool = dataset.pool();
             if !all_u2_pools.contains(&data_pool) {
                 warn!(
@@ -3344,20 +3351,37 @@ impl ServiceManager {
                     device: format!("zpool: {data_pool}"),
                 });
             }
-            data_pool.dataset_mountpoint(&mount_config.root, ZONE_DATASET)
-        } else {
-            // If the zone it not coupled to other datsets, we pick one
-            // arbitrarily.
-            let mut rng = rand::thread_rng();
-            all_u2_pools
-                .choose(&mut rng)
-                .map(|pool| {
-                    pool.dataset_mountpoint(&mount_config.root, ZONE_DATASET)
-                })
+        }
+
+        let filesystem_pool = match (&zone.filesystem_pool, zone.dataset_name())
+        {
+            // If a pool was explicitly requested, use it.
+            (Some(pool), _) => pool.clone(),
+            // NOTE: The following cases are for backwards compatibility.
+            //
+            // If no pool was selected, prefer to use the same pool as the
+            // durable dataset. Otherwise, pick one randomly.
+            (None, Some(dataset)) => dataset.pool().clone(),
+            (None, None) => all_u2_pools
+                .choose(&mut rand::thread_rng())
                 .ok_or_else(|| Error::U2NotFound)?
-                .clone()
+                .clone(),
         };
-        Ok(root)
+
+        if !all_u2_pools.contains(&filesystem_pool) {
+            warn!(
+                self.inner.log,
+                "zone filesystem dataset requested on a zpool which doesn't exist";
+                "zone" => &name,
+                "zpool" => %filesystem_pool
+            );
+            return Err(Error::MissingDevice {
+                device: format!("zpool: {filesystem_pool}"),
+            });
+        }
+        let path = filesystem_pool
+            .dataset_mountpoint(&mount_config.root, ZONE_DATASET);
+        Ok(PathInPool { pool: Some(filesystem_pool), path })
     }
 
     pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
@@ -4361,6 +4385,7 @@ mod test {
                         id,
                         underlay_address: Ipv6Addr::LOCALHOST,
                         zone_type,
+                        filesystem_pool: None,
                     }],
                 },
                 Some(&tmp_dir),
@@ -4392,6 +4417,7 @@ mod test {
                         dns_servers: vec![],
                         domain: None,
                     },
+                    filesystem_pool: None,
                 }],
             },
             Some(&tmp_dir),
@@ -4808,6 +4834,7 @@ mod test {
                 dns_servers: vec![],
                 domain: None,
             },
+            filesystem_pool: None,
         }];
 
         let tmp_dir = String::from(test_config.config_dir.path().as_str());
@@ -4836,6 +4863,7 @@ mod test {
                 dns_servers: vec![],
                 domain: None,
             },
+            filesystem_pool: None,
         });
 
         // Now try to apply that list with an older generation number.  This

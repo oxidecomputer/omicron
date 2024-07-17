@@ -236,6 +236,25 @@ impl OpContext {
         }
     }
 
+    /// Creates a new `OpContext` just like the given one, but with a different
+    /// identity.
+    ///
+    /// This is only intended for tests.
+    pub fn child_with_authn(&self, authn: authn::Context) -> OpContext {
+        let created_instant = Instant::now();
+        let created_walltime = SystemTime::now();
+
+        OpContext {
+            log: self.log.clone(),
+            authn: Arc::new(authn),
+            authz: self.authz.clone(),
+            created_instant,
+            created_walltime,
+            metadata: self.metadata.clone(),
+            kind: self.kind,
+        }
+    }
+
     /// Check whether the actor performing this request is authorized for
     /// `action` on `resource`.
     pub async fn authorize<Resource>(

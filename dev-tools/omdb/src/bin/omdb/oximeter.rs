@@ -5,6 +5,7 @@
 //! omdb commands that query oximeter
 
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
+use crate::Omdb;
 use anyhow::Context;
 use clap::Args;
 use clap::Subcommand;
@@ -18,18 +19,17 @@ use tabled::Table;
 use tabled::Tabled;
 use uuid::Uuid;
 
+/// Arguments for the oximeter subcommand.
 #[derive(Debug, Args)]
 pub struct OximeterArgs {
     /// URL of the oximeter collector to query
     #[arg(
         long,
         env = "OMDB_OXIMETER_URL",
-        // This can't be global = true (i.e. passed in later in the
-        // command-line) because global options can't be required. If this
-        // changes to being optional, we should set global = true.
+        global = true,
         help_heading = CONNECTION_OPTIONS_HEADING,
     )]
-    oximeter_url: String,
+    oximeter_url: Option<String>,
 
     #[command(subcommand)]
     command: OximeterCommands,
@@ -38,20 +38,47 @@ pub struct OximeterArgs {
 /// Subcommands that query oximeter collector state
 #[derive(Debug, Subcommand)]
 enum OximeterCommands {
-    /// List the producers the collector is assigned to poll
+    /// List the producers the collector is assigned to poll.
     ListProducers,
 }
 
 impl OximeterArgs {
-    fn client(&self, log: &Logger) -> Client {
-        Client::new(
-            &self.oximeter_url,
+    async fn client(
+        &self,
+        omdb: &Omdb,
+        log: &Logger,
+    ) -> Result<Client, anyhow::Error> {
+        let oximeter_url = match &self.oximeter_url {
+            Some(cli_or_env_url) => cli_or_env_url.clone(),
+            None => {
+                eprintln!(
+                    "note: Oximeter URL not specified.  Will pick one from DNS."
+                );
+                let addr = omdb
+                    .dns_lookup_one(
+                        log.clone(),
+                        internal_dns::ServiceName::Oximeter,
+                    )
+                    .await?;
+                format!("http://{}", addr)
+            }
+        };
+        eprintln!("note: using Oximeter URL {}", &oximeter_url);
+
+        let client = Client::new(
+            &oximeter_url,
             log.new(slog::o!("component" => "oximeter-client")),
-        )
+        );
+        Ok(client)
     }
 
-    pub async fn run_cmd(&self, log: &Logger) -> anyhow::Result<()> {
-        let client = self.client(log);
+    /// Run the command.
+    pub async fn run_cmd(
+        &self,
+        omdb: &Omdb,
+        log: &Logger,
+    ) -> anyhow::Result<()> {
+        let client = self.client(omdb, log).await?;
         match self.command {
             OximeterCommands::ListProducers => {
                 self.list_producers(client).await

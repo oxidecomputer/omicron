@@ -778,7 +778,7 @@ impl super::Nexus {
                         baseboard: Baseboard {
                             serial: k.serial_number.clone(),
                             part: k.part_number.clone(),
-                            revision: v.baseboard_revision.into(),
+                            revision: v.baseboard_revision,
                         },
                         rack_id: self.rack_id,
                         cubby: v.sp_slot,

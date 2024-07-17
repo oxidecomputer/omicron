@@ -91,6 +91,55 @@ impl super::Nexus {
         Ok(!on_in_service_physical_disk)
     }
 
+    /// Return a region's associated address
+    pub async fn region_addr(
+        &self,
+        log: &Logger,
+        region_id: Uuid,
+    ) -> Result<SocketAddrV6, Error> {
+        // If a region port was previously recorded, return the address right
+        // away
+
+        if let Some(addr) = self.datastore().region_addr(region_id).await? {
+            return Ok(addr);
+        }
+
+        // Otherwise, ask the appropriate Crucible agent
+
+        let dataset = {
+            let region = self.datastore().get_region(region_id).await?;
+            self.datastore().dataset_get(region.dataset_id()).await?
+        };
+
+        let Some(returned_region) =
+            self.maybe_get_crucible_region(log, &dataset, region_id).await?
+        else {
+            // The Crucible agent didn't think the region exists? It could have
+            // been concurrently deleted, or otherwise garbage collected.
+            warn!(log, "no region for id {region_id} from Crucible Agent");
+            return Err(Error::Gone);
+        };
+
+        // Record the returned port
+        self.datastore()
+            .region_set_port(region_id, returned_region.port_number)
+            .await?;
+
+        // Return the address with the port that was just recorded - guard again
+        // against the case where the region record could have been concurrently
+        // deleted
+        match self.datastore().region_addr(region_id).await {
+            Ok(Some(addr)) => Ok(addr),
+
+            Ok(None) => {
+                warn!(log, "region {region_id} deleted");
+                Err(Error::Gone)
+            }
+
+            Err(e) => Err(e),
+        }
+    }
+
     /// Call out to Crucible agent and perform region creation.
     async fn ensure_region_in_dataset(
         &self,
@@ -176,7 +225,7 @@ impl super::Nexus {
             );
         };
 
-        let region = backoff::retry_notify(
+        let returned_region = backoff::retry_notify(
             backoff::retry_policy_internal_service(),
             create_region,
             log_create_failure,
@@ -194,7 +243,14 @@ impl super::Nexus {
             WaitError::Permanent(e) => e,
         })?;
 
-        Ok(region.into_inner())
+        let returned_region = returned_region.into_inner();
+
+        // Record the returned port
+        self.datastore()
+            .region_set_port(region.id(), returned_region.port_number)
+            .await?;
+
+        Ok(returned_region)
     }
 
     /// Returns a Ok(Some(Region)) if a region with id {region_id} exists,

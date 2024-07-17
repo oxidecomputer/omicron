@@ -829,7 +829,6 @@ pub(crate) mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::{authn::saga::Serialized, db::datastore::DataStore};
     use nexus_test_utils::resource_helpers::create_project;
-    use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -839,6 +838,8 @@ pub(crate) mod test {
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+    type DiskTest<'a> =
+        nexus_test_utils::resource_helpers::DiskTest<'a, crate::Server>;
 
     const DISK_NAME: &str = "my-disk";
     const PROJECT_NAME: &str = "springfield-squidport";
@@ -977,9 +978,9 @@ pub(crate) mod test {
 
     async fn no_region_allocations_exist(
         datastore: &DataStore,
-        test: &DiskTest,
+        test: &DiskTest<'_>,
     ) -> bool {
-        for zpool in &test.zpools {
+        for zpool in test.zpools() {
             for dataset in &zpool.datasets {
                 if datastore
                     .regions_total_occupied_size(dataset.id)
@@ -996,9 +997,9 @@ pub(crate) mod test {
 
     async fn no_regions_ensured(
         sled_agent: &SledAgent,
-        test: &DiskTest,
+        test: &DiskTest<'_>,
     ) -> bool {
-        for zpool in &test.zpools {
+        for zpool in test.zpools() {
             for dataset in &zpool.datasets {
                 let crucible_dataset =
                     sled_agent.get_crucible_dataset(zpool.id, dataset.id).await;
@@ -1012,7 +1013,7 @@ pub(crate) mod test {
 
     pub(crate) async fn verify_clean_slate(
         cptestctx: &ControlPlaneTestContext,
-        test: &DiskTest,
+        test: &DiskTest<'_>,
     ) {
         let sled_agent = &cptestctx.sled_agent.sled_agent;
         let datastore = cptestctx.server.server_context().nexus.datastore();

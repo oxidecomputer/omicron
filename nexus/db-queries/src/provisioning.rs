@@ -5,35 +5,14 @@
 //! Types to export metrics about provisioning information.
 
 use crate::db::model::VirtualProvisioningCollection;
-use oximeter::{types::Sample, Metric, MetricsError, Target};
+use oximeter::{types::Sample, MetricsError};
 use std::sync::{Arc, Mutex};
-use uuid::Uuid;
 
-/// Describes a collection that holds other resources.
-///
-/// Example targets might include projects, silos or fleets.
-#[derive(Debug, Clone, Target)]
-struct CollectionTarget {
-    id: Uuid,
-}
-
-#[derive(Debug, Clone, Metric)]
-struct VirtualDiskSpaceProvisioned {
-    #[datum]
-    bytes_used: i64,
-}
-
-#[derive(Debug, Clone, Metric)]
-struct CpusProvisioned {
-    #[datum]
-    cpus: i64,
-}
-
-#[derive(Debug, Clone, Metric)]
-struct RamProvisioned {
-    #[datum]
-    bytes: i64,
-}
+oximeter::use_timeseries!("collection-target.toml");
+use collection_target::CollectionTarget;
+use collection_target::CpusProvisioned;
+use collection_target::RamProvisioned;
+use collection_target::VirtualDiskSpaceProvisioned;
 
 /// An oximeter producer for reporting [`VirtualProvisioningCollection`] information to Clickhouse.
 ///
@@ -72,9 +51,7 @@ impl Producer {
                         .expect("Should always have default value"),
                     &CollectionTarget { id: provision.id },
                     &VirtualDiskSpaceProvisioned {
-                        bytes_used: provision
-                            .virtual_disk_bytes_provisioned
-                            .into(),
+                        datum: provision.virtual_disk_bytes_provisioned.into(),
                     },
                 )
             })
@@ -96,7 +73,7 @@ impl Producer {
                         .time_modified
                         .expect("Should always have default value"),
                     &CollectionTarget { id: provision.id },
-                    &CpusProvisioned { cpus: provision.cpus_provisioned },
+                    &CpusProvisioned { datum: provision.cpus_provisioned },
                 )
             })
             .chain(provisions.iter().map(|provision| {
@@ -105,7 +82,7 @@ impl Producer {
                         .time_modified
                         .expect("Should always have default value"),
                     &CollectionTarget { id: provision.id },
-                    &RamProvisioned { bytes: provision.ram_provisioned.into() },
+                    &RamProvisioned { datum: provision.ram_provisioned.into() },
                 )
             }))
             .collect::<Result<Vec<_>, _>>()?;

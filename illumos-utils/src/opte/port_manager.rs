@@ -304,57 +304,6 @@ impl PortManager {
             rules,
         })?;
 
-        // TODO-remove(#2932): Create a VNIC on top of this device, to hook Viona into.
-        //
-        // Viona is the illumos MAC provider that implements the VIRTIO
-        // specification. It sits on top of a MAC provider, which is responsible
-        // for delivering frames to the underlying data link. The guest includes
-        // a driver that handles the virtio-net specification on their side,
-        // which talks to Viona.
-        //
-        // In theory, Viona works with any MAC provider. However, there are
-        // implicit assumptions, in both Viona _and_ MAC, that require Viona to
-        // be built on top of a VNIC specifically. There is probably a good deal
-        // of work required to relax that assumption, so in the meantime, we
-        // create a superfluous VNIC on the OPTE device, solely so Viona can use
-        // it.
-        let vnic = {
-            let vnic_name = format!("v{}", port_name);
-            #[cfg(target_os = "illumos")]
-            if let Err(e) = crate::dladm::Dladm::create_vnic(
-                &crate::dladm::PhysicalLink(port_name.clone()),
-                &vnic_name,
-                Some(nic.mac),
-                None,
-                1500,
-            ) {
-                slog::warn!(
-                    self.inner.log,
-                    "Failed to create overlay VNIC for xde device";
-                    "port_name" => &port_name,
-                    "err" => ?e
-                );
-                if let Err(e) = hdl.delete_xde(&port_name) {
-                    slog::warn!(
-                        self.inner.log,
-                        "Failed to clean up xde device after failure to create overlay VNIC";
-                        "err" => ?e
-                    );
-                }
-                return Err(e.into());
-            }
-            debug!(
-                self.inner.log,
-                "Created overlay VNIC for xde device";
-                "port_name" => &port_name,
-                "vnic_name" => &vnic_name,
-            );
-
-            // NOTE: We intentionally use a string rather than the Vnic type
-            // here. See the notes on the `opte::PortInner::vnic` field.
-            vnic_name
-        };
-
         let (port, ticket) = {
             let mut ports = self.inner.ports.lock().unwrap();
             let ticket = PortTicket::new(nic.id, nic.kind, self.inner.clone());
@@ -366,7 +315,6 @@ impl PortManager {
                 vni,
                 subnet: nic.subnet,
                 gateway,
-                vnic,
             });
             let old = ports.insert((nic.id, nic.kind), port.clone());
             assert!(

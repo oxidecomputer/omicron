@@ -28,6 +28,12 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::num::NonZeroU8;
 
+mod limits {
+    pub const MAX_FIELD_NAME_LENGTH: usize = 64;
+    pub const MAX_DESCRIPTION_LENGTH: usize = 1024;
+    pub const MAX_TIMESERIES_NAME_LENGTH: usize = 128;
+}
+
 #[derive(Debug, Deserialize)]
 pub struct FieldMetadata {
     #[serde(rename = "type")]
@@ -107,6 +113,44 @@ impl TimeseriesDefinition {
         let mut timeseries = BTreeMap::new();
         let target_name = &self.target.name;
 
+        // Validate text length limits on field names and descriptions.
+        if self.target.name.is_empty() {
+            return Err(MetricsError::SchemaDefinition(String::from(
+                "Target name cannot be empty",
+            )));
+        }
+        for (name, metadata) in self.fields.iter() {
+            if name.is_empty() {
+                return Err(MetricsError::SchemaDefinition(String::from(
+                    "Field names cannot be empty",
+                )));
+            }
+            if name.len() > limits::MAX_FIELD_NAME_LENGTH {
+                return Err(MetricsError::SchemaDefinition(format!(
+                    "Field name '{}' is {} characters, which exceeds the \
+                    maximum field name length of {}",
+                    name,
+                    name.len(),
+                    limits::MAX_FIELD_NAME_LENGTH,
+                )));
+            }
+            if metadata.description.is_empty() {
+                return Err(MetricsError::SchemaDefinition(format!(
+                    "Description of field '{}' cannot be empty",
+                    name,
+                )));
+            }
+            if metadata.description.len() > limits::MAX_DESCRIPTION_LENGTH {
+                return Err(MetricsError::SchemaDefinition(format!(
+                    "Description of field '{}' is {} characters, which \
+                    exceeds the maximum description length of {}",
+                    name,
+                    metadata.description.len(),
+                    limits::MAX_DESCRIPTION_LENGTH,
+                )));
+            }
+        }
+
         // At this point, we do not support actually _modifying_ schema.
         // Instead, we're putting in place infrastructure to support multiple
         // versions, while still requiring all schema to define the first and
@@ -177,6 +221,26 @@ impl TimeseriesDefinition {
         // version, along with running some basic lints and checks.
         for metric in self.metrics.iter() {
             let metric_name = &metric.name;
+            if metric_name.is_empty() {
+                return Err(MetricsError::SchemaDefinition(String::from(
+                    "Metric name cannot be empty",
+                )));
+            }
+            let timeseries_name = TimeseriesName::try_from(format!(
+                "{}:{}",
+                target_name, metric_name
+            ))?;
+            if timeseries_name.as_str().len()
+                > limits::MAX_TIMESERIES_NAME_LENGTH
+            {
+                return Err(MetricsError::SchemaDefinition(format!(
+                    "Timeseries name '{}' is {} characters, which \
+                    exceeds the maximum length of {}",
+                    timeseries_name,
+                    timeseries_name.len(),
+                    limits::MAX_TIMESERIES_NAME_LENGTH,
+                )));
+            }
 
             // Store the current version of the metric. This doesn't need to be
             // sequential, but they do need to be monotonic and have a matching
@@ -231,9 +295,6 @@ impl TimeseriesDefinition {
                             self.target.authz_scope,
                             &field_schema,
                         )?;
-                        let timeseries_name = TimeseriesName::try_from(
-                            format!("{}:{}", target_name, metric_name),
-                        )?;
                         let version =
                             NonZeroU8::new(last_target_version).unwrap();
                         let description = TimeseriesDescription {
@@ -251,7 +312,7 @@ impl TimeseriesDefinition {
                             created: Utc::now(),
                         };
                         if let Some(old) = timeseries
-                            .insert((timeseries_name, version), schema)
+                            .insert((timeseries_name.clone(), version), schema)
                         {
                             return Err(MetricsError::SchemaDefinition(
                                 format!(
@@ -1411,6 +1472,200 @@ mod tests {
             msg, "Target 'target' version 1 must have at least one field",
             "Message should indicate that all targets must \
             have at least one field, but found {msg:?}",
+        );
+    }
+
+    #[test]
+    fn fail_on_very_long_timeseries_name() {
+        let contents = r#"
+        format_version = 1
+
+        [target]
+        name = "veeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeery_long_target"
+        description = "some target"
+        authz_scope = "fleet"
+        versions = [
+            { version = 1, fields = [ "foo" ] },
+        ]
+
+        [[metrics]]
+        name = "veeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeery_long_metric"
+        description = "some metric"
+        datum_type = "u8"
+        units = "count"
+        versions = [
+            { added_in = 1, fields = [ ] },
+        ]
+
+        [fields.foo]
+        type = "string"
+        description = "a field"
+        "#;
+        let res = load_schema(contents);
+        let Err(MetricsError::SchemaDefinition(msg)) = &res else {
+            panic!(
+                "Expected to fail when timeseries name is too long, found {res:#?}"
+            );
+        };
+        assert!(
+            msg.contains("exceeds the maximum"),
+            "Message should complain about a long timeseries name, but found {msg:?}",
+        );
+    }
+
+    #[test]
+    fn fail_on_empty_metric_name() {
+        let contents = r#"
+        format_version = 1
+
+        [target]
+        name = "target"
+        description = "some target"
+        authz_scope = "fleet"
+        versions = [
+            { version = 1, fields = [ "foo" ] },
+        ]
+
+        [[metrics]]
+        name = ""
+        description = "some metric"
+        datum_type = "u8"
+        units = "count"
+        versions = [
+            { added_in = 1, fields = [ ] },
+        ]
+
+        [fields.foo]
+        type = "string"
+        description = "a field"
+        "#;
+        let res = load_schema(contents);
+        let Err(MetricsError::SchemaDefinition(msg)) = &res else {
+            panic!(
+                "Expected to fail when metric name is empty, found {res:#?}"
+            );
+        };
+        assert_eq!(
+            msg, "Metric name cannot be empty",
+            "Message should complain about an empty metric name \
+            but found {msg:?}",
+        );
+    }
+
+    #[test]
+    fn fail_on_empty_target_name() {
+        let contents = r#"
+        format_version = 1
+
+        [target]
+        name = ""
+        description = "some target"
+        authz_scope = "fleet"
+        versions = [
+            { version = 1, fields = [ "foo" ] },
+        ]
+
+        [[metrics]]
+        name = "metric"
+        description = "some metric"
+        datum_type = "u8"
+        units = "count"
+        versions = [
+            { added_in = 1, fields = [ ] },
+        ]
+
+        [fields.foo]
+        type = "string"
+        description = "a field"
+        "#;
+        let res = load_schema(contents);
+        let Err(MetricsError::SchemaDefinition(msg)) = &res else {
+            panic!(
+                "Expected to fail when target name is empty, found {res:#?}"
+            );
+        };
+        assert_eq!(
+            msg, "Target name cannot be empty",
+            "Message should complain about an empty target name \
+            but found {msg:?}",
+        );
+    }
+
+    #[test]
+    fn fail_on_very_long_field_names() {
+        let contents = r#"
+        format_version = 1
+
+        [target]
+        name = "target"
+        description = "some target"
+        authz_scope = "fleet"
+        versions = [
+            { version = 1, fields = [ "foo" ] },
+        ]
+
+        [[metrics]]
+        name = "metric"
+        description = "some metric"
+        datum_type = "u8"
+        units = "count"
+        versions = [
+            { added_in = 1, fields = [ ] },
+        ]
+
+        [fields.this_is_a_reeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeealy_long_field_name]
+        type = "string"
+        description = "a field"
+        "#;
+        let res = load_schema(contents);
+        let Err(MetricsError::SchemaDefinition(msg)) = &res else {
+            panic!(
+                "Expected to fail when field name is too long, found {res:#?}"
+            );
+        };
+        assert!(
+            msg.contains("which exceeds the maximum field name length"),
+            "Message should complain about a field name being \
+            too long, but found {msg:?}",
+        );
+    }
+
+    #[test]
+    fn fail_on_empty_descriptions() {
+        let contents = r#"
+        format_version = 1
+
+        [target]
+        name = "target"
+        description = "some target"
+        authz_scope = "fleet"
+        versions = [
+            { version = 1, fields = [ "foo" ] },
+        ]
+
+        [[metrics]]
+        name = "metric"
+        description = "some metric"
+        datum_type = "u8"
+        units = "count"
+        versions = [
+            { added_in = 1, fields = [ ] },
+        ]
+
+        [fields.foo]
+        type = "string"
+        description = ""
+        "#;
+        let res = load_schema(contents);
+        let Err(MetricsError::SchemaDefinition(msg)) = &res else {
+            panic!(
+                "Expected to fail when field description is empty, found {res:#?}"
+            );
+        };
+        assert_eq!(
+            msg, "Description of field 'foo' cannot be empty",
+            "Message should complain about a field description being \
+            empty, but found {msg:?}",
         );
     }
 }

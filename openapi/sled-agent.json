@@ -710,6 +710,30 @@
         }
       }
     },
+    "/sled-identifiers": {
+      "get": {
+        "summary": "Fetch sled identifiers",
+        "operationId": "sled_identifiers",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledIdentifiers"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sled-role": {
       "get": {
         "operationId": "sled_role_get",
@@ -1390,7 +1414,8 @@
               },
               "revision": {
                 "type": "integer",
-                "format": "int64"
+                "format": "uint32",
+                "minimum": 0
               },
               "type": {
                 "type": "string",
@@ -3732,6 +3757,15 @@
         "description": "Describes one Omicron-managed zone running on a sled",
         "type": "object",
         "properties": {
+          "filesystem_pool": {
+            "nullable": true,
+            "description": "The pool on which we'll place this zone's filesystem.\n\nNote that this is transient -- the sled agent is permitted to destroy the zone's dataset on this pool each time the zone is initialized.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ZpoolName"
+              }
+            ]
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -4539,6 +4573,43 @@
       "SemverVersion": {
         "type": "string",
         "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+      },
+      "SledIdentifiers": {
+        "description": "Identifiers for a single sled.\n\nThis is intended primarily to be used in timeseries, to identify sled from which metric data originates.",
+        "type": "object",
+        "properties": {
+          "model": {
+            "description": "Model name of the sled",
+            "type": "string"
+          },
+          "rack_id": {
+            "description": "Control plane ID of the rack this sled is a member of",
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "description": "Revision number of the sled",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "serial": {
+            "description": "Serial number of the sled",
+            "type": "string"
+          },
+          "sled_id": {
+            "description": "Control plane ID for the sled itself",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "model",
+          "rack_id",
+          "revision",
+          "serial",
+          "sled_id"
+        ]
       },
       "SledInstanceState": {
         "description": "A wrapper type containing a sled's total knowledge of the state of a specific VMM and the instance it incarnates.",

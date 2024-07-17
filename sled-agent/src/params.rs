@@ -341,6 +341,13 @@ impl From<OmicronZonesConfig> for sled_agent_client::types::OmicronZonesConfig {
 pub struct OmicronZoneConfig {
     pub id: Uuid,
     pub underlay_address: Ipv6Addr,
+
+    /// The pool on which we'll place this zone's filesystem.
+    ///
+    /// Note that this is transient -- the sled agent is permitted to
+    /// destroy the zone's dataset on this pool each time the zone is
+    /// initialized.
+    pub filesystem_pool: Option<ZpoolName>,
     pub zone_type: OmicronZoneType,
 }
 
@@ -349,6 +356,7 @@ impl From<OmicronZoneConfig> for sled_agent_client::types::OmicronZoneConfig {
         Self {
             id: local.id,
             underlay_address: local.underlay_address,
+            filesystem_pool: local.filesystem_pool,
             zone_type: local.zone_type.into(),
         }
     }

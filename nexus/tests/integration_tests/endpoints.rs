@@ -14,7 +14,6 @@ use internal_dns::names::DNS_ZONE_EXTERNAL_TESTING;
 use nexus_db_queries::authn;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::Resource;
-use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::PHYSICAL_DISK_UUID;
 use nexus_test_utils::RACK_UUID;
 use nexus_test_utils::SLED_AGENT_UUID;
@@ -40,6 +39,9 @@ use once_cell::sync::Lazy;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
+
+type DiskTest<'a> =
+    nexus_test_utils::resource_helpers::DiskTest<'a, omicron_nexus::Server>;
 
 pub static HARDWARE_RACK_URL: Lazy<String> =
     Lazy::new(|| format!("/v1/system/hardware/racks/{}", RACK_UUID));
@@ -2305,7 +2307,7 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
-                AllowedMethod::Post(
+                AllowedMethod::Put(
                     serde_json::to_value(&*DEMO_BGP_ANNOUNCE).unwrap(),
                 ),
                 AllowedMethod::GetNonexistent,

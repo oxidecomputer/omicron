@@ -593,6 +593,36 @@ impl From<omicron_common::api::internal::shared::NetworkInterfaceKind>
     }
 }
 
+impl From<omicron_common::api::internal::shared::SledIdentifiers>
+    for types::SledIdentifiers
+{
+    fn from(
+        value: omicron_common::api::internal::shared::SledIdentifiers,
+    ) -> Self {
+        Self {
+            model: value.model,
+            rack_id: value.rack_id,
+            revision: value.revision,
+            serial: value.serial,
+            sled_id: value.sled_id,
+        }
+    }
+}
+
+impl From<types::SledIdentifiers>
+    for omicron_common::api::internal::shared::SledIdentifiers
+{
+    fn from(value: types::SledIdentifiers) -> Self {
+        Self {
+            model: value.model,
+            rack_id: value.rack_id,
+            revision: value.revision,
+            serial: value.serial,
+            sled_id: value.sled_id,
+        }
+    }
+}
+
 /// Exposes additional [`Client`] interfaces for use by the test suite. These
 /// are bonus endpoints, not generated in the real client.
 #[async_trait]

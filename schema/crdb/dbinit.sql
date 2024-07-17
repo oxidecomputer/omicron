@@ -574,7 +574,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.region (
     /* Metadata describing the region */
     block_size INT NOT NULL,
     blocks_per_extent INT NOT NULL,
-    extent_count INT NOT NULL
+    extent_count INT NOT NULL,
+
+    port INT4
 );
 
 /*
@@ -592,6 +594,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_region_by_dataset on omicron.public.reg
     dataset_id,
     id
 );
+
+CREATE INDEX IF NOT EXISTS lookup_regions_missing_ports
+    on omicron.public.region (id)
+    WHERE port IS NULL;
 
 /*
  * A snapshot of a region, within a dataset.
@@ -3247,6 +3253,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
     snat_last_port INT4
         CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
 
+    -- TODO: This is nullable for backwards compatibility.
+    -- Eventually, that nullability should be removed.
+    filesystem_pool UUID,
+
     PRIMARY KEY (inv_collection_id, id)
 );
 
@@ -3492,6 +3502,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- blueprint has not yet been realized, it's possible the IP hasn't been
     -- created yet.
     external_ip_id UUID,
+
+    -- TODO: This is nullable for backwards compatibility.
+    -- Eventually, that nullability should be removed.
+    filesystem_pool UUID,
 
     PRIMARY KEY (blueprint_id, id)
 );
@@ -4060,11 +4074,20 @@ CREATE TYPE IF NOT EXISTS omicron.public.migration_state AS ENUM (
 CREATE TABLE IF NOT EXISTS omicron.public.migration (
     id UUID PRIMARY KEY,
 
+    /* The ID of the instance that was migrated */
+    instance_id UUID NOT NULL,
+
     /* The time this migration record was created. */
     time_created TIMESTAMPTZ NOT NULL,
 
     /* The time this migration record was deleted. */
     time_deleted TIMESTAMPTZ,
+
+    /* Note that there's no `time_modified/time_updated` timestamp for migration
+     * records. This is because we track updated time separately for the source
+     * and target sides of the migration, using separate `time_source_updated`
+     * and time_target_updated` columns.
+    */
 
     /* The state of the migration source */
     source_state omicron.public.migration_state NOT NULL,
@@ -4099,6 +4122,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.migration (
     time_target_updated TIMESTAMPTZ
 );
 
+/* Lookup migrations by instance ID */
+CREATE INDEX IF NOT EXISTS lookup_migrations_by_instance_id ON omicron.public.migration (
+    instance_id
+);
+
 /* Lookup region snapshot by snapshot id */
 CREATE INDEX IF NOT EXISTS lookup_region_snapshot_by_snapshot_id on omicron.public.region_snapshot (
     snapshot_id
@@ -4115,7 +4143,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '79.0.0', NULL)
+    (TRUE, NOW(), NOW(), '82.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

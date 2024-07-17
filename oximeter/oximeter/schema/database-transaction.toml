@@ -1,0 +1,26 @@
+format_version = 1
+
+[target]
+name = "database_transaction"
+description = "A named transaction run in the control plane database"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "name" ] }
+]
+
+[[metrics]]
+name = "retry_data"
+description = "Information about a retried transaction"
+units = "seconds"
+datum_type = "f64"
+versions = [
+    { added_in = 1, fields = [ "attempt" ] }
+]
+
+[fields.name]
+type = "string"
+description = "The name of the transaction"
+
+[fields.attempt]
+type = "u32"
+description = "The attempt at running the transaction"

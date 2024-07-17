@@ -2,8 +2,92 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Specific background task initialization
+//! Initialize Nexus background tasks
+//!
+//! This file contains entirely Nexus-specific initialization (as opposed to
+//! driver.rs, which doesn't really know much about Nexus).
+//!
+//! The design here is oriented around being able to initialize background tasks
+//! in two phases:
+//!
+//! 1. Phase 1 assembles a `BackgroundTasks` struct containing `Activator`
+//!    objects that will be used by any part of Nexus (including background
+//!    tasks) to activate any background task or read data provided by another
+//!    background task.  This is the interface between this subsystem and the
+//!    rest of Nexus.  At this point in startup, none of the background tasks
+//!    themselves have been started yet.
+//!
+//! 2. Phase 2 starts all of the individual background tasks and then wires up
+//!    the `Activator`s created in phase 1.
+//!
+//! This allows us to break what would otherwise be a circular dependency during
+//! initialization.  Concretely: Nexus startup does phase 1, stores the
+//! `BackgroundTasks` into the `Arc<Nexus>` to which all of Nexus has a
+//! reference, and _then_ starts the background tasks.  If we didn't break it up
+//! like this, then we couldn't make the `Arc<Nexus>` available to background
+//! tasks during _their_ initialization (because it couldn't be constructed
+//! yet), which means background tasks could not activate other background
+//! tasks.  We'd also have trouble allowing background tasks to use other
+//! subsystems in Nexus (e.g., sagas), especially if those subsystems wanted to
+//! activate background tasks.
+//!
+//! Why do we do things this way?  We're trying to satisfy a few different
+//! goals:
+//!
+//! - Background tasks should be able to activate other background tasks.
+//! - Background tasks should be able to use other subsystems in Nexus (like
+//!   sagas) that themselves can activate background tasks.
+//! - It should be hard to mess any of this up when adding or removing
+//!   background tasks.  This means:
+//!     - We should be able to tell at compile-time which code activates what
+//!       specific background tasks.
+//!     - We should be able to tell at compile-time if code is attempting to
+//!       activate a background task that doesn't exist.
+//!     - It should be hard to add an `Activator` for a background task that is
+//!       not wired up to that task or is wired up to a different task.
+//!
+//! Ultimately, tasks are activated via the `Driver` which keeps track of tasks
+//! by name.  So how can we have code paths in Nexus refer to tasks in a way
+//! that satisfies these goals?  A conventional approach would be to have
+//! `Driver::register()` return a handle that could be used to activate the
+//! task, but then we wouldn't have the handle available until the task was
+//! running, which is too late -- see the note above about the circular
+//! dependency during initialization.  We could make the task identifiers global
+//! constants, but this is easy to mess up: someone could remove the task
+//! without removing its constant.  Then code paths could appear to activate the
+//! task but fail at _runtime_ (rather than compile-time) because the task
+//! actually doesn't exist.
+//!
+//! Instead, we assemble the `BackgroundTasks` struct, whose fields correspond
+//! to specific tasks.  This makes it super explicit what code paths are using
+//! which tasks.  And since the `Activator`s in the struct can be created before
+//! the tasks are created, we can create this whole struct and pass it to all
+//! the background tasks (and anybody else that wants to activate background
+//! tasks), even though the actual tasks aren't wired up yet.  Then we can wire
+//! it up behind the scenes.  If someone uses the activators ahead of time,
+//! they'll get the expected behavior: the task will be activated shortly.
+//!
+//! There remain several ways someone could get this wrong when adding or
+//! reworking background tasks:
+//!
+//! - Forgetting to put an `Activator` for a background task into
+//!   `BackgroundTasks`.  If you make this mistake, you won't get far because
+//!   you won't have the argument you need for `Driver::register()`.
+//! - Forgetting to wire up an `Activator` by passing it to
+//!   `Driver::register()`.  We attempt to avoid this with an exhaustive match
+//!   inside `BackgroundTasksInitializer::start()`.  If you forget to wire
+//!   something up, rustc should report an unused variable.
+//! - Wiring the `Activator` up to the wrong task (e.g., by copying and pasting
+//!   a `Driver::register()` call and forgetting to update the activator
+//!   argument).  If this happens, it's likely that either one `Activator` gets
+//!   used more than once (which is caught with a panic only at runtime, but
+//!   it _is_ during Nexus initialization, so it should definitely be caught in
+//!   testing) or else some `Activator` is unused (see the previous bullet).
+//!
+//! It's not foolproof but hopefully these mechanisms will catch the easy
+//! mistakes.
 
+use super::driver::TaskDefinition;
 use super::tasks::abandoned_vmm_reaper;
 use super::tasks::bfd;
 use super::tasks::blueprint_execution;
@@ -15,21 +99,24 @@ use super::tasks::dns_servers;
 use super::tasks::external_endpoints;
 use super::tasks::instance_watcher;
 use super::tasks::inventory_collection;
+use super::tasks::lookup_region_port;
 use super::tasks::metrics_producer_gc;
 use super::tasks::nat_cleanup;
 use super::tasks::phantom_disks;
 use super::tasks::physical_disk_adoption;
 use super::tasks::region_replacement;
 use super::tasks::region_replacement_driver;
+use super::tasks::saga_recovery;
 use super::tasks::service_firewall_rules;
 use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
 use super::tasks::v2p_mappings::V2PManager;
 use super::tasks::vpc_routes;
+use super::Activator;
 use super::Driver;
-use super::TaskHandle;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
-use crate::app::sagas::SagaRequest;
+use crate::app::saga::StartSaga;
+use crate::Nexus;
 use nexus_config::BackgroundTaskConfig;
 use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
@@ -38,464 +125,157 @@ use nexus_db_queries::db::DataStore;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::watch;
 use uuid::Uuid;
 
-/// Describes ongoing background tasks and provides interfaces for working with
-/// them
-///
-/// Most interaction happens through the `driver` field.  The rest of the fields
-/// are specific background tasks.
+/// Interface for activating various background tasks and read data that they
+/// expose to Nexus at-large
 pub struct BackgroundTasks {
-    /// interface for working with background tasks (activation, checking
-    /// status, etc.)
-    pub driver: Driver,
+    // Handles to activate specific background tasks
+    pub task_internal_dns_config: Activator,
+    pub task_internal_dns_servers: Activator,
+    pub task_external_dns_config: Activator,
+    pub task_external_dns_servers: Activator,
+    pub task_metrics_producer_gc: Activator,
+    pub task_external_endpoints: Activator,
+    pub task_nat_cleanup: Activator,
+    pub task_bfd_manager: Activator,
+    pub task_inventory_collection: Activator,
+    pub task_physical_disk_adoption: Activator,
+    pub task_phantom_disks: Activator,
+    pub task_blueprint_loader: Activator,
+    pub task_blueprint_executor: Activator,
+    pub task_crdb_node_id_collector: Activator,
+    pub task_service_zone_nat_tracker: Activator,
+    pub task_switch_port_settings_manager: Activator,
+    pub task_v2p_manager: Activator,
+    pub task_region_replacement: Activator,
+    pub task_region_replacement_driver: Activator,
+    pub task_instance_watcher: Activator,
+    pub task_service_firewall_propagation: Activator,
+    pub task_abandoned_vmm_reaper: Activator,
+    pub task_vpc_route_manager: Activator,
+    pub task_saga_recovery: Activator,
+    pub task_lookup_region_port: Activator,
 
-    /// task handle for the internal DNS config background task
-    pub task_internal_dns_config: TaskHandle,
-    /// task handle for the internal DNS servers background task
-    pub task_internal_dns_servers: TaskHandle,
-    /// task handle for the external DNS config background task
-    pub task_external_dns_config: TaskHandle,
-    /// task handle for the external DNS servers background task
-    pub task_external_dns_servers: TaskHandle,
+    // Handles to activate background tasks that do not get used by Nexus
+    // at-large.  These background tasks are implementation details as far as
+    // the rest of Nexus is concerned.  These handles don't even really need to
+    // be here, but it's convenient.
+    task_internal_dns_propagation: Activator,
+    task_external_dns_propagation: Activator,
 
-    /// task handle for pruning metrics producers with expired leases
-    pub task_metrics_producer_gc: TaskHandle,
-
-    /// task handle for the task that keeps track of external endpoints
-    pub task_external_endpoints: TaskHandle,
-    /// external endpoints read by the background task
-    pub external_endpoints: tokio::sync::watch::Receiver<
-        Option<external_endpoints::ExternalEndpoints>,
-    >,
-    /// task handle for the ipv4 nat entry garbage collector
-    pub task_nat_cleanup: TaskHandle,
-
-    /// task handle for the switch bfd manager
-    pub task_bfd_manager: TaskHandle,
-
-    /// task handle for the task that collects inventory
-    pub task_inventory_collection: TaskHandle,
-
-    /// task handle for the task that collects inventory
-    pub task_physical_disk_adoption: TaskHandle,
-
-    /// task handle for the task that detects phantom disks
-    pub task_phantom_disks: TaskHandle,
-
-    /// task handle for blueprint target loader
-    pub task_blueprint_loader: TaskHandle,
-
-    /// task handle for blueprint execution background task
-    pub task_blueprint_executor: TaskHandle,
-
-    /// task handle for collecting CockroachDB node IDs
-    pub task_crdb_node_id_collector: TaskHandle,
-
-    /// task handle for the service zone nat tracker
-    pub task_service_zone_nat_tracker: TaskHandle,
-
-    /// task handle for the switch port settings manager
-    pub task_switch_port_settings_manager: TaskHandle,
-
-    /// task handle for the opte v2p manager
-    pub task_v2p_manager: TaskHandle,
-
-    /// task handle for the task that detects if regions need replacement and
-    /// begins the process
-    pub task_region_replacement: TaskHandle,
-
-    /// task handle for the task that drives region replacements forward
-    pub task_region_replacement_driver: TaskHandle,
-
-    /// task handle for the task that polls sled agents for instance states.
-    pub task_instance_watcher: TaskHandle,
-
-    /// task handle for propagation of VPC firewall rules for Omicron services
-    /// with external network connectivity,
-    pub task_service_firewall_propagation: TaskHandle,
-
-    /// task handle for deletion of database records for VMMs abandoned by their
-    /// instances.
-    pub task_abandoned_vmm_reaper: TaskHandle,
-
-    /// task handle for propagation of VPC router rules to all OPTE ports
-    pub task_vpc_route_manager: TaskHandle,
+    // Data exposed by various background tasks to the rest of Nexus
+    /// list of currently configured external endpoints
+    pub external_endpoints:
+        watch::Receiver<Option<external_endpoints::ExternalEndpoints>>,
 }
 
 impl BackgroundTasks {
-    /// Kick off all background tasks
-    #[allow(clippy::too_many_arguments)]
+    /// Activate the specified background task
+    ///
+    /// If the task is currently running, it will be activated again when it
+    /// finishes.
+    pub fn activate(&self, task: &Activator) {
+        task.activate();
+    }
+}
+
+/// Initializes the background task subsystem
+///
+/// See the module-level documentation for more on the two-phase initialization
+/// of this subsystem.
+// See the definition of `Activator` for more design notes about this interface.
+pub struct BackgroundTasksInitializer {
+    driver: Driver,
+    external_endpoints_tx:
+        watch::Sender<Option<external_endpoints::ExternalEndpoints>>,
+}
+
+impl BackgroundTasksInitializer {
+    /// Begin initializing the Nexus background task subsystem
+    ///
+    /// This step does not start any background tasks.  It just returns:
+    ///
+    /// * a short-lived `BackgroundTasksInitializer` object, on which you can
+    ///   call `start()` to actually start the tasks
+    /// * a long-lived `BackgroundTasks` object that you can use to activate any
+    ///   of the tasks that will be started and read data that they provide
+    pub fn new() -> (BackgroundTasksInitializer, BackgroundTasks) {
+        let (external_endpoints_tx, external_endpoints_rx) =
+            watch::channel(None);
+
+        let initializer = BackgroundTasksInitializer {
+            driver: Driver::new(),
+            external_endpoints_tx,
+        };
+
+        let background_tasks = BackgroundTasks {
+            task_internal_dns_config: Activator::new(),
+            task_internal_dns_servers: Activator::new(),
+            task_external_dns_config: Activator::new(),
+            task_external_dns_servers: Activator::new(),
+            task_metrics_producer_gc: Activator::new(),
+            task_external_endpoints: Activator::new(),
+            task_nat_cleanup: Activator::new(),
+            task_bfd_manager: Activator::new(),
+            task_inventory_collection: Activator::new(),
+            task_physical_disk_adoption: Activator::new(),
+            task_phantom_disks: Activator::new(),
+            task_blueprint_loader: Activator::new(),
+            task_blueprint_executor: Activator::new(),
+            task_crdb_node_id_collector: Activator::new(),
+            task_service_zone_nat_tracker: Activator::new(),
+            task_switch_port_settings_manager: Activator::new(),
+            task_v2p_manager: Activator::new(),
+            task_region_replacement: Activator::new(),
+            task_region_replacement_driver: Activator::new(),
+            task_instance_watcher: Activator::new(),
+            task_service_firewall_propagation: Activator::new(),
+            task_abandoned_vmm_reaper: Activator::new(),
+            task_vpc_route_manager: Activator::new(),
+            task_saga_recovery: Activator::new(),
+            task_lookup_region_port: Activator::new(),
+
+            task_internal_dns_propagation: Activator::new(),
+            task_external_dns_propagation: Activator::new(),
+
+            external_endpoints: external_endpoints_rx,
+        };
+
+        (initializer, background_tasks)
+    }
+
+    /// Starts all the Nexus background tasks
+    ///
+    /// This function will wire up the `Activator`s in `background_tasks` to the
+    /// corresponding tasks once they've been started.
     pub fn start(
-        opctx: &OpContext,
-        datastore: Arc<DataStore>,
-        config: &BackgroundTaskConfig,
-        rack_id: Uuid,
-        nexus_id: Uuid,
-        resolver: internal_dns::resolver::Resolver,
-        saga_request: Sender<SagaRequest>,
-        v2p_watcher: (
-            tokio::sync::watch::Sender<()>,
-            tokio::sync::watch::Receiver<()>,
-        ),
-        producer_registry: &ProducerRegistry,
-    ) -> BackgroundTasks {
-        let mut driver = Driver::new();
+        self,
+        background_tasks: &'_ BackgroundTasks,
+        args: BackgroundTasksData,
+    ) -> Driver {
+        let mut driver = self.driver;
+        let opctx = &args.opctx;
+        let datastore = args.datastore;
+        let config = args.config;
+        let rack_id = args.rack_id;
+        let nexus_id = args.nexus_id;
+        let resolver = args.resolver;
+        let sagas = args.saga_starter;
+        let producer_registry = &args.producer_registry;
 
-        let (task_internal_dns_config, task_internal_dns_servers) = init_dns(
-            &mut driver,
-            opctx,
-            datastore.clone(),
-            DnsGroup::Internal,
-            resolver.clone(),
-            &config.dns_internal,
-        );
-        let (task_external_dns_config, task_external_dns_servers) = init_dns(
-            &mut driver,
-            opctx,
-            datastore.clone(),
-            DnsGroup::External,
-            resolver.clone(),
-            &config.dns_external,
-        );
-
-        let task_metrics_producer_gc = {
-            let gc = metrics_producer_gc::MetricProducerGc::new(
-                datastore.clone(),
-                PRODUCER_LEASE_DURATION,
-            );
-            driver.register(
-                String::from("metrics_producer_gc"),
-                String::from(
-                    "unregisters Oximeter metrics producers that have not \
-                     renewed their lease",
-                ),
-                config.metrics_producer_gc.period_secs,
-                Box::new(gc),
-                opctx.child(BTreeMap::new()),
-                vec![],
-            )
-        };
-
-        // Background task: External endpoints list watcher
-        let (task_external_endpoints, external_endpoints) = {
-            let watcher = external_endpoints::ExternalEndpointsWatcher::new(
-                datastore.clone(),
-            );
-            let watcher_channel = watcher.watcher();
-            let task = driver.register(
-                String::from("external_endpoints"),
-                String::from(
-                    "reads config for silos and TLS certificates to determine \
-                     the right set of HTTP endpoints, their HTTP server \
-                     names, and which TLS certificates to use on each one",
-                ),
-                config.external_endpoints.period_secs,
-                Box::new(watcher),
-                opctx.child(BTreeMap::new()),
-                vec![],
-            );
-            (task, watcher_channel)
-        };
-
-        let task_nat_cleanup = {
-            driver.register(
-                "nat_v4_garbage_collector".to_string(),
-                String::from(
-                    "prunes soft-deleted IPV4 NAT entries from ipv4_nat_entry \
-                     table based on a predetermined retention policy",
-                ),
-                config.nat_cleanup.period_secs,
-                Box::new(nat_cleanup::Ipv4NatGarbageCollector::new(
-                    datastore.clone(),
-                    resolver.clone(),
-                )),
-                opctx.child(BTreeMap::new()),
-                vec![],
-            )
-        };
-
-        let task_bfd_manager = {
-            driver.register(
-                "bfd_manager".to_string(),
-                String::from(
-                    "Manages bidirectional fowarding detection (BFD) \
-                     configuration on rack switches",
-                ),
-                config.bfd_manager.period_secs,
-                Box::new(bfd::BfdManager::new(
-                    datastore.clone(),
-                    resolver.clone(),
-                )),
-                opctx.child(BTreeMap::new()),
-                vec![],
-            )
-        };
-
-        // Background task: phantom disk detection
-        let task_phantom_disks = {
-            let detector =
-                phantom_disks::PhantomDiskDetector::new(datastore.clone());
-
-            let task = driver.register(
-                String::from("phantom_disks"),
-                String::from("detects and un-deletes phantom disks"),
-                config.phantom_disks.period_secs,
-                Box::new(detector),
-                opctx.child(BTreeMap::new()),
-                vec![],
-            );
-
-            task
-        };
-
-        // Background task: blueprint loader
-        let blueprint_loader =
-            blueprint_load::TargetBlueprintLoader::new(datastore.clone());
-        let rx_blueprint = blueprint_loader.watcher();
-        let task_blueprint_loader = driver.register(
-            String::from("blueprint_loader"),
-            String::from("Loads the current target blueprint from the DB"),
-            config.blueprints.period_secs_load,
-            Box::new(blueprint_loader),
-            opctx.child(BTreeMap::new()),
-            vec![],
-        );
-
-        // Background task: blueprint executor
-        let blueprint_executor = blueprint_execution::BlueprintExecutor::new(
-            datastore.clone(),
-            rx_blueprint.clone(),
-            nexus_id.to_string(),
-        );
-        let rx_blueprint_exec = blueprint_executor.watcher();
-        let task_blueprint_executor = driver.register(
-            String::from("blueprint_executor"),
-            String::from("Executes the target blueprint"),
-            config.blueprints.period_secs_execute,
-            Box::new(blueprint_executor),
-            opctx.child(BTreeMap::new()),
-            vec![Box::new(rx_blueprint.clone())],
-        );
-
-        // Background task: CockroachDB node ID collector
-        let crdb_node_id_collector =
-            crdb_node_id_collector::CockroachNodeIdCollector::new(
-                datastore.clone(),
-                rx_blueprint.clone(),
-            );
-        let task_crdb_node_id_collector = driver.register(
-            String::from("crdb_node_id_collector"),
-            String::from("Collects node IDs of running CockroachDB zones"),
-            config.blueprints.period_secs_collect_crdb_node_ids,
-            Box::new(crdb_node_id_collector),
-            opctx.child(BTreeMap::new()),
-            vec![Box::new(rx_blueprint)],
-        );
-
-        // Background task: inventory collector
-        //
-        // This currently depends on the "output" of the blueprint executor in
-        // order to automatically trigger inventory collection whenever the
-        // blueprint executor runs.  In the limit, this could become a problem
-        // because the blueprint executor might also depend indirectly on the
-        // inventory collector.  In that case, we may need to do something more
-        // complicated.  But for now, this works.
-        let (task_inventory_collection, inventory_watcher) = {
-            let collector = inventory_collection::InventoryCollector::new(
-                datastore.clone(),
-                resolver.clone(),
-                &nexus_id.to_string(),
-                config.inventory.nkeep,
-                config.inventory.disable,
-            );
-            let inventory_watcher = collector.watcher();
-            let task = driver.register(
-                String::from("inventory_collection"),
-                String::from(
-                    "collects hardware and software inventory data from the \
-                     whole system",
-                ),
-                config.inventory.period_secs,
-                Box::new(collector),
-                opctx.child(BTreeMap::new()),
-                vec![Box::new(rx_blueprint_exec)],
-            );
-
-            (task, inventory_watcher)
-        };
-
-        let task_physical_disk_adoption = {
-            driver.register(
-                "physical_disk_adoption".to_string(),
-                "ensure new physical disks are automatically marked in-service"
-                    .to_string(),
-                config.physical_disk_adoption.period_secs,
-                Box::new(physical_disk_adoption::PhysicalDiskAdoption::new(
-                    datastore.clone(),
-                    inventory_watcher.clone(),
-                    config.physical_disk_adoption.disable,
-                    rack_id,
-                )),
-                opctx.child(BTreeMap::new()),
-                vec![Box::new(inventory_watcher)],
-            )
-        };
-
-        let task_service_zone_nat_tracker = {
-            driver.register(
-                "service_zone_nat_tracker".to_string(),
-                String::from(
-                    "ensures service zone nat records are recorded in NAT RPW \
-                     table",
-                ),
-                config.sync_service_zone_nat.period_secs,
-                Box::new(ServiceZoneNatTracker::new(
-                    datastore.clone(),
-                    resolver.clone(),
-                )),
-                opctx.child(BTreeMap::new()),
-                vec![],
-            )
-        };
-
-        let task_switch_port_settings_manager = {
-            driver.register(
-                "switch_port_config_manager".to_string(),
-                String::from("manages switch port settings for rack switches"),
-                config.switch_port_settings_manager.period_secs,
-                Box::new(SwitchPortSettingsManager::new(
-                    datastore.clone(),
-                    resolver.clone(),
-                )),
-                opctx.child(BTreeMap::new()),
-                vec![],
-            )
-        };
-
-        let task_v2p_manager = {
-            driver.register(
-                "v2p_manager".to_string(),
-                String::from("manages opte v2p mappings for vpc networking"),
-                config.v2p_mapping_propagation.period_secs,
-                Box::new(V2PManager::new(datastore.clone())),
-                opctx.child(BTreeMap::new()),
-                vec![Box::new(v2p_watcher.1)],
-            )
-        };
-
-        // Background task: detect if a region needs replacement and begin the
-        // process
-        let task_region_replacement = {
-            let detector = region_replacement::RegionReplacementDetector::new(
-                datastore.clone(),
-                saga_request.clone(),
-            );
-
-            let task = driver.register(
-                String::from("region_replacement"),
-                String::from(
-                    "detects if a region requires replacing and begins the \
-                     process",
-                ),
-                config.region_replacement.period_secs,
-                Box::new(detector),
-                opctx.child(BTreeMap::new()),
-                vec![],
-            );
-
-            task
-        };
-
-        // Background task: drive region replacements forward to completion
-        let task_region_replacement_driver = {
-            let detector =
-                region_replacement_driver::RegionReplacementDriver::new(
-                    datastore.clone(),
-                    saga_request.clone(),
-                );
-
-            let task = driver.register(
-                String::from("region_replacement_driver"),
-                String::from("drive region replacements forward to completion"),
-                config.region_replacement_driver.period_secs,
-                Box::new(detector),
-                opctx.child(BTreeMap::new()),
-                vec![],
-            );
-
-            task
-        };
-
-        let task_instance_watcher = {
-            let watcher = instance_watcher::InstanceWatcher::new(
-                datastore.clone(),
-                resolver.clone(),
-                producer_registry,
-                instance_watcher::WatcherIdentity { nexus_id, rack_id },
-                v2p_watcher.0,
-            );
-            driver.register(
-                "instance_watcher".to_string(),
-                "periodically checks instance states".to_string(),
-                config.instance_watcher.period_secs,
-                Box::new(watcher),
-                opctx.child(BTreeMap::new()),
-                vec![],
-            )
-        };
-
-        // Background task: service firewall rule propagation
-        let task_service_firewall_propagation = driver.register(
-            String::from("service_firewall_rule_propagation"),
-            String::from(
-                "propagates VPC firewall rules for Omicron services with \
-                 external network connectivity",
-            ),
-            config.service_firewall_propagation.period_secs,
-            Box::new(service_firewall_rules::ServiceRulePropagator::new(
-                datastore.clone(),
-            )),
-            opctx.child(BTreeMap::new()),
-            vec![],
-        );
-
-        // Background task: OPTE port route propagation
-        let task_vpc_route_manager = {
-            let watcher = vpc_routes::VpcRouteManager::new(datastore.clone());
-            driver.register(
-                "vpc_route_manager".to_string(),
-                "propagates updated VPC routes to all OPTE ports".into(),
-                config.switch_port_settings_manager.period_secs,
-                Box::new(watcher),
-                opctx.child(BTreeMap::new()),
-                vec![],
-            )
-        };
-
-        // Background task: abandoned VMM reaping
-        let task_abandoned_vmm_reaper = driver.register(
-            String::from("abandoned_vmm_reaper"),
-            String::from(
-                "deletes sled reservations for VMMs that have been abandoned \
-                 by their instances",
-            ),
-            config.abandoned_vmm_reaper.period_secs,
-            Box::new(abandoned_vmm_reaper::AbandonedVmmReaper::new(datastore)),
-            opctx.child(BTreeMap::new()),
-            vec![],
-        );
-
-        BackgroundTasks {
-            driver,
+        // This "let" construction helps catch mistakes where someone forgets to
+        // wire up an activator to its corresponding background task.
+        let BackgroundTasks {
             task_internal_dns_config,
             task_internal_dns_servers,
+            task_internal_dns_propagation,
             task_external_dns_config,
             task_external_dns_servers,
+            task_external_dns_propagation,
             task_metrics_producer_gc,
             task_external_endpoints,
-            external_endpoints,
             task_nat_cleanup,
             task_bfd_manager,
             task_inventory_collection,
@@ -513,18 +293,427 @@ impl BackgroundTasks {
             task_service_firewall_propagation,
             task_abandoned_vmm_reaper,
             task_vpc_route_manager,
-        }
-    }
+            task_saga_recovery,
+            task_lookup_region_port,
+            // Add new background tasks here.  Be sure to use this binding in a
+            // call to `Driver::register()` below.  That's what actually wires
+            // up the Activator to the corresponding background task.
 
-    /// Activate the specified background task
-    ///
-    /// If the task is currently running, it will be activated again when it
-    /// finishes.
-    pub fn activate(&self, task: &TaskHandle) {
-        self.driver.activate(task);
+            // The following fields can be safely ignored here because they're
+            // already wired up as needed.
+            external_endpoints: _,
+            // Do NOT add a `..` catch-all here!  See above.
+        } = &background_tasks;
+
+        init_dns(
+            &mut driver,
+            opctx,
+            datastore.clone(),
+            DnsGroup::Internal,
+            resolver.clone(),
+            &config.dns_internal,
+            task_internal_dns_config,
+            task_internal_dns_servers,
+            task_internal_dns_propagation,
+        );
+
+        init_dns(
+            &mut driver,
+            opctx,
+            datastore.clone(),
+            DnsGroup::External,
+            resolver.clone(),
+            &config.dns_external,
+            task_external_dns_config,
+            task_external_dns_servers,
+            task_external_dns_propagation,
+        );
+
+        {
+            let gc = metrics_producer_gc::MetricProducerGc::new(
+                datastore.clone(),
+                PRODUCER_LEASE_DURATION,
+            );
+
+            driver.register(TaskDefinition {
+                name: "metrics_producer_gc",
+                description:
+                    "unregisters Oximeter metrics producers that have not \
+                     renewed their lease",
+                period: config.metrics_producer_gc.period_secs,
+                task_impl: Box::new(gc),
+                opctx: opctx.child(BTreeMap::new()),
+                watchers: vec![],
+                activator: task_metrics_producer_gc,
+            })
+        };
+
+        // Background task: External endpoints list watcher
+        {
+            let watcher = external_endpoints::ExternalEndpointsWatcher::new(
+                datastore.clone(),
+                self.external_endpoints_tx,
+            );
+            driver.register(TaskDefinition {
+                name: "external_endpoints",
+                description:
+                    "reads config for silos and TLS certificates to determine \
+                     the right set of HTTP endpoints, their HTTP server \
+                     names, and which TLS certificates to use on each one",
+                period: config.external_endpoints.period_secs,
+                task_impl: Box::new(watcher),
+                opctx: opctx.child(BTreeMap::new()),
+                watchers: vec![],
+                activator: task_external_endpoints,
+            });
+        }
+
+        driver.register(TaskDefinition {
+            name: "nat_v4_garbage_collector",
+            description:
+                "prunes soft-deleted IPV4 NAT entries from ipv4_nat_entry \
+                 table based on a predetermined retention policy",
+            period: config.nat_cleanup.period_secs,
+            task_impl: Box::new(nat_cleanup::Ipv4NatGarbageCollector::new(
+                datastore.clone(),
+                resolver.clone(),
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_nat_cleanup,
+        });
+
+        driver.register(TaskDefinition {
+            name: "bfd_manager",
+            description: "Manages bidirectional fowarding detection (BFD) \
+                 configuration on rack switches",
+            period: config.bfd_manager.period_secs,
+            task_impl: Box::new(bfd::BfdManager::new(
+                datastore.clone(),
+                resolver.clone(),
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_bfd_manager,
+        });
+
+        // Background task: phantom disk detection
+        {
+            let detector =
+                phantom_disks::PhantomDiskDetector::new(datastore.clone());
+            driver.register(TaskDefinition {
+                name: "phantom_disks",
+                description: "detects and un-deletes phantom disks",
+                period: config.phantom_disks.period_secs,
+                task_impl: Box::new(detector),
+                opctx: opctx.child(BTreeMap::new()),
+                watchers: vec![],
+                activator: task_phantom_disks,
+            });
+        };
+
+        // Background task: blueprint loader
+        let blueprint_loader =
+            blueprint_load::TargetBlueprintLoader::new(datastore.clone());
+        let rx_blueprint = blueprint_loader.watcher();
+        driver.register(TaskDefinition {
+            name: "blueprint_loader",
+            description: "Loads the current target blueprint from the DB",
+            period: config.blueprints.period_secs_load,
+            task_impl: Box::new(blueprint_loader),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_blueprint_loader,
+        });
+
+        // Background task: blueprint executor
+        let blueprint_executor = blueprint_execution::BlueprintExecutor::new(
+            datastore.clone(),
+            resolver.clone(),
+            rx_blueprint.clone(),
+            nexus_id.to_string(),
+        );
+        let rx_blueprint_exec = blueprint_executor.watcher();
+        driver.register(TaskDefinition {
+            name: "blueprint_executor",
+            description: "Executes the target blueprint",
+            period: config.blueprints.period_secs_execute,
+            task_impl: Box::new(blueprint_executor),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(rx_blueprint.clone())],
+            activator: task_blueprint_executor,
+        });
+
+        // Background task: CockroachDB node ID collector
+        let crdb_node_id_collector =
+            crdb_node_id_collector::CockroachNodeIdCollector::new(
+                datastore.clone(),
+                rx_blueprint.clone(),
+            );
+        driver.register(TaskDefinition {
+            name: "crdb_node_id_collector",
+            description: "Collects node IDs of running CockroachDB zones",
+            period: config.blueprints.period_secs_collect_crdb_node_ids,
+            task_impl: Box::new(crdb_node_id_collector),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(rx_blueprint)],
+            activator: task_crdb_node_id_collector,
+        });
+
+        // Background task: inventory collector
+        //
+        // This currently depends on the "output" of the blueprint executor in
+        // order to automatically trigger inventory collection whenever the
+        // blueprint executor runs.  In the limit, this could become a problem
+        // because the blueprint executor might also depend indirectly on the
+        // inventory collector.  In that case, we could expose `Activator`s to
+        // one or both of these tasks to directly activate the other precisely
+        // when needed.  But for now, this works.
+        let inventory_watcher = {
+            let collector = inventory_collection::InventoryCollector::new(
+                datastore.clone(),
+                resolver.clone(),
+                &nexus_id.to_string(),
+                config.inventory.nkeep,
+                config.inventory.disable,
+            );
+            let inventory_watcher = collector.watcher();
+            driver.register(TaskDefinition {
+                name: "inventory_collection",
+                description:
+                    "collects hardware and software inventory data from the \
+                     whole system",
+                period: config.inventory.period_secs,
+                task_impl: Box::new(collector),
+                opctx: opctx.child(BTreeMap::new()),
+                watchers: vec![Box::new(rx_blueprint_exec)],
+                activator: task_inventory_collection,
+            });
+
+            inventory_watcher
+        };
+
+        driver.register(TaskDefinition {
+            name: "physical_disk_adoption",
+            description:
+                "ensure new physical disks are automatically marked in-service",
+            period: config.physical_disk_adoption.period_secs,
+            task_impl: Box::new(
+                physical_disk_adoption::PhysicalDiskAdoption::new(
+                    datastore.clone(),
+                    inventory_watcher.clone(),
+                    config.physical_disk_adoption.disable,
+                    rack_id,
+                ),
+            ),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(inventory_watcher)],
+            activator: task_physical_disk_adoption,
+        });
+
+        driver.register(TaskDefinition {
+            name: "service_zone_nat_tracker",
+            description:
+                "ensures service zone nat records are recorded in NAT RPW \
+                 table",
+            period: config.sync_service_zone_nat.period_secs,
+            task_impl: Box::new(ServiceZoneNatTracker::new(
+                datastore.clone(),
+                resolver.clone(),
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_service_zone_nat_tracker,
+        });
+
+        driver.register(TaskDefinition {
+            name: "switch_port_config_manager",
+            description: "manages switch port settings for rack switches",
+            period: config.switch_port_settings_manager.period_secs,
+            task_impl: Box::new(SwitchPortSettingsManager::new(
+                datastore.clone(),
+                resolver.clone(),
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_switch_port_settings_manager,
+        });
+
+        driver.register(TaskDefinition {
+            name: "v2p_manager",
+            description: "manages opte v2p mappings for vpc networking",
+            period: config.v2p_mapping_propagation.period_secs,
+            task_impl: Box::new(V2PManager::new(datastore.clone())),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_v2p_manager,
+        });
+
+        // Background task: detect if a region needs replacement and begin the
+        // process
+        {
+            let detector = region_replacement::RegionReplacementDetector::new(
+                datastore.clone(),
+                sagas.clone(),
+            );
+
+            driver.register(TaskDefinition {
+                name: "region_replacement",
+                description:
+                    "detects if a region requires replacing and begins the \
+                     process",
+                period: config.region_replacement.period_secs,
+                task_impl: Box::new(detector),
+                opctx: opctx.child(BTreeMap::new()),
+                watchers: vec![],
+                activator: task_region_replacement,
+            });
+        };
+
+        // Background task: drive region replacements forward to completion
+        {
+            let detector =
+                region_replacement_driver::RegionReplacementDriver::new(
+                    datastore.clone(),
+                    sagas.clone(),
+                );
+
+            driver.register(TaskDefinition {
+                name: "region_replacement_driver",
+                description: "drive region replacements forward to completion",
+                period: config.region_replacement_driver.period_secs,
+                task_impl: Box::new(detector),
+                opctx: opctx.child(BTreeMap::new()),
+                watchers: vec![],
+                activator: task_region_replacement_driver,
+            });
+        };
+
+        {
+            let watcher = instance_watcher::InstanceWatcher::new(
+                datastore.clone(),
+                resolver.clone(),
+                producer_registry,
+                instance_watcher::WatcherIdentity { nexus_id, rack_id },
+                task_v2p_manager.clone(),
+            );
+            driver.register(TaskDefinition {
+                name: "instance_watcher",
+                description: "periodically checks instance states",
+                period: config.instance_watcher.period_secs,
+                task_impl: Box::new(watcher),
+                opctx: opctx.child(BTreeMap::new()),
+                watchers: vec![],
+                activator: task_instance_watcher,
+            })
+        };
+
+        // Background task: service firewall rule propagation
+        driver.register(TaskDefinition {
+            name: "service_firewall_rule_propagation",
+            description:
+                "propagates VPC firewall rules for Omicron services with \
+                 external network connectivity",
+            period: config.service_firewall_propagation.period_secs,
+            task_impl: Box::new(
+                service_firewall_rules::ServiceRulePropagator::new(
+                    datastore.clone(),
+                ),
+            ),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_service_firewall_propagation,
+        });
+
+        // Background task: OPTE port route propagation
+        {
+            let watcher = vpc_routes::VpcRouteManager::new(datastore.clone());
+            driver.register(TaskDefinition {
+                name: "vpc_route_manager",
+                description: "propagates updated VPC routes to all OPTE ports",
+                period: config.switch_port_settings_manager.period_secs,
+                task_impl: Box::new(watcher),
+                opctx: opctx.child(BTreeMap::new()),
+                watchers: vec![],
+                activator: task_vpc_route_manager,
+            })
+        };
+
+        // Background task: abandoned VMM reaping
+        driver.register(TaskDefinition {
+            name: "abandoned_vmm_reaper",
+            description:
+                "deletes sled reservations for VMMs that have been abandoned \
+                 by their instances",
+            period: config.abandoned_vmm_reaper.period_secs,
+            task_impl: Box::new(abandoned_vmm_reaper::AbandonedVmmReaper::new(
+                datastore.clone(),
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_abandoned_vmm_reaper,
+        });
+
+        // Background task: saga recovery
+        {
+            let task_impl = Box::new(saga_recovery::SagaRecovery::new(
+                datastore.clone(),
+                nexus_db_model::SecId(args.nexus_id),
+                args.saga_recovery,
+            ));
+
+            driver.register(TaskDefinition {
+                name: "saga_recovery",
+                description: "recovers sagas assigned to this Nexus",
+                period: config.saga_recovery.period_secs,
+                task_impl,
+                opctx: opctx.child(BTreeMap::new()),
+                watchers: vec![],
+                activator: task_saga_recovery,
+            });
+        }
+
+        driver.register(TaskDefinition {
+            name: "lookup_region_port",
+            description: "fill in missing ports for region records",
+            period: config.lookup_region_port.period_secs,
+            task_impl: Box::new(lookup_region_port::LookupRegionPort::new(
+                datastore,
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_lookup_region_port,
+        });
+
+        driver
     }
 }
 
+pub struct BackgroundTasksData {
+    /// root `OpContext` used for background tasks
+    pub opctx: OpContext,
+    /// handle to `DataStore`, provided directly to many background tasks
+    pub datastore: Arc<DataStore>,
+    /// background task configuration
+    pub config: BackgroundTaskConfig,
+    /// rack identifier
+    pub rack_id: Uuid,
+    /// nexus identifier
+    pub nexus_id: Uuid,
+    /// internal DNS DNS resolver, used when tasks need to contact other
+    /// internal services
+    pub resolver: internal_dns::resolver::Resolver,
+    /// handle to saga subsystem for starting sagas
+    pub saga_starter: Arc<dyn StartSaga>,
+    /// Oximeter producer registry (for metrics)
+    pub producer_registry: ProducerRegistry,
+    /// Helpers for saga recovery
+    pub saga_recovery: saga_recovery::SagaRecoveryHelpers<Arc<Nexus>>,
+}
+
+/// Starts the three DNS-propagation-related background tasks for either
+/// internal or external DNS (depending on the arguments)
+#[allow(clippy::too_many_arguments)]
 fn init_dns(
     driver: &mut Driver,
     opctx: &OpContext,
@@ -532,7 +721,10 @@ fn init_dns(
     dns_group: DnsGroup,
     resolver: internal_dns::resolver::Resolver,
     config: &DnsTasksConfig,
-) -> (TaskHandle, TaskHandle) {
+    task_config: &Activator,
+    task_servers: &Activator,
+    task_propagation: &Activator,
+) {
     let dns_group_name = dns_group.to_string();
     let metadata = BTreeMap::from([("dns_group".to_string(), dns_group_name)]);
 
@@ -541,30 +733,35 @@ fn init_dns(
         dns_config::DnsConfigWatcher::new(Arc::clone(&datastore), dns_group);
     let dns_config_watcher = dns_config.watcher();
     let task_name_config = format!("dns_config_{}", dns_group);
-    let task_config = driver.register(
-        task_name_config.clone(),
-        format!("watches {} DNS data stored in CockroachDB", dns_group),
-        config.period_secs_config,
-        Box::new(dns_config),
-        opctx.child(metadata.clone()),
-        vec![],
-    );
+    driver.register(TaskDefinition {
+        name: task_name_config.clone(),
+        description: format!(
+            "watches {} DNS data stored in CockroachDB",
+            dns_group
+        ),
+        period: config.period_secs_config,
+        task_impl: Box::new(dns_config),
+        opctx: opctx.child(metadata.clone()),
+        watchers: vec![],
+        activator: task_config,
+    });
 
     // Background task: DNS server list watcher
     let dns_servers = dns_servers::DnsServersWatcher::new(dns_group, resolver);
     let dns_servers_watcher = dns_servers.watcher();
     let task_name_servers = format!("dns_servers_{}", dns_group);
-    let task_servers = driver.register(
-        task_name_servers.clone(),
-        format!(
+    driver.register(TaskDefinition {
+        name: task_name_servers.clone(),
+        description: format!(
             "watches list of {} DNS servers stored in internal DNS",
             dns_group,
         ),
-        config.period_secs_servers,
-        Box::new(dns_servers),
-        opctx.child(metadata.clone()),
-        vec![],
-    );
+        period: config.period_secs_servers,
+        task_impl: Box::new(dns_servers),
+        opctx: opctx.child(metadata.clone()),
+        watchers: vec![],
+        activator: task_servers,
+    });
 
     // Background task: DNS propagation
     let dns_propagate = dns_propagation::DnsPropagator::new(
@@ -572,26 +769,30 @@ fn init_dns(
         dns_servers_watcher.clone(),
         config.max_concurrent_server_updates,
     );
-    driver.register(
-        format!("dns_propagation_{}", dns_group),
-        format!(
+    driver.register(TaskDefinition {
+        name: format!("dns_propagation_{}", dns_group),
+        description: format!(
             "propagates latest {} DNS configuration (from {:?} background \
              task) to the latest list of DNS servers (from {:?} background \
              task)",
             dns_group, task_name_config, task_name_servers,
         ),
-        config.period_secs_propagation,
-        Box::new(dns_propagate),
-        opctx.child(metadata),
-        vec![Box::new(dns_config_watcher), Box::new(dns_servers_watcher)],
-    );
-
-    (task_config, task_servers)
+        period: config.period_secs_propagation,
+        task_impl: Box::new(dns_propagate),
+        opctx: opctx.child(metadata),
+        watchers: vec![
+            Box::new(dns_config_watcher),
+            Box::new(dns_servers_watcher),
+        ],
+        activator: task_propagation,
+    });
 }
 
 #[cfg(test)]
 pub mod test {
+    use crate::app::saga::StartSaga;
     use dropshot::HandlerTaskMode;
+    use futures::FutureExt;
     use nexus_db_model::DnsGroup;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
@@ -600,8 +801,38 @@ pub mod test {
     use nexus_types::internal_api::params as nexus_params;
     use omicron_test_utils::dev::poll;
     use std::net::SocketAddr;
+    use std::sync::atomic::AtomicU64;
+    use std::sync::atomic::Ordering;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    /// Used by various tests of tasks that kick off sagas
+    pub(crate) struct NoopStartSaga {
+        count: AtomicU64,
+    }
+
+    impl NoopStartSaga {
+        pub(crate) fn new() -> Self {
+            Self { count: AtomicU64::new(0) }
+        }
+
+        pub(crate) fn count_reset(&self) -> u64 {
+            self.count.swap(0, Ordering::SeqCst)
+        }
+    }
+
+    impl StartSaga for NoopStartSaga {
+        fn saga_start(
+            &self,
+            _: steno::SagaDag,
+        ) -> futures::prelude::future::BoxFuture<
+            '_,
+            Result<(), omicron_common::api::external::Error>,
+        > {
+            let _ = self.count.fetch_add(1, Ordering::SeqCst);
+            async { Ok(()) }.boxed()
+        }
+    }
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
