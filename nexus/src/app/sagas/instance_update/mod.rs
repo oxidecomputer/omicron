@@ -1305,10 +1305,8 @@ mod test {
             // Running to complete.
             let state = wait_for_update(cptestctx, state.instance()).await;
             let vmm = state.vmm().as_ref().unwrap();
-            let dst_sled_id = test_helpers::select_first_alternate_sled(
-                vmm,
-                &other_sleds[..],
-            );
+            let dst_sled_id =
+                test_helpers::select_first_alternate_sled(vmm, other_sleds);
             let params = instance_migrate::Params {
                 serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
                 instance: state.instance().clone(),
