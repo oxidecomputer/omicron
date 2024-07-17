@@ -5,13 +5,13 @@ name = "switch_rib"
 description = "Maghemite router routing information base"
 authz_scope = "fleet"
 versions = [
-    { version = 1, fields = [ "hostname", "link_id", "rack_id" ] }
+    { version = 1, fields = [ "hostname", "sled_id", "rack_id" ] }
 ]
 
 [[metrics]]
 name = "active_routes"
 description = "The number of currently active routes"
-units = "count
+units = "count"
 datum_type = "u64"
 versions = [
     { added_in = 1, fields = [ ] }
