@@ -71,7 +71,7 @@ async fn main() -> anyhow::Result<()> {
     let log = Logger::root(drain, slog::o!("unit" => "schema_updater"));
 
     let crdb_cfg = db::Config { url: args.url };
-    let pool = Arc::new(db::Pool::new(&log, &crdb_cfg));
+    let pool = Arc::new(db::Pool::new_single_host(&log, &crdb_cfg));
     let schema_config = SchemaConfig { schema_dir: args.schema_directory };
     let all_versions = AllSchemaVersions::load(&schema_config.schema_dir)?;
 
