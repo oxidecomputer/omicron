@@ -43,16 +43,16 @@ description = "Serial number of the sled running Dendrite"
 
 [fields.switch_model]
 type = "string"
-description = "The model of the switch this Dendrite is managing"
+description = "The model of the switch being managed"
 
 [fields.switch_revision]
 type = "u32"
-description = "Revision number of the switch this Dendrite is managing"
+description = "Revision number of the switch being managed"
 
 [fields.switch_id]
 type = "uuid"
-description = "ID of the switch this Dendrite is managing"
+description = "ID of the switch being managed"
 
 [fields.switch_serial]
 type = "string"
-description = "Serial number of the switch this Dendrite is managing"
+description = "Serial number of the switch being managed"
