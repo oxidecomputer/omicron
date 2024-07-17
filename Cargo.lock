@@ -6421,6 +6421,7 @@ dependencies = [
  "approx",
  "bytes",
  "chrono",
+ "criterion",
  "float-ord",
  "heck 0.5.0",
  "num",
