@@ -194,8 +194,8 @@ impl UpdatesRequired {
                     debug_assert_eq!(new_vmm.id, migration.target_propolis_id);
                     new_runtime.propolis_id =
                         Some(migration.target_propolis_id);
-                    update_required = true;
                     network_config = Some(NetworkConfigUpdate::to_vmm(new_vmm));
+                    update_required = true;
                 }
 
                 // If the target reports that the migration has completed,
@@ -895,6 +895,60 @@ mod test {
         )
     }
 
+    async fn after_unwinding(cptestctx: &ControlPlaneTestContext) {
+        let state = test_helpers::instance_fetch_by_name(
+            cptestctx,
+            INSTANCE_NAME,
+            PROJECT_NAME,
+        )
+        .await;
+        let instance = state.instance();
+
+        // Unlike most other sagas, we actually don't unwind the
+        // work performed by an update saga, as we would prefer
+        // that at least some of it succeeds. The only thing
+        // that *needs* to be rolled back when an
+        // instance-update saga fails is that the updater lock
+        // *MUST* be released so that a subsequent saga can run.
+        assert_instance_unlocked(instance);
+
+        // Throw away the instance so that subsequent unwinding
+        // tests also operate on an instance in the correct
+        // preconditions to actually run the saga path we mean
+        // to test.
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
+        // Depending on where we got to in the update saga, the
+        // sled-agent may or may not actually be willing to stop
+        // the instance, so just manually update the DB record
+        // into a state where we can delete it to make sure
+        // everything is cleaned up for the next run.
+        cptestctx
+            .server
+            .server_context()
+            .nexus
+            .datastore()
+            .instance_update_runtime(
+                &instance_id,
+                &InstanceRuntimeState {
+                    time_updated: Utc::now(),
+                    gen: Generation(instance.runtime().gen.0.next()),
+                    propolis_id: None,
+                    dst_propolis_id: None,
+                    migration_id: None,
+                    nexus_state: InstanceState::NoVmm,
+                },
+            )
+            .await
+            .unwrap();
+
+        test_helpers::instance_delete_by_name(
+            cptestctx,
+            INSTANCE_NAME,
+            PROJECT_NAME,
+        )
+        .await;
+    }
+
     // === Active VMM destroyed tests ====
 
     #[nexus_test(server = crate::Server)]
@@ -951,63 +1005,7 @@ mod test {
                     params
                 })
             },
-            || {
-                Box::pin({
-                    async {
-                        let state = test_helpers::instance_fetch_by_name(
-                            cptestctx,
-                            INSTANCE_NAME,
-                            PROJECT_NAME,
-                        )
-                        .await;
-                        let instance = state.instance();
-
-                        // Unlike most other sagas, we actually don't unwind the
-                        // work performed by an update saga, as we would prefer
-                        // that at least some of it succeeds. The only thing
-                        // that *needs* to be rolled back when an
-                        // instance-update saga fails is that the updater lock
-                        // *MUST* be released so that a subsequent saga can run.
-                        assert_instance_unlocked(instance);
-
-                        // Throw away the instance so that subsequent unwinding
-                        // tests also operate on an instance in the correct
-                        // preconditions to actually run the saga path we mean
-                        // to test.
-                        let instance_id =
-                            InstanceUuid::from_untyped_uuid(instance.id());
-                        // Depending on where we got to in the update saga, the
-                        // sled-agent may or may not actually be willing to stop
-                        // the instance, so just manually update the DB record
-                        // into a state where we can delete it to make sure
-                        // everything is cleaned up for the next run.
-                        nexus
-                            .datastore()
-                            .instance_update_runtime(
-                                &instance_id,
-                                &InstanceRuntimeState {
-                                    time_updated: Utc::now(),
-                                    gen: Generation(
-                                        instance.runtime().gen.0.next(),
-                                    ),
-                                    propolis_id: None,
-                                    dst_propolis_id: None,
-                                    migration_id: None,
-                                    nexus_state: InstanceState::NoVmm,
-                                },
-                            )
-                            .await
-                            .unwrap();
-
-                        test_helpers::instance_delete_by_name(
-                            cptestctx,
-                            INSTANCE_NAME,
-                            PROJECT_NAME,
-                        )
-                        .await;
-                    }
-                })
-            },
+            || Box::pin(after_unwinding(cptestctx)),
             &cptestctx.logctx.log,
         )
         .await;
@@ -1203,63 +1201,95 @@ mod test {
                     test.saga_params()
                 })
             },
+            || Box::pin(after_unwinding(cptestctx)),
+            &cptestctx.logctx.log,
+        )
+        .await;
+    }
+
+    // === migration target completed tests ===
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_target_completed_succeeds(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+        let test = MigrationTest::setup(cptestctx, &other_sleds).await;
+
+        // Pretend the migration target has completed.
+        test.update_target_state(
+            cptestctx,
+            VmmState::Running,
+            MigrationState::Completed,
+        )
+        .await;
+
+        // Run the instance-update saga.
+        let nexus = &cptestctx.server.server_context().nexus;
+        nexus
+            .sagas
+            .saga_execute::<SagaInstanceUpdate>(test.saga_params())
+            .await
+            .expect("update saga should succeed");
+
+        test.verify_target_succeeded(cptestctx).await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_target_completed_actions_succeed_idempotently(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+        let test = MigrationTest::setup(cptestctx, &other_sleds).await;
+
+        // Pretend the migration target has completed.
+        test.update_target_state(
+            cptestctx,
+            VmmState::Running,
+            MigrationState::Completed,
+        )
+        .await;
+
+        // Build the saga DAG with the provided test parameters
+        let dag =
+            create_saga_dag::<SagaInstanceUpdate>(test.saga_params()).unwrap();
+
+        crate::app::sagas::test_helpers::actions_succeed_idempotently(
+            &cptestctx.server.server_context().nexus,
+            dag,
+        )
+        .await;
+
+        test.verify_target_succeeded(cptestctx).await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_target_completed_can_unwind(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+
+        test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
+            nexus,
             || {
-                Box::pin({
-                    async {
-                        let state = test_helpers::instance_fetch_by_name(
-                            cptestctx,
-                            INSTANCE_NAME,
-                            PROJECT_NAME,
-                        )
-                        .await;
-                        let instance = state.instance();
-
-                        // Unlike most other sagas, we actually don't unwind the
-                        // work performed by an update saga, as we would prefer
-                        // that at least some of it succeeds. The only thing
-                        // that *needs* to be rolled back when an
-                        // instance-update saga fails is that the updater lock
-                        // *MUST* be released so that a subsequent saga can run.
-                        assert_instance_unlocked(instance);
-
-                        // Throw away the instance so that subsequent unwinding
-                        // tests also operate on an instance in the correct
-                        // preconditions to actually run the saga path we mean
-                        // to test.
-                        let instance_id =
-                            InstanceUuid::from_untyped_uuid(instance.id());
-                        // Depending on where we got to in the update saga, the
-                        // sled-agent may or may not actually be willing to stop
-                        // the instance, so just manually update the DB record
-                        // into a state where we can delete it to make sure
-                        // everything is cleaned up for the next run.
-                        nexus
-                            .datastore()
-                            .instance_update_runtime(
-                                &instance_id,
-                                &InstanceRuntimeState {
-                                    time_updated: Utc::now(),
-                                    gen: Generation(
-                                        instance.runtime().gen.0.next(),
-                                    ),
-                                    propolis_id: None,
-                                    dst_propolis_id: None,
-                                    migration_id: None,
-                                    nexus_state: InstanceState::NoVmm,
-                                },
-                            )
-                            .await
-                            .unwrap();
-
-                        test_helpers::instance_delete_by_name(
-                            cptestctx,
-                            INSTANCE_NAME,
-                            PROJECT_NAME,
-                        )
-                        .await;
-                    }
+                Box::pin(async {
+                    let test =
+                        MigrationTest::setup(cptestctx, &other_sleds).await;
+                    // Pretend the migration target has completed.
+                    test.update_target_state(
+                        cptestctx,
+                        VmmState::Running,
+                        MigrationState::Completed,
+                    )
+                    .await;
+                    test.saga_params()
                 })
             },
+            || Box::pin(after_unwinding(cptestctx)),
             &cptestctx.logctx.log,
         )
         .await;
@@ -1392,6 +1422,59 @@ mod test {
                 .expect("updating migration source state should succeed");
         }
 
+        async fn update_target_state(
+            &self,
+            cptestctx: &ControlPlaneTestContext,
+            vmm_state: VmmState,
+            migration_state: MigrationState,
+        ) {
+            let target_vmm =
+                self.state.target_vmm.as_ref().expect("must have a target VMM");
+            let vmm_id = PropolisUuid::from_untyped_uuid(target_vmm.id);
+            let new_runtime = nexus_db_model::VmmRuntimeState {
+                time_state_updated: Utc::now(),
+                gen: Generation(target_vmm.runtime.gen.0.next()),
+                state: vmm_state,
+            };
+
+            let migration = self
+                .state
+                .migration
+                .as_ref()
+                .expect("must have an active migration");
+            let migration_in = MigrationRuntimeState {
+                migration_id: migration.id,
+                state: migration_state,
+                gen: migration.target_gen.0.next(),
+                time_updated: Utc::now(),
+            };
+            let migrations = Migrations {
+                migration_in: Some(&migration_in),
+                migration_out: None,
+            };
+
+            info!(
+                cptestctx.logctx.log,
+                "updating target VMM state...";
+                "propolis_id" => %vmm_id,
+                "new_runtime" => ?new_runtime,
+                "migration_in" => ?migration_in,
+            );
+
+            cptestctx
+                .server
+                .server_context()
+                .nexus
+                .datastore()
+                .vmm_and_migration_update_runtime(
+                    vmm_id,
+                    &new_runtime,
+                    migrations,
+                )
+                .await
+                .expect("updating migration target state should succeed");
+        }
+
         fn saga_params(&self) -> Params {
             Params {
                 authz_instance: self.authz_instance.clone(),
@@ -1405,6 +1488,42 @@ mod test {
             &self,
             cptestctx: &ControlPlaneTestContext,
         ) {
+            let state = self.verify_migration_succeeded(cptestctx).await;
+            let instance = state.instance();
+            let instance_runtime = instance.runtime();
+            assert_eq!(
+                instance_runtime.dst_propolis_id,
+                Some(self.target_vmm_id()),
+                "target VMM ID must remain set until target VMM reports success",
+            );
+            assert_eq!(
+                instance_runtime.migration_id,
+                self.state.instance.runtime().migration_id,
+                "migration ID must remain set until target VMM reports success",
+            );
+        }
+
+        async fn verify_target_succeeded(
+            &self,
+            cptestctx: &ControlPlaneTestContext,
+        ) {
+            let state = self.verify_migration_succeeded(cptestctx).await;
+            let instance = state.instance();
+            let instance_runtime = instance.runtime();
+            assert_eq!(
+                instance_runtime.dst_propolis_id, None,
+                "target VMM ID must be unset once VMM reports success",
+            );
+            assert_eq!(
+                instance_runtime.migration_id, None,
+                "migration ID must be unset once target VMM reports success",
+            );
+        }
+
+        async fn verify_migration_succeeded(
+            &self,
+            cptestctx: &ControlPlaneTestContext,
+        ) -> InstanceAndActiveVmm {
             let state =
                 test_helpers::instance_fetch(cptestctx, self.instance_id).await;
             let instance = state.instance();
@@ -1414,17 +1533,7 @@ mod test {
             assert_eq!(
                 active_vmm_id,
                 Some(self.target_vmm_id()),
-                "target VMM must be in the active VMM position after source success",
-            );
-            assert_eq!(
-                instance_runtime.dst_propolis_id,
-                Some(active_vmm_id.unwrap()),
-                "target VMM ID must remain set until target VMM reports success",
-            );
-            assert_eq!(
-                instance_runtime.migration_id,
-                self.state.instance.runtime().migration_id,
-                "migration ID must remain set until target VMM reports success",
+                "target VMM must be in the active VMM position after migration success",
             );
             assert_eq!(instance_runtime.nexus_state, InstanceState::Vmm);
             assert_instance_unlocked(instance);
@@ -1447,6 +1556,8 @@ mod test {
                 .await,
                 "sled resource records must exist after successful migration",
             );
+
+            state
         }
     }
 }
