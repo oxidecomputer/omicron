@@ -748,6 +748,7 @@ mod test {
     use crate::app::db::model::VmmRuntimeState;
     use crate::app::saga::create_saga_dag;
     use crate::app::sagas::test_helpers;
+    use crate::app::OpContext;
     use crate::external_api::params;
     use chrono::Utc;
     use dropshot::test_util::ClientTestContext;
@@ -757,6 +758,9 @@ mod test {
         create_default_ip_pool, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use omicron_common::api::internal::nexus::{
+        MigrationRuntimeState, MigrationState, Migrations,
+    };
     use omicron_test_utils::dev::poll;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PropolisUuid;
@@ -1078,5 +1082,245 @@ mod test {
             test_helpers::no_sled_resource_instance_records_exist(cptestctx)
                 .await
         );
+    }
+
+    // === migration source completed tests ===
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_source_completed_succeeds(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let test = MigrationTest::setup(cptestctx).await;
+
+        // Pretend the migration source has completed.
+        test.update_src_state(
+            cptestctx,
+            VmmState::Stopping,
+            MigrationState::Completed,
+        )
+        .await;
+
+        // Run the instance-update saga.
+        let nexus = &cptestctx.server.server_context().nexus;
+        nexus
+            .sagas
+            .saga_execute::<SagaInstanceUpdate>(test.saga_params())
+            .await
+            .expect("update saga should succeed");
+
+        test.verify_src_succeeded(cptestctx).await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_source_completed_actions_succeed_idempotently(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let test = MigrationTest::setup(cptestctx).await;
+
+        // Pretend the migration source has completed.
+        test.update_src_state(
+            cptestctx,
+            VmmState::Stopping,
+            MigrationState::Completed,
+        )
+        .await;
+
+        // Build the saga DAG with the provided test parameters
+        let dag =
+            create_saga_dag::<SagaInstanceUpdate>(test.saga_params()).unwrap();
+
+        crate::app::sagas::test_helpers::actions_succeed_idempotently(
+            &cptestctx.server.server_context().nexus,
+            dag,
+        )
+        .await;
+
+        test.verify_src_succeeded(cptestctx).await;
+    }
+
+    struct MigrationTest {
+        instance_id: InstanceUuid,
+        state: InstanceSnapshot,
+        authz_instance: authz::Instance,
+        opctx: OpContext,
+    }
+
+    impl MigrationTest {
+        fn target_vmm_id(&self) -> Uuid {
+            self.state
+                .target_vmm
+                .as_ref()
+                .expect("migrating instance must have a target VMM")
+                .id
+        }
+
+        async fn setup(cptestctx: &ControlPlaneTestContext) -> Self {
+            use crate::app::sagas::instance_migrate;
+
+            let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+            let client = &cptestctx.external_client;
+            let nexus = &cptestctx.server.server_context().nexus;
+            let datastore = nexus.datastore();
+            let _project_id = setup_test_project(&client).await;
+
+            let opctx = test_helpers::test_opctx(cptestctx);
+            let instance = create_instance(client).await;
+            let instance_id =
+                InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+            // Poke the instance to get it into the Running state.
+            let state =
+                test_helpers::instance_fetch(cptestctx, instance_id).await;
+            test_helpers::instance_simulate(cptestctx, &instance_id).await;
+
+            // Wait for the instance update saga triggered by a transition to
+            // Running to complete.
+            let state = wait_for_update(cptestctx, state.instance()).await;
+            let vmm = state.vmm().as_ref().unwrap();
+            let dst_sled_id = test_helpers::select_first_alternate_sled(
+                vmm,
+                &other_sleds[..],
+            );
+            let params = instance_migrate::Params {
+                serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+                instance: state.instance().clone(),
+                src_vmm: vmm.clone(),
+                migrate_params: params::InstanceMigrate {
+                    dst_sled_id: dst_sled_id.into_untyped_uuid(),
+                },
+            };
+
+            nexus
+                .sagas
+                .saga_execute::<instance_migrate::SagaInstanceMigrate>(params)
+                .await
+                .expect("Migration saga should succeed");
+
+            let (_, _, authz_instance, ..) =
+                LookupPath::new(&opctx, &datastore)
+                    .instance_id(instance_id.into_untyped_uuid())
+                    .fetch()
+                    .await
+                    .expect("test instance should be present in datastore");
+            let state = datastore
+                .instance_fetch_all(&opctx, &authz_instance)
+                .await
+                .expect("test instance should be present in datastore");
+
+            Self { authz_instance, state, opctx, instance_id }
+        }
+
+        async fn update_src_state(
+            &self,
+            cptestctx: &ControlPlaneTestContext,
+            vmm_state: VmmState,
+            migration_state: MigrationState,
+        ) {
+            let src_vmm = self
+                .state
+                .active_vmm
+                .as_ref()
+                .expect("must have an active VMM");
+            let vmm_id = PropolisUuid::from_untyped_uuid(src_vmm.id);
+            let new_runtime = nexus_db_model::VmmRuntimeState {
+                time_state_updated: Utc::now(),
+                gen: Generation(src_vmm.runtime.gen.0.next()),
+                state: vmm_state,
+            };
+
+            let migration = self
+                .state
+                .migration
+                .as_ref()
+                .expect("must have an active migration");
+            let migration_out = MigrationRuntimeState {
+                migration_id: migration.id,
+                state: migration_state,
+                gen: migration.source_gen.0.next(),
+                time_updated: Utc::now(),
+            };
+            let migrations = Migrations {
+                migration_in: None,
+                migration_out: Some(&migration_out),
+            };
+
+            info!(
+                cptestctx.logctx.log,
+                "updating source VMM state...";
+                "propolis_id" => %vmm_id,
+                "new_runtime" => ?new_runtime,
+                "migration_out" => ?migration_out,
+            );
+
+            cptestctx
+                .server
+                .server_context()
+                .nexus
+                .datastore()
+                .vmm_and_migration_update_runtime(
+                    vmm_id,
+                    &new_runtime,
+                    migrations,
+                )
+                .await
+                .expect("updating migration source state should succeed");
+        }
+
+        fn saga_params(&self) -> Params {
+            Params {
+                authz_instance: self.authz_instance.clone(),
+                serialized_authn: authn::saga::Serialized::for_opctx(
+                    &self.opctx,
+                ),
+            }
+        }
+
+        async fn verify_src_succeeded(
+            &self,
+            cptestctx: &ControlPlaneTestContext,
+        ) {
+            let state =
+                test_helpers::instance_fetch(cptestctx, self.instance_id).await;
+            let instance = state.instance();
+            let instance_runtime = instance.runtime();
+
+            let active_vmm_id = instance_runtime.propolis_id;
+            assert_eq!(
+                active_vmm_id,
+                Some(self.target_vmm_id()),
+                "target VMM must be in the active VMM position after source success",
+            );
+            assert_eq!(
+                instance_runtime.dst_propolis_id,
+                Some(active_vmm_id.unwrap()),
+                "target VMM ID must remain set until target VMM reports success",
+            );
+            assert_eq!(
+                instance_runtime.migration_id,
+                self.state.instance.runtime().migration_id,
+                "migration ID must remain set until target VMM reports success",
+            );
+            assert_eq!(instance_runtime.nexus_state, InstanceState::Vmm);
+            assert_instance_unlocked(instance);
+            assert!(
+                !test_helpers::no_virtual_provisioning_resource_records_exist(
+                    cptestctx
+                )
+                .await,
+                "virtual provisioning records must exist after successful migration",
+            );
+            assert!(
+            !test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx)
+                .await,
+                "virtual provisioning records must exist after successful migration",
+        );
+            assert!(
+                !test_helpers::no_sled_resource_instance_records_exist(
+                    cptestctx
+                )
+                .await,
+                "sled resource records must exist after successful migration",
+            );
+        }
     }
 }

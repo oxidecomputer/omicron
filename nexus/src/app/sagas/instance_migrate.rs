@@ -591,21 +591,16 @@ async fn sim_instance_migrate(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::app::sagas::test_helpers;
-    use camino::Utf8Path;
     use dropshot::test_util::ClientTestContext;
-    use nexus_test_interface::NexusServer;
     use nexus_test_utils::resource_helpers::{
         create_default_ip_pool, create_project, object_create,
     };
-    use nexus_test_utils::start_sled_agent;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
-    use omicron_sled_agent::sim::Server;
-
-    use super::*;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -617,35 +612,6 @@ mod tests {
         create_default_ip_pool(&client).await;
         let project = create_project(&client, PROJECT_NAME).await;
         project.identity.id
-    }
-
-    async fn add_sleds(
-        cptestctx: &ControlPlaneTestContext,
-        num_sleds: usize,
-    ) -> Vec<(SledUuid, Server)> {
-        let mut sas = Vec::with_capacity(num_sleds);
-        for _ in 0..num_sleds {
-            let sa_id = SledUuid::new_v4();
-            let log =
-                cptestctx.logctx.log.new(o!("sled_id" => sa_id.to_string()));
-            let addr =
-                cptestctx.server.get_http_server_internal_address().await;
-
-            info!(&cptestctx.logctx.log, "Adding simulated sled"; "sled_id" => %sa_id);
-            let update_dir = Utf8Path::new("/should/be/unused");
-            let sa = start_sled_agent(
-                log,
-                addr,
-                sa_id,
-                &update_dir,
-                omicron_sled_agent::sim::SimMode::Explicit,
-            )
-            .await
-            .unwrap();
-            sas.push((sa_id, sa));
-        }
-
-        sas
     }
 
     async fn create_instance(
@@ -675,32 +641,11 @@ mod tests {
         .await
     }
 
-    fn select_first_alternate_sled(
-        db_vmm: &db::model::Vmm,
-        other_sleds: &[(SledUuid, Server)],
-    ) -> SledUuid {
-        let default_sled_uuid: SledUuid =
-            nexus_test_utils::SLED_AGENT_UUID.parse().unwrap();
-        if other_sleds.is_empty() {
-            panic!("need at least one other sled");
-        }
-
-        if other_sleds.iter().any(|sled| sled.0 == default_sled_uuid) {
-            panic!("default test sled agent was in other_sleds");
-        }
-
-        if db_vmm.sled_id == default_sled_uuid.into_untyped_uuid() {
-            other_sleds[0].0
-        } else {
-            default_sled_uuid
-        }
-    }
-
     #[nexus_test(server = crate::Server)]
     async fn test_saga_basic_usage_succeeds(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let other_sleds = add_sleds(cptestctx, 1).await;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
@@ -714,7 +659,8 @@ mod tests {
 
         let state = test_helpers::instance_fetch(cptestctx, instance_id).await;
         let vmm = state.vmm().as_ref().unwrap();
-        let dst_sled_id = select_first_alternate_sled(vmm, &other_sleds);
+        let dst_sled_id =
+            test_helpers::select_first_alternate_sled(vmm, &other_sleds[..]);
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
             instance: state.instance().clone(),
@@ -747,7 +693,7 @@ mod tests {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let log = &cptestctx.logctx.log;
-        let other_sleds = add_sleds(cptestctx, 1).await;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
@@ -772,8 +718,10 @@ mod tests {
                         .as_ref()
                         .expect("instance should have a vmm before migrating");
 
-                    let dst_sled_id =
-                        select_first_alternate_sled(old_vmm, &other_sleds);
+                    let dst_sled_id = test_helpers::select_first_alternate_sled(
+                        old_vmm,
+                        &other_sleds[..],
+                    );
 
                     info!(log, "setting up new migration saga";
                           "old_instance" => ?old_instance,
