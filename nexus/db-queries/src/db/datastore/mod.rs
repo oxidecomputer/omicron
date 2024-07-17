@@ -394,9 +394,9 @@ mod test {
         BlockSize, ConsoleSession, Dataset, DatasetKind, ExternalIp,
         PhysicalDisk, PhysicalDiskKind, PhysicalDiskPolicy, PhysicalDiskState,
         Project, Rack, Region, SiloUser, SledBaseboard, SledSystemHardware,
-        SledUpdate, SshKey, VpcSubnet, Zpool,
+        SledUpdate, SshKey, Zpool,
     };
-    use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
+    use crate::db::queries::vpc_subnet::InsertVpcSubnetQuery;
     use chrono::{Duration, Utc};
     use futures::stream;
     use futures::StreamExt;
@@ -1599,11 +1599,7 @@ mod test {
             "172.30.0.0/22".parse().unwrap(),
             "fd00::/64".parse().unwrap(),
         );
-        let values = FilterConflictingVpcSubnetRangesQuery::new(subnet);
-        let query =
-            diesel::insert_into(db::schema::vpc_subnet::dsl::vpc_subnet)
-                .values(values)
-                .returning(VpcSubnet::as_returning());
+        let query = InsertVpcSubnetQuery::new(subnet);
         println!("{}", diesel::debug_query(&query));
         let explanation = query.explain_async(&conn).await.unwrap();
         assert!(

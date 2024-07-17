@@ -8,7 +8,7 @@ use super::NexusSaga;
 use super::ACTION_GENERATE_ID;
 use crate::app::sagas::declare_saga_actions;
 use crate::external_api::params;
-use nexus_db_queries::db::queries::vpc_subnet::SubnetError;
+use nexus_db_queries::db::queries::vpc_subnet::InsertVpcSubnetError;
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults as defaults;
 use omicron_common::api::external;
@@ -368,7 +368,7 @@ async fn svc_create_subnet(
         .vpc_create_subnet(&opctx, &authz_vpc, subnet)
         .await
         .map_err(|err| match err {
-            SubnetError::OverlappingIpRange(ip) => {
+            InsertVpcSubnetError::OverlappingIpRange(ip) => {
                 let ipv4_block = &defaults::DEFAULT_VPC_SUBNET_IPV4_BLOCK;
                 let log = sagactx.user_data().log();
                 error!(
@@ -388,8 +388,20 @@ async fn svc_create_subnet(
                         found overlapping IP address ranges",
                 )
             }
-            SubnetError::SameIdWithDifferentIpBlock(e) => e,
-            SubnetError::External(e) => e,
+            InsertVpcSubnetError::SameIdWithDifferentIpBlocks(e) => {
+                error!(
+                    sagactx.user_data().log(),
+                    "failed to create default VPC Subnet, \
+                    there is an existing (non-deleted) record \
+                    in the database with _different_ IP blocks";
+                    "vpc_id" => ?vpc_id,
+                    "subnet_id" => ?default_subnet_id,
+                    "ipv4_block" => ?defaults::DEFAULT_VPC_SUBNET_IPV4_BLOCK,
+                    "ipv6_block" => ?ipv6_block,
+                );
+                e
+            }
+            InsertVpcSubnetError::External(e) => e,
         })
         .map_err(ActionError::action_failed)
 }
