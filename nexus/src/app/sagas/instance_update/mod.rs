@@ -764,6 +764,7 @@ mod test {
     use omicron_test_utils::dev::poll;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PropolisUuid;
+    use omicron_uuid_kinds::SledUuid;
     use std::time::Duration;
     use uuid::Uuid;
 
@@ -900,6 +901,7 @@ mod test {
     async fn test_active_vmm_destroyed_succeeds(
         cptestctx: &ControlPlaneTestContext,
     ) {
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
         let (state, params) = setup_active_vmm_destroyed_test(cptestctx).await;
 
         // Run the instance-update saga.
@@ -918,6 +920,7 @@ mod test {
     async fn test_active_vmm_destroyed_actions_succeed_idempotently(
         cptestctx: &ControlPlaneTestContext,
     ) {
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
         let (state, params) = setup_active_vmm_destroyed_test(cptestctx).await;
 
         // Build the saga DAG with the provided test parameters
@@ -937,36 +940,71 @@ mod test {
     async fn test_active_vmm_destroyed_action_failure_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let (state, Params { serialized_authn, authz_instance }) =
-            setup_active_vmm_destroyed_test(cptestctx).await;
-        let instance_id =
-            InstanceUuid::from_untyped_uuid(state.instance().id());
-
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let nexus = &cptestctx.server.server_context().nexus;
         test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
-            &cptestctx.server.server_context().nexus,
+            nexus,
             || {
                 Box::pin(async {
-                    Params {
-                        serialized_authn: serialized_authn.clone(),
-                        authz_instance: authz_instance.clone(),
-                    }
+                    let (_, params) =
+                        setup_active_vmm_destroyed_test(cptestctx).await;
+                    params
                 })
             },
             || {
                 Box::pin({
                     async {
-                        let state = test_helpers::instance_fetch(
+                        let state = test_helpers::instance_fetch_by_name(
                             cptestctx,
-                            instance_id,
+                            INSTANCE_NAME,
+                            PROJECT_NAME,
                         )
                         .await;
+                        let instance = state.instance();
+
                         // Unlike most other sagas, we actually don't unwind the
                         // work performed by an update saga, as we would prefer
                         // that at least some of it succeeds. The only thing
                         // that *needs* to be rolled back when an
                         // instance-update saga fails is that the updater lock
                         // *MUST* be released so that a subsequent saga can run.
-                        assert_instance_unlocked(state.instance());
+                        assert_instance_unlocked(instance);
+
+                        // Throw away the instance so that subsequent unwinding
+                        // tests also operate on an instance in the correct
+                        // preconditions to actually run the saga path we mean
+                        // to test.
+                        let instance_id =
+                            InstanceUuid::from_untyped_uuid(instance.id());
+                        // Depending on where we got to in the update saga, the
+                        // sled-agent may or may not actually be willing to stop
+                        // the instance, so just manually update the DB record
+                        // into a state where we can delete it to make sure
+                        // everything is cleaned up for the next run.
+                        nexus
+                            .datastore()
+                            .instance_update_runtime(
+                                &instance_id,
+                                &InstanceRuntimeState {
+                                    time_updated: Utc::now(),
+                                    gen: Generation(
+                                        instance.runtime().gen.0.next(),
+                                    ),
+                                    propolis_id: None,
+                                    dst_propolis_id: None,
+                                    migration_id: None,
+                                    nexus_state: InstanceState::NoVmm,
+                                },
+                            )
+                            .await
+                            .unwrap();
+
+                        test_helpers::instance_delete_by_name(
+                            cptestctx,
+                            INSTANCE_NAME,
+                            PROJECT_NAME,
+                        )
+                        .await;
                     }
                 })
             },
@@ -983,7 +1021,6 @@ mod test {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore().clone();
-        let _project_id = setup_test_project(&client).await;
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
@@ -1090,7 +1127,9 @@ mod test {
     async fn test_migration_source_completed_succeeds(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let test = MigrationTest::setup(cptestctx).await;
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+        let test = MigrationTest::setup(cptestctx, &other_sleds).await;
 
         // Pretend the migration source has completed.
         test.update_src_state(
@@ -1115,7 +1154,9 @@ mod test {
     async fn test_migration_source_completed_actions_succeed_idempotently(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let test = MigrationTest::setup(cptestctx).await;
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+        let test = MigrationTest::setup(cptestctx, &other_sleds).await;
 
         // Pretend the migration source has completed.
         test.update_src_state(
@@ -1138,6 +1179,92 @@ mod test {
         test.verify_src_succeeded(cptestctx).await;
     }
 
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_source_completed_can_unwind(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+
+        test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
+            nexus,
+            || {
+                Box::pin(async {
+                    let test =
+                        MigrationTest::setup(cptestctx, &other_sleds).await;
+                    // Pretend the migration source has completed.
+                    test.update_src_state(
+                        cptestctx,
+                        VmmState::Stopping,
+                        MigrationState::Completed,
+                    )
+                    .await;
+                    test.saga_params()
+                })
+            },
+            || {
+                Box::pin({
+                    async {
+                        let state = test_helpers::instance_fetch_by_name(
+                            cptestctx,
+                            INSTANCE_NAME,
+                            PROJECT_NAME,
+                        )
+                        .await;
+                        let instance = state.instance();
+
+                        // Unlike most other sagas, we actually don't unwind the
+                        // work performed by an update saga, as we would prefer
+                        // that at least some of it succeeds. The only thing
+                        // that *needs* to be rolled back when an
+                        // instance-update saga fails is that the updater lock
+                        // *MUST* be released so that a subsequent saga can run.
+                        assert_instance_unlocked(instance);
+
+                        // Throw away the instance so that subsequent unwinding
+                        // tests also operate on an instance in the correct
+                        // preconditions to actually run the saga path we mean
+                        // to test.
+                        let instance_id =
+                            InstanceUuid::from_untyped_uuid(instance.id());
+                        // Depending on where we got to in the update saga, the
+                        // sled-agent may or may not actually be willing to stop
+                        // the instance, so just manually update the DB record
+                        // into a state where we can delete it to make sure
+                        // everything is cleaned up for the next run.
+                        nexus
+                            .datastore()
+                            .instance_update_runtime(
+                                &instance_id,
+                                &InstanceRuntimeState {
+                                    time_updated: Utc::now(),
+                                    gen: Generation(
+                                        instance.runtime().gen.0.next(),
+                                    ),
+                                    propolis_id: None,
+                                    dst_propolis_id: None,
+                                    migration_id: None,
+                                    nexus_state: InstanceState::NoVmm,
+                                },
+                            )
+                            .await
+                            .unwrap();
+
+                        test_helpers::instance_delete_by_name(
+                            cptestctx,
+                            INSTANCE_NAME,
+                            PROJECT_NAME,
+                        )
+                        .await;
+                    }
+                })
+            },
+            &cptestctx.logctx.log,
+        )
+        .await;
+    }
+
     struct MigrationTest {
         instance_id: InstanceUuid,
         state: InstanceSnapshot,
@@ -1154,14 +1281,15 @@ mod test {
                 .id
         }
 
-        async fn setup(cptestctx: &ControlPlaneTestContext) -> Self {
+        async fn setup(
+            cptestctx: &ControlPlaneTestContext,
+            other_sleds: &[(SledUuid, omicron_sled_agent::sim::Server)],
+        ) -> Self {
             use crate::app::sagas::instance_migrate;
 
-            let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
             let client = &cptestctx.external_client;
             let nexus = &cptestctx.server.server_context().nexus;
             let datastore = nexus.datastore();
-            let _project_id = setup_test_project(&client).await;
 
             let opctx = test_helpers::test_opctx(cptestctx);
             let instance = create_instance(client).await;

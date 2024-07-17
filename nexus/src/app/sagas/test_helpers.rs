@@ -194,6 +194,39 @@ pub async fn instance_fetch(
     db_state
 }
 
+pub async fn instance_fetch_by_name(
+    cptestctx: &ControlPlaneTestContext,
+    name: &str,
+    project_name: &str,
+) -> InstanceAndActiveVmm {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx = test_opctx(&cptestctx);
+    let instance_selector =
+        nexus_types::external_api::params::InstanceSelector {
+            project: Some(project_name.to_string().try_into().unwrap()),
+            instance: name.to_string().try_into().unwrap(),
+        };
+
+    let instance_lookup =
+        nexus.instance_lookup(&opctx, instance_selector).unwrap();
+    let (_, _, authz_instance, ..) = instance_lookup.fetch().await.unwrap();
+
+    let db_state = datastore
+        .instance_fetch_with_vmm(&opctx, &authz_instance)
+        .await
+        .expect("test instance's info should be fetchable");
+
+    info!(&cptestctx.logctx.log, "refetched instance info from db";
+        "instance_name" => name,
+        "project_name" => project_name,
+        "instance_id" => %authz_instance.id(),
+        "instance_and_vmm" => ?db_state,
+    );
+
+    db_state
+}
+
 pub(crate) async fn instance_wait_for_state(
     cptestctx: &ControlPlaneTestContext,
     instance_id: InstanceUuid,
