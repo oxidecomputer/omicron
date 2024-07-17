@@ -72,7 +72,7 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         address_lot_id: Uuid,
-        block: params::AddressLotBlock,
+        block: params::AddressLotBlockAddRemove,
     ) -> CreateResult<AddressLotBlock> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
         validate_block(&block)?;
@@ -85,7 +85,7 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         address_lot_id: Uuid,
-        block: params::AddressLotBlock,
+        block: params::AddressLotBlockAddRemove,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
         validate_block(&block)?;
@@ -108,7 +108,9 @@ impl super::Nexus {
     }
 }
 
-fn validate_block(block: &params::AddressLotBlock) -> Result<(), Error> {
+fn validate_block(
+    block: &params::AddressLotBlockAddRemove,
+) -> Result<(), Error> {
     match (&block.first_address, &block.last_address) {
         (IpAddr::V4(first), IpAddr::V4(last)) => {
             validate_v4_block(first, last)?

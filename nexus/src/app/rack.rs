@@ -28,7 +28,7 @@ use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::params::Address;
 use nexus_types::external_api::params::AddressConfig;
-use nexus_types::external_api::params::AddressLotBlock;
+use nexus_types::external_api::params::AddressLotBlockAddRemove;
 use nexus_types::external_api::params::BgpAnnounceSetCreate;
 use nexus_types::external_api::params::BgpAnnouncementCreate;
 use nexus_types::external_api::params::BgpConfigCreate;
@@ -379,7 +379,8 @@ impl super::Nexus {
 
         let first_address = IpAddr::V4(rack_network_config.infra_ip_first);
         let last_address = IpAddr::V4(rack_network_config.infra_ip_last);
-        let ipv4_block = AddressLotBlock { first_address, last_address };
+        let ipv4_block =
+            AddressLotBlockAddRemove { first_address, last_address };
 
         let address_lot_params = AddressLotCreate { identity, kind };
 
@@ -476,7 +477,7 @@ impl super::Nexus {
                     .address_lot_block_create(
                         &opctx,
                         address_lot_id,
-                        AddressLotBlock {
+                        AddressLotBlockAddRemove {
                             first_address: net.first_addr().into(),
                             last_address: net.last_addr().into(),
                         },

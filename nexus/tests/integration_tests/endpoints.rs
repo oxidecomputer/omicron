@@ -563,11 +563,12 @@ pub static DEMO_ADDRESS_LOT_CREATE: Lazy<params::AddressLotCreate> =
         kind: AddressLotKind::Infra,
     });
 
-pub static DEMO_ADDRESS_LOT_BLOCK_CREATE: Lazy<params::AddressLotBlock> =
-    Lazy::new(|| params::AddressLotBlock {
-        first_address: "203.0.113.10".parse().unwrap(),
-        last_address: "203.0.113.20".parse().unwrap(),
-    });
+pub static DEMO_ADDRESS_LOT_BLOCK_CREATE: Lazy<
+    params::AddressLotBlockAddRemove,
+> = Lazy::new(|| params::AddressLotBlockAddRemove {
+    first_address: "203.0.113.10".parse().unwrap(),
+    last_address: "203.0.113.20".parse().unwrap(),
+});
 
 pub const DEMO_BGP_CONFIG_CREATE_URL: &'static str =
     "/v1/system/networking/bgp?name_or_id=as47";

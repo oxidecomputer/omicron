@@ -1431,10 +1431,10 @@ pub struct AddressLotCreate {
     pub kind: AddressLotKind,
 }
 
-/// Parameters for creating an address lot block. Fist and last addresses are
-/// inclusive.
+/// Parameters for adding or removing an address lot block.
+/// First and last addresses are inclusive.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct AddressLotBlock {
+pub struct AddressLotBlockAddRemove {
     /// The first address in the lot (inclusive).
     pub first_address: IpAddr,
     /// The last address in the lot (inclusive).

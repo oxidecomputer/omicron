@@ -6327,7 +6327,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AddressLotBlock2"
+                "$ref": "#/components/schemas/AddressLotBlockAddRemove"
               }
             }
           },
@@ -6375,7 +6375,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AddressLotBlock2"
+                "$ref": "#/components/schemas/AddressLotBlockAddRemove"
               }
             }
           },
@@ -9816,8 +9816,8 @@
           "last_address"
         ]
       },
-      "AddressLotBlock2": {
-        "description": "Parameters for creating an address lot block. Fist and last addresses are inclusive.",
+      "AddressLotBlockAddRemove": {
+        "description": "Parameters for adding or removing an address lot block. First and last addresses are inclusive.",
         "type": "object",
         "properties": {
           "first_address": {

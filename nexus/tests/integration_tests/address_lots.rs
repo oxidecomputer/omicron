@@ -45,7 +45,7 @@ async fn test_address_lot_basic_crud(ctx: &ControlPlaneTestContext) {
         kind: AddressLotKind::Infra,
     };
 
-    let block_params = params::AddressLotBlock {
+    let block_params = params::AddressLotBlockAddRemove {
         first_address: "203.0.113.10".parse().unwrap(),
         last_address: "203.0.113.20".parse().unwrap(),
     };
@@ -140,7 +140,7 @@ async fn test_address_lot_invalid_range(ctx: &ControlPlaneTestContext) {
             },
             kind: AddressLotKind::Infra,
         },
-        params::AddressLotBlock {
+        params::AddressLotBlockAddRemove {
             first_address: "203.0.113.10".parse().unwrap(),
             last_address: "fd00:1701::d".parse().unwrap(),
         },
@@ -155,7 +155,7 @@ async fn test_address_lot_invalid_range(ctx: &ControlPlaneTestContext) {
             },
             kind: AddressLotKind::Infra,
         },
-        params::AddressLotBlock {
+        params::AddressLotBlockAddRemove {
             first_address: "203.0.113.20".parse().unwrap(),
             last_address: "203.0.113.10".parse().unwrap(),
         },
@@ -170,7 +170,7 @@ async fn test_address_lot_invalid_range(ctx: &ControlPlaneTestContext) {
             },
             kind: AddressLotKind::Infra,
         },
-        params::AddressLotBlock {
+        params::AddressLotBlockAddRemove {
             first_address: "fd00:1701::d".parse().unwrap(),
             last_address: "fd00:1701::a".parse().unwrap(),
         },

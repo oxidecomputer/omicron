@@ -3505,7 +3505,7 @@ async fn networking_address_lot_list(
 async fn networking_address_lot_block_add(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::AddressLotPath>,
-    block: TypedBody<params::AddressLotBlock>,
+    block: TypedBody<params::AddressLotBlockAddRemove>,
 ) -> Result<HttpResponseCreated<AddressLotBlock>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -3544,7 +3544,7 @@ async fn networking_address_lot_block_add(
 async fn networking_address_lot_block_remove(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::AddressLotPath>,
-    block: TypedBody<params::AddressLotBlock>,
+    block: TypedBody<params::AddressLotBlockAddRemove>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let handler = async {

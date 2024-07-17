@@ -202,7 +202,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         address_lot_id: Uuid,
-        params: params::AddressLotBlock,
+        params: params::AddressLotBlockAddRemove,
     ) -> CreateResult<AddressLotBlock> {
         use db::schema::address_lot_block::dsl;
 
@@ -265,7 +265,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         address_lot_id: Uuid,
-        params: params::AddressLotBlock,
+        params: params::AddressLotBlockAddRemove,
     ) -> DeleteResult {
         use db::schema::address_lot_block::dsl;
         use db::schema::address_lot_rsvd_block::dsl as rsvd_block_dsl;
