@@ -70,11 +70,15 @@ impl steno::SecStore for CockroachDbSecStore {
         // Add retries for this operation. saga_create_event is internally
         // idempotent, so we can retry indefinitely until the event has been
         // durably recorded.
-        backoff_saga_operation(&log, || {
-            self.datastore
-                .saga_create_event(&our_event)
-                .map_err(backoff::BackoffError::transient)
-        })
+        backoff_saga_operation(
+            &log,
+            || {
+                self.datastore
+                    .saga_create_event(&our_event)
+                    .map_err(backoff::BackoffError::transient)
+            },
+            "recording saga event",
+        )
         .await
     }
 
@@ -94,11 +98,20 @@ impl steno::SecStore for CockroachDbSecStore {
         // idempotent, so we can retry indefinitely until the event has been
         // durably recorded. (But see the note in saga_update_state about how
         // idempotence is enough for now, but may not be in the future.)
-        backoff_saga_operation(&log, || {
-            self.datastore
-                .saga_update_state(id, update, self.sec_id, Generation::new())
-                .map_err(backoff::BackoffError::transient)
-        })
+        backoff_saga_operation(
+            &log,
+            || {
+                self.datastore
+                    .saga_update_state(
+                        id,
+                        update,
+                        self.sec_id,
+                        Generation::new(),
+                    )
+                    .map_err(backoff::BackoffError::transient)
+            },
+            "updating saga state",
+        )
         .await
     }
 }
@@ -119,7 +132,7 @@ impl steno::SecStore for CockroachDbSecStore {
 /// At a higher level, callers should plan for the fact saga execution could
 /// potentially loop indefinitely while the datastore (or other dependent
 /// services) are down.
-async fn backoff_saga_operation<F, Fut>(log: &Logger, op: F)
+async fn backoff_saga_operation<F, Fut>(log: &Logger, op: F, description: &str)
 where
     F: Fn() -> Fut,
     Fut: Future<Output = Result<(), backoff::BackoffError<external::Error>>>,
@@ -133,7 +146,7 @@ where
             if http_error.status_code.is_client_error() {
                 error!(
                     &log,
-                    "client error while recording saga event (likely \
+                    "client error while {description} (likely \
                      requires operator intervention), retrying anyway";
                     "error" => &error,
                     "call_count" => call_count,
@@ -142,7 +155,7 @@ where
             } else if total_duration > Duration::from_secs(20) {
                 warn!(
                     &log,
-                    "server error while recording saga event, retrying";
+                    "server error while {description}, retrying";
                     "error" => &error,
                     "call_count" => call_count,
                     "total_duration" => ?total_duration,
@@ -150,7 +163,7 @@ where
             } else {
                 info!(
                     &log,
-                    "server error while recording saga event, retrying";
+                    "server error while {description}, retrying";
                     "error" => &error,
                     "call_count" => call_count,
                     "total_duration" => ?total_duration,
