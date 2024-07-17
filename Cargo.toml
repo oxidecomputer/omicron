@@ -257,10 +257,13 @@ camino-tempfile = "1.1.1"
 cancel-safe-futures = "0.1.5"
 cargo_metadata = "0.18.1"
 chacha20poly1305 = "0.10.1"
-ciborium = "0.2.2"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
+ciborium = "0.2.2"
 clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
+# TODO: Pin a rev before merging
+#clickward = { git = "https://github.com/oxidecomputer/clickward", branch = "main" }
+clickward = { path = "../clickward" }
 cockroach-admin-client = { path = "clients/cockroach-admin-client" }
 colored = "2.1"
 const_format = "0.2.32"

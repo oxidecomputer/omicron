@@ -16,6 +16,7 @@ bcs.workspace = true
 camino.workspace = true
 chrono.workspace = true
 clap.workspace = true
+clickward.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 highway.workspace = true
@@ -83,6 +84,7 @@ workspace = true
 features = [ "rt-multi-thread", "macros" ]
 
 [dev-dependencies]
+camino-tempfile.workspace = true
 expectorate.workspace = true
 indexmap.workspace = true
 itertools.workspace = true
