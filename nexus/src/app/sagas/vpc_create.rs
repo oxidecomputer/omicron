@@ -388,19 +388,6 @@ async fn svc_create_subnet(
                         found overlapping IP address ranges",
                 )
             }
-            InsertVpcSubnetError::SameIdWithDifferentIpBlocks(e) => {
-                error!(
-                    sagactx.user_data().log(),
-                    "failed to create default VPC Subnet, \
-                    there is an existing (non-deleted) record \
-                    in the database with _different_ IP blocks";
-                    "vpc_id" => ?vpc_id,
-                    "subnet_id" => ?default_subnet_id,
-                    "ipv4_block" => ?defaults::DEFAULT_VPC_SUBNET_IPV4_BLOCK,
-                    "ipv6_block" => ?ipv6_block,
-                );
-                e
-            }
             InsertVpcSubnetError::External(e) => e,
         })
         .map_err(ActionError::action_failed)
