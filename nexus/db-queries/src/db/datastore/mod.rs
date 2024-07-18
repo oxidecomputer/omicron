@@ -892,7 +892,8 @@ mod test {
                 .collect()
                 .await;
 
-            let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
+            let bogus_addr =
+                Some(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0));
 
             let datasets = stream::iter(zpools)
                 .map(|zpool| {
@@ -1266,7 +1267,8 @@ mod test {
             .collect()
             .await;
 
-        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
+        let bogus_addr =
+            Some(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0));
 
         // 1 dataset per zpool
         stream::iter(zpool_ids.clone())
@@ -1365,7 +1367,8 @@ mod test {
                 .collect()
                 .await;
 
-        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
+        let bogus_addr =
+            Some(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0));
 
         // 1 dataset per zpool
         stream::iter(zpool_ids)
@@ -1444,7 +1447,8 @@ mod test {
                 physical_disk_id,
             )
             .await;
-            let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
+            let bogus_addr =
+                Some(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0));
             let dataset = Dataset::new(
                 Uuid::new_v4(),
                 zpool_id,

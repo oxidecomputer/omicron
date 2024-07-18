@@ -525,8 +525,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.dataset (
     pool_id UUID NOT NULL,
 
     /* Contact information for the dataset */
-    ip INET NOT NULL,
-    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
+    ip INET,
+    port INT4 CHECK (port BETWEEN 0 AND 65535),
 
     kind omicron.public.dataset_kind NOT NULL,
 
@@ -537,6 +537,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.dataset (
     CONSTRAINT size_used_column_set_for_crucible CHECK (
       (kind != 'crucible') OR
       (kind = 'crucible' AND size_used IS NOT NULL)
+    ),
+
+    CONSTRAINT ip_and_port_set_for_crucible CHECK (
+      (kind != 'crucible') OR
+      (kind = 'crucible' AND ip IS NOT NULL and port IS NOT NULL)
     )
 );
 
@@ -4140,7 +4145,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '82.0.0', NULL)
+    (TRUE, NOW(), NOW(), '83.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
