@@ -1064,6 +1064,15 @@ impl Client {
         }
     }
 
+    /// Useful for testing and introspection
+    pub async fn list_replicated_tables(&self) -> Result<Vec<String>, Error> {
+        self.list_oximeter_database_tables(ListDetails {
+            include_version: true,
+            replicated: true,
+        })
+        .await
+    }
+
     /// List tables in the oximeter database.
     async fn list_oximeter_database_tables(
         &self,

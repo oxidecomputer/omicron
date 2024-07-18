@@ -7,9 +7,9 @@ use camino_tempfile::Builder;
 use dropshot::test_util::log_prefix_for_test;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::test_setup_log;
-use oximeter_db::Client;
-use std::net::SocketAddr;
+use oximeter_db::{Client, DbWrite};
 use std::time::Duration;
+use tokio::net::TcpStream;
 
 #[tokio::test]
 async fn test_cluster() -> anyhow::Result<()> {
@@ -22,8 +22,10 @@ async fn test_cluster() -> anyhow::Result<()> {
         .tempdir_in(parent_dir)
         .context("failed to create tempdir for clickward deployment")?;
 
-    let deployment =
-        clickward::Deployment::new_with_default_port_config(dir.path().into());
+    let deployment = clickward::Deployment::new_with_default_port_config(
+        dir.path().into(),
+        "oximeter_cluster".to_string(),
+    );
 
     let num_keepers = 3;
     let num_replicas = 2;
@@ -32,12 +34,53 @@ async fn test_cluster() -> anyhow::Result<()> {
         .context("failed to generate config")?;
     deployment.deploy().context("failed to deploy")?;
 
-    let port = deployment.http_port(1);
-    let addr: SocketAddr = format!("[::1]:{port}").parse().unwrap();
-    let client = Client::new(addr, log);
-    wait_for_ping(&client).await?;
+    let client1 = Client::new(deployment.http_addr(1)?, log);
+    let client2 = Client::new(deployment.http_addr(2)?, log);
+    wait_for_ping(&client1).await?;
+    wait_for_ping(&client2).await?;
+    wait_for_keepers(&deployment, 1..3).await?;
+
+    client1.init_replicated_db().await.context("Failed to initialize db")?;
+
+    // Ensure our database tables show up on both clients
+    let output1 = client1.list_replicated_tables().await?;
+    let output2 = client2.list_replicated_tables().await?;
+    assert_eq!(output1, output2);
 
     deployment.teardown()?;
+
+    Ok(())
+}
+
+/// Wait for all keeper servers to accept connections
+async fn wait_for_keepers(
+    deployment: &clickward::Deployment,
+    range: std::ops::Range<u64>,
+) -> anyhow::Result<()> {
+    let mut keeper_addrs = Vec::new();
+    for id in range {
+        keeper_addrs.push(deployment.keeper_addr(id)?);
+    }
+
+    poll::wait_for_condition(
+        || async {
+            let mut done = true;
+            for addr in keeper_addrs.clone() {
+                if TcpStream::connect(addr).await.is_err() {
+                    done = false;
+                }
+            }
+            if !done {
+                Err(poll::CondCheckError::<std::io::Error>::NotYet)
+            } else {
+                Ok(())
+            }
+        },
+        &Duration::from_millis(1),
+        &Duration::from_secs(10),
+    )
+    .await
+    .context("failed to contact all keepers")?;
 
     Ok(())
 }
