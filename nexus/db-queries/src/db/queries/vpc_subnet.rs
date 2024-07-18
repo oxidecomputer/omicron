@@ -40,13 +40,17 @@ use uuid::Uuid;
 /// overlap AS MATERIALIZED (
 ///     SELECT
 ///         -- NOTE: This cast always fails, we just use _how_ it fails to
-///         -- learn which IP block overlaps.
+///         -- learn which IP block overlaps. The filter `id != <id>` below
+///         -- means we're explicitly ignoring an existing, identical record.
+///         -- So this cast is only run if there is another record in the same
+///         -- VPC with an overlapping subnet, which is exactly the error case
+///         -- we're trying to cacth.
 ///         CAST(
 ///             IF(
 ///                 inet_contains_or_equals(ipv4_block, <ipv4_block>),
 ///                'ipv4',
-///                 'ipv6'
-///             j)
+///                'ipv6'
+///             )
 ///             AS BOOL
 ///         )
 ///     FROM
