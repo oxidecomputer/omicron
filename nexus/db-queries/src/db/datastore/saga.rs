@@ -412,6 +412,10 @@ mod test {
                 .await
                 .expect("inserting duplicate node events");
         }
+
+        // Test cleanup
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -463,6 +467,10 @@ mod test {
             )
             .await
             .expect("updating state to Done again");
+
+        // Test cleanup
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 
     /// Helpers to create sagas.

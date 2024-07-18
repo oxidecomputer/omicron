@@ -68,7 +68,7 @@ impl Server {
 
         let dropshot_config = dropshot::ConfigDropshot {
             bind_address: SocketAddr::V6(sled_address),
-            ..config.dropshot
+            ..config.dropshot.clone()
         };
         let dropshot_log = log.new(o!("component" => "dropshot (SledAgent)"));
         let http_server = dropshot::HttpServerStarter::new(

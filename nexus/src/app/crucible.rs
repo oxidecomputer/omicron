@@ -69,11 +69,17 @@ impl super::Nexus {
     fn crucible_agent_client_for_dataset(
         &self,
         dataset: &db::model::Dataset,
-    ) -> CrucibleAgentClient {
-        CrucibleAgentClient::new_with_client(
-            &format!("http://{}", dataset.address()),
+    ) -> Result<CrucibleAgentClient, Error> {
+        let Some(addr) = dataset.address() else {
+            return Err(Error::internal_error(
+                "Missing crucible dataset address",
+            ));
+        };
+
+        Ok(CrucibleAgentClient::new_with_client(
+            &format!("http://{}", addr),
             self.reqwest_client.clone(),
-        )
+        ))
     }
 
     /// Return if the Crucible agent is expected to be there and answer Nexus:
@@ -147,7 +153,7 @@ impl super::Nexus {
         dataset: &db::model::Dataset,
         region: &db::model::Region,
     ) -> Result<Region, Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset);
+        let client = self.crucible_agent_client_for_dataset(dataset)?;
         let dataset_id = dataset.id();
 
         let Ok(extent_count) = u32::try_from(region.extent_count()) else {
@@ -261,7 +267,7 @@ impl super::Nexus {
         dataset: &db::model::Dataset,
         region_id: Uuid,
     ) -> Result<Option<Region>, Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset);
+        let client = self.crucible_agent_client_for_dataset(dataset)?;
         let dataset_id = dataset.id();
 
         let result = ProgenitorOperationRetry::new(
@@ -303,7 +309,7 @@ impl super::Nexus {
         dataset: &db::model::Dataset,
         region_id: Uuid,
     ) -> Result<GetSnapshotResponse, Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset);
+        let client = self.crucible_agent_client_for_dataset(dataset)?;
         let dataset_id = dataset.id();
 
         let result = ProgenitorOperationRetry::new(
@@ -343,7 +349,7 @@ impl super::Nexus {
         dataset: &db::model::Dataset,
         region_id: Uuid,
     ) -> Result<(), Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset);
+        let client = self.crucible_agent_client_for_dataset(dataset)?;
         let dataset_id = dataset.id();
 
         let result = ProgenitorOperationRetry::new(
@@ -386,7 +392,7 @@ impl super::Nexus {
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset);
+        let client = self.crucible_agent_client_for_dataset(dataset)?;
         let dataset_id = dataset.id();
 
         let result = ProgenitorOperationRetry::new(
@@ -435,7 +441,7 @@ impl super::Nexus {
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset);
+        let client = self.crucible_agent_client_for_dataset(dataset)?;
         let dataset_id = dataset.id();
 
         let result = ProgenitorOperationRetry::new(

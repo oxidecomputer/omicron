@@ -534,12 +534,13 @@ async fn srrs_replace_region_in_volume(
         "ensured_dataset_and_region",
     )?;
 
-    let new_region_address = SocketAddrV6::new(
-        *new_dataset.address().ip(),
-        ensured_region.port_number,
-        0,
-        0,
-    );
+    let Some(new_address) = new_dataset.address() else {
+        return Err(ActionError::action_failed(Error::internal_error(
+            "Dataset missing IP address",
+        )));
+    };
+    let new_region_address =
+        SocketAddrV6::new(*new_address.ip(), ensured_region.port_number, 0, 0);
 
     // If this node is rerun, the forward action will have overwritten
     // db_region's volume id, so get the cached copy.
@@ -611,12 +612,11 @@ async fn srrs_replace_region_in_volume_undo(
         "ensured_dataset_and_region",
     )?;
 
-    let new_region_address = SocketAddrV6::new(
-        *new_dataset.address().ip(),
-        ensured_region.port_number,
-        0,
-        0,
-    );
+    let Some(new_address) = new_dataset.address() else {
+        anyhow::bail!("Dataset missing IP address");
+    };
+    let new_region_address =
+        SocketAddrV6::new(*new_address.ip(), ensured_region.port_number, 0, 0);
 
     // The forward action will have overwritten db_region's volume id, so get
     // the cached copy.
@@ -894,25 +894,25 @@ pub(crate) mod test {
             Dataset::new(
                 Uuid::new_v4(),
                 Uuid::new_v4(),
-                "[fd00:1122:3344:101::1]:12345".parse().unwrap(),
+                Some("[fd00:1122:3344:101::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
             ),
             Dataset::new(
                 Uuid::new_v4(),
                 Uuid::new_v4(),
-                "[fd00:1122:3344:102::1]:12345".parse().unwrap(),
+                Some("[fd00:1122:3344:102::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
             ),
             Dataset::new(
                 Uuid::new_v4(),
                 Uuid::new_v4(),
-                "[fd00:1122:3344:103::1]:12345".parse().unwrap(),
+                Some("[fd00:1122:3344:103::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
             ),
             Dataset::new(
                 Uuid::new_v4(),
                 Uuid::new_v4(),
-                "[fd00:1122:3344:104::1]:12345".parse().unwrap(),
+                Some("[fd00:1122:3344:104::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
             ),
         ];
