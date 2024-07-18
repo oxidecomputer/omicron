@@ -142,6 +142,26 @@ pub(crate) async fn instance_simulate(
     sa.instance_finish_transition(instance_id.into_untyped_uuid()).await;
 }
 
+pub(crate) async fn instance_single_step_on_sled(
+    cptestctx: &ControlPlaneTestContext,
+    instance_id: &InstanceUuid,
+    sled_id: &SledUuid,
+) {
+    info!(
+        &cptestctx.logctx.log,
+        "Single-stepping simulated instance on sled";
+        "instance_id" => %instance_id,
+        "sled_id" => %sled_id,
+    );
+    let nexus = &cptestctx.server.server_context().nexus;
+    let sa = nexus
+        .sled_client(sled_id)
+        .await
+        .expect("sled must exist to simulate a state change");
+
+    sa.instance_single_step(instance_id.into_untyped_uuid()).await;
+}
+
 pub(crate) async fn instance_simulate_by_name(
     cptestctx: &ControlPlaneTestContext,
     name: &str,

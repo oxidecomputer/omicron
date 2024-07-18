@@ -1373,10 +1373,10 @@ mod test {
             let state =
                 test_helpers::instance_fetch(cptestctx, instance_id).await;
             test_helpers::instance_simulate(cptestctx, &instance_id).await;
-
             // Wait for the instance update saga triggered by a transition to
             // Running to complete.
             let state = wait_for_update(cptestctx, state.instance()).await;
+
             let vmm = state.vmm().as_ref().unwrap();
             let dst_sled_id =
                 test_helpers::select_first_alternate_sled(vmm, other_sleds);
@@ -1394,6 +1394,17 @@ mod test {
                 .saga_execute::<instance_migrate::SagaInstanceMigrate>(params)
                 .await
                 .expect("Migration saga should succeed");
+
+            // Poke the destination sled just enough to make it appear to have a VMM.
+            test_helpers::instance_single_step_on_sled(
+                cptestctx,
+                &instance_id,
+                &dst_sled_id,
+            )
+            .await;
+            // Wait for the instance update saga triggered by poking the target
+            // VMM to complete (it should be a NOP).
+            wait_for_update(cptestctx, state.instance()).await;
 
             let (_, _, authz_instance, ..) =
                 LookupPath::new(&opctx, &datastore)
@@ -1653,19 +1664,16 @@ mod test {
 
             let target_destroyed = self
                 .outcome
-                .source
+                .target
                 .as_ref()
                 .map(|(_, state)| state == &VmmState::Destroyed)
                 .unwrap_or(false);
 
-            // TODO(eliza): this doesn't actually work because we don't actually
-            // poke the target simulated sled agent enough to get it to have
-            // resource records...
-            // assert_eq!(
-            //     self.target_resource_records_exist(cptestctx).await,
-            //     !target_destroyed,
-            //     "target VMM should exist if and only if the target hasn't been destroyed",
-            // );
+            assert_eq!(
+                self.target_resource_records_exist(cptestctx).await,
+                !target_destroyed,
+                "target VMM should exist if and only if the target hasn't been destroyed",
+            );
 
             let all_vmms_destroyed = src_destroyed && target_destroyed;
 
