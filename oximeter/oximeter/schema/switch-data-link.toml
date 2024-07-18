@@ -81,15 +81,6 @@ versions = [
 ]
 
 [[metrics]]
-name = "packets_received"
-description = "Total number of packets received on the data link"
-units = "count"
-datum_type = "cumulative_u64"
-versions = [
-    { added_in = 1, fields = [ "port_id", "link_id" ] }
-]
-
-[[metrics]]
 name = "link_up"
 description = "Reports whether the link is currently up"
 units = "none"
