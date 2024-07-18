@@ -537,6 +537,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.dataset (
     CONSTRAINT size_used_column_set_for_crucible CHECK (
       (kind != 'crucible') OR
       (kind = 'crucible' AND size_used IS NOT NULL)
+    ),
+
+    CONSTRAINT ip_and_port_set_for_crucible CHECK (
+      (kind != 'crucible') OR
+      (kind = 'crucible' AND ip IS NOT NULL and port IS NOT NULL)
     )
 );
 
