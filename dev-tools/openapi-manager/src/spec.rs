@@ -45,6 +45,15 @@ pub fn all_apis() -> Vec<ApiSpec> {
             filename: "nexus-internal.json",
             extra_validation: None,
         },
+        ApiSpec {
+            title: "Oxide Technician Port Control Service",
+            version: "0.0.1",
+            description: "API for use by the technician port TUI: wicket",
+            boundary: ApiBoundary::Internal,
+            api_description: wicketd_api::wicketd_api_mod::stub_api_description,
+            filename: "wicketd.json",
+            extra_validation: None,
+        },
         // Add your APIs here! Please keep this list sorted by filename.
     ]
 }

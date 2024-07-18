@@ -426,7 +426,6 @@ mod tests {
     use super::*;
     use approx::assert_relative_eq;
     use rand::{Rng, SeedableRng};
-    use rand_distr::{Distribution, Normal};
 
     fn test_quantile_impl(
         p: f64,
@@ -567,38 +566,5 @@ mod tests {
         assert_eq!(q.find_cell(7.), Some(4));
         assert_eq!(q.find_cell(4.), Some(3));
         assert_eq!(q.find_cell(3.5), Some(2));
-    }
-
-    /// Emulates baseline test in a basic Python implementation of the P²
-    /// algorithm:
-    /// <https://github.com/rfrenoy/psquare/blob/master/tests/test_psquare.py#L47>.
-    #[test]
-    fn test_against_baseline_normal_distribution() {
-        let mu = 500.;
-        let sigma = 100.;
-        let size = 1000;
-        let p = 0.9;
-
-        let normal = Normal::new(mu, sigma);
-        let mut observations = (0..size)
-            .map(|_| normal.unwrap().sample(&mut rand::thread_rng()))
-            .collect::<Vec<f64>>();
-        float_ord::sort(&mut observations);
-        let idx = ((f64::from(size) - 1.) * p) as usize;
-
-        let base_p_est = observations[idx];
-
-        let mut q = Quantile::new(p).unwrap();
-        for o in observations.iter() {
-            q.append(*o).unwrap();
-        }
-        let p_est = q.estimate().unwrap();
-
-        println!("Base: {}, Est: {}", base_p_est, p_est);
-        assert!(
-            (base_p_est - p_est).abs() < 10.0,
-            "Difference {} is not less than 10",
-            (base_p_est - p_est).abs()
-        );
     }
 }

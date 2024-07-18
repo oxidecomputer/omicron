@@ -9,7 +9,7 @@
     };
   };
 
-  outputs = { self, nixpkgs, rust-overlay, ... }:
+  outputs = { nixpkgs, rust-overlay, ... }:
     let
       overlays = [ (import rust-overlay) ];
       pkgs = import nixpkgs {
@@ -381,11 +381,16 @@
           };
         };
 
-      devShells.x86_64-linux.default =
-        pkgs.mkShell.override
+      devShells.x86_64-linux.default = with pkgs;
+        mkShell.override
           {
-            # use Clang as the C compiler for all C libraries
-            stdenv = pkgs.clangStdenv;
+            stdenv =
+              # use Mold as the linker rather than ld, for faster builds. Mold
+              # to require substantially less memory to link Nexus and its
+              # avoiding swapping on memory-constrained dev systems.
+              stdenvAdapters.useMoldLinker
+                # use Clang as the C compiler for all C libraries.
+                clangStdenv;
           }
           {
             inherit buildInputs;
@@ -398,10 +403,10 @@
             ];
 
             name = "omicron";
-            DEP_PQ_LIBDIRS = "${pkgs.postgresql.lib}/lib";
-            LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
-            OPENSSL_DIR = "${pkgs.openssl.dev}";
-            OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
+            DEP_PQ_LIBDIRS = "${postgresql.lib}/lib";
+            LIBCLANG_PATH = "${libclang.lib}/lib";
+            OPENSSL_DIR = "${openssl.dev}";
+            OPENSSL_LIB_DIR = "${openssl.out}/lib";
 
             MG_OPENAPI_PATH = mgOpenAPI;
             DDM_OPENAPI_PATH = ddmOpenAPI;
