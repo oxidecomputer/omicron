@@ -830,63 +830,6 @@ mod test {
         .await
     }
 
-    /// Wait for an update saga to complete for the provided `instance`.
-    async fn wait_for_update(
-        cptestctx: &ControlPlaneTestContext,
-        instance: &Instance,
-    ) -> InstanceAndActiveVmm {
-        // I'd be pretty surprised if an update saga takes longer than a minute
-        // to complete in a unit test. If a saga hasn't run, failing the test in
-        // a timely manner is helpful, so making this *too* long could be annoying...
-        const MAX_WAIT: Duration = Duration::from_secs(60);
-
-        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
-        let initial_gen = instance.updater_gen;
-        let log = &cptestctx.logctx.log;
-
-        info!(
-            log,
-            "waiting for instance update to complete...";
-            "instance_id" => %instance_id,
-            "initial_gen" => ?initial_gen,
-        );
-
-        poll::wait_for_condition(
-            || async {
-                let state =
-                    test_helpers::instance_fetch(cptestctx, instance_id).await;
-                let instance = state.instance();
-                if instance.updater_gen > initial_gen
-                    && instance.updater_id.is_none()
-                {
-                    info!(
-                        log,
-                        "instance update completed!";
-                        "instance_id" => %instance_id,
-                        "initial_gen" => ?initial_gen,
-                        "current_gen" => ?instance.updater_gen,
-                    );
-                    return Ok(state);
-                }
-
-                info!(
-                    log,
-                    "instance update has not yet completed...";
-                    "instance_id" => %instance_id,
-                    "initial_gen" => ?initial_gen,
-                    "current_gen" => ?instance.updater_gen,
-                    "current_updater" => ?instance.updater_id,
-                );
-                Err(poll::CondCheckError::NotYet::<()>)
-            },
-            // A lot can happen in one second...
-            &Duration::from_secs(1),
-            &MAX_WAIT,
-        )
-        .await
-        .unwrap()
-    }
-
     #[track_caller]
     fn assert_instance_unlocked(instance: &Instance) {
         assert_eq!(
@@ -1025,11 +968,9 @@ mod test {
         let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
         // Poke the instance to get it into the Running state.
-        let state = test_helpers::instance_fetch(cptestctx, instance_id).await;
         test_helpers::instance_simulate(cptestctx, &instance_id).await;
-        // Wait for the instance update saga triggered by a transition to
-        // Running to complete.
-        let state = wait_for_update(cptestctx, state.instance()).await;
+
+        let state = test_helpers::instance_fetch(cptestctx, instance_id).await;
         // The instance should have an active VMM.
         let instance_runtime = state.instance().runtime();
         assert_eq!(instance_runtime.nexus_state, InstanceState::Vmm);
@@ -1373,9 +1314,6 @@ mod test {
             let state =
                 test_helpers::instance_fetch(cptestctx, instance_id).await;
             test_helpers::instance_simulate(cptestctx, &instance_id).await;
-            // Wait for the instance update saga triggered by a transition to
-            // Running to complete.
-            let state = wait_for_update(cptestctx, state.instance()).await;
 
             let vmm = state.vmm().as_ref().unwrap();
             let dst_sled_id =
@@ -1402,9 +1340,6 @@ mod test {
                 &dst_sled_id,
             )
             .await;
-            // Wait for the instance update saga triggered by poking the target
-            // VMM to complete (it should be a NOP).
-            wait_for_update(cptestctx, state.instance()).await;
 
             let (_, _, authz_instance, ..) =
                 LookupPath::new(&opctx, &datastore)
