@@ -702,6 +702,26 @@ pub struct ResolvedVpcRouteSet {
     pub routes: HashSet<ResolvedVpcRoute>,
 }
 
+/// Identifiers for a single sled.
+///
+/// This is intended primarily to be used in timeseries, to identify
+/// sled from which metric data originates.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SledIdentifiers {
+    /// Control plane ID of the rack this sled is a member of
+    pub rack_id: Uuid,
+    /// Control plane ID for the sled itself
+    pub sled_id: Uuid,
+    /// Model name of the sled
+    pub model: String,
+    /// Revision number of the sled
+    pub revision: u32,
+    /// Serial number of the sled
+    //
+    // NOTE: This is only guaranteed to be unique within a model.
+    pub serial: String,
+}
+
 #[cfg(test)]
 mod tests {
     use crate::api::internal::shared::AllowedSourceIps;

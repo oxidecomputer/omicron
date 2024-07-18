@@ -411,9 +411,17 @@ async fn ssc_regions_ensure(
                     .map(|(dataset, region)| {
                         dataset
                             .address_with_port(region.port_number)
-                            .to_string()
+                            .ok_or_else(|| {
+                                ActionError::action_failed(
+                                    Error::internal_error(&format!(
+                                        "missing IP address for dataset {}",
+                                        dataset.id(),
+                                    )),
+                                )
+                            })
+                            .map(|addr| addr.to_string())
                     })
-                    .collect(),
+                    .collect::<Result<Vec<_>, ActionError>>()?,
 
                 lossy: false,
                 flush_timeout: None,
@@ -1232,8 +1240,14 @@ async fn ssc_start_running_snapshot(
     let mut map: BTreeMap<String, String> = BTreeMap::new();
 
     for (dataset, region) in datasets_and_regions {
+        let Some(dataset_addr) = dataset.address() else {
+            return Err(ActionError::action_failed(Error::internal_error(
+                &format!("Missing IP address for dataset {}", dataset.id(),),
+            )));
+        };
+
         // Create a Crucible agent client
-        let url = format!("http://{}", dataset.address());
+        let url = format!("http://{}", dataset_addr);
         let client = CrucibleAgentClient::new(&url);
 
         info!(
@@ -1299,11 +1313,21 @@ async fn ssc_start_running_snapshot(
         // Map from the region to the snapshot
         let region_addr = format!(
             "{}",
-            dataset.address_with_port(crucible_region.port_number)
+            SocketAddrV6::new(
+                *dataset_addr.ip(),
+                crucible_region.port_number,
+                0,
+                0
+            )
         );
         let snapshot_addr = format!(
             "{}",
-            dataset.address_with_port(crucible_running_snapshot.port_number)
+            SocketAddrV6::new(
+                *dataset_addr.ip(),
+                crucible_running_snapshot.port_number,
+                0,
+                0
+            )
         );
         info!(log, "map {} to {}", region_addr, snapshot_addr);
         map.insert(region_addr, snapshot_addr.clone());

@@ -66,7 +66,7 @@ pub(crate) async fn ensure_dataset_records_exist(
         let dataset = Dataset::new(
             id.into_untyped_uuid(),
             pool_id.into_untyped_uuid(),
-            address,
+            Some(address),
             kind.into(),
         );
         let maybe_inserted = datastore

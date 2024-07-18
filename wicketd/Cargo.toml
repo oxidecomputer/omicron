@@ -62,6 +62,7 @@ tufaceous-lib.workspace = true
 update-common.workspace = true
 update-engine.workspace = true
 wicket-common.workspace = true
+wicketd-api.workspace = true
 wicketd-client.workspace = true
 omicron-workspace-hack.workspace = true
 

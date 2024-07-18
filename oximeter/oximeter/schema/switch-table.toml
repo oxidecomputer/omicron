@@ -1,0 +1,106 @@
+format_version = 1
+
+[target]
+name = "switch_table"
+description = "A table on a Sidecar switch ASIC"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "rack_id", "sled_id", "sidecar_id", "table" ] },
+]
+
+[[metrics]]
+name = "capacity"
+description = "Maximum number of entries in the table"
+units = "count"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "collisions"
+description = "Total number of inserts failed due to a collision"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "delete_misses"
+description = "Total number of deletes that failed due to a missing entry"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "deletes"
+description = "Total number of entries deleted"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "exhaustion"
+description = "Total number of inserts that failed due to space exhaustion"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "inserts"
+description = "Total number of entries inserted"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "occupancy"
+description = "Current number of entries in the table"
+units = "count"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "update_misses"
+description = "Total number of updates that failed due to a missing entry"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
+name = "updates"
+description = "Total number of entries updated in place"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[fields.rack_id]
+type = "uuid"
+description = "ID of the rack containing the switch"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID of the sled responsible for managing the switch"
+
+[fields.sidecar_id]
+type = "uuid"
+description = "ID of the Sidecar switch"
+
+[fields.table]
+type = "string"
+description = "Name of the switch table"
