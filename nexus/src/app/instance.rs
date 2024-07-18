@@ -852,13 +852,13 @@ impl super::Nexus {
                 // the caller to let it decide how to handle it.
                 //
                 // When creating the zone for the first time, we just get
-                // Ok(None) here, which is a no-op in write_returned_instance_state.
+                // Ok(None) here, in which case, there's nothing to write back.
                 match instance_put_result {
-                    Ok(state) => self
-                        .write_returned_instance_state(&instance_id, state)
+                    Ok(Some(ref state)) => self
+                        .notify_instance_updated(opctx, instance_id, state)
                         .await
-                        .map(|_| ())
                         .map_err(Into::into),
+                    Ok(None) => Ok(()),
                     Err(e) => Err(InstanceStateChangeError::SledAgent(e)),
                 }
             }
@@ -1139,12 +1139,13 @@ impl super::Nexus {
                 },
             )
             .await
-            .map(|res| Some(res.into_inner().into()))
+            .map(|res| res.into_inner().into())
             .map_err(|e| SledAgentInstancePutError(e));
 
         match instance_register_result {
             Ok(state) => {
-                self.write_returned_instance_state(&instance_id, state).await?;
+                self.notify_instance_updated(opctx, instance_id, &state)
+                    .await?;
             }
             Err(e) => {
                 if e.instance_unhealthy() {
@@ -1161,57 +1162,6 @@ impl super::Nexus {
         }
 
         Ok(())
-    }
-
-    /// Takes an updated instance state returned from a call to sled agent and
-    /// writes it back to the database.
-    ///
-    /// # Return value
-    ///
-    /// - `Ok((instance_updated, vmm_updated))` if no failures occurred. The
-    ///   tuple fields indicate which database records (if any) were updated.
-    ///   Note that it is possible for sled agent not to return an updated
-    ///   instance state from a particular API call. In that case, the `state`
-    ///   parameter is `None` and this routine returns `Ok((false, false))`.
-    /// - `Err` if an error occurred while writing state to the database. A
-    ///   database operation that succeeds but doesn't update anything (e.g.
-    ///   owing to an outdated generation number) will return `Ok`.
-    async fn write_returned_instance_state(
-        &self,
-        instance_id: &InstanceUuid,
-        state: Option<nexus::SledInstanceState>,
-    ) -> Result<InstanceUpdateResult, Error> {
-        slog::debug!(&self.log,
-                     "writing instance state returned from sled agent";
-                     "instance_id" => %instance_id,
-                     "new_state" => ?state);
-
-        if let Some(state) = state {
-            let update_result = self
-                .db_datastore
-                .vmm_and_migration_update_runtime(
-                    state.propolis_id,
-                    &state.vmm_state.clone().into(),
-                    state.migrations(),
-                )
-                .await;
-
-            slog::debug!(&self.log,
-                         "attempted to write instance state from sled agent";
-                         "instance_id" => %instance_id,
-                         "propolis_id" => %state.propolis_id,
-                         "result" => ?update_result);
-            update_result
-        } else {
-            // There was no instance state to write back, so --- perhaps
-            // obviously --- nothing happened.
-            Ok(InstanceUpdateResult {
-                instance_updated: false,
-                vmm_updated: false,
-                migration_in_updated: false,
-                migration_out_updated: false,
-            })
-        }
     }
 
     /// Attempts to move an instance from `prev_instance_runtime` to the
@@ -1375,7 +1325,7 @@ impl super::Nexus {
     /// Invoked by a sled agent to publish an updated runtime state for an
     /// Instance.
     pub(crate) async fn notify_instance_updated(
-        self: &Arc<Self>,
+        &self,
         opctx: &OpContext,
         instance_id: InstanceUuid,
         new_runtime_state: &nexus::SledInstanceState,
