@@ -380,7 +380,7 @@ mod test {
     async fn test_create_event_idempotent() {
         // Test setup
         let logctx = dev::test_setup_log("test_create_event_idempotent");
-        let db = test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let (_, datastore) = datastore_test(&logctx, &db).await;
         let node_cx = SagaTestContext::new(SecId(Uuid::new_v4()));
 
@@ -422,7 +422,7 @@ mod test {
     async fn test_update_state_idempotent() {
         // Test setup
         let logctx = dev::test_setup_log("test_create_event_idempotent");
-        let db = test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let (_, datastore) = datastore_test(&logctx, &db).await;
         let node_cx = SagaTestContext::new(SecId(Uuid::new_v4()));
 
