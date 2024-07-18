@@ -28,7 +28,7 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::NameOrId;
 use omicron_test_utils::dev::poll;
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid, SledUuid};
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use sled_agent_client::TestInterfaces as _;
 use slog::{info, warn, Logger};
 use std::{num::NonZeroU32, sync::Arc, time::Duration};
@@ -324,6 +324,12 @@ async fn instance_poll_state(
 pub async fn no_virtual_provisioning_resource_records_exist(
     cptestctx: &ControlPlaneTestContext,
 ) -> bool {
+    count_virtual_provisioning_resource_records(cptestctx).await == 0
+}
+
+pub async fn count_virtual_provisioning_resource_records(
+    cptestctx: &ControlPlaneTestContext,
+) -> usize {
     use nexus_db_queries::db::model::VirtualProvisioningResource;
     use nexus_db_queries::db::schema::virtual_provisioning_resource::dsl;
 
@@ -331,7 +337,7 @@ pub async fn no_virtual_provisioning_resource_records_exist(
     let conn = datastore.pool_connection_for_tests().await.unwrap();
 
     datastore
-        .transaction_retry_wrapper("no_virtual_provisioning_resource_records_exist")
+        .transaction_retry_wrapper("count_virtual_provisioning_resource_records")
         .transaction(&conn, |conn| async move {
             conn
                 .batch_execute_async(nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL)
@@ -345,7 +351,7 @@ pub async fn no_virtual_provisioning_resource_records_exist(
                     .get_results_async::<VirtualProvisioningResource>(&conn)
                     .await
                     .unwrap()
-                    .is_empty()
+                    .len()
             )
         }).await.unwrap()
 }
@@ -353,6 +359,14 @@ pub async fn no_virtual_provisioning_resource_records_exist(
 pub async fn no_virtual_provisioning_collection_records_using_instances(
     cptestctx: &ControlPlaneTestContext,
 ) -> bool {
+    count_virtual_provisioning_collection_records_using_instances(cptestctx)
+        .await
+        == 0
+}
+
+pub async fn count_virtual_provisioning_collection_records_using_instances(
+    cptestctx: &ControlPlaneTestContext,
+) -> usize {
     use nexus_db_queries::db::model::VirtualProvisioningCollection;
     use nexus_db_queries::db::schema::virtual_provisioning_collection::dsl;
 
@@ -361,7 +375,7 @@ pub async fn no_virtual_provisioning_collection_records_using_instances(
 
     datastore
         .transaction_retry_wrapper(
-            "no_virtual_provisioning_collection_records_using_instances",
+            "count_virtual_provisioning_collection_records_using_instances",
         )
         .transaction(&conn, |conn| async move {
             conn.batch_execute_async(
@@ -377,7 +391,7 @@ pub async fn no_virtual_provisioning_collection_records_using_instances(
                 .get_results_async::<VirtualProvisioningCollection>(&conn)
                 .await
                 .unwrap()
-                .is_empty())
+                .len())
         })
         .await
         .unwrap()
@@ -412,6 +426,33 @@ pub async fn no_sled_resource_instance_records_exist(
         })
         .await
         .unwrap()
+}
+
+pub async fn sled_resources_exist_for_vmm(
+    cptestctx: &ControlPlaneTestContext,
+    vmm_id: PropolisUuid,
+) -> bool {
+    use nexus_db_queries::db::model::SledResource;
+    use nexus_db_queries::db::model::SledResourceKind;
+    use nexus_db_queries::db::schema::sled_resource::dsl;
+
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+    let results = dsl::sled_resource
+        .filter(dsl::kind.eq(SledResourceKind::Instance))
+        .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
+        .select(SledResource::as_select())
+        .load_async(&*conn)
+        .await
+        .unwrap();
+    info!(
+        cptestctx.logctx.log,
+        "queried sled reservation records for VMM";
+        "vmm_id" => %vmm_id,
+        "results" => ?results,
+    );
+    !results.is_empty()
 }
 
 /// Tests that the saga described by `dag` succeeds if each of its nodes is

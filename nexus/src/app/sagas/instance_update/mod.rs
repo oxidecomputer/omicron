@@ -1127,25 +1127,12 @@ mod test {
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
         let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
-        let test = MigrationTest::setup(cptestctx, &other_sleds).await;
-
-        // Pretend the migration source has completed.
-        test.update_src_state(
-            cptestctx,
-            VmmState::Stopping,
-            MigrationState::Completed,
-        )
-        .await;
-
-        // Run the instance-update saga.
-        let nexus = &cptestctx.server.server_context().nexus;
-        nexus
-            .sagas
-            .saga_execute::<SagaInstanceUpdate>(test.saga_params())
+        MigrationOutcome::default()
+            .source(MigrationState::Completed, VmmState::Stopping)
+            .setup_test(cptestctx, &other_sleds)
             .await
-            .expect("update saga should succeed");
-
-        test.verify_src_succeeded(cptestctx).await;
+            .run_saga_basic_usage_succeeds_test(cptestctx)
+            .await;
     }
 
     #[nexus_test(server = crate::Server)]
@@ -1154,27 +1141,13 @@ mod test {
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
         let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
-        let test = MigrationTest::setup(cptestctx, &other_sleds).await;
 
-        // Pretend the migration source has completed.
-        test.update_src_state(
-            cptestctx,
-            VmmState::Stopping,
-            MigrationState::Completed,
-        )
-        .await;
-
-        // Build the saga DAG with the provided test parameters
-        let dag =
-            create_saga_dag::<SagaInstanceUpdate>(test.saga_params()).unwrap();
-
-        crate::app::sagas::test_helpers::actions_succeed_idempotently(
-            &cptestctx.server.server_context().nexus,
-            dag,
-        )
-        .await;
-
-        test.verify_src_succeeded(cptestctx).await;
+        MigrationOutcome::default()
+            .source(MigrationState::Completed, VmmState::Stopping)
+            .setup_test(cptestctx, &other_sleds)
+            .await
+            .run_actions_succeed_idempotently_test(cptestctx)
+            .await;
     }
 
     #[nexus_test(server = crate::Server)]
@@ -1185,20 +1158,17 @@ mod test {
         let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
         let _project_id = setup_test_project(&cptestctx.external_client).await;
 
+        let outcome = MigrationOutcome::default()
+            .source(MigrationState::Completed, VmmState::Stopping);
+
         test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
             nexus,
             || {
                 Box::pin(async {
-                    let test =
-                        MigrationTest::setup(cptestctx, &other_sleds).await;
-                    // Pretend the migration source has completed.
-                    test.update_src_state(
-                        cptestctx,
-                        VmmState::Stopping,
-                        MigrationState::Completed,
-                    )
-                    .await;
-                    test.saga_params()
+                    outcome
+                        .setup_test(cptestctx, &other_sleds)
+                        .await
+                        .saga_params()
                 })
             },
             || Box::pin(after_unwinding(cptestctx)),
@@ -1215,25 +1185,13 @@ mod test {
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
         let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
-        let test = MigrationTest::setup(cptestctx, &other_sleds).await;
 
-        // Pretend the migration target has completed.
-        test.update_target_state(
-            cptestctx,
-            VmmState::Running,
-            MigrationState::Completed,
-        )
-        .await;
-
-        // Run the instance-update saga.
-        let nexus = &cptestctx.server.server_context().nexus;
-        nexus
-            .sagas
-            .saga_execute::<SagaInstanceUpdate>(test.saga_params())
+        MigrationOutcome::default()
+            .target(MigrationState::Completed, VmmState::Running)
+            .setup_test(cptestctx, &other_sleds)
             .await
-            .expect("update saga should succeed");
-
-        test.verify_target_succeeded(cptestctx).await;
+            .run_saga_basic_usage_succeeds_test(cptestctx)
+            .await;
     }
 
     #[nexus_test(server = crate::Server)]
@@ -1242,27 +1200,13 @@ mod test {
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
         let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
-        let test = MigrationTest::setup(cptestctx, &other_sleds).await;
 
-        // Pretend the migration target has completed.
-        test.update_target_state(
-            cptestctx,
-            VmmState::Running,
-            MigrationState::Completed,
-        )
-        .await;
-
-        // Build the saga DAG with the provided test parameters
-        let dag =
-            create_saga_dag::<SagaInstanceUpdate>(test.saga_params()).unwrap();
-
-        crate::app::sagas::test_helpers::actions_succeed_idempotently(
-            &cptestctx.server.server_context().nexus,
-            dag,
-        )
-        .await;
-
-        test.verify_target_succeeded(cptestctx).await;
+        MigrationOutcome::default()
+            .target(MigrationState::Completed, VmmState::Running)
+            .setup_test(cptestctx, &other_sleds)
+            .await
+            .run_actions_succeed_idempotently_test(cptestctx)
+            .await;
     }
 
     #[nexus_test(server = crate::Server)]
@@ -1272,21 +1216,17 @@ mod test {
         let nexus = &cptestctx.server.server_context().nexus;
         let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
         let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let outcome = MigrationOutcome::default()
+            .target(MigrationState::Completed, VmmState::Running);
 
         test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
             nexus,
             || {
                 Box::pin(async {
-                    let test =
-                        MigrationTest::setup(cptestctx, &other_sleds).await;
-                    // Pretend the migration target has completed.
-                    test.update_target_state(
-                        cptestctx,
-                        VmmState::Running,
-                        MigrationState::Completed,
-                    )
-                    .await;
-                    test.saga_params()
+                    outcome
+                        .setup_test(cptestctx, &other_sleds)
+                        .await
+                        .saga_params()
                 })
             },
             || Box::pin(after_unwinding(cptestctx)),
@@ -1295,23 +1235,126 @@ mod test {
         .await;
     }
 
+    // === migration completed and source destroyed tests ===
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_completed_source_destroyed_succeeds(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+
+        MigrationOutcome::default()
+            .target(MigrationState::Completed, VmmState::Running)
+            .source(MigrationState::Completed, VmmState::Destroyed)
+            .setup_test(cptestctx, &other_sleds)
+            .await
+            .run_saga_basic_usage_succeeds_test(cptestctx)
+            .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_completed_source_destroyed_actions_succeed_idempotently(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+
+        MigrationOutcome::default()
+            .target(MigrationState::Completed, VmmState::Running)
+            .source(MigrationState::Completed, VmmState::Destroyed)
+            .setup_test(cptestctx, &other_sleds)
+            .await
+            .run_actions_succeed_idempotently_test(cptestctx)
+            .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_completed_source_destroyed_can_unwind(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+
+        let outcome = MigrationOutcome::default()
+            .target(MigrationState::Completed, VmmState::Running)
+            .source(MigrationState::Completed, VmmState::Destroyed);
+
+        test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
+            nexus,
+            || {
+                Box::pin(async {
+                    outcome
+                        .setup_test(cptestctx, &other_sleds)
+                        .await
+                        .saga_params()
+                })
+            },
+            || Box::pin(after_unwinding(cptestctx)),
+            &cptestctx.logctx.log,
+        )
+        .await;
+    }
+
+    #[derive(Clone, Copy, Default)]
+    struct MigrationOutcome {
+        source: Option<(MigrationState, VmmState)>,
+        target: Option<(MigrationState, VmmState)>,
+        failed: bool,
+    }
+
+    impl MigrationOutcome {
+        fn source(self, migration: MigrationState, vmm: VmmState) -> Self {
+            let failed = self.failed
+                || migration == MigrationState::Failed
+                || vmm == VmmState::Failed;
+            Self { source: Some((migration, vmm)), failed, ..self }
+        }
+
+        fn target(self, migration: MigrationState, vmm: VmmState) -> Self {
+            let failed = self.failed
+                || migration == MigrationState::Failed
+                || vmm == VmmState::Failed;
+            Self { target: Some((migration, vmm)), failed, ..self }
+        }
+
+        async fn setup_test(
+            self,
+            cptestctx: &ControlPlaneTestContext,
+            other_sleds: &[(SledUuid, omicron_sled_agent::sim::Server)],
+        ) -> MigrationTest {
+            MigrationTest::setup(self, cptestctx, other_sleds).await
+        }
+    }
+
     struct MigrationTest {
+        outcome: MigrationOutcome,
         instance_id: InstanceUuid,
-        state: InstanceSnapshot,
+        initial_state: InstanceSnapshot,
         authz_instance: authz::Instance,
         opctx: OpContext,
     }
 
     impl MigrationTest {
         fn target_vmm_id(&self) -> Uuid {
-            self.state
+            self.initial_state
                 .target_vmm
                 .as_ref()
                 .expect("migrating instance must have a target VMM")
                 .id
         }
 
+        fn src_vmm_id(&self) -> Uuid {
+            self.initial_state
+                .active_vmm
+                .as_ref()
+                .expect("migrating instance must have a source VMM")
+                .id
+        }
+
         async fn setup(
+            outcome: MigrationOutcome,
             cptestctx: &ControlPlaneTestContext,
             other_sleds: &[(SledUuid, omicron_sled_agent::sim::Server)],
         ) -> Self {
@@ -1358,12 +1401,64 @@ mod test {
                     .fetch()
                     .await
                     .expect("test instance should be present in datastore");
-            let state = datastore
+            let initial_state = datastore
                 .instance_fetch_all(&opctx, &authz_instance)
                 .await
                 .expect("test instance should be present in datastore");
 
-            Self { authz_instance, state, opctx, instance_id }
+            let this = Self {
+                authz_instance,
+                initial_state,
+                outcome,
+                opctx,
+                instance_id,
+            };
+            if let Some((migration_state, vmm_state)) = this.outcome.source {
+                this.update_src_state(cptestctx, vmm_state, migration_state)
+                    .await;
+            }
+
+            if let Some((migration_state, vmm_state)) = this.outcome.target {
+                this.update_target_state(cptestctx, vmm_state, migration_state)
+                    .await;
+            }
+
+            this
+        }
+
+        async fn run_saga_basic_usage_succeeds_test(
+            &self,
+            cptestctx: &ControlPlaneTestContext,
+        ) {
+            // Run the instance-update saga.
+            let nexus = &cptestctx.server.server_context().nexus;
+            nexus
+                .sagas
+                .saga_execute::<SagaInstanceUpdate>(self.saga_params())
+                .await
+                .expect("update saga should succeed");
+
+            // Check the results
+            self.verify(cptestctx).await;
+        }
+
+        async fn run_actions_succeed_idempotently_test(
+            &self,
+            cptestctx: &ControlPlaneTestContext,
+        ) {
+            // Build the saga DAG with the provided test parameters
+            let dag = create_saga_dag::<SagaInstanceUpdate>(self.saga_params())
+                .unwrap();
+
+            // Run the actions-succeed-idempotently test
+            crate::app::sagas::test_helpers::actions_succeed_idempotently(
+                &cptestctx.server.server_context().nexus,
+                dag,
+            )
+            .await;
+
+            // Check the results
+            self.verify(cptestctx).await;
         }
 
         async fn update_src_state(
@@ -1373,7 +1468,7 @@ mod test {
             migration_state: MigrationState,
         ) {
             let src_vmm = self
-                .state
+                .initial_state
                 .active_vmm
                 .as_ref()
                 .expect("must have an active VMM");
@@ -1385,7 +1480,7 @@ mod test {
             };
 
             let migration = self
-                .state
+                .initial_state
                 .migration
                 .as_ref()
                 .expect("must have an active migration");
@@ -1428,8 +1523,11 @@ mod test {
             vmm_state: VmmState,
             migration_state: MigrationState,
         ) {
-            let target_vmm =
-                self.state.target_vmm.as_ref().expect("must have a target VMM");
+            let target_vmm = self
+                .initial_state
+                .target_vmm
+                .as_ref()
+                .expect("must have a target VMM");
             let vmm_id = PropolisUuid::from_untyped_uuid(target_vmm.id);
             let new_runtime = nexus_db_model::VmmRuntimeState {
                 time_state_updated: Utc::now(),
@@ -1438,7 +1536,7 @@ mod test {
             };
 
             let migration = self
-                .state
+                .initial_state
                 .migration
                 .as_ref()
                 .expect("must have an active migration");
@@ -1484,80 +1582,137 @@ mod test {
             }
         }
 
-        async fn verify_src_succeeded(
-            &self,
-            cptestctx: &ControlPlaneTestContext,
-        ) {
-            let state = self.verify_migration_succeeded(cptestctx).await;
-            let instance = state.instance();
-            let instance_runtime = instance.runtime();
-            assert_eq!(
-                instance_runtime.dst_propolis_id,
-                Some(self.target_vmm_id()),
-                "target VMM ID must remain set until target VMM reports success",
+        async fn verify(&self, cptestctx: &ControlPlaneTestContext) {
+            info!(
+                cptestctx.logctx.log,
+                "checking update saga results after migration";
+                "source_outcome" => ?self.outcome.source.as_ref(),
+                "target_outcome" => ?self.outcome.target.as_ref(),
+                "migration_failed" => self.outcome.failed,
             );
-            assert_eq!(
-                instance_runtime.migration_id,
-                self.state.instance.runtime().migration_id,
-                "migration ID must remain set until target VMM reports success",
-            );
-        }
 
-        async fn verify_target_succeeded(
-            &self,
-            cptestctx: &ControlPlaneTestContext,
-        ) {
-            let state = self.verify_migration_succeeded(cptestctx).await;
-            let instance = state.instance();
-            let instance_runtime = instance.runtime();
-            assert_eq!(
-                instance_runtime.dst_propolis_id, None,
-                "target VMM ID must be unset once VMM reports success",
-            );
-            assert_eq!(
-                instance_runtime.migration_id, None,
-                "migration ID must be unset once target VMM reports success",
-            );
-        }
-
-        async fn verify_migration_succeeded(
-            &self,
-            cptestctx: &ControlPlaneTestContext,
-        ) -> InstanceAndActiveVmm {
+            use test_helpers::*;
             let state =
                 test_helpers::instance_fetch(cptestctx, self.instance_id).await;
             let instance = state.instance();
             let instance_runtime = instance.runtime();
 
             let active_vmm_id = instance_runtime.propolis_id;
-            assert_eq!(
-                active_vmm_id,
-                Some(self.target_vmm_id()),
-                "target VMM must be in the active VMM position after migration success",
-            );
-            assert_eq!(instance_runtime.nexus_state, InstanceState::Vmm);
+
             assert_instance_unlocked(instance);
-            assert!(
-                !test_helpers::no_virtual_provisioning_resource_records_exist(
-                    cptestctx
-                )
-                .await,
-                "virtual provisioning records must exist after successful migration",
-            );
-            assert!(
-            !test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx)
-                .await,
-                "virtual provisioning records must exist after successful migration",
-        );
-            assert!(
-                !test_helpers::no_sled_resource_instance_records_exist(
-                    cptestctx
-                )
-                .await,
-                "sled resource records must exist after successful migration",
+
+            if self.outcome.failed {
+                todo!("eliza: verify migration-failed postconditions");
+            } else {
+                assert_eq!(
+                    active_vmm_id,
+                    Some(self.target_vmm_id()),
+                    "target VMM must be in the active VMM position after migration success",
+                );
+                assert_eq!(instance_runtime.nexus_state, InstanceState::Vmm);
+                if self
+                    .outcome
+                    .target
+                    .as_ref()
+                    .map(|(state, _)| state == &MigrationState::Completed)
+                    .unwrap_or(false)
+                {
+                    assert_eq!(
+                        instance_runtime.dst_propolis_id, None,
+                        "target VMM ID must be unset once target VMM reports success",
+                    );
+                    assert_eq!(
+                        instance_runtime.migration_id, None,
+                        "migration ID must be unset once target VMM reports success",
+                    );
+                } else {
+                    assert_eq!(
+                        instance_runtime.dst_propolis_id,
+                        Some(self.target_vmm_id()),
+                        "target VMM ID must remain set until the target VMM reports success",
+                    );
+                    assert_eq!(
+                        instance_runtime.migration_id,
+                        self.initial_state.instance.runtime().migration_id,
+                        "migration ID must remain set until target VMM reports success",
+                    );
+                }
+            }
+
+            let src_destroyed = self
+                .outcome
+                .source
+                .as_ref()
+                .map(|(_, state)| state == &VmmState::Destroyed)
+                .unwrap_or(false);
+            assert_eq!(
+                self.src_resource_records_exist(cptestctx).await,
+                !src_destroyed,
+                "source VMM should exist if and only if the source hasn't been destroyed",
             );
 
-            state
+            let target_destroyed = self
+                .outcome
+                .source
+                .as_ref()
+                .map(|(_, state)| state == &VmmState::Destroyed)
+                .unwrap_or(false);
+
+            // TODO(eliza): this doesn't actually work because we don't actually
+            // poke the target simulated sled agent enough to get it to have
+            // resource records...
+            // assert_eq!(
+            //     self.target_resource_records_exist(cptestctx).await,
+            //     !target_destroyed,
+            //     "target VMM should exist if and only if the target hasn't been destroyed",
+            // );
+
+            let all_vmms_destroyed = src_destroyed && target_destroyed;
+
+            assert_eq!(
+                no_virtual_provisioning_resource_records_exist(cptestctx).await,
+                all_vmms_destroyed,
+                "virtual provisioning resource records must exist as long as \
+                 the instance has a VMM",
+            );
+            assert_eq!(
+                no_virtual_provisioning_collection_records_using_instances(
+                    cptestctx
+                )
+                .await,
+                all_vmms_destroyed,
+                "virtual provisioning collection records must exist as long \
+                 as the instance has a VMM",
+            );
+
+            let instance_state = if all_vmms_destroyed {
+                InstanceState::NoVmm
+            } else {
+                InstanceState::Vmm
+            };
+            assert_eq!(instance_runtime.nexus_state, instance_state);
+        }
+
+        async fn src_resource_records_exist(
+            &self,
+            cptestctx: &ControlPlaneTestContext,
+        ) -> bool {
+            test_helpers::sled_resources_exist_for_vmm(
+                cptestctx,
+                PropolisUuid::from_untyped_uuid(self.src_vmm_id()),
+            )
+            .await
+        }
+
+        async fn target_resource_records_exist(
+            &self,
+            cptestctx: &ControlPlaneTestContext,
+        ) -> bool {
+            test_helpers::sled_resources_exist_for_vmm(
+                cptestctx,
+                PropolisUuid::from_untyped_uuid(self.target_vmm_id()),
+            )
+            .await
         }
     }
 }
