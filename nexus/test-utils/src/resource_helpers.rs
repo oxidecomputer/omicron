@@ -332,7 +332,7 @@ pub async fn create_switch(
     client: &ClientTestContext,
     serial: &str,
     part: &str,
-    revision: i64,
+    revision: u32,
     rack_id: Uuid,
 ) -> views::Switch {
     object_put(

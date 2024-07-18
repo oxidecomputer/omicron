@@ -1430,7 +1430,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.network_interface_kind AS ENUM (
     'instance',
 
     /* An interface attached to a service. */
-    'service'
+    'service',
+    'probe'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.network_interface (
@@ -1870,6 +1871,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
      * across sagas and allow rollback to correct state.
      */
     state omicron.public.ip_attach_state NOT NULL,
+
+    is_probe BOOL NOT NULL DEFAULT false,
 
     /* The name must be non-NULL iff this is a floating IP. */
     CONSTRAINT null_fip_name CHECK (
@@ -2618,11 +2621,32 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_port_config (
     geometry omicron.public.switch_port_geometry
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.switch_link_fec AS ENUM (
+    'Firecode',
+    'None',
+    'Rs'
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.switch_link_speed AS ENUM (
+    '0G',
+    '1G',
+    '10G',
+    '25G',
+    '40G',
+    '50G',
+    '100G',
+    '200G',
+    '400G'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_link_config (
     port_settings_id UUID,
     lldp_service_config_id UUID NOT NULL,
     link_name TEXT,
     mtu INT4,
+    fec omicron.public.switch_link_fec,
+    speed omicron.public.switch_link_speed,
+    autoneg BOOL NOT NULL DEFAULT false,
 
     PRIMARY KEY (port_settings_id, link_name)
 );
@@ -3599,27 +3623,6 @@ FROM
 WHERE
     instance.time_deleted IS NULL AND vmm.time_deleted IS NULL;
 
-CREATE TYPE IF NOT EXISTS omicron.public.switch_link_fec AS ENUM (
-    'Firecode',
-    'None',
-    'Rs'
-);
-
-CREATE TYPE IF NOT EXISTS omicron.public.switch_link_speed AS ENUM (
-    '0G',
-    '1G',
-    '10G',
-    '25G',
-    '40G',
-    '50G',
-    '100G',
-    '200G',
-    '400G'
-);
-
-ALTER TABLE omicron.public.switch_port_settings_link_config ADD COLUMN IF NOT EXISTS fec omicron.public.switch_link_fec;
-ALTER TABLE omicron.public.switch_port_settings_link_config ADD COLUMN IF NOT EXISTS speed omicron.public.switch_link_speed;
-
 CREATE SEQUENCE IF NOT EXISTS omicron.public.ipv4_nat_version START 1 INCREMENT 1;
 
 CREATE TABLE IF NOT EXISTS omicron.public.ipv4_nat_entry (
@@ -3695,8 +3698,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_bfd_session ON omicron.public.bfd_sessi
     remote,
     switch
 ) WHERE time_deleted IS NULL;
-
-ALTER TABLE omicron.public.switch_port_settings_link_config ADD COLUMN IF NOT EXISTS autoneg BOOL NOT NULL DEFAULT false;
 
 CREATE INDEX IF NOT EXISTS ipv4_nat_lookup_by_vni ON omicron.public.ipv4_nat_entry (
   vni
@@ -3789,10 +3790,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_probe_by_name ON omicron.public.probe (
     name
 ) WHERE
     time_deleted IS NULL;
-
-ALTER TABLE omicron.public.external_ip ADD COLUMN IF NOT EXISTS is_probe BOOL NOT NULL DEFAULT false;
-
-ALTER TYPE omicron.public.network_interface_kind ADD VALUE IF NOT EXISTS 'probe';
 
 CREATE TYPE IF NOT EXISTS omicron.public.upstairs_repair_notification_type AS ENUM (
   'started',

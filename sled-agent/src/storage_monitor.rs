@@ -7,10 +7,18 @@
 //! code.
 
 use crate::dump_setup::DumpSetup;
+use omicron_common::api::external::Generation;
 use sled_storage::config::MountConfig;
 use sled_storage::manager::StorageHandle;
 use sled_storage::resources::AllDisks;
 use slog::Logger;
+use tokio::sync::watch;
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Storage Monitor no longer running")]
+    NotRunning,
+}
 
 pub struct StorageMonitor {
     log: Logger,
@@ -18,6 +26,46 @@ pub struct StorageMonitor {
 
     // Invokes dumpadm(8) and savecore(8) when new disks are encountered
     dump_setup: DumpSetup,
+
+    tx: watch::Sender<StorageMonitorStatus>,
+}
+
+/// Emits status about storage monitoring.
+#[derive(Debug, Clone)]
+pub struct StorageMonitorStatus {
+    /// The latest generation of physical disks to be processed
+    /// by the storage monitor.
+    pub latest_gen: Option<Generation>,
+}
+
+impl StorageMonitorStatus {
+    fn new() -> Self {
+        Self { latest_gen: None }
+    }
+}
+
+#[derive(Clone)]
+pub struct StorageMonitorHandle {
+    rx: watch::Receiver<StorageMonitorStatus>,
+}
+
+impl StorageMonitorHandle {
+    pub async fn await_generation(
+        &self,
+        wanted: Generation,
+    ) -> Result<(), Error> {
+        self.rx
+            .clone()
+            .wait_for(|status| {
+                let Some(observed) = status.latest_gen else {
+                    return false;
+                };
+                return observed >= wanted;
+            })
+            .await
+            .map_err(|_| Error::NotRunning)?;
+        Ok(())
+    }
 }
 
 impl StorageMonitor {
@@ -25,10 +73,14 @@ impl StorageMonitor {
         log: &Logger,
         mount_config: MountConfig,
         storage_manager: StorageHandle,
-    ) -> StorageMonitor {
+    ) -> (StorageMonitor, StorageMonitorHandle) {
         let dump_setup = DumpSetup::new(&log, mount_config);
         let log = log.new(o!("component" => "StorageMonitor"));
-        StorageMonitor { log, storage_manager, dump_setup }
+        let (tx, rx) = watch::channel(StorageMonitorStatus::new());
+        (
+            StorageMonitor { log, storage_manager, dump_setup, tx },
+            StorageMonitorHandle { rx },
+        )
     }
 
     /// Run the main receive loop of the `StorageMonitor`
@@ -50,10 +102,14 @@ impl StorageMonitor {
     }
 
     async fn handle_resource_update(&mut self, updated_disks: AllDisks) {
+        let generation = updated_disks.generation();
         self.dump_setup
             .update_dumpdev_setup(
                 updated_disks.iter_managed().map(|(_id, disk)| disk),
             )
             .await;
+        self.tx.send_replace(StorageMonitorStatus {
+            latest_gen: Some(*generation),
+        });
     }
 }

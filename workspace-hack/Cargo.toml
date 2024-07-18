@@ -31,8 +31,8 @@ byteorder = { version = "1.5.0" }
 bytes = { version = "1.6.0", features = ["serde"] }
 chrono = { version = "0.4.38", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.5.4", features = ["cargo", "derive", "env", "wrap_help"] }
-clap_builder = { version = "4.5.2", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+clap = { version = "4.5.9", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.5.9", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 console = { version = "0.15.8" }
 const-oid = { version = "0.9.6", default-features = false, features = ["db", "std"] }
 crossbeam-epoch = { version = "0.9.18" }
@@ -102,9 +102,9 @@ smallvec = { version = "1.13.2", default-features = false, features = ["const_ne
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.68", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.71", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.36", features = ["formatting", "local-offset", "macros", "parsing"] }
-tokio = { version = "1.38.0", features = ["full", "test-util"] }
+tokio = { version = "1.38.1", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.10", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-stream = { version = "0.1.15", features = ["net"] }
 tokio-util = { version = "0.7.11", features = ["codec", "io-util"] }
@@ -136,8 +136,8 @@ byteorder = { version = "1.5.0" }
 bytes = { version = "1.6.0", features = ["serde"] }
 chrono = { version = "0.4.38", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.5.4", features = ["cargo", "derive", "env", "wrap_help"] }
-clap_builder = { version = "4.5.2", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+clap = { version = "4.5.9", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.5.9", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 console = { version = "0.15.8" }
 const-oid = { version = "0.9.6", default-features = false, features = ["db", "std"] }
 crossbeam-epoch = { version = "0.9.18" }
@@ -208,10 +208,10 @@ spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extra-traits", "fold", "full", "visit"] }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.68", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.71", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.36", features = ["formatting", "local-offset", "macros", "parsing"] }
 time-macros = { version = "0.2.18", default-features = false, features = ["formatting", "parsing"] }
-tokio = { version = "1.38.0", features = ["full", "test-util"] }
+tokio = { version = "1.38.1", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.10", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-stream = { version = "0.1.15", features = ["net"] }
 tokio-util = { version = "0.7.11", features = ["codec", "io-util"] }

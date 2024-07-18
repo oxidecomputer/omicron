@@ -486,9 +486,15 @@ impl InstanceStates {
     /// instance's state in Nexus may become inconsistent. This routine should
     /// therefore only be invoked by callers who know that an instance is not
     /// migrating.
-    pub(crate) fn terminate_rudely(&mut self) {
+    pub(crate) fn terminate_rudely(&mut self, mark_failed: bool) {
+        let vmm_state = if mark_failed {
+            PropolisInstanceState(PropolisApiState::Failed)
+        } else {
+            PropolisInstanceState(PropolisApiState::Destroyed)
+        };
+
         let fake_observed = ObservedPropolisState {
-            vmm_state: PropolisInstanceState(PropolisApiState::Destroyed),
+            vmm_state,
             migration_status: if self.instance.migration_id.is_some() {
                 ObservedMigrationStatus::Failed
             } else {
@@ -893,7 +899,8 @@ mod test {
         assert_eq!(state.propolis_role(), PropolisRole::MigrationTarget);
 
         let prev = state.clone();
-        state.terminate_rudely();
+        let mark_failed = false;
+        state.terminate_rudely(mark_failed);
 
         assert_state_change_has_gen_change(&prev, &state);
         assert_eq!(state.instance.gen, prev.instance.gen);
