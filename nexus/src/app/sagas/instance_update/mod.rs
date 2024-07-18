@@ -24,6 +24,7 @@ use chrono::Utc;
 use nexus_db_queries::{authn, authz};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
+use omicron_common::api::internal::nexus;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -47,6 +48,72 @@ mod start;
 pub(crate) use self::start::{Params, SagaInstanceUpdate};
 
 mod destroyed;
+
+/// Returns `true` if an `instance-update` saga should be executed as a result
+/// of writing the provided [`SledInstanceState`] to the database with the
+/// provided [`InstanceUpdateResult`].
+///
+/// We determine this only after actually updating the database records,
+/// because we don't know whether a particular VMM or migration state is
+/// *new* or not until we know whether the corresponding database record has
+/// actually changed (determined by the generation number). For example, when
+/// an instance has migrated into a Propolis process, Propolis will continue
+/// to report the migration in in the `Completed` state as part of all state
+/// updates regarding that instance, but we no longer need to act on it if
+/// the migration record has already been updated to reflect that the
+/// migration has completed.
+///
+/// Once we know what rows have been updated, we can inspect the states
+/// written to the DB to determine whether an instance-update saga is
+/// required to bring the instance record's state in line with the new
+/// VMM/migration states.
+pub fn update_saga_needed(
+    log: &slog::Logger,
+    instance_id: InstanceUuid,
+    state: &nexus::SledInstanceState,
+    result: &instance::InstanceUpdateResult,
+) -> bool {
+    // Currently, an instance-update saga is required if (and only if):
+    //
+    // - The instance's active VMM has transitioned to `Destroyed`. We don't
+    //   actually know whether the VMM whose state was updated here was the
+    //   active VMM or not, so we will always attempt to run an instance-update
+    //   saga if the VMM was `Destroyed`.
+    let vmm_needs_update = result.vmm_updated
+        && state.vmm_state.state == nexus::VmmState::Destroyed;
+    // - A migration in to this VMM has transitioned to a terminal state
+    //   (`Failed` or `Completed`).
+    let migrations = state.migrations();
+    let migration_in_needs_update = result.migration_in_updated
+        && migrations
+            .migration_in
+            .map(|migration| migration.state.is_terminal())
+            .unwrap_or(false);
+    // - A migration out from this VMM has transitioned to a terminal state
+    //   (`Failed` or `Completed`).
+    let migration_out_needs_update = result.migration_out_updated
+        && migrations
+            .migration_out
+            .map(|migration| migration.state.is_terminal())
+            .unwrap_or(false);
+    // If any of the above conditions are true, prepare an instance-update saga
+    // for this instance.
+    let needed = vmm_needs_update
+        || migration_in_needs_update
+        || migration_out_needs_update;
+    if needed {
+        debug!(log,
+            "new VMM runtime state from sled agent requires an \
+             instance-update saga";
+            "instance_id" => %instance_id,
+            "propolis_id" => %state.propolis_id,
+            "vmm_needs_update" => vmm_needs_update,
+            "migration_in_needs_update" => migration_in_needs_update,
+            "migration_out_needs_update" => migration_out_needs_update,
+        );
+    }
+    needed
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 struct UpdatesRequired {
