@@ -267,7 +267,7 @@ pub enum UpdateableComponentType {
 pub struct Baseboard {
     pub serial: String,
     pub part: String,
-    pub revision: i64,
+    pub revision: u32,
 }
 
 /// A sled that has not been added to an initialized rack yet

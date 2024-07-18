@@ -22,13 +22,13 @@ use update_engine::NestedError;
 use uuid::Uuid;
 use wicket::OutputKind;
 use wicket_common::{
-    rack_update::{ClearUpdateStateResponse, SpIdentifier, SpType},
+    inventory::{SpIdentifier, SpType},
+    rack_update::{ClearUpdateStateResponse, StartUpdateOptions},
     update_events::{StepEventKind, UpdateComponent},
 };
 use wicketd::{RunningUpdateState, StartUpdateError};
 use wicketd_client::types::{
-    GetInventoryParams, GetInventoryResponse, StartUpdateOptions,
-    StartUpdateParams,
+    GetInventoryParams, GetInventoryResponse, StartUpdateParams,
 };
 
 // See documentation for extract_nested_artifact_pair in update_plan.rs for why
@@ -430,10 +430,7 @@ async fn test_update_races() {
         .expect("bytes read and archived");
 
     // Now start an update.
-    let sp = gateway_client::types::SpIdentifier {
-        slot: 0,
-        type_: gateway_client::types::SpType::Sled,
-    };
+    let sp = SpIdentifier { slot: 0, type_: SpType::Sled };
     let sps: BTreeSet<_> = vec![sp].into_iter().collect();
 
     let (sender, receiver) = oneshot::channel();

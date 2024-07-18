@@ -99,26 +99,33 @@ impl BackgroundTask for LookupRegionPort {
                     }
                 };
 
-                let returned_region = match get_region_from_agent(
-                    &dataset.address(),
-                    region.id(),
-                )
-                .await
-                {
-                    Ok(returned_region) => returned_region,
-
-                    Err(e) => {
-                        let s = format!(
-                            "could not get region {} from agent: {e}",
-                            region.id(),
-                        );
-
-                        error!(log, "{s}");
-                        status.errors.push(s);
-
-                        continue;
-                    }
+                let Some(dataset_addr) = dataset.address() else {
+                    let s = format!(
+                        "Missing dataset address for dataset: {dataset_id}"
+                    );
+                    error!(log, "{s}");
+                    status.errors.push(s);
+                    continue;
                 };
+
+                let returned_region =
+                    match get_region_from_agent(&dataset_addr, region.id())
+                        .await
+                    {
+                        Ok(returned_region) => returned_region,
+
+                        Err(e) => {
+                            let s = format!(
+                                "could not get region {} from agent: {e}",
+                                region.id(),
+                            );
+
+                            error!(log, "{s}");
+                            status.errors.push(s);
+
+                            continue;
+                        }
+                    };
 
                 match self
                     .datastore

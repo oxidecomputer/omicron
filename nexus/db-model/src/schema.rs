@@ -1022,8 +1022,8 @@ table! {
 
         pool_id -> Uuid,
 
-        ip -> Inet,
-        port -> Int4,
+        ip -> Nullable<Inet>,
+        port -> Nullable<Int4>,
 
         kind -> crate::DatasetKindEnum,
         size_used -> Nullable<Int8>,

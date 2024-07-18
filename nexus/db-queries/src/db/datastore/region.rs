@@ -518,7 +518,13 @@ impl DataStore {
 
         let dataset = self.dataset_get(dataset_id).await?;
 
-        Ok(Some(SocketAddrV6::new(*dataset.address().ip(), port, 0, 0)))
+        let Some(address) = dataset.address() else {
+            return Err(Error::internal_error(
+                "Dataset for Crucible region does know IP address",
+            ));
+        };
+
+        Ok(Some(SocketAddrV6::new(*address.ip(), port, 0, 0)))
     }
 
     pub async fn regions_missing_ports(

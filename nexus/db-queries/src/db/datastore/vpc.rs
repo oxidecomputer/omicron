@@ -40,8 +40,8 @@ use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
 use crate::db::queries::vpc::InsertVpcQuery;
 use crate::db::queries::vpc::VniSearchIter;
-use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
-use crate::db::queries::vpc_subnet::SubnetError;
+use crate::db::queries::vpc_subnet::InsertVpcSubnetError;
+use crate::db::queries::vpc_subnet::InsertVpcSubnetQuery;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -288,7 +288,7 @@ impl DataStore {
             self.vpc_create_subnet(opctx, &authz_vpc, vpc_subnet.clone())
                 .await
                 .map(|_| ())
-                .map_err(SubnetError::into_external)
+                .map_err(InsertVpcSubnetError::into_external)
                 .or_else(|e| match e {
                     Error::ObjectAlreadyExists { .. } => Ok(()),
                     _ => Err(e),
@@ -809,17 +809,17 @@ impl DataStore {
         opctx: &OpContext,
         authz_vpc: &authz::Vpc,
         subnet: VpcSubnet,
-    ) -> Result<(authz::VpcSubnet, VpcSubnet), SubnetError> {
+    ) -> Result<(authz::VpcSubnet, VpcSubnet), InsertVpcSubnetError> {
         opctx
             .authorize(authz::Action::CreateChild, authz_vpc)
             .await
-            .map_err(SubnetError::External)?;
+            .map_err(InsertVpcSubnetError::External)?;
         assert_eq!(authz_vpc.id(), subnet.vpc_id);
 
         let db_subnet = self.vpc_create_subnet_raw(subnet).await?;
         self.vpc_system_router_ensure_subnet_routes(opctx, authz_vpc.id())
             .await
-            .map_err(SubnetError::External)?;
+            .map_err(InsertVpcSubnetError::External)?;
         Ok((
             authz::VpcSubnet::new(
                 authz_vpc.clone(),
@@ -833,20 +833,16 @@ impl DataStore {
     pub(crate) async fn vpc_create_subnet_raw(
         &self,
         subnet: VpcSubnet,
-    ) -> Result<VpcSubnet, SubnetError> {
-        use db::schema::vpc_subnet::dsl;
-        let values = FilterConflictingVpcSubnetRangesQuery::new(subnet.clone());
+    ) -> Result<VpcSubnet, InsertVpcSubnetError> {
         let conn = self
             .pool_connection_unauthorized()
             .await
-            .map_err(SubnetError::External)?;
-
-        diesel::insert_into(dsl::vpc_subnet)
-            .values(values)
-            .returning(VpcSubnet::as_returning())
+            .map_err(InsertVpcSubnetError::External)?;
+        let query = InsertVpcSubnetQuery::new(subnet.clone());
+        query
             .get_result_async(&*conn)
             .await
-            .map_err(|e| SubnetError::from_diesel(e, &subnet))
+            .map_err(|e| InsertVpcSubnetError::from_diesel(e, &subnet))
     }
 
     pub async fn vpc_delete_subnet(

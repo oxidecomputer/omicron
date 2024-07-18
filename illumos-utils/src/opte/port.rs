@@ -30,17 +30,6 @@ pub struct PortData {
     pub(crate) subnet: IpNet,
     /// Information about the virtual gateway, aka OPTE
     pub(crate) gateway: Gateway,
-    /// Name of the VNIC the OPTE port is bound to.
-    // TODO-remove(#2932): Remove this once we can put Viona directly on top of an
-    // OPTE port device.
-    //
-    // NOTE: This is intentionally not an actual `Vnic` object. We'd like to
-    // delete the VNIC manually in `PortInner::drop`, because we _can't_ delete
-    // the xde device if we fail to delete the VNIC. See
-    // https://github.com/oxidecomputer/opte/issues/178 for more details. This
-    // can be changed back to a real VNIC when that is resolved, and the Drop
-    // impl below can simplify to just call `drop(self.vnic)`.
-    pub(crate) vnic: String,
 }
 
 #[derive(Debug)]
@@ -57,18 +46,6 @@ impl core::ops::Deref for PortInner {
 #[cfg(target_os = "illumos")]
 impl Drop for PortInner {
     fn drop(&mut self) {
-        if let Err(e) = crate::dladm::Dladm::delete_vnic(&self.vnic) {
-            eprintln!(
-                "WARNING: Failed to delete OPTE port overlay VNIC \
-                while dropping port. The VNIC will not be cleaned up \
-                properly, and the xde device itself will not be deleted. \
-                Both the VNIC and the xde device must be deleted out \
-                of band, and it will not be possible to recreate the xde \
-                device until then. Error: {:?}",
-                e
-            );
-            return;
-        }
         let err = match opte_ioctl::OpteHdl::open(opte_ioctl::OpteHdl::XDE_CTL)
         {
             Ok(hdl) => {
@@ -81,9 +58,8 @@ impl Drop for PortInner {
             Err(e) => e,
         };
         eprintln!(
-            "WARNING: OPTE port overlay VNIC deleted, but failed \
-            to delete the xde device. It must be deleted out \
-            of band, and it will not be possible to recreate the xde \
+            "WARNING: Failed to delete the xde device. It must be deleted
+            out of band, and it will not be possible to recreate the xde \
             device until then. Error: {:?}",
             err,
         );
@@ -128,10 +104,6 @@ impl Port {
 
     pub fn subnet(&self) -> &IpNet {
         &self.inner.subnet
-    }
-
-    pub fn vnic_name(&self) -> &str {
-        &self.inner.vnic
     }
 
     pub fn slot(&self) -> u8 {

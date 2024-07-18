@@ -293,7 +293,7 @@ mod test {
             .dataset_insert_if_not_exists(Dataset::new(
                 Uuid::new_v4(),
                 zpool_id,
-                "[::1]:0".parse().unwrap(),
+                Some("[::1]:0".parse().unwrap()),
                 DatasetKind::Crucible,
             ))
             .await
@@ -326,7 +326,7 @@ mod test {
             .dataset_insert_if_not_exists(Dataset::new(
                 dataset1.id(),
                 zpool_id,
-                "[::1]:12345".parse().unwrap(),
+                Some("[::1]:12345".parse().unwrap()),
                 DatasetKind::Cockroach,
             ))
             .await
@@ -342,7 +342,7 @@ mod test {
             .dataset_upsert(Dataset::new(
                 Uuid::new_v4(),
                 zpool_id,
-                "[::1]:0".parse().unwrap(),
+                Some("[::1]:0".parse().unwrap()),
                 DatasetKind::Cockroach,
             ))
             .await
@@ -374,7 +374,7 @@ mod test {
             .dataset_insert_if_not_exists(Dataset::new(
                 dataset1.id(),
                 zpool_id,
-                "[::1]:12345".parse().unwrap(),
+                Some("[::1]:12345".parse().unwrap()),
                 DatasetKind::Cockroach,
             ))
             .await
