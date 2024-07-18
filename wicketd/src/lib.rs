@@ -9,7 +9,6 @@ mod context;
 mod helpers;
 mod http_entrypoints;
 mod installinator_progress;
-mod inventory;
 pub mod mgs;
 mod nexus_proxy;
 mod preflight_check;
@@ -28,7 +27,6 @@ use display_error_chain::DisplayErrorChain;
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer};
 pub use installinator_progress::{IprUpdateTracker, RunningUpdateState};
 use internal_dns::resolver::Resolver;
-pub use inventory::{RackV1Inventory, SpInventory};
 use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
 use nexus_proxy::NexusTcpProxy;
@@ -44,18 +42,6 @@ use std::{
     sync::Arc,
 };
 pub use update_tracker::{StartUpdateError, UpdateTracker};
-
-/// Run the OpenAPI generator for the API; which emits the OpenAPI spec
-/// to stdout.
-pub fn run_openapi() -> Result<(), String> {
-    http_entrypoints::api()
-        .openapi("Oxide Technician Port Control Service", "0.0.1")
-        .description("API for use by the technician port TUI: wicket")
-        .contact_url("https://oxide.computer")
-        .contact_email("api@oxide.computer")
-        .write(&mut std::io::stdout())
-        .map_err(|e| e.to_string())
-}
 
 /// Command line arguments for wicketd
 pub struct Args {
@@ -149,6 +135,7 @@ impl Server {
             // some endpoints.
             request_body_max_bytes: 4 << 30,
             default_handler_task_mode: HandlerTaskMode::Detached,
+            log_headers: vec![],
         };
 
         let mgs_manager = MgsManager::new(&log, args.mgs_address);

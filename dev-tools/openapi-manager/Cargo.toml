@@ -25,3 +25,4 @@ owo-colors.workspace = true
 serde_json.workspace = true
 similar.workspace = true
 supports-color.workspace = true
+wicketd-api.workspace = true

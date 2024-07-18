@@ -51,7 +51,7 @@ use omicron_common::api::internal::nexus::{
 };
 use omicron_common::api::internal::shared::{
     HostPortConfig, RackNetworkConfig, ResolvedVpcRouteSet,
-    ResolvedVpcRouteState,
+    ResolvedVpcRouteState, SledIdentifiers,
 };
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
@@ -156,6 +156,9 @@ pub enum Error {
 
     #[error("Metrics error: {0}")]
     Metrics(#[from] crate::metrics::Error),
+
+    #[error("Expected revision to fit in a u32, but found {0}")]
+    UnexpectedRevision(i64),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -1183,6 +1186,26 @@ impl SledAgent {
 
     pub(crate) fn boot_disk_os_writer(&self) -> &BootDiskOsWriter {
         &self.inner.boot_disk_os_writer
+    }
+
+    /// Return identifiers for this sled.
+    ///
+    /// This is mostly used to identify timeseries data with the originating
+    /// sled.
+    ///
+    /// NOTE: This only returns the identifiers for the _sled_ itself. If you're
+    /// interested in the switch identifiers, MGS is the current best way to do
+    /// that, by asking for the local switch's slot, and then that switch's SP
+    /// state.
+    pub(crate) async fn sled_identifiers(&self) -> SledIdentifiers {
+        let baseboard = self.inner.hardware.baseboard();
+        SledIdentifiers {
+            rack_id: self.inner.start_request.body.rack_id,
+            sled_id: self.inner.id,
+            model: baseboard.model().to_string(),
+            revision: baseboard.revision(),
+            serial: baseboard.identifier().to_string(),
+        }
     }
 
     /// Return basic information about ourselves: identity and status

@@ -1371,7 +1371,7 @@ impl ServiceManager {
             })
         })?;
 
-        let opte_interface = port.vnic_name();
+        let opte_interface = port.name();
         let opte_gateway = port.gateway().ip().to_string();
         let opte_ip = port.ip().to_string();
 
@@ -2160,6 +2160,7 @@ impl ServiceManager {
                             request_body_max_bytes: 8192 * 1024,
                             default_handler_task_mode:
                                 HandlerTaskMode::Detached,
+                            log_headers: vec![],
                         },
                     },
                     dropshot_internal: dropshot::ConfigDropshot {
@@ -2170,6 +2171,7 @@ impl ServiceManager {
                         // rack setup.
                         request_body_max_bytes: 10 * 1024 * 1024,
                         default_handler_task_mode: HandlerTaskMode::Detached,
+                        log_headers: vec![],
                     },
                     internal_dns: nexus_config::InternalDns::FromSubnet {
                         subnet: Ipv6Subnet::<RACK_PREFIX>::new(
