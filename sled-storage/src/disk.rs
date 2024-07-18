@@ -12,6 +12,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::ledger::Ledgerable;
 use omicron_common::zpool_name::{ZpoolKind, ZpoolName};
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -41,6 +42,68 @@ pub struct OmicronPhysicalDiskConfig {
     pub identity: DiskIdentity,
     pub id: Uuid,
     pub pool_id: ZpoolUuid,
+}
+
+/// Configuration information necessary to request a single dataset
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+)]
+pub struct DatasetConfig {
+    /// The UUID of the dataset being requested
+    pub id: DatasetUuid,
+
+    /// The dataset's name
+    pub name: dataset::DatasetName,
+
+    /// The compression mode to be supplied, if any
+    pub compression: Option<String>,
+
+    /// The upper bound on the amount of storage used by this dataset
+    pub quota: Option<usize>,
+
+    /// The lower bound on the amount of storage usable by this dataset
+    pub reservation: Option<usize>,
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct DatasetsConfig {
+    /// generation number of this configuration
+    ///
+    /// This generation number is owned by the control plane (i.e., RSS or
+    /// Nexus, depending on whether RSS-to-Nexus handoff has happened).  It
+    /// should not be bumped within Sled Agent.
+    ///
+    /// Sled Agent rejects attempts to set the configuration to a generation
+    /// older than the one it's currently running.
+    pub generation: Generation,
+
+    pub datasets: Vec<DatasetConfig>,
+}
+
+impl Default for DatasetsConfig {
+    fn default() -> Self {
+        Self { generation: Generation::new(), datasets: vec![] }
+    }
+}
+
+impl Ledgerable for DatasetsConfig {
+    fn is_newer_than(&self, other: &Self) -> bool {
+        self.generation > other.generation
+    }
+
+    // No need to do this, the generation number is provided externally.
+    fn generation_bump(&mut self) {}
 }
 
 #[derive(

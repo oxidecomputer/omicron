@@ -8,9 +8,14 @@ use std::collections::HashSet;
 
 use crate::config::MountConfig;
 use crate::dataset::{DatasetName, CONFIG_DATASET};
-use crate::disk::{OmicronPhysicalDisksConfig, RawDisk};
+use crate::disk::{
+    DatasetConfig, DatasetsConfig, OmicronPhysicalDisksConfig, RawDisk,
+};
 use crate::error::Error;
-use crate::resources::{AllDisks, DisksManagementResult, StorageResources};
+use crate::resources::{
+    AllDisks, DatasetManagementStatus, DatasetsManagementResult,
+    DisksManagementResult, StorageResources,
+};
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
 use futures::future::FutureExt;
@@ -19,6 +24,8 @@ use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::ledger::Ledger;
+use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::GenericUuid;
 use sled_hardware::DiskVariant;
 use slog::{info, o, warn, Logger};
 use std::future::Future;
@@ -110,6 +117,16 @@ pub(crate) enum StorageRequest {
     DetectedRawDisksChanged {
         raw_disks: HashSet<RawDisk>,
         tx: DebugIgnore<oneshot::Sender<Result<(), Error>>>,
+    },
+
+    DatasetsEnsure {
+        config: DatasetsConfig,
+        tx: DebugIgnore<
+            oneshot::Sender<Result<DatasetsManagementResult, Error>>,
+        >,
+    },
+    DatasetsList {
+        tx: DebugIgnore<oneshot::Sender<Result<DatasetsConfig, Error>>>,
     },
 
     // Requests to explicitly manage or stop managing a set of devices
@@ -238,6 +255,31 @@ impl StorageHandle {
         rx.map(|result| result.unwrap())
     }
 
+    pub async fn datasets_ensure(
+        &self,
+        config: DatasetsConfig,
+    ) -> Result<DatasetsManagementResult, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(StorageRequest::DatasetsEnsure { config, tx: tx.into() })
+            .await
+            .unwrap();
+
+        rx.await.unwrap()
+    }
+
+    /// Reads the last value written to storage by
+    /// [Self::datasets_ensure].
+    pub async fn datasets_list(&self) -> Result<DatasetsConfig, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(StorageRequest::DatasetsList { tx: tx.into() })
+            .await
+            .unwrap();
+
+        rx.await.unwrap()
+    }
+
     pub async fn omicron_physical_disks_ensure(
         &self,
         config: OmicronPhysicalDisksConfig,
@@ -320,6 +362,10 @@ impl StorageHandle {
         rx.await.unwrap()
     }
 
+    // TODO(https://github.com/oxidecomputer/omicron/issues/6043):
+    //
+    // Deprecate usage of this function, prefer to call "datasets_ensure"
+    // and ask for the set of all datasets from Nexus.
     pub async fn upsert_filesystem(
         &self,
         dataset_id: Uuid,
@@ -425,6 +471,12 @@ impl StorageManager {
             StorageRequest::DetectedRawDisksChanged { raw_disks, tx } => {
                 self.ensure_using_exactly_these_disks(raw_disks).await;
                 let _ = tx.0.send(Ok(()));
+            }
+            StorageRequest::DatasetsEnsure { config, tx } => {
+                let _ = tx.0.send(self.datasets_ensure(config).await);
+            }
+            StorageRequest::DatasetsList { tx } => {
+                let _ = tx.0.send(self.datasets_list().await);
             }
             StorageRequest::OmicronPhysicalDisksEnsure { config, tx } => {
                 let _ =
@@ -590,6 +642,103 @@ impl StorageManager {
         }
 
         Ok(())
+    }
+
+    async fn datasets_ensure(
+        &mut self,
+        mut config: DatasetsConfig,
+    ) -> Result<DatasetsManagementResult, Error> {
+        let log = self.log.new(o!("request" => "datasets_ensure"));
+
+        // Ensure that the datasets arrive in a consistent order
+        config.datasets.sort_by(|a, b| a.id.partial_cmp(&b.id).unwrap());
+
+        // We rely on the schema being stable across reboots -- observe
+        // "test_datasets_schema" below for that property guarantee.
+        let ledger_paths = self.all_omicron_disk_ledgers().await;
+        let maybe_ledger =
+            Ledger::<DatasetsConfig>::new(&log, ledger_paths.clone()).await;
+
+        let mut ledger = match maybe_ledger {
+            Some(ledger) => {
+                info!(
+                    log,
+                    "Comparing 'requested datasets' to ledger on internal storage"
+                );
+                let ledger_data = ledger.data();
+                if config.generation < ledger_data.generation {
+                    warn!(
+                        log,
+                        "Request looks out-of-date compared to prior request"
+                    );
+                    return Err(Error::PhysicalDiskConfigurationOutdated {
+                        requested: config.generation,
+                        current: ledger_data.generation,
+                    });
+                }
+
+                // TODO: If the generation is equal, check that the values are
+                // also equal.
+
+                info!(log, "Request looks newer than prior requests");
+                ledger
+            }
+            None => {
+                info!(log, "No previously-stored 'requested datasets', creating new ledger");
+                Ledger::<DatasetsConfig>::new_with(
+                    &log,
+                    ledger_paths.clone(),
+                    DatasetsConfig::default(),
+                )
+            }
+        };
+
+        let result = self.datasets_ensure_internal(&log, &config).await;
+
+        let ledger_data = ledger.data_mut();
+        if *ledger_data == config {
+            return Ok(result);
+        }
+        *ledger_data = config;
+        ledger.commit().await?;
+
+        Ok(result)
+    }
+
+    async fn datasets_ensure_internal(
+        &mut self,
+        log: &Logger,
+        config: &DatasetsConfig,
+    ) -> DatasetsManagementResult {
+        let mut status = vec![];
+        for dataset in &config.datasets {
+            status.push(self.dataset_ensure_internal(log, dataset).await);
+        }
+        DatasetsManagementResult { status }
+    }
+
+    async fn dataset_ensure_internal(
+        &mut self,
+        log: &Logger,
+        config: &DatasetConfig,
+    ) -> DatasetManagementStatus {
+        info!(log, "Ensuring dataset"; "name" => config.name.full_name());
+        let mut status = DatasetManagementStatus {
+            dataset_name: config.name.clone(),
+            err: None,
+        };
+
+        if let Err(err) = self.ensure_dataset(config).await {
+            status.err = Some(err.to_string());
+        };
+
+        status
+    }
+
+    async fn datasets_list(&mut self) -> Result<DatasetsConfig, Error> {
+        let log = self.log.new(o!("request" => "datasets_list"));
+
+        todo!();
     }
 
     // Makes an U.2 disk managed by the control plane within [`StorageResources`].
@@ -761,6 +910,60 @@ impl StorageManager {
                 );
             }
         }
+    }
+
+    // Ensures a dataset exists within a zpool, according to `config`.
+    async fn ensure_dataset(
+        &mut self,
+        config: &DatasetConfig,
+    ) -> Result<(), Error> {
+        info!(self.log, "ensure_dataset"; "config" => ?config);
+        if !self
+            .resources
+            .disks()
+            .iter_managed()
+            .any(|(_, disk)| disk.zpool_name() == config.name.pool())
+        {
+            return Err(Error::ZpoolNotFound(format!(
+                "{}",
+                config.name.pool(),
+            )));
+        }
+
+        let zoned = true;
+        let fs_name = &config.name.full_name();
+        let do_format = true;
+        let encryption_details = None;
+        let size_details = Some(illumos_utils::zfs::SizeDetails {
+            quota: config.quota,
+            reservation: config.reservation,
+            compression: config.compression.clone(),
+        });
+        Zfs::ensure_filesystem(
+            fs_name,
+            Mountpoint::Path(Utf8PathBuf::from("/data")),
+            zoned,
+            do_format,
+            encryption_details,
+            size_details,
+            None,
+        )?;
+        // Ensure the dataset has a usable UUID.
+        if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
+            if let Ok(id) = id_str.parse::<DatasetUuid>() {
+                if id != config.id {
+                    return Err(Error::UuidMismatch {
+                        name: Box::new(config.name.clone()),
+                        old: id.into_untyped_uuid(),
+                        new: config.id.into_untyped_uuid(),
+                    });
+                }
+                return Ok(());
+            }
+        }
+        Zfs::set_oxide_value(&fs_name, "uuid", &config.id.to_string())?;
+
+        Ok(())
     }
 
     // Attempts to add a dataset within a zpool, according to `request`.
@@ -1317,6 +1520,15 @@ mod test {
         let schema = schemars::schema_for!(OmicronPhysicalDisksConfig);
         expectorate::assert_contents(
             "../schema/omicron-physical-disks.json",
+            &serde_json::to_string_pretty(&schema).unwrap(),
+        );
+    }
+
+    #[test]
+    fn test_datasets_schema() {
+        let schema = schemars::schema_for!(DatasetsConfig);
+        expectorate::assert_contents(
+            "../schema/datasets.json",
             &serde_json::to_string_pretty(&schema).unwrap(),
         );
     }

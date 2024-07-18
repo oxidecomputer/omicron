@@ -129,7 +129,16 @@ impl ExpectedDataset {
 /// The type of a dataset, and an auxiliary information necessary
 /// to successfully launch a zone managing the associated data.
 #[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    Ord,
+    PartialOrd,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DatasetKind {
@@ -198,7 +207,16 @@ impl std::fmt::Display for DatasetKind {
 }
 
 #[derive(
-    Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Clone, JsonSchema,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Clone,
+    JsonSchema,
+    PartialOrd,
+    Ord,
 )]
 pub struct DatasetName {
     // A unique identifier for the Zpool on which the dataset is stored.
@@ -412,7 +430,8 @@ pub(crate) async fn ensure_zpool_has_datasets(
         let encryption_details = None;
         let size_details = Some(SizeDetails {
             quota: dataset.quota,
-            compression: dataset.compression,
+            reservation: None,
+            compression: dataset.compression.map(|s| s.to_string()),
         });
         Zfs::ensure_filesystem(
             name,

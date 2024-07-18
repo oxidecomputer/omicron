@@ -300,6 +300,8 @@ pub type OmicronPhysicalDiskConfig =
     sled_storage::disk::OmicronPhysicalDiskConfig;
 pub type OmicronPhysicalDisksConfig =
     sled_storage::disk::OmicronPhysicalDisksConfig;
+pub type DatasetConfig = sled_storage::disk::DatasetConfig;
+pub type DatasetsConfig = sled_storage::disk::DatasetsConfig;
 
 /// Describes the set of Omicron-managed zones running on a sled
 #[derive(

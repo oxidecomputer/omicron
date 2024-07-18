@@ -57,6 +57,23 @@ impl DiskManagementError {
     }
 }
 
+/// Identifies how a single dataset management operation may have succeeded or
+/// failed.
+#[derive(Debug, JsonSchema, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DatasetManagementStatus {
+    pub dataset_name: crate::dataset::DatasetName,
+    pub err: Option<String>,
+}
+
+/// The result from attempting to manage datasets.
+#[derive(Default, Debug, JsonSchema, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[must_use = "this `DatasetManagementResult` may contain errors, which should be handled"]
+pub struct DatasetsManagementResult {
+    pub status: Vec<DatasetManagementStatus>,
+}
+
 /// Identifies how a single disk management operation may have succeeded or
 /// failed.
 #[derive(Debug, JsonSchema, Serialize, Deserialize)]

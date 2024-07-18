@@ -19,11 +19,12 @@ use crate::nexus::{
     NexusNotifierTask,
 };
 use crate::params::{
-    DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
-    InstanceMetadata, InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse, Inventory,
-    OmicronPhysicalDisksConfig, OmicronZonesConfig, SledRole, TimeSync,
-    VpcFirewallRule, ZoneBundleMetadata, Zpool,
+    DatasetsConfig, DiskStateRequested, InstanceExternalIpBody,
+    InstanceHardware, InstanceMetadata, InstanceMigrationSourceParams,
+    InstancePutStateResponse, InstanceStateRequested,
+    InstanceUnregisterResponse, Inventory, OmicronPhysicalDisksConfig,
+    OmicronZonesConfig, SledRole, TimeSync, VpcFirewallRule,
+    ZoneBundleMetadata, Zpool,
 };
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
@@ -67,6 +68,7 @@ use sled_hardware::{underlay, HardwareManager};
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_hardware_types::Baseboard;
 use sled_storage::manager::StorageHandle;
+use sled_storage::resources::DatasetsManagementResult;
 use sled_storage::resources::DisksManagementResult;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -803,6 +805,25 @@ impl SledAgent {
         self.inner.zone_bundler.cleanup().await.map_err(Error::from)
     }
 
+    pub async fn datasets_list(&self) -> Result<DatasetsConfig, Error> {
+        Ok(self.storage().datasets_list().await?)
+    }
+
+    pub async fn datasets_ensure(
+        &self,
+        config: DatasetsConfig,
+    ) -> Result<DatasetsManagementResult, Error> {
+        info!(self.log, "datasets ensure");
+        let datasets_result = self.storage().datasets_ensure(config).await?;
+        info!(self.log, "datasets ensure: Updated storage");
+
+        // TODO: See omicron_physical_disks_ensure, below - do we similarly
+        // need to ensure that old datasets are no longer in-use before we
+        // return here?
+
+        Ok(datasets_result)
+    }
+
     /// Requests the set of physical disks currently managed by the Sled Agent.
     ///
     /// This should be contrasted by the set of disks in the inventory, which
@@ -891,7 +912,7 @@ impl SledAgent {
         &self,
         requested_zones: OmicronZonesConfig,
     ) -> Result<(), Error> {
-        // TODO:
+        // TODO(https://github.com/oxidecomputer/omicron/issues/6043):
         // - If these are the set of filesystems, we should also consider
         // removing the ones which are not listed here.
         // - It's probably worth sending a bulk request to the storage system,

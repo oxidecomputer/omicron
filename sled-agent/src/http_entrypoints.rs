@@ -8,11 +8,12 @@ use super::sled_agent::SledAgent;
 use crate::bootstrap::early_networking::EarlyNetworkConfig;
 use crate::bootstrap::params::AddSledRequest;
 use crate::params::{
-    BootstoreStatus, CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
-    InstanceExternalIpBody, InstancePutMigrationIdsBody, InstancePutStateBody,
-    InstancePutStateResponse, InstanceUnregisterResponse, Inventory,
-    OmicronPhysicalDisksConfig, OmicronZonesConfig, SledRole, TimeSync,
-    VpcFirewallRulesEnsureBody, ZoneBundleId, ZoneBundleMetadata, Zpool,
+    BootstoreStatus, CleanupContextUpdate, DatasetsConfig, DiskEnsureBody,
+    InstanceEnsureBody, InstanceExternalIpBody, InstancePutMigrationIdsBody,
+    InstancePutStateBody, InstancePutStateResponse, InstanceUnregisterResponse,
+    Inventory, OmicronPhysicalDisksConfig, OmicronZonesConfig, SledRole,
+    TimeSync, VpcFirewallRulesEnsureBody, ZoneBundleId, ZoneBundleMetadata,
+    Zpool,
 };
 use crate::sled_agent::Error as SledAgentError;
 use crate::zone_bundle;
@@ -38,6 +39,7 @@ use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::DiskVariant;
+use sled_storage::resources::DatasetsManagementResult;
 use sled_storage::resources::DisksManagementResult;
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -62,6 +64,8 @@ pub fn api() -> SledApiDescription {
         api.register(omicron_zones_get)?;
         api.register(omicron_zones_put)?;
         api.register(zones_list)?;
+        api.register(datasets_get)?;
+        api.register(datasets_put)?;
         api.register(omicron_physical_disks_get)?;
         api.register(omicron_physical_disks_put)?;
         api.register(zone_bundle_list)?;
@@ -343,6 +347,31 @@ async fn omicron_zones_get(
 ) -> Result<HttpResponseOk<OmicronZonesConfig>, HttpError> {
     let sa = rqctx.context();
     Ok(HttpResponseOk(sa.omicron_zones_list().await?))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/datasets",
+}]
+async fn datasets_put(
+    rqctx: RequestContext<SledAgent>,
+    body: TypedBody<DatasetsConfig>,
+) -> Result<HttpResponseOk<DatasetsManagementResult>, HttpError> {
+    let sa = rqctx.context();
+    let body_args = body.into_inner();
+    let result = sa.datasets_ensure(body_args).await?;
+    Ok(HttpResponseOk(result))
+}
+
+#[endpoint {
+    method = GET,
+    path = "/datasets",
+}]
+async fn datasets_get(
+    rqctx: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<DatasetsConfig>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(sa.datasets_list().await?))
 }
 
 #[endpoint {

@@ -203,7 +203,8 @@ pub struct EncryptionDetails {
 #[derive(Debug, Default)]
 pub struct SizeDetails {
     pub quota: Option<usize>,
-    pub compression: Option<&'static str>,
+    pub reservation: Option<usize>,
+    pub compression: Option<String>,
 }
 
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
@@ -274,10 +275,18 @@ impl Zfs {
     ) -> Result<(), EnsureFilesystemError> {
         let (exists, mounted) = Self::dataset_exists(name, &mountpoint)?;
         if exists {
-            if let Some(SizeDetails { quota, compression }) = size_details {
+            if let Some(SizeDetails { quota, reservation, compression }) =
+                size_details
+            {
                 // apply quota and compression mode (in case they've changed across
                 // sled-agent versions since creation)
-                Self::apply_properties(name, &mountpoint, quota, compression)?;
+                Self::apply_properties(
+                    name,
+                    &mountpoint,
+                    quota,
+                    reservation,
+                    compression,
+                )?;
             }
 
             if encryption_details.is_none() {
@@ -351,9 +360,17 @@ impl Zfs {
             })?;
         }
 
-        if let Some(SizeDetails { quota, compression }) = size_details {
+        if let Some(SizeDetails { quota, reservation, compression }) =
+            size_details
+        {
             // Apply any quota and compression mode.
-            Self::apply_properties(name, &mountpoint, quota, compression)?;
+            Self::apply_properties(
+                name,
+                &mountpoint,
+                quota,
+                reservation,
+                compression,
+            )?;
         }
 
         Ok(())
@@ -363,7 +380,8 @@ impl Zfs {
         name: &str,
         mountpoint: &Mountpoint,
         quota: Option<usize>,
-        compression: Option<&'static str>,
+        reservation: Option<usize>,
+        compression: Option<String>,
     ) -> Result<(), EnsureFilesystemError> {
         if let Some(quota) = quota {
             if let Err(err) =
@@ -377,8 +395,20 @@ impl Zfs {
                 });
             }
         }
+        if let Some(reservation) = reservation {
+            if let Err(err) =
+                Self::set_value(name, "reservation", &format!("{reservation}"))
+            {
+                return Err(EnsureFilesystemError {
+                    name: name.to_string(),
+                    mountpoint: mountpoint.clone(),
+                    // Take the execution error from the SetValueError
+                    err: err.err.into(),
+                });
+            }
+        }
         if let Some(compression) = compression {
-            if let Err(err) = Self::set_value(name, "compression", compression)
+            if let Err(err) = Self::set_value(name, "compression", &compression)
             {
                 return Err(EnsureFilesystemError {
                     name: name.to_string(),
