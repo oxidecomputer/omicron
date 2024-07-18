@@ -10,6 +10,7 @@ use super::{
     ACTION_GENERATE_ID,
 };
 use crate::app::db::datastore::instance;
+use crate::app::db::datastore::instance::InstanceUpdateResult;
 use crate::app::db::datastore::InstanceSnapshot;
 use crate::app::db::lookup::LookupPath;
 use crate::app::db::model::Generation;
@@ -50,8 +51,8 @@ pub(crate) use self::start::{Params, SagaInstanceUpdate};
 mod destroyed;
 
 /// Returns `true` if an `instance-update` saga should be executed as a result
-/// of writing the provided [`SledInstanceState`] to the database with the
-/// provided [`InstanceUpdateResult`].
+/// of writing the provided [`nexus::SledInstanceState`] to the database with
+/// the provided [`InstanceUpdateResult`].
 ///
 /// We determine this only after actually updating the database records,
 /// because we don't know whether a particular VMM or migration state is
@@ -71,7 +72,7 @@ pub fn update_saga_needed(
     log: &slog::Logger,
     instance_id: InstanceUuid,
     state: &nexus::SledInstanceState,
-    result: &instance::InstanceUpdateResult,
+    result: &InstanceUpdateResult,
 ) -> bool {
     // Currently, an instance-update saga is required if (and only if):
     //
