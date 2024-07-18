@@ -828,11 +828,9 @@ mod test {
     use omicron_common::api::internal::nexus::{
         MigrationRuntimeState, MigrationState, Migrations,
     };
-    use omicron_test_utils::dev::poll;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PropolisUuid;
     use omicron_uuid_kinds::SledUuid;
-    use std::time::Duration;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
