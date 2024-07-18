@@ -1201,19 +1201,15 @@ impl super::Nexus {
                          "instance_id" => %instance_id,
                          "propolis_id" => %state.propolis_id,
                          "result" => ?update_result);
-            let (vmm_updated, migration_updated) = update_result?;
-            Ok(InstanceUpdateResult {
-                instance_updated: false,
-                vmm_updated,
-                migration_updated,
-            })
+            update_result
         } else {
             // There was no instance state to write back, so --- perhaps
             // obviously --- nothing happened.
             Ok(InstanceUpdateResult {
                 instance_updated: false,
                 vmm_updated: false,
-                migration_updated: None,
+                migration_in_updated: false,
+                migration_out_updated: false,
             })
         }
     }
@@ -1906,7 +1902,7 @@ pub(crate) async fn notify_instance_updated(
         "migration_state" => ?migrations,
     );
 
-    let (vmm_updated, migration_updated) = datastore
+    let result = datastore
         .vmm_and_migration_update_runtime(
             propolis_id,
             // TODO(eliza): probably should take this by value...
@@ -1915,19 +1911,60 @@ pub(crate) async fn notify_instance_updated(
         )
         .await?;
 
-    // If the instance or VMM records in the database have changed as a result
-    // of this update, prepare an `instance-update` saga to ensure that the
-    // changes are reflected by the instance record.
+    // Determine whether an `instance-update` saga should be executed.
     //
-    // TODO(eliza): it would be nice to be smarter about determining whether we
-    // need to run a saga here. We don't need to run an instance-update saga
-    // *every* time a VMM or migration has been updated. instead, we should only
-    // trigger them if any side of the migration has *terminated*, or if the
-    // active VMM state transitioned to Destroyed. Eliding unnecessary start
-    // sagas would reduce updater lock contention and allow the necessary sagas
-    // to run in a timelier manner.
-    let updated = vmm_updated || migration_updated.unwrap_or(false);
-    if updated {
+    // We determine this only after actually updating the database records,
+    // because we don't know whether a particular VMM or migration state is
+    // *new* or not until we know whether the corresponding database record has
+    // actually changed (determined by the generation number). For example, when
+    // an instance has migrated into a Propolis process, Propolis will continue
+    // to report the migration in in the `Completed` state as part of all state
+    // updates regarding that instance, but we no longer need to act on it if
+    // the migration record has already been updated to reflect that the
+    // migration has completed.
+    //
+    // Once we know what rows have been updated, we can inspect the states
+    // written to the DB to determine whether an instance-update saga is
+    // required to bring the instance record's state in line with the new
+    // VMM/migration states.
+    //
+    // Currently, an instance-update saga is required if (and only if):
+    //
+    // - The instance's active VMM has transitioned to `Destroyed`. We don't
+    //   actually know whether the VMM whose state was updated here was the
+    //   active VMM or not, so we will always attempt to run an instance-update
+    //   saga if the VMM was `Destroyed`.
+    let vmm_needs_update = result.vmm_updated
+        && new_runtime_state.vmm_state.state == nexus::VmmState::Destroyed;
+    // - A migration in to this VMM has transitioned to a terminal state
+    //   (`Failed` or `Completed`).
+    let migration_in_needs_update = result.migration_in_updated
+        && migrations
+            .migration_in
+            .map(|migration| migration.state.is_terminal())
+            .unwrap_or(false);
+    // - A migration out from this VMM has transitioned to a terminal state
+    //   (`Failed` or `Completed`).
+    let migration_out_needs_update = result.migration_out_updated
+        && migrations
+            .migration_out
+            .map(|migration| migration.state.is_terminal())
+            .unwrap_or(false);
+    // If any of the above conditions are true, prepare an instance-update saga
+    // for this instance.
+    if vmm_needs_update
+        || migration_in_needs_update
+        || migration_out_needs_update
+    {
+        debug!(opctx.log,
+            "new VMM runtime state from sled agent requires an instance-update saga";
+            "instance_id" => %instance_id,
+            "propolis_id" => %propolis_id,
+            "vmm_needs_update" => vmm_needs_update,
+            "migration_in_needs_update" => migration_in_needs_update,
+            "migration_out_needs_update" => migration_out_needs_update,
+        );
+
         let (.., authz_instance) = LookupPath::new(&opctx, datastore)
             .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)

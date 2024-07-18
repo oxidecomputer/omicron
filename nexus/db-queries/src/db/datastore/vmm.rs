@@ -7,6 +7,7 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
+use crate::db::datastore::instance::InstanceUpdateResult;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::Vmm;
@@ -147,7 +148,7 @@ impl DataStore {
         vmm_id: PropolisUuid,
         new_runtime: &VmmRuntimeState,
         migrations: Migrations<'_>,
-    ) -> Result<(bool, Option<bool>), Error> {
+    ) -> Result<InstanceUpdateResult, Error> {
         let query = crate::db::queries::instance::InstanceAndVmmUpdate::new(
             vmm_id,
             new_runtime.clone(),
@@ -163,22 +164,16 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        let vmm_updated = match result.vmm_status {
-            Some(UpdateStatus::Updated) => true,
-            Some(UpdateStatus::NotUpdatedButExists) => false,
-            None => false,
-        };
-        let migration_updated = if migrations.migration_in.is_some()
-            || migrations.migration_out.is_some()
-        {
-            Some(
-                result.migration_in_status.was_updated()
-                    || result.migration_out_status.was_updated(),
-            )
-        } else {
-            None
-        };
-        Ok((vmm_updated, migration_updated))
+        Ok(InstanceUpdateResult {
+            instance_updated: false,
+            vmm_updated: match result.vmm_status {
+                Some(UpdateStatus::Updated) => true,
+                Some(UpdateStatus::NotUpdatedButExists) => false,
+                None => false,
+            },
+            migration_in_updated: result.migration_in_status.was_updated(),
+            migration_out_updated: result.migration_out_status.was_updated(),
+        })
     }
 
     /// Forcibly overwrites the Propolis IP/Port in the supplied VMM's record with

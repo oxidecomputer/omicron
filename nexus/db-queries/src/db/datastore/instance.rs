@@ -230,15 +230,8 @@ pub struct InstanceUpdateResult {
     pub instance_updated: bool,
     /// `true` if the VMM record was updated, `false` otherwise.
     pub vmm_updated: bool,
-    /// Indicates whether a migration record for this instance was updated, if
-    /// [`Migrations`] were provided to
-    /// [`DataStore::instance_and_vmm_update_runtime`].
-    ///
-    /// - `Some(true)` if a migration record was updated
-    /// - `Some(false)` if [`Migrations`] were provided, but the
-    ///   migration record was not updated
-    /// - `None` if no [`Migrations`] were provided
-    pub migration_updated: Option<bool>,
+    pub migration_in_updated: bool,
+    pub migration_out_updated: bool,
 }
 
 impl DataStore {
@@ -781,22 +774,11 @@ impl DataStore {
             Some(UpdateStatus::NotUpdatedButExists) => false,
             None => false,
         };
-
-        let migration_updated = if migrations.migration_in.is_some()
-            || migrations.migration_out.is_some()
-        {
-            Some(
-                result.migration_in_status.was_updated()
-                    || result.migration_out_status.was_updated(),
-            )
-        } else {
-            None
-        };
-
         Ok(InstanceUpdateResult {
             instance_updated,
             vmm_updated,
-            migration_updated,
+            migration_in_updated: result.migration_in_status.was_updated(),
+            migration_out_updated: result.migration_out_status.was_updated(),
         })
     }
 
