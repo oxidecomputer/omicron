@@ -695,10 +695,11 @@ impl super::Nexus {
         vmm_state: &Option<db::model::Vmm>,
         requested: &InstanceStateChangeRequest,
     ) -> Result<InstanceStateChangeRequestAction, Error> {
-        let effective_state = InstanceAndActiveVmm::determine_effective_state(
-            instance_state,
-            vmm_state.as_ref(),
-        );
+        let effective_state = if let Some(vmm) = vmm_state {
+            vmm.runtime.state.into()
+        } else {
+            instance_state.runtime().nexus_state.into()
+        };
 
         // Requests that operate on active instances have to be directed to the
         // instance's current sled agent. If there is none, the request needs to
