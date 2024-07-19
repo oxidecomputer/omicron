@@ -7,12 +7,12 @@
 //! The facilities here handle binding a UDP socket, receiving DNS messages on
 //! that socket, and replying to them.
 
-use crate::dns_types::DnsRecord;
 use crate::storage;
 use crate::storage::QueryError;
 use crate::storage::Store;
 use anyhow::anyhow;
 use anyhow::Context;
+use dns_server_api::DnsRecord;
 use pretty_hex::*;
 use serde::Deserialize;
 use slog::{debug, error, info, o, trace, Logger};
@@ -234,12 +234,7 @@ fn dns_record_to_record(
             Ok(aaaa)
         }
 
-        DnsRecord::SRV(crate::dns_types::SRV {
-            prio,
-            weight,
-            port,
-            target,
-        }) => {
+        DnsRecord::SRV(dns_server_api::SRV { prio, weight, port, target }) => {
             let tgt = Name::from_str(&target).map_err(|error| {
                 RequestError::ServFail(anyhow!(
                     "serialization failed due to bad SRV target {:?}: {:#}",

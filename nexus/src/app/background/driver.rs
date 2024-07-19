@@ -382,6 +382,9 @@ impl TaskExec {
 
         // Do it!
         let details = self.imp.activate(&self.opctx).await;
+        let details_str = serde_json::to_string(&details).unwrap_or_else(|e| {
+            format!("<<failed to serialize task status: {}>>", e)
+        });
 
         let elapsed = start_instant.elapsed();
 
@@ -407,6 +410,7 @@ impl TaskExec {
             "activation complete";
             "elapsed" => ?elapsed,
             "iteration" => iteration,
+            "status" => details_str,
         );
     }
 }

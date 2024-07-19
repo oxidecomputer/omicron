@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "20240710.0"
+    "version": "20240821.0"
   },
   "paths": {
     "/device/auth": {
@@ -10013,7 +10013,8 @@
           },
           "revision": {
             "type": "integer",
-            "format": "int64"
+            "format": "uint32",
+            "minimum": 0
           },
           "serial": {
             "type": "string"

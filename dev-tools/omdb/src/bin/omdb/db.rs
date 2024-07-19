@@ -62,6 +62,7 @@ use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_model::NetworkInterface;
 use nexus_db_model::NetworkInterfaceKind;
+use nexus_db_model::PhysicalDisk;
 use nexus_db_model::Probe;
 use nexus_db_model::Project;
 use nexus_db_model::Region;
@@ -96,7 +97,10 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
+use nexus_types::external_api::views::PhysicalDiskPolicy;
+use nexus_types::external_api::views::PhysicalDiskState;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::identity::Resource;
@@ -281,12 +285,14 @@ pub struct DbFetchOptions {
 enum DbCommands {
     /// Print information about the rack
     Rack(RackArgs),
-    /// Print information about disks
+    /// Print information about virtual disks
     Disks(DiskArgs),
     /// Print information about internal and external DNS
     Dns(DnsArgs),
     /// Print information about collected hardware/software inventory
     Inventory(InventoryArgs),
+    /// Print information about physical disks
+    PhysicalDisks(PhysicalDisksArgs),
     /// Save the current Reconfigurator inputs to a file
     ReconfiguratorSave(ReconfiguratorSaveArgs),
     /// Print information about regions
@@ -407,8 +413,8 @@ enum InventoryCommands {
     Cabooses,
     /// list and show details from particular collections
     Collections(CollectionsArgs),
-    /// show all physical disks every found
-    PhysicalDisks(PhysicalDisksArgs),
+    /// show all physical disks ever found
+    PhysicalDisks(InvPhysicalDisksArgs),
     /// list all root of trust pages ever found
     RotPages,
 }
@@ -437,12 +443,19 @@ struct CollectionsShowArgs {
 }
 
 #[derive(Debug, Args, Clone, Copy)]
-struct PhysicalDisksArgs {
+struct InvPhysicalDisksArgs {
     #[clap(long)]
     collection_id: Option<CollectionUuid>,
 
     #[clap(long, requires("collection_id"))]
     sled_id: Option<SledUuid>,
+}
+
+#[derive(Debug, Args)]
+struct PhysicalDisksArgs {
+    /// Show disks that match the given filter
+    #[clap(short = 'F', long, value_enum)]
+    filter: Option<DiskFilter>,
 }
 
 #[derive(Debug, Args)]
@@ -608,6 +621,15 @@ impl DbArgs {
                     &datastore,
                     &self.fetch_opts,
                     inventory_args,
+                )
+                .await
+            }
+            DbCommands::PhysicalDisks(args) => {
+                cmd_db_physical_disks(
+                    &opctx,
+                    &datastore,
+                    &self.fetch_opts,
+                    args,
                 )
                 .await
             }
@@ -1382,6 +1404,68 @@ async fn cmd_db_disk_physical(
         .to_string();
 
     println!("{}", table);
+    Ok(())
+}
+
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct PhysicalDiskRow {
+    id: Uuid,
+    serial: String,
+    vendor: String,
+    model: String,
+    sled_id: Uuid,
+    policy: PhysicalDiskPolicy,
+    state: PhysicalDiskState,
+}
+
+impl From<PhysicalDisk> for PhysicalDiskRow {
+    fn from(d: PhysicalDisk) -> Self {
+        PhysicalDiskRow {
+            id: d.id(),
+            serial: d.serial.clone(),
+            vendor: d.vendor.clone(),
+            model: d.model.clone(),
+            sled_id: d.sled_id,
+            policy: d.disk_policy.into(),
+            state: d.disk_state.into(),
+        }
+    }
+}
+
+/// Run `omdb db physical-disks`.
+async fn cmd_db_physical_disks(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &PhysicalDisksArgs,
+) -> Result<(), anyhow::Error> {
+    let limit = fetch_opts.fetch_limit;
+    let filter = match args.filter {
+        Some(filter) => filter,
+        None => {
+            eprintln!(
+                "note: listing all in-service disks \
+                 (use -F to filter, e.g. -F in-service)"
+            );
+            DiskFilter::InService
+        }
+    };
+
+    let sleds = datastore
+        .physical_disk_list(&opctx, &first_page(limit), filter)
+        .await
+        .context("listing physical disks")?;
+    check_limit(&sleds, limit, || String::from("listing physical disks"));
+
+    let rows = sleds.into_iter().map(|s| PhysicalDiskRow::from(s));
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(1, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
     Ok(())
 }
 
@@ -2795,7 +2879,12 @@ async fn cmd_db_validate_region_snapshots(
         use crucible_agent_client::types::State;
         use crucible_agent_client::Client as CrucibleAgentClient;
 
-        let url = format!("http://{}", dataset.address());
+        let Some(dataset_addr) = dataset.address() else {
+            eprintln!("Dataset {} missing an IP address", dataset.id());
+            continue;
+        };
+
+        let url = format!("http://{}", dataset_addr);
         let client = CrucibleAgentClient::new(&url);
 
         let actual_region_snapshots = client
@@ -2856,7 +2945,7 @@ async fn cmd_db_validate_region_snapshots(
                                     dataset_id: region_snapshot.dataset_id,
                                     region_id: region_snapshot.region_id,
                                     snapshot_id: region_snapshot.snapshot_id,
-                                    dataset_addr: dataset.address(),
+                                    dataset_addr,
                                     error: String::from(
                                         "region snapshot was deleted, please remove its record",
                                     ),
@@ -2871,7 +2960,7 @@ async fn cmd_db_validate_region_snapshots(
                                     dataset_id: region_snapshot.dataset_id,
                                     region_id: region_snapshot.region_id,
                                     snapshot_id: region_snapshot.snapshot_id,
-                                    dataset_addr: dataset.address(),
+                                    dataset_addr,
                                     error: String::from(
                                         "NEXUS BUG: region snapshot was deleted, but the higher level snapshot was not!",
                                     ),
@@ -2900,7 +2989,7 @@ async fn cmd_db_validate_region_snapshots(
                                 dataset_id: region_snapshot.dataset_id,
                                 region_id: region_snapshot.region_id,
                                 snapshot_id: region_snapshot.snapshot_id,
-                                dataset_addr: dataset.address(),
+                                dataset_addr,
                                 error: format!(
                                     "AGENT BUG: region snapshot was deleted but has a running snapshot in state {:?}!",
                                     running_snapshot.state,
@@ -2950,7 +3039,12 @@ async fn cmd_db_validate_region_snapshots(
         use crucible_agent_client::types::State;
         use crucible_agent_client::Client as CrucibleAgentClient;
 
-        let url = format!("http://{}", dataset.address());
+        let Some(dataset_addr) = dataset.address() else {
+            eprintln!("Dataset {} missing an IP address", dataset.id());
+            continue;
+        };
+
+        let url = format!("http://{}", dataset_addr);
         let client = CrucibleAgentClient::new(&url);
 
         let actual_region_snapshots = client
@@ -2968,7 +3062,7 @@ async fn cmd_db_validate_region_snapshots(
                     dataset_id: dataset.id(),
                     region_id: region.id(),
                     snapshot_id,
-                    dataset_addr: dataset.address(),
+                    dataset_addr,
                     error: String::from(
                         "Nexus does not know about this snapshot!",
                     ),
@@ -2993,7 +3087,7 @@ async fn cmd_db_validate_region_snapshots(
                             dataset_id: dataset.id(),
                             region_id: region.id(),
                             snapshot_id,
-                            dataset_addr: dataset.address(),
+                            dataset_addr,
                             error: String::from(
                                 "Nexus does not know about this running snapshot!"
                             ),
@@ -3187,7 +3281,7 @@ async fn cmd_db_inventory_cabooses(
 async fn cmd_db_inventory_physical_disks(
     conn: &DataStoreConnection<'_>,
     limit: NonZeroU32,
-    args: PhysicalDisksArgs,
+    args: InvPhysicalDisksArgs,
 ) -> Result<(), anyhow::Error> {
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]

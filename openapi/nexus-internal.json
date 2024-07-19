@@ -909,6 +909,34 @@
         }
       }
     },
+    "/physical-disk/expunge": {
+      "post": {
+        "summary": "Mark a physical disk as expunged",
+        "description": "This is an irreversible process! It should only be called after sufficient warning to the operator.\nThis is idempotent.",
+        "operationId": "physical_disk_expunge",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhysicalDiskPath"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/probes/{sled}": {
       "get": {
         "summary": "Get all the probes associated with a given sled.",
@@ -1498,7 +1526,8 @@
           },
           "revision": {
             "type": "integer",
-            "format": "int64"
+            "format": "uint32",
+            "minimum": 0
           },
           "serial": {
             "type": "string"
@@ -3792,6 +3821,19 @@
         "enum": [
           "m2",
           "u2"
+        ]
+      },
+      "PhysicalDiskPath": {
+        "type": "object",
+        "properties": {
+          "disk_id": {
+            "description": "ID of the physical disk",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "disk_id"
         ]
       },
       "PhysicalDiskPutRequest": {
