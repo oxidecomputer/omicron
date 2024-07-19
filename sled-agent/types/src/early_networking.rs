@@ -15,9 +15,9 @@ use slog::{warn, Logger};
 /// Network configuration required to bring up the control plane
 ///
 /// The fields in this structure are those from
-/// [`super::params::RackInitializeRequest`] necessary for use beyond RSS. This
-/// is just for the initial rack configuration and cold boot purposes. Updates
-/// come from Nexus.
+/// [`crate::rack_init::RackInitializeRequest`] necessary for use beyond RSS.
+/// This is just for the initial rack configuration and cold boot purposes.
+/// Updates come from Nexus.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct EarlyNetworkConfig {
     // The current generation number of data as stored in CRDB.
