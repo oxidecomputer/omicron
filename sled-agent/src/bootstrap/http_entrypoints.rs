@@ -10,8 +10,6 @@
 use super::rack_ops::RssAccess;
 use super::BootstrapError;
 use super::RssAccessError;
-use crate::bootstrap::params::RackInitializeRequest;
-use crate::bootstrap::rack_ops::{RackInitId, RackResetId};
 use crate::updates::ConfigUpdates;
 use crate::updates::{Component, UpdateManager};
 use bootstore::schemes::v0 as bootstore;
@@ -22,8 +20,10 @@ use dropshot::{
 };
 use http::StatusCode;
 use omicron_common::api::external::Error;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use omicron_uuid_kinds::RackInitUuid;
+use omicron_uuid_kinds::RackResetUuid;
+use sled_agent_types::rack_init::RackInitializeRequest;
+use sled_agent_types::rack_ops::RackOperationStatus;
 use sled_hardware_types::Baseboard;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
@@ -47,7 +47,7 @@ impl BootstrapServerContext {
     pub(super) fn start_rack_initialize(
         &self,
         request: RackInitializeRequest,
-    ) -> Result<RackInitId, RssAccessError> {
+    ) -> Result<RackInitUuid, RssAccessError> {
         self.rss_access.start_initializing(
             &self.base_log,
             self.global_zone_bootstrap_ip,
@@ -79,45 +79,6 @@ pub(crate) fn api() -> BootstrapApiDescription {
         panic!("failed to register entrypoints: {}", err);
     }
     api
-}
-
-/// Current status of any rack-level operation being performed by this bootstrap
-/// agent.
-#[derive(
-    Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
-)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum RackOperationStatus {
-    Initializing {
-        id: RackInitId,
-    },
-    /// `id` will be none if the rack was already initialized on startup.
-    Initialized {
-        id: Option<RackInitId>,
-    },
-    InitializationFailed {
-        id: RackInitId,
-        message: String,
-    },
-    InitializationPanicked {
-        id: RackInitId,
-    },
-    Resetting {
-        id: RackResetId,
-    },
-    /// `reset_id` will be None if the rack is in an uninitialized-on-startup,
-    /// or Some if it is in an uninitialized state due to a reset operation
-    /// completing.
-    Uninitialized {
-        reset_id: Option<RackResetId>,
-    },
-    ResetFailed {
-        id: RackResetId,
-        message: String,
-    },
-    ResetPanicked {
-        id: RackResetId,
-    },
 }
 
 /// Return the baseboard identity of this sled.
@@ -173,7 +134,7 @@ async fn rack_initialization_status(
 async fn rack_initialize(
     rqctx: RequestContext<BootstrapServerContext>,
     body: TypedBody<RackInitializeRequest>,
-) -> Result<HttpResponseOk<RackInitId>, HttpError> {
+) -> Result<HttpResponseOk<RackInitUuid>, HttpError> {
     let ctx = rqctx.context();
     let request = body.into_inner();
     let id = ctx
@@ -189,7 +150,7 @@ async fn rack_initialize(
 }]
 async fn rack_reset(
     rqctx: RequestContext<BootstrapServerContext>,
-) -> Result<HttpResponseOk<RackResetId>, HttpError> {
+) -> Result<HttpResponseOk<RackResetUuid>, HttpError> {
     let ctx = rqctx.context();
     let id = ctx
         .rss_access

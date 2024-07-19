@@ -10,9 +10,6 @@ use super::disk::SimDisk;
 use super::instance::SimInstance;
 use super::storage::CrucibleData;
 use super::storage::Storage;
-use crate::bootstrap::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkConfigBody,
-};
 use crate::nexus::NexusClient;
 use crate::params::{
     DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
@@ -47,6 +44,7 @@ use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
 };
 use propolis_mock_server::Context as PropolisContext;
+use sled_agent_types::early_networking::{EarlyNetworkConfig, EarlyNetworkConfigBody};
 use sled_storage::resources::DisksManagementResult;
 use slog::Logger;
 use std::collections::{HashMap, HashSet, VecDeque};
