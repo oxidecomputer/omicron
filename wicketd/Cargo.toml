@@ -57,6 +57,7 @@ installinator-common.workspace = true
 omicron-certificates.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
+omicron-uuid-kinds.workspace = true
 sled-hardware-types.workspace = true
 tufaceous-lib.workspace = true
 update-common.workspace = true

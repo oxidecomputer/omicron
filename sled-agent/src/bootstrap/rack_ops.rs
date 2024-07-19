@@ -9,9 +9,8 @@ use crate::bootstrap::params::RackInitializeRequest;
 use crate::bootstrap::rss_handle::RssHandle;
 use crate::rack_setup::service::SetupServiceError;
 use bootstore::schemes::v0 as bootstore;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
+use omicron_uuid_kinds::RackInitUuid;
+use omicron_uuid_kinds::RackResetUuid;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::mem;
@@ -20,37 +19,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::error::TryRecvError;
-use uuid::Uuid;
-
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-)]
-pub struct RackInitId(pub Uuid);
-
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-)]
-pub struct RackResetId(pub Uuid);
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum RssAccessError {
@@ -174,7 +142,7 @@ impl RssAccess {
         storage_manager: &StorageHandle,
         bootstore_node_handle: &bootstore::NodeHandle,
         request: RackInitializeRequest,
-    ) -> Result<RackInitId, RssAccessError> {
+    ) -> Result<RackInitUuid, RssAccessError> {
         let mut status = self.status.lock().unwrap();
 
         match &*status {
@@ -202,7 +170,7 @@ impl RssAccess {
             }
             RssStatus::Uninitialized { .. } => {
                 let (completion_tx, completion) = oneshot::channel();
-                let id = RackInitId(Uuid::new_v4());
+                let id = RackInitUuid::new_v4();
                 *status = RssStatus::Initializing { id, completion };
                 mem::drop(status);
 
@@ -240,7 +208,7 @@ impl RssAccess {
         &self,
         parent_log: &Logger,
         global_zone_bootstrap_ip: Ipv6Addr,
-    ) -> Result<RackResetId, RssAccessError> {
+    ) -> Result<RackResetUuid, RssAccessError> {
         let mut status = self.status.lock().unwrap();
 
         match &*status {
@@ -267,7 +235,7 @@ impl RssAccess {
             }
             RssStatus::Initialized { .. } => {
                 let (completion_tx, completion) = oneshot::channel();
-                let id = RackResetId(Uuid::new_v4());
+                let id = RackResetUuid::new_v4();
                 *status = RssStatus::Resetting { id, completion };
                 mem::drop(status);
 
@@ -302,40 +270,40 @@ enum RssStatus {
         // We can either be uninitialized on startup (in which case `reset_id`
         // is None) or because a reset has completed (in which case `reset_id`
         // is Some).
-        reset_id: Option<RackResetId>,
+        reset_id: Option<RackResetUuid>,
     },
     Initialized {
         // We can either be initialized on startup (in which case `id`
         // is None) or because initialization has completed (in which case `id`
         // is Some).
-        id: Option<RackInitId>,
+        id: Option<RackInitUuid>,
     },
 
     // Tranistory states (which we may be in for a long time, even on human time
     // scales, but should eventually leave).
     Initializing {
-        id: RackInitId,
+        id: RackInitUuid,
         completion: oneshot::Receiver<()>,
     },
     Resetting {
-        id: RackResetId,
+        id: RackResetUuid,
         completion: oneshot::Receiver<()>,
     },
 
     // Terminal failure states; these require support intervention.
     InitializationFailed {
-        id: RackInitId,
+        id: RackInitUuid,
         err: SetupServiceError,
     },
     InitializationPanicked {
-        id: RackInitId,
+        id: RackInitUuid,
     },
     ResetFailed {
-        id: RackResetId,
+        id: RackResetUuid,
         err: SetupServiceError,
     },
     ResetPanicked {
-        id: RackResetId,
+        id: RackResetUuid,
     },
 }
 

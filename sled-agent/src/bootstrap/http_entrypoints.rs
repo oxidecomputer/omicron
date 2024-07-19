@@ -11,7 +11,6 @@ use super::rack_ops::RssAccess;
 use super::BootstrapError;
 use super::RssAccessError;
 use crate::bootstrap::params::RackInitializeRequest;
-use crate::bootstrap::rack_ops::{RackInitId, RackResetId};
 use crate::updates::ConfigUpdates;
 use crate::updates::{Component, UpdateManager};
 use bootstore::schemes::v0 as bootstore;
@@ -22,6 +21,8 @@ use dropshot::{
 };
 use http::StatusCode;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::RackInitUuid;
+use omicron_uuid_kinds::RackResetUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware_types::Baseboard;
@@ -47,7 +48,7 @@ impl BootstrapServerContext {
     pub(super) fn start_rack_initialize(
         &self,
         request: RackInitializeRequest,
-    ) -> Result<RackInitId, RssAccessError> {
+    ) -> Result<RackInitUuid, RssAccessError> {
         self.rss_access.start_initializing(
             &self.base_log,
             self.global_zone_bootstrap_ip,
@@ -89,34 +90,34 @@ pub(crate) fn api() -> BootstrapApiDescription {
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum RackOperationStatus {
     Initializing {
-        id: RackInitId,
+        id: RackInitUuid,
     },
     /// `id` will be none if the rack was already initialized on startup.
     Initialized {
-        id: Option<RackInitId>,
+        id: Option<RackInitUuid>,
     },
     InitializationFailed {
-        id: RackInitId,
+        id: RackInitUuid,
         message: String,
     },
     InitializationPanicked {
-        id: RackInitId,
+        id: RackInitUuid,
     },
     Resetting {
-        id: RackResetId,
+        id: RackResetUuid,
     },
     /// `reset_id` will be None if the rack is in an uninitialized-on-startup,
     /// or Some if it is in an uninitialized state due to a reset operation
     /// completing.
     Uninitialized {
-        reset_id: Option<RackResetId>,
+        reset_id: Option<RackResetUuid>,
     },
     ResetFailed {
-        id: RackResetId,
+        id: RackResetUuid,
         message: String,
     },
     ResetPanicked {
-        id: RackResetId,
+        id: RackResetUuid,
     },
 }
 
@@ -173,7 +174,7 @@ async fn rack_initialization_status(
 async fn rack_initialize(
     rqctx: RequestContext<BootstrapServerContext>,
     body: TypedBody<RackInitializeRequest>,
-) -> Result<HttpResponseOk<RackInitId>, HttpError> {
+) -> Result<HttpResponseOk<RackInitUuid>, HttpError> {
     let ctx = rqctx.context();
     let request = body.into_inner();
     let id = ctx
@@ -189,7 +190,7 @@ async fn rack_initialize(
 }]
 async fn rack_reset(
     rqctx: RequestContext<BootstrapServerContext>,
-) -> Result<HttpResponseOk<RackResetId>, HttpError> {
+) -> Result<HttpResponseOk<RackResetUuid>, HttpError> {
     let ctx = rqctx.context();
     let id = ctx
         .rss_access

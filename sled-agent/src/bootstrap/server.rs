@@ -8,7 +8,6 @@ use super::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use super::http_entrypoints;
 use super::params::RackInitializeRequest;
 use super::params::StartSledAgentRequest;
-use super::rack_ops::RackInitId;
 use super::views::SledAgentResponse;
 use super::BootstrapError;
 use super::RssAccessError;
@@ -42,6 +41,7 @@ use omicron_common::ledger;
 use omicron_common::ledger::Ledger;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_ddm_admin_client::DdmError;
+use omicron_uuid_kinds::RackInitUuid;
 use sled_hardware::underlay;
 use sled_storage::dataset::CONFIG_DATASET;
 use sled_storage::manager::StorageHandle;
@@ -290,7 +290,7 @@ impl Server {
     pub fn start_rack_initialize(
         &self,
         request: RackInitializeRequest,
-    ) -> Result<RackInitId, RssAccessError> {
+    ) -> Result<RackInitUuid, RssAccessError> {
         self.bootstrap_http_server.app_private().start_rack_initialize(request)
     }
 

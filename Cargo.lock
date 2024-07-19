@@ -703,6 +703,7 @@ name = "bootstrap-agent-client"
 version = "0.1.0"
 dependencies = [
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
  "progenitor",
@@ -11141,6 +11142,7 @@ dependencies = [
  "omicron-ddm-admin-client",
  "omicron-passwords",
  "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "once_cell",
  "openapi-lint",
@@ -11184,6 +11186,7 @@ dependencies = [
  "gateway-client",
  "omicron-common",
  "omicron-passwords",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars",
  "serde",
@@ -11199,6 +11202,7 @@ dependencies = [
  "chrono",
  "installinator-common",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor",
  "regress",
