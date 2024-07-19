@@ -61,6 +61,7 @@ members = [
     "nexus/test-utils-macros",
     "nexus/test-utils",
     "nexus/types",
+    "oximeter/api",
     "oximeter/collector",
     "oximeter/db",
     "oximeter/impl",
@@ -158,6 +159,7 @@ default-members = [
     "nexus/test-utils-macros",
     "nexus/test-utils",
     "nexus/types",
+    "oximeter/api",
     "oximeter/collector",
     "oximeter/db",
     "oximeter/impl",
@@ -397,6 +399,7 @@ opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "3dc9a3dd8d3
 oso = "0.27"
 owo-colors = "4.0.0"
 oximeter = { path = "oximeter/oximeter" }
+oximeter-api = { path = "oximeter/api" }
 oximeter-client = { path = "clients/oximeter-client" }
 oximeter-db = { path = "oximeter/db/", default-features = false }
 oximeter-collector = { path = "oximeter/collector" }

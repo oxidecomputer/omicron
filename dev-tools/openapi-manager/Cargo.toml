@@ -22,6 +22,7 @@ omicron-workspace-hack.workspace = true
 openapiv3.workspace = true
 openapi-lint.workspace = true
 owo-colors.workspace = true
+oximeter-api.workspace = true
 serde_json.workspace = true
 similar.workspace = true
 supports-color.workspace = true
