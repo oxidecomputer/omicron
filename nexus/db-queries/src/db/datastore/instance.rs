@@ -78,37 +78,42 @@ impl InstanceAndActiveVmm {
         self.vmm.as_ref().map(|v| SledUuid::from_untyped_uuid(v.sled_id))
     }
 
+    /// Returns the operator-visible [external API
+    /// `InstanceState`](external::InstanceState) for this instance and its
+    /// active VMM.
     pub fn effective_state(&self) -> external::InstanceState {
-        if let Some(vmm) = &self.vmm {
-            vmm.runtime.state.into()
-        } else {
-            self.instance.runtime().nexus_state.into()
-        }
+        Self::determine_effective_state(&self.instance, self.vmm.as_ref())
     }
-}
 
-impl From<(Instance, Option<Vmm>)> for InstanceAndActiveVmm {
-    fn from(value: (Instance, Option<Vmm>)) -> Self {
-        Self { instance: value.0, vmm: value.1 }
-    }
-}
-
-impl From<InstanceAndActiveVmm> for external::Instance {
-    fn from(value: InstanceAndActiveVmm) -> Self {
+    /// Returns the operator-visible [external API
+    /// `InstanceState`](external::InstanceState) for the provided [`Instance`]
+    /// and its active [`Vmm`], if one exists.
+    ///
+    /// # Arguments
+    ///
+    /// - `instance`: the instance
+    /// - `active_vmm`: the instance's active VMM, if one exists.
+    ///
+    /// # Notes
+    ///
+    /// Generally, the value of `active_vmm` should be
+    /// the VMM pointed to by `instance.runtime_state.propolis_id`. However,
+    /// this is not enforced by this function, as the `instance_migrate` saga
+    /// must in some cases determine an effective instance state from the
+    /// instance and *target* VMM states.
+    pub fn determine_effective_state(
+        instance: &Instance,
+        active_vmm: Option<&Vmm>,
+    ) -> external::InstanceState {
         use crate::db::model::InstanceState;
         use crate::db::model::VmmState;
-        let time_run_state_updated = value
-            .vmm
-            .as_ref()
-            .map(|vmm| vmm.runtime.time_state_updated)
-            .unwrap_or(value.instance.runtime_state.time_updated);
 
-        let instance_state = value.instance.runtime_state.nexus_state;
-        let vmm_state = value.vmm.as_ref().map(|vmm| vmm.runtime.state);
+        let instance_state = instance.runtime_state.nexus_state;
+        let vmm_state = active_vmm.map(|vmm| vmm.runtime.state);
 
         // We want to only report that an instance is `Stopped` when a new
         // `instance-start` saga is able to proceed. That means that:
-        let run_state = match (instance_state, vmm_state) {
+        match (instance_state, vmm_state) {
             // - If there's an active migration ID for the instance, *always*
             //   treat its state as "migration" regardless of the VMM's state.
             //
@@ -127,7 +132,7 @@ impl From<InstanceAndActiveVmm> for external::Instance {
             //   and migration IDs.
             //
             (InstanceState::Vmm, Some(_))
-                if value.instance.runtime_state.migration_id.is_some() =>
+                if instance.runtime_state.migration_id.is_some() =>
             {
                 external::InstanceState::Migrating
             }
@@ -157,7 +162,23 @@ impl From<InstanceAndActiveVmm> for external::Instance {
             }
             // If there's no VMM state, use the instance's state.
             (instance_state, None) => instance_state.into(),
-        };
+        }
+    }
+}
+
+impl From<(Instance, Option<Vmm>)> for InstanceAndActiveVmm {
+    fn from(value: (Instance, Option<Vmm>)) -> Self {
+        Self { instance: value.0, vmm: value.1 }
+    }
+}
+
+impl From<InstanceAndActiveVmm> for external::Instance {
+    fn from(value: InstanceAndActiveVmm) -> Self {
+        let time_run_state_updated = value
+            .vmm
+            .as_ref()
+            .map(|vmm| vmm.runtime.time_state_updated)
+            .unwrap_or(value.instance.runtime_state.time_updated);
 
         Self {
             identity: value.instance.identity(),
@@ -170,7 +191,7 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                 .parse()
                 .expect("found invalid hostname in the database"),
             runtime: external::InstanceRuntimeState {
-                run_state,
+                run_state: value.effective_state(),
                 time_run_state_updated,
             },
         }
