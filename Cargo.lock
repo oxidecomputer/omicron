@@ -699,10 +699,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "bootstrap-agent-api"
+version = "0.1.0"
+dependencies = [
+ "dropshot",
+ "nexus-client",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+ "sled-agent-types",
+ "sled-hardware-types",
+]
+
+[[package]]
 name = "bootstrap-agent-client"
 version = "0.1.0"
 dependencies = [
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
  "progenitor",
@@ -2231,6 +2247,7 @@ dependencies = [
  "russh-keys",
  "serde",
  "serde_json",
+ "sled-agent-types",
  "socket2 0.5.7",
  "tokio",
  "toml 0.8.15",
@@ -5780,6 +5797,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bootstore",
+ "bootstrap-agent-api",
  "bootstrap-agent-client",
  "bytes",
  "camino",
@@ -5844,6 +5862,7 @@ dependencies = [
  "serde_json",
  "sha3",
  "sled-agent-client",
+ "sled-agent-types",
  "sled-hardware",
  "sled-hardware-types",
  "sled-storage",
@@ -6105,6 +6124,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "atomicwrites",
+ "bootstrap-agent-api",
  "camino",
  "clap",
  "dns-server-api",
@@ -8891,6 +8911,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "sled-agent-types"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bootstore",
+ "camino",
+ "camino-tempfile",
+ "nexus-client",
+ "omicron-common",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "oxnet",
+ "rcgen",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sled-hardware-types",
+ "slog",
+ "thiserror",
+ "toml 0.8.15",
+]
+
+[[package]]
 name = "sled-hardware"
 version = "0.1.0"
 dependencies = [
@@ -11141,6 +11185,7 @@ dependencies = [
  "omicron-ddm-admin-client",
  "omicron-passwords",
  "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "once_cell",
  "openapi-lint",
@@ -11184,6 +11229,7 @@ dependencies = [
  "gateway-client",
  "omicron-common",
  "omicron-passwords",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars",
  "serde",
@@ -11199,6 +11245,7 @@ dependencies = [
  "chrono",
  "installinator-common",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor",
  "regress",
