@@ -64,14 +64,11 @@
 //! completing execution, and unconditionally calls the "handoff to Nexus" API
 //! thereafter.
 
-use super::config::SetupServiceConfig as Config;
 use super::plan::service::SledConfig;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use crate::bootstrap::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkConfigBody, EarlyNetworkSetup,
-    EarlyNetworkSetupError,
+    EarlyNetworkSetup, EarlyNetworkSetupError,
 };
-use crate::bootstrap::params::BootstrapAddressDiscovery;
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::nexus::{d2n_params, ConvertInto};
@@ -110,6 +107,12 @@ use omicron_uuid_kinds::{ExternalIpUuid, GenericUuid};
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
+};
+use sled_agent_types::early_networking::{
+    EarlyNetworkConfig, EarlyNetworkConfigBody,
+};
+use sled_agent_types::rack_init::{
+    BootstrapAddressDiscovery, RackInitializeRequest as Config,
 };
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_storage::dataset::CONFIG_DATASET;
@@ -1545,7 +1548,7 @@ impl<'a> OmicronZonesConfigGenerator<'a> {
 
 #[cfg(test)]
 mod test {
-    use super::OmicronZonesConfigGenerator;
+    use super::{Config, OmicronZonesConfigGenerator};
     use crate::{
         params::OmicronZoneType,
         rack_setup::plan::service::{Plan as ServicePlan, SledInfo},
@@ -1594,7 +1597,7 @@ mod test {
     }
 
     fn make_test_service_plan() -> ServicePlan {
-        let rss_config = crate::bootstrap::params::test_config();
+        let rss_config = Config::test_config();
         let fake_sleds = vec![
             make_sled_info(
                 SledUuid::new_v4(),

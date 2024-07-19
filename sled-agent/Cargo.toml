@@ -68,6 +68,7 @@ serde_human_bytes.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 sha3.workspace = true
 sled-agent-client.workspace = true
+sled-agent-types.workspace = true
 sled-hardware.workspace = true
 sled-hardware-types.workspace = true
 sled-storage.workspace = true

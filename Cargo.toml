@@ -73,6 +73,7 @@ members = [
     "passwords",
     "rpaths",
     "sled-agent",
+    "sled-agent/types",
     "sled-hardware",
     "sled-hardware/types",
     "sled-storage",
@@ -170,6 +171,7 @@ default-members = [
     "passwords",
     "rpaths",
     "sled-agent",
+    "sled-agent/types",
     "sled-hardware",
     "sled-hardware/types",
     "sled-storage",
@@ -472,6 +474,7 @@ similar-asserts = "1.5.0"
 # server zones.
 sled = "=0.34.7"
 sled-agent-client = { path = "clients/sled-agent-client" }
+sled-agent-types = { path = "sled-agent/types" }
 sled-hardware = { path = "sled-hardware" }
 sled-hardware-types = { path = "sled-hardware/types" }
 sled-storage = { path = "sled-storage" }
