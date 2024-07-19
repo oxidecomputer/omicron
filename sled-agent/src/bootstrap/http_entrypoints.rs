@@ -10,7 +10,6 @@
 use super::rack_ops::RssAccess;
 use super::BootstrapError;
 use super::RssAccessError;
-use crate::bootstrap::params::RackInitializeRequest;
 use crate::updates::ConfigUpdates;
 use crate::updates::{Component, UpdateManager};
 use bootstore::schemes::v0 as bootstore;
@@ -23,8 +22,8 @@ use http::StatusCode;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use sled_agent_types::rack_init::RackInitializeRequest;
+use sled_agent_types::rack_ops::RackOperationStatus;
 use sled_hardware_types::Baseboard;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
@@ -80,45 +79,6 @@ pub(crate) fn api() -> BootstrapApiDescription {
         panic!("failed to register entrypoints: {}", err);
     }
     api
-}
-
-/// Current status of any rack-level operation being performed by this bootstrap
-/// agent.
-#[derive(
-    Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
-)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum RackOperationStatus {
-    Initializing {
-        id: RackInitUuid,
-    },
-    /// `id` will be none if the rack was already initialized on startup.
-    Initialized {
-        id: Option<RackInitUuid>,
-    },
-    InitializationFailed {
-        id: RackInitUuid,
-        message: String,
-    },
-    InitializationPanicked {
-        id: RackInitUuid,
-    },
-    Resetting {
-        id: RackResetUuid,
-    },
-    /// `reset_id` will be None if the rack is in an uninitialized-on-startup,
-    /// or Some if it is in an uninitialized state due to a reset operation
-    /// completing.
-    Uninitialized {
-        reset_id: Option<RackResetUuid>,
-    },
-    ResetFailed {
-        id: RackResetUuid,
-        message: String,
-    },
-    ResetPanicked {
-        id: RackResetUuid,
-    },
 }
 
 /// Return the baseboard identity of this sled.

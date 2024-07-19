@@ -4,13 +4,13 @@
 
 //! Internal API for rack-level bootstrap agent operations.
 
-use crate::bootstrap::http_entrypoints::RackOperationStatus;
-use crate::bootstrap::params::RackInitializeRequest;
 use crate::bootstrap::rss_handle::RssHandle;
 use crate::rack_setup::service::SetupServiceError;
 use bootstore::schemes::v0 as bootstore;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
+use sled_agent_types::rack_init::RackInitializeRequest;
+use sled_agent_types::rack_ops::RackOperationStatus;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::mem;

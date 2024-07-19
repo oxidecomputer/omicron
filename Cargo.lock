@@ -2232,6 +2232,7 @@ dependencies = [
  "russh-keys",
  "serde",
  "serde_json",
+ "sled-agent-types",
  "socket2 0.5.7",
  "tokio",
  "toml 0.8.15",
@@ -5845,6 +5846,7 @@ dependencies = [
  "serde_json",
  "sha3",
  "sled-agent-client",
+ "sled-agent-types",
  "sled-hardware",
  "sled-hardware-types",
  "sled-storage",
@@ -8888,6 +8890,30 @@ dependencies = [
  "serde_json",
  "slog",
  "uuid",
+]
+
+[[package]]
+name = "sled-agent-types"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bootstore",
+ "camino",
+ "camino-tempfile",
+ "nexus-client",
+ "omicron-common",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "oxnet",
+ "rcgen",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sled-hardware-types",
+ "slog",
+ "thiserror",
+ "toml 0.8.15",
 ]
 
 [[package]]

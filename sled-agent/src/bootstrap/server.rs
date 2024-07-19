@@ -6,7 +6,6 @@
 
 use super::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use super::http_entrypoints;
-use super::params::RackInitializeRequest;
 use super::params::StartSledAgentRequest;
 use super::views::SledAgentResponse;
 use super::BootstrapError;
@@ -42,6 +41,7 @@ use omicron_common::ledger::Ledger;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::RackInitUuid;
+use sled_agent_types::rack_init::RackInitializeRequest;
 use sled_hardware::underlay;
 use sled_storage::dataset::CONFIG_DATASET;
 use sled_storage::manager::StorageHandle;

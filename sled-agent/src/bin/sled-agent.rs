@@ -11,8 +11,8 @@ use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::bootstrap::server as bootstrap_server;
 use omicron_sled_agent::bootstrap::RssAccessError;
-use omicron_sled_agent::rack_setup::config::SetupServiceConfig as RssConfig;
 use omicron_sled_agent::{config::Config as SledConfig, server as sled_server};
+use sled_agent_types::rack_init::RackInitializeRequest;
 
 #[derive(Subcommand, Debug)]
 enum OpenapiFlavor {
@@ -81,7 +81,7 @@ async fn do_run() -> Result<(), CmdError> {
             };
             let rss_config = if rss_config_path.exists() {
                 Some(
-                    RssConfig::from_file(rss_config_path)
+                    RackInitializeRequest::from_file(rss_config_path)
                         .map_err(|e| CmdError::Failure(anyhow!(e)))?,
                 )
             } else {
