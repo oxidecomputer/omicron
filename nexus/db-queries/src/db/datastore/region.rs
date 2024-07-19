@@ -69,7 +69,7 @@ impl DataStore {
             .filter(region_dsl::volume_id.eq(volume_id))
             .inner_join(
                 dataset_dsl::dataset
-                    .on(region_dsl::dataset_id.eq(dataset_dsl::id.nullable())),
+                    .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
             )
             .select((Dataset::as_select(), Region::as_select()))
     }
@@ -315,13 +315,10 @@ impl DataStore {
                     let datasets = diesel::delete(region_dsl::region)
                         .filter(region_dsl::id.eq_any(region_ids))
                         .returning(region_dsl::dataset_id)
-                        .get_results_async::<Option<Uuid>>(&conn).await?;
+                        .get_results_async::<Uuid>(&conn).await?;
 
                     // Update datasets to which the regions belonged.
                     for dataset in datasets {
-                        // If the dataset has already been deleted, skip it.
-                        let Some(dataset) = dataset else { continue; };
-
                         let dataset_total_occupied_size: Option<
                             diesel::pg::data_types::PgNumeric,
                         > = region_dsl::region
@@ -425,11 +422,7 @@ impl DataStore {
         use db::schema::region::dsl as region_dsl;
         use db::schema::zpool::dsl as zpool_dsl;
 
-        // Consider all regions with datasets on expunged disks.
-        //
-        // This case triggers for physical disks which are expunged,
-        // but not yet decommissioned.
-        let expunged_regions = region_dsl::region
+        region_dsl::region
             .filter(region_dsl::dataset_id.eq_any(
                 dataset_dsl::dataset
                     .filter(dataset_dsl::time_deleted.is_null())
@@ -443,21 +436,9 @@ impl DataStore {
                             ))
                             .select(zpool_dsl::id)
                     ))
-                    .select(dataset_dsl::id.nullable())
+                    .select(dataset_dsl::id)
             ))
-            .select(Region::as_select());
-
-        // Consider all regions with dataset on decommissioned disks.
-        //
-        // As disks are decommissioned, this "dataset_id" field is set to NULL
-        // so we can quickly identify these regions, even though the underlying
-        // datasets + zpools are deleted.
-        let decommissioned_regions = region_dsl::region
-            .filter(region_dsl::dataset_id.is_null())
-            .select(Region::as_select());
-
-        expunged_regions
-            .union(decommissioned_regions)
+            .select(Region::as_select())
             .load_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -512,11 +493,8 @@ impl DataStore {
         let Some(port) = region.port() else {
             return Ok(None);
         };
-        let Some(dataset_id) = region.dataset_id() else {
-            return Ok(None);
-        };
 
-        let dataset = self.dataset_get(dataset_id).await?;
+        let dataset = self.dataset_get(region.dataset_id()).await?;
 
         let Some(address) = dataset.address() else {
             return Err(Error::internal_error(

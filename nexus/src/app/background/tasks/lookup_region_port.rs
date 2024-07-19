@@ -74,15 +74,7 @@ impl BackgroundTask for LookupRegionPort {
                 };
 
             for region in regions_missing_ports {
-                let Some(dataset_id) = region.dataset_id() else {
-                    let s = format!(
-                        "region {} missing dataset (was expunged?)",
-                        region.id()
-                    );
-                    error!(log, "{s}");
-                    status.errors.push(s);
-                    continue;
-                };
+                let dataset_id = region.dataset_id();
 
                 let dataset = match self.datastore.dataset_get(dataset_id).await
                 {

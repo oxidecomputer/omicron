@@ -10,18 +10,14 @@ use anyhow::Context;
 use futures::stream;
 use futures::StreamExt;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
-use nexus_types::identity::Asset;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
-use omicron_uuid_kinds::ZpoolUuid;
 use slog::info;
 use slog::o;
 use slog::warn;
 use std::collections::BTreeMap;
-use std::num::NonZeroU32;
 
 /// Idempotently ensure that the specified Omicron disks are deployed to the
 /// corresponding sleds
@@ -102,11 +98,6 @@ pub(crate) async fn deploy_disks(
     }
 }
 
-const MAX_CLEANUP_BATCH: NonZeroU32 = unsafe {
-    // Safety: last time I checked, 100 was greater than zero.
-    NonZeroU32::new_unchecked(100)
-};
-
 /// Decommissions all disks which are currently expunged
 pub(crate) async fn decommission_expunged_disks(
     opctx: &OpContext,
@@ -116,64 +107,6 @@ pub(crate) async fn decommission_expunged_disks(
         .physical_disk_decommission_all_expunged(&opctx)
         .await
         .map_err(|e| vec![anyhow!(e)])?;
-    Ok(())
-}
-
-/// Cleans up old database state from decommissioned disks.
-///
-/// This involves removing zpools and datasets allocated
-/// to disks which are now decommissioned.
-pub(crate) async fn clean_up_decommissioned_disks(
-    opctx: &OpContext,
-    datastore: &DataStore,
-) -> Result<(), Vec<anyhow::Error>> {
-    let log = &opctx.log;
-
-    let mut errors = vec![];
-    let mut paginator = Paginator::new(MAX_CLEANUP_BATCH);
-    while let Some(p) = paginator.next() {
-        let maybe_batch = datastore
-            .zpool_on_decommissioned_disk_list(opctx, &p.current_pagparams())
-            .await;
-        let batch = match maybe_batch {
-            Ok(batch) => batch,
-            Err(e) => {
-                slog::error!(
-                    log,
-                    "list decommissioned zpools query failed: {e}"
-                );
-                errors.push(anyhow!(e));
-                return Err(errors);
-            }
-        };
-        paginator = p.found_batch(&batch, &|z| z.id());
-
-        let mut batch = batch.into_iter();
-        if let Some(zpool) = batch.next() {
-            info!(log,
-                "Found an out-of-service zpool";
-                "zpool_id" => zpool.id().to_string(),
-            );
-
-            let zpool_id = ZpoolUuid::from_untyped_uuid(zpool.id());
-
-            if let Err(e) = datastore
-                .zpool_delete_self_and_all_datasets(opctx, zpool_id)
-                .await
-            {
-                slog::error!(
-                    log,
-                    "failed to clean up decommissioned physical disk: {e}"
-                );
-                errors.push(anyhow!(e));
-                continue;
-            }
-        }
-    }
-
-    if !errors.is_empty() {
-        return Err(errors);
-    }
     Ok(())
 }
 
@@ -495,12 +428,12 @@ mod test {
             .dataset_upsert(Dataset::new(
                 Uuid::new_v4(),
                 zpool.id(),
-                std::net::SocketAddrV6::new(
+                Some(std::net::SocketAddrV6::new(
                     std::net::Ipv6Addr::LOCALHOST,
                     0,
                     0,
                     0,
-                ),
+                )),
                 DatasetKind::Crucible,
             ))
             .await
@@ -601,14 +534,14 @@ mod test {
                 .await;
         }
 
-        let disk_to_expunge = disks[0];
+        let disk_to_decommission = disks[0];
         let other_disk = disks[1];
 
         // Expunge one of the disks
         datastore
             .physical_disk_update_policy(
                 &opctx,
-                disk_to_expunge.into_untyped_uuid(),
+                disk_to_decommission.into_untyped_uuid(),
                 PhysicalDiskPolicy::Expunged,
             )
             .await
@@ -626,7 +559,7 @@ mod test {
             .into_iter()
             .map(|disk| (disk.id(), disk))
             .collect::<BTreeMap<_, _>>();
-        let d = &all_disks[&disk_to_expunge.into_untyped_uuid()];
+        let d = &all_disks[&disk_to_decommission.into_untyped_uuid()];
         assert_eq!(d.disk_state, PhysicalDiskState::Active);
         assert_eq!(d.disk_policy, PhysicalDiskPolicy::Expunged);
         let d = &all_disks[&other_disk.into_untyped_uuid()];
@@ -648,31 +581,24 @@ mod test {
             .into_iter()
             .map(|disk| (disk.id(), disk))
             .collect::<BTreeMap<_, _>>();
-        let d = &all_disks[&disk_to_expunge.into_untyped_uuid()];
+        let d = &all_disks[&disk_to_decommission.into_untyped_uuid()];
         assert_eq!(d.disk_state, PhysicalDiskState::Decommissioned);
         assert_eq!(d.disk_policy, PhysicalDiskPolicy::Expunged);
         let d = &all_disks[&other_disk.into_untyped_uuid()];
         assert_eq!(d.disk_state, PhysicalDiskState::Active);
         assert_eq!(d.disk_policy, PhysicalDiskPolicy::InService);
 
-        // Before we decommission the disk, we should also be able to see all
-        // pools, datasets, and regions.
-        let pools = get_pools(&datastore, disk_to_expunge).await;
+        // Even though we've decommissioned this disk, the pools, datasets, and
+        // regions should remain. Refer to the "decommissioned_disk_cleaner"
+        // for how these get eventually cleared up.
+        let pools = get_pools(&datastore, disk_to_decommission).await;
         assert_eq!(pools.len(), 1);
         let datasets = get_datasets(&datastore, pools[0]).await;
         assert_eq!(datasets.len(), 1);
         let regions = get_regions(&datastore, datasets[0]).await;
         assert_eq!(regions.len(), 1);
 
-        // After the cleanup, we should not be able to observe any zpools
-        // nor datasets for the decommissioned disk.
-        super::clean_up_decommissioned_disks(&opctx, &datastore).await.unwrap();
-
-        assert!(get_pools(&datastore, disk_to_expunge).await.is_empty());
-        assert!(get_datasets(&datastore, pools[0]).await.is_empty());
-        assert!(get_regions(&datastore, datasets[0]).await.is_empty());
-
-        // However, the "other disk" should still exist.
+        // Similarly, the "other disk" should still exist.
         let pools = get_pools(&datastore, other_disk).await;
         assert_eq!(pools.len(), 1);
         let datasets = get_datasets(&datastore, pools[0]).await;

@@ -140,25 +140,6 @@ impl DataStore {
         Ok(zpools)
     }
 
-    /// Soft-deletes the Zpools and cleans up all associated DB resources.
-    ///
-    /// In order:
-    /// - Finds all regions referencing the datasets within this Zpool. Updates
-    /// them to reference a "NULL" dataset_id.
-    /// - Finds all datasets within the zpool. Soft-deletes them.
-    /// - Soft-deletes the zpool itself.
-    pub async fn zpool_delete_self_and_all_datasets(
-        &self,
-        opctx: &OpContext,
-        zpool_id: ZpoolUuid,
-    ) -> DeleteResult {
-        let conn = &*self.pool_connection_authorized(&opctx).await?;
-        Self::zpool_delete_self_and_all_datasets_on_connection(
-            &conn, opctx, zpool_id,
-        )
-        .await
-    }
-
     /// Returns all (non-deleted) zpools on decommissioned (or deleted) disks
     pub async fn zpool_on_decommissioned_disk_list(
         &self,
@@ -196,6 +177,28 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Soft-deletes the Zpools and cleans up all associated DB resources.
+    ///
+    /// This should only be called for zpools on physical disks which
+    /// have been decommissioned.
+    ///
+    /// In order:
+    /// - Finds all datasets within the zpool
+    /// - Ensures that no regions nor region snapshots are using these datasets
+    /// - Soft-deletes the datasets within the zpool
+    /// - Soft-deletes the zpool itself
+    pub async fn zpool_delete_self_and_all_datasets(
+        &self,
+        opctx: &OpContext,
+        zpool_id: ZpoolUuid,
+    ) -> DeleteResult {
+        let conn = &*self.pool_connection_authorized(&opctx).await?;
+        Self::zpool_delete_self_and_all_datasets_on_connection(
+            &conn, opctx, zpool_id,
+        )
+        .await
+    }
+
     /// See: [Self::zpool_delete_self_and_all_datasets]
     pub(crate) async fn zpool_delete_self_and_all_datasets_on_connection(
         conn: &async_bb8_diesel::Connection<db::DbConnection>,
@@ -205,7 +208,6 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let now = Utc::now();
         use db::schema::dataset::dsl as dataset_dsl;
-        use db::schema::region::dsl as region_dsl;
         use db::schema::zpool::dsl as zpool_dsl;
 
         let zpool_id = *zpool_id.as_untyped_uuid();
@@ -219,17 +221,32 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        // Update all regions currently using these datasets
-        diesel::update(region_dsl::region)
-            .filter(region_dsl::dataset_id.eq_any(dataset_ids))
-            .set((
-                region_dsl::dataset_id.eq(Option::<Uuid>::None),
-                region_dsl::time_modified.eq(Utc::now()),
-            ))
-            .execute_async(conn)
+        // Verify that there are no regions nor region snapshots using this dataset
+        use db::schema::region::dsl as region_dsl;
+        let region_count = region_dsl::region
+            .filter(region_dsl::dataset_id.eq_any(dataset_ids.clone()))
+            .count()
+            .first_async::<i64>(conn)
             .await
-            .map(|_rows_modified| ())
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        if region_count > 0 {
+            return Err(Error::unavail(&format!(
+                "Cannot delete this zpool; it has {region_count} regions"
+            )));
+        }
+
+        use db::schema::region_snapshot::dsl as region_snapshot_dsl;
+        let region_snapshot_count = region_snapshot_dsl::region_snapshot
+            .filter(region_snapshot_dsl::dataset_id.eq_any(dataset_ids))
+            .count()
+            .first_async::<i64>(conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        if region_snapshot_count > 0 {
+            return Err(
+                Error::unavail(&format!("Cannot delete this zpool; it has {region_snapshot_count} region snapshots"))
+            );
+        }
 
         // Ensure the datasets are deleted
         diesel::update(dataset_dsl::dataset)

@@ -233,14 +233,6 @@ where
     omicron_physical_disks::decommission_expunged_disks(&opctx, datastore)
         .await?;
 
-    // Regardless of how a disk was marked decommissioned, this is a signal we
-    // can delete old database tables (e.g., datasets, zpools) used by that disk.
-    //
-    // This depends on "decommission_sleds" and "decommission_expunged_disks",
-    // as each of those stages can mark disks decommissioned.
-    omicron_physical_disks::clean_up_decommissioned_disks(&opctx, datastore)
-        .await?;
-
     // This is likely to error if any cluster upgrades are in progress (which
     // can take some time), so it should remain at the end so that other parts
     // of the blueprint can progress normally.

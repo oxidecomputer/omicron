@@ -30,7 +30,7 @@ pub struct Region {
     #[diesel(embed)]
     identity: RegionIdentity,
 
-    dataset_id: Option<Uuid>,
+    dataset_id: Uuid,
     volume_id: Uuid,
 
     block_size: ByteCount,
@@ -56,7 +56,7 @@ impl Region {
     ) -> Self {
         Self {
             identity: RegionIdentity::new(Uuid::new_v4()),
-            dataset_id: Some(dataset_id),
+            dataset_id,
             volume_id,
             block_size,
             blocks_per_extent: blocks_per_extent as i64,
@@ -71,7 +71,7 @@ impl Region {
     pub fn volume_id(&self) -> Uuid {
         self.volume_id
     }
-    pub fn dataset_id(&self) -> Option<Uuid> {
+    pub fn dataset_id(&self) -> Uuid {
         self.dataset_id
     }
     pub fn block_size(&self) -> external::ByteCount {

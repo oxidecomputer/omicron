@@ -93,6 +93,7 @@ use super::tasks::bfd;
 use super::tasks::blueprint_execution;
 use super::tasks::blueprint_load;
 use super::tasks::crdb_node_id_collector;
+use super::tasks::decommissioned_disk_cleaner;
 use super::tasks::dns_config;
 use super::tasks::dns_propagation;
 use super::tasks::dns_servers;
@@ -142,6 +143,7 @@ pub struct BackgroundTasks {
     pub task_bfd_manager: Activator,
     pub task_inventory_collection: Activator,
     pub task_physical_disk_adoption: Activator,
+    pub task_decommissioned_disk_cleaner: Activator,
     pub task_phantom_disks: Activator,
     pub task_blueprint_loader: Activator,
     pub task_blueprint_executor: Activator,
@@ -221,6 +223,7 @@ impl BackgroundTasksInitializer {
             task_bfd_manager: Activator::new(),
             task_inventory_collection: Activator::new(),
             task_physical_disk_adoption: Activator::new(),
+            task_decommissioned_disk_cleaner: Activator::new(),
             task_phantom_disks: Activator::new(),
             task_blueprint_loader: Activator::new(),
             task_blueprint_executor: Activator::new(),
@@ -280,6 +283,7 @@ impl BackgroundTasksInitializer {
             task_bfd_manager,
             task_inventory_collection,
             task_physical_disk_adoption,
+            task_decommissioned_disk_cleaner,
             task_phantom_disks,
             task_blueprint_loader,
             task_blueprint_executor,
@@ -509,6 +513,23 @@ impl BackgroundTasksInitializer {
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![Box::new(inventory_watcher)],
             activator: task_physical_disk_adoption,
+        });
+
+        driver.register(TaskDefinition {
+            name: "decommissioned_disk_cleaner",
+            description:
+                "deletes DB records for decommissioned disks, after regions \
+                 have been replaced",
+            period: config.decommissioned_disk_cleaner.period_secs,
+            task_impl: Box::new(
+                decommissioned_disk_cleaner::DecommissionedDiskCleaner::new(
+                    datastore.clone(),
+                    config.decommissioned_disk_cleaner.disable,
+                ),
+            ),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_decommissioned_disk_cleaner,
         });
 
         driver.register(TaskDefinition {
