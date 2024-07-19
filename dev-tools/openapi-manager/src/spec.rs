@@ -15,6 +15,17 @@ use openapiv3::OpenAPI;
 pub fn all_apis() -> Vec<ApiSpec> {
     vec![
         ApiSpec {
+            title: "CockroachDB Cluster Admin API",
+            version: "0.0.1",
+            description: "API for interacting with the Oxide control plane's \
+                CockroachDB cluster",
+            boundary: ApiBoundary::Internal,
+            api_description:
+                cockroach_admin_api::cockroach_admin_api_mod::stub_api_description,
+            filename: "cockroach-admin.json",
+            extra_validation: None,
+        },
+        ApiSpec {
             title: "Internal DNS",
             version: "0.0.1",
             description: "API for the internal DNS server",

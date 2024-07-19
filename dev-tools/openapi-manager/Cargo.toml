@@ -11,6 +11,7 @@ workspace = true
 anyhow.workspace = true
 atomicwrites.workspace = true
 camino.workspace = true
+cockroach-admin-api.workspace = true
 clap.workspace = true
 dns-server-api.workspace = true
 dropshot.workspace = true
