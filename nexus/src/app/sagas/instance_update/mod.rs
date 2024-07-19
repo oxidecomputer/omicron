@@ -4,7 +4,88 @@
 
 //! Instance Update Saga
 //!
-//! # Theory of Operation
+//! ## Background
+//!
+//! The state of a VM instance, as understood by Nexus, consists of a
+//! combination of database tables:
+//!
+//! - The `instance` table, owned exclusively by Nexus itself, represents the
+//!   user-facing "logical" VM instance.
+//! - The `vmm` table, which represents a "physical" Propolis VMM process on
+//!   which a running instance is incarnated.
+//! - The `migration` table, which represents the state of an in-progress live
+//!   migration of an instance between two VMMs.
+//!
+//! When an instance is incarnated on a sled, the `propolis_id` field in an
+//! `instance` record contains a UUID foreign key into the `vmm` table that points
+//! to the `vmm` record for the Propolis process on which the instance is
+//! currently running. If an instance is undergoing live migration, its record
+//! additionally contains a `dst_propolis_id` foreign key pointing at the `vmm`
+//! row representing the *target* Propolis process that it is migrating to, and
+//! a `migration_id` foreign key into the `migration` table record tracking the
+//! state of that migration.
+//!
+//! Sled-agents report the state of the VMMs they manage to Nexus. This occurs
+//! when a VMM state transition occurs and the sled-agent *pushes* an update to
+//! Nexus' `cpapi_instances_put` internal API endpoint, when a Nexus'
+//! `instance-watcher` background task *pulls* instance states from sled-agents
+//! periodically, or as the return value of an API call from Nexus to a
+//! sled-agent. When a Nexus receives a new [`SledInstanceState`] from a
+//! sled-agent through any of these mechanisms, the Nexus will write any changed
+//! state to the `vmm` and/or `migration` tables directly on behalf of the
+//! sled-agent.
+//!
+//! Although Nexus is technically the party responsible for the database query
+//! that writes VMM and migration state updates received from sled-agent, it is
+//! the sled-agent that *logically* "owns" these records. A row in the `vmm`
+//! table represents a particular Propolis process running on a particular sled,
+//! and that sled's sled-agent is the sole source of truth for that process. The
+//! generation number for a `vmm` record is the property of the sled-agent
+//! responsible for that VMM. Similarly, a `migration` record has separate
+//! generation numbers for the source and target VMM states, which are owned by
+//! the sled-agents responsible for the source and target Propolis processes,
+//! respectively. If a sled-agent pushes a state update to a particular Nexus
+//! instance and that Nexus fails to write the state to the database, that isn't
+//! the end of the world: the sled-agent can simply retry with a different
+//! Nexus, and the generation number, which is incremented exclusively by the
+//! sled-agent, ensures that state changes are idempotent and ordered. If a
+//! faulty Nexus were to return 200 OK to a sled-agent's call to
+//! `cpapi_instances_put` but choose to simply eat the received instance state
+//! update rather than writing it to the database, even *that* wouldn't
+//! necessarily mean that the state change was gone forever: the
+//! `instance-watcher` background task on another Nexus instance would
+//! eventually poll the sled-agent's state and observe any changes that were
+//! accidentally missed. This is all very neat and tidy, and we should feel
+//! proud of ourselves for having designed such a nice little system.
+//!
+//! Unfortunately, when we look beyond the `vmm` and `migration` tables, things
+//! rapidly become interesting (in the "may you live in interesting times"
+//! sense). The `instance` record *cannot* be owned exclusively by anyone. The
+//! logical instance state it represents is a gestalt that may consist of state
+//! that exists in multiple VMM processes on multiple sleds, as well as
+//! control-plane operations triggered by operator inputs and performed by
+//! multiple Nexus instances. This is, as they say, "hairy". The neat and tidy
+//! little state updates published by sled-agents to Nexus in the previous
+//! paragraph may, in some cases, represent a state transition that also
+//! requires changes to the `instance` table: for instance, a live migration may
+//! have completed, necessitating a change in the instance's `propolis_id` to
+//! point to the new VMM.
+//!
+//! Oh, and one other thing: the `instance` table record in turn logically
+//! "owns" other resources, such as the virtual-provisioning counters that
+//! represent rack-level resources allocated to the instance, and the instance's
+//! network configuration. When the instance's state changes, these resources
+//! owned by the instance may also need to be updated, such as changing the
+//! network configuration to point at an instance's new home after a successful
+//! migration, or deallocating virtual provisioning counters when an instance is
+//! destroyed. Naturally, these updates must also be performed reliably and
+//! inconsistent states must be avoided.
+//!
+//! Thus, we arrive here, at the instance-update saga.
+//!
+//! ## Theory of Operation
+//!
+//! Some ground rules:
 use super::{
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
     ACTION_GENERATE_ID,
@@ -26,6 +107,7 @@ use nexus_db_queries::{authn, authz};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus;
+use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -51,8 +133,8 @@ pub(crate) use self::start::{Params, SagaInstanceUpdate};
 mod destroyed;
 
 /// Returns `true` if an `instance-update` saga should be executed as a result
-/// of writing the provided [`nexus::SledInstanceState`] to the database with
-/// the provided [`InstanceUpdateResult`].
+/// of writing the provided [`SledInstanceState`] to the database with the
+/// provided [`InstanceUpdateResult`].
 ///
 /// We determine this only after actually updating the database records,
 /// because we don't know whether a particular VMM or migration state is
@@ -71,7 +153,7 @@ mod destroyed;
 pub fn update_saga_needed(
     log: &slog::Logger,
     instance_id: InstanceUuid,
-    state: &nexus::SledInstanceState,
+    state: &SledInstanceState,
     result: &InstanceUpdateResult,
 ) -> bool {
     // Currently, an instance-update saga is required if (and only if):
