@@ -859,7 +859,7 @@ impl Client {
     // TODO-robustness This currently does no validation of the statement.
     async fn execute<S>(&self, sql: S) -> Result<(), Error>
     where
-        S: AsRef<str>,
+        S: Into<String>,
     {
         self.execute_with_body(sql).await?;
         Ok(())
@@ -873,9 +873,9 @@ impl Client {
         sql: S,
     ) -> Result<(QuerySummary, String), Error>
     where
-        S: AsRef<str>,
+        S: Into<String>,
     {
-        let sql = sql.as_ref().to_string();
+        let sql = sql.into();
         trace!(
             self.log,
             "executing SQL query";
@@ -1153,6 +1153,24 @@ async fn handle_db_response(
         // the body if possible, which contains the actual error from the database.
         let body = response.text().await.unwrap_or_else(|e| e.to_string());
         Err(Error::Database(format!("Query failed: {body}")))
+    }
+}
+
+/// A trait allowing a [`Client`] to use the sql methods directly.
+///
+/// In general, clients should use oxql, but in many tests we use the SQL methods.
+/// For integration test purposes we need to make them public. However, we don't
+/// want to expose these functions for general consumption without extra clarity.
+#[async_trait::async_trait]
+pub trait RawSql {
+    async fn execute(&self, sql: String) -> Result<(), Error>;
+}
+
+#[async_trait::async_trait]
+impl RawSql for Client {
+    async fn execute(&self, sql: String) -> Result<(), Error> {
+        self.execute_with_body(sql).await?;
+        Ok(())
     }
 }
 

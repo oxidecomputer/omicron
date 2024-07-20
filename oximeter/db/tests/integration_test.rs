@@ -7,12 +7,36 @@ use clickward::{Deployment, KeeperClient, KeeperError};
 use dropshot::test_util::log_prefix_for_test;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::test_setup_log;
-use oximeter_db::{Client, DbWrite};
+use oximeter::test_util;
+use oximeter_db::{Client, DbWrite, OxqlResult, Sample};
+use std::default::Default;
 use std::time::Duration;
+
+pub struct TestInput {
+    n_projects: usize,
+    n_instances: usize,
+    n_cpus: usize,
+    n_samples: usize,
+}
+
+impl Default for TestInput {
+    fn default() -> Self {
+        TestInput { n_projects: 2, n_instances: 2, n_cpus: 2, n_samples: 1000 }
+    }
+}
+
+impl TestInput {
+    fn n_timeseries(&self) -> usize {
+        self.n_projects * self.n_instances * self.n_cpus
+    }
+
+    fn n_points(&self) -> usize {
+        self.n_projects * self.n_instances * self.n_cpus * self.n_samples
+    }
+}
 
 #[tokio::test]
 async fn test_cluster() -> anyhow::Result<()> {
-    tokio::time::sleep(Duration::from_secs(10)).await;
     let logctx = test_setup_log("test_cluster");
     let log = &logctx.log;
 
@@ -45,10 +69,88 @@ async fn test_cluster() -> anyhow::Result<()> {
     let output2 = client2.list_replicated_tables().await?;
     assert_eq!(output1, output2);
 
+    let input = TestInput::default();
+
+    // Let's write some samples to our first replica and wait for them to show
+    // up on replica 2.
+    let samples = test_util::generate_test_samples(
+        input.n_projects,
+        input.n_instances,
+        input.n_cpus,
+        input.n_samples,
+    );
+    assert_eq!(samples.len(), input.n_points());
+    client1.insert_samples(&samples).await.expect("failed to insert samples");
+
+    // Get all the samples from the replica where the data was inserted
+    let oxql_res1 = client1
+        .oxql_query("get virtual_machine:cpu_busy")
+        .await
+        .expect("failed to get all samples");
+
+    // Ensure the samples are correct on this replica
+    assert_input_and_output(&input, &samples, &oxql_res1);
+
+    wait_for_expected_output(&client2, &samples)
+        .await
+        .expect("failed to get samples from client2");
+
     deployment.teardown()?;
     std::fs::remove_dir_all(path)?;
     logctx.cleanup_successful();
 
+    Ok(())
+}
+
+fn total_points(oxql_res: &OxqlResult) -> usize {
+    if oxql_res.tables.len() != 1 {
+        return 0;
+    }
+    let table = &oxql_res.tables.first().unwrap();
+    let mut total_points = 0;
+    for timeseries in table.timeseries() {
+        total_points += timeseries.points.iter_points().count();
+    }
+    total_points
+}
+
+/// Ensure the samples inserted come back as points when queried
+fn assert_input_and_output(
+    input: &TestInput,
+    samples: &[Sample],
+    oxql_res: &OxqlResult,
+) {
+    assert_eq!(oxql_res.tables.len(), 1);
+    let table = oxql_res.tables.first().unwrap();
+    assert_eq!(table.n_timeseries(), input.n_timeseries());
+    assert_eq!(total_points(&oxql_res), samples.len());
+}
+
+/// Wait for all `samples` inserted to exist at the replica that `client` is
+/// speaking to.
+async fn wait_for_expected_output(
+    client: &Client,
+    samples: &[Sample],
+) -> anyhow::Result<()> {
+    poll::wait_for_condition(
+        || async {
+            let oxql_res = client
+                .oxql_query("get virtual_machine:cpu_busy")
+                .await
+                .map_err(|_| {
+                    poll::CondCheckError::<oximeter_db::Error>::NotYet
+                })?;
+            if total_points(&oxql_res) != samples.len() {
+                Err(poll::CondCheckError::<oximeter_db::Error>::NotYet)
+            } else {
+                Ok(())
+            }
+        },
+        &Duration::from_millis(10),
+        &Duration::from_secs(10),
+    )
+    .await
+    .context("failed to ping clickhouse server")?;
     Ok(())
 }
 
