@@ -16,8 +16,6 @@ use sled_agent_types::rack_init::RackInitializeRequest;
 
 #[derive(Subcommand, Debug)]
 enum OpenapiFlavor {
-    /// Generates bootstrap agent openapi spec
-    Bootstrap,
     /// Generates sled agent openapi spec
     Sled,
 }
@@ -53,8 +51,6 @@ async fn do_run() -> Result<(), CmdError> {
     match args {
         Args::Openapi(flavor) => match flavor {
             OpenapiFlavor::Sled => sled_server::run_openapi()
-                .map_err(|err| CmdError::Failure(anyhow!(err))),
-            OpenapiFlavor::Bootstrap => bootstrap_server::run_openapi()
                 .map_err(|err| CmdError::Failure(anyhow!(err))),
         },
         Args::Run { config_path } => {

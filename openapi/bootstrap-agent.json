@@ -1,8 +1,8 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Oxide Bootstrap Agent API",
-    "description": "API for interacting with individual sleds",
+    "title": "Bootstrap Agent API",
+    "description": "Per-sled API for setup and teardown",
     "contact": {
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
@@ -36,7 +36,7 @@
     },
     "/components": {
       "get": {
-        "summary": "Provides a list of components known to the bootstrap agent.",
+        "summary": "Provide a list of components known to the bootstrap agent.",
         "description": "This API is intended to allow early boot services (such as Wicket) to query the underlying component versions installed on a sled.",
         "operationId": "components_get",
         "responses": {
@@ -87,7 +87,7 @@
         }
       },
       "post": {
-        "summary": "Initializes the rack with the provided configuration.",
+        "summary": "Initialize the rack with the provided configuration.",
         "operationId": "rack_initialize",
         "requestBody": {
           "content": {
@@ -119,7 +119,7 @@
         }
       },
       "delete": {
-        "summary": "Resets the rack to an unconfigured state.",
+        "summary": "Reset the rack to an unconfigured state.",
         "operationId": "rack_reset",
         "responses": {
           "200": {
@@ -143,7 +143,7 @@
     },
     "/sled-initialize": {
       "delete": {
-        "summary": "Resets this particular sled to an unconfigured state.",
+        "summary": "Reset this particular sled to an unconfigured state.",
         "operationId": "sled_reset",
         "responses": {
           "204": {

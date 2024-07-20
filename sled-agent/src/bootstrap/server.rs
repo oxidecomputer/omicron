@@ -11,7 +11,6 @@ use super::views::SledAgentResponse;
 use super::BootstrapError;
 use super::RssAccessError;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
-use crate::bootstrap::http_entrypoints::api as http_api;
 use crate::bootstrap::http_entrypoints::BootstrapServerContext;
 use crate::bootstrap::maghemite;
 use crate::bootstrap::pre_server::BootstrapAgentStartup;
@@ -499,17 +498,6 @@ async fn sled_config_paths(
         return Err(MissingM2Paths(CONFIG_DATASET));
     }
     Ok(paths)
-}
-
-/// Runs the OpenAPI generator, emitting the spec to stdout.
-pub fn run_openapi() -> Result<(), String> {
-    http_api()
-        .openapi("Oxide Bootstrap Agent API", "0.0.1")
-        .description("API for interacting with individual sleds")
-        .contact_url("https://oxide.computer")
-        .contact_email("api@oxide.computer")
-        .write(&mut std::io::stdout())
-        .map_err(|e| e.to_string())
 }
 
 struct Inner {

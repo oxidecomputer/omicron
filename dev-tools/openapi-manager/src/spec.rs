@@ -26,6 +26,16 @@ pub fn all_apis() -> Vec<ApiSpec> {
             extra_validation: None,
         },
         ApiSpec {
+            title: "Bootstrap Agent API",
+            version: "0.0.1",
+            description: "Per-sled API for setup and teardown",
+            boundary: ApiBoundary::Internal,
+            api_description:
+                bootstrap_agent_api::bootstrap_agent_api_mod::stub_api_description,
+            filename: "bootstrap-agent.json",
+            extra_validation: None,
+        },
+        ApiSpec {
             title: "Internal DNS",
             version: "0.0.1",
             description: "API for the internal DNS server",

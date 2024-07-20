@@ -699,6 +699,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "bootstrap-agent-api"
+version = "0.1.0"
+dependencies = [
+ "dropshot",
+ "nexus-client",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+ "sled-agent-types",
+ "sled-hardware-types",
+]
+
+[[package]]
 name = "bootstrap-agent-client"
 version = "0.1.0"
 dependencies = [
@@ -5811,6 +5826,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bootstore",
+ "bootstrap-agent-api",
  "bootstrap-agent-client",
  "bytes",
  "camino",
@@ -6136,6 +6152,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "atomicwrites",
+ "bootstrap-agent-api",
  "camino",
  "clap",
  "cockroach-admin-api",
