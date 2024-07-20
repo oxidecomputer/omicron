@@ -869,9 +869,9 @@ dependencies = [
 
 [[package]]
 name = "cargo_toml"
-version = "0.20.3"
+version = "0.20.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4895c018bb228aa6b3ba1a0285543fcb4b704734c3fb1f72afaa75aa769500c1"
+checksum = "ad639525b1c67b6a298f378417b060fbc04618bea559482a8484381cce27d965"
 dependencies = [
  "serde",
  "toml 0.8.15",
@@ -1089,6 +1089,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67ba02a97a2bd10f4b59b25c7973101c79642302776489e030cd13cdab09ed15"
 
 [[package]]
+name = "cockroach-admin-api"
+version = "0.1.0"
+dependencies = [
+ "cockroach-admin-types",
+ "dropshot",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+]
+
+[[package]]
 name = "cockroach-admin-client"
 version = "0.1.0"
 dependencies = [
@@ -1100,6 +1113,20 @@ dependencies = [
  "schemars",
  "serde",
  "slog",
+]
+
+[[package]]
+name = "cockroach-admin-types"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "csv",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "proptest",
+ "schemars",
+ "serde",
+ "test-strategy",
 ]
 
 [[package]]
@@ -5324,6 +5351,8 @@ dependencies = [
  "camino",
  "chrono",
  "clap",
+ "cockroach-admin-api",
+ "cockroach-admin-types",
  "csv",
  "dropshot",
  "expectorate",
@@ -6126,6 +6155,7 @@ dependencies = [
  "bootstrap-agent-api",
  "camino",
  "clap",
+ "cockroach-admin-api",
  "dns-server-api",
  "dropshot",
  "fs-err",
