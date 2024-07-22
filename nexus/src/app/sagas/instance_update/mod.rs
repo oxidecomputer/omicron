@@ -175,6 +175,19 @@
 //! saga unwinds into the start saga, that's fine, because a double-unlock is
 //! prevented by the saga ID having changed in the "inherit lock" operation.
 //!
+//! ### Avoiding Missed Updates, or, "The `InstanceRuntimeState` Will Always Get Through"
+//!
+//! The lock operation we've described above is really more of a "try-lock"
+//! operation: if the lock is already held, the saga trying to acquire it just
+//! ends immediately, rather than waiting for the lock to be released. This begs
+//! the question, "what happens if an instance update comes in while the lock is
+//! held?" Do we just...leave it on the floor? Wasn't the whole point of this
+//! Rube Goldberg mechanism of sagas to *prevent* instance state changes from
+//! being missed?
+//!
+//! We solve this using an ~~even more layers of complexity~~defense-in-depth
+//! approach.
+//!
 //! [instance_updater_lock]:
 //!     crate::app::db::datastore::DataStore::instance_updater_lock
 //! [instance_updater_inherit_lock]:
