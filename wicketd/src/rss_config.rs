@@ -296,7 +296,7 @@ impl CurrentRssConfig {
             external_certificates: self.external_certificates.clone(),
             recovery_silo: RecoverySiloConfig {
                 silo_name: Name::try_from(RECOVERY_SILO_NAME).unwrap(),
-                user_name: UserId(RECOVERY_SILO_USERNAME.into()),
+                user_name: UserId::try_from(RECOVERY_SILO_USERNAME).unwrap(),
                 user_password_hash,
             },
             rack_network_config,
