@@ -10,7 +10,6 @@ use anyhow::{anyhow, Context};
 use clap::Parser;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
-use oximeter_collector::oximeter_api;
 use oximeter_collector::standalone_nexus_api;
 use oximeter_collector::Config;
 use oximeter_collector::Oximeter;
@@ -22,16 +21,6 @@ use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::path::PathBuf;
 use uuid::Uuid;
-
-pub fn run_openapi() -> Result<(), String> {
-    oximeter_api()
-        .openapi("Oxide Oximeter API", "0.0.1")
-        .description("API for interacting with oximeter")
-        .contact_url("https://oxide.computer")
-        .contact_email("api@oxide.computer")
-        .write(&mut std::io::stdout())
-        .map_err(|e| e.to_string())
-}
 
 pub fn run_standalone_openapi() -> Result<(), String> {
     standalone_nexus_api()
@@ -47,9 +36,6 @@ pub fn run_standalone_openapi() -> Result<(), String> {
 #[derive(Parser)]
 #[clap(name = "oximeter", about = "See README.adoc for more information")]
 enum Args {
-    /// Print the external OpenAPI Spec document and exit
-    Openapi,
-
     /// Start an Oximeter server
     Run {
         /// Path to TOML file with configuration for the server
@@ -133,9 +119,6 @@ async fn main() {
 async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
     match args {
-        Args::Openapi => {
-            run_openapi().map_err(|err| CmdError::Failure(anyhow!(err)))
-        }
         Args::Run { config_file, id, address } => {
             let config = Config::from_file(config_file).unwrap();
             let args = OximeterArguments { id, address };

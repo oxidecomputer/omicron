@@ -67,6 +67,16 @@ pub fn all_apis() -> Vec<ApiSpec> {
             extra_validation: None,
         },
         ApiSpec {
+            title: "Oxide Oximeter API",
+            version: "0.0.1",
+            description: "API for interacting with oximeter",
+            boundary: ApiBoundary::Internal,
+            api_description:
+                oximeter_api::oximeter_api_mod::stub_api_description,
+            filename: "oximeter.json",
+            extra_validation: None,
+        },
+        ApiSpec {
             title: "Oxide Technician Port Control Service",
             version: "0.0.1",
             description: "API for use by the technician port TUI: wicket",

@@ -19,6 +19,7 @@ internal-dns.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 oximeter.workspace = true
+oximeter-api.workspace = true
 oximeter-client.workspace = true
 oximeter-db.workspace = true
 rand.workspace = true
