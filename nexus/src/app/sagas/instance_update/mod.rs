@@ -1112,6 +1112,44 @@ mod test {
         )
     }
 
+    // Asserts that an instance record is in a consistent state (e.g., that all
+    // state changes performed by the update saga are either applied atomically,
+    // or have not been applied). This is particularly important to check when a
+    // saga unwinds.
+    #[track_caller]
+    fn assert_instance_record_is_consistent(instance: &Instance) {
+        let run_state = instance.runtime();
+        match run_state.nexus_state {
+            InstanceState::Vmm => assert!(
+                run_state.propolis_id.is_some(),
+                "if the instance record is in the `Vmm` state, it must have \
+                 an active VMM\ninstance: {instance:#?}",
+            ),
+            state => assert_eq!(
+                run_state.propolis_id, None,
+                "if the instance record is in the `{state:?}` state, it must \
+                 not have an active VMM\ninstance: {instance:#?}",
+            ),
+        }
+
+        if run_state.dst_propolis_id.is_some() {
+            assert!(
+                run_state.migration_id.is_some(),
+                "if the instance record has a target VMM ID, then it must \
+                 also have a migration\ninstance: {instance:#?}",
+            );
+        }
+
+        if run_state.migration_id.is_some() {
+            assert_eq!(
+                run_state.nexus_state,
+                InstanceState::Vmm,
+                "if an instance is migrating, it must be in the VMM state\n\
+                 instance: {instance:#?}",
+            );
+        }
+    }
+
     async fn after_unwinding(cptestctx: &ControlPlaneTestContext) {
         let state = test_helpers::instance_fetch_by_name(
             cptestctx,
@@ -1121,13 +1159,19 @@ mod test {
         .await;
         let instance = state.instance();
 
-        // Unlike most other sagas, we actually don't unwind the
-        // work performed by an update saga, as we would prefer
-        // that at least some of it succeeds. The only thing
-        // that *needs* to be rolled back when an
-        // instance-update saga fails is that the updater lock
-        // *MUST* be released so that a subsequent saga can run.
+        // Unlike most other sagas, we actually don't unwind the work performed
+        // by an update saga, as we would prefer that at least some of it
+        // succeeds. The only thing  that *needs* to be rolled back when an
+        // instance-update saga fails is that the updater lock *MUST* be
+        // released so that a subsequent saga can run.
+        //
+        // Additionally, we assert that the instance record is in a
+        // consistent state, ensuring that all changes to the instance record
+        // are atomic. This is important *because* we won't roll back changes
+        // to the instance: if we're going to leave them in place, they can't
+        // be partially applied, even if we unwound partway through the saga.
         assert_instance_unlocked(instance);
+        assert_instance_record_is_consistent(instance);
 
         // Throw away the instance so that subsequent unwinding
         // tests also operate on an instance in the correct
