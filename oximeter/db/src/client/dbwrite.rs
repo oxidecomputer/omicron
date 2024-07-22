@@ -63,7 +63,7 @@ impl DbWrite for Client {
         debug!(self.log, "initializing ClickHouse database");
         self.run_many_sql_statements(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/schema/replicated/db-init.sql"
+            "/schema/replicated/db-init-test.sql"
         )))
         .await
     }

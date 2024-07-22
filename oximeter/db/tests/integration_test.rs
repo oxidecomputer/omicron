@@ -37,6 +37,7 @@ impl TestInput {
 
 #[tokio::test]
 async fn test_cluster() -> anyhow::Result<()> {
+    let start = tokio::time::Instant::now();
     let logctx = test_setup_log("test_cluster");
     let log = &logctx.log;
 
@@ -61,39 +62,59 @@ async fn test_cluster() -> anyhow::Result<()> {
     wait_for_ping(&client1).await?;
     wait_for_ping(&client2).await?;
     wait_for_keepers(&deployment, (1..=3).collect()).await?;
+    let end = tokio::time::Instant::now();
+    println!("deploy setup time = {:?}", end - start);
 
+    let start = tokio::time::Instant::now();
     client1.init_replicated_db().await.context("Failed to initialize db")?;
+    let end = tokio::time::Instant::now();
+    println!("init replicated db time = {:?}", end - start);
 
     // Ensure our database tables show up on both servers
+    let start = tokio::time::Instant::now();
     let output1 = client1.list_replicated_tables().await?;
     let output2 = client2.list_replicated_tables().await?;
+    let end = tokio::time::Instant::now();
+    println!("list tables time = {:?}", end - start);
     assert_eq!(output1, output2);
 
     let input = TestInput::default();
 
     // Let's write some samples to our first replica and wait for them to show
     // up on replica 2.
+    let start = tokio::time::Instant::now();
     let samples = test_util::generate_test_samples(
         input.n_projects,
         input.n_instances,
         input.n_cpus,
         input.n_samples,
     );
+    let end = tokio::time::Instant::now();
+    println!("generate samples time = {:?}", end - start);
     assert_eq!(samples.len(), input.n_points());
+    let start = tokio::time::Instant::now();
     client1.insert_samples(&samples).await.expect("failed to insert samples");
+    let end = tokio::time::Instant::now();
+    println!("insert samples time = {:?}", end - start);
 
     // Get all the samples from the replica where the data was inserted
+    let start = tokio::time::Instant::now();
     let oxql_res1 = client1
         .oxql_query("get virtual_machine:cpu_busy")
         .await
         .expect("failed to get all samples");
+    let end = tokio::time::Instant::now();
+    println!("query samples from client1 time = {:?}", end - start);
 
     // Ensure the samples are correct on this replica
     assert_input_and_output(&input, &samples, &oxql_res1);
 
+    let start = tokio::time::Instant::now();
     wait_for_expected_output(&client2, &samples)
         .await
         .expect("failed to get samples from client2");
+    let end = tokio::time::Instant::now();
+    println!("query samples from client2 time = {:?}", end - start);
 
     deployment.teardown()?;
     std::fs::remove_dir_all(path)?;
