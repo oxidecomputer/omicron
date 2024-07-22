@@ -119,13 +119,23 @@ async fn siu_lock_instance_undo(
 ) -> Result<(), anyhow::Error> {
     let Params { ref serialized_authn, ref authz_instance, .. } =
         sagactx.saga_params::<Params>()?;
-    super::unlock_instance_inner(
-        serialized_authn,
-        authz_instance,
-        &sagactx,
-        None,
-    )
-    .await?;
+
+    // If the instance lock node in the saga context was `None`, that means
+    // we didn't acquire the lock, and we can die happily without having to
+    // worry about unlocking the instance. It would be pretty surprising if this
+    // saga unwound without having acquired the lock, but...whatever.
+    if let Some(lock) =
+        sagactx.lookup::<Option<instance::UpdaterLock>>(INSTANCE_LOCK)?
+    {
+        super::unwind_instance_lock(
+            lock,
+            serialized_authn,
+            authz_instance,
+            &sagactx,
+        )
+        .await;
+    }
+
     Ok(())
 }
 
@@ -152,9 +162,9 @@ async fn siu_fetch_state_and_start_real_saga(
 
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, &serialized_authn);
+    let datastore = osagactx.datastore();
 
-    let state = osagactx
-        .datastore()
+    let state = datastore
         .instance_fetch_all(&opctx, &authz_instance)
         .await
         .map_err(ActionError::action_failed)?;
@@ -201,13 +211,11 @@ async fn siu_fetch_state_and_start_real_saga(
             "current.active_vmm" => ?state.active_vmm,
             "current.target_vmm" => ?state.target_vmm,
         );
-        super::unlock_instance_inner(
-            &serialized_authn,
-            &authz_instance,
-            &sagactx,
-            None,
-        )
-        .await?;
+        osagactx
+            .datastore()
+            .instance_updater_unlock(&opctx, &authz_instance, &orig_lock, None)
+            .await
+            .map_err(ActionError::action_failed)?;
     }
 
     Ok(())

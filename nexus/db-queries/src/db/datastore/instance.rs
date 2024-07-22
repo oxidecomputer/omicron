@@ -1178,12 +1178,13 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        UpdaterLock { updater_id, locked_gen }: UpdaterLock,
+        lock: &UpdaterLock,
         new_runtime: Option<&InstanceRuntimeState>,
     ) -> Result<bool, Error> {
         use db::schema::instance::dsl;
 
         let instance_id = authz_instance.id();
+        let UpdaterLock { updater_id, locked_gen } = *lock;
 
         let result = diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
@@ -1381,7 +1382,7 @@ mod tests {
 
         // unlock the instance from saga 1
         let unlocked = datastore
-            .instance_updater_unlock(&opctx, &authz_instance, lock1, None)
+            .instance_updater_unlock(&opctx, &authz_instance, &lock1, None)
             .await
             .expect("instance must be unlocked by saga 1");
         assert!(unlocked, "instance must actually be unlocked");
@@ -1394,7 +1395,7 @@ mod tests {
 
         // unlock the instance from saga 2
         let unlocked = datastore
-            .instance_updater_unlock(&opctx, &authz_instance, lock2, None)
+            .instance_updater_unlock(&opctx, &authz_instance, &lock2, None)
             .await
             .expect("instance must be unlocked by saga 2");
         assert!(unlocked, "instance must actually be unlocked");
@@ -1440,7 +1441,7 @@ mod tests {
         // now, unlock the instance.
         let unlocked = dbg!(
             datastore
-                .instance_updater_unlock(&opctx, &authz_instance, lock1, None)
+                .instance_updater_unlock(&opctx, &authz_instance, &lock1, None)
                 .await
         )
         .expect("instance should unlock");
@@ -1449,7 +1450,7 @@ mod tests {
         // unlocking it again should also succeed...
         let unlocked = dbg!(
             datastore
-                .instance_updater_unlock(&opctx, &authz_instance, lock2, None)
+                .instance_updater_unlock(&opctx, &authz_instance, &lock2, None)
                 .await
         )
         .expect("instance should unlock again");
@@ -1492,7 +1493,7 @@ mod tests {
                     // what we're doing here. But this simulates a case where
                     // an incorrect one is constructed, or a raw database query
                     // attempts an invalid unlock operation.
-                    UpdaterLock {
+                    &UpdaterLock {
                         updater_id: saga2,
                         locked_gen: lock1.locked_gen,
                     },
@@ -1515,7 +1516,7 @@ mod tests {
         // unlocking with the correct ID should succeed.
         let unlocked = dbg!(
             datastore
-                .instance_updater_unlock(&opctx, &authz_instance, lock1, None)
+                .instance_updater_unlock(&opctx, &authz_instance, &lock1, None)
                 .await
         )
         .expect("instance should unlock");
@@ -1531,7 +1532,7 @@ mod tests {
                     // Again, these fields are private specifically to prevent
                     // you from doing this exact thing. But, we should  still
                     // test that we handle it gracefully.
-                    UpdaterLock { updater_id: saga1, locked_gen: next_gen },
+                    &UpdaterLock { updater_id: saga1, locked_gen: next_gen },
                     None,
                 )
                 .await
