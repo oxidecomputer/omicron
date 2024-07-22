@@ -1012,6 +1012,46 @@ impl From<ZoneType> for ServiceKind {
     }
 }
 
+impl From<ZoneType> for omicron_common_extended::inventory::ZoneKind {
+    fn from(zone_type: ZoneType) -> Self {
+        use omicron_common_extended::inventory::ZoneKind::*;
+
+        match zone_type {
+            ZoneType::BoundaryNtp => BoundaryNtp,
+            ZoneType::Clickhouse => Clickhouse,
+            ZoneType::ClickhouseKeeper => ClickhouseKeeper,
+            ZoneType::CockroachDb => CockroachDb,
+            ZoneType::Crucible => Crucible,
+            ZoneType::CruciblePantry => CruciblePantry,
+            ZoneType::ExternalDns => ExternalDns,
+            ZoneType::InternalDns => InternalDns,
+            ZoneType::InternalNtp => InternalNtp,
+            ZoneType::Nexus => Nexus,
+            ZoneType::Oximeter => Oximeter,
+        }
+    }
+}
+
+impl From<omicron_common_extended::inventory::ZoneKind> for ZoneType {
+    fn from(zone_kind: omicron_common_extended::inventory::ZoneKind) -> Self {
+        use omicron_common_extended::inventory::ZoneKind::*;
+
+        match zone_kind {
+            BoundaryNtp => ZoneType::BoundaryNtp,
+            Clickhouse => ZoneType::Clickhouse,
+            ClickhouseKeeper => ZoneType::ClickhouseKeeper,
+            CockroachDb => ZoneType::CockroachDb,
+            Crucible => ZoneType::Crucible,
+            CruciblePantry => ZoneType::CruciblePantry,
+            ExternalDns => ZoneType::ExternalDns,
+            InternalDns => ZoneType::InternalDns,
+            InternalNtp => ZoneType::InternalNtp,
+            Nexus => ZoneType::Nexus,
+            Oximeter => ZoneType::Oximeter,
+        }
+    }
+}
+
 /// See [`omicron_common_extended::inventory::OmicronZoneConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_zone)]

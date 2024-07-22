@@ -265,7 +265,7 @@ pub(crate) trait OmicronZoneConfigExt {
 impl OmicronZoneConfigExt for OmicronZoneConfig {
     fn zone_name(&self) -> String {
         illumos_utils::running_zone::InstalledZone::get_zone_name(
-            &self.zone_type.kind().service_str(),
+            self.zone_type.kind().zone_prefix(),
             Some(self.id),
         )
     }
@@ -333,56 +333,9 @@ impl OmicronZoneTypeExt for OmicronZoneConfig {
     }
 }
 
-/// The type of zone that Sled Agent may run
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum ZoneType {
-    Clickhouse,
-    ClickhouseKeeper,
-    CockroachDb,
-    CruciblePantry,
-    Crucible,
-    ExternalDns,
-    InternalDns,
-    Nexus,
-    Ntp,
-    Oximeter,
-    Switch,
-}
-
-impl std::fmt::Display for ZoneType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use ZoneType::*;
-        let name = match self {
-            Clickhouse => "clickhouse",
-            ClickhouseKeeper => "clickhouse_keeper",
-            CockroachDb => "cockroachdb",
-            Crucible => "crucible",
-            CruciblePantry => "crucible_pantry",
-            ExternalDns => "external_dns",
-            InternalDns => "internal_dns",
-            Nexus => "nexus",
-            Ntp => "ntp",
-            Oximeter => "oximeter",
-            Switch => "switch",
-        };
-        write!(f, "{name}")
-    }
-}
-
 impl crate::smf_helper::Service for OmicronZoneType {
     fn service_name(&self) -> String {
-        // For historical reasons, crucible-pantry is the only zone type whose
-        // SMF service does not match the canonical name that we use for the
-        // zone.
-        match self {
-            OmicronZoneType::CruciblePantry { .. } => {
-                "crucible/pantry".to_owned()
-            }
-            _ => self.kind().service_str().to_owned(),
-        }
+        self.kind().service_prefix().to_owned()
     }
     fn smf_name(&self) -> String {
         format!("svc:/oxide/{}", self.service_name())

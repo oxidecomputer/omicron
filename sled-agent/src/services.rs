@@ -32,7 +32,7 @@ use crate::bootstrap::BootstrapNetworking;
 use crate::config::SidecarRevision;
 use crate::params::{
     DendriteAsic, OmicronZoneConfigExt, OmicronZoneTypeExt, TimeSync,
-    ZoneBundleCause, ZoneBundleMetadata, ZoneType,
+    ZoneBundleCause, ZoneBundleMetadata,
 };
 use crate::profile::*;
 use crate::smf_helper::SmfHelper;
@@ -1464,7 +1464,7 @@ impl ServiceManager {
 
         let zone_type_str = match &request {
             ZoneArgs::Omicron(zone_config) => {
-                zone_config.zone.zone_type.kind().service_str()
+                zone_config.zone.zone_type.kind().zone_prefix()
             }
             ZoneArgs::Switch(_) => "switch",
         };
@@ -3475,7 +3475,7 @@ impl ServiceManager {
             // TODO: We could probably store the ZoneKind in the running zone to
             // make this "comparison to existing zones by name" mechanism a bit
             // safer.
-            if zone.name().contains(&ZoneType::CockroachDb.to_string()) {
+            if zone.name().contains(ZoneKind::CockroachDb.zone_prefix()) {
                 let address = Zones::get_address(
                     Some(zone.name()),
                     &zone.runtime.control_interface(),
@@ -3589,7 +3589,7 @@ impl ServiceManager {
         };
 
         let ntp_zone_name =
-            InstalledZone::get_zone_name(&ZoneType::Ntp.to_string(), None);
+            InstalledZone::get_zone_name(ZoneKind::NTP_PREFIX, None);
 
         let ntp_zone = existing_zones
             .iter()

@@ -343,15 +343,18 @@ impl OmicronZoneType {
 ///
 /// # String representations of this type
 ///
-/// There are three string representations for this type:
+/// There are no fewer than four string representations for this type, all
+/// slightly different from each other.
 ///
-/// 1. [`Self::service_str`]: This string is used to construct zone and SMF
-///    service names.
-/// 2. [`Self::name_str`]: This string is used to construct `Name` instances.
-/// 3. [`Self::report_str`]: This string is used for reporting and testing.
+/// 1. [`Self::zone_prefix`]: Used to construct zone names.
+/// 2. [`Self::service_prefix`]: Used to construct SMF service names.
+/// 3. [`Self::name_prefix`]: Used to construct `Name` instances.
+/// 4. [`Self::report_str`]: Used for reporting and testing.
 ///
 /// There is no `Display` impl to ensure that users explicitly choose the
-/// representation they want.
+/// representation they want. (Please play close attention to this decision!
+/// The functions are all similar but different, and we don't currently have
+/// great type safety around the choice.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ZoneKind {
     BoundaryNtp,
@@ -368,16 +371,19 @@ pub enum ZoneKind {
 }
 
 impl ZoneKind {
-    /// Return a string that is used to construct zone and SMF service names.
-    ///
-    /// Compare with [`Self::name_str`] and [`Self::report_str`].
-    pub fn service_str(self) -> &'static str {
+    /// The NTP prefix used for both BoundaryNtp and InternalNtp zones and
+    /// services.
+    pub const NTP_PREFIX: &'static str = "ntp";
+
+    /// Return a string that is used to construct **zone names**.
+    pub fn zone_prefix(self) -> &'static str {
         match self {
             // BoundaryNtp and InternalNtp both use "ntp".
-            ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => "ntp",
+            ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => Self::NTP_PREFIX,
             ZoneKind::Clickhouse => "clickhouse",
             ZoneKind::ClickhouseKeeper => "clickhouse_keeper",
-            ZoneKind::CockroachDb => "cockroach_db",
+            // Note "cockroachdb" for historical reasons.
+            ZoneKind::CockroachDb => "cockroachdb",
             ZoneKind::Crucible => "crucible",
             ZoneKind::CruciblePantry => "crucible_pantry",
             ZoneKind::ExternalDns => "external_dns",
@@ -387,17 +393,33 @@ impl ZoneKind {
         }
     }
 
-    /// Return a string suitable for use in `Name` instances.
-    ///
-    /// This is similar to `service_str`, but replaces underscores with
-    /// dashes (as required by `Name`).
-    ///
-    /// Compare with [`Self::service_str`] and [`Self::report_str`].
-    pub fn name_str(self) -> &'static str {
+    /// Return a string that is used to construct **SMF service names**.
+    pub fn service_prefix(self) -> &'static str {
         match self {
-            ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => "ntp",
+            // BoundaryNtp and InternalNtp both use "ntp".
+            ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => Self::NTP_PREFIX,
+            ZoneKind::Clickhouse => "clickhouse",
+            ZoneKind::ClickhouseKeeper => "clickhouse_keeper",
+            // Note "cockroachdb" for historical reasons.
+            ZoneKind::CockroachDb => "cockroachdb",
+            ZoneKind::Crucible => "crucible",
+            // Note "crucible/pantry" for historical reasons.
+            ZoneKind::CruciblePantry => "crucible/pantry",
+            ZoneKind::ExternalDns => "external_dns",
+            ZoneKind::InternalDns => "internal_dns",
+            ZoneKind::Nexus => "nexus",
+            ZoneKind::Oximeter => "oximeter",
+        }
+    }
+
+    /// Return a string suitable for use **in `Name` instances**.
+    pub fn name_prefix(self) -> &'static str {
+        match self {
+            // BoundaryNtp and InternalNtp both use "ntp" here.
+            ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => Self::NTP_PREFIX,
             ZoneKind::Clickhouse => "clickhouse",
             ZoneKind::ClickhouseKeeper => "clickhouse-keeper",
+            // Note "cockroach" for historical reasons.
             ZoneKind::CockroachDb => "cockroach",
             ZoneKind::Crucible => "crucible",
             ZoneKind::CruciblePantry => "crucible-pantry",
@@ -409,8 +431,6 @@ impl ZoneKind {
     }
 
     /// Return a string that is used for reporting and testing.
-    ///
-    /// Compare with [`Self::service_str`] and [`Self::name_str`].
     pub fn report_str(self) -> &'static str {
         match self {
             ZoneKind::BoundaryNtp => "boundary_ntp",

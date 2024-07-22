@@ -170,7 +170,7 @@ impl ServiceNetworkInterface {
         // therefore we don't need to be able to generate names for them, but
         // it's simpler to give them valid descriptions than worry about error
         // handling here.
-        let prefix = zone_kind.name_str();
+        let prefix = zone_kind.name_prefix();
 
         // Now that we have a valid prefix, we know this format string
         // always produces a valid `Name`, so we'll unwrap here.
