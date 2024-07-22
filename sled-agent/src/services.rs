@@ -4539,7 +4539,7 @@ mod test {
         zone_type: OmicronZoneType,
         tmp_dir: String,
     ) -> Result<(), Error> {
-        let zone_prefix = format!("oxz_{}", zone_type.kind().service_str());
+        let zone_prefix = format!("oxz_{}", zone_type.kind().zone_prefix());
         let _expectations = expect_new_service(&zone_prefix);
         let r = mgr
             .ensure_all_omicron_zones_persistent(
