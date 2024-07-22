@@ -605,8 +605,10 @@ async fn siu_unbecome_updater(
 ) -> Result<(), anyhow::Error> {
     let RealParams { ref serialized_authn, ref authz_instance, .. } =
         sagactx.saga_params::<RealParams>()?;
-    unlock_instance_inner(serialized_authn, authz_instance, &sagactx, None)
-        .await?;
+    let lock = sagactx.lookup::<instance::UpdaterLock>(INSTANCE_LOCK)?;
+
+    unwind_instance_lock(lock, serialized_authn, authz_instance, &sagactx)
+        .await;
 
     Ok(())
 }
@@ -760,16 +762,42 @@ async fn siu_unassign_oximeter_producer(
 async fn siu_commit_instance_updates(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
     let RealParams { serialized_authn, authz_instance, ref update, .. } =
         sagactx.saga_params::<RealParams>()?;
-    unlock_instance_inner(
-        &serialized_authn,
-        &authz_instance,
-        &sagactx,
-        Some(&update.new_runtime),
-    )
-    .await?;
+    let lock = sagactx.lookup::<instance::UpdaterLock>(INSTANCE_LOCK)?;
+
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, &serialized_authn);
+
     let instance_id = authz_instance.id();
+
+    slog::debug!(
+        osagactx.log(),
+        "instance update: committing new runtime state and unlocking...";
+        "instance_id" => %instance_id,
+        "new_runtime" => ?update.new_runtime,
+        "lock" => ?lock,
+    );
+
+    let did_unlock = osagactx
+        .datastore()
+        .instance_updater_unlock(
+            &opctx,
+            &authz_instance,
+            &lock,
+            Some(&update.new_runtime),
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    slog::info!(
+        osagactx.log(),
+        "instance update: committed update new runtime state!";
+        "instance_id" => %instance_id,
+        "new_runtime" => ?update.new_runtime,
+        "did_unlock" => ?did_unlock,
+    );
 
     // Check if the VMM or migration state has changed while the update saga was
     // running and whether an additional update saga is now required. If one is
@@ -858,37 +886,135 @@ async fn chain_update_saga(
     Ok(())
 }
 
-async fn unlock_instance_inner(
+/// Unlock the instance record while unwinding.
+///
+/// This is factored out of the actual reverse action, because the `Params` type
+/// differs between the start saga and the actual instance update sagas, both of
+/// which must unlock the instance in their reverse actions.
+async fn unwind_instance_lock(
+    lock: instance::UpdaterLock,
     serialized_authn: &authn::saga::Serialized,
     authz_instance: &authz::Instance,
     sagactx: &NexusActionContext,
-    new_runtime: Option<&InstanceRuntimeState>,
-) -> Result<(), ActionError> {
-    let lock = sagactx.lookup::<instance::UpdaterLock>(INSTANCE_LOCK)?;
-    let opctx =
-        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+) {
+    // /!\ EXTREMELY IMPORTANT WARNING /!\
+    //
+    // This comment is a message, and part of a system of messages. Pay
+    // attention to it! The message is a warning about danger.
+    //
+    // The danger is still present in your time, as it was in ours. The danger
+    // is to the instance record, and it can deadlock.
+    //
+    // When unwinding, unlocking an instance MUST succeed at all costs. This is
+    // of the upmost importance. It's fine for unlocking an instance in a
+    // forward action to fail, since the reverse action will still unlock the
+    // instance when the saga is unwound. However, when unwinding, we must
+    // ensure the instance is unlocked, no matter what. This is because a
+    // failure to unlock the instance will leave the instance record in a
+    // PERMANENTLY LOCKED state, since no other update saga will ever be
+    // able to lock it again. If we can't unlock the instance here, our death
+    // will ruin the instance record forever and it will only be able to be
+    // removed by manual operator intervention. That would be...not great.
+    //
+    // Therefore, this action will retry the attempt to unlock the instance
+    // until it either:
+    //
+    // - succeeds, and we know the instance is now unlocked.
+    // - fails *because the instance doesn't exist*, in which case we can die
+    //   happily because it doesn't matter if the instance is actually unlocked.
+    use dropshot::HttpError;
+    use futures::{future, TryFutureExt};
+    use omicron_common::backoff;
+
     let osagactx = sagactx.user_data();
-    slog::info!(
-        osagactx.log(),
-        "instance update: unlocking instance";
-        "instance_id" => %authz_instance.id(),
+    let log = osagactx.log();
+    let instance_id = authz_instance.id();
+    let opctx =
+        crate::context::op_context_for_saga_action(sagactx, &serialized_authn);
+
+    debug!(
+        log,
+        "instance update: unlocking instance on unwind";
+        "instance_id" => %instance_id,
         "lock" => ?lock,
     );
 
-    let did_unlock = osagactx
-        .datastore()
-        .instance_updater_unlock(&opctx, authz_instance, lock, new_runtime)
-        .await
-        .map_err(ActionError::action_failed)?;
+    const WARN_DURATION: std::time::Duration =
+        std::time::Duration::from_secs(20);
 
-    slog::info!(
-        osagactx.log(),
-        "instance update: unlocked instance";
-        "instance_id" => %authz_instance.id(),
-        "did_unlock" => ?did_unlock,
+    let did_unlock = backoff::retry_notify_ext(
+        // This is an internal service query to CockroachDB.
+        backoff::retry_policy_internal_service(),
+        || {
+            osagactx
+            .datastore()
+            .instance_updater_unlock(&opctx, authz_instance, &lock, None)
+            .or_else(|err| future::ready(match err {
+                // The instance record was not found. It's probably been
+                // deleted. That's fine, we can now die happily, since we won't
+                // be leaving the instance permanently locked.
+                Error::ObjectNotFound { .. } => {
+                    info!(
+                        log,
+                        "instance update: giving up on unlocking instance, \
+                         as it no longer exists";
+                        "instance_id" => %instance_id,
+                        "lock" => ?lock,
+                    );
+
+                    Ok(false)
+                },
+                // All other errors should be retried.
+                _ => Err(backoff::BackoffError::transient(err)),
+            }))
+        },
+        |error, call_count, total_duration| {
+            let http_error = HttpError::from(error.clone());
+            if http_error.status_code.is_client_error() {
+                error!(
+                    &log,
+                    "instance update: client error while unlocking instance \
+                     (likely requires operator intervention), retrying anyway";
+                    "instance_id" => %instance_id,
+                    "lock" => ?lock,
+                    "error" => &error,
+                    "call_count" => call_count,
+                    "total_duration" => ?total_duration,
+                );
+            } else if total_duration > WARN_DURATION {
+                warn!(
+                    &log,
+                    "instance update: server error while unlocking instance,
+                     retrying";
+                    "instance_id" => %instance_id,
+                    "lock" => ?lock,
+                    "error" => &error,
+                    "call_count" => call_count,
+                    "total_duration" => ?total_duration,
+                );
+            } else {
+                info!(
+                    &log,
+                    "server error while recording saga event, retrying";
+                    "instance_id" => %instance_id,
+                    "lock" => ?lock,
+                    "error" => &error,
+                    "call_count" => call_count,
+                    "total_duration" => ?total_duration,
+                );
+            }
+        },
+    )
+    .await
+    .expect("errors should be retried indefinitely");
+
+    info!(
+        log,
+        "instance update: unlocked instance while unwinding";
+        "instance_id" => %instance_id,
+        "lock" => ?lock,
+        "did_unlock" => did_unlock,
     );
-
-    Ok(())
 }
 
 #[cfg(test)]
