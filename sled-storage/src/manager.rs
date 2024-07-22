@@ -27,7 +27,7 @@ use omicron_common::ledger::Ledger;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use sled_hardware::DiskVariant;
-use slog::{info, o, warn, Logger};
+use slog::{error, info, o, warn, Logger};
 use std::future::Future;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{interval, Duration, MissedTickBehavior};
@@ -615,7 +615,9 @@ impl StorageManager {
         self.resources.insert_or_update_disk(raw_disk).await
     }
 
-    async fn load_disks_ledger(&self) -> Option<Ledger<OmicronPhysicalDisksConfig>> {
+    async fn load_disks_ledger(
+        &self,
+    ) -> Option<Ledger<OmicronPhysicalDisksConfig>> {
         let ledger_paths = self.all_omicron_disk_ledgers().await;
         let log = self.log.new(o!("request" => "load_disks_ledger"));
         let maybe_ledger = Ledger::<OmicronPhysicalDisksConfig>::new(
@@ -701,12 +703,24 @@ impl StorageManager {
                         requested: config.generation,
                         current: ledger_data.generation,
                     });
+                } else if config.generation == ledger_data.generation {
+                    info!(
+                        log,
+                        "Requested geenration number matches prior request",
+                    );
+
+                    if ledger_data != &config {
+                        error!(log, "Requested configuration changed (with the same generation)");
+                        return Err(Error::DatasetConfigurationChanged {
+                            generation: config.generation,
+                        });
+                    }
                 }
 
-                // TODO: If the generation is equal, check that the values are
-                // also equal.
-
-                info!(log, "Request looks newer than prior requests");
+                info!(
+                    log,
+                    "Request looks newer than (or identical to) prior requests"
+                );
                 ledger
             }
             None => {
@@ -767,11 +781,8 @@ impl StorageManager {
         let log = self.log.new(o!("request" => "datasets_list"));
 
         let ledger_paths = self.all_omicron_dataset_ledgers().await;
-        let maybe_ledger = Ledger::<DatasetsConfig>::new(
-            &log,
-            ledger_paths.clone(),
-        )
-        .await;
+        let maybe_ledger =
+            Ledger::<DatasetsConfig>::new(&log, ledger_paths.clone()).await;
 
         match maybe_ledger {
             Some(ledger) => {
@@ -1082,6 +1093,7 @@ mod tests {
 
     use super::*;
     use camino_tempfile::tempdir_in;
+    use omicron_common::api::external::Generation;
     use omicron_common::ledger;
     use omicron_test_utils::dev::test_setup_log;
     use sled_hardware::DiskFirmware;
@@ -1556,6 +1568,82 @@ mod tests {
             .upsert_filesystem(dataset_id, dataset_name)
             .await
             .unwrap();
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn ensure_datasets() {
+        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
+        let logctx = test_setup_log("ensure_datasets");
+        let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
+
+        // Test setup: Add a U.2 and M.2, adopt them into the "control plane"
+        // for usage.
+        harness.handle().key_manager_ready().await;
+        let raw_disks =
+            harness.add_vdevs(&["u2_under_test.vdev", "m2_helping.vdev"]).await;
+        let config = harness.make_config(1, &raw_disks);
+        let result = harness
+            .handle()
+            .omicron_physical_disks_ensure(config.clone())
+            .await
+            .expect("Ensuring disks should work after key manager is ready");
+        assert!(!result.has_error(), "{:?}", result);
+
+        // Create a dataset on the newly formatted U.2
+        let id = DatasetUuid::new_v4();
+        let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
+        let name = DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
+        let datasets = vec![DatasetConfig {
+            id,
+            name,
+            compression: None,
+            quota: None,
+            reservation: None,
+        }];
+        // "Generation = 1" is reserved as "no requests seen yet", so we jump
+        // past it.
+        let generation = Generation::new().next();
+        let mut config = DatasetsConfig { generation, datasets };
+
+        let status =
+            harness.handle().datasets_ensure(config.clone()).await.unwrap();
+        assert!(!status.has_error());
+
+        // List datasets, expect to see what we just created
+        let observed_config = harness.handle().datasets_list().await.unwrap();
+        assert_eq!(config, observed_config);
+
+        // Calling "datasets_ensure" with the same input should succeed.
+        let status =
+            harness.handle().datasets_ensure(config.clone()).await.unwrap();
+        assert!(!status.has_error());
+
+        let current_config_generation = config.generation;
+        let next_config_generation = config.generation.next();
+
+        // Calling "datasets_ensure" with an old generation should fail
+        config.generation = Generation::new();
+        let err =
+            harness.handle().datasets_ensure(config.clone()).await.unwrap_err();
+        assert!(matches!(err, Error::DatasetConfigurationOutdated { .. }));
+
+        // However, calling it with a different input and the same generation
+        // number should fail.
+        config.generation = current_config_generation;
+        config.datasets[0].reservation = Some(1024);
+        let err =
+            harness.handle().datasets_ensure(config.clone()).await.unwrap_err();
+        assert!(matches!(err, Error::DatasetConfigurationChanged { .. }));
+
+        // If we bump the generation number while making a change, updated
+        // configs will work.
+        config.generation = next_config_generation;
+        let status =
+            harness.handle().datasets_ensure(config.clone()).await.unwrap();
+        assert!(!status.has_error());
 
         harness.cleanup().await;
         logctx.cleanup_successful();

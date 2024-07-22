@@ -74,6 +74,17 @@ pub struct DatasetsManagementResult {
     pub status: Vec<DatasetManagementStatus>,
 }
 
+impl DatasetsManagementResult {
+    pub fn has_error(&self) -> bool {
+        for status in &self.status {
+            if status.err.is_some() {
+                return true;
+            }
+        }
+        false
+    }
+}
+
 /// Identifies how a single disk management operation may have succeeded or
 /// failed.
 #[derive(Debug, JsonSchema, Serialize, Deserialize)]

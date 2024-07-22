@@ -86,6 +86,10 @@ pub struct DatasetsConfig {
     ///
     /// Sled Agent rejects attempts to set the configuration to a generation
     /// older than the one it's currently running.
+    ///
+    /// Note that "Generation::new()", AKA, the first generation number,
+    /// is reserved for "no datasets". This is the default configuration
+    /// for a sled before any requests have been made.
     pub generation: Generation,
 
     pub datasets: Vec<DatasetConfig>,
