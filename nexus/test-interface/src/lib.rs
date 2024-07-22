@@ -63,7 +63,9 @@ pub trait NexusServer: Send + Sync + 'static {
         internal_dns_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
         recovery_silo: nexus_types::internal_api::params::RecoverySiloConfig,
-        tls_certificates: Vec<nexus_types::internal_api::params::Certificate>,
+        tls_certificates: Vec<
+            omicron_common::api::internal::nexus::Certificate,
+        >,
         disable_sled_id: Uuid,
     ) -> Self;
 

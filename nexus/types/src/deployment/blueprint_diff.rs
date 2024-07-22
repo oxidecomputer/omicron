@@ -13,9 +13,9 @@ use super::blueprint_display::{
 use super::{zone_sort_key, CockroachDbPreserveDowngrade};
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
+use omicron_common_extended::inventory::ZoneKind;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
-use sled_agent_client::ZoneKind;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -51,7 +51,7 @@ impl BpSledSubtableData for BpDiffZoneDetails {
             BpSledSubtableRow::from_strings(
                 state,
                 vec![
-                    zone.kind().to_string(),
+                    zone.kind().report_str().to_string(),
                     zone.id().to_string(),
                     zone.disposition().to_string(),
                     zone.underlay_address().to_string(),
@@ -93,8 +93,8 @@ impl ModifiedZone {
         if before.kind() != after.kind() {
             let msg = format!(
                 "mismatched zone kind: before: {}, after: {}\n",
-                before.kind(),
-                after.kind()
+                before.kind().report_str(),
+                after.kind().report_str(),
             );
             reason.push_str(&msg);
         }
@@ -152,7 +152,9 @@ impl BpSledSubtableData for BpDiffZonesModified {
             BpSledSubtableRow::new(
                 state,
                 vec![
-                    BpSledSubtableColumn::value(zone.zone.kind().to_string()),
+                    BpSledSubtableColumn::value(
+                        zone.zone.kind().report_str().to_string(),
+                    ),
                     BpSledSubtableColumn::value(zone.zone.id().to_string()),
                     BpSledSubtableColumn::diff(
                         zone.prior_disposition.to_string(),

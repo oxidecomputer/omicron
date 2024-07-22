@@ -9,8 +9,7 @@ use crate::bootstrap::params::AddSledRequest;
 use crate::params::{
     BootstoreStatus, CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
     InstanceExternalIpBody, InstancePutMigrationIdsBody, InstancePutStateBody,
-    InstancePutStateResponse, InstanceUnregisterResponse, Inventory,
-    OmicronPhysicalDisksConfig, OmicronZonesConfig, SledRole, TimeSync,
+    InstancePutStateResponse, InstanceUnregisterResponse, TimeSync,
     VpcFirewallRulesEnsureBody, ZoneBundleId, ZoneBundleMetadata, Zpool,
 };
 use crate::sled_agent::Error as SledAgentError;
@@ -33,11 +32,14 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::shared::{
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SledIdentifiers, SwitchPorts,
 };
+use omicron_common::disk::{DiskVariant, OmicronPhysicalDisksConfig};
+use omicron_common_extended::inventory::{
+    Inventory, OmicronZonesConfig, SledRole,
+};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::EarlyNetworkConfig;
-use sled_hardware::DiskVariant;
 use sled_storage::resources::DisksManagementResult;
 use std::collections::BTreeMap;
 use uuid::Uuid;

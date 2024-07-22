@@ -14,8 +14,7 @@ use crate::nexus::NexusClient;
 use crate::params::{
     DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
     InstanceMetadata, InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse, Inventory,
-    OmicronPhysicalDisksConfig, OmicronZonesConfig, SledRole,
+    InstanceStateRequested, InstanceUnregisterResponse,
 };
 use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
@@ -37,7 +36,12 @@ use omicron_common::api::internal::shared::{
     RackNetworkConfig, ResolvedVpcRoute, ResolvedVpcRouteSet,
     ResolvedVpcRouteState, RouterId, RouterKind, RouterVersion,
 };
-use omicron_common::disk::DiskIdentity;
+use omicron_common::disk::{
+    DiskIdentity, DiskVariant, OmicronPhysicalDisksConfig,
+};
+use omicron_common_extended::inventory::{
+    Inventory, InventoryDisk, InventoryZpool, OmicronZonesConfig, SledRole,
+};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, ZpoolUuid};
 use oxnet::Ipv6Net;
 use propolis_client::{
@@ -593,7 +597,7 @@ impl SledAgent {
         id: Uuid,
         identity: DiskIdentity,
     ) {
-        let variant = sled_hardware::DiskVariant::U2;
+        let variant = DiskVariant::U2;
         self.storage
             .lock()
             .await
@@ -850,7 +854,7 @@ impl SledAgent {
             disks: storage
                 .physical_disks()
                 .values()
-                .map(|info| crate::params::InventoryDisk {
+                .map(|info| InventoryDisk {
                     identity: info.identity.clone(),
                     variant: info.variant,
                     slot: info.slot,
@@ -860,7 +864,7 @@ impl SledAgent {
                 .zpools()
                 .iter()
                 .map(|(id, zpool)| {
-                    Ok(crate::params::InventoryZpool {
+                    Ok(InventoryZpool {
                         id: *id,
                         total_size: ByteCount::try_from(zpool.total_size())?,
                     })

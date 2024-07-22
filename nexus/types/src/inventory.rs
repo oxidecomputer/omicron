@@ -11,7 +11,6 @@
 
 use crate::external_api::params::PhysicalDiskKind;
 use crate::external_api::params::UninitializedSledId;
-use crate::external_api::shared::Baseboard;
 use chrono::DateTime;
 use chrono::Utc;
 pub use gateway_client::types::PowerState;
@@ -23,16 +22,16 @@ pub use omicron_common::api::internal::shared::NetworkInterface;
 pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
 pub use omicron_common::api::internal::shared::SourceNatConfig;
 pub use omicron_common::zpool_name::ZpoolName;
+use omicron_common_extended::inventory::InventoryDisk;
+use omicron_common_extended::inventory::InventoryZpool;
+use omicron_common_extended::inventory::OmicronZoneConfig;
+use omicron_common_extended::inventory::OmicronZonesConfig;
+use omicron_common_extended::inventory::SledRole;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-pub use sled_agent_client::types::OmicronZoneConfig;
-pub use sled_agent_client::types::OmicronZoneDataset;
-pub use sled_agent_client::types::OmicronZoneType;
-pub use sled_agent_client::types::OmicronZonesConfig;
-pub use sled_agent_client::types::SledRole;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
@@ -178,8 +177,8 @@ pub struct BaseboardId {
     pub serial_number: String,
 }
 
-impl From<Baseboard> for BaseboardId {
-    fn from(value: Baseboard) -> Self {
+impl From<crate::external_api::shared::Baseboard> for BaseboardId {
+    fn from(value: crate::external_api::shared::Baseboard) -> Self {
         BaseboardId { part_number: value.part, serial_number: value.serial }
     }
 }
@@ -364,13 +363,15 @@ impl IntoRotPage for gateway_client::types::RotCfpa {
 /// the disk is being actively managed by the control plane.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PhysicalDisk {
+    // TODO: should this just be InventoryDisk? Do we need a separation between
+    // InventoryDisk and PhysicalDisk?
     pub identity: omicron_common::disk::DiskIdentity,
     pub variant: PhysicalDiskKind,
     pub slot: i64,
 }
 
-impl From<sled_agent_client::types::InventoryDisk> for PhysicalDisk {
-    fn from(disk: sled_agent_client::types::InventoryDisk) -> PhysicalDisk {
+impl From<InventoryDisk> for PhysicalDisk {
+    fn from(disk: InventoryDisk) -> PhysicalDisk {
         PhysicalDisk {
             identity: disk.identity,
             variant: disk.variant.into(),
@@ -388,10 +389,7 @@ pub struct Zpool {
 }
 
 impl Zpool {
-    pub fn new(
-        time_collected: DateTime<Utc>,
-        pool: sled_agent_client::types::InventoryZpool,
-    ) -> Zpool {
+    pub fn new(time_collected: DateTime<Utc>, pool: InventoryZpool) -> Zpool {
         Zpool { time_collected, id: pool.id, total_size: pool.total_size }
     }
 }

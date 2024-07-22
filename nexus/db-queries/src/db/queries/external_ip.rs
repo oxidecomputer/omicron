@@ -891,13 +891,13 @@ mod tests {
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common_extended::inventory::ZoneKind;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::db::CockroachInstance;
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
-    use sled_agent_client::ZoneKind;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::sync::Arc;

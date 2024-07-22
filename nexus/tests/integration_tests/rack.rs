@@ -18,9 +18,9 @@ use nexus_types::external_api::params;
 use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views::Rack;
 use nexus_types::internal_api::params::SledAgentInfo;
-use nexus_types::internal_api::params::SledRole;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
+use omicron_common_extended::inventory::SledRole;
 use omicron_uuid_kinds::GenericUuid;
 use uuid::Uuid;
 

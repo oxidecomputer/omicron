@@ -32,6 +32,9 @@ use nexus_types::inventory::{
     BaseboardId, Caboose, Collection, PowerState, RotPage, RotSlot,
 };
 use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_common_extended::inventory::{
+    OmicronZoneConfig, OmicronZonesConfig,
+};
 use omicron_uuid_kinds::CollectionKind;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -758,20 +761,28 @@ impl_enum_type!(
     Scrimlet =>  b"scrimlet"
 );
 
-impl From<nexus_types::inventory::SledRole> for SledRole {
-    fn from(value: nexus_types::inventory::SledRole) -> Self {
+impl From<omicron_common_extended::inventory::SledRole> for SledRole {
+    fn from(value: omicron_common_extended::inventory::SledRole) -> Self {
         match value {
-            nexus_types::inventory::SledRole::Gimlet => SledRole::Gimlet,
-            nexus_types::inventory::SledRole::Scrimlet => SledRole::Scrimlet,
+            omicron_common_extended::inventory::SledRole::Gimlet => {
+                SledRole::Gimlet
+            }
+            omicron_common_extended::inventory::SledRole::Scrimlet => {
+                SledRole::Scrimlet
+            }
         }
     }
 }
 
-impl From<SledRole> for nexus_types::inventory::SledRole {
+impl From<SledRole> for omicron_common_extended::inventory::SledRole {
     fn from(value: SledRole) -> Self {
         match value {
-            SledRole::Gimlet => nexus_types::inventory::SledRole::Gimlet,
-            SledRole::Scrimlet => nexus_types::inventory::SledRole::Scrimlet,
+            SledRole::Gimlet => {
+                omicron_common_extended::inventory::SledRole::Gimlet
+            }
+            SledRole::Scrimlet => {
+                omicron_common_extended::inventory::SledRole::Scrimlet
+            }
         }
     }
 }
@@ -953,7 +964,7 @@ impl InvSledOmicronZones {
             time_collected: self.time_collected,
             source: self.source,
             sled_id: self.sled_id.into(),
-            zones: nexus_types::inventory::OmicronZonesConfig {
+            zones: OmicronZonesConfig {
                 generation: *self.generation,
                 zones: Vec::new(),
             },
@@ -1001,7 +1012,7 @@ impl From<ZoneType> for ServiceKind {
     }
 }
 
-/// See [`nexus_types::inventory::OmicronZoneConfig`].
+/// See [`omicron_common_extended::inventory::OmicronZoneConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_zone)]
 pub struct InvOmicronZone {
@@ -1033,7 +1044,7 @@ impl InvOmicronZone {
     pub fn new(
         inv_collection_id: CollectionUuid,
         sled_id: SledUuid,
-        zone: &nexus_types::inventory::OmicronZoneConfig,
+        zone: &OmicronZoneConfig,
     ) -> Result<InvOmicronZone, anyhow::Error> {
         // Inventory zones do not know the external IP ID.
         let external_ip_id = None;
@@ -1074,7 +1085,7 @@ impl InvOmicronZone {
     pub fn into_omicron_zone_config(
         self,
         nic_row: Option<InvOmicronZoneNic>,
-    ) -> Result<nexus_types::inventory::OmicronZoneConfig, anyhow::Error> {
+    ) -> Result<OmicronZoneConfig, anyhow::Error> {
         let zone = OmicronZone {
             sled_id: self.sled_id.into(),
             id: self.id,
@@ -1137,7 +1148,7 @@ impl From<InvOmicronZoneNic> for OmicronZoneNic {
 impl InvOmicronZoneNic {
     pub fn new(
         inv_collection_id: CollectionUuid,
-        zone: &nexus_types::inventory::OmicronZoneConfig,
+        zone: &OmicronZoneConfig,
     ) -> Result<Option<InvOmicronZoneNic>, anyhow::Error> {
         let Some(nic) = zone.zone_type.service_vnic() else {
             return Ok(None);

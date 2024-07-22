@@ -15,6 +15,7 @@ use nexus_types::{
     identity::Asset,
     internal_api::params,
 };
+use omicron_common_extended::inventory::SledRole;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
@@ -141,9 +142,9 @@ impl From<Sled> for views::Sled {
 impl From<Sled> for params::SledAgentInfo {
     fn from(sled: Sled) -> Self {
         let role = if sled.is_scrimlet {
-            params::SledRole::Scrimlet
+            SledRole::Scrimlet
         } else {
-            params::SledRole::Gimlet
+            SledRole::Gimlet
         };
         let decommissioned = match sled.state {
             SledState::Active => false,

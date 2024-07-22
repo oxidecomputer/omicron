@@ -19,6 +19,7 @@ members = [
     "cockroach-admin/api",
     "cockroach-admin/types",
     "common",
+    "common-extended",
     "dev-tools/crdb-seed",
     "dev-tools/omdb",
     "dev-tools/omicron-dev",
@@ -117,6 +118,7 @@ default-members = [
     "cockroach-admin/api",
     "cockroach-admin/types",
     "common",
+    "common-extended",
     "dev-tools/crdb-seed",
     "dev-tools/omdb",
     "dev-tools/omicron-dev",
@@ -388,6 +390,7 @@ num-integer = "0.1.46"
 num = { version = "0.4.3", default-features = false, features = [ "libm" ] }
 omicron-cockroach-admin = { path = "cockroach-admin" }
 omicron-common = { path = "common" }
+omicron-common-extended = { path = "common-extended" }
 omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
 omicron-omdb = { path = "dev-tools/omdb" }

@@ -43,6 +43,7 @@ uuid.workspace = true
 db-macros.workspace = true
 omicron-certificates.workspace = true
 omicron-common.workspace = true
+omicron-common-extended.workspace = true
 nexus-config.workspace = true
 nexus-defaults.workspace = true
 nexus-types.workspace = true

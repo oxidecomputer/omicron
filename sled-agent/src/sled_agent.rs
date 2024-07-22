@@ -19,9 +19,8 @@ use crate::nexus::{
 use crate::params::{
     DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
     InstanceMetadata, InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse, Inventory,
-    OmicronPhysicalDisksConfig, OmicronZonesConfig, SledRole, TimeSync,
-    VpcFirewallRule, ZoneBundleMetadata, Zpool,
+    InstanceStateRequested, InstanceUnregisterResponse, OmicronZoneTypeExt,
+    TimeSync, VpcFirewallRule, ZoneBundleMetadata, Zpool,
 };
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
@@ -57,6 +56,10 @@ use omicron_common::api::{
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+};
+use omicron_common::disk::OmicronPhysicalDisksConfig;
+use omicron_common_extended::inventory::{
+    Inventory, InventoryDisk, InventoryZpool, OmicronZonesConfig, SledRole,
 };
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
@@ -1221,17 +1224,14 @@ impl SledAgent {
         let usable_physical_ram =
             self.inner.hardware.usable_physical_ram_bytes();
         let reservoir_size = self.inner.instances.reservoir_size();
-        let sled_role = if is_scrimlet {
-            crate::params::SledRole::Scrimlet
-        } else {
-            crate::params::SledRole::Gimlet
-        };
+        let sled_role =
+            if is_scrimlet { SledRole::Scrimlet } else { SledRole::Gimlet };
 
         let mut disks = vec![];
         let mut zpools = vec![];
         let all_disks = self.storage().get_latest_disks().await;
         for (identity, variant, slot, _firmware) in all_disks.iter_all() {
-            disks.push(crate::params::InventoryDisk {
+            disks.push(InventoryDisk {
                 identity: identity.clone(),
                 variant,
                 slot,
@@ -1253,7 +1253,7 @@ impl SledAgent {
                     }
                 };
 
-            zpools.push(crate::params::InventoryZpool {
+            zpools.push(InventoryZpool {
                 id: zpool.id(),
                 total_size: ByteCount::try_from(info.size())?,
             });

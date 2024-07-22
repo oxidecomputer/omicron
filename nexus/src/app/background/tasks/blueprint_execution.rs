@@ -132,9 +132,9 @@ mod test {
         BlueprintZoneType, BlueprintZonesConfig, CockroachDbPreserveDowngrade,
     };
     use nexus_types::external_api::views::SledState;
-    use nexus_types::inventory::OmicronZoneDataset;
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_common_extended::inventory::OmicronZoneDataset;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;

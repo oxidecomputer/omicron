@@ -2,11 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::disk::{
-    DiskPaths, DiskVariant, Partition, PooledDiskError, UnparsedDisk,
-};
+use crate::disk::{DiskPaths, Partition, PooledDiskError, UnparsedDisk};
 use crate::SledMode;
-use omicron_common::disk::DiskIdentity;
+use omicron_common::disk::{DiskIdentity, DiskVariant};
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_hardware_types::Baseboard;
 use slog::Logger;

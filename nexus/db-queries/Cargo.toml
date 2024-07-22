@@ -55,6 +55,7 @@ nexus-db-fixed-data.workspace = true
 nexus-db-model.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
+omicron-common-extended.workspace = true
 omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true
 oximeter.workspace = true

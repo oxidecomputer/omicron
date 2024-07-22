@@ -318,10 +318,11 @@ mod test {
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Asset;
     use omicron_common::api::external::ByteCount;
-    use omicron_common::disk::DiskIdentity;
+    use omicron_common::disk::{DiskIdentity, DiskVariant};
+    use omicron_common_extended::inventory::{
+        Baseboard, Inventory, InventoryDisk, SledRole,
+    };
     use omicron_test_utils::dev;
-    use sled_agent_client::types::DiskVariant;
-    use sled_agent_client::types::InventoryDisk;
     use std::net::{Ipv6Addr, SocketAddrV6};
     use std::num::NonZeroU32;
 
@@ -683,19 +684,19 @@ mod test {
     fn add_sled_to_inventory(
         builder: &mut nexus_inventory::CollectionBuilder,
         sled: &Sled,
-        disks: Vec<sled_agent_client::types::InventoryDisk>,
+        disks: Vec<InventoryDisk>,
     ) {
         builder
             .found_sled_inventory(
                 "fake sled agent",
-                sled_agent_client::types::Inventory {
-                    baseboard: sled_agent_client::types::Baseboard::Gimlet {
+                Inventory {
+                    baseboard: Baseboard::Gimlet {
                         identifier: sled.serial_number().to_string(),
                         model: sled.part_number().to_string(),
                         revision: 0,
                     },
                     reservoir_size: ByteCount::from(1024),
-                    sled_role: sled_agent_client::types::SledRole::Gimlet,
+                    sled_role: SledRole::Gimlet,
                     sled_agent_address: "[::1]:56792".parse().unwrap(),
                     sled_id: sled.id(),
                     usable_hardware_threads: 10,

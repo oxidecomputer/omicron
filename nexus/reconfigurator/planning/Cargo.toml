@@ -18,6 +18,7 @@ nexus-config.workspace = true
 nexus-inventory.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
+omicron-common-extended.workspace = true
 omicron-uuid-kinds.workspace = true
 oxnet.workspace = true
 rand.workspace = true

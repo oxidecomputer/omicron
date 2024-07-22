@@ -10,9 +10,6 @@ use super::sled_agent::SledAgent;
 use super::storage::PantryServer;
 use crate::nexus::d2n_params;
 use crate::nexus::NexusClient;
-use crate::params::OmicronZoneConfig;
-use crate::params::OmicronZoneDataset;
-use crate::params::OmicronZoneType;
 use crate::rack_setup::service::build_initial_blueprint_from_sled_configs;
 use crate::rack_setup::SledConfig;
 use anyhow::anyhow;
@@ -28,15 +25,21 @@ use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Vni;
+use omicron_common::api::internal::nexus::Certificate;
+use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::disk::DiskIdentity;
 use omicron_common::FileKv;
+use omicron_common_extended::inventory::OmicronZoneConfig;
+use omicron_common_extended::inventory::OmicronZoneDataset;
+use omicron_common_extended::inventory::OmicronZoneType;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
+use sled_agent_types::rack_init::RecoverySiloConfig;
 use slog::{info, Drain, Logger};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -196,7 +199,7 @@ impl Server {
                 dataset_id,
                 request: NexusTypes::DatasetPutRequest {
                     address: address.to_string(),
-                    kind: NexusTypes::DatasetKind::Crucible,
+                    kind: DatasetKind::Crucible,
                 },
             });
 
@@ -283,7 +286,7 @@ pub struct RssArgs {
     pub internal_dns_dns_addr: Option<SocketAddrV6>,
     /// Specify a certificate and associated private key for the initial Silo's
     /// initial TLS certificates
-    pub tls_certificate: Option<NexusTypes::Certificate>,
+    pub tls_certificate: Option<Certificate>,
 }
 
 /// Run an instance of the `Server` which is able to handoff to Nexus.
@@ -475,7 +478,7 @@ pub async fn run_standalone_server(
             .push(IpRange::V6(Ipv6Range { first: ip, last: ip }));
     }
 
-    let recovery_silo = NexusTypes::RecoverySiloConfig {
+    let recovery_silo = RecoverySiloConfig {
         silo_name: "demo-silo".parse().unwrap(),
         user_name: "demo-privileged".parse().unwrap(),
         // The following is a hash for the password "oxide".  This is
@@ -505,7 +508,7 @@ pub async fn run_standalone_server(
                 dataset_id,
                 request: NexusTypes::DatasetPutRequest {
                     address: address.to_string(),
-                    kind: NexusTypes::DatasetKind::Crucible,
+                    kind: DatasetKind::Crucible,
                 },
             });
         }

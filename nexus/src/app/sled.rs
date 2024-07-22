@@ -6,7 +6,7 @@
 
 use crate::external_api::params;
 use crate::internal_api::params::{
-    PhysicalDiskPutRequest, SledAgentInfo, SledRole, ZpoolPutRequest,
+    PhysicalDiskPutRequest, SledAgentInfo, ZpoolPutRequest,
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -22,6 +22,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common_extended::inventory::SledRole;
 use omicron_uuid_kinds::{GenericUuid, SledUuid};
 use sled_agent_client::Client as SledAgentClient;
 use std::net::SocketAddrV6;

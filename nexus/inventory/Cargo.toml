@@ -16,6 +16,7 @@ gateway-client.workspace = true
 gateway-messages.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
+omicron-common-extended.workspace = true
 omicron-uuid-kinds.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true

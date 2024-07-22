@@ -12,6 +12,7 @@ anyhow.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 omicron-common.workspace = true
+omicron-common-extended.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 oxnet.workspace = true

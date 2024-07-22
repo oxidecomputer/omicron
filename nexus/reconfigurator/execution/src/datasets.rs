@@ -125,9 +125,9 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::BlueprintZoneType;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_common_extended::inventory::OmicronZoneDataset;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use sled_agent_client::types::OmicronZoneDataset;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =

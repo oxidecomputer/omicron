@@ -253,7 +253,7 @@ impl nexus_test_interface::NexusServer for Server {
         internal_dns_zone_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
         recovery_silo: nexus_types::internal_api::params::RecoverySiloConfig,
-        certs: Vec<nexus_types::internal_api::params::Certificate>,
+        certs: Vec<omicron_common::api::internal::nexus::Certificate>,
         disable_sled_id: Uuid,
     ) -> Self {
         // Perform the "handoff from RSS".

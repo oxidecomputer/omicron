@@ -4656,7 +4656,7 @@
         ]
       },
       "SledRole": {
-        "description": "Describes the role of the sled within the rack.\n\nNote that this may change if the sled is physically moved within the rack.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Describes the role of the sled within the rack.\\n\\nNote that this may change if the sled is physically moved within the rack.\", \"oneOf\": [ { \"description\": \"The sled is a general compute sled.\", \"type\": \"string\", \"enum\": [ \"gimlet\" ] }, { \"description\": \"The sled is attached to the network switch, and has additional responsibilities.\", \"type\": \"string\", \"enum\": [ \"scrimlet\" ] } ] } ``` </details>",
+        "description": "Describes the role of the sled within the rack.\n\nNote that this may change if the sled is physically moved within the rack.",
         "oneOf": [
           {
             "description": "The sled is a general compute sled.",

@@ -5,8 +5,8 @@
 //! Omicron zone placement decisions
 
 use nexus_types::deployment::BlueprintZoneType;
+use omicron_common_extended::inventory::ZoneKind;
 use omicron_uuid_kinds::SledUuid;
-use sled_agent_client::ZoneKind;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::mem;
@@ -56,7 +56,7 @@ impl From<DiscretionaryOmicronZone> for ZoneKind {
 pub(super) enum PlacementError {
     #[error(
         "no sleds eligible for placement of new {} zone",
-        ZoneKind::from(*zone_kind)
+        ZoneKind::from(*zone_kind).report_str()
     )]
     NoSledsEligible { zone_kind: DiscretionaryOmicronZone },
 }

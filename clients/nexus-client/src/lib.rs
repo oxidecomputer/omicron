@@ -29,6 +29,8 @@ progenitor::generate_api!(
         // as "blueprint" this way, but we have really useful functionality
         // (e.g., diff'ing) that's implemented on our local type.
         Blueprint = nexus_types::deployment::Blueprint,
+        Certificate = omicron_common::api::internal::nexus::Certificate,
+        DatasetKind = omicron_common::api::internal::shared::DatasetKind,
         Generation = omicron_common::api::external::Generation,
         ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         MacAddr = omicron_common::api::external::MacAddr,
@@ -36,6 +38,7 @@ progenitor::generate_api!(
         NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
         NetworkInterfaceKind = omicron_common::api::internal::shared::NetworkInterfaceKind,
         NewPasswordHash = omicron_passwords::NewPasswordHash,
+        RecoverySiloConfig = nexus_types::internal_api::params::RecoverySiloConfig,
         TypedUuidForCollectionKind = omicron_uuid_kinds::CollectionUuid,
         TypedUuidForDownstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::DownstairsKind>,
         TypedUuidForPropolisKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::PropolisKind>,

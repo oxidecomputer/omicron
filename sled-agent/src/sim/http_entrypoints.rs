@@ -8,8 +8,8 @@ use crate::bootstrap::params::AddSledRequest;
 use crate::params::{
     DiskEnsureBody, InstanceEnsureBody, InstanceExternalIpBody,
     InstancePutMigrationIdsBody, InstancePutStateBody,
-    InstancePutStateResponse, InstanceUnregisterResponse, Inventory,
-    OmicronPhysicalDisksConfig, OmicronZonesConfig, VpcFirewallRulesEnsureBody,
+    InstancePutStateResponse, InstanceUnregisterResponse,
+    VpcFirewallRulesEnsureBody,
 };
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -26,6 +26,8 @@ use omicron_common::api::internal::nexus::UpdateArtifactId;
 use omicron_common::api::internal::shared::{
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
 };
+use omicron_common::disk::OmicronPhysicalDisksConfig;
+use omicron_common_extended::inventory::{Inventory, OmicronZonesConfig};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

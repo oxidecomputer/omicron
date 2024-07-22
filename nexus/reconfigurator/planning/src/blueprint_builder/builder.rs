@@ -23,7 +23,6 @@ use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::DiskFilter;
-use nexus_types::deployment::OmicronZoneDataset;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledDetails;
@@ -42,6 +41,8 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common_extended::inventory::OmicronZoneDataset;
+use omicron_common_extended::inventory::ZoneKind;
 use omicron_uuid_kinds::ExternalIpKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneKind;
@@ -51,7 +52,6 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use sled_agent_client::ZoneKind;
 use slog::debug;
 use slog::error;
 use slog::info;
@@ -132,7 +132,7 @@ pub enum EnsureMultiple {
 /// "comment", identifying which operations have occurred on the blueprint.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) enum Operation {
-    AddZone { sled_id: SledUuid, kind: sled_agent_client::ZoneKind },
+    AddZone { sled_id: SledUuid, kind: ZoneKind },
     UpdateDisks { sled_id: SledUuid, added: usize, removed: usize },
     ZoneExpunged { sled_id: SledUuid, reason: ZoneExpungeReason, count: usize },
 }
@@ -141,7 +141,7 @@ impl fmt::Display for Operation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::AddZone { sled_id, kind } => {
-                write!(f, "sled {sled_id}: added zone: {kind}")
+                write!(f, "sled {sled_id}: added zone: {}", kind.report_str())
             }
             Self::UpdateDisks { sled_id, added, removed } => {
                 write!(f, "sled {sled_id}: added {added} disks, removed {removed} disks")

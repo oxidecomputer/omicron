@@ -29,6 +29,7 @@ use nexus_types::inventory::SourceNatConfig;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::internal::shared::SourceNatConfigError;
+use omicron_common_extended::inventory::ZoneKind;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -36,7 +37,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::InstanceExternalIpBody;
-use sled_agent_client::ZoneKind;
 use slog_error_chain::SlogInlineError;
 use std::convert::TryFrom;
 use std::net::IpAddr;
@@ -406,7 +406,7 @@ impl IncompleteExternalIp {
                     IpKind::Floating,
                     None,
                     Some(name),
-                    Some(zone_kind.to_string()),
+                    Some(zone_kind.report_str().to_string()),
                     state,
                 )
             }

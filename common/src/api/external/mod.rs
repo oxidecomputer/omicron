@@ -399,6 +399,48 @@ impl JsonSchema for NameOrId {
     }
 }
 
+/// A username for a local-only user
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(try_from = "String")]
+pub struct UserId(String);
+
+impl AsRef<str> for UserId {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
+    }
+}
+
+impl FromStr for UserId {
+    type Err = String;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        UserId::try_from(String::from(value))
+    }
+}
+
+/// Used to impl `Deserialize`
+impl TryFrom<String> for UserId {
+    type Error = String;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        // Mostly, this validation exists to cap the input size.  The specific
+        // length is not critical here.  For convenience and consistency, we use
+        // the same rules as `Name`.
+        let _ = Name::try_from(value.clone())?;
+        Ok(UserId(value))
+    }
+}
+
+impl JsonSchema for UserId {
+    fn schema_name() -> String {
+        "UserId".to_string()
+    }
+
+    fn json_schema(
+        gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        Name::json_schema(gen)
+    }
+}
+
 // TODO: remove wrapper for semver::Version once this PR goes through
 // https://github.com/GREsau/schemars/pull/195
 #[derive(

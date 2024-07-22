@@ -90,7 +90,7 @@ use illumos_utils::dumpadm::{DumpAdm, DumpContentType};
 use illumos_utils::zone::ZONE_PREFIX;
 use illumos_utils::zpool::{ZpoolHealth, ZpoolName};
 use illumos_utils::ExecutionError;
-use sled_hardware::DiskVariant;
+use omicron_common::disk::DiskVariant;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::{CRASH_DATASET, DUMP_DATASET};
 use sled_storage::disk::Disk;

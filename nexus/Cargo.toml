@@ -100,6 +100,7 @@ nexus-reconfigurator-planning.workspace = true
 nexus-reconfigurator-preparation.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
+omicron-common-extended.workspace = true
 omicron-passwords.workspace = true
 oximeter.workspace = true
 oximeter-instruments = { workspace = true, features = ["http-instruments"] }

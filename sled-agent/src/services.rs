@@ -31,8 +31,8 @@ use crate::bootstrap::early_networking::{
 use crate::bootstrap::BootstrapNetworking;
 use crate::config::SidecarRevision;
 use crate::params::{
-    DendriteAsic, OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
-    TimeSync, ZoneBundleCause, ZoneBundleMetadata, ZoneType,
+    DendriteAsic, OmicronZoneConfigExt, OmicronZoneTypeExt, TimeSync,
+    ZoneBundleCause, ZoneBundleMetadata, ZoneType,
 };
 use crate::profile::*;
 use crate::smf_helper::SmfHelper;
@@ -87,6 +87,9 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
+use omicron_common_extended::inventory::{
+    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig, ZoneKind,
+};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use once_cell::sync::OnceCell;
 use rand::prelude::SliceRandom;
@@ -97,7 +100,7 @@ use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
 use sled_hardware_types::Baseboard;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::{
-    DatasetKind, DatasetName, CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET,
+    DatasetName, DatasetType, CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET,
 };
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
@@ -194,9 +197,9 @@ pub enum Error {
     #[error("Failed to access underlay device: {0}")]
     Underlay(#[from] underlay::Error),
 
-    #[error("Failed to create OPTE port for service {service}: {err}")]
+    #[error("Failed to create OPTE port for service {}: {err}", service.report_str())]
     ServicePortCreation {
-        service: String,
+        service: ZoneKind,
         err: Box<illumos_utils::opte::Error>,
     },
 
@@ -1138,17 +1141,14 @@ impl ServiceManager {
             .collect();
 
         let external_ip;
-        let (zone_type_str, nic, snat, floating_ips) = match &zone_args
+        let (zone_kind, nic, snat, floating_ips) = match &zone_args
             .omicron_type()
         {
             Some(
                 zone_type @ OmicronZoneType::Nexus { external_ip, nic, .. },
-            ) => (
-                zone_type.zone_type_str(),
-                nic,
-                None,
-                std::slice::from_ref(external_ip),
-            ),
+            ) => {
+                (zone_type.kind(), nic, None, std::slice::from_ref(external_ip))
+            }
             Some(
                 zone_type @ OmicronZoneType::ExternalDns {
                     dns_address,
@@ -1158,7 +1158,7 @@ impl ServiceManager {
             ) => {
                 external_ip = dns_address.ip();
                 (
-                    zone_type.zone_type_str(),
+                    zone_type.kind(),
                     nic,
                     None,
                     std::slice::from_ref(&external_ip),
@@ -1168,7 +1168,7 @@ impl ServiceManager {
                 zone_type @ OmicronZoneType::BoundaryNtp {
                     nic, snat_cfg, ..
                 },
-            ) => (zone_type.zone_type_str(), nic, Some(*snat_cfg), &[][..]),
+            ) => (zone_type.kind(), nic, Some(*snat_cfg), &[][..]),
             _ => unreachable!("unexpected zone type"),
         };
 
@@ -1188,7 +1188,7 @@ impl ServiceManager {
                 is_service: true,
             })
             .map_err(|err| Error::ServicePortCreation {
-                service: zone_type_str.clone(),
+                service: zone_kind,
                 err: Box::new(err),
             })?;
 
@@ -1209,7 +1209,7 @@ impl ServiceManager {
             let nat_create = || async {
                 info!(
                     self.inner.log, "creating NAT entry for service";
-                    "zone_type" => &zone_type_str,
+                    "zone_type" => zone_kind.report_str(),
                 );
 
                 dpd_client
@@ -1233,7 +1233,7 @@ impl ServiceManager {
                 warn!(
                     self.inner.log, "failed to create NAT entry for service";
                     "error" => ?error,
-                    "zone_type" => &zone_type_str,
+                    "zone_type" => zone_kind.report_str(),
                 );
             };
             retry_notify(
@@ -1453,9 +1453,9 @@ impl ServiceManager {
 
         let zone_type_str = match &request {
             ZoneArgs::Omicron(zone_config) => {
-                zone_config.zone.zone_type.zone_type_str()
+                zone_config.zone.zone_type.kind().service_str()
             }
-            ZoneArgs::Switch(_) => "switch".to_string(),
+            ZoneArgs::Switch(_) => "switch",
         };
 
         // We use the fake initialiser for testing
@@ -1474,7 +1474,7 @@ impl ServiceManager {
             .with_underlay_vnic_allocator(&self.inner.underlay_vnic_allocator)
             .with_zone_root_path(request.root())
             .with_zone_image_paths(zone_image_paths.as_slice())
-            .with_zone_type(&zone_type_str)
+            .with_zone_type(zone_type_str)
             .with_datasets(datasets.as_slice())
             .with_filesystems(&filesystems)
             .with_data_links(&data_links)
@@ -1707,7 +1707,7 @@ impl ServiceManager {
 
                 let dataset_name = DatasetName::new(
                     dataset.pool_name.clone(),
-                    DatasetKind::Crucible,
+                    DatasetType::Crucible,
                 )
                 .full_name();
                 let uuid = &Uuid::new_v4().to_string();
@@ -2385,7 +2385,7 @@ impl ServiceManager {
                         panic!(
                             "{} is a service which exists as part of a \
                             self-assembling zone",
-                            &zone_config.zone.zone_type.zone_type_str(),
+                            &zone_config.zone.zone_type.kind().report_str(),
                         )
                     }
                 };
@@ -2967,7 +2967,7 @@ impl ServiceManager {
                 fake_install_dir,
             )
             .await
-            .map_err(|err| (zone.zone_name().to_string(), err))
+            .map_err(|err| (zone.zone_name(), err))
         });
 
         let results = futures::future::join_all(futures).await;

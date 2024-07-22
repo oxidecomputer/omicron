@@ -224,7 +224,7 @@ impl ClientParams {
         let silo_name = config.recovery_silo.silo_name.as_str();
         let login_url = format!("{}/v1/login/{}/local", base_url, silo_name);
         let username: oxide_client::types::UserId =
-            config.recovery_silo.user_name.as_str().parse().map_err(|s| {
+            config.recovery_silo.user_name.as_ref().parse().map_err(|s| {
                 anyhow!("parsing configured recovery user name: {:?}", s)
             })?;
         // See the comment in the config file about this password.

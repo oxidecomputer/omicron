@@ -242,6 +242,7 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_common_extended::inventory::OmicronZoneDataset;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
@@ -277,7 +278,7 @@ mod tests {
                 zone_type: BlueprintZoneType::CockroachDb(
                     blueprint_zone_type::CockroachDb {
                         address: addr,
-                        dataset: nexus_types::inventory::OmicronZoneDataset {
+                        dataset: OmicronZoneDataset {
                             pool_name: format!("oxp_{}", zpool_id)
                                 .parse()
                                 .unwrap(),
