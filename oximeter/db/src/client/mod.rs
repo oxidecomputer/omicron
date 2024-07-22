@@ -14,6 +14,7 @@ pub(crate) mod query_summary;
 mod sql;
 
 pub use self::dbwrite::DbWrite;
+pub use self::dbwrite::TestDbWrite;
 use crate::client::query_summary::QuerySummary;
 use crate::model;
 use crate::query;

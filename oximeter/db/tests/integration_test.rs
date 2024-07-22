@@ -8,7 +8,7 @@ use dropshot::test_util::log_prefix_for_test;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::test_setup_log;
 use oximeter::test_util;
-use oximeter_db::{Client, DbWrite, OxqlResult, Sample};
+use oximeter_db::{Client, DbWrite, OxqlResult, Sample, TestDbWrite};
 use std::default::Default;
 use std::time::Duration;
 
@@ -67,7 +67,10 @@ async fn test_cluster() -> anyhow::Result<()> {
     println!("deploy setup time = {:?}", end - start);
 
     let start = tokio::time::Instant::now();
-    client1.init_replicated_db().await.context("failed to initialize db")?;
+    client1
+        .init_test_minimal_replicated_db()
+        .await
+        .context("failed to initialize db")?;
     let end = tokio::time::Instant::now();
     println!("init replicated db time = {:?}", end - start);
 
@@ -124,7 +127,10 @@ async fn test_cluster() -> anyhow::Result<()> {
 
     // We need to initiate copying from existing replicated tables by creating
     // the DB and those tables on the new node.
-    client3.init_replicated_db().await.expect("failed to initialized db");
+    client3
+        .init_test_minimal_replicated_db()
+        .await
+        .expect("failed to initialized db");
 
     // Wait for all the data to be copied to node 3
     let start = tokio::time::Instant::now();

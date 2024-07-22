@@ -63,7 +63,7 @@ impl DbWrite for Client {
         debug!(self.log, "initializing ClickHouse database");
         self.run_many_sql_statements(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/schema/replicated/db-init-test.sql"
+            "/schema/replicated/db-init.sql"
         )))
         .await
     }
@@ -94,6 +94,27 @@ impl DbWrite for Client {
         self.run_many_sql_statements(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/schema/single-node/db-wipe.sql"
+        )))
+        .await
+    }
+}
+
+/// Allow initializing a minimal subset of db tables for replicated cluster
+/// testing
+#[async_trait::async_trait]
+pub trait TestDbWrite {
+    /// Initialize the replicated telemetry database, creating a subset of tables.
+    async fn init_test_minimal_replicated_db(&self) -> Result<(), Error>;
+}
+
+#[async_trait::async_trait]
+impl TestDbWrite for Client {
+    /// Initialize the replicated telemetry database, creating tables as needed.
+    async fn init_test_minimal_replicated_db(&self) -> Result<(), Error> {
+        debug!(self.log, "initializing ClickHouse database");
+        self.run_many_sql_statements(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/schema/replicated/db-init-test.sql"
         )))
         .await
     }
