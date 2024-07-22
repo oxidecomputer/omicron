@@ -1556,6 +1556,68 @@ mod test {
         .await;
     }
 
+    // === migration failed, target not destroyed ===
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_target_failed_succeeds(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+
+        MigrationOutcome::default()
+            .target(MigrationState::Failed, VmmState::Failed)
+            .source(MigrationState::Failed, VmmState::Running)
+            .setup_test(cptestctx, &other_sleds)
+            .await
+            .run_saga_basic_usage_succeeds_test(cptestctx)
+            .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_target_failed_actions_succeed_idempotently(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+
+        MigrationOutcome::default()
+            .target(MigrationState::Failed, VmmState::Failed)
+            .source(MigrationState::Failed, VmmState::Running)
+            .setup_test(cptestctx, &other_sleds)
+            .await
+            .run_saga_basic_usage_succeeds_test(cptestctx)
+            .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_target_failed_can_unwind(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+
+        let outcome = MigrationOutcome::default()
+            .target(MigrationState::Failed, VmmState::Failed)
+            .source(MigrationState::Failed, VmmState::Running);
+
+        test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
+            nexus,
+            || {
+                Box::pin(async {
+                    outcome
+                        .setup_test(cptestctx, &other_sleds)
+                        .await
+                        .saga_params()
+                })
+            },
+            || Box::pin(after_unwinding(cptestctx)),
+            &cptestctx.logctx.log,
+        )
+        .await;
+    }
+
     #[derive(Clone, Copy, Default)]
     struct MigrationOutcome {
         source: Option<(MigrationState, VmmState)>,
@@ -1864,9 +1926,17 @@ mod test {
             let active_vmm_id = instance_runtime.propolis_id;
 
             assert_instance_unlocked(instance);
+            assert_instance_record_is_consistent(instance);
 
             if self.outcome.failed {
-                todo!("eliza: verify migration-failed postconditions");
+                assert_eq!(
+                    instance_runtime.migration_id, None,
+                    "migration ID must be unset when a migration has failed"
+                );
+                assert_eq!(
+                    instance_runtime.dst_propolis_id, None,
+                    "target VMM ID must be unset when a migration has failed"
+                );
             } else {
                 assert_eq!(
                     active_vmm_id,
