@@ -1298,7 +1298,7 @@ mod tests {
         let dataset_id = Uuid::new_v4();
         let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
         let dataset_name =
-            DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
+            DatasetName::new(zpool_name.clone(), DatasetType::Crucible);
         harness
             .handle()
             .upsert_filesystem(dataset_id, dataset_name)
