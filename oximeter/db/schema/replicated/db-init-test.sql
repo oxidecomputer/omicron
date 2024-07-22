@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS oximeter.version ON CLUSTER oximeter_cluster
     value UInt64,
     timestamp DateTime64(9, 'UTC')
 )
-ENGINE = ReplicatedMergeTree()
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/version', '{replica}')
 ORDER BY (value, timestamp);
 
 /* The measurement tables contain all individual samples from each timeseries.
@@ -109,7 +109,7 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_i64 ON CLUSTER oximeter_cluster
     field_name String,
     field_value Int64
 )
-ENGINE = ReplicatedReplacingMergeTree()
+ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/fields_i64', '{replica}')
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_ipaddr ON CLUSTER oximeter_cluster
@@ -119,7 +119,7 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_ipaddr ON CLUSTER oximeter_cluster
     field_name String,
     field_value IPv6
 )
-ENGINE = ReplicatedReplacingMergeTree()
+ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/fields_ipaddr', '{replica}')
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_string ON CLUSTER oximeter_cluster
@@ -129,7 +129,7 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_string ON CLUSTER oximeter_cluster
     field_name String,
     field_value String
 )
-ENGINE = ReplicatedReplacingMergeTree()
+ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/fields_string', '{replica}')
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_uuid ON CLUSTER oximeter_cluster
@@ -139,7 +139,7 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_uuid ON CLUSTER oximeter_cluster
     field_name String,
     field_value UUID
 )
-ENGINE = ReplicatedReplacingMergeTree()
+ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/fields_uuid', '{replica}')
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 
 /* The timeseries schema table stores the extracted schema for the samples
@@ -200,5 +200,5 @@ CREATE TABLE IF NOT EXISTS oximeter.timeseries_schema ON CLUSTER oximeter_cluste
     ),
     created DateTime64(9, 'UTC')
 )
-ENGINE = ReplicatedMergeTree()
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/timeseries_schema', '{replica}')
 ORDER BY (timeseries_name, fields.name);

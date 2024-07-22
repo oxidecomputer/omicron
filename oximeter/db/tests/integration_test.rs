@@ -67,7 +67,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     println!("deploy setup time = {:?}", end - start);
 
     let start = tokio::time::Instant::now();
-    client1.init_replicated_db().await.context("Failed to initialize db")?;
+    client1.init_replicated_db().await.context("failed to initialize db")?;
     let end = tokio::time::Instant::now();
     println!("init replicated db time = {:?}", end - start);
 
@@ -116,6 +116,23 @@ async fn test_cluster() -> anyhow::Result<()> {
         .expect("failed to get samples from client2");
     let end = tokio::time::Instant::now();
     println!("query samples from client2 time = {:?}", end - start);
+
+    // Add a 3rd clickhouse server and wait for it to come up
+    deployment.add_server().expect("failed to launch a 3rd clickhouse server");
+    let client3 = Client::new(deployment.http_addr(3)?, log);
+    wait_for_ping(&client3).await?;
+
+    // We need to initiate copying from existing replicated tables by creating
+    // the DB and those tables on the new node.
+    client3.init_replicated_db().await.expect("failed to initialized db");
+
+    // Wait for all the data to be copied to node 3
+    let start = tokio::time::Instant::now();
+    wait_for_expected_output(&client3, &samples)
+        .await
+        .expect("failed to get samples from client3");
+    let end = tokio::time::Instant::now();
+    println!("query samples from client3 time = {:?}", end - start);
 
     deployment.teardown()?;
     std::fs::remove_dir_all(path)?;
