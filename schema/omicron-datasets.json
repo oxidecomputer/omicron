@@ -14,7 +14,7 @@
       }
     },
     "generation": {
-      "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.",
+      "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.\n\nNote that \"Generation::new()\", AKA, the first generation number, is reserved for \"no datasets\". This is the default configuration for a sled before any requests have been made.",
       "allOf": [
         {
           "$ref": "#/definitions/Generation"
