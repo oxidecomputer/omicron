@@ -1618,6 +1618,192 @@ mod test {
         .await;
     }
 
+    // === migration failed, migration target destroyed tests ===
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_target_failed_destroyed_succeeds(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+
+        MigrationOutcome::default()
+            .target(MigrationState::Failed, VmmState::Destroyed)
+            .source(MigrationState::Failed, VmmState::Running)
+            .setup_test(cptestctx, &other_sleds)
+            .await
+            .run_saga_basic_usage_succeeds_test(cptestctx)
+            .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_target_failed_destroyed_actions_succeed_idempotently(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+
+        MigrationOutcome::default()
+            .target(MigrationState::Failed, VmmState::Destroyed)
+            .source(MigrationState::Failed, VmmState::Running)
+            .setup_test(cptestctx, &other_sleds)
+            .await
+            .run_saga_basic_usage_succeeds_test(cptestctx)
+            .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_target_failed_destroyed_can_unwind(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+
+        let outcome = MigrationOutcome::default()
+            .target(MigrationState::Failed, VmmState::Destroyed)
+            .source(MigrationState::Failed, VmmState::Running);
+
+        test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
+            nexus,
+            || {
+                Box::pin(async {
+                    outcome
+                        .setup_test(cptestctx, &other_sleds)
+                        .await
+                        .saga_params()
+                })
+            },
+            || Box::pin(after_unwinding(cptestctx)),
+            &cptestctx.logctx.log,
+        )
+        .await;
+    }
+
+    // === migration failed, migration source destroyed tests ===
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_source_failed_destroyed_succeeds(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+
+        MigrationOutcome::default()
+            .target(MigrationState::InProgress, VmmState::Running)
+            .source(MigrationState::Failed, VmmState::Destroyed)
+            .setup_test(cptestctx, &other_sleds)
+            .await
+            .run_saga_basic_usage_succeeds_test(cptestctx)
+            .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_source_failed_destroyed_actions_succeed_idempotently(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+
+        MigrationOutcome::default()
+            .target(MigrationState::InProgress, VmmState::Running)
+            .source(MigrationState::Failed, VmmState::Destroyed)
+            .setup_test(cptestctx, &other_sleds)
+            .await
+            .run_saga_basic_usage_succeeds_test(cptestctx)
+            .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_source_failed_destroyed_can_unwind(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+
+        let outcome = MigrationOutcome::default()
+            .target(MigrationState::InProgress, VmmState::Running)
+            .source(MigrationState::Failed, VmmState::Destroyed);
+
+        test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
+            nexus,
+            || {
+                Box::pin(async {
+                    outcome
+                        .setup_test(cptestctx, &other_sleds)
+                        .await
+                        .saga_params()
+                })
+            },
+            || Box::pin(after_unwinding(cptestctx)),
+            &cptestctx.logctx.log,
+        )
+        .await;
+    }
+
+    // === migration failed, source and target both destroyed ===
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_failed_everyone_died_succeeds(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+
+        MigrationOutcome::default()
+            .target(MigrationState::Failed, VmmState::Destroyed)
+            .source(MigrationState::Failed, VmmState::Destroyed)
+            .setup_test(cptestctx, &other_sleds)
+            .await
+            .run_saga_basic_usage_succeeds_test(cptestctx)
+            .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_failed_everyone_died_actions_succeed_idempotently(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+
+        MigrationOutcome::default()
+            .target(MigrationState::Failed, VmmState::Destroyed)
+            .source(MigrationState::Failed, VmmState::Destroyed)
+            .setup_test(cptestctx, &other_sleds)
+            .await
+            .run_saga_basic_usage_succeeds_test(cptestctx)
+            .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_failed_everyone_died_can_unwind(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+
+        let outcome = MigrationOutcome::default()
+            .target(MigrationState::Failed, VmmState::Destroyed)
+            .source(MigrationState::Failed, VmmState::Destroyed);
+
+        test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
+            nexus,
+            || {
+                Box::pin(async {
+                    outcome
+                        .setup_test(cptestctx, &other_sleds)
+                        .await
+                        .saga_params()
+                })
+            },
+            || Box::pin(after_unwinding(cptestctx)),
+            &cptestctx.logctx.log,
+        )
+        .await;
+    }
+
     #[derive(Clone, Copy, Default)]
     struct MigrationOutcome {
         source: Option<(MigrationState, VmmState)>,
@@ -1998,11 +2184,22 @@ mod test {
                 "target VMM should exist if and only if the target hasn't been destroyed",
             );
 
-            let all_vmms_destroyed = src_destroyed && target_destroyed;
+            // VThe instance has a VMM if (and only if):
+            let has_vmm = if self.outcome.failed {
+                // If the migration failed, the instance should have a VMM if
+                // and only if the source VMM is still okay. It doesn't matter
+                // whether the target is still there or not, because we didn't
+                // migrate to it successfully.
+                !src_destroyed
+            } else {
+                // Otherwise, if the migration succeeded, the instance should be
+                // on the target VMM.
+                true
+            };
 
             assert_eq!(
                 no_virtual_provisioning_resource_records_exist(cptestctx).await,
-                all_vmms_destroyed,
+                !has_vmm,
                 "virtual provisioning resource records must exist as long as \
                  the instance has a VMM",
             );
@@ -2011,16 +2208,13 @@ mod test {
                     cptestctx
                 )
                 .await,
-                all_vmms_destroyed,
+                !has_vmm,
                 "virtual provisioning collection records must exist as long \
                  as the instance has a VMM",
             );
 
-            let instance_state = if all_vmms_destroyed {
-                InstanceState::NoVmm
-            } else {
-                InstanceState::Vmm
-            };
+            let instance_state =
+                if has_vmm { InstanceState::Vmm } else { InstanceState::NoVmm };
             assert_eq!(instance_runtime.nexus_state, instance_state);
         }
 
