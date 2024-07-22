@@ -249,8 +249,8 @@ task: "crdb_node_id_collector"
 
 
 task: "decommissioned_disk_cleaner"
-    deletes DB records for decommissioned disks, after regions have been
-    replaced
+    deletes DB records for decommissioned disks, after regions and region
+    snapshots have been replaced
 
 
 task: "dns_config_external"
