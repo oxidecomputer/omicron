@@ -6166,6 +6166,7 @@ dependencies = [
  "openapi-lint",
  "openapiv3",
  "owo-colors",
+ "oximeter-api",
  "serde_json",
  "similar",
  "supports-color",
@@ -6363,6 +6364,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "oximeter-api"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dropshot",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+ "uuid",
+]
+
+[[package]]
 name = "oximeter-client"
 version = "0.1.0"
 dependencies = [
@@ -6398,6 +6412,7 @@ dependencies = [
  "openapi-lint",
  "openapiv3",
  "oximeter",
+ "oximeter-api",
  "oximeter-client",
  "oximeter-db",
  "rand 0.8.5",
