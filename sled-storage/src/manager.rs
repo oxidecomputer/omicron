@@ -67,6 +67,9 @@ const SYNCHRONIZE_INTERVAL: Duration = Duration::from_secs(10);
 // The filename of the ledger storing physical disk info
 const DISKS_LEDGER_FILENAME: &str = "omicron-physical-disks.json";
 
+// The filename of the ledger storing dataset info
+const DATASETS_LEDGER_FILENAME: &str = "omicron-datasets.json";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StorageManagerState {
     // We know that any attempts to manage disks will fail, as the key manager
@@ -535,12 +538,29 @@ impl StorageManager {
         );
     }
 
+    // Sled Agents can remember which disks they need to manage by reading
+    // a configuration file from the M.2s.
+    //
+    // This function returns the paths to those configuration files.
     async fn all_omicron_disk_ledgers(&self) -> Vec<Utf8PathBuf> {
         self.resources
             .disks()
             .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
             .map(|p| p.join(DISKS_LEDGER_FILENAME))
+            .collect()
+    }
+
+    // Sled Agents can remember which datasets they need to manage by reading
+    // a configuration file from the M.2s.
+    //
+    // This function returns the paths to those configuration files.
+    async fn all_omicron_dataset_ledgers(&self) -> Vec<Utf8PathBuf> {
+        self.resources
+            .disks()
+            .all_m2_mountpoints(CONFIG_DATASET)
+            .into_iter()
+            .map(|p| p.join(DATASETS_LEDGER_FILENAME))
             .collect()
     }
 
@@ -595,9 +615,9 @@ impl StorageManager {
         self.resources.insert_or_update_disk(raw_disk).await
     }
 
-    async fn load_ledger(&self) -> Option<Ledger<OmicronPhysicalDisksConfig>> {
+    async fn load_disks_ledger(&self) -> Option<Ledger<OmicronPhysicalDisksConfig>> {
         let ledger_paths = self.all_omicron_disk_ledgers().await;
-        let log = self.log.new(o!("request" => "load_ledger"));
+        let log = self.log.new(o!("request" => "load_disks_ledger"));
         let maybe_ledger = Ledger::<OmicronPhysicalDisksConfig>::new(
             &log,
             ledger_paths.clone(),
@@ -629,7 +649,7 @@ impl StorageManager {
         // Now that we're actually able to unpack U.2s, attempt to load the
         // set of disks which we previously stored in the ledger, if one
         // existed.
-        let ledger = self.load_ledger().await;
+        let ledger = self.load_disks_ledger().await;
         if let Some(ledger) = ledger {
             info!(self.log, "Setting StorageResources state to match ledger");
 
@@ -640,6 +660,12 @@ impl StorageManager {
         } else {
             info!(self.log, "KeyManager ready, but no ledger detected");
         }
+
+        // We don't load any configuration for datasets, since we aren't
+        // currently storing any dataset information in-memory.
+        //
+        // If we ever wanted to do so, however, we could load that information
+        // here.
 
         Ok(())
     }
@@ -655,7 +681,7 @@ impl StorageManager {
 
         // We rely on the schema being stable across reboots -- observe
         // "test_datasets_schema" below for that property guarantee.
-        let ledger_paths = self.all_omicron_disk_ledgers().await;
+        let ledger_paths = self.all_omicron_dataset_ledgers().await;
         let maybe_ledger =
             Ledger::<DatasetsConfig>::new(&log, ledger_paths.clone()).await;
 
@@ -671,7 +697,7 @@ impl StorageManager {
                         log,
                         "Request looks out-of-date compared to prior request"
                     );
-                    return Err(Error::PhysicalDiskConfigurationOutdated {
+                    return Err(Error::DatasetConfigurationOutdated {
                         requested: config.generation,
                         current: ledger_data.generation,
                     });
@@ -722,13 +748,15 @@ impl StorageManager {
         log: &Logger,
         config: &DatasetConfig,
     ) -> DatasetManagementStatus {
-        info!(log, "Ensuring dataset"; "name" => config.name.full_name());
+        let log = log.new(o!("name" => config.name.full_name()));
+        info!(log, "Ensuring dataset");
         let mut status = DatasetManagementStatus {
             dataset_name: config.name.clone(),
             err: None,
         };
 
         if let Err(err) = self.ensure_dataset(config).await {
+            warn!(log, "Failed to ensure dataset"; "err" => ?err);
             status.err = Some(err.to_string());
         };
 
@@ -738,7 +766,23 @@ impl StorageManager {
     async fn datasets_list(&mut self) -> Result<DatasetsConfig, Error> {
         let log = self.log.new(o!("request" => "datasets_list"));
 
-        todo!();
+        let ledger_paths = self.all_omicron_dataset_ledgers().await;
+        let maybe_ledger = Ledger::<DatasetsConfig>::new(
+            &log,
+            ledger_paths.clone(),
+        )
+        .await;
+
+        match maybe_ledger {
+            Some(ledger) => {
+                info!(log, "Found ledger on internal storage");
+                return Ok(ledger.data().clone());
+            }
+            None => {
+                info!(log, "No ledger detected on internal storage");
+                return Err(Error::LedgerNotFound);
+            }
+        }
     }
 
     // Makes an U.2 disk managed by the control plane within [`StorageResources`].
@@ -918,6 +962,10 @@ impl StorageManager {
         config: &DatasetConfig,
     ) -> Result<(), Error> {
         info!(self.log, "ensure_dataset"; "config" => ?config);
+
+        // We can only place datasets within managed disks.
+        // If a disk is attached to this sled, but not a part of the Control
+        // Plane, it is treated as "not found" for dataset placement.
         if !self
             .resources
             .disks()
@@ -930,6 +978,8 @@ impl StorageManager {
             )));
         }
 
+        // TODO: Revisit these args, they might need more configuration
+        // tweaking.
         let zoned = true;
         let fs_name = &config.name.full_name();
         let do_format = true;
@@ -1528,7 +1578,7 @@ mod test {
     fn test_datasets_schema() {
         let schema = schemars::schema_for!(DatasetsConfig);
         expectorate::assert_contents(
-            "../schema/datasets.json",
+            "../schema/omicron-datasets.json",
             &serde_json::to_string_pretty(&schema).unwrap(),
         );
     }

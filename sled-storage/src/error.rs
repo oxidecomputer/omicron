@@ -83,6 +83,12 @@ pub enum Error {
         current: Generation,
     },
 
+    #[error("Dataset configuration out-of-date (asked for {requested}, but latest is {current})")]
+    DatasetConfigurationOutdated {
+        requested: Generation,
+        current: Generation,
+    },
+
     #[error("Failed to update ledger in internal storage")]
     Ledger(#[from] omicron_common::ledger::Error),
 
