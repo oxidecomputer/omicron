@@ -352,7 +352,7 @@ fn draw_rack_status_details_popup(
             ]));
             if let Some(id) = reset_id {
                 body.lines.push(Line::from(vec![Span::styled(
-                    format!("Last reset operation ID: {}", id.0),
+                    format!("Last reset operation ID: {}", id),
                     style::plain_text(),
                 )]));
             }
@@ -364,7 +364,7 @@ fn draw_rack_status_details_popup(
             ]));
             if let Some(id) = id {
                 body.lines.push(Line::from(vec![Span::styled(
-                    format!("Last initialization operation ID: {}", id.0),
+                    format!("Last initialization operation ID: {}", id),
                     style::plain_text(),
                 )]));
             }
@@ -375,7 +375,7 @@ fn draw_rack_status_details_popup(
                 Span::styled("Initialization Failed", style::plain_text()),
             ]));
             body.lines.push(Line::from(vec![Span::styled(
-                format!("Last initialization operation ID: {}", id.0),
+                format!("Last initialization operation ID: {}", id),
                 style::plain_text(),
             )]));
             push_text_lines(message, prefix, &mut body.lines);
@@ -386,7 +386,7 @@ fn draw_rack_status_details_popup(
                 Span::styled("Initialization Panicked", style::plain_text()),
             ]));
             body.lines.push(Line::from(vec![Span::styled(
-                format!("Last initialization operation ID: {}", id.0),
+                format!("Last initialization operation ID: {}", id),
                 style::plain_text(),
             )]));
         }
@@ -396,7 +396,7 @@ fn draw_rack_status_details_popup(
                 Span::styled("Reset Failed", style::plain_text()),
             ]));
             body.lines.push(Line::from(vec![Span::styled(
-                format!("Last reset operation ID: {}", id.0),
+                format!("Last reset operation ID: {}", id),
                 style::plain_text(),
             )]));
             push_text_lines(message, prefix, &mut body.lines);
@@ -407,7 +407,7 @@ fn draw_rack_status_details_popup(
                 Span::styled("Reset Panicked", style::plain_text()),
             ]));
             body.lines.push(Line::from(vec![Span::styled(
-                format!("Last reset operation ID: {}", id.0),
+                format!("Last reset operation ID: {}", id),
                 style::plain_text(),
             )]));
         }
@@ -417,7 +417,7 @@ fn draw_rack_status_details_popup(
                 Span::styled("Initializing", style::plain_text()),
             ]));
             body.lines.push(Line::from(vec![Span::styled(
-                format!("Current operation ID: {}", id.0),
+                format!("Current operation ID: {}", id),
                 style::plain_text(),
             )]));
         }
@@ -427,7 +427,7 @@ fn draw_rack_status_details_popup(
                 Span::styled("Resetting", style::plain_text()),
             ]));
             body.lines.push(Line::from(vec![Span::styled(
-                format!("Current operation ID: {}", id.0),
+                format!("Current operation ID: {}", id),
                 style::plain_text(),
             )]));
         }

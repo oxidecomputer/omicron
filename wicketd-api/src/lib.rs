@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use bootstrap_agent_client::types::RackInitId;
 use bootstrap_agent_client::types::RackOperationStatus;
-use bootstrap_agent_client::types::RackResetId;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
@@ -16,6 +14,8 @@ use gateway_client::types::IgnitionCommand;
 use omicron_common::api::external::SemverVersion;
 use omicron_common::update::ArtifactHashId;
 use omicron_common::update::ArtifactId;
+use omicron_uuid_kinds::RackInitUuid;
+use omicron_uuid_kinds::RackResetUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -170,7 +170,7 @@ pub trait WicketdApi {
     }]
     async fn post_run_rack_setup(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RackInitId>, HttpError>;
+    ) -> Result<HttpResponseOk<RackInitUuid>, HttpError>;
 
     /// Run rack reset.
     #[endpoint {
@@ -179,7 +179,7 @@ pub trait WicketdApi {
     }]
     async fn post_run_rack_reset(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RackResetId>, HttpError>;
+    ) -> Result<HttpResponseOk<RackResetUuid>, HttpError>;
 
     /// A status endpoint used to report high level information known to
     /// wicketd.

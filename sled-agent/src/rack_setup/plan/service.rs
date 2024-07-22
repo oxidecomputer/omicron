@@ -9,7 +9,6 @@ use crate::params::{
     OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig, OmicronZoneConfig,
     OmicronZoneDataset, OmicronZoneType,
 };
-use crate::rack_setup::config::SetupServiceConfig as Config;
 use camino::Utf8PathBuf;
 use dns_service_client::types::DnsConfigParams;
 use illumos_utils::zpool::ZpoolName;
@@ -37,6 +36,7 @@ use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
 };
+use sled_agent_types::rack_init::RackInitializeRequest as Config;
 use sled_storage::dataset::{DatasetKind, DatasetName, CONFIG_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
@@ -1180,12 +1180,12 @@ impl ServicePortBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bootstrap::params::BootstrapAddressDiscovery;
-    use crate::bootstrap::params::RecoverySiloConfig;
     use omicron_common::address::IpRange;
     use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_common::api::internal::shared::RackNetworkConfig;
     use oxnet::Ipv6Net;
+    use sled_agent_types::rack_init::BootstrapAddressDiscovery;
+    use sled_agent_types::rack_init::RecoverySiloConfig;
 
     const EXPECTED_RESERVED_ADDRESSES: u16 = 2;
     const EXPECTED_USABLE_ADDRESSES: u16 =

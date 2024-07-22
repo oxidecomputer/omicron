@@ -355,7 +355,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RackInitId"
+                  "$ref": "#/components/schemas/TypedUuidForRackInitKind"
                 }
               }
             }
@@ -377,7 +377,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RackResetId"
+                  "$ref": "#/components/schemas/TypedUuidForRackResetKind"
                 }
               }
             }
@@ -2618,19 +2618,14 @@
           "rack_network_config"
         ]
       },
-      "RackInitId": {
-        "description": "RackInitId\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"format\": \"uuid\" } ``` </details>",
-        "type": "string",
-        "format": "uuid"
-      },
       "RackOperationStatus": {
-        "description": "Current status of any rack-level operation being performed by this bootstrap agent.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Current status of any rack-level operation being performed by this bootstrap agent.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackInitId\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initializing\" ] } } }, { \"description\": \"`id` will be none if the rack was already initialized on startup.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"id\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RackInitId\" } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackInitId\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackInitId\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_panicked\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackResetId\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"resetting\" ] } } }, { \"description\": \"`reset_id` will be None if the rack is in an uninitialized-on-startup, or Some if it is in an uninitialized state due to a reset operation completing.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"reset_id\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RackResetId\" } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"uninitialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackResetId\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackResetId\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_panicked\" ] } } } ] } ``` </details>",
+        "description": "Current status of any rack-level operation being performed by this bootstrap agent.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Current status of any rack-level operation being performed by this bootstrap agent.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initializing\" ] } } }, { \"description\": \"`id` will be none if the rack was already initialized on startup.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"id\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_panicked\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"resetting\" ] } } }, { \"description\": \"`reset_id` will be None if the rack is in an uninitialized-on-startup, or Some if it is in an uninitialized state due to a reset operation completing.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"reset_id\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"uninitialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_panicked\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackInitId"
+                "$ref": "#/components/schemas/TypedUuidForRackInitKind"
               },
               "status": {
                 "type": "string",
@@ -2652,7 +2647,7 @@
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/RackInitId"
+                    "$ref": "#/components/schemas/TypedUuidForRackInitKind"
                   }
                 ]
               },
@@ -2671,7 +2666,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackInitId"
+                "$ref": "#/components/schemas/TypedUuidForRackInitKind"
               },
               "message": {
                 "type": "string"
@@ -2693,7 +2688,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackInitId"
+                "$ref": "#/components/schemas/TypedUuidForRackInitKind"
               },
               "status": {
                 "type": "string",
@@ -2711,7 +2706,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackResetId"
+                "$ref": "#/components/schemas/TypedUuidForRackResetKind"
               },
               "status": {
                 "type": "string",
@@ -2733,7 +2728,7 @@
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/RackResetId"
+                    "$ref": "#/components/schemas/TypedUuidForRackResetKind"
                   }
                 ]
               },
@@ -2752,7 +2747,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackResetId"
+                "$ref": "#/components/schemas/TypedUuidForRackResetKind"
               },
               "message": {
                 "type": "string"
@@ -2774,7 +2769,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackResetId"
+                "$ref": "#/components/schemas/TypedUuidForRackResetKind"
               },
               "status": {
                 "type": "string",
@@ -2789,11 +2784,6 @@
             ]
           }
         ]
-      },
-      "RackResetId": {
-        "description": "RackResetId\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"format\": \"uuid\" } ``` </details>",
-        "type": "string",
-        "format": "uuid"
       },
       "RackV1Inventory": {
         "description": "The current state of the v1 Rack as known to wicketd",
@@ -5681,6 +5671,14 @@
             ]
           }
         ]
+      },
+      "TypedUuidForRackInitKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForRackResetKind": {
+        "type": "string",
+        "format": "uuid"
       },
       "UpdateComponent": {
         "oneOf": [
