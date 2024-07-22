@@ -671,7 +671,7 @@ async fn siu_update_network_config(
     Ok(())
 }
 
-pub(super) async fn siu_release_virtual_provisioning(
+async fn siu_release_virtual_provisioning(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
@@ -731,7 +731,7 @@ pub(super) async fn siu_release_virtual_provisioning(
     Ok(())
 }
 
-pub(super) async fn siu_unassign_oximeter_producer(
+async fn siu_unassign_oximeter_producer(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
