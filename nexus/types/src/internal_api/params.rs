@@ -19,7 +19,7 @@ use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_common_extended::inventory::SledRole;
-pub use omicron_common_extended::recovery_silo::RecoverySiloConfig;
+use omicron_common_extended::recovery_silo::RecoverySiloConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;

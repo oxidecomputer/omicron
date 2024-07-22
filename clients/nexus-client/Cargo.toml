@@ -12,6 +12,7 @@ chrono.workspace = true
 futures.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
+omicron-common-extended.workspace = true
 omicron-passwords.workspace = true
 oxnet.workspace = true
 progenitor.workspace = true
