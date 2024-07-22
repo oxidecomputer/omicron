@@ -519,7 +519,7 @@ impl BackgroundTasksInitializer {
             name: "decommissioned_disk_cleaner",
             description:
                 "deletes DB records for decommissioned disks, after regions \
-                 have been replaced",
+                 and region snapshots have been replaced",
             period: config.decommissioned_disk_cleaner.period_secs,
             task_impl: Box::new(
                 decommissioned_disk_cleaner::DecommissionedDiskCleaner::new(

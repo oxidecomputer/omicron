@@ -4,8 +4,8 @@
 
 //! Cleans up old database state from decommissioned disks.
 //!
-//! This cannot happen at decommissioning time, because it depends
-//! on region replacement, which happens in the backgorund.
+//! This cannot happen at decommissioning time, because it depends on region
+//! (and snapshot) replacement, which happens in the background.
 //!
 //! Cleanup involves deleting database records for disks (datasets, zpools)
 //! that are no longer viable after the physical disk has been decommissioned.
@@ -93,7 +93,7 @@ impl DecommissionedDiskCleaner {
                 .await
             {
                 Ok(_) => {
-                    slog::trace!(
+                    slog::info!(
                         opctx.log,
                         "Deleted zpool and datasets within";
                         "zpool" => %zpool_id,
@@ -101,7 +101,7 @@ impl DecommissionedDiskCleaner {
                     results.deleted += 1;
                 }
                 Err(Error::ServiceUnavailable { internal_message }) => {
-                    slog::info!(
+                    slog::trace!(
                         opctx.log,
                         "Zpool on decommissioned disk not ready for deletion";
                         "zpool" => %zpool_id,
