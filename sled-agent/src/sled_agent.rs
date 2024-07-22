@@ -6,9 +6,7 @@
 
 use crate::boot_disk_os_writer::BootDiskOsWriter;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
-use crate::bootstrap::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkSetupError,
-};
+use crate::bootstrap::early_networking::EarlyNetworkSetupError;
 use crate::bootstrap::params::{BaseboardId, StartSledAgentRequest};
 use crate::config::Config;
 use crate::instance_manager::InstanceManager;
@@ -63,6 +61,7 @@ use omicron_common::backoff::{
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
 use oximeter::types::ProducerRegistry;
+use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_hardware::{underlay, HardwareManager};
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_hardware_types::Baseboard;

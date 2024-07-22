@@ -15,10 +15,10 @@ use omicron_common::api::{
         RackNetworkConfig, RouteConfig,
     },
 };
-use omicron_sled_agent::bootstrap::early_networking::{
+use omicron_test_utils::dev::test_setup_log;
+use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
 };
-use omicron_test_utils::dev::test_setup_log;
 
 const BLOB_PATH: &str = "tests/data/early_network_blobs.txt";
 

@@ -27,7 +27,7 @@
 
   <property_group name='config' type='application'>
     <propval name='datalink' type='astring' value='unknown' />
-    <propval name='gateway' type='astring' value='unknown' />
+    <propval name='gateway' type='astring' value='' />
     <propval name='static_addr' type='astring' value='unknown' />
   </property_group>
 
