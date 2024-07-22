@@ -102,7 +102,7 @@ async fn siu_destroyed_release_sled_resources(
         .map_err(ActionError::action_failed)
 }
 
-pub(super) async fn siu_destroyed_mark_vmm_deleted(
+async fn siu_destroyed_mark_vmm_deleted(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();

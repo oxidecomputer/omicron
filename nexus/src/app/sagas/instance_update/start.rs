@@ -25,9 +25,9 @@ use uuid::Uuid;
 pub(crate) struct Params {
     /// Authentication context to use to fetch the instance's current state from
     /// the database.
-    pub serialized_authn: authn::saga::Serialized,
+    pub(crate) serialized_authn: authn::saga::Serialized,
 
-    pub authz_instance: authz::Instance,
+    pub(crate) authz_instance: authz::Instance,
 }
 
 // instance update saga: actions
