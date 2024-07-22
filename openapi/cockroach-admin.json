@@ -1,8 +1,8 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Oxide CockroachDb Cluster Admin API",
-    "description": "API for interacting with the Oxide control plane's CockroachDb cluster",
+    "title": "CockroachDB Cluster Admin API",
+    "description": "API for interacting with the Oxide control plane's CockroachDB cluster",
     "contact": {
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
@@ -12,7 +12,7 @@
   "paths": {
     "/node/decommission": {
       "post": {
-        "summary": "Decommission a node from the CRDB cluster",
+        "summary": "Decommission a node from the CRDB cluster.",
         "operationId": "node_decommission",
         "requestBody": {
           "content": {
@@ -70,7 +70,7 @@
     },
     "/node/status": {
       "get": {
-        "summary": "Get the status of all nodes in the CRDB cluster",
+        "summary": "Get the status of all nodes in the CRDB cluster.",
         "operationId": "node_status",
         "responses": {
           "200": {

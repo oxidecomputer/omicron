@@ -36,8 +36,8 @@ pub const PFEXEC: &str = "/usr/bin/pfexec";
 pub struct CommandFailureInfo {
     command: String,
     status: std::process::ExitStatus,
-    stdout: String,
-    stderr: String,
+    pub stdout: String,
+    pub stderr: String,
 }
 
 impl std::fmt::Display for CommandFailureInfo {

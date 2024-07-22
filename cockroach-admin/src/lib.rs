@@ -23,21 +23,6 @@ pub use cockroach_cli::CockroachCli;
 pub use cockroach_cli::CockroachCliError;
 pub use config::Config;
 
-/// Run the OpenAPI generator for the API; this emits the OpenAPI spec to
-/// stdout.
-pub fn run_openapi() -> Result<(), String> {
-    http_entrypoints::api()
-        .openapi("Oxide CockroachDb Cluster Admin API", "0.0.1")
-        .description(
-            "API for interacting with the Oxide \
-             control plane's CockroachDb cluster",
-        )
-        .contact_url("https://oxide.computer")
-        .contact_email("api@oxide.computer")
-        .write(&mut std::io::stdout())
-        .map_err(|e| e.to_string())
-}
-
 #[derive(Debug, thiserror::Error, SlogInlineError)]
 pub enum StartError {
     #[error("failed to initialize logger")]
