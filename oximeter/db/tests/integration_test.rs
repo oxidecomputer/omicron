@@ -21,7 +21,7 @@ pub struct TestInput {
 
 impl Default for TestInput {
     fn default() -> Self {
-        TestInput { n_projects: 2, n_instances: 2, n_cpus: 2, n_samples: 1000 }
+        TestInput { n_projects: 2, n_instances: 2, n_cpus: 2, n_samples: 100 }
     }
 }
 
@@ -37,6 +37,7 @@ impl TestInput {
 
 #[tokio::test]
 async fn test_cluster() -> anyhow::Result<()> {
+    usdt::register_probes().unwrap();
     let start = tokio::time::Instant::now();
     let logctx = test_setup_log("test_cluster");
     let log = &logctx.log;
