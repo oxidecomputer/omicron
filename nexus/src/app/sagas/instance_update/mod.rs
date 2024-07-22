@@ -85,7 +85,108 @@
 //!
 //! ## Theory of Operation
 //!
-//! Some ground rules:
+//! In order to ensure that changes to the state of an instance are handled
+//! reliably, we require that all mutations of an instance` record are performed
+//! by a saga. The following sagas currently touch the `instance` record:
+//!
+//! - [`instance_start`](super::instance_start)
+//! - [`instance_migrate`](super::instance_migrate)
+//! - [`instance_delete`](super::instance_delete)
+//! - `instance_update` (this saga)
+//!
+//! For most of these sagas, the instance state machine itself guards against
+//! potential race conditions. By considering the valid and invalid flows
+//! through an instance's state machine, we arrive at some ground rules:
+//!
+//! - The `instance_migrate` and `instance_delete` sagas will
+//!   only modify the instance record if the instance *has* an active Propolis
+//!   ID.
+//! - The `instance_start` and instance_delete` sagas will only modify the
+//!   instance record if the instance does *not* have an active VMM.
+//! - The presence of a migration ID prevents an `instance_migrate` saga from
+//!   succeeding until the current migration is resolved (either completes or
+//!   fails).
+//! - Only the `instance_start` saga can set the instance's *active* Propolis ID,
+//!   and it can only do this if there is currently no active Propolis.
+//! - Only the `instance_migrate` saga can set the instance's *target* Propolis
+//!   ID and migration ID, and it can only do that if these fields are unset.
+//! - Only the `instance_update` saga can unset a migration ID and target
+//!   Propolis ID, which it will do when handling an update from sled-agent that
+//!   indicates that a migration has succeeded or failed.
+//! - Only the `instance_update` saga can unset an instance's active Propolis
+//!   ID, which it will do when handling an update from sled-agent that
+//!   indicates that the VMM has been destroyed (peacefully or violently).
+//!
+//! For the most part, this state machine prevents race conditions where
+//! multiple sagas mutate the same fields in the instance record, because the
+//! states from which a particular transition may start limited. However, this
+//! is not the case for the `instance-update` saga, which may need to run any
+//! time a sled-agent publishes a new instance state. Therefore, this saga has
+//! the dubious honor of using the only distributed lock in Nexus (at the time
+//! of writing), the "instance updater lock".
+//!
+//! ### The Instance-Updater Lock, or, "Distributed RAII"
+//!
+//! Distributed locks [are scary][dist-locking]. One of the *scariest* things
+//! about distributed locks is that a process can die[^1] while holding a lock,
+//! which results in the protected resource (in this case, the `instance`
+//! record) being locked forever.[^2] It would be good for that to not happen.
+//! Fortunately, *if* (and only if) we promise to *only* ever acquire the the
+//! instance-updater lock inside of a saga, we can guarantee forward progress:
+//! should a saga fail while holding the lock, it will unwind into a reverse
+//! action that releases the lock. This is essentially the distributed
+//! equivalent to holding a RAII guard in a Rust program: if the thread holding
+//! the lock panics, it unwinds its stack, drops the [`std::sync::MutexGuard`],
+//! and the rest of the system is not left in a deadlocked state. As long as we
+//! ensure that the instance-updater lock is only ever acquired by sagas, and
+//! that any saga holding a lock will reliably release it when it unwinds, we're
+//! ... *probably* ... okay.
+//!
+//! When an `instance-update` saga is started, it attempts to [acquire the
+//! updater lock][instance_updater_lock]. If the lock is already held by another
+//! update saga, then the update saga completes immediately. Otherwise, the saga
+//! then queries CRDB for a snapshot of the current state of the `instance``
+//! record, the active and migration-target `vmm` records (if any exist), and
+//! the current `migration` record (if one exists). This snapshot represents the
+//! state from which the update will be applied, and must be read only after
+//! locking the instance to ensure that it cannot race with another saga.
+//!
+//! This is where another of this saga's weird quirks shows up: the shape of the
+//! saga DAG we wish to execute depends on this instance, active VMM, target
+//! VMM, and migration snapshot. But, because this snapshot may only be taken
+//! once the lock is acquired, and --- as we discussed above --- the
+//! instance-updater lock may only ever be acquired within a saga, we arrive at
+//! a bit of a weird impasse: we can't determine what saga DAG to build without
+//! looking at the snapshot, but we can't take the snapshot until we've already
+//! started a saga. To solve this, we've split this saga into two pieces: the
+//! first, `start-instance-update`, is a very small saga that just tries to lock
+//! the instance, and upon doing so, loads the instance snapshot from the
+//! database and prepares and executes the "real" instance update saga. Once the
+//! "real" saga starts, it "inherits" the lock from the start saga by performing
+//! [the SQL equivalent equivalent of a compare-and-swap
+//! operation][instance_updater_inherit_lock] with its own UUID.
+//!
+//! The DAG for the "real" update saga depends on the snapshot read within the
+//! lock, and since the lock was never released, that snapshot remains valid for
+//! its execution. As the final action of the update saga, the instance record's
+//! new runtime state is written back to the database and the lock is released,
+//! in a [single atomic operation][instance_updater_unlock]. Should the update
+//! saga fail, it will release the inherited lock. And, if the unwinding update
+//! saga unwinds into the start saga, that's fine, because a double-unlock is
+//! prevented by the saga ID having changed in the "inherit lock" operation.
+//!
+//! [instance_updater_lock]:
+//!     crate::app::db::datastore::DataStore::instance_updater_lock
+//! [instance_updater_inherit_lock]:
+//!     crate::app::db::datastore::DataStore::instance_updater_inherit_lock
+//! [instance_updater_unlock]:
+//!     crate::app::db::datastore::DataStore::instance_updater_unlock
+//! [dist-locking]:
+//!     https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html
+//!
+//! [^1]: And, if a process *can* die, well...we can assume it *will*.
+//! [^2]: Barring human intervention.
+
 use super::{
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
     ACTION_GENERATE_ID,
