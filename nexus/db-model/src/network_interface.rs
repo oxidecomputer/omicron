@@ -161,11 +161,6 @@ pub struct ServiceNetworkInterface {
 impl ServiceNetworkInterface {
     /// Generate a suitable [`Name`] for the given Omicron zone ID and kind.
     pub fn name(zone_id: OmicronZoneUuid, zone_kind: ZoneKind) -> Name {
-        // We use `as_name_str` rather than `as_service_str` here, because that
-        // uses underscores as separators which aren't allowed in `Name`s. We
-        // also preserve some existing naming behavior where NTP external
-        // networking is just called "ntp", not "boundary-ntp".
-        //
         // Most of these zone kinds do not get external networking and
         // therefore we don't need to be able to generate names for them, but
         // it's simpler to give them valid descriptions than worry about error

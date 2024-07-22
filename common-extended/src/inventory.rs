@@ -375,7 +375,8 @@ impl ZoneKind {
     /// services.
     pub const NTP_PREFIX: &'static str = "ntp";
 
-    /// Return a string that is used to construct **zone names**.
+    /// Return a string that is used to construct **zone names**. This string
+    /// is guaranteed to be stable over time.
     pub fn zone_prefix(self) -> &'static str {
         match self {
             // BoundaryNtp and InternalNtp both use "ntp".
@@ -393,7 +394,8 @@ impl ZoneKind {
         }
     }
 
-    /// Return a string that is used to construct **SMF service names**.
+    /// Return a string that is used to construct **SMF service names**. This
+    /// string is guaranteed to be stable over time.
     pub fn service_prefix(self) -> &'static str {
         match self {
             // BoundaryNtp and InternalNtp both use "ntp".
@@ -412,7 +414,10 @@ impl ZoneKind {
         }
     }
 
-    /// Return a string suitable for use **in `Name` instances**.
+    /// Return a string suitable for use **in `Name` instances**. This string
+    /// is guaranteed to be stable over time.
+    ///
+    /// This string uses dashes rather than underscores, as required by `Name`.
     pub fn name_prefix(self) -> &'static str {
         match self {
             // BoundaryNtp and InternalNtp both use "ntp" here.
@@ -430,7 +435,10 @@ impl ZoneKind {
         }
     }
 
-    /// Return a string that is used for reporting and testing.
+    /// Return a string that is used for reporting and error messages. This is
+    /// **not guaranteed** to be stable.
+    ///
+    /// If you're displaying a user-friendly message, prefer this method.
     pub fn report_str(self) -> &'static str {
         match self {
             ZoneKind::BoundaryNtp => "boundary_ntp",
