@@ -18,5 +18,6 @@ serde_json.workspace = true
 sled-hardware-types.workspace = true
 slog.workspace = true
 uuid.workspace = true
+omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 oxnet.workspace = true

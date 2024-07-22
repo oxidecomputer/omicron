@@ -81,6 +81,8 @@ progenitor::generate_api!(
         StepEventForInstallinatorSpec = installinator_common::StepEvent,
         StepEventForWicketdEngineSpec = wicket_common::update_events::StepEvent,
         SwitchLocation = omicron_common::api::internal::shared::SwitchLocation,
+        TypedUuidForRackInitKind = omicron_uuid_kinds::RackInitUuid,
+        TypedUuidForRackResetKind = omicron_uuid_kinds::RackResetUuid,
         UpdateSimulatedResult = wicket_common::rack_update::UpdateSimulatedResult,
         UpdateTestError = wicket_common::rack_update::UpdateTestError,
         UplinkPreflightStepId = wicket_common::preflight_check::UplinkPreflightStepId,

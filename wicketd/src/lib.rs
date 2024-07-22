@@ -135,6 +135,7 @@ impl Server {
             // some endpoints.
             request_body_max_bytes: 4 << 30,
             default_handler_task_mode: HandlerTaskMode::Detached,
+            log_headers: vec![],
         };
 
         let mgs_manager = MgsManager::new(&log, args.mgs_address);

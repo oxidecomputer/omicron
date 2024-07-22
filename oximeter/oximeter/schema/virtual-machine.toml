@@ -5,7 +5,7 @@ name = "virtual_machine"
 description = "A guest virtual machine instance"
 authz_scope = "project"
 versions = [
-    { version = 1, fields = [ "instance_id", "project_id", "silo_id" ] },
+    { version = 1, fields = [ "instance_id", "project_id", "silo_id", "sled_id", "sled_model", "sled_revision", "sled_serial" ] },
 ]
 
 [[metrics]]
@@ -55,6 +55,22 @@ description = "ID of the virtual machine instance's project"
 [fields.silo_id]
 type = "uuid"
 description = "ID of the virtual machine instance's silo"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID of the sled hosting the instance"
+
+[fields.sled_model]
+type = "string"
+description = "Model number of the sled hosting the instance"
+
+[fields.sled_revision]
+type = "u32"
+description = "Revision number of the sled hosting the instance"
+
+[fields.sled_serial]
+type = "string"
+description = "Serial number of the sled hosting the instance"
 
 [fields.state]
 type = "string"
