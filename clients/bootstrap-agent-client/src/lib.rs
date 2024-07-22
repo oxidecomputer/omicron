@@ -24,6 +24,8 @@ progenitor::generate_api!(
     replace = {
         AllowedSourceIps = omicron_common::api::external::AllowedSourceIps,
         ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
+        TypedUuidForRackInitKind = omicron_uuid_kinds::RackInitUuid,
+        TypedUuidForRackResetKind = omicron_uuid_kinds::RackResetUuid,
     }
 );
 
