@@ -312,14 +312,36 @@ pub fn update_saga_needed(
     needed
 }
 
+/// The set of updates to the instance and its owned resources to perform in
+/// response to a VMM/migration state update.
+///
+/// Depending on the current state of the instance and its VMM(s) and migration,
+/// an update saga may perform a variety of operations. Which operations need to
+/// be performed for the current state snapshot of the instance, VMM, and
+/// migration records is determined by the [`UpdatesRequired::for_snapshot`]
+/// function.
 #[derive(Debug, Deserialize, Serialize)]
 struct UpdatesRequired {
-    /// The new runtime state that must be written back to the database.
+    /// The new runtime state that must be written back to the database when the
+    /// saga completes.
     new_runtime: InstanceRuntimeState,
 
+    /// If this is [`Some`], the instance's active VMM with this UUID has
+    /// transitioned to [`VmmState::Destroyed`], and its resources must be
+    /// cleaned up by a [`destroyed`] subsaga.
     destroy_active_vmm: Option<PropolisUuid>,
+
+    /// If this is [`Some`], the instance's migration target VMM with this UUID
+    /// has transitioned to [`VmmState::Destroyed`], and its resources must be
+    /// cleaned up by a [`destroyed`] subsaga.
     destroy_target_vmm: Option<PropolisUuid>,
+
+    /// If `true`, the instance no longer has an active VMM, and its
+    /// virtual provisioning resource records and Oximeter producer should be
+    /// deallocated.
     deprovision: bool,
+
+    /// If this is [`Some`],
     network_config: Option<NetworkConfigUpdate>,
 }
 
@@ -684,9 +706,10 @@ async fn siu_become_updater(
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
     let osagactx = sagactx.user_data();
+    let log = osagactx.log();
 
-    slog::debug!(
-        osagactx.log(),
+    debug!(
+        log,
         "instance update: trying to become instance updater...";
         "instance_id" => %authz_instance.id(),
         "saga_id" => %saga_id,
@@ -704,9 +727,9 @@ async fn siu_become_updater(
         .await
         .map_err(ActionError::action_failed)?;
 
-    slog::info!(
-        osagactx.log(),
-        "Now, I am become Updater, the destroyer of VMMs.";
+    info!(
+        log,
+        "instance_update: Now, I am become Updater, the destroyer of VMMs.";
         "instance_id" => %authz_instance.id(),
         "saga_id" => %saga_id,
     );
@@ -732,19 +755,23 @@ async fn siu_update_network_config(
 ) -> Result<(), ActionError> {
     let Params { ref serialized_authn, ref authz_instance, .. } =
         sagactx.saga_params()?;
-    let opctx =
-        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
-    let osagactx = sagactx.user_data();
-    let nexus = osagactx.nexus();
-    let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
     let update =
         sagactx.lookup::<NetworkConfigUpdate>(NETWORK_CONFIG_UPDATE)?;
 
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+
+    let osagactx = sagactx.user_data();
+    let nexus = osagactx.nexus();
+    let log = osagactx.log();
+
+    let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
+
     match update {
         NetworkConfigUpdate::Delete => {
             info!(
-                osagactx.log(),
+                log,
                 "instance update: deleting network config";
                 "instance_id" => %instance_id,
             );
@@ -755,7 +782,7 @@ async fn siu_update_network_config(
         }
         NetworkConfigUpdate::Update { active_propolis_id, new_sled_id } => {
             info!(
-                osagactx.log(),
+                log,
                 "instance update: ensuring updated instance network config";
                 "instance_id" => %instance_id,
                 "active_propolis_id" => %active_propolis_id,
@@ -796,14 +823,15 @@ async fn siu_release_virtual_provisioning(
 
     let instance = state.instance;
     let vmm_id = {
-        let id = instance
-            .runtime()
-            .propolis_id
-            .expect("a `release_virtual_provisioning` action should not have been pushed if there is no active VMM ID");
+        let id = instance.runtime().propolis_id.expect(
+            "a `release_virtual_provisioning` action should not have been \
+                pushed if there is no active VMM ID",
+        );
         PropolisUuid::from_untyped_uuid(id)
     };
     let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
+    let log = osagactx.log();
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
 
@@ -820,25 +848,23 @@ async fn siu_release_virtual_provisioning(
     match result {
         Ok(deleted) => {
             info!(
-                osagactx.log(),
-                "instance update (VMM destroyed): deallocated virtual \
-                 provisioning resources";
+                log,
+                "instance update (no VMM): deallocated virtual provisioning \
+                 resources";
                 "instance_id" => %instance_id,
                 "propolis_id" => %vmm_id,
                 "records_deleted" => ?deleted,
-                "instance_update" => %"active VMM destroyed",
             );
         }
         // Necessary for idempotency --- the virtual provisioning resources may
         // have been deleted already, that's fine.
         Err(Error::ObjectNotFound { .. }) => {
             info!(
-                osagactx.log(),
-                "instance update (VMM destroyed): virtual provisioning \
-                 record not found; perhaps it has already been deleted?";
+                log,
+                "instance update (no VMM): virtual provisioning record not \
+                 found; perhaps it has already been deleted?";
                 "instance_id" => %instance_id,
                 "propolis_id" => %vmm_id,
-                "instance_update" => %"active VMM destroyed",
             );
         }
         Err(err) => return Err(ActionError::action_failed(err)),
@@ -856,16 +882,16 @@ async fn siu_unassign_oximeter_producer(
 
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+    let log = osagactx.log();
 
     info!(
-        osagactx.log(),
-        "instance update (VMM destroyed): unassigning oximeter producer";
+        log,
+        "instance update (no VMM): unassigning oximeter producer";
         "instance_id" => %authz_instance.id(),
-        "instance_update" => %"active VMM destroyed",
     );
     crate::app::oximeter::unassign_producer(
         osagactx.datastore(),
-        osagactx.log(),
+        log,
         &opctx,
         &authz_instance.id(),
     )
@@ -883,11 +909,12 @@ async fn siu_commit_instance_updates(
 
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, &serialized_authn);
+    let log = osagactx.log();
 
     let instance_id = authz_instance.id();
 
-    slog::debug!(
-        osagactx.log(),
+    debug!(
+        log,
         "instance update: committing new runtime state and unlocking...";
         "instance_id" => %instance_id,
         "new_runtime" => ?update.new_runtime,
@@ -905,8 +932,8 @@ async fn siu_commit_instance_updates(
         .await
         .map_err(ActionError::action_failed)?;
 
-    slog::info!(
-        osagactx.log(),
+    info!(
+        log,
         "instance update: committed update new runtime state!";
         "instance_id" => %instance_id,
         "new_runtime" => ?update.new_runtime,
@@ -927,13 +954,12 @@ async fn siu_commit_instance_updates(
     if let Err(error) =
         chain_update_saga(&sagactx, authz_instance, serialized_authn).await
     {
-        let osagactx = sagactx.user_data();
         // If starting the new update saga failed, DO NOT unwind this saga and
         // undo all the work we've done successfully! Instead, just kick the
         // instance-updater background task to try and start a new saga
         // eventually, and log a warning.
         warn!(
-            osagactx.log(),
+            log,
             "instance update: failed to start successor saga!";
             "instance_id" => %instance_id,
             "error" => %error,
@@ -952,6 +978,8 @@ async fn chain_update_saga(
     let opctx =
         crate::context::op_context_for_saga_action(sagactx, &serialized_authn);
     let osagactx = sagactx.user_data();
+    let log = osagactx.log();
+
     let instance_id = authz_instance.id();
 
     // Fetch the state from the database again to see if we should immediately
@@ -962,11 +990,9 @@ async fn chain_update_saga(
         .await
         .context("failed to fetch latest snapshot for instance")?;
 
-    if let Some(update) =
-        UpdatesRequired::for_snapshot(osagactx.log(), &new_state)
-    {
+    if let Some(update) = UpdatesRequired::for_snapshot(log, &new_state) {
         debug!(
-            osagactx.log(),
+            log,
             "instance update: additional updates required, preparing a \
              successor update saga...";
             "instance_id" => %instance_id,
@@ -991,7 +1017,7 @@ async fn chain_update_saga(
         // N.B. that we don't wait for the successor update saga to *complete*
         // here. We just want to make sure it starts.
         info!(
-            osagactx.log(),
+            log,
             "instance update: successor update saga started!";
             "instance_id" => %instance_id,
         );
@@ -1086,7 +1112,7 @@ async fn unwind_instance_lock(
             let http_error = HttpError::from(error.clone());
             if http_error.status_code.is_client_error() {
                 error!(
-                    &log,
+                    log,
                     "instance update: client error while unlocking instance \
                      (likely requires operator intervention), retrying anyway";
                     "instance_id" => %instance_id,
@@ -1097,7 +1123,7 @@ async fn unwind_instance_lock(
                 );
             } else if total_duration > WARN_DURATION {
                 warn!(
-                    &log,
+                    log,
                     "instance update: server error while unlocking instance,
                      retrying";
                     "instance_id" => %instance_id,
@@ -1108,7 +1134,7 @@ async fn unwind_instance_lock(
                 );
             } else {
                 info!(
-                    &log,
+                    log,
                     "server error while recording saga event, retrying";
                     "instance_id" => %instance_id,
                     "lock" => ?lock,

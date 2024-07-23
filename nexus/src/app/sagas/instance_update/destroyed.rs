@@ -82,10 +82,9 @@ async fn siu_destroyed_release_sled_resources(
 
     info!(
         osagactx.log(),
-        "instance update (active VMM destroyed): deallocating sled resource reservation";
+        "instance update (VMM destroyed): deallocating sled resource reservation";
         "instance_id" => %instance_id,
         "propolis_id" => %vmm_id,
-        "instance_update" => %"VMM destroyed",
     );
 
     osagactx
@@ -117,7 +116,6 @@ async fn siu_destroyed_mark_vmm_deleted(
         "instance update (VMM destroyed): marking VMM record deleted";
         "instance_id" => %instance_id,
         "propolis_id" => %vmm_id,
-        "instance_update" => %"VMM destroyed",
     );
 
     osagactx
