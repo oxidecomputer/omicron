@@ -532,9 +532,9 @@ pub static DEMO_LOOPBACK_CREATE: Lazy<params::LoopbackAddressCreate> =
     });
 
 pub const DEMO_SWITCH_PORT_SETTINGS_URL: &'static str =
-    "/v1/system/networking/switch-port-settings?port_settings=portofino";
+    "/v1/system/networking/switch-port-configuration?port_settings=portofino";
 pub const DEMO_SWITCH_PORT_SETTINGS_INFO_URL: &'static str =
-    "/v1/system/networking/switch-port-settings/protofino";
+    "/v1/system/networking/switch-port-configuration/protofino";
 pub static DEMO_SWITCH_PORT_SETTINGS_CREATE: Lazy<
     params::SwitchPortSettingsCreate,
 > = Lazy::new(|| {

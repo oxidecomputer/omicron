@@ -41,8 +41,6 @@ use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
 use nexus_types::external_api::shared::{BfdStatus, ProbeInfo};
-use omicron_common::api::external::http_pagination::marker_for_name;
-use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::http_pagination::PaginatedById;
@@ -80,6 +78,12 @@ use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::api::external::{
     http_pagination::data_page_params_for, AggregateBgpMessageHistory,
+};
+use omicron_common::api::external::{
+    http_pagination::marker_for_name, SwitchPortGeometry,
+};
+use omicron_common::api::external::{
+    http_pagination::marker_for_name_or_id, SwitchPortLinkConfig,
 };
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
@@ -268,15 +272,70 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_loopback_address_delete)?;
         api.register(networking_loopback_address_list)?;
 
-        api.register(networking_switch_port_settings_list)?;
-        api.register(networking_switch_port_settings_view)?;
-        api.register(networking_switch_port_settings_create)?;
-        api.register(networking_switch_port_settings_delete)?;
+        api.register(networking_switch_port_configuration_create)?;
+        api.register(networking_switch_port_configuration_delete)?;
+        api.register(networking_switch_port_configuration_view)?;
+        api.register(networking_switch_port_configuration_list)?;
+
+        // TODO: Levon - Group composition (omicron#4405)?
+        // /v1/system/networking/switch-port-configuration-group/{name_or_id}/..
+
+        // /v1/system/networking/switch-port-configuration/{name_or_id}/geometry
+        // TODO: Levon - test
+        api.register(networking_switch_port_configuration_geometry_view)?;
+        // TODO: Levon - test
+        api.register(networking_switch_port_configuration_geometry_set)?;
+
+        // /v1/system/networking/switch-port-configuration/{name_or_id}/link
+        // TODO: Levon - test
+        api.register(networking_switch_port_configuration_link_create)?;
+        // TODO: Levon - test
+        api.register(networking_switch_port_configuration_link_delete)?;
+        // TODO: Levon - test
+        api.register(networking_switch_port_configuration_link_view)?;
+        // TODO: Levon - test
+        api.register(networking_switch_port_configuration_link_list)?;
+
+        // /v1/system/networking/switch-port-configuration/{name_or_id}/link/{link}/interface
+        // TODO: Levon - test
+        // api.register(networking_switch_port_configuration_link_interface_create)?;
+        // TODO: Levon - test
+        // api.register(networking_switch_port_configuration_link_interface_delete)?;
+        // TODO: Levon - test
+        // api.register(networking_switch_port_configuration_link_interface_view)?;
+        // TODO: Levon - test
+        // api.register(networking_switch_port_configuration_link_interface_list)?;
+
+        // /v1/system/networking/switch-port-configuration/{name_or_id}/link/{link}/interface/{interface}/address
+        // TODO: Levon - test
+        // api.register(networking_switch_port_configuration_link_interface_addr_add)?;
+        // TODO: Levon - test
+        // api.register(networking_switch_port_configuration_link_interface_addr_remove)?;
+        // TODO: Levon - test
+        // api.register(networking_switch_port_configuration_link_interface_addr_list)?;
+
+        // /v1/system/networking/switch-port-configuration/{name_or_id}/link/{link}/interface/{interface}/route
+        // TODO: Levon - test
+        // api.register(networking_switch_port_configuration_link_interface_route_add)?;
+        // TODO: Levon - test
+        // api.register(networking_switch_port_configuration_link_interface_route_remove)?;
+        // TODO: Levon - test
+        // api.register(networking_switch_port_configuration_link_interface_route_list)?;
+
+        // /v1/system/networking/switch-port-configuration/{name_or_id}/link/{link}/interface/{interface}/bgp_peer
+        // TODO: Levon - test
+        // api.register(networking_switch_port_configuration_link_interface_bgp_peer_add)?;
+        // TODO: Levon - test
+        // api.register(networking_switch_port_configuration_link_interface_bgp_peer_remove)?;
+        // TODO: Levon - test
+        // api.register(networking_switch_port_configuration_link_interface_bgp_peer_list)?;
 
         api.register(networking_switch_port_list)?;
         api.register(networking_switch_port_status)?;
         api.register(networking_switch_port_apply_settings)?;
         api.register(networking_switch_port_clear_settings)?;
+        // TODO: Levon - test
+        // api.register(networking_switch_port_view_settings)?;
 
         api.register(networking_bgp_config_create)?;
         api.register(networking_bgp_config_list)?;
@@ -3739,10 +3798,10 @@ async fn networking_loopback_address_list(
 /// Create switch port settings
 #[endpoint {
     method = POST,
-    path = "/v1/system/networking/switch-port-settings",
+    path = "/v1/system/networking/switch-port-configuration",
     tags = ["system/networking"],
 }]
-async fn networking_switch_port_settings_create(
+async fn networking_switch_port_configuration_create(
     rqctx: RequestContext<ApiContext>,
     new_settings: TypedBody<params::SwitchPortSettingsCreate>,
 ) -> Result<HttpResponseCreated<SwitchPortSettingsView>, HttpError> {
@@ -3766,10 +3825,10 @@ async fn networking_switch_port_settings_create(
 /// Delete switch port settings
 #[endpoint {
     method = DELETE,
-    path = "/v1/system/networking/switch-port-settings",
+    path = "/v1/system/networking/switch-port-configuration",
     tags = ["system/networking"],
 }]
-async fn networking_switch_port_settings_delete(
+async fn networking_switch_port_configuration_delete(
     rqctx: RequestContext<ApiContext>,
     query_params: Query<params::SwitchPortSettingsSelector>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -3791,10 +3850,10 @@ async fn networking_switch_port_settings_delete(
 /// List switch port settings
 #[endpoint {
     method = GET,
-    path = "/v1/system/networking/switch-port-settings",
+    path = "/v1/system/networking/switch-port-configuration",
     tags = ["system/networking"],
 }]
-async fn networking_switch_port_settings_list(
+async fn networking_switch_port_configuration_list(
     rqctx: RequestContext<ApiContext>,
     query_params: Query<
         PaginatedByNameOrId<params::SwitchPortSettingsSelector>,
@@ -3828,23 +3887,210 @@ async fn networking_switch_port_settings_list(
         .await
 }
 
-/// Get information about switch port
+/// Get information about a named set of switch-port-settings
 #[endpoint {
     method = GET,
-    path = "/v1/system/networking/switch-port-settings/{port}",
+    path = "/v1/system/networking/switch-port-configuration/{name_or_id}",
     tags = ["system/networking"],
 }]
-async fn networking_switch_port_settings_view(
+async fn networking_switch_port_configuration_view(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::SwitchPortSettingsInfoSelector>,
 ) -> Result<HttpResponseOk<SwitchPortSettingsView>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let query = path_params.into_inner().port;
+        let query = path_params.into_inner().name_or_id;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
         Ok(HttpResponseOk(settings.into()))
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+/// Get switch port geometry for a provided switch port configuration
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/switch-port-configuration/{name_or_id}/geometry",
+    tags = ["system/networking"],
+}]
+async fn networking_switch_port_configuration_geometry_view(
+    rqctx: RequestContext<ApiContext>,
+    path_params: Path<params::SwitchPortSettingsInfoSelector>,
+) -> Result<HttpResponseOk<SwitchPortGeometry>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let query = path_params.into_inner().name_or_id;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
+        todo!("fetch geometry")
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+/// Set switch port geometry for a provided switch port configuration
+#[endpoint {
+    method = POST,
+    path = "/v1/system/networking/switch-port-configuration/{name_or_id}/geometry",
+    tags = ["system/networking"],
+}]
+async fn networking_switch_port_configuration_geometry_set(
+    rqctx: RequestContext<ApiContext>,
+    path_params: Path<params::SwitchPortSettingsInfoSelector>,
+) -> Result<HttpResponseOk<SwitchPortGeometry>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let query = path_params.into_inner().name_or_id;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
+        todo!("set geometry")
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+/// List links for a provided switch port configuration
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/switch-port-configuration/{name_or_id}/link",
+    tags = ["system/networking"],
+}]
+async fn networking_switch_port_configuration_link_list(
+    rqctx: RequestContext<ApiContext>,
+    //query_params: Query<PaginatedById<params::SwitchPortPageSelector>>,
+    path_params: Path<params::SwitchPortSettingsInfoSelector>,
+    // ) -> Result<HttpResponseOk<ResultsPage<SwitchPort>>, HttpError> {
+) -> Result<HttpResponseOk<SwitchPortLinkConfig>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let query = path_params.into_inner().name_or_id;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
+        todo!("list links")
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+/// Create a link for a provided switch port configuration
+#[endpoint {
+    method = POST,
+    path = "/v1/system/networking/switch-port-configuration/{name_or_id}/link",
+    tags = ["system/networking"],
+}]
+async fn networking_switch_port_configuration_link_create(
+    rqctx: RequestContext<ApiContext>,
+    path_params: Path<params::SwitchPortSettingsInfoSelector>,
+    new_settings: TypedBody<params::LinkConfigCreate>,
+) -> Result<HttpResponseOk<SwitchPortLinkConfig>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let query = path_params.into_inner().name_or_id;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
+        todo!("create link")
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+/// View a link for a provided switch port configuration
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/switch-port-configuration/{name_or_id}/link/{link}",
+    tags = ["system/networking"],
+}]
+async fn networking_switch_port_configuration_link_view(
+    rqctx: RequestContext<ApiContext>,
+    path_params: Path<params::SwitchPortSettingsLinkInfoSelector>,
+) -> Result<HttpResponseOk<SwitchPortLinkConfig>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let query = path_params.into_inner().name_or_id;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
+        todo!("view link")
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+/// Delete a link for a provided switch port configuration
+#[endpoint {
+    method = DELETE,
+    path = "/v1/system/networking/switch-port-configuration/{name_or_id}/link/{link}",
+    tags = ["system/networking"],
+}]
+async fn networking_switch_port_configuration_link_delete(
+    rqctx: RequestContext<ApiContext>,
+    path_params: Path<params::SwitchPortSettingsLinkInfoSelector>,
+) -> Result<HttpResponseOk<SwitchPortLinkConfig>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let query = path_params.into_inner().name_or_id;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
+        todo!("delete link")
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+/// List interfaces for a provided switch port link configuration
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/switch-port-configuration/{name_or_id}/link/{link}/interface",
+    tags = ["system/networking"],
+}]
+async fn networking_switch_port_configuration_link_interface_list(
+    rqctx: RequestContext<ApiContext>,
+    //query_params: Query<PaginatedById<params::SwitchPortPageSelector>>,
+    path_params: Path<params::SwitchPortSettingsLinkInfoSelector>,
+    // ) -> Result<HttpResponseOk<ResultsPage<SwitchPort>>, HttpError> {
+) -> Result<HttpResponseOk<SwitchPortLinkConfig>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let query = path_params.into_inner().name_or_id;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
+        todo!("list interfaces")
     };
     apictx
         .context

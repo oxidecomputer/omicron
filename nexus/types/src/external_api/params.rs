@@ -1788,7 +1788,17 @@ pub struct SwitchPortSettingsSelector {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct SwitchPortSettingsInfoSelector {
     /// A name or id to use when selecting switch port settings info objects.
-    pub port: NameOrId,
+    pub name_or_id: NameOrId,
+}
+
+/// Select a link settings i nfo object by port settings name and link name.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SwitchPortSettingsLinkInfoSelector {
+    /// A name or id to use when selecting switch port settings info objects.
+    pub name_or_id: NameOrId,
+
+    /// Link name
+    pub link: Name,
 }
 
 /// Select a switch port by name.
