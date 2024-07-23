@@ -209,6 +209,7 @@ use crate::app::db::datastore::instance::InstanceUpdateResult;
 use crate::app::db::datastore::InstanceSnapshot;
 use crate::app::db::lookup::LookupPath;
 use crate::app::db::model::Generation;
+use crate::app::db::model::Instance;
 use crate::app::db::model::InstanceRuntimeState;
 use crate::app::db::model::InstanceState;
 use crate::app::db::model::MigrationState;
@@ -336,10 +337,13 @@ struct UpdatesRequired {
     /// cleaned up by a [`destroyed`] subsaga.
     destroy_target_vmm: Option<PropolisUuid>,
 
-    /// If `true`, the instance no longer has an active VMM, and its
+    /// If this is [`Some`], the instance no longer has an active VMM, and its
     /// virtual provisioning resource records and Oximeter producer should be
     /// deallocated.
-    deprovision: bool,
+    ///
+    /// The entire instance record is required for this, since we need to know
+    /// the instance's virtual resource requests in order to deallocate them.
+    deprovision: Option<Instance>,
 
     /// If this is [`Some`],
     network_config: Option<NetworkConfigUpdate>,
@@ -363,12 +367,13 @@ impl UpdatesRequired {
 
         let mut update_required = false;
         let mut network_config = None;
-        let mut deprovision = false;
+        let mut deprovision = true;
 
         // Has the active VMM been destroyed?
         let destroy_active_vmm =
             snapshot.active_vmm.as_ref().and_then(|active_vmm| {
                 if active_vmm.runtime.state == VmmState::Destroyed {
+                    let id = PropolisUuid::from_untyped_uuid(active_vmm.id);
                     // Unlink the active VMM ID. If the active VMM was destroyed
                     // because a migration out completed, the next block, which
                     // handles migration updates, will set this to the new VMM's ID,
@@ -393,7 +398,7 @@ impl UpdatesRequired {
                     // will change this to a network config update if the
                     // instance is now living somewhere else.
                     network_config = Some(NetworkConfigUpdate::Delete);
-                    Some(PropolisUuid::from_untyped_uuid(active_vmm.id))
+                    Some(id)
                 } else {
                     None
                 }
@@ -506,10 +511,10 @@ impl UpdatesRequired {
 
                 // Even if the active VMM was destroyed (and we set the
                 // instance's state to `NoVmm` above), it has successfully
-                // migrated, so leave it in the VMM state.
+                // migrated, so leave it in the VMM state and don't deallocate
+                // virtual provisioning records --- the instance is still
+                // incarnated.
                 new_runtime.nexus_state = InstanceState::Vmm;
-                // If the active VMM has also been destroyed, don't delete
-                // virtual provisioning records while cleaning it up.
                 deprovision = false;
             }
         }
@@ -522,7 +527,7 @@ impl UpdatesRequired {
             new_runtime,
             destroy_active_vmm,
             destroy_target_vmm,
-            deprovision,
+            deprovision: deprovision.then(|| snapshot.instance.clone()),
             network_config,
         })
     }
@@ -544,8 +549,6 @@ struct RealParams {
 
     authz_instance: authz::Instance,
 
-    state: InstanceSnapshot,
-
     update: UpdatesRequired,
 
     orig_lock: instance::UpdaterLock,
@@ -554,6 +557,7 @@ struct RealParams {
 const INSTANCE_LOCK_ID: &str = "saga_instance_lock_id";
 const INSTANCE_LOCK: &str = "updater_lock";
 const NETWORK_CONFIG_UPDATE: &str = "network_config_update";
+const DEPROVISION_INSTANCE: &str = "deprovision_instance";
 
 // instance update saga: actions
 
@@ -634,7 +638,8 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
 
         // If the instance now has no active VMM, release its virtual
         // provisioning resources and unassign its Oximeter producer.
-        if params.update.deprovision {
+        if let Some(ref instance) = params.update.deprovision {
+            builder.append(const_node(DEPROVISION_INSTANCE, instance)?);
             builder.append(release_virtual_provisioning_action());
             builder.append(unassign_oximeter_producer_action());
         }
@@ -818,17 +823,9 @@ async fn siu_release_virtual_provisioning(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let RealParams { ref serialized_authn, ref authz_instance, state, .. } =
+    let RealParams { ref serialized_authn, ref authz_instance, .. } =
         sagactx.saga_params::<RealParams>()?;
-
-    let instance = state.instance;
-    let vmm_id = {
-        let id = instance.runtime().propolis_id.expect(
-            "a `release_virtual_provisioning` action should not have been \
-                pushed if there is no active VMM ID",
-        );
-        PropolisUuid::from_untyped_uuid(id)
-    };
+    let instance = sagactx.lookup::<Instance>(DEPROVISION_INSTANCE)?;
     let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
     let log = osagactx.log();
@@ -852,7 +849,6 @@ async fn siu_release_virtual_provisioning(
                 "instance update (no VMM): deallocated virtual provisioning \
                  resources";
                 "instance_id" => %instance_id,
-                "propolis_id" => %vmm_id,
                 "records_deleted" => ?deleted,
             );
         }
@@ -864,7 +860,6 @@ async fn siu_release_virtual_provisioning(
                 "instance update (no VMM): virtual provisioning record not \
                  found; perhaps it has already been deleted?";
                 "instance_id" => %instance_id,
-                "propolis_id" => %vmm_id,
             );
         }
         Err(err) => return Err(ActionError::action_failed(err)),
@@ -1000,7 +995,7 @@ async fn chain_update_saga(
             "update.network_config_update" => ?update.network_config,
             "update.destroy_active_vmm" => ?update.destroy_active_vmm,
             "update.destroy_target_vmm" => ?update.destroy_target_vmm,
-            "update.deprovision" => update.deprovision,
+            "update.deprovision" => ?update.deprovision,
         );
         let saga_dag = SagaInstanceUpdate::prepare(&Params {
             serialized_authn,
