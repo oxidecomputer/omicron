@@ -261,8 +261,8 @@ use crate::app::db::datastore::instance;
 use crate::app::db::datastore::instance::InstanceUpdateResult;
 use crate::app::db::datastore::InstanceSnapshot;
 use crate::app::db::lookup::LookupPath;
+use crate::app::db::model::ByteCount;
 use crate::app::db::model::Generation;
-use crate::app::db::model::Instance;
 use crate::app::db::model::InstanceRuntimeState;
 use crate::app::db::model::InstanceState;
 use crate::app::db::model::MigrationState;
@@ -393,10 +393,7 @@ struct UpdatesRequired {
     /// If this is [`Some`], the instance no longer has an active VMM, and its
     /// virtual provisioning resource records and Oximeter producer should be
     /// deallocated.
-    ///
-    /// The entire instance record is required for this, since we need to know
-    /// the instance's virtual resource requests in order to deallocate them.
-    deprovision: Option<Instance>,
+    deprovision: Option<Deprovision>,
 
     /// If this is [`Some`],
     network_config: Option<NetworkConfigUpdate>,
@@ -406,6 +403,15 @@ struct UpdatesRequired {
 enum NetworkConfigUpdate {
     Delete,
     Update { active_propolis_id: PropolisUuid, new_sled_id: Uuid },
+}
+
+/// Virtual provisioning counters to release when an instance no longer has a
+/// VMM.
+#[derive(Debug, Deserialize, Serialize)]
+struct Deprovision {
+    project_id: Uuid,
+    cpus_diff: i64,
+    ram_diff: ByteCount,
 }
 
 impl UpdatesRequired {
@@ -580,7 +586,11 @@ impl UpdatesRequired {
             new_runtime,
             destroy_active_vmm,
             destroy_target_vmm,
-            deprovision: deprovision.then(|| snapshot.instance.clone()),
+            deprovision: deprovision.then(|| Deprovision {
+                project_id: snapshot.instance.project_id,
+                cpus_diff: i64::from(snapshot.instance.ncpus.0 .0),
+                ram_diff: snapshot.instance.memory,
+            }),
             network_config,
         })
     }
@@ -610,7 +620,6 @@ struct RealParams {
 const INSTANCE_LOCK_ID: &str = "saga_instance_lock_id";
 const INSTANCE_LOCK: &str = "updater_lock";
 const NETWORK_CONFIG_UPDATE: &str = "network_config_update";
-const DEPROVISION_INSTANCE: &str = "deprovision_instance";
 
 // instance update saga: actions
 
@@ -691,8 +700,7 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
 
         // If the instance now has no active VMM, release its virtual
         // provisioning resources and unassign its Oximeter producer.
-        if let Some(ref instance) = params.update.deprovision {
-            builder.append(const_node(DEPROVISION_INSTANCE, instance)?);
+        if params.update.deprovision.is_some() {
             builder.append(release_virtual_provisioning_action());
             builder.append(unassign_oximeter_producer_action());
         }
@@ -876,9 +884,19 @@ async fn siu_release_virtual_provisioning(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let RealParams { ref serialized_authn, ref authz_instance, .. } =
-        sagactx.saga_params::<RealParams>()?;
-    let instance = sagactx.lookup::<Instance>(DEPROVISION_INSTANCE)?;
+    let RealParams {
+        ref serialized_authn, ref authz_instance, ref update, ..
+    } = sagactx.saga_params::<RealParams>()?;
+    let Some(Deprovision { project_id, cpus_diff, ram_diff }) =
+        update.deprovision
+    else {
+        return Err(ActionError::action_failed(
+            "a `siu_release_virtual_provisioning` action should never have \
+             been added to the DAG if the update does not contain virtual \
+             resources to deprovision"
+                .to_string(),
+        ));
+    };
     let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
     let log = osagactx.log();
@@ -890,9 +908,9 @@ async fn siu_release_virtual_provisioning(
         .virtual_provisioning_collection_delete_instance(
             &opctx,
             instance_id,
-            instance.project_id,
-            i64::from(instance.ncpus.0 .0),
-            instance.memory,
+            project_id,
+            cpus_diff,
+            ram_diff,
         )
         .await;
     match result {
