@@ -426,7 +426,7 @@ impl UpdatesRequired {
 
         let mut update_required = false;
         let mut network_config = None;
-        let mut deprovision = true;
+        let mut deprovision = false;
 
         // Has the active VMM been destroyed?
         let destroy_active_vmm =
