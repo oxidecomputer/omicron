@@ -1164,12 +1164,14 @@ impl DataStore {
 
         let mut targets: Vec<SocketAddrV6> = vec![];
 
-        find_matching_rw_regions_in_volume(
-            &vcr,
-            dataset.address().ip(),
-            &mut targets,
-        )
-        .map_err(|e| Error::internal_error(&e.to_string()))?;
+        let Some(address) = dataset.address() else {
+            return Err(Error::internal_error(
+                "Crucible Dataset missing IP address",
+            ));
+        };
+
+        find_matching_rw_regions_in_volume(&vcr, address.ip(), &mut targets)
+            .map_err(|e| Error::internal_error(&e.to_string()))?;
 
         Ok(targets)
     }

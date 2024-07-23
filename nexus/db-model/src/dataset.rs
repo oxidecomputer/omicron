@@ -36,8 +36,8 @@ pub struct Dataset {
 
     pub pool_id: Uuid,
 
-    ip: ipv6::Ipv6Addr,
-    port: SqlU16,
+    ip: Option<ipv6::Ipv6Addr>,
+    port: Option<SqlU16>,
 
     pub kind: DatasetKind,
     pub size_used: Option<i64>,
@@ -47,7 +47,7 @@ impl Dataset {
     pub fn new(
         id: Uuid,
         pool_id: Uuid,
-        addr: SocketAddrV6,
+        addr: Option<SocketAddrV6>,
         kind: DatasetKind,
     ) -> Self {
         let size_used = match kind {
@@ -59,19 +59,19 @@ impl Dataset {
             time_deleted: None,
             rcgen: Generation::new(),
             pool_id,
-            ip: addr.ip().into(),
-            port: addr.port().into(),
+            ip: addr.map(|addr| addr.ip().into()),
+            port: addr.map(|addr| addr.port().into()),
             kind,
             size_used,
         }
     }
 
-    pub fn address(&self) -> SocketAddrV6 {
-        self.address_with_port(self.port.into())
+    pub fn address(&self) -> Option<SocketAddrV6> {
+        self.address_with_port(self.port?.into())
     }
 
-    pub fn address_with_port(&self, port: u16) -> SocketAddrV6 {
-        SocketAddrV6::new(Ipv6Addr::from(self.ip), port, 0, 0)
+    pub fn address_with_port(&self, port: u16) -> Option<SocketAddrV6> {
+        Some(SocketAddrV6::new(Ipv6Addr::from(self.ip?), port, 0, 0))
     }
 }
 

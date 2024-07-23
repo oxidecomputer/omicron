@@ -163,6 +163,7 @@ impl Display for ServiceInstanceBuilder {
     }
 }
 
+#[derive(Clone)]
 pub struct PropertyGroupBuilder {
     name: String,
     /// names of the properties that were added, in the order they were added
@@ -233,7 +234,7 @@ impl Display for PropertyGroupBuilder {
             if values.len() == 1 {
                 write!(
                     f,
-                    r#"        <propval type="{ty}" name="{name}" value="{value}"/>
+                    r#"        <propval type="{ty}" name="{name}" value='{value}'/>
 "#,
                     name = property_name,
                     value = &values[0],
@@ -302,7 +303,7 @@ mod tests {
 <service_bundle type="profile" name="myprofile">
   <service version="1" type="service" name="myservice">
       <property_group type="application" name="mypg">
-        <propval type="astring" name="myprop" value="myvalue"/>
+        <propval type="astring" name="myprop" value='myvalue'/>
       </property_group>
   </service>
 </service_bundle>"#,
@@ -384,7 +385,7 @@ mod tests {
   <service version="1" type="service" name="myservice">
     <instance enabled="true" name="default">
       <property_group type="application" name="mypg">
-        <propval type="type" name="prop" value="value"/>
+        <propval type="type" name="prop" value='value'/>
       </property_group>
     </instance>
   </service>
@@ -429,11 +430,11 @@ mod tests {
       </property_group>
     <instance enabled="true" name="default">
       <property_group type="application" name="mypg">
-        <propval type="type" name="prop" value="value"/>
-        <propval type="type" name="prop2" value="value2"/>
+        <propval type="type" name="prop" value='value'/>
+        <propval type="type" name="prop2" value='value2'/>
       </property_group>
       <property_group type="application" name="mypg2">
-        <propval type="type" name="prop3" value="value3"/>
+        <propval type="type" name="prop3" value='value3'/>
       </property_group>
     </instance>
   </service>

@@ -306,7 +306,8 @@ impl super::Nexus {
             "dataset_id" => id.to_string(),
             "address" => address.to_string()
         );
-        let dataset = db::model::Dataset::new(id, zpool_id, address, kind);
+        let dataset =
+            db::model::Dataset::new(id, zpool_id, Some(address), kind);
         self.db_datastore.dataset_upsert(dataset).await?;
         Ok(())
     }

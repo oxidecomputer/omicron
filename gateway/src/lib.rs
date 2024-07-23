@@ -98,6 +98,7 @@ fn start_dropshot_server(
         bind_address: SocketAddr::V6(addr),
         request_body_max_bytes,
         default_handler_task_mode: HandlerTaskMode::Detached,
+        log_headers: vec![],
     };
     let http_server_starter = dropshot::HttpServerStarter::new(
         &dropshot,

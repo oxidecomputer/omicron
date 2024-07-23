@@ -1,7 +1,6 @@
 use crate::helpers::generate_name;
 use anyhow::{anyhow, Context as _, Result};
 use chrono::Utc;
-use omicron_sled_agent::rack_setup::config::SetupServiceConfig;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{Name, ProjectCreate};
 use oxide_client::CustomDnsResolver;
@@ -9,6 +8,7 @@ use oxide_client::{Client, ClientImagesExt, ClientProjectsExt, ClientVpcsExt};
 use reqwest::dns::Resolve;
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Url;
+use sled_agent_types::rack_init::RackInitializeRequest;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -73,7 +73,7 @@ impl Context {
     }
 }
 
-fn rss_config() -> Result<SetupServiceConfig> {
+fn rss_config() -> Result<RackInitializeRequest> {
     let path = "/opt/oxide/sled-agent/pkg/config-rss.toml";
     let content =
         std::fs::read_to_string(&path).unwrap_or(RSS_CONFIG_STR.to_string());
@@ -81,7 +81,7 @@ fn rss_config() -> Result<SetupServiceConfig> {
         .with_context(|| "parsing config-rss as TOML".to_string())
 }
 
-fn nexus_external_dns_name(config: &SetupServiceConfig) -> String {
+fn nexus_external_dns_name(config: &RackInitializeRequest) -> String {
     format!(
         "{}.sys.{}",
         config.recovery_silo.silo_name.as_str(),
@@ -89,7 +89,7 @@ fn nexus_external_dns_name(config: &SetupServiceConfig) -> String {
     )
 }
 
-fn external_dns_addr(config: &SetupServiceConfig) -> Result<SocketAddr> {
+fn external_dns_addr(config: &RackInitializeRequest) -> Result<SocketAddr> {
     // From the RSS config, grab the first address from the configured services
     // IP pool as the DNS server's IP address.
     let dns_ip = config
@@ -138,7 +138,7 @@ pub async fn nexus_addr() -> Result<IpAddr> {
 }
 
 pub struct ClientParams {
-    rss_config: SetupServiceConfig,
+    rss_config: RackInitializeRequest,
     nexus_dns_name: String,
     resolver: Arc<CustomDnsResolver>,
     proto: &'static str,

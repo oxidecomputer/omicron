@@ -9,6 +9,7 @@ pub mod bfd;
 pub mod blueprint_execution;
 pub mod blueprint_load;
 pub mod crdb_node_id_collector;
+pub mod decommissioned_disk_cleaner;
 pub mod dns_config;
 pub mod dns_propagation;
 pub mod dns_servers;
