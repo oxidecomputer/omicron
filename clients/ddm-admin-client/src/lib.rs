@@ -96,7 +96,7 @@ impl Client {
             }, |err, duration| {
                 info!(
                     me.log,
-                    "Failed to notify ddmd of our address (will retry after {duration:?}";
+                    "Failed to notify ddmd of our address (will retry after {duration:?})";
                     "err" => %err,
                 );
             }).await.unwrap();
@@ -112,7 +112,7 @@ impl Client {
             }, |err, duration| {
                 info!(
                     me.log,
-                    "Failed to notify ddmd of tunnel endpoint (retry in {duration:?}";
+                    "Failed to notify ddmd of tunnel endpoint (retry in {duration:?})";
                     "err" => %err,
                 );
             }).await.unwrap();
@@ -176,7 +176,7 @@ impl Client {
             }, |err, duration| {
                 info!(
                     me.log,
-                    "Failed enable ddm stats (will retry after {duration:?}";
+                    "Failed enable ddm stats (will retry after {duration:?})";
                     "err" => %err,
                 );
             }).await.unwrap();
