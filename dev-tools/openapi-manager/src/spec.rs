@@ -15,6 +15,27 @@ use openapiv3::OpenAPI;
 pub fn all_apis() -> Vec<ApiSpec> {
     vec![
         ApiSpec {
+            title: "CockroachDB Cluster Admin API",
+            version: "0.0.1",
+            description: "API for interacting with the Oxide control plane's \
+                CockroachDB cluster",
+            boundary: ApiBoundary::Internal,
+            api_description:
+                cockroach_admin_api::cockroach_admin_api_mod::stub_api_description,
+            filename: "cockroach-admin.json",
+            extra_validation: None,
+        },
+        ApiSpec {
+            title: "Bootstrap Agent API",
+            version: "0.0.1",
+            description: "Per-sled API for setup and teardown",
+            boundary: ApiBoundary::Internal,
+            api_description:
+                bootstrap_agent_api::bootstrap_agent_api_mod::stub_api_description,
+            filename: "bootstrap-agent.json",
+            extra_validation: None,
+        },
+        ApiSpec {
             title: "Internal DNS",
             version: "0.0.1",
             description: "API for the internal DNS server",
@@ -43,6 +64,16 @@ pub fn all_apis() -> Vec<ApiSpec> {
             api_description:
                 nexus_internal_api::nexus_internal_api_mod::stub_api_description,
             filename: "nexus-internal.json",
+            extra_validation: None,
+        },
+        ApiSpec {
+            title: "Oxide Oximeter API",
+            version: "0.0.1",
+            description: "API for interacting with oximeter",
+            boundary: ApiBoundary::Internal,
+            api_description:
+                oximeter_api::oximeter_api_mod::stub_api_description,
+            filename: "oximeter.json",
             extra_validation: None,
         },
         ApiSpec {

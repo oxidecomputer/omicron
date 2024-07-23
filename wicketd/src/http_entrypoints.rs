@@ -10,9 +10,7 @@ use crate::mgs::GetInventoryError;
 use crate::mgs::MgsHandle;
 use crate::mgs::ShutdownInProgress;
 use crate::SmfConfigValues;
-use bootstrap_agent_client::types::RackInitId;
 use bootstrap_agent_client::types::RackOperationStatus;
-use bootstrap_agent_client::types::RackResetId;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
@@ -24,6 +22,8 @@ use dropshot::TypedBody;
 use http::StatusCode;
 use internal_dns::resolver::Resolver;
 use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_uuid_kinds::RackInitUuid;
+use omicron_uuid_kinds::RackResetUuid;
 use sled_hardware_types::Baseboard;
 use slog::o;
 use std::collections::BTreeMap;
@@ -237,7 +237,7 @@ impl WicketdApi for WicketdApiImpl {
 
     async fn post_run_rack_setup(
         rqctx: RequestContext<ServerContext>,
-    ) -> Result<HttpResponseOk<RackInitId>, HttpError> {
+    ) -> Result<HttpResponseOk<RackInitUuid>, HttpError> {
         let ctx = rqctx.context();
         let log = &rqctx.log;
 
@@ -291,7 +291,7 @@ impl WicketdApi for WicketdApiImpl {
 
     async fn post_run_rack_reset(
         rqctx: RequestContext<ServerContext>,
-    ) -> Result<HttpResponseOk<RackResetId>, HttpError> {
+    ) -> Result<HttpResponseOk<RackResetUuid>, HttpError> {
         let ctx = rqctx.context();
 
         let sled_agent_addr = ctx.bootstrap_agent_addr().map_err(|err| {

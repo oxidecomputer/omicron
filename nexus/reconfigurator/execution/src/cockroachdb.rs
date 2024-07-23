@@ -90,7 +90,10 @@ mod test {
         );
         // Record the zpools so we don't fail to ensure datasets (unrelated to
         // crdb settings) during blueprint execution.
-        crate::tests::insert_zpool_records(datastore, &opctx, &blueprint).await;
+        crate::tests::create_disks_for_zones_using_datasets(
+            datastore, &opctx, &blueprint,
+        )
+        .await;
         // Execute the initial blueprint.
         let overrides = Overridables::for_test(cptestctx);
         crate::realize_blueprint_with_overrides(
