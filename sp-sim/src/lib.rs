@@ -13,6 +13,7 @@ pub use anyhow::Result;
 use async_trait::async_trait;
 pub use config::Config;
 use gateway_messages::SpPort;
+use gateway_types::component::SpState;
 pub use gimlet::Gimlet;
 pub use gimlet::SimSpHandledRequest;
 pub use gimlet::SIM_GIMLET_BOARD;
@@ -36,7 +37,7 @@ pub enum Responsiveness {
 #[async_trait]
 pub trait SimulatedSp {
     /// Serial number.
-    async fn state(&self) -> omicron_gateway::http_entrypoints::SpState;
+    async fn state(&self) -> SpState;
 
     /// Listening UDP address of the given port of this simulated SP, if it was
     /// configured to listen.

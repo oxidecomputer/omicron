@@ -828,8 +828,8 @@
     },
     "/sp/{type}/{slot}/component/{component}/serial-console/attach": {
       "get": {
-        "summary": "Upgrade into a websocket connection attached to the given SP component's",
-        "description": "serial console.",
+        "summary": "Upgrade into a websocket connection attached to the given SP",
+        "description": "component's serial console.",
         "operationId": "sp_component_serial_console_attach",
         "parameters": [
           {
@@ -875,8 +875,8 @@
     },
     "/sp/{type}/{slot}/component/{component}/serial-console/detach": {
       "post": {
-        "summary": "Detach the websocket connection attached to the given SP component's serial",
-        "description": "console, if such a connection exists.",
+        "summary": "Detach the websocket connection attached to the given SP component's",
+        "description": "serial console, if such a connection exists.",
         "operationId": "sp_component_serial_console_detach",
         "parameters": [
           {

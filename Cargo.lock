@@ -2698,6 +2698,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "gateway-api"
+version = "0.1.0"
+dependencies = [
+ "dropshot",
+ "gateway-types",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+ "uuid",
+]
+
+[[package]]
 name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
@@ -2793,12 +2807,27 @@ dependencies = [
  "camino",
  "dropshot",
  "gateway-messages",
+ "gateway-types",
  "omicron-gateway",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "slog",
  "sp-sim",
  "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "gateway-types"
+version = "0.1.0"
+dependencies = [
+ "gateway-messages",
+ "hex",
+ "ipcc",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
  "uuid",
 ]
 
@@ -5503,9 +5532,11 @@ dependencies = [
  "dropshot",
  "expectorate",
  "futures",
+ "gateway-api",
  "gateway-messages",
  "gateway-sp-comms",
  "gateway-test-utils",
+ "gateway-types",
  "hex",
  "http 0.2.12",
  "hyper 0.14.28",
@@ -6159,6 +6190,7 @@ dependencies = [
  "dns-server-api",
  "dropshot",
  "fs-err",
+ "gateway-api",
  "indent_write",
  "installinator-api",
  "nexus-internal-api",
@@ -9287,9 +9319,9 @@ dependencies = [
  "dropshot",
  "futures",
  "gateway-messages",
+ "gateway-types",
  "hex",
  "omicron-common",
- "omicron-gateway",
  "omicron-workspace-hack",
  "serde",
  "slog",

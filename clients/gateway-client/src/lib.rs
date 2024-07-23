@@ -35,6 +35,17 @@ pub use gateway_messages::SpComponent;
 // If the format of inventory data desired by wicket or nexus changes such that
 // it is no longer useful to directly expose the JsonSchema types, we can go
 // back to reusing `omicron_common`.
+//
+// As another alternative, since the `derives` and `patch` directives were
+// introduced, these types have moved to living in gateway-types. This means
+// that we can choose to use `replace` on them. That hasn't felt necessary so
+// far, but it's an option if it becomes desirable in the future. (One reason
+// to do that might be that currently, `nexus-types` depends on
+// `gateway-client`. Generally we expect the `-client` layer to depend on the
+// `-types` layer to avoid a circular dependency, and we've had to resolve a
+// rather thorny one between Nexus and sled-agent. But Nexus and sled-agent
+// call into each other. Since `gateway` is a lower-level service and never
+// calls into Nexus, the current scheme is okay.)
 progenitor::generate_api!(
     spec = "../../openapi/gateway.json",
     inner_type = slog::Logger,

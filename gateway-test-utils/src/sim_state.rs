@@ -6,10 +6,10 @@
 
 use gateway_messages::ignition::SystemPowerState;
 use gateway_messages::ignition::SystemType;
-use omicron_gateway::http_entrypoints::SpIdentifier;
-use omicron_gateway::http_entrypoints::SpIgnitionInfo;
-use omicron_gateway::http_entrypoints::SpState;
-use omicron_gateway::http_entrypoints::SpType;
+use gateway_types::component::SpIdentifier;
+use gateway_types::component::SpState;
+use gateway_types::component::SpType;
+use gateway_types::ignition::SpIgnitionInfo;
 use sp_sim::Gimlet;
 use sp_sim::SimRack;
 use sp_sim::SimulatedSp;

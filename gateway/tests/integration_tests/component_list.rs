@@ -10,10 +10,10 @@ use gateway_messages::SpComponent;
 use gateway_messages::SpPort;
 use gateway_test_utils::current_simulator_state;
 use gateway_test_utils::setup;
-use omicron_gateway::http_entrypoints::SpComponentInfo;
-use omicron_gateway::http_entrypoints::SpComponentList;
-use omicron_gateway::http_entrypoints::SpComponentPresence;
-use omicron_gateway::http_entrypoints::SpType;
+use gateway_types::component::SpComponentInfo;
+use gateway_types::component::SpComponentList;
+use gateway_types::component::SpComponentPresence;
+use gateway_types::component::SpType;
 
 #[tokio::test]
 async fn component_list() {
