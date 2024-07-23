@@ -12,6 +12,7 @@
   "paths": {
     "/info": {
       "get": {
+        "summary": "Return identifying information about this collector.",
         "operationId": "collector_info",
         "responses": {
           "200": {
@@ -35,6 +36,7 @@
     },
     "/producers": {
       "get": {
+        "summary": "List all producers.",
         "operationId": "producers_list",
         "parameters": [
           {
@@ -81,6 +83,7 @@
         }
       },
       "post": {
+        "summary": "Handle a request from Nexus to register a new producer with this collector.",
         "operationId": "producers_post",
         "requestBody": {
           "content": {
@@ -107,6 +110,7 @@
     },
     "/producers/{producer_id}": {
       "delete": {
+        "summary": "Delete a producer by ID.",
         "operationId": "producer_delete",
         "parameters": [
           {
