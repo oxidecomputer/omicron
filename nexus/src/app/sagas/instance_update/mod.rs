@@ -186,7 +186,57 @@
 //! being missed?
 //!
 //! We solve this using an ~~even more layers of complexity~~defense-in-depth
-//! approach.
+//! approach. Together, a number of mechanisms exist to ensure that (a) an
+//! instance whose VMM and migration states require an update saga will always
+//! have an update saga run eventually, and (b) update sagas are run in as
+//! timely a manner as possible.
+//!
+//! The first of these ~~layers of nonsense~~redundant systems to
+//! prevent missed updates is perhaps the simplest one: _avoiding unnecessary
+//! update sagas_. The `cpapi_instances_put` API endpoint and instance-watcher
+//! background tasks handle changes to VMM and migration states by calling the
+//! [`Nexus::notify_instance_updated`] method, which writes the new states to
+//! the database and (potentially) starts an update saga. Naively, this method
+//! would *always* start an update saga, but remember that --- as we discussed
+//! [above](#background) --- many VMM/migration state changes don't actually
+//! require modifying the instance record. For example, if an instance's VMM
+//! transitions from [`VmmState::Starting`] to [`VmmState::Running`], that
+//! changes the instance's externally-visible effective state, but it does *not*
+//! require an instance record update. By not starting an update saga unless one
+//! is actually required, we reduce updater lock contention, so that the lock is
+//! less likely to be held when VMM and migration states that actually *do*
+//! require an update saga are published. The [`update_saga_needed`] function in
+//! this module contains the logic for determining whether an update saga is
+//! required.
+//!
+//! The second mechanism for ensuring updates are performed in a timely manner
+//! is what I'm calling _saga chaining_. When the final action in an
+//! instance-update saga writes back the instance record and releases the
+//! updater lock, it will then perform a second query to read the instance, VMM,
+//! and migration records. If the current state of the instance indicates that
+//! another update saga is needed, then the completing saga will execute a new
+//! start saga as its final action.
+//!
+//! The last line of defense is the `instance-updater` background task. This
+//! task periodically queries the database to list instances which require
+//! update sagas (either their active VMM is `Destroyed` or their active
+//! migration has terminated) and are not currently locked by another update
+//! saga. A new update saga is started for any such instances found. Because
+//! this task runs periodically, it ensures that eventually, an update saga will
+//! be started for any instance that requires one.[^3]
+//!
+//! The background task ensures that sagas are started eventually, but because
+//! it only runs occasionally, update sagas started by it may be somewhat
+//! delayed. To improve the timeliness of update sagas, we will also explicitly
+//! activate the background task at any point where we know that an update saga
+//! *should* run but we were not able to run it. If an update saga cannot be
+//! started, whether by [`Nexus::notify_instance_updated`], a
+//! `start-instance-update` saga  attempting to start its real saga, or an
+//! `instance-update` saga chaining into a new one as its last action, the
+//! `instance-watcher` background task is activated. Similarly, when a
+//! `start-instance-update` saga fails to acquire the lock and exits, it
+//! activates the background task as well. This ensures that we will attempt the
+//! update again.
 //!
 //! [instance_updater_lock]:
 //!     crate::app::db::datastore::DataStore::instance_updater_lock
@@ -199,6 +249,9 @@
 //!
 //! [^1]: And, if a process *can* die, well...we can assume it *will*.
 //! [^2]: Barring human intervention.
+//! [^3]: Even if the Nexus instance that processed the state update died
+//!     between when it wrote the state to CRDB and when it started the
+//!     requisite update saga!
 
 use super::{
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
