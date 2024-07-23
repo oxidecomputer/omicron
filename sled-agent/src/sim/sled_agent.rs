@@ -321,6 +321,24 @@ impl SledAgent {
                 .contains_key(&instance_id.into_untyped_uuid())
                 .await
             {
+                let metadata = propolis_client::types::InstanceMetadata {
+                    project_id: metadata.project_id,
+                    silo_id: metadata.silo_id,
+                    sled_id: self.id,
+                    sled_model: self
+                        .config
+                        .hardware
+                        .baseboard
+                        .model()
+                        .to_string(),
+                    sled_revision: self.config.hardware.baseboard.revision(),
+                    sled_serial: self
+                        .config
+                        .hardware
+                        .baseboard
+                        .identifier()
+                        .to_string(),
+                };
                 let properties = propolis_client::types::InstanceProperties {
                     id: propolis_id.into_untyped_uuid(),
                     name: hardware.properties.hostname.to_string(),
@@ -329,7 +347,7 @@ impl SledAgent {
                     bootrom_id: Uuid::default(),
                     memory: hardware.properties.memory.to_whole_mebibytes(),
                     vcpus: hardware.properties.ncpus.0 as u8,
-                    metadata: metadata.into(),
+                    metadata,
                 };
                 let body = propolis_client::types::InstanceEnsureRequest {
                     properties,
