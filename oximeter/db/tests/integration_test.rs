@@ -21,7 +21,7 @@ pub struct TestInput {
 
 impl Default for TestInput {
     fn default() -> Self {
-        TestInput { n_projects: 2, n_instances: 2, n_cpus: 2, n_samples: 100 }
+        TestInput { n_projects: 2, n_instances: 2, n_cpus: 2, n_samples: 50 }
     }
 }
 
@@ -114,7 +114,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     assert_input_and_output(&input, &samples, &oxql_res1);
 
     let start = tokio::time::Instant::now();
-    wait_for_expected_output(&client2, &samples)
+    wait_for_num_points(&client2, samples.len())
         .await
         .expect("failed to get samples from client2");
     let end = tokio::time::Instant::now();
@@ -134,11 +134,40 @@ async fn test_cluster() -> anyhow::Result<()> {
 
     // Wait for all the data to be copied to node 3
     let start = tokio::time::Instant::now();
-    wait_for_expected_output(&client3, &samples)
+    wait_for_num_points(&client3, samples.len())
         .await
         .expect("failed to get samples from client3");
     let end = tokio::time::Instant::now();
     println!("query samples from client3 time = {:?}", end - start);
+
+    // Let's stop replica 1 and write some data to replica 3
+    // When we bring replica 1 back up we should see data get replicated to it.
+    // Data should also get replicated to replica 2 immediately.
+    deployment.stop_server(1).unwrap();
+
+    // Generate some new samples and insert them at replica3
+    let samples = test_util::generate_test_samples(
+        input.n_projects,
+        input.n_instances,
+        input.n_cpus,
+        input.n_samples,
+    );
+    client3.insert_samples(&samples).await.expect("failed to insert samples");
+
+    // Ensure that both replica 3 and replica 2 have the samples
+    wait_for_num_points(&client3, samples.len() * 2)
+        .await
+        .expect("failed to get samples from client3");
+    wait_for_num_points(&client2, samples.len() * 2)
+        .await
+        .expect("failed to get samples from client2");
+
+    // Restart node 1 and wait for the data to replicate
+    deployment.start_server(1).expect("failed to restart clickhouse server 1");
+    wait_for_ping(&client1).await.expect("failed to ping server 1");
+    wait_for_num_points(&client1, samples.len() * 2)
+        .await
+        .expect("failed to get samples from client1");
 
     deployment.teardown()?;
     std::fs::remove_dir_all(path)?;
@@ -171,11 +200,11 @@ fn assert_input_and_output(
     assert_eq!(total_points(&oxql_res), samples.len());
 }
 
-/// Wait for all `samples` inserted to exist at the replica that `client` is
-/// speaking to.
-async fn wait_for_expected_output(
+/// Wait for the number of `samples` inserted to equal the number of `points`
+/// returned at the replica that `client` is speaking to.
+async fn wait_for_num_points(
     client: &Client,
-    samples: &[Sample],
+    n_samples: usize,
 ) -> anyhow::Result<()> {
     poll::wait_for_condition(
         || async {
@@ -185,7 +214,7 @@ async fn wait_for_expected_output(
                 .map_err(|_| {
                     poll::CondCheckError::<oximeter_db::Error>::NotYet
                 })?;
-            if total_points(&oxql_res) != samples.len() {
+            if total_points(&oxql_res) != n_samples {
                 Err(poll::CondCheckError::<oximeter_db::Error>::NotYet)
             } else {
                 Ok(())
