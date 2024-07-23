@@ -17,8 +17,8 @@
 //!   migration of an instance between two VMMs.
 //!
 //! When an instance is incarnated on a sled, the `propolis_id` field in an
-//! `instance` record contains a UUID foreign key into the `vmm` table that points
-//! to the `vmm` record for the Propolis process on which the instance is
+//! `instance` record contains a UUID foreign key into the `vmm` table that
+//! points to the `vmm` record for the Propolis process on which the instance is
 //! currently running. If an instance is undergoing live migration, its record
 //! additionally contains a `dst_propolis_id` foreign key pointing at the `vmm`
 //! row representing the *target* Propolis process that it is migrating to, and
@@ -98,16 +98,15 @@
 //! potential race conditions. By considering the valid and invalid flows
 //! through an instance's state machine, we arrive at some ground rules:
 //!
-//! - The `instance_migrate` and `instance_delete` sagas will
-//!   only modify the instance record if the instance *has* an active Propolis
-//!   ID.
+//! - The `instance_migrate` and `instance_delete` sagas will only modify the
+//!   instance record if the instance *has* an active Propolis ID.
 //! - The `instance_start` and instance_delete` sagas will only modify the
 //!   instance record if the instance does *not* have an active VMM.
 //! - The presence of a migration ID prevents an `instance_migrate` saga from
 //!   succeeding until the current migration is resolved (either completes or
 //!   fails).
-//! - Only the `instance_start` saga can set the instance's *active* Propolis ID,
-//!   and it can only do this if there is currently no active Propolis.
+//! - Only the `instance_start` saga can set the instance's *active* Propolis
+//!   ID, and it can only do this if there is currently no active Propolis.
 //! - Only the `instance_migrate` saga can set the instance's *target* Propolis
 //!   ID and migration ID, and it can only do that if these fields are unset.
 //! - Only the `instance_update` saga can unset a migration ID and target
@@ -191,13 +190,13 @@
 //! have an update saga run eventually, and (b) update sagas are run in as
 //! timely a manner as possible.
 //!
-//! The first of these ~~layers of nonsense~~redundant systems to
-//! prevent missed updates is perhaps the simplest one: _avoiding unnecessary
-//! update sagas_. The `cpapi_instances_put` API endpoint and instance-watcher
-//! background tasks handle changes to VMM and migration states by calling the
-//! [`Nexus::notify_instance_updated`] method, which writes the new states to
-//! the database and (potentially) starts an update saga. Naively, this method
-//! would *always* start an update saga, but remember that --- as we discussed
+//! The first of these ~~layers of nonsense~~redundant systems to prevent missed
+//! updates is perhaps the simplest one: _avoiding unnecessary update sagas_.
+//! The `cpapi_instances_put` API endpoint and instance-watcher background tasks
+//! handle changes to VMM and migration states by calling the
+//! [`notify_instance_updated`] method, which writes the new states to the
+//! database and (potentially) starts an update saga. Naively, this method would
+//! *always* start an update saga, but remember that --- as we discussed
 //! [above](#background) --- many VMM/migration state changes don't actually
 //! require modifying the instance record. For example, if an instance's VMM
 //! transitions from [`VmmState::Starting`] to [`VmmState::Running`], that
@@ -230,13 +229,12 @@
 //! delayed. To improve the timeliness of update sagas, we will also explicitly
 //! activate the background task at any point where we know that an update saga
 //! *should* run but we were not able to run it. If an update saga cannot be
-//! started, whether by [`Nexus::notify_instance_updated`], a
-//! `start-instance-update` saga  attempting to start its real saga, or an
-//! `instance-update` saga chaining into a new one as its last action, the
-//! `instance-watcher` background task is activated. Similarly, when a
-//! `start-instance-update` saga fails to acquire the lock and exits, it
-//! activates the background task as well. This ensures that we will attempt the
-//! update again.
+//! started, whether by [`notify_instance_updated`], a `start-instance-update`
+//! saga attempting to start its real saga, or an `instance-update` saga
+//! chaining into a new one as its last action, the `instance-watcher`
+//! background task is activated. Similarly, when a `start-instance-update` saga
+//! fails to acquire the lock and exits, it activates the background task as
+//! well. This ensures that we will attempt the update again.
 //!
 //! [instance_updater_lock]:
 //!     crate::app::db::datastore::DataStore::instance_updater_lock
@@ -244,6 +242,8 @@
 //!     crate::app::db::datastore::DataStore::instance_updater_inherit_lock
 //! [instance_updater_unlock]:
 //!     crate::app::db::datastore::DataStore::instance_updater_unlock
+//! [`notify_instance_updated`]: crate::app::Nexus::notify_instance_updated
+//!
 //! [dist-locking]:
 //!     https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html
 //!
