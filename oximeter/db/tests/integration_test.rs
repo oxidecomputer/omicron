@@ -169,6 +169,53 @@ async fn test_cluster() -> anyhow::Result<()> {
         .await
         .expect("failed to get samples from client1");
 
+    // Remove a keeper node
+    deployment.remove_keeper(2).expect("failed to remove keeper");
+
+    // Querying from any node should still work after a keeper is removed
+    wait_for_num_points(&client1, samples.len() * 2)
+        .await
+        .expect("failed to get samples from client1");
+
+    // We still have a quorum (2 of 3 keepers), so we should be able to insert
+    let samples = test_util::generate_test_samples(
+        input.n_projects,
+        input.n_instances,
+        input.n_cpus,
+        input.n_samples,
+    );
+    client3.insert_samples(&samples).await.expect("failed to insert samples");
+    wait_for_num_points(&client2, samples.len() * 3)
+        .await
+        .expect("failed to get samples from client1");
+
+    // Stop another keeper
+    deployment.stop_keeper(1).expect("failed to stop keeper");
+
+    // We should still be able to query
+    wait_for_num_points(&client3, samples.len() * 3)
+        .await
+        .expect("failed to get samples from client1");
+
+    println!("Attempting to insert samples without keeper quorum");
+    // We have lost quorum and should not be able to insert
+    client1
+        .insert_samples(&samples)
+        .await
+        .expect_err("Insert succeeded without keeper quorum");
+
+    // Bringing the keeper back up should allow us to insert again
+    /*    deployment.start_keeper(1).expect("failed to restart keeper");
+    wait_for_keepers(&deployment, vec![1, 3])
+        .await
+        .expect("failed to sync keepers");
+    client1.insert_samples(&samples).await.expect("failed to insert samples");
+    wait_for_num_points(&client2, samples.len() * 4)
+        .await
+        .expect("failed to get samples from client1");
+        */
+
+    println!("Cleaning up test");
     deployment.teardown()?;
     std::fs::remove_dir_all(path)?;
     logctx.cleanup_successful();
