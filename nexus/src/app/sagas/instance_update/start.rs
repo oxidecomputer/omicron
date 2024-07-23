@@ -191,7 +191,7 @@ async fn siu_fetch_state_and_start_real_saga(
             "update.network_config_update" => ?update.network_config,
             "update.destroy_active_vmm" => ?update.destroy_active_vmm,
             "update.destroy_target_vmm" => ?update.destroy_target_vmm,
-            "update.deprovision" => update.deprovision,
+            "update.deprovision" => update.deprovision.is_some(),
         );
         osagactx
             .nexus()
@@ -199,7 +199,6 @@ async fn siu_fetch_state_and_start_real_saga(
             .saga_execute::<SagaDoActualInstanceUpdate>(RealParams {
                 serialized_authn,
                 authz_instance,
-                state,
                 update,
                 orig_lock,
             })
