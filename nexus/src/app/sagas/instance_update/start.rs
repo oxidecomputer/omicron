@@ -92,12 +92,14 @@ async fn siu_lock_instance(
     let lock_id = sagactx.lookup::<Uuid>(INSTANCE_LOCK_ID)?;
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
-    slog::info!(
+
+    info!(
         osagactx.log(),
         "instance update: attempting to lock instance";
         "instance_id" => %authz_instance.id(),
         "saga_id" => %lock_id,
     );
+
     let locked = osagactx
         .datastore()
         .instance_updater_lock(&opctx, authz_instance, lock_id)
@@ -146,13 +148,16 @@ async fn siu_fetch_state_and_start_real_saga(
         sagactx.saga_params::<Params>()?;
     let osagactx = sagactx.user_data();
     let lock_id = sagactx.lookup::<Uuid>(INSTANCE_LOCK_ID)?;
+
+    let log = osagactx.log();
+
     // Did we get the lock? If so, we can start the next saga, otherwise, just
     // exit gracefully.
     let Some(orig_lock) =
         sagactx.lookup::<Option<instance::UpdaterLock>>(INSTANCE_LOCK)?
     else {
-        slog::info!(
-            osagactx.log(),
+        info!(
+            log,
             "instance update: instance is already locked! doing nothing...";
             "instance_id" => %authz_instance.id(),
             "saga_id" => %lock_id,
@@ -173,10 +178,9 @@ async fn siu_fetch_state_and_start_real_saga(
     // state snapshot. If there are updates to perform, execute the "real"
     // update saga. Otherwise, if we don't need to do anything else, simply
     // release the lock and finish this saga.
-    if let Some(update) = UpdatesRequired::for_snapshot(osagactx.log(), &state)
-    {
+    if let Some(update) = UpdatesRequired::for_snapshot(log, &state) {
         info!(
-            osagactx.log(),
+            log,
             "instance update: starting real update saga...";
             "instance_id" => %authz_instance.id(),
             "current.runtime_state" => ?state.instance.runtime(),
@@ -203,7 +207,7 @@ async fn siu_fetch_state_and_start_real_saga(
             .map_err(ActionError::action_failed)?;
     } else {
         info!(
-            osagactx.log(),
+            log,
             "instance update: no updates required, releasing lock.";
             "instance_id" => %authz_instance.id(),
             "current.runtime_state" => ?state.instance.runtime(),
@@ -211,8 +215,7 @@ async fn siu_fetch_state_and_start_real_saga(
             "current.active_vmm" => ?state.active_vmm,
             "current.target_vmm" => ?state.target_vmm,
         );
-        osagactx
-            .datastore()
+        datastore
             .instance_updater_unlock(&opctx, &authz_instance, &orig_lock, None)
             .await
             .map_err(ActionError::action_failed)?;
