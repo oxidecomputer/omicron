@@ -130,7 +130,7 @@
 //! about distributed locks is that a process can die[^1] while holding a lock,
 //! which results in the protected resource (in this case, the `instance`
 //! record) being locked forever.[^2] It would be good for that to not happen.
-//! Fortunately, *if* (and only if) we promise to *only* ever acquire the the
+//! Fortunately, *if* (and only if) we promise to *only* ever acquire the
 //! instance-updater lock inside of a saga, we can guarantee forward progress:
 //! should a saga fail while holding the lock, it will unwind into a reverse
 //! action that releases the lock. This is essentially the distributed
