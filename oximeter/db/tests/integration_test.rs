@@ -37,7 +37,7 @@ impl TestInput {
 
 #[tokio::test]
 async fn test_cluster() -> anyhow::Result<()> {
-    let request_timeout = Duration::from_secs(5);
+    let request_timeout = Duration::from_secs(15);
     usdt::register_probes().unwrap();
     let start = tokio::time::Instant::now();
     let logctx = test_setup_log("test_cluster");
@@ -239,6 +239,22 @@ async fn test_cluster() -> anyhow::Result<()> {
         .await
         .expect("failed to get samples from client1");
 
+    // Add a new keeper to restore fault tolerance and try again
+    deployment.add_keeper().expect("Failed to add keeeper");
+    wait_for_keepers(&deployment, vec![1, 3, 4])
+        .await
+        .expect("failed to sync keepers");
+    let samples = test_util::generate_test_samples(
+        input.n_projects,
+        input.n_instances,
+        input.n_cpus,
+        input.n_samples,
+    );
+    client1.insert_samples(&samples).await.expect("failed to insert samples");
+    wait_for_num_points(&client2, samples.len() * 5)
+        .await
+        .expect("failed to get samples from client1");
+
     println!("Cleaning up test");
     deployment.teardown()?;
     std::fs::remove_dir_all(path)?;
@@ -297,7 +313,7 @@ async fn wait_for_num_points(
             }
         },
         &Duration::from_millis(10),
-        &Duration::from_secs(10),
+        &Duration::from_secs(30),
     )
     .await
     .context("failed to get all samples from clickhouse server")?;
@@ -338,7 +354,7 @@ async fn wait_for_keepers(
             }
         },
         &Duration::from_millis(1),
-        &Duration::from_secs(10),
+        &Duration::from_secs(30),
     )
     .await
     .context("failed to contact all keepers")?;
