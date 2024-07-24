@@ -176,7 +176,7 @@ async fn switch_zone_setup(
     );
     generate_switch_zone_baseboard_file(&file, info)?;
 
-    info!(&log, "Setting up the users required for wicket and support");
+    info!(log, "Setting up the users required for wicket and support");
     let wicket_user = SwitchZoneUser::new(
         "wicket".to_string(),
         "wicket".to_string(),
@@ -287,7 +287,7 @@ async fn chrony_setup(
 ) -> anyhow::Result<()> {
     println!("running chrony setup: {args:?}");
 
-    generate_chrony_config(args, &log)?;
+    generate_chrony_config(args, log)?;
 
     // The NTP zone delivers a logadm fragment into /etc/logadm.d/ that needs to
     // be added to the system's /etc/logadm.conf. Unfortunately, the service
@@ -519,7 +519,7 @@ async fn common_nw_set_up(
 
     if static_addrs.is_empty() {
         info!(
-            &log,
+            log,
             "No static addresses provided; will not ensure static and \
              auto-configured addresses are set on the IP interface"
         );
@@ -559,55 +559,7 @@ async fn common_nw_set_up(
             );
         }
         Some(gw) => {
-            // Ensuring default route with gateway must happen after peer agents
-            // have been initialized. Omicron zones will be able ensure a
-            // default route with gateway immediately, but the switch zone on
-            // the secondary scrimlet might need a few tries while it waits.
-            retry_notify(
-                  retry_policy_local(),
-                  || async {
-                        info!(
-                            log, "Ensuring there is a default route";
-                            "gateway" => ?gw,
-                        );
-                        Route::ensure_default_route_with_gateway(Gateway::Ipv6(gw))
-                        .map_err(|err| {
-                            let err_with_context = |err: ExecutionError| {
-                                anyhow!(err).context(
-            format!(
-                "failed to ensure default route via gateway {gw}",
-            ))
-                            };
-                            match err {
-                                ExecutionError::CommandFailure(ref e) => {
-                                    if e.stdout.contains("Network is unreachable") {
-                                        BackoffError::transient(
-                                            err_with_context(err),
-                                        )
-                                    } else {
-                                        BackoffError::permanent(
-                                            err_with_context(err),
-                                        )
-                                    }
-                                }
-                                _ => {
-                                    BackoffError::permanent(
-                                        err_with_context(err),
-                                    )
-                                }
-                            }
-                        })
-                },
-                |err, delay| {
-                    info!(
-                        &log,
-                        "Cannot ensure there is a default route yet (retrying in {:?})",
-                        delay;
-                        "error" => ?err
-                    );
-                },
-                )
-                .await?;
+            ensure_default_route_via_gateway_with_retries(gw, log).await?;
         }
     }
 
@@ -631,6 +583,55 @@ async fn common_nw_set_up(
         .with_context(|| format!("failed to write hosts file {HOSTS_FILE}"))?;
 
     Ok(())
+}
+
+async fn ensure_default_route_via_gateway_with_retries(
+    gateway: Ipv6Addr,
+    log: &Logger,
+) -> anyhow::Result<()> {
+    // Helper to attach error context in the retry loop below.
+    let err_with_context = |err: ExecutionError| {
+        anyhow!(err).context(format!(
+            "failed to ensure default route via gateway {gateway}",
+        ))
+    };
+
+    let gateway = Gateway::Ipv6(gateway);
+
+    // Ensuring default route with gateway must happen after peer agents
+    // have been initialized. Omicron zones will be able ensure a
+    // default route with gateway immediately, but the switch zone on
+    // the secondary scrimlet might need a few tries while it waits.
+    retry_notify(
+        retry_policy_local(),
+        || async {
+            info!(
+                log, "Ensuring there is a default route";
+                "gateway" => ?gateway,
+            );
+            Route::ensure_default_route_with_gateway(gateway).map_err(|err| {
+                match err {
+                    ExecutionError::CommandFailure(ref e) => {
+                        if e.stdout.contains("Network is unreachable") {
+                            BackoffError::transient(err_with_context(err))
+                        } else {
+                            BackoffError::permanent(err_with_context(err))
+                        }
+                    }
+                    _ => BackoffError::permanent(err_with_context(err)),
+                }
+            })
+        },
+        |err, delay| {
+            info!(
+                log,
+                "Cannot ensure there is a default route yet (retrying in {:?})",
+                delay;
+                "error" => #%err
+            );
+        },
+    )
+    .await
 }
 
 async fn opte_interface_set_up(
