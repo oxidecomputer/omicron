@@ -242,35 +242,62 @@ impl SwitchZoneUser {
     }
 
     pub fn setup_switch_zone_user(self, log: &Logger) -> anyhow::Result<()> {
-        info!(&log, "Add a new group for the user"; "group" => ?self.group, "user" => ?self.user);
+        info!(
+            log, "Add a new group for the user";
+            "group" => &self.group,
+            "user" => &self.user,
+        );
         self.add_new_group_for_user()?;
 
-        info!(&log, "Add the user"; "user" => ?self.user, "shell" => ?self.shell,
-        "group" => &self.group, "gecos" => &self.gecos);
+        info!(
+            log, "Add the user";
+            "user" => &self.user,
+            "shell" => &self.shell,
+            "group" => &self.group,
+            "gecos" => &self.gecos,
+        );
         self.add_new_user()?;
 
-        // Either enable password-less login (wicket) or disable password-based logins
-        // completely (support, which logs in via ssh key).
+        // Either enable password-less login (wicket) or disable password-based
+        // logins completely (support, which logs in via ssh key).
         if self.nopasswd {
-            info!(&log, "Enable password-less login for user"; "user" => ?self.user);
+            info!(
+                log, "Enable password-less login for user";
+                "user" => &self.user,
+            );
             self.enable_passwordless_login()?;
         } else {
-            info!(&log, "Disable password-based logins"; "user" => ?self.user);
+            info!(
+                log, "Disable password-based logins";
+                "user" => &self.user,
+            );
             self.disable_password_based_login()?;
         };
 
         if let Some(_) = &self.profiles {
-            info!(&log, "Assign user profiles"; "user" => ?self.user, "profiles" => ?self.profiles);
+            info!(
+                log, "Assign user profiles";
+                "user" => &self.user,
+                "profiles" => ?self.profiles,
+            );
             self.assign_user_profiles()?;
         } else {
-            info!(&log, "Remove user profiles"; "user" => ?self.user);
+            info!(
+                log, "Remove user profiles";
+                "user" => &self.user,
+            );
             self.remove_user_profiles()?;
         };
 
         if let Some(_) = self.homedir {
-            info!(&log, "Set up home directory and startup files"; "user" => ?self.user, "home directory" => ?self.homedir);
+            info!(
+                log, "Set up home directory and startup files";
+                "user" => &self.user,
+                "home directory" => ?self.homedir,
+            );
             self.set_up_home_directory_and_startup_files()?;
         }
+
         Ok(())
     }
 }
