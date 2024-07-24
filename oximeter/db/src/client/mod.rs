@@ -51,11 +51,13 @@ use std::ops::Bound;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use std::time::Duration;
 use std::time::Instant;
 use tokio::fs;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 const CLICKHOUSE_DB_MISSING: &'static str = "Database oximeter does not exist";
 const CLICKHOUSE_DB_VERSION_MISSING: &'static str =
     "Table oximeter.version does not exist";
@@ -77,6 +79,7 @@ pub struct Client {
     url: String,
     client: reqwest::Client,
     schema: Mutex<BTreeMap<TimeseriesName, TimeseriesSchema>>,
+    request_timeout: Duration,
 }
 
 impl Client {
@@ -90,7 +93,32 @@ impl Client {
         let client = reqwest::Client::new();
         let url = format!("http://{}", address);
         let schema = Mutex::new(BTreeMap::new());
-        Self { _id: id, log, url, client, schema }
+        Self {
+            _id: id,
+            log,
+            url,
+            client,
+            schema,
+            request_timeout: DEFAULT_REQUEST_TIMEOUT,
+        }
+    }
+
+    /// Construct a new ClickHouse client of the database at `address`, and a
+    /// custom request timeout.
+    pub fn new_with_request_timeout(
+        address: SocketAddr,
+        log: &Logger,
+        request_timeout: Duration,
+    ) -> Self {
+        let id = Uuid::new_v4();
+        let log = log.new(slog::o!(
+            "component" => "clickhouse-client",
+            "id" => id.to_string(),
+        ));
+        let client = reqwest::Client::new();
+        let url = format!("http://{}", address);
+        let schema = Mutex::new(BTreeMap::new());
+        Self { _id: id, log, url, client, schema, request_timeout }
     }
 
     /// Ping the ClickHouse server to verify connectivitiy.
@@ -896,6 +924,7 @@ impl Client {
         let response = self
             .client
             .post(&self.url)
+            .timeout(self.request_timeout)
             .query(&[
                 ("output_format_json_quote_64bit_integers", "0"),
                 // TODO-performance: This is needed to get the correct counts of

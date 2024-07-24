@@ -37,6 +37,7 @@ impl TestInput {
 
 #[tokio::test]
 async fn test_cluster() -> anyhow::Result<()> {
+    let request_timeout = Duration::from_secs(5);
     usdt::register_probes().unwrap();
     let start = tokio::time::Instant::now();
     let logctx = test_setup_log("test_cluster");
@@ -58,8 +59,16 @@ async fn test_cluster() -> anyhow::Result<()> {
         .context("failed to generate config")?;
     deployment.deploy().context("failed to deploy")?;
 
-    let client1 = Client::new(deployment.http_addr(1)?, log);
-    let client2 = Client::new(deployment.http_addr(2)?, log);
+    let client1 = Client::new_with_request_timeout(
+        deployment.http_addr(1)?,
+        log,
+        request_timeout,
+    );
+    let client2 = Client::new_with_request_timeout(
+        deployment.http_addr(2)?,
+        log,
+        request_timeout,
+    );
     wait_for_ping(&client1).await?;
     wait_for_ping(&client2).await?;
     wait_for_keepers(&deployment, (1..=3).collect()).await?;
@@ -122,7 +131,11 @@ async fn test_cluster() -> anyhow::Result<()> {
 
     // Add a 3rd clickhouse server and wait for it to come up
     deployment.add_server().expect("failed to launch a 3rd clickhouse server");
-    let client3 = Client::new(deployment.http_addr(3)?, log);
+    let client3 = Client::new_with_request_timeout(
+        deployment.http_addr(3)?,
+        log,
+        request_timeout,
+    );
     wait_for_ping(&client3).await?;
 
     // We need to initiate copying from existing replicated tables by creating
@@ -198,22 +211,33 @@ async fn test_cluster() -> anyhow::Result<()> {
         .expect("failed to get samples from client1");
 
     println!("Attempting to insert samples without keeper quorum");
+    let samples = test_util::generate_test_samples(
+        input.n_projects,
+        input.n_instances,
+        input.n_cpus,
+        input.n_samples,
+    );
     // We have lost quorum and should not be able to insert
     client1
         .insert_samples(&samples)
         .await
-        .expect_err("Insert succeeded without keeper quorum");
+        .expect_err("insert succeeded without keeper quorum");
 
     // Bringing the keeper back up should allow us to insert again
-    /*    deployment.start_keeper(1).expect("failed to restart keeper");
+    deployment.start_keeper(1).expect("failed to restart keeper");
     wait_for_keepers(&deployment, vec![1, 3])
         .await
         .expect("failed to sync keepers");
+    let samples = test_util::generate_test_samples(
+        input.n_projects,
+        input.n_instances,
+        input.n_cpus,
+        input.n_samples,
+    );
     client1.insert_samples(&samples).await.expect("failed to insert samples");
     wait_for_num_points(&client2, samples.len() * 4)
         .await
         .expect("failed to get samples from client1");
-        */
 
     println!("Cleaning up test");
     deployment.teardown()?;
@@ -262,6 +286,11 @@ async fn wait_for_num_points(
                     poll::CondCheckError::<oximeter_db::Error>::NotYet
                 })?;
             if total_points(&oxql_res) != n_samples {
+                println!(
+                    "received {}, expected {}",
+                    total_points(&oxql_res),
+                    n_samples
+                );
                 Err(poll::CondCheckError::<oximeter_db::Error>::NotYet)
             } else {
                 Ok(())
@@ -271,7 +300,7 @@ async fn wait_for_num_points(
         &Duration::from_secs(10),
     )
     .await
-    .context("failed to ping clickhouse server")?;
+    .context("failed to get all samples from clickhouse server")?;
     Ok(())
 }
 
