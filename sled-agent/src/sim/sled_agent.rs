@@ -866,6 +866,8 @@ impl SledAgent {
                     })
                 })
                 .collect::<Result<Vec<_>, anyhow::Error>>()?,
+            // TODO: Make this more real?
+            datasets: vec![],
         })
     }
 

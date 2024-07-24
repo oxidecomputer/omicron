@@ -19,6 +19,7 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::shared::{
     NetworkInterface, SourceNatConfig,
 };
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
@@ -763,6 +764,49 @@ pub struct InventoryZpool {
     pub total_size: ByteCount,
 }
 
+/// Identifies information about datasets within Oxide-managed zpools
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct InventoryDataset {
+    /// Although datasets mandated by the control plane will have UUIDs,
+    /// datasets can be created (and have been created) without UUIDs.
+    pub id: Option<DatasetUuid>,
+
+    /// This name is the full path of the dataset.
+    // This is akin to [sled_storage::dataset::DatasetName::full_name],
+    // and it's also what you'd see when running "zfs list".
+    pub name: String,
+
+    /// The amount of remaining space usable by the dataset (and children)
+    /// assuming there is no other activity within the pool.
+    pub available: u64,
+
+    /// The amount of space consumed by this dataset and descendents.
+    pub used: u64,
+
+    /// The maximum amount of space usable by a dataset and all descendents.
+    pub quota: Option<u64>,
+
+    /// The minimum amount of space guaranteed to a dataset and descendents.
+    pub reservation: Option<u64>,
+
+    /// The compression algorithm used for this dataset, if any.
+    pub compression: String,
+}
+
+impl From<illumos_utils::zfs::DatasetProperties> for InventoryDataset {
+    fn from(props: illumos_utils::zfs::DatasetProperties) -> Self {
+        Self {
+            id: props.id,
+            name: props.name,
+            available: props.avail,
+            used: props.used,
+            quota: props.quota,
+            reservation: props.reservation,
+            compression: props.compression,
+        }
+    }
+}
+
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct Inventory {
@@ -775,6 +819,7 @@ pub struct Inventory {
     pub reservoir_size: ByteCount,
     pub disks: Vec<InventoryDisk>,
     pub zpools: Vec<InventoryZpool>,
+    pub datasets: Vec<InventoryDataset>,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
