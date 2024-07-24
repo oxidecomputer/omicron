@@ -123,6 +123,7 @@ pub use sled::SledTransition;
 pub use sled::TransitionError;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use virtual_provisioning_collection::StorageType;
+pub use vmm::VmmStateUpdateResult;
 pub use volume::read_only_resources_associated_with_volume;
 pub use volume::CrucibleResources;
 pub use volume::CrucibleTargets;

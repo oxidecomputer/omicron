@@ -7,8 +7,8 @@
 
 pub mod disk;
 pub mod external_ip;
-pub mod instance;
 pub mod ip_pool;
+pub mod vmm;
 #[macro_use]
 mod next_item;
 pub mod network_interface;

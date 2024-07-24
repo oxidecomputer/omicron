@@ -12,25 +12,22 @@ use diesel::sql_types::{Nullable, Uuid as SqlUuid};
 use diesel::{pg::Pg, query_builder::AstPass};
 use diesel::{Column, ExpressionMethods, QueryDsl, RunQueryDsl};
 use nexus_db_model::{
-    schema::{
-        instance::dsl as instance_dsl, migration::dsl as migration_dsl,
-        vmm::dsl as vmm_dsl,
-    },
-    Generation, InstanceRuntimeState, MigrationState, VmmRuntimeState,
+    schema::{migration::dsl as migration_dsl, vmm::dsl as vmm_dsl},
+    Generation, MigrationState, VmmRuntimeState,
 };
 use omicron_common::api::internal::nexus::{MigrationRuntimeState, Migrations};
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid};
+use omicron_uuid_kinds::{GenericUuid, PropolisUuid};
 use uuid::Uuid;
 
 use crate::db::pool::DbConnection;
 use crate::db::update_and_check::UpdateStatus;
 
-/// A CTE that checks and updates the instance and VMM tables in a single
+/// A CTE that checks and updates the VMM and migration tables in a single
 /// atomic operation.
 //
 // The single-table update-and-check CTE has the following form:
 //
-// WITH found   AS (SELECT <primary key> FROM T WHERE <primary key = value>)
+// WITH found  AS (SELECT <primary key> FROM T WHERE <primary key = value>)
 //      updated AS (UPDATE T SET <values> RETURNING *)
 // SELECT
 //      found.<primary key>
@@ -44,48 +41,50 @@ use crate::db::update_and_check::UpdateStatus;
 //      found.<primary_key> = updated.<primary_key>;
 //
 // The idea behind this query is to have separate "found" and "updated"
-// subqueries for the instance and VMM tables, then use those to create two more
+// subqueries for the VMM and migration tables, then use those to create two more
 // subqueries that perform the joins and yield the results, along the following
 // lines:
 //
 // WITH vmm_found AS (SELECT(SELECT id FROM vmm WHERE vmm.id = id) AS id),
 //      vmm_updated AS (UPDATE vmm SET ... RETURNING *),
-//      instance_found AS (SELECT(
-//          SELECT id FROM instance WHERE instance.id = id
+//      migration_in_found AS (SELECT(
+//          SELECT id FROM migration WHERE migration.id = migration_in_id
 //      ) AS id),
-//      instance_updated AS (UPDATE instance SET ... RETURNING *),
+//      migration_in_updated AS (UPDATE migration SET ... RETURNING *),
+//      migration_out_found AS (SELECT(
+//          SELECT id FROM migration WHERE migration.id = migration_out_id
+//      ) AS id),
+//      migration_out_updated AS (UPDATE migration SET ... RETURNING *),
 //      vmm_result AS (
 //          SELECT vmm_found.id AS found, vmm_updated.id AS updated
 //          FROM vmm_found
 //          LEFT JOIN vmm_updated
 //          ON vmm_found.id = vmm_updated.id
 //      ),
-//      instance_result AS (
-//          SELECT instance_found.id AS found, instance_updated.id AS updated
-//          FROM instance_found
-//          LEFT JOIN instance_updated
-//          ON instance_found.id = instance_updated.id
-//      )
-// SELECT vmm_result.found, vmm_result.updated, instance_result.found,
-//        instance_result.updated
-// FROM vmm_result, instance_result;
-///
-/// If a [`MigrationRuntimeState`] is provided, similar "found" and "update"
-/// clauses  are also added to join the `migration` record for the instance's
-/// active migration, if one exists, and update the migration record. If no
-/// migration record is provided, this part of the query is skipped, and the
-/// `migration_found` and `migration_updated` portions are always `false`.
+//      migration_in_result AS (
+//          SELECT migration_in_found.id AS found, migration_in_updated.id AS updated
+//          FROM migration_in_found
+//          LEFT JOIN migration_in_updated
+//          ON migration_in_found.id = migration_in_updated.id
+//      ),
+//      migration_out_result AS ( .. )
+// SELECT vmm_result.found, vmm_result.updated, migration_in_result.found,
+//        migration_in_result.updated, migration_out_result.found,
+//        migration_out_result.updated,
+// FROM vmm_result, migration_in_result, migration_out_result;
 //
-// The "wrapper" SELECTs when finding instances and VMMs are used to get a NULL
+// Depending on whether a migration in, migration out, both, or neither were
+// provided, the structure of the query will differ somewhat.
+//
+// The "wrapper" SELECTs when finding migrations and VMMs are used to get a NULL
 // result in the final output instead of failing the entire query if the target
 // object is missing. This maximizes Nexus's flexibility when dealing with
 // updates from sled agent that refer to one valid and one deleted object. (This
 // can happen if, e.g., sled agent sends a message indicating that a retired VMM
 // has finally been destroyed when its instance has since been deleted.)
-pub struct InstanceAndVmmUpdate {
+pub struct VmmAndMigrationUpdate {
     vmm_find: Box<dyn QueryFragment<Pg> + Send>,
     vmm_update: Box<dyn QueryFragment<Pg> + Send>,
-    instance: Option<Update>,
     migration_in: Option<Update>,
     migration_out: Option<Update>,
 }
@@ -99,12 +98,7 @@ struct Update {
 
 /// Contains the result of a combined instance-and-VMM update operation.
 #[derive(Copy, Clone, PartialEq, Debug)]
-pub struct InstanceAndVmmUpdateResult {
-    /// `Some(status)` if the target instance was found; the wrapped
-    /// `UpdateStatus` indicates whether the row was updated. `None` if the
-    /// instance was not found.
-    pub instance_status: RecordUpdateStatus,
-
+pub struct VmmAndMigrationUpdateResult {
     /// `Some(status)` if the target VMM was found; the wrapped `UpdateStatus`
     /// indicates whether the row was updated. `None` if the VMM was not found.
     pub vmm_status: Option<UpdateStatus>,
@@ -171,11 +165,10 @@ where
     }
 }
 
-impl InstanceAndVmmUpdate {
+impl VmmAndMigrationUpdate {
     pub fn new(
         vmm_id: PropolisUuid,
         new_vmm_runtime_state: VmmRuntimeState,
-        instance: Option<(InstanceUuid, InstanceRuntimeState)>,
         Migrations { migration_in, migration_out }: Migrations<'_>,
     ) -> Self {
         let vmm_find = Box::new(
@@ -191,32 +184,6 @@ impl InstanceAndVmmUpdate {
                 .filter(vmm_dsl::state_generation.lt(new_vmm_runtime_state.gen))
                 .set(new_vmm_runtime_state),
         );
-
-        let instance = instance.map(|(instance_id, new_runtime_state)| {
-            let instance_id = instance_id.into_untyped_uuid();
-            let find = Box::new(
-                instance_dsl::instance
-                    .filter(instance_dsl::id.eq(instance_id))
-                    .select(instance_dsl::id),
-            );
-
-            let update = Box::new(
-                diesel::update(instance_dsl::instance)
-                    .filter(instance_dsl::time_deleted.is_null())
-                    .filter(instance_dsl::id.eq(instance_id))
-                    .filter(
-                        instance_dsl::state_generation
-                            .lt(new_runtime_state.gen),
-                    )
-                    .set(new_runtime_state),
-            );
-            Update {
-                find,
-                update,
-                name: "instance",
-                id: instance_dsl::id::NAME,
-            }
-        });
 
         fn migration_find(
             migration_id: Uuid,
@@ -293,21 +260,18 @@ impl InstanceAndVmmUpdate {
             },
         );
 
-        Self { vmm_find, vmm_update, instance, migration_in, migration_out }
+        Self { vmm_find, vmm_update, migration_in, migration_out }
     }
 
     pub async fn execute_and_check(
         self,
         conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection> + Sync),
-    ) -> Result<InstanceAndVmmUpdateResult, DieselError> {
+    ) -> Result<VmmAndMigrationUpdateResult, DieselError> {
         let has_migration_in = self.migration_in.is_some();
         let has_migration_out = self.migration_out.is_some();
-        let has_instance = self.instance.is_some();
         let (
             vmm_found,
             vmm_updated,
-            instance_found,
-            instance_updated,
             migration_in_found,
             migration_in_updated,
             migration_out_found,
@@ -320,21 +284,11 @@ impl InstanceAndVmmUpdate {
                 Option<Uuid>,
                 Option<Uuid>,
                 Option<Uuid>,
-                Option<Uuid>,
-                Option<Uuid>,
                 // WHEW!
             )>(conn)
             .await?;
 
         let vmm_status = compute_update_status(vmm_found, vmm_updated);
-
-        let instance_status = if has_instance {
-            compute_update_status(instance_found, instance_updated)
-                .map(RecordUpdateStatus::Found)
-                .unwrap_or(RecordUpdateStatus::NotFound)
-        } else {
-            RecordUpdateStatus::NotProvided
-        };
 
         let migration_in_status = if has_migration_in {
             compute_update_status(migration_in_found, migration_in_updated)
@@ -352,8 +306,7 @@ impl InstanceAndVmmUpdate {
             RecordUpdateStatus::NotProvided
         };
 
-        Ok(InstanceAndVmmUpdateResult {
-            instance_status,
+        Ok(VmmAndMigrationUpdateResult {
             vmm_status,
             migration_in_status,
             migration_out_status,
@@ -361,15 +314,13 @@ impl InstanceAndVmmUpdate {
     }
 }
 
-impl QueryId for InstanceAndVmmUpdate {
+impl QueryId for VmmAndMigrationUpdate {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
 }
 
-impl Query for InstanceAndVmmUpdate {
+impl Query for VmmAndMigrationUpdate {
     type SqlType = (
-        Nullable<SqlUuid>,
-        Nullable<SqlUuid>,
         Nullable<SqlUuid>,
         Nullable<SqlUuid>,
         Nullable<SqlUuid>,
@@ -379,7 +330,7 @@ impl Query for InstanceAndVmmUpdate {
     );
 }
 
-impl RunQueryDsl<DbConnection> for InstanceAndVmmUpdate {}
+impl RunQueryDsl<DbConnection> for VmmAndMigrationUpdate {}
 
 impl Update {
     fn push_subqueries<'b>(
@@ -422,13 +373,9 @@ impl Update {
     }
 }
 
-impl QueryFragment<Pg> for InstanceAndVmmUpdate {
+impl QueryFragment<Pg> for VmmAndMigrationUpdate {
     fn walk_ast<'b>(&'b self, mut out: AstPass<'_, 'b, Pg>) -> QueryResult<()> {
         out.push_sql("WITH ");
-        if let Some(ref instance) = self.instance {
-            instance.push_subqueries(&mut out)?;
-            out.push_sql(", ");
-        }
 
         if let Some(ref m) = self.migration_in {
             m.push_subqueries(&mut out)?;
@@ -474,17 +421,12 @@ impl QueryFragment<Pg> for InstanceAndVmmUpdate {
         }
 
         out.push_sql("SELECT vmm_result.found, vmm_result.updated, ");
-        push_select_from_result(self.instance.as_ref(), &mut out);
-        out.push_sql(", ");
         push_select_from_result(self.migration_in.as_ref(), &mut out);
         out.push_sql(", ");
         push_select_from_result(self.migration_out.as_ref(), &mut out);
         out.push_sql(" ");
 
         out.push_sql("FROM vmm_result");
-        if self.instance.is_some() {
-            out.push_sql(", instance_result");
-        }
         if self.migration_in.is_some() {
             out.push_sql(", migration_in_result");
         }
@@ -530,52 +472,19 @@ mod test {
         }
     }
 
-    fn mk_instance_state() -> (InstanceUuid, InstanceRuntimeState) {
-        let id = InstanceUuid::nil();
-        let state = InstanceRuntimeState {
-            time_updated: Utc::now(),
-            gen: Generation::new(),
-            propolis_id: Some(Uuid::nil()),
-            dst_propolis_id: Some(Uuid::nil()),
-            migration_id: Some(Uuid::nil()),
-            nexus_state: nexus_db_model::InstanceState::Vmm,
-        };
-        (id, state)
-    }
-
     #[tokio::test]
     async fn expectorate_query_only_vmm() {
         let vmm_id = PropolisUuid::nil();
         let vmm_state = mk_vmm_state();
 
-        let query = InstanceAndVmmUpdate::new(
+        let query = VmmAndMigrationUpdate::new(
             vmm_id,
             vmm_state,
-            None,
             Migrations::default(),
         );
         expectorate_query_contents(
             &query,
-            "tests/output/instance_and_vmm_update_vmm_only.sql",
-        )
-        .await;
-    }
-
-    #[tokio::test]
-    async fn expectorate_query_vmm_and_instance() {
-        let vmm_id = PropolisUuid::nil();
-        let vmm_state = mk_vmm_state();
-        let instance = mk_instance_state();
-
-        let query = InstanceAndVmmUpdate::new(
-            vmm_id,
-            vmm_state,
-            Some(instance),
-            Migrations::default(),
-        );
-        expectorate_query_contents(
-            &query,
-            "tests/output/instance_and_vmm_update_vmm_and_instance.sql",
+            "tests/output/vmm_and_migration_update_vmm_only.sql",
         )
         .await;
     }
@@ -586,35 +495,14 @@ mod test {
         let vmm_state = mk_vmm_state();
         let migration = mk_migration_state();
 
-        let query = InstanceAndVmmUpdate::new(
+        let query = VmmAndMigrationUpdate::new(
             vmm_id,
             vmm_state,
-            None,
             Migrations { migration_in: Some(&migration), migration_out: None },
         );
         expectorate_query_contents(
             &query,
-            "tests/output/instance_and_vmm_update_vmm_and_migration_in.sql",
-        )
-        .await;
-    }
-
-    #[tokio::test]
-    async fn expectorate_query_vmm_instance_and_migration_in() {
-        let vmm_id = PropolisUuid::nil();
-        let vmm_state = mk_vmm_state();
-        let instance = mk_instance_state();
-        let migration = mk_migration_state();
-
-        let query = InstanceAndVmmUpdate::new(
-            vmm_id,
-            vmm_state,
-            Some(instance),
-            Migrations { migration_in: Some(&migration), migration_out: None },
-        );
-        expectorate_query_contents(
-            &query,
-            "tests/output/instance_and_vmm_update_vmm_instance_and_migration_in.sql",
+            "tests/output/vmm_and_migration_update_vmm_and_migration_in.sql",
         )
         .await;
     }
@@ -625,35 +513,14 @@ mod test {
         let vmm_state = mk_vmm_state();
         let migration = mk_migration_state();
 
-        let query = InstanceAndVmmUpdate::new(
+        let query = VmmAndMigrationUpdate::new(
             vmm_id,
             vmm_state,
-            None,
             Migrations { migration_out: Some(&migration), migration_in: None },
         );
         expectorate_query_contents(
             &query,
-            "tests/output/instance_and_vmm_update_vmm_and_migration_out.sql",
-        )
-        .await;
-    }
-
-    #[tokio::test]
-    async fn expectorate_query_vmm_instance_and_migration_out() {
-        let vmm_id = PropolisUuid::nil();
-        let vmm_state = mk_vmm_state();
-        let instance = mk_instance_state();
-        let migration = mk_migration_state();
-
-        let query = InstanceAndVmmUpdate::new(
-            vmm_id,
-            vmm_state,
-            Some(instance),
-            Migrations { migration_out: Some(&migration), migration_in: None },
-        );
-        expectorate_query_contents(
-            &query,
-            "tests/output/instance_and_vmm_update_vmm_instance_and_migration_out.sql",
+            "tests/output/vmm_and_migration_update_vmm_and_migration_out.sql",
         )
         .await;
     }
@@ -665,10 +532,9 @@ mod test {
         let migration_in = mk_migration_state();
         let migration_out = mk_migration_state();
 
-        let query = InstanceAndVmmUpdate::new(
+        let query = VmmAndMigrationUpdate::new(
             vmm_id,
             vmm_state,
-            None,
             Migrations {
                 migration_in: Some(&migration_in),
                 migration_out: Some(&migration_out),
@@ -676,31 +542,7 @@ mod test {
         );
         expectorate_query_contents(
             &query,
-            "tests/output/instance_and_vmm_update_vmm_and_both_migrations.sql",
-        )
-        .await;
-    }
-
-    #[tokio::test]
-    async fn expectorate_query_vmm_instance_and_both_migrations() {
-        let vmm_id = PropolisUuid::nil();
-        let vmm_state = mk_vmm_state();
-        let instance = mk_instance_state();
-        let migration_in = mk_migration_state();
-        let migration_out = mk_migration_state();
-
-        let query = InstanceAndVmmUpdate::new(
-            vmm_id,
-            vmm_state,
-            Some(instance),
-            Migrations {
-                migration_in: Some(&migration_in),
-                migration_out: Some(&migration_out),
-            },
-        );
-        expectorate_query_contents(
-            &query,
-            "tests/output/instance_and_vmm_update_vmm_instance_and_both_migrations.sql",
+            "tests/output/vmm_and_migration_update_vmm_and_both_migrations.sql",
         )
         .await;
     }
