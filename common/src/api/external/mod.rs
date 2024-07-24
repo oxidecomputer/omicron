@@ -310,7 +310,6 @@ impl JsonSchema for Name {
             ),
             ..Default::default()
         })
-        .into()
     }
 }
 
@@ -432,7 +431,6 @@ impl JsonSchema for UserId {
             ),
             ..Default::default()
         })
-        .into()
     }
 }
 
