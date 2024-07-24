@@ -36,7 +36,6 @@ use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_model::ApplySledFilterExt;
 use nexus_db_model::Disk;
-use nexus_db_model::VmmRuntimeState;
 use nexus_types::deployment::SledFilter;
 use omicron_common::api;
 use omicron_common::api::external;
@@ -49,7 +48,6 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
-use omicron_common::api::internal::nexus::Migrations;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -241,18 +239,6 @@ pub enum UpdaterLockError {
     /// An error occurred executing the query.
     #[error("error locking instance: {0}")]
     Query(#[from] Error),
-}
-
-/// The result of an [`DataStore::instance_and_vmm_update_runtime`] call,
-/// indicating which records were updated.
-#[derive(Copy, Clone, Debug)]
-pub struct InstanceUpdateResult {
-    /// `true` if the instance record was updated, `false` otherwise.
-    pub instance_updated: bool,
-    /// `true` if the VMM record was updated, `false` otherwise.
-    pub vmm_updated: bool,
-    pub migration_in_updated: bool,
-    pub migration_out_updated: bool,
 }
 
 impl DataStore {
@@ -1201,6 +1187,7 @@ mod tests {
     use crate::db::lookup::LookupPath;
     use nexus_db_model::InstanceState;
     use nexus_db_model::Project;
+    use nexus_db_model::VmmRuntimeState;
     use nexus_db_model::VmmState;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;

@@ -55,8 +55,6 @@ SELECT
   vmm_result.updated,
   NULL,
   NULL,
-  NULL,
-  NULL,
   migration_out_result.found,
   migration_out_result.updated
 FROM

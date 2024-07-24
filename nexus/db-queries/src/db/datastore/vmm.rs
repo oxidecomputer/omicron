@@ -7,7 +7,6 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::datastore::instance::InstanceUpdateResult;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::Vmm;
@@ -33,6 +32,22 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use std::net::SocketAddr;
 use uuid::Uuid;
+
+/// The result of an [`DataStore::vmm_and_migration_update_runtime`] call,
+/// indicating which records were updated.
+#[derive(Copy, Clone, Debug)]
+pub struct VmmStateUpdateResult {
+    /// `true` if the VMM record was updated, `false` otherwise.
+    pub vmm_updated: bool,
+
+    /// `true` if a migration record was updated for the migration in, false if
+    /// no update was performed or no migration in was provided.
+    pub migration_in_updated: bool,
+
+    /// `true` if a migration record was updated for the migration out, false if
+    /// no update was performed or no migration out was provided.
+    pub migration_out_updated: bool,
+}
 
 impl DataStore {
     pub async fn vmm_insert(
@@ -143,20 +158,44 @@ impl DataStore {
         Ok(updated)
     }
 
+    /// Updates a VMM record and associated migration record(s) with a single
+    /// database command.
+    ///
+    /// This is intended to be used to apply updates from sled agent that
+    /// may change a VMM's runtime state (e.g. moving an instance from Running
+    /// to Stopped) and the state of its current active mgiration in a single
+    /// transaction. The caller is responsible for ensuring the VMM and
+    /// migration states are consistent with each other before calling this
+    /// routine.
+    ///
+    /// # Arguments
+    ///
+    /// - `vmm_id`: The ID of the VMM to update.
+    /// - `new_runtime`: The new VMM runtime state to try to write.
+    /// - `migrations`: The (optional) migration-in and migration-out states to
+    ///   try to write.
+    ///
+    /// # Return value
+    ///
+    /// - `Ok(`[`VmmStateUpdateResult`]`)` if the query was issued
+    ///   successfully. The returned [`VmmStateUpdateResult`] indicates which
+    ///   database record(s) were updated. Note that an update can fail because
+    ///   it was inapplicable (i.e. the database has state with a newer
+    ///   generation already) or because the relevant record was not found.
+    /// - `Err` if another error occurred while accessing the database.
     pub async fn vmm_and_migration_update_runtime(
         &self,
         vmm_id: PropolisUuid,
         new_runtime: &VmmRuntimeState,
         migrations: Migrations<'_>,
-    ) -> Result<InstanceUpdateResult, Error> {
-        let query = crate::db::queries::instance::InstanceAndVmmUpdate::new(
+    ) -> Result<VmmStateUpdateResult, Error> {
+        let query = crate::db::queries::vmm::VmmAndMigrationUpdate::new(
             vmm_id,
             new_runtime.clone(),
-            None,
             migrations,
         );
 
-        // The InstanceAndVmmUpdate query handles and indicates failure to find
+        // The VmmAndMigrationUpdate query handles and indicates failure to find
         // either the VMM or the migration, so a query failure here indicates
         // some kind of internal error and not a failed lookup.
         let result = query
@@ -164,8 +203,7 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        Ok(InstanceUpdateResult {
-            instance_updated: false,
+        Ok(VmmStateUpdateResult {
             vmm_updated: match result.vmm_status {
                 Some(UpdateStatus::Updated) => true,
                 Some(UpdateStatus::NotUpdatedButExists) => false,
