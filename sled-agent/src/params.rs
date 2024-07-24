@@ -257,7 +257,7 @@ pub struct Zpool {
 /// Extension trait for `OmicronZoneConfig`.
 ///
 /// This lives here because it is pretty specific to sled-agent, and also
-/// requires extra dependencies that omicron-common-extended doesn't have
+/// requires extra dependencies that nexus-sled-agent-shared doesn't have.
 pub(crate) trait OmicronZoneConfigExt {
     fn zone_name(&self) -> String;
 }
@@ -274,7 +274,7 @@ impl OmicronZoneConfigExt for OmicronZoneConfig {
 /// Extension trait for `OmicronZoneType` and `OmicronZoneConfig`.
 ///
 /// This lives here because it requires extra dependencies that
-/// omicron-common-extended doesn't have.
+/// nexus-sled-agent-shared doesn't have.
 pub(crate) trait OmicronZoneTypeExt {
     fn as_omicron_zone_type(&self) -> &OmicronZoneType;
 
