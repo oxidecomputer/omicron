@@ -102,50 +102,62 @@ ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_cumulativef64
  * already has the key. Realistically though, these tables are quite small and
  * so performance benefits will be low in absolute terms.
  */
-CREATE TABLE IF NOT EXISTS oximeter.fields_i64 ON CLUSTER oximeter_cluster
+CREATE TABLE IF NOT EXISTS oximeter.fields_i64_local ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
     field_value Int64
 )
-ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/fields_i64', '{replica}')
+ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/fields_i64_local', '{replica}')
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 
-CREATE TABLE IF NOT EXISTS oximeter.fields_ipaddr ON CLUSTER oximeter_cluster
+CREATE TABLE IF NOT EXISTS oximeter.fields_i64 ON CLUSTER oximeter_cluster AS oximeter.fields_i64_local
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'fields_i64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
+
+CREATE TABLE IF NOT EXISTS oximeter.fields_ipaddr_local ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
     field_value IPv6
 )
-ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/fields_ipaddr', '{replica}')
+ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/fields_ipaddr_local', '{replica}')
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 
-CREATE TABLE IF NOT EXISTS oximeter.fields_string ON CLUSTER oximeter_cluster
+CREATE TABLE IF NOT EXISTS oximeter.fields_ipaddr ON CLUSTER oximeter_cluster AS oximeter.fields_ipaddr_local
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'fields_ipaddr_local', xxHash64(splitByChar(':', timeseries_name)[1]));
+
+CREATE TABLE IF NOT EXISTS oximeter.fields_string_local ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
     field_value String
 )
-ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/fields_string', '{replica}')
+ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/fields_string_local', '{replica}')
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 
-CREATE TABLE IF NOT EXISTS oximeter.fields_uuid ON CLUSTER oximeter_cluster
+CREATE TABLE IF NOT EXISTS oximeter.fields_string ON CLUSTER oximeter_cluster AS oximeter.fields_string_local
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'fields_string_local', xxHash64(splitByChar(':', timeseries_name)[1]));
+
+CREATE TABLE IF NOT EXISTS oximeter.fields_uuid_local ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
     field_value UUID
 )
-ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/fields_uuid', '{replica}')
+ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/fields_uuid_local', '{replica}')
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+
+CREATE TABLE IF NOT EXISTS oximeter.fields_uuid ON CLUSTER oximeter_cluster AS oximeter.fields_uuid_local
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'fields_uuid_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
 /* The timeseries schema table stores the extracted schema for the samples
  * oximeter collects.
  */
-CREATE TABLE IF NOT EXISTS oximeter.timeseries_schema ON CLUSTER oximeter_cluster
+CREATE TABLE IF NOT EXISTS oximeter.timeseries_schema_local ON CLUSTER oximeter_cluster
 (
     timeseries_name String,
     fields Nested(
@@ -200,5 +212,8 @@ CREATE TABLE IF NOT EXISTS oximeter.timeseries_schema ON CLUSTER oximeter_cluste
     ),
     created DateTime64(9, 'UTC')
 )
-ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/timeseries_schema', '{replica}')
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/timeseries_schema_local', '{replica}')
 ORDER BY (timeseries_name, fields.name);
+
+CREATE TABLE IF NOT EXISTS oximeter.timeseries_schema ON CLUSTER oximeter_cluster AS oximeter.timeseries_schema_local
+ENGINE = Distributed('oximeter_cluster', 'oximeter', 'timeseries_schema_local', xxHash64(splitByChar(':', timeseries_name)[1]));
