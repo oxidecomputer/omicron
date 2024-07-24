@@ -1496,8 +1496,9 @@ pub struct VpcFirewallRulePriority(pub u16);
 /// matching ALL filters. The maximum number of each type of filter is 256.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleFilter {
-    /// If present, the sources (if incoming) or destinations (if outgoing)
-    /// this rule applies to.
+    /// If present, host filters match the "other end" of traffic from the
+    /// target’s perspective: for an inbound rule, they match the source of
+    /// traffic. For an outbound rule, they match the destination.
     #[schemars(length(max = 256))]
     pub hosts: Option<Vec<VpcFirewallRuleHostFilter>>,
 
@@ -1505,7 +1506,7 @@ pub struct VpcFirewallRuleFilter {
     #[schemars(length(max = 256))]
     pub protocols: Option<Vec<VpcFirewallRuleProtocol>>,
 
-    /// If present, the destination ports this rule applies to.
+    /// If present, the destination ports or port ranges this rule applies to.
     #[schemars(length(max = 256))]
     pub ports: Option<Vec<L4PortRange>>,
 }
@@ -1704,7 +1705,7 @@ impl JsonSchema for L4PortRange {
                 title: Some("A range of IP ports".to_string()),
                 description: Some(
                     "An inclusive-inclusive range of IP ports. The second port \
-                    may be omitted to represent a single port"
+                    may be omitted to represent a single port."
                         .to_string(),
                 ),
                 examples: vec!["22".into(), "6667-7000".into()],

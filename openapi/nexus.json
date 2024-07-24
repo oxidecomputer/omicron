@@ -8297,7 +8297,7 @@
           "vpcs"
         ],
         "summary": "Replace firewall rules",
-        "description": "The maximum number of rules is 1024. The maximum number of targets and each type of filter is 256.",
+        "description": "The maximum number of rules per VPC is 1024.\nTargets are used to specify the set of instances to which a firewall rule applies. You can target instances directly by name, or specify a VPC, VPC subnet, IP, or IP subnet, which will apply the rule to traffic going to all matching instances. Targets are additive: the rule applies to instances matching ANY target. The maximum number of targets is 256.\nFilters reduce the scope of a firewall rule. Without filters, the rule applies to all packets to the targets (or from the targets, if it's an outbound rule). With multiple filters, the rule applies only to packets matching ALL filters. The maximum number of each type of filter is 256.",
         "operationId": "vpc_firewall_rules_update",
         "parameters": [
           {
@@ -16027,7 +16027,7 @@
       "L4PortRange": {
         "example": "22",
         "title": "A range of IP ports",
-        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port",
+        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port.",
         "type": "string",
         "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
         "minLength": 1,
@@ -20444,7 +20444,7 @@
         "properties": {
           "hosts": {
             "nullable": true,
-            "description": "If present, the sources (if incoming) or destinations (if outgoing) this rule applies to.",
+            "description": "If present, host filters match the \"other end\" of traffic from the target’s perspective: for an inbound rule, they match the source of traffic. For an outbound rule, they match the destination.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRuleHostFilter"
@@ -20453,7 +20453,7 @@
           },
           "ports": {
             "nullable": true,
-            "description": "If present, the destination ports this rule applies to.",
+            "description": "If present, the destination ports or port ranges this rule applies to.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/L4PortRange"
