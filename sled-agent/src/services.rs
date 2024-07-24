@@ -43,7 +43,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
 use dropshot::HandlerTaskMode;
 use illumos_utils::addrobj::AddrObject;
-use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
+use illumos_utils::addrobj::IPV6_LINK_LOCAL_ADDROBJ_NAME;
 use illumos_utils::dladm::{
     Dladm, Etherstub, EtherstubVnic, GetSimnetError, PhysicalLink,
 };
@@ -2879,7 +2879,7 @@ impl ServiceManager {
                                             // cabled together.
                                             AddrObject::new(
                                                 &format!("tfportrear{}_0", i),
-                                                IPV6_LINK_LOCAL_NAME,
+                                                IPV6_LINK_LOCAL_ADDROBJ_NAME,
                                             )
                                             .unwrap()
                                         })
@@ -2891,7 +2891,7 @@ impl ServiceManager {
                                         .map(|i| {
                                             AddrObject::new(
                                                 &i.to_string(),
-                                                IPV6_LINK_LOCAL_NAME,
+                                                IPV6_LINK_LOCAL_ADDROBJ_NAME,
                                             )
                                             .unwrap()
                                         })
@@ -3648,7 +3648,7 @@ impl ServiceManager {
                 }
             }
             Err(e) => {
-                info!(self.inner.log, "chronyc command failed: {}", e);
+                error!(self.inner.log, "chronyc command failed: {}", e);
                 Err(Error::NtpZoneNotReady)
             }
         }
