@@ -119,13 +119,13 @@ mod tests {
     use super::*;
     use nexus_db_model::Zpool;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::BlueprintZoneType;
     use omicron_common::zpool_name::ZpoolName;
-    use omicron_common_extended::inventory::OmicronZoneDataset;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use uuid::Uuid;
@@ -153,7 +153,10 @@ mod tests {
 
         // Record the sleds and zpools.
         crate::tests::insert_sled_records(datastore, &blueprint).await;
-        crate::tests::insert_zpool_records(datastore, opctx, &blueprint).await;
+        crate::tests::create_disks_for_zones_using_datasets(
+            datastore, opctx, &blueprint,
+        )
+        .await;
 
         // Prior to ensuring datasets exist, there should be none.
         assert_eq!(

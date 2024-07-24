@@ -238,11 +238,11 @@ mod tests {
     use httptest::Expectation;
     use nexus_db_queries::db::datastore::pub_test_utils::datastore_test;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use omicron_common::zpool_name::ZpoolName;
-    use omicron_common_extended::inventory::OmicronZoneDataset;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;

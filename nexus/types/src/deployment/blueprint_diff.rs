@@ -11,9 +11,9 @@ use super::blueprint_display::{
     BpSledSubtableRow, KvListWithHeading, KvPair,
 };
 use super::{zone_sort_key, CockroachDbPreserveDowngrade};
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
-use omicron_common_extended::inventory::ZoneKind;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::{BTreeMap, BTreeSet};

@@ -1,9 +1,9 @@
-# omicron-common-extended
+# nexus-sled-agent-shared
 
-Shared non-public types used by Omicron, with extra dependencies not in
-omicron-common.
+Internal types shared between Nexus and sled-agent, with extra dependencies not
+in omicron-common.
 
-This crate should only be used for internal types and data structures.
+**This crate should only be used for internal types and data structures.**
 
 ## Why not omicron-common?
 
@@ -23,8 +23,7 @@ once with the feature and once without. A separate crate avoids that.
 
 `nexus-config` is a similar crate that was split out of `omicron-common` for
 dependency reasons. However, `nexus-config` depends on the rather heavyweight
-tokio-postgres, a dependency that is not a necessary component of (say)
-sled-agent.
+tokio-postgres, a dependency that is not a necessary component of sled-agent.
 
 ## Why not sled-agent-types or nexus-types?
 

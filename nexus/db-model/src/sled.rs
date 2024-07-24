@@ -10,12 +10,12 @@ use crate::sled::shared::Baseboard;
 use crate::sled_policy::DbSledPolicy;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
+use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::{
     external_api::{shared, views},
     identity::Asset,
     internal_api::params,
 };
-use omicron_common_extended::inventory::SledRole;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;

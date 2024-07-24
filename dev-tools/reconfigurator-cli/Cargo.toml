@@ -21,9 +21,9 @@ humantime.workspace = true
 indexmap.workspace = true
 nexus-reconfigurator-planning.workspace = true
 nexus-reconfigurator-execution.workspace = true
+nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
-omicron-common-extended.workspace = true
 omicron-uuid-kinds.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"

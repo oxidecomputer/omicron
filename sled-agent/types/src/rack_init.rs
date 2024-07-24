@@ -11,6 +11,7 @@ use std::{
 
 use anyhow::{bail, Result};
 use camino::{Utf8Path, Utf8PathBuf};
+pub use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
 use omicron_common::{
     address::{
         get_64_subnet, IpRange, Ipv6Subnet, AZ_PREFIX, RACK_PREFIX, SLED_PREFIX,
@@ -20,7 +21,6 @@ use omicron_common::{
         internal::{nexus::Certificate, shared::RackNetworkConfig},
     },
 };
-pub use omicron_common_extended::recovery_silo::RecoverySiloConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware_types::Baseboard;

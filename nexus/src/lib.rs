@@ -252,7 +252,7 @@ impl nexus_test_interface::NexusServer for Server {
         datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
         internal_dns_zone_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
-        recovery_silo: omicron_common_extended::recovery_silo::RecoverySiloConfig,
+        recovery_silo: nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
         certs: Vec<omicron_common::api::internal::nexus::Certificate>,
         disable_sled_id: Uuid,
     ) -> Self {

@@ -124,6 +124,7 @@ mod test {
     };
     use nexus_db_queries::authn;
     use nexus_db_queries::context::OpContext;
+    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::{
@@ -134,7 +135,6 @@ mod test {
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
-    use omicron_common_extended::inventory::OmicronZoneDataset;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;

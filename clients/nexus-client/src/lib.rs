@@ -40,7 +40,7 @@ progenitor::generate_api!(
         NewPasswordHash = omicron_passwords::NewPasswordHash,
         OmicronPhysicalDiskConfig = nexus_types::disk::OmicronPhysicalDiskConfig,
         OmicronPhysicalDisksConfig = nexus_types::disk::OmicronPhysicalDisksConfig,
-        RecoverySiloConfig = omicron_common_extended::recovery_silo::RecoverySiloConfig,
+        RecoverySiloConfig = nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
         TypedUuidForCollectionKind = omicron_uuid_kinds::CollectionUuid,
         TypedUuidForDownstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::DownstairsKind>,
         TypedUuidForPropolisKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::PropolisKind>,

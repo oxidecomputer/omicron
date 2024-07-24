@@ -20,6 +20,7 @@ use dropshot::RequestContext;
 use dropshot::TypedBody;
 use dropshot::{endpoint, ApiDescriptionRegisterError};
 use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
+use nexus_sled_agent_shared::inventory::{Inventory, OmicronZonesConfig};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
@@ -27,7 +28,6 @@ use omicron_common::api::internal::shared::{
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
 };
 use omicron_common::disk::OmicronPhysicalDisksConfig;
-use omicron_common_extended::inventory::{Inventory, OmicronZonesConfig};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

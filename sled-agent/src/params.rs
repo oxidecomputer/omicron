@@ -9,6 +9,7 @@ pub use crate::zone_bundle::ZoneBundleMetadata;
 pub use illumos_utils::opte::params::DhcpConfig;
 pub use illumos_utils::opte::params::VpcFirewallRule;
 pub use illumos_utils::opte::params::VpcFirewallRulesEnsureBody;
+use nexus_sled_agent_shared::inventory::{OmicronZoneConfig, OmicronZoneType};
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, InstanceProperties, InstanceRuntimeState,
     SledInstanceState, VmmRuntimeState,
@@ -17,7 +18,6 @@ use omicron_common::api::internal::shared::{
     NetworkInterface, SourceNatConfig,
 };
 use omicron_common::disk::DiskVariant;
-use omicron_common_extended::inventory::{OmicronZoneConfig, OmicronZoneType};
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;

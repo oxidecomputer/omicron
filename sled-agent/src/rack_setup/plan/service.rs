@@ -10,6 +10,9 @@ use dns_service_client::types::DnsConfigParams;
 use illumos_utils::zpool::ZpoolName;
 use internal_dns::config::{Host, Zone};
 use internal_dns::ServiceName;
+use nexus_sled_agent_shared::inventory::{
+    Inventory, OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType, SledRole,
+};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
     COCKROACHDB_REDUNDANCY, DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT,
@@ -28,9 +31,6 @@ use omicron_common::disk::{
     DiskVariant, OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
-use omicron_common_extended::inventory::{
-    Inventory, OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType, SledRole,
-};
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, SledUuid, ZpoolUuid};
 use rand::prelude::SliceRandom;
 use schemars::JsonSchema;

@@ -9,11 +9,11 @@
 //! that is not needed by sled-agent.
 
 use super::OmicronZoneExternalIp;
+use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+use nexus_sled_agent_shared::inventory::OmicronZoneType;
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::NetworkInterface;
-use omicron_common_extended::inventory::OmicronZoneDataset;
-use omicron_common_extended::inventory::OmicronZoneType;
-use omicron_common_extended::inventory::ZoneKind;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -251,8 +251,8 @@ pub mod blueprint_zone_type {
     use crate::deployment::OmicronZoneExternalFloatingAddr;
     use crate::deployment::OmicronZoneExternalFloatingIp;
     use crate::deployment::OmicronZoneExternalSnatIp;
+    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use omicron_common::api::internal::shared::NetworkInterface;
-    use omicron_common_extended::inventory::OmicronZoneDataset;
     use schemars::JsonSchema;
     use serde::Deserialize;
     use serde::Serialize;

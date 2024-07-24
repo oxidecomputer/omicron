@@ -18,10 +18,10 @@ use nexus_db_model::Ipv4NatValues;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
-use omicron_common::address::{MAX_PORT, MIN_PORT};
-use omicron_common_extended::inventory::{
+use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
+use omicron_common::address::{MAX_PORT, MIN_PORT};
 use omicron_uuid_kinds::GenericUuid;
 use serde_json::json;
 use std::net::{IpAddr, SocketAddr};

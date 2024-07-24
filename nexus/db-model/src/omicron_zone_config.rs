@@ -15,6 +15,9 @@ use crate::inventory::ZoneType;
 use crate::{ipv6, MacAddr, Name, SqlU16, SqlU32, SqlU8};
 use anyhow::{anyhow, bail, ensure, Context};
 use ipnetwork::IpNetwork;
+use nexus_sled_agent_shared::inventory::{
+    OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
+};
 use nexus_types::deployment::{
     blueprint_zone_type, BlueprintZoneDisposition, BlueprintZoneType,
     OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
@@ -23,9 +26,6 @@ use nexus_types::deployment::{
 use nexus_types::inventory::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::zpool_name::ZpoolName;
-use omicron_common_extended::inventory::{
-    OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
-};
 use omicron_uuid_kinds::{
     ExternalIpUuid, GenericUuid, OmicronZoneUuid, SledUuid, ZpoolUuid,
 };

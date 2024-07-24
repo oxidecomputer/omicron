@@ -309,6 +309,9 @@ mod test {
     use httptest::matchers::{all_of, json_decoded, request};
     use httptest::responders::{json_encoded, status_code};
     use httptest::Expectation;
+    use nexus_sled_agent_shared::inventory::{
+        OmicronZoneDataset, OmicronZonesConfig,
+    };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
         blueprint_zone_type, Blueprint, BlueprintTarget,
@@ -316,9 +319,6 @@ mod test {
     };
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
-    use omicron_common_extended::inventory::{
-        OmicronZoneDataset, OmicronZonesConfig,
-    };
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;

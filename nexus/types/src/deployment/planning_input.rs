@@ -347,6 +347,9 @@ pub enum DiskFilter {
 
     /// All disks which are in-service.
     InService,
+
+    /// All disks which are expunged but still active.
+    ExpungedButActive,
 }
 
 impl DiskFilter {
@@ -366,10 +369,12 @@ impl PhysicalDiskPolicy {
             PhysicalDiskPolicy::InService => match filter {
                 DiskFilter::All => true,
                 DiskFilter::InService => true,
+                DiskFilter::ExpungedButActive => false,
             },
             PhysicalDiskPolicy::Expunged => match filter {
                 DiskFilter::All => true,
                 DiskFilter::InService => false,
+                DiskFilter::ExpungedButActive => true,
             },
         }
     }
@@ -391,10 +396,12 @@ impl PhysicalDiskState {
             PhysicalDiskState::Active => match filter {
                 DiskFilter::All => true,
                 DiskFilter::InService => true,
+                DiskFilter::ExpungedButActive => true,
             },
             PhysicalDiskState::Decommissioned => match filter {
                 DiskFilter::All => true,
                 DiskFilter::InService => false,
+                DiskFilter::ExpungedButActive => false,
             },
         }
     }

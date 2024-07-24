@@ -28,13 +28,13 @@ use diesel::pg::Pg;
 use diesel::serialize::ToSql;
 use diesel::{serialize, sql_types};
 use ipnetwork::IpNetwork;
+use nexus_sled_agent_shared::inventory::{
+    OmicronZoneConfig, OmicronZonesConfig,
+};
 use nexus_types::inventory::{
     BaseboardId, Caboose, Collection, PowerState, RotPage, RotSlot,
 };
 use omicron_common::api::internal::shared::NetworkInterface;
-use omicron_common_extended::inventory::{
-    OmicronZoneConfig, OmicronZonesConfig,
-};
 use omicron_uuid_kinds::CollectionKind;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -761,27 +761,27 @@ impl_enum_type!(
     Scrimlet =>  b"scrimlet"
 );
 
-impl From<omicron_common_extended::inventory::SledRole> for SledRole {
-    fn from(value: omicron_common_extended::inventory::SledRole) -> Self {
+impl From<nexus_sled_agent_shared::inventory::SledRole> for SledRole {
+    fn from(value: nexus_sled_agent_shared::inventory::SledRole) -> Self {
         match value {
-            omicron_common_extended::inventory::SledRole::Gimlet => {
+            nexus_sled_agent_shared::inventory::SledRole::Gimlet => {
                 SledRole::Gimlet
             }
-            omicron_common_extended::inventory::SledRole::Scrimlet => {
+            nexus_sled_agent_shared::inventory::SledRole::Scrimlet => {
                 SledRole::Scrimlet
             }
         }
     }
 }
 
-impl From<SledRole> for omicron_common_extended::inventory::SledRole {
+impl From<SledRole> for nexus_sled_agent_shared::inventory::SledRole {
     fn from(value: SledRole) -> Self {
         match value {
             SledRole::Gimlet => {
-                omicron_common_extended::inventory::SledRole::Gimlet
+                nexus_sled_agent_shared::inventory::SledRole::Gimlet
             }
             SledRole::Scrimlet => {
-                omicron_common_extended::inventory::SledRole::Scrimlet
+                nexus_sled_agent_shared::inventory::SledRole::Scrimlet
             }
         }
     }
@@ -1012,9 +1012,9 @@ impl From<ZoneType> for ServiceKind {
     }
 }
 
-impl From<ZoneType> for omicron_common_extended::inventory::ZoneKind {
+impl From<ZoneType> for nexus_sled_agent_shared::inventory::ZoneKind {
     fn from(zone_type: ZoneType) -> Self {
-        use omicron_common_extended::inventory::ZoneKind::*;
+        use nexus_sled_agent_shared::inventory::ZoneKind::*;
 
         match zone_type {
             ZoneType::BoundaryNtp => BoundaryNtp,
@@ -1032,9 +1032,9 @@ impl From<ZoneType> for omicron_common_extended::inventory::ZoneKind {
     }
 }
 
-impl From<omicron_common_extended::inventory::ZoneKind> for ZoneType {
-    fn from(zone_kind: omicron_common_extended::inventory::ZoneKind) -> Self {
-        use omicron_common_extended::inventory::ZoneKind::*;
+impl From<nexus_sled_agent_shared::inventory::ZoneKind> for ZoneType {
+    fn from(zone_kind: nexus_sled_agent_shared::inventory::ZoneKind) -> Self {
+        use nexus_sled_agent_shared::inventory::ZoneKind::*;
 
         match zone_kind {
             BoundaryNtp => ZoneType::BoundaryNtp,
@@ -1052,7 +1052,7 @@ impl From<omicron_common_extended::inventory::ZoneKind> for ZoneType {
     }
 }
 
-/// See [`omicron_common_extended::inventory::OmicronZoneConfig`].
+/// See [`nexus_sled_agent_shared::inventory::OmicronZoneConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_zone)]
 pub struct InvOmicronZone {

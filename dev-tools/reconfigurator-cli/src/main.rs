@@ -20,6 +20,9 @@ use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
     SledBuilder, SledHwInventory, SystemDescription,
 };
+use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
+use nexus_sled_agent_shared::inventory::SledRole;
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
@@ -29,9 +32,6 @@ use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
-use omicron_common_extended::inventory::OmicronZonesConfig;
-use omicron_common_extended::inventory::SledRole;
-use omicron_common_extended::inventory::ZoneKind;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;

@@ -377,12 +377,12 @@ mod test {
     use super::Collector;
     use crate::StaticSledAgentEnumerator;
     use gateway_messages::SpPort;
+    use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
+    use nexus_sled_agent_shared::inventory::OmicronZoneType;
+    use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
     use nexus_types::inventory::Collection;
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
-    use omicron_common_extended::inventory::OmicronZoneConfig;
-    use omicron_common_extended::inventory::OmicronZoneType;
-    use omicron_common_extended::inventory::OmicronZonesConfig;
     use omicron_sled_agent::sim;
     use omicron_uuid_kinds::ZpoolUuid;
     use std::fmt::Write;

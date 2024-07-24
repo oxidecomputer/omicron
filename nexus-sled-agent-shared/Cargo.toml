@@ -1,5 +1,5 @@
 [package]
-name = "omicron-common-extended"
+name = "nexus-sled-agent-shared"
 version = "0.1.0"
 edition = "2021"
 

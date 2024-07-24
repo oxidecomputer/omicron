@@ -1012,6 +1012,7 @@ mod test {
     use nexus_reconfigurator_planning::system::{
         SledBuilder, SystemDescription,
     };
+    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
@@ -1037,7 +1038,6 @@ mod test {
     };
     use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_common::zpool_name::ZpoolName;
-    use omicron_common_extended::inventory::OmicronZoneDataset;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{ExternalIpUuid, OmicronZoneUuid};
     use omicron_uuid_kinds::{GenericUuid, ZpoolUuid};

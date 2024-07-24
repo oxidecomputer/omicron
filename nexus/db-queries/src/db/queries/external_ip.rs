@@ -881,6 +881,7 @@ mod tests {
     use nexus_db_model::InstanceCpuCount;
     use nexus_db_model::IpPoolResource;
     use nexus_db_model::IpPoolResourceType;
+    use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalIp;
@@ -891,7 +892,6 @@ mod tests {
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
-    use omicron_common_extended::inventory::ZoneKind;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::db::CockroachInstance;
     use omicron_uuid_kinds::ExternalIpUuid;

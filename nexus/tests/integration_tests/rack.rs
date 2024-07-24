@@ -9,6 +9,7 @@ use nexus_client::types::SledId;
 use nexus_db_model::SledBaseboard;
 use nexus_db_model::SledSystemHardware;
 use nexus_db_model::SledUpdate;
+use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -20,7 +21,6 @@ use nexus_types::external_api::views::Rack;
 use nexus_types::internal_api::params::SledAgentInfo;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
-use omicron_common_extended::inventory::SledRole;
 use omicron_uuid_kinds::GenericUuid;
 use uuid::Uuid;
 

@@ -11,10 +11,10 @@ workspace = true
 anyhow.workspace = true
 bootstore.workspace = true
 camino.workspace = true
+nexus-sled-agent-shared.workspace = true
 # Note: we're trying to avoid a dependency from sled-agent-types to nexus-types
 # because the correct direction of dependency is unclear. If there are types
-# common to both, put them in `omicron-common` or `omicron-common-extended`.
-omicron-common-extended.workspace = true
+# common to both, put them in `omicron-common` or `nexus-sled-agent-shared`.
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true

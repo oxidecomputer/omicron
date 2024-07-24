@@ -4,8 +4,8 @@
 
 //! Omicron zone placement decisions
 
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneType;
-use omicron_common_extended::inventory::ZoneKind;
 use omicron_uuid_kinds::SledUuid;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;

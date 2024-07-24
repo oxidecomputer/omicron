@@ -4554,9 +4554,9 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "futures",
+ "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
- "omicron-common-extended",
  "omicron-passwords",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -4624,10 +4624,10 @@ dependencies = [
  "newtype_derive",
  "nexus-config",
  "nexus-defaults",
+ "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-certificates",
  "omicron-common",
- "omicron-common-extended",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-uuid-kinds",
@@ -4684,10 +4684,10 @@ dependencies = [
  "nexus-db-model",
  "nexus-inventory",
  "nexus-reconfigurator-planning",
+ "nexus-sled-agent-shared",
  "nexus-test-utils",
  "nexus-types",
  "omicron-common",
- "omicron-common-extended",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
@@ -4769,9 +4769,9 @@ dependencies = [
  "gateway-client",
  "gateway-messages",
  "gateway-test-utils",
+ "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
- "omicron-common-extended",
  "omicron-sled-agent",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -4861,11 +4861,11 @@ dependencies = [
  "nexus-networking",
  "nexus-reconfigurator-planning",
  "nexus-reconfigurator-preparation",
+ "nexus-sled-agent-shared",
  "nexus-test-utils",
  "nexus-test-utils-macros",
  "nexus-types",
  "omicron-common",
- "omicron-common-extended",
  "omicron-nexus",
  "omicron-rpaths",
  "omicron-test-utils",
@@ -4896,9 +4896,9 @@ dependencies = [
  "maplit",
  "nexus-config",
  "nexus-inventory",
+ "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
- "omicron-common-extended",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -4958,14 +4958,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-sled-agent-shared"
+version = "0.1.0"
+dependencies = [
+ "omicron-common",
+ "omicron-passwords",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+ "sled-hardware-types",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-test-interface"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "nexus-config",
+ "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
- "omicron-common-extended",
  "omicron-workspace-hack",
  "slog",
  "uuid",
@@ -4994,10 +5008,10 @@ dependencies = [
  "internal-dns",
  "nexus-config",
  "nexus-db-queries",
+ "nexus-sled-agent-shared",
  "nexus-test-interface",
  "nexus-types",
  "omicron-common",
- "omicron-common-extended",
  "omicron-passwords",
  "omicron-sled-agent",
  "omicron-test-utils",
@@ -5044,8 +5058,8 @@ dependencies = [
  "humantime",
  "ipnetwork",
  "newtype-uuid",
+ "nexus-sled-agent-shared",
  "omicron-common",
- "omicron-common-extended",
  "omicron-passwords",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -5442,20 +5456,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "omicron-common-extended"
-version = "0.1.0"
-dependencies = [
- "omicron-common",
- "omicron-passwords",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "schemars",
- "serde",
- "sled-hardware-types",
- "uuid",
-]
-
-[[package]]
 name = "omicron-ddm-admin-client"
 version = "0.1.0"
 dependencies = [
@@ -5616,13 +5616,13 @@ dependencies = [
  "nexus-reconfigurator-planning",
  "nexus-reconfigurator-preparation",
  "nexus-saga-recovery",
+ "nexus-sled-agent-shared",
  "nexus-test-interface",
  "nexus-test-utils",
  "nexus-test-utils-macros",
  "nexus-types",
  "num-integer",
  "omicron-common",
- "omicron-common-extended",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
@@ -5887,9 +5887,9 @@ dependencies = [
  "mg-admin-client",
  "nexus-client",
  "nexus-config",
+ "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
- "omicron-common-extended",
  "omicron-ddm-admin-client",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -7772,11 +7772,11 @@ dependencies = [
  "nexus-reconfigurator-execution",
  "nexus-reconfigurator-planning",
  "nexus-reconfigurator-preparation",
+ "nexus-sled-agent-shared",
  "nexus-test-utils",
  "nexus-test-utils-macros",
  "nexus-types",
  "omicron-common",
- "omicron-common-extended",
  "omicron-nexus",
  "omicron-rpaths",
  "omicron-test-utils",
@@ -8965,8 +8965,8 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "nexus-sled-agent-shared",
  "omicron-common",
- "omicron-common-extended",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
@@ -8988,8 +8988,8 @@ dependencies = [
  "bootstore",
  "camino",
  "camino-tempfile",
+ "nexus-sled-agent-shared",
  "omicron-common",
- "omicron-common-extended",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",

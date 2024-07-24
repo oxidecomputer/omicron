@@ -17,16 +17,16 @@ pub use gateway_client::types::PowerState;
 pub use gateway_client::types::RotImageError;
 pub use gateway_client::types::RotSlot;
 pub use gateway_client::types::SpType;
+use nexus_sled_agent_shared::inventory::InventoryDisk;
+use nexus_sled_agent_shared::inventory::InventoryZpool;
+use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
+use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
+use nexus_sled_agent_shared::inventory::SledRole;
 use omicron_common::api::external::ByteCount;
 pub use omicron_common::api::internal::shared::NetworkInterface;
 pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
 pub use omicron_common::api::internal::shared::SourceNatConfig;
 pub use omicron_common::zpool_name::ZpoolName;
-use omicron_common_extended::inventory::InventoryDisk;
-use omicron_common_extended::inventory::InventoryZpool;
-use omicron_common_extended::inventory::OmicronZoneConfig;
-use omicron_common_extended::inventory::OmicronZonesConfig;
-use omicron_common_extended::inventory::SledRole;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -363,8 +363,10 @@ impl IntoRotPage for gateway_client::types::RotCfpa {
 /// the disk is being actively managed by the control plane.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PhysicalDisk {
-    // TODO: should this just be InventoryDisk? Do we need a separation between
-    // InventoryDisk and PhysicalDisk?
+    // XXX: Should this just be InventoryDisk? Do we need a separation between
+    // InventoryDisk and PhysicalDisk? The types are structurally the same, but
+    // maybe the separation is useful to indicate that a `PhysicalDisk` doesn't
+    // always show up in the inventory.
     pub identity: omicron_common::disk::DiskIdentity,
     pub variant: PhysicalDiskKind,
     pub slot: i64,

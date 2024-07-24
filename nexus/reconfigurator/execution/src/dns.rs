@@ -471,6 +471,7 @@ mod test {
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::example;
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
+    use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_test_utils::resource_helpers::create_silo;
     use nexus_test_utils::resource_helpers::DiskTestBuilder;
     use nexus_test_utils_macros::nexus_test;
@@ -502,7 +503,6 @@ mod test {
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::zpool_name::ZpoolName;
-    use omicron_common_extended::inventory::ZoneKind;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
@@ -1182,7 +1182,10 @@ mod test {
 
         // Record the zpools so we don't fail to ensure datasets (unrelated to
         // DNS) during blueprint execution.
-        crate::tests::insert_zpool_records(datastore, &opctx, &blueprint).await;
+        crate::tests::create_disks_for_zones_using_datasets(
+            datastore, &opctx, &blueprint,
+        )
+        .await;
 
         // Now, execute the initial blueprint.
         let overrides = Overridables::for_test(cptestctx);

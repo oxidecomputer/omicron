@@ -88,6 +88,9 @@ use internal_dns::ServiceName;
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
+use nexus_sled_agent_shared::inventory::{
+    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
+};
 use nexus_types::deployment::{
     Blueprint, BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
     BlueprintZoneDisposition, BlueprintZonesConfig,
@@ -104,9 +107,6 @@ use omicron_common::disk::{
     OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
-use omicron_common_extended::inventory::{
-    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
-};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::{ExternalIpUuid, GenericUuid};
@@ -1553,13 +1553,13 @@ impl<'a> OmicronZonesConfigGenerator<'a> {
 mod test {
     use super::{Config, OmicronZonesConfigGenerator};
     use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
+    use nexus_sled_agent_shared::inventory::{
+        Baseboard, Inventory, InventoryDisk, OmicronZoneType, SledRole,
+    };
     use omicron_common::{
         address::{get_sled_address, Ipv6Subnet, SLED_PREFIX},
         api::external::{ByteCount, Generation},
         disk::{DiskIdentity, DiskVariant},
-    };
-    use omicron_common_extended::inventory::{
-        Baseboard, Inventory, InventoryDisk, OmicronZoneType, SledRole,
     };
     use omicron_uuid_kinds::{GenericUuid, SledUuid};
 

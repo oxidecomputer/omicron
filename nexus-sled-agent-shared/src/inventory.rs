@@ -352,9 +352,16 @@ impl OmicronZoneType {
 /// 4. [`Self::report_str`]: Used for reporting and testing.
 ///
 /// There is no `Display` impl to ensure that users explicitly choose the
-/// representation they want. (Please play close attention to this decision!
-/// The functions are all similar but different, and we don't currently have
-/// great type safety around the choice.)
+/// representation they want. (Please play close attention to this! The
+/// functions are all similar but different, and we don't currently have great
+/// type safety around the choice.)
+///
+/// ## Adding new representations
+///
+/// If you have a new use case for a string representation, please reuse one of
+/// the four representations if at all possible. If you must add a new one,
+/// please add it here rather than doing something ad-hoc in the calling code
+/// so it's more legible.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ZoneKind {
     BoundaryNtp,

@@ -25,6 +25,9 @@ use dropshot::{
 };
 use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use installinator_common::M2Slot;
+use nexus_sled_agent_shared::inventory::{
+    Inventory, OmicronZonesConfig, SledRole,
+};
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, SledInstanceState, UpdateArtifactId,
@@ -33,9 +36,6 @@ use omicron_common::api::internal::shared::{
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SledIdentifiers, SwitchPorts,
 };
 use omicron_common::disk::{DiskVariant, OmicronPhysicalDisksConfig};
-use omicron_common_extended::inventory::{
-    Inventory, OmicronZonesConfig, SledRole,
-};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
