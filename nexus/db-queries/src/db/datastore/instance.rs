@@ -741,68 +741,6 @@ impl DataStore {
         Ok(updated)
     }
 
-    /// Updates an instance record and a VMM record with a single database
-    /// command.
-    ///
-    /// This is intended to be used to apply updates from sled agent that
-    /// may change a VMM's runtime state (e.g. moving an instance from Running
-    /// to Stopped) and its corresponding instance's state (e.g. changing the
-    /// active Propolis ID to reflect a completed migration) in a single
-    /// transaction. The caller is responsible for ensuring the instance and
-    /// VMM states are consistent with each other before calling this routine.
-    ///
-    /// # Arguments
-    ///
-    /// - instance_id: The ID of the instance to update.
-    /// - new_instance: The new instance runtime state to try to write.
-    /// - vmm_id: The ID of the VMM to update.
-    /// - new_vmm: The new VMM runtime state to try to write.
-    ///
-    /// # Return value
-    ///
-    /// - `Ok(`[`InstanceUpdateResult`]`)` if the query was issued
-    ///   successfully. The returned [`InstanceUpdateResult`] indicates which
-    ///   database record(s) were updated. Note that an update can fail because
-    ///   it was inapplicable (i.e. the database has state with a newer
-    ///   generation already) or because the relevant record was not found.
-    /// - `Err` if another error occurred while accessing the database.
-    pub async fn instance_and_vmm_update_runtime(
-        &self,
-        instance_id: &InstanceUuid,
-        new_instance: &InstanceRuntimeState,
-        vmm_id: &PropolisUuid,
-        new_vmm: &VmmRuntimeState,
-        migrations: Migrations<'_>,
-    ) -> Result<InstanceUpdateResult, Error> {
-        let query = crate::db::queries::instance::InstanceAndVmmUpdate::new(
-            *vmm_id,
-            new_vmm.clone(),
-            Some((*instance_id, new_instance.clone())),
-            migrations,
-        );
-
-        // The InstanceAndVmmUpdate query handles and indicates failure to find
-        // either the instance or the VMM, so a query failure here indicates
-        // some kind of internal error and not a failed lookup.
-        let result = query
-            .execute_and_check(&*self.pool_connection_unauthorized().await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        let instance_updated = result.instance_status.was_updated();
-        let vmm_updated = match result.vmm_status {
-            Some(UpdateStatus::Updated) => true,
-            Some(UpdateStatus::NotUpdatedButExists) => false,
-            None => false,
-        };
-        Ok(InstanceUpdateResult {
-            instance_updated,
-            vmm_updated,
-            migration_in_updated: result.migration_in_status.was_updated(),
-            migration_out_updated: result.migration_out_status.was_updated(),
-        })
-    }
-
     /// Lists all instances on in-service sleds with active Propolis VMM
     /// processes, returning the instance along with the VMM on which it's
     /// running, the sled on which the VMM is running, and the project that owns
