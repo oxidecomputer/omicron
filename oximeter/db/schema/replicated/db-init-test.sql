@@ -35,12 +35,7 @@ ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_i64 ON CLUSTER oximeter_cluster
-(
-    timeseries_name String,
-    timeseries_key UInt64,
-    timestamp DateTime64(9, 'UTC'),
-    datum Nullable(Int64)
-)
+AS oximeter.measurements_i64_local
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_i64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_f64_local ON CLUSTER oximeter_cluster
@@ -55,12 +50,7 @@ ORDER BY (timeseries_name, timeseries_key, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_f64 ON CLUSTER oximeter_cluster
-(
-    timeseries_name String,
-    timeseries_key UInt64,
-    timestamp DateTime64(9, 'UTC'),
-    datum Nullable(Float64)
-)
+AS oximeter.measurements_f64_local
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_f64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef64_local ON CLUSTER oximeter_cluster
@@ -76,13 +66,7 @@ ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef64 ON CLUSTER oximeter_cluster
-(
-    timeseries_name String,
-    timeseries_key UInt64,
-    start_time DateTime64(9, 'UTC'),
-    timestamp DateTime64(9, 'UTC'),
-    datum Nullable(Float64)
-)
+AS oximeter.measurements_cumulativef64_local
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_cumulativef64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
 /* The field tables store named dimensions of each timeseries.
@@ -112,7 +96,8 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_i64_local ON CLUSTER oximeter_cluster
 ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/fields_i64_local', '{replica}')
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 
-CREATE TABLE IF NOT EXISTS oximeter.fields_i64 ON CLUSTER oximeter_cluster AS oximeter.fields_i64_local
+CREATE TABLE IF NOT EXISTS oximeter.fields_i64 ON CLUSTER oximeter_cluster
+AS oximeter.fields_i64_local
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'fields_i64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_ipaddr_local ON CLUSTER oximeter_cluster
@@ -125,7 +110,8 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_ipaddr_local ON CLUSTER oximeter_clus
 ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/fields_ipaddr_local', '{replica}')
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 
-CREATE TABLE IF NOT EXISTS oximeter.fields_ipaddr ON CLUSTER oximeter_cluster AS oximeter.fields_ipaddr_local
+CREATE TABLE IF NOT EXISTS oximeter.fields_ipaddr ON CLUSTER oximeter_cluster
+AS oximeter.fields_ipaddr_local
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'fields_ipaddr_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_string_local ON CLUSTER oximeter_cluster
@@ -138,7 +124,8 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_string_local ON CLUSTER oximeter_clus
 ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/fields_string_local', '{replica}')
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 
-CREATE TABLE IF NOT EXISTS oximeter.fields_string ON CLUSTER oximeter_cluster AS oximeter.fields_string_local
+CREATE TABLE IF NOT EXISTS oximeter.fields_string ON CLUSTER oximeter_cluster
+AS oximeter.fields_string_local
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'fields_string_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_uuid_local ON CLUSTER oximeter_cluster
@@ -151,7 +138,8 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_uuid_local ON CLUSTER oximeter_cluste
 ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/fields_uuid_local', '{replica}')
 ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
 
-CREATE TABLE IF NOT EXISTS oximeter.fields_uuid ON CLUSTER oximeter_cluster AS oximeter.fields_uuid_local
+CREATE TABLE IF NOT EXISTS oximeter.fields_uuid ON CLUSTER oximeter_cluster
+AS oximeter.fields_uuid_local
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'fields_uuid_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
 /* The timeseries schema table stores the extracted schema for the samples
@@ -215,5 +203,6 @@ CREATE TABLE IF NOT EXISTS oximeter.timeseries_schema_local ON CLUSTER oximeter_
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/timeseries_schema_local', '{replica}')
 ORDER BY (timeseries_name, fields.name);
 
-CREATE TABLE IF NOT EXISTS oximeter.timeseries_schema ON CLUSTER oximeter_cluster AS oximeter.timeseries_schema_local
+CREATE TABLE IF NOT EXISTS oximeter.timeseries_schema ON CLUSTER oximeter_cluster
+AS oximeter.timeseries_schema_local
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'timeseries_schema_local', xxHash64(splitByChar(':', timeseries_name)[1]));
