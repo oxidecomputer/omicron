@@ -6,7 +6,7 @@
 
 use anyhow::anyhow;
 use clap::{arg, command, value_parser, Arg, ArgMatches, Command};
-use illumos_utils::addrobj::{AddrObject, IPV6_LINK_LOCAL_NAME};
+use illumos_utils::addrobj::{AddrObject, IPV6_LINK_LOCAL_ADDROBJ_NAME};
 use illumos_utils::ipadm::Ipadm;
 use illumos_utils::route::{Gateway, Route};
 use illumos_utils::svcadm::Svcadm;
@@ -232,7 +232,7 @@ async fn do_run() -> Result<(), CmdError> {
         )
         .subcommand(
             Command::new(CHRONY_SETUP_CMD)
-                .about("Sets up Chrony configuration for NTP zone") 
+                .about("Sets up Chrony configuration for NTP zone")
                 .arg(
                     arg!(-f --file <String> "Chrony configuration file")
                     .default_value(CHRONY_CONFIG_FILE)
@@ -328,7 +328,7 @@ async fn switch_zone_setup(
         for link in &links {
             Zones::ensure_has_link_local_v6_address(
                 None,
-                &AddrObject::new(link, IPV6_LINK_LOCAL_NAME).unwrap(),
+                &AddrObject::new(link, IPV6_LINK_LOCAL_ADDROBJ_NAME).unwrap(),
             )
             .map_err(|err| {
                 CmdError::Failure(anyhow!(
@@ -635,7 +635,7 @@ maxslewrate 2708.333
     })?;
 
     if old_file.clone().is_some_and(|f| f != new_config) {
-        info!(&log, "Chrony configuration file has changed"; 
+        info!(&log, "Chrony configuration file has changed";
         "old configuration file" => ?old_file, "new configuration file" => ?new_config,);
     }
 
@@ -663,13 +663,15 @@ async fn common_nw_set_up(
         ))
     })?;
 
-    // TODO: remove when https://github.com/oxidecomputer/stlouis/issues/435 is
-    // addressed
-    info!(&log, "Ensuring a temporary IP interface is created"; "data link" => ?datalink);
-    Ipadm::set_temp_interface_for_datalink(&datalink)
+    info!(
+        &log,
+        "Ensuring IP interface exists on datalink";
+        "datalink" => datalink
+    );
+    Ipadm::ensure_ip_interface_exists(datalink)
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
-    info!(&log, "Setting MTU to 9000 for IPv6 and IPv4"; "data link" => ?datalink);
+    info!(&log, "Setting MTU to 9000 for IPv6 and IPv4"; "datalink" => ?datalink);
     Ipadm::set_interface_mtu(&datalink)
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
@@ -705,11 +707,11 @@ async fn common_nw_set_up(
             if gw.is_empty() {
                 info!(&log, "Underlay is not available yet. Not ensuring there is a default route");
             } else {
-                // We can safely retrieve the first address only as the CLI only accepts a single item. 
+                // We can safely retrieve the first address only as the CLI only accepts a single item.
                 let gw = gw.first().unwrap();
 
                 // Ensuring default route with gateway must happen after peer agents have been initialized.
-                // Omicron zones will be able ensure a default route with gateway immediately, but the 
+                // Omicron zones will be able ensure a default route with gateway immediately, but the
                 // switch zone on the secondary scrimlet might need a few tries while it waits.
                 retry_notify(
                   retry_policy_local(),

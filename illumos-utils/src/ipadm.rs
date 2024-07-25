@@ -4,6 +4,7 @@
 
 //! Utilities for managing IP interfaces.
 
+use crate::addrobj::{IPV6_LINK_LOCAL_ADDROBJ_NAME, IPV6_STATIC_ADDROBJ_NAME};
 use crate::zone::IPADM;
 use crate::{execute, ExecutionError, PFEXEC};
 use std::net::Ipv6Addr;
@@ -11,23 +12,29 @@ use std::net::Ipv6Addr;
 /// Wraps commands for interacting with interfaces.
 pub struct Ipadm {}
 
+/// Expected error message contents when showing an addrobj that doesn't exist.
+const ADDROBJ_NOT_FOUND_ERR: &str = "Address object not found";
+
+/// Expected error message when an interface already exists.
+const INTERFACE_ALREADY_EXISTS: &str = "Interface already exists";
+
 #[cfg_attr(any(test, feature = "testing"), mockall::automock)]
 impl Ipadm {
-    // Remove current IP interface and create a new temporary one.
-    pub fn set_temp_interface_for_datalink(
+    /// Ensure that an IP interface exists on the provided datalink.
+    pub fn ensure_ip_interface_exists(
         datalink: &str,
     ) -> Result<(), ExecutionError> {
         let mut cmd = std::process::Command::new(PFEXEC);
-        let cmd = cmd.args(&[IPADM, "delete-if", datalink]);
-        // First we remove IP interface if it already exists. If it doesn't
-        // exist and the command returns an error we continue anyway as
-        // the next step is to create it.
-        let _ = execute(cmd);
-
-        let mut cmd = std::process::Command::new(PFEXEC);
         let cmd = cmd.args(&[IPADM, "create-if", "-t", datalink]);
-        execute(cmd)?;
-        Ok(())
+        match execute(cmd) {
+            Ok(_) => Ok(()),
+            Err(ExecutionError::CommandFailure(info))
+                if info.stderr.contains(INTERFACE_ALREADY_EXISTS) =>
+            {
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
     }
 
     // Set MTU to 9000 on both IPv4 and IPv6
@@ -65,11 +72,13 @@ impl Ipadm {
         listen_addr: &Ipv6Addr,
     ) -> Result<(), ExecutionError> {
         // Create auto-configured address on the IP interface if it doesn't already exist
-        let addrobj = format!("{}/ll", datalink);
+        let addrobj = format!("{}/{}", datalink, IPV6_LINK_LOCAL_ADDROBJ_NAME);
         let mut cmd = std::process::Command::new(PFEXEC);
         let cmd = cmd.args(&[IPADM, "show-addr", &addrobj]);
         match execute(cmd) {
-            Err(_) => {
+            Err(ExecutionError::CommandFailure(info))
+                if info.stderr.contains(ADDROBJ_NOT_FOUND_ERR) =>
+            {
                 let mut cmd = std::process::Command::new(PFEXEC);
                 let cmd = cmd.args(&[
                     IPADM,
@@ -81,15 +90,18 @@ impl Ipadm {
                 ]);
                 execute(cmd)?;
             }
+            Err(other) => return Err(other),
             Ok(_) => (),
         };
 
         // Create static address on the IP interface if it doesn't already exist
-        let addrobj = format!("{}/omicron6", datalink);
+        let addrobj = format!("{}/{}", datalink, IPV6_STATIC_ADDROBJ_NAME);
         let mut cmd = std::process::Command::new(PFEXEC);
         let cmd = cmd.args(&[IPADM, "show-addr", &addrobj]);
         match execute(cmd) {
-            Err(_) => {
+            Err(ExecutionError::CommandFailure(info))
+                if info.stderr.contains(ADDROBJ_NOT_FOUND_ERR) =>
+            {
                 let mut cmd = std::process::Command::new(PFEXEC);
                 let cmd = cmd.args(&[
                     IPADM,
@@ -101,11 +113,11 @@ impl Ipadm {
                     &listen_addr.to_string(),
                     &addrobj,
                 ]);
-                execute(cmd)?;
+                execute(cmd).map(|_| ())
             }
-            Ok(_) => (),
-        };
-        Ok(())
+            Err(other) => Err(other),
+            Ok(_) => Ok(()),
+        }
     }
 
     // Create gateway on the IP interface if it doesn't already exist
