@@ -7,7 +7,7 @@
   <create_default_instance enabled='true' />
 
   <!-- Run after the zone's networking stack is up. -->
-  <dependency name='physical' grouping='require_all' restart_on='none'
+  <dependency name='network' grouping='require_all' restart_on='none'
     type='service'>
   <service_fmri value='svc:/milestone/network:default' />
   </dependency>
@@ -16,7 +16,7 @@
           have been set by the sled-agent, which happens after the
           `manifest-import` service is running.
   -->
-  <dependency name='zone-network-setup-manifest-import' type='service' grouping='require_all' restart_on='none'>
+  <dependency name='manifest-import' type='service' grouping='require_all' restart_on='none'>
     <service_fmri value='svc:/system/manifest-import:default' />
   </dependency>
 

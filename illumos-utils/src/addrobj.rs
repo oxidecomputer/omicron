@@ -12,7 +12,7 @@ pub const IPV6_STATIC_ADDROBJ_NAME: &str = "omicron6";
 
 /// The name provided to all static IPv4 addresses, usually for public OPTE
 /// interfaces.
-pub const IPV4_STATIC_ADDROBJ_NAME: &str = "omicron6";
+pub const IPV4_STATIC_ADDROBJ_NAME: &str = "omicron4";
 
 /// The name provided to DHCP-configured addresses, of either family.
 pub const DHCP_ADDROBJ_NAME: &str = "omicron";
