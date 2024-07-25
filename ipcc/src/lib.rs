@@ -9,6 +9,7 @@
 //! values are variously static, passed from the control plane to the SP
 //! (through MGS) or set from userland via libipcc.
 
+use attest_data::messages::{HostToRotCommand, HostToRotError, RotToHost};
 use cfg_if::cfg_if;
 use omicron_common::update::ArtifactHash;
 use serde::Deserialize;
@@ -145,6 +146,14 @@ pub enum InstallinatorImageIdError {
     DeserializationFailed(String),
 }
 
+#[derive(Debug, Error)]
+pub enum RotRequestError {
+    #[error(transparent)]
+    Ipcc(#[from] IpccError),
+    #[error("Error from RotRequest call {0:?}")]
+    RotRequest(HostToRotError)
+}
+
 #[derive(Error, Debug)]
 pub enum IpccError {
     #[error("Memory allocation error")]
@@ -213,6 +222,66 @@ impl Ipcc {
         let id = InstallinatorImageId::deserialize(&buf[..n])
             .map_err(InstallinatorImageIdError::DeserializationFailed)?;
         Ok(id)
+    }
+
+    /// Makes a request to the RoT. The details of the request are
+    /// entirely opaque and are expected to be ecoded elsewhere per
+    /// RFD 497
+    pub fn rot_get_cert_chain(&self) -> Result<Vec<u8>, RotRequestError> {
+        let mut rot_message = vec![0; attest_data::messages::MAX_REQUEST_SIZE];
+        let mut rot_resp = vec![0; ffi::IPCC_MAX_DATA_SIZE];
+        let len = attest_data::messages::serialize(
+            &mut rot_message,
+            &HostToRotCommand::GetCertificates,
+            |_| 0,
+        ).map_err(|e| RotRequestError::RotRequest(HostToRotError::from(e)))?;
+        let len = self
+            .handle
+            .rot_request(&rot_message[..len], &mut rot_resp)?;
+        let data = attest_data::messages::parse_response(
+            &rot_resp[..len],
+            RotToHost::RotCertificates,
+        ).map_err(RotRequestError::RotRequest)?;
+        Ok(data.to_vec())
+    }
+
+    pub fn rot_get_measurement_log(&self) -> Result<Vec<u8>, RotRequestError> {
+        let mut rot_message = vec![0; attest_data::messages::MAX_REQUEST_SIZE];
+        let mut rot_resp = vec![0; ffi::IPCC_MAX_DATA_SIZE];
+        let len = attest_data::messages::serialize(
+            &mut rot_message,
+            &HostToRotCommand::GetMeasurementLog,
+            |_| 0,
+        ).map_err(|e| RotRequestError::RotRequest(HostToRotError::from(e)))?;
+        let len = self
+            .handle
+            .rot_request(&rot_message[..len], &mut rot_resp)?;
+        let data = attest_data::messages::parse_response(
+            &rot_resp[..len],
+            RotToHost::RotMeasurementLog,
+        ).map_err(RotRequestError::RotRequest)?;
+        Ok(data.to_vec())
+    }
+
+    pub fn rot_attest(&self, nonce: &[u8]) -> Result<Vec<u8>, RotRequestError> {
+        let mut rot_message = vec![0; attest_data::messages::MAX_REQUEST_SIZE];
+        let mut rot_resp = vec![0; ffi::IPCC_MAX_DATA_SIZE];
+        let len = attest_data::messages::serialize(
+            &mut rot_message,
+            &HostToRotCommand::Attest,
+            |buf| {
+                buf[..nonce.len()].copy_from_slice(nonce);
+                nonce.len()
+            },
+        ).map_err(|e| RotRequestError::RotRequest(HostToRotError::from(e)))?;
+        let len = self
+            .handle
+            .rot_request(&rot_message[..len], &mut rot_resp)?;
+        let data = attest_data::messages::parse_response(
+            &rot_resp[..len],
+            RotToHost::RotAttestation,
+        ).map_err(RotRequestError::RotRequest)?;
+        Ok(data.to_vec())
     }
 }
 

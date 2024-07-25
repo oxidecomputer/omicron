@@ -8,6 +8,7 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
+attest-data.workspace = true
 ciborium.workspace = true
 libc.workspace = true
 omicron-common.workspace = true

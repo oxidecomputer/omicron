@@ -336,6 +336,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "attest-data"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/dice-util?branch=attest_messages#37d6ef5b64a3a472559fd6f132a5e9fd3d0e1392"
+dependencies = [
+ "getrandom 0.2.14",
+ "hubpack",
+ "salty",
+ "serde",
+ "serde_with",
+ "sha3",
+ "thiserror",
+]
+
+[[package]]
 name = "atty"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1812,6 +1826,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7993efb860416547839c115490d4951c6d0f8ec04a3594d9dd99d50ed7ec170"
 
 [[package]]
+name = "dice-verifier"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/dice-util?branch=attest_messages#37d6ef5b64a3a472559fd6f132a5e9fd3d0e1392"
+dependencies = [
+ "anyhow",
+ "attest-data",
+ "const-oid",
+ "ed25519-dalek",
+ "env_logger 0.11.4",
+ "log",
+ "p384",
+ "pem-rfc7468",
+ "sha3",
+ "x509-cert",
+]
+
+[[package]]
 name = "diesel"
 version = "2.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2301,6 +2332,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "env_filter"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6dc8c8ff84895b051f07a0e65f975cf225131742531338752abfb324e4449ff"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "env_logger"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2322,6 +2362,16 @@ dependencies = [
  "is-terminal",
  "log",
  "termcolor",
+]
+
+[[package]]
+name = "env_logger"
+version = "0.11.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06676b12debf7bba6903559720abca942d3a66b8acb88815fd2c7c6537e9ade1"
+dependencies = [
+ "env_filter",
+ "log",
 ]
 
 [[package]]
@@ -3776,6 +3826,7 @@ checksum = "fc6d6206008e25125b1f97fbe5d309eb7b85141cf9199d52dbd3729a1584dd16"
 name = "ipcc"
 version = "0.1.0"
 dependencies = [
+ "attest-data",
  "cfg-if",
  "ciborium",
  "libc",
@@ -4046,7 +4097,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.5",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -5536,6 +5587,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-ipcc-rot"
+version = "0.1.0"
+dependencies = [
+ "attest-data",
+ "der",
+ "dice-verifier",
+ "hubpack",
+ "ipcc",
+ "omicron-rpaths",
+ "pem-rfc7468",
+ "x509-cert",
+]
+
+[[package]]
 name = "omicron-nexus"
 version = "0.1.0"
 dependencies = [
@@ -6612,6 +6677,18 @@ name = "p256"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c9863ad85fa8f4460f9c48cb909d38a0d689dba1f6f6988a5e3e0d31071bcd4b"
+dependencies = [
+ "ecdsa",
+ "elliptic-curve",
+ "primeorder",
+ "sha2",
+]
+
+[[package]]
+name = "p384"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70786f51bcc69f6a4c0360e063a4cac5419ef7c5cd5b3c99ad70f3be5ba79209"
 dependencies = [
  "ecdsa",
  "elliptic-curve",
@@ -8412,6 +8489,16 @@ name = "ryu"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3cb5ba0dc43242ce17de99c180e96db90b235b8a9fdc9543c96d2209116bd9f"
+
+[[package]]
+name = "salty"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b947325a585e90733e0e9ec097228f40b637cc346f9bd68f84d5c6297d0fcfef"
+dependencies = [
+ "subtle",
+ "zeroize",
+]
 
 [[package]]
 name = "samael"

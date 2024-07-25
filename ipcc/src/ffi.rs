@@ -60,6 +60,20 @@ pub(crate) const LIBIPCC_ERR_LEN: usize = 1024;
 /// this crate takes advantage of this.
 pub(crate) type libipcc_key_flag_t = ::std::os::raw::c_uint;
 
+/// Opaque rot_resp_t handle
+#[repr(C)]
+pub(crate) struct libipcc_rot_resp_t {
+    _data: [u8; 0],
+    _marker: core::marker::PhantomData<(*mut u8, core::marker::PhantomPinned)>,
+}
+
+/// These aren't strictly part of libipcc but are used as part of message calculations
+/// for RoT
+pub(crate) const IPCC_MIN_MESSAGE_SIZE: usize = 19;
+pub(crate) const IPCC_MAX_MESSAGE_SIZE: usize = 4123;
+pub(crate) const IPCC_MAX_DATA_SIZE: usize =
+    IPCC_MAX_MESSAGE_SIZE - IPCC_MIN_MESSAGE_SIZE;
+
 #[link(name = "ipcc")]
 extern "C" {
     pub(crate) fn libipcc_init(
@@ -80,4 +94,16 @@ extern "C" {
         lenp: *mut usize,
         flags: libipcc_key_flag_t,
     ) -> bool;
+
+    pub(crate) fn libipcc_rot_send(
+        lih: *mut libipcc_handle_t,
+        request: *const u8,
+        len: usize,
+        rotrp: *mut *mut libipcc_rot_resp_t,
+    ) -> bool;
+    pub(crate) fn libipcc_rot_resp_get(
+        rotrp: *mut libipcc_rot_resp_t,
+        lenp: *mut usize,
+    ) -> *const u8;
+    pub(crate) fn libipcc_rot_resp_free(rotrp: *mut libipcc_rot_resp_t);
 }

@@ -27,6 +27,7 @@ members = [
     "dev-tools/reconfigurator-cli",
     "dev-tools/releng",
     "dev-tools/xtask",
+    "dev-tools/ipcc-rot",
     "dns-server",
     "dns-server-api",
     "end-to-end-tests",
@@ -125,6 +126,7 @@ default-members = [
     "dev-tools/oxlog",
     "dev-tools/reconfigurator-cli",
     "dev-tools/releng",
+    "dev-tools/ipcc-rot",
     # Do not include xtask in the list of default members, because this causes
     # hakari to not work as well and build times to be longer.
     # See omicron#4392.
@@ -252,6 +254,7 @@ assert_matches = "1.5.0"
 assert_cmd = "2.0.14"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "ed7ab5ef0513ba303d33efd41d3e9e381169d59b" }
 async-trait = "0.1.81"
+attest-data = { git = "https://github.com/oxidecomputer/dice-util", branch = "attest_messages"}
 atomicwrites = "0.4.3"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
@@ -297,6 +300,7 @@ derive_more = "0.99.18"
 derive-where = "1.2.7"
 diesel = { version = "2.1.6", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", branch = "main" }
+dice-verifier = { git = "https://github.com/oxidecomputer/dice-util", branch = "attest_messages"}
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
@@ -552,6 +556,7 @@ wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }
 wicketd-api = { path = "wicketd-api" }
 wicketd-client = { path = "clients/wicketd-client" }
+x509-cert = { version = "0.2.5", default-features = false }
 zeroize = { version = "1.7.0", features = ["zeroize_derive", "std"] }
 zip = { version = "0.6.6", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3", default-features = false, features = ["async"] }
