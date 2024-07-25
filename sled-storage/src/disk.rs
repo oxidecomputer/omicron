@@ -8,78 +8,16 @@ use anyhow::bail;
 use camino::{Utf8Path, Utf8PathBuf};
 use derive_more::From;
 use key_manager::StorageKeyRequester;
-use omicron_common::api::external::Generation;
-use omicron_common::disk::DiskIdentity;
-use omicron_common::ledger::Ledgerable;
+use omicron_common::disk::{DiskIdentity, DiskVariant};
 use omicron_common::zpool_name::{ZpoolKind, ZpoolName};
 use omicron_uuid_kinds::ZpoolUuid;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use sled_hardware::{
-    DiskFirmware, DiskVariant, Partition, PooledDisk, PooledDiskError,
-    UnparsedDisk,
+    DiskFirmware, Partition, PooledDisk, PooledDiskError, UnparsedDisk,
 };
 use slog::{info, Logger};
-use uuid::Uuid;
 
 use crate::config::MountConfig;
 use crate::dataset;
-
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-)]
-pub struct OmicronPhysicalDiskConfig {
-    pub identity: DiskIdentity,
-    pub id: Uuid,
-    pub pool_id: ZpoolUuid,
-}
-
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-pub struct OmicronPhysicalDisksConfig {
-    /// generation number of this configuration
-    ///
-    /// This generation number is owned by the control plane (i.e., RSS or
-    /// Nexus, depending on whether RSS-to-Nexus handoff has happened).  It
-    /// should not be bumped within Sled Agent.
-    ///
-    /// Sled Agent rejects attempts to set the configuration to a generation
-    /// older than the one it's currently running.
-    pub generation: Generation,
-
-    pub disks: Vec<OmicronPhysicalDiskConfig>,
-}
-
-impl Default for OmicronPhysicalDisksConfig {
-    fn default() -> Self {
-        Self { generation: Generation::new(), disks: vec![] }
-    }
-}
-
-impl Ledgerable for OmicronPhysicalDisksConfig {
-    fn is_newer_than(&self, other: &OmicronPhysicalDisksConfig) -> bool {
-        self.generation > other.generation
-    }
-
-    // No need to do this, the generation number is provided externally.
-    fn generation_bump(&mut self) {}
-}
-
-impl OmicronPhysicalDisksConfig {
-    pub fn new() -> Self {
-        Self { generation: Generation::new(), disks: vec![] }
-    }
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum DiskError {

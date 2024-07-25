@@ -3737,7 +3737,11 @@ fn inv_collection_print_sleds(collection: &Collection) {
 
             println!("    ZONES FOUND");
             for z in &zones.zones.zones {
-                println!("      zone {} (type {})", z.id, z.zone_type.kind());
+                println!(
+                    "      zone {} (type {})",
+                    z.id,
+                    z.zone_type.kind().report_str()
+                );
             }
         } else {
             println!("  warning: no zone information found");

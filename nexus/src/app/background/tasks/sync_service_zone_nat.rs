@@ -18,10 +18,12 @@ use nexus_db_model::Ipv4NatValues;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
+use nexus_sled_agent_shared::inventory::{
+    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
+};
 use omicron_common::address::{MAX_PORT, MIN_PORT};
 use omicron_uuid_kinds::GenericUuid;
 use serde_json::json;
-use sled_agent_client::types::OmicronZoneType;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
@@ -126,10 +128,8 @@ impl BackgroundTask for ServiceZoneNatTracker {
 
                 let sled_address = oxnet::Ipv6Net::host_net(*sled.ip);
 
-                let zones_config: sled_agent_client::types::OmicronZonesConfig =
-                    zones_found.zones;
-                let zones: Vec<sled_agent_client::types::OmicronZoneConfig> =
-                    zones_config.zones;
+                let zones_config: OmicronZonesConfig = zones_found.zones;
+                let zones: Vec<OmicronZoneConfig> = zones_config.zones;
 
                 for zone in zones {
                     let zone_type: OmicronZoneType = zone.zone_type;
@@ -201,19 +201,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
                             nexus_count += 1;
                         },
                         OmicronZoneType::ExternalDns { nic, dns_address, .. } => {
-                            let socket_addr: SocketAddr = match dns_address.parse() {
-                                Ok(value) => value,
-                                Err(e) => {
-                                    error!(
-                                        &log,
-                                        "failed to parse value into socketaddr";
-                                        "value" => dns_address,
-                                        "error" => ?e,
-                                    );
-                                    continue;
-                                }
-                            };
-                            let external_ip = match socket_addr {
+                            let external_ip = match dns_address {
                                 SocketAddr::V4(v4) => {
                                     *v4.ip()
                                 },

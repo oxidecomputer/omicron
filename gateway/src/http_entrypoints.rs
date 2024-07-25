@@ -76,7 +76,7 @@ impl GatewayApi for GatewayImpl {
 
     /// Get info on an SP
     async fn sp_get(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSp>,
     ) -> Result<HttpResponseOk<SpState>, HttpError> {
         let apictx = rqctx.context();
@@ -96,7 +96,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_startup_options_get(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSp>,
     ) -> Result<HttpResponseOk<HostStartupOptions>, HttpError> {
         let apictx = rqctx.context();
@@ -112,7 +112,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_startup_options_set(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSp>,
         body: TypedBody<HostStartupOptions>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -129,7 +129,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_sensor_read_value(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSpSensorId>,
     ) -> Result<HttpResponseOk<SpSensorReading>, HttpError> {
         let apictx = rqctx.context();
@@ -144,7 +144,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_component_list(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSp>,
     ) -> Result<HttpResponseOk<SpComponentList>, HttpError> {
         let apictx = rqctx.context();
@@ -158,7 +158,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_component_get(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,
     ) -> Result<HttpResponseOk<Vec<SpComponentDetails>>, HttpError> {
         let apictx = rqctx.context();
@@ -186,7 +186,7 @@ impl GatewayApi for GatewayImpl {
     //    same fields). If that becomes untrue, we may need to split this endpoint
     //    up to allow differently-typed responses.
     async fn sp_component_caboose_get(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,
         query_params: Query<ComponentCabooseSlot>,
     ) -> Result<HttpResponseOk<SpComponentCaboose>, HttpError> {
@@ -261,7 +261,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_component_clear_status(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
@@ -278,7 +278,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_component_active_slot_get(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,
     ) -> Result<HttpResponseOk<SpComponentFirmwareSlot>, HttpError> {
         let apictx = rqctx.context();
@@ -296,7 +296,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_component_active_slot_set(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,
         query_params: Query<SetComponentActiveSlotParams>,
         body: TypedBody<SpComponentFirmwareSlot>,
@@ -317,7 +317,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_component_serial_console_attach(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,
         websocket: WebsocketUpgrade,
     ) -> WebsocketEndpointResult {
@@ -347,7 +347,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_component_serial_console_detach(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
@@ -366,7 +366,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_component_reset(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
@@ -389,7 +389,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_component_update(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,
         query_params: Query<ComponentUpdateIdSlot>,
         body: UntypedBody,
@@ -414,7 +414,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_component_update_status(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,
     ) -> Result<HttpResponseOk<SpUpdateStatus>, HttpError> {
         let apictx = rqctx.context();
@@ -432,7 +432,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_component_update_abort(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,
         body: TypedBody<UpdateAbortBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -452,7 +452,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_rot_cmpa_get(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,
     ) -> Result<HttpResponseOk<RotCmpa>, HttpError> {
         let apictx = rqctx.context();
@@ -480,7 +480,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_rot_cfpa_get(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,
         params: TypedBody<GetCfpaParams>,
     ) -> Result<HttpResponseOk<RotCfpa>, HttpError> {
@@ -516,7 +516,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_rot_boot_info(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,
         params: TypedBody<GetRotBootInfoParams>,
     ) -> Result<HttpResponseOk<RotState>, HttpError> {
@@ -543,7 +543,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn ignition_list(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<SpIgnitionInfo>>, HttpError> {
         let apictx = rqctx.context();
         let mgmt_switch = &apictx.mgmt_switch;
@@ -561,7 +561,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn ignition_get(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSp>,
     ) -> Result<HttpResponseOk<SpIgnitionInfo>, HttpError> {
         let apictx = rqctx.context();
@@ -584,7 +584,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn ignition_command(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSpIgnitionCommand>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
@@ -606,7 +606,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_power_state_get(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSp>,
     ) -> Result<HttpResponseOk<PowerState>, HttpError> {
         let apictx = rqctx.context();
@@ -621,7 +621,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_power_state_set(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSp>,
         body: TypedBody<PowerState>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -638,7 +638,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_installinator_image_id_set(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSp>,
         body: TypedBody<InstallinatorImageId>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -664,7 +664,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_installinator_image_id_delete(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSp>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         use ipcc::Key;
@@ -688,7 +688,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_host_phase2_progress_get(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSp>,
     ) -> Result<HttpResponseOk<HostPhase2Progress>, HttpError> {
         let apictx = rqctx.context();
@@ -726,7 +726,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_host_phase2_progress_delete(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         path: Path<PathSp>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
@@ -738,7 +738,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn recovery_host_phase2_upload(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
         body: UntypedBody,
     ) -> Result<HttpResponseOk<HostPhase2RecoveryImageId>, HttpError> {
         let apictx = rqctx.context();
@@ -762,7 +762,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_local_switch_id(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SpIdentifier>, HttpError> {
         let apictx = rqctx.context();
 
@@ -772,7 +772,7 @@ impl GatewayApi for GatewayImpl {
     }
 
     async fn sp_all_ids(
-        rqctx: RequestContext<Arc<ServerContext>>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<SpIdentifier>>, HttpError> {
         let apictx = rqctx.context();
 

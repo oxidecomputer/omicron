@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 use crate::config::MountConfig;
 use crate::dataset::{DatasetName, CONFIG_DATASET};
-use crate::disk::{OmicronPhysicalDisksConfig, RawDisk};
+use crate::disk::RawDisk;
 use crate::error::Error;
 use crate::resources::{AllDisks, DisksManagementResult, StorageResources};
 use camino::Utf8PathBuf;
@@ -17,9 +17,10 @@ use futures::future::FutureExt;
 use illumos_utils::zfs::{Mountpoint, Zfs};
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
-use omicron_common::disk::DiskIdentity;
+use omicron_common::disk::{
+    DiskIdentity, DiskVariant, OmicronPhysicalDisksConfig,
+};
 use omicron_common::ledger::Ledger;
-use sled_hardware::DiskVariant;
 use slog::{info, o, warn, Logger};
 use std::future::Future;
 use tokio::sync::{mpsc, oneshot, watch};
@@ -822,7 +823,7 @@ impl StorageManager {
 /// systems.
 #[cfg(all(test, target_os = "illumos"))]
 mod tests {
-    use crate::dataset::DatasetKind;
+    use crate::dataset::DatasetType;
     use crate::disk::RawSyntheticDisk;
     use crate::manager_test_harness::StorageManagerTestHarness;
     use crate::resources::DiskManagementError;
@@ -1297,7 +1298,7 @@ mod tests {
         let dataset_id = Uuid::new_v4();
         let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
         let dataset_name =
-            DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
+            DatasetName::new(zpool_name.clone(), DatasetType::Crucible);
         harness
             .handle()
             .upsert_filesystem(dataset_id, dataset_name)

@@ -4,7 +4,10 @@
 
 //! Utilities to manage running zones.
 
-use crate::addrobj::AddrObject;
+use crate::addrobj::{
+    AddrObject, DHCP_ADDROBJ_NAME, IPV4_STATIC_ADDROBJ_NAME,
+    IPV6_STATIC_ADDROBJ_NAME,
+};
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
@@ -360,7 +363,11 @@ impl RunningZone {
     }
 
     pub fn control_interface(&self) -> AddrObject {
-        AddrObject::new(self.inner.get_control_vnic_name(), "omicron6").unwrap()
+        AddrObject::new(
+            self.inner.get_control_vnic_name(),
+            IPV6_STATIC_ADDROBJ_NAME,
+        )
+        .unwrap()
     }
 
     /// Runs a command within the Zone, return the output.
@@ -547,10 +554,10 @@ impl RunningZone {
         addrtype: AddressRequest,
     ) -> Result<IpNetwork, EnsureAddressError> {
         let name = match addrtype {
-            AddressRequest::Dhcp => "omicron",
+            AddressRequest::Dhcp => DHCP_ADDROBJ_NAME,
             AddressRequest::Static(net) => match net.ip() {
-                std::net::IpAddr::V4(_) => "omicron4",
-                std::net::IpAddr::V6(_) => "omicron6",
+                std::net::IpAddr::V4(_) => IPV4_STATIC_ADDROBJ_NAME,
+                std::net::IpAddr::V6(_) => IPV6_STATIC_ADDROBJ_NAME,
             },
         };
         self.ensure_address_with_name(addrtype, name).await

@@ -1,0 +1,17 @@
+[package]
+name = "nexus-sled-agent-shared"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[dependencies]
+omicron-common.workspace = true
+omicron-passwords.workspace = true
+omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
+schemars.workspace = true
+serde.workspace = true
+sled-hardware-types.workspace = true
+uuid.workspace = true

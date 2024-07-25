@@ -65,6 +65,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::UserId;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -86,7 +87,7 @@ pub struct RackInit {
     pub external_dns: InitialDnsGroup,
     pub recovery_silo: external_params::SiloCreate,
     pub recovery_silo_fq_dns_name: String,
-    pub recovery_user_id: external_params::UserId,
+    pub recovery_user_id: UserId,
     pub recovery_user_password_hash: omicron_passwords::PasswordHashString,
     pub dns_update: DnsVersionUpdateBuilder,
     pub allowed_source_ips: AllowedSourceIps,
@@ -429,7 +430,7 @@ impl DataStore {
         log: &slog::Logger,
         recovery_silo: external_params::SiloCreate,
         recovery_silo_fq_dns_name: String,
-        recovery_user_id: external_params::UserId,
+        recovery_user_id: UserId,
         recovery_user_password_hash: omicron_passwords::PasswordHashString,
         dns_update: DnsVersionUpdateBuilder,
     ) -> Result<(), RackInitError> {
@@ -520,6 +521,7 @@ impl DataStore {
         // For services with external connectivity, we record their
         // explicit IP allocation and create a service NIC as well.
         let zone_type = &zone_config.zone_type;
+        let zone_report_str = zone_type.kind().report_str();
         let service_ip_nic = match zone_type {
             BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns { nic, dns_address, .. },
@@ -534,7 +536,7 @@ impl DataStore {
                         name: nic.name.clone(),
                         description: format!(
                             "{} service vNIC",
-                            zone_type.kind()
+                            zone_report_str
                         ),
                     },
                     nic.ip,
@@ -558,7 +560,7 @@ impl DataStore {
                         name: nic.name.clone(),
                         description: format!(
                             "{} service vNIC",
-                            zone_type.kind()
+                            zone_report_str
                         ),
                     },
                     nic.ip,
@@ -580,7 +582,7 @@ impl DataStore {
                         name: nic.name.clone(),
                         description: format!(
                             "{} service vNIC",
-                            zone_type.kind()
+                            zone_report_str
                         ),
                     },
                     nic.ip,
@@ -602,8 +604,7 @@ impl DataStore {
         let Some((external_ip, db_nic)) = service_ip_nic else {
             info!(
                 log,
-                "No networking records needed for {} service",
-                zone_type.kind(),
+                "No networking records needed for {} service", zone_report_str,
             );
             return Ok(());
         };
@@ -619,7 +620,7 @@ impl DataStore {
                     log,
                     "Initializing Rack: Failed to allocate \
                      IP address for {}",
-                    zone_type.kind();
+                     zone_report_str;
                     "err" => %err,
                 );
                 match err.retryable() {
@@ -648,7 +649,7 @@ impl DataStore {
         info!(
             log,
             "Inserted networking records for {} service",
-            zone_type.kind(),
+            zone_type.kind().report_str(),
         );
 
         Ok(())
@@ -1011,6 +1012,7 @@ mod test {
     use nexus_reconfigurator_planning::system::{
         SledBuilder, SystemDescription,
     };
+    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
@@ -1041,7 +1043,6 @@ mod test {
     use omicron_uuid_kinds::{GenericUuid, ZpoolUuid};
     use omicron_uuid_kinds::{SledUuid, TypedUuid};
     use oxnet::IpNet;
-    use sled_agent_client::types::OmicronZoneDataset;
     use std::collections::{BTreeMap, HashMap};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
     use std::num::NonZeroU32;

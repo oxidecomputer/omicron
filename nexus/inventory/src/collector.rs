@@ -377,6 +377,9 @@ mod test {
     use super::Collector;
     use crate::StaticSledAgentEnumerator;
     use gateway_messages::SpPort;
+    use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
+    use nexus_sled_agent_shared::inventory::OmicronZoneType;
+    use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
     use nexus_types::inventory::Collection;
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
@@ -496,7 +499,7 @@ mod test {
                         &mut s,
                         "        zone {} type {}\n",
                         zone.id,
-                        zone.zone_type.kind(),
+                        zone.zone_type.kind().report_str(),
                     )
                     .unwrap();
                 }
@@ -552,15 +555,14 @@ mod test {
         let filesystem_pool = ZpoolName::new_external(ZpoolUuid::new_v4());
         let zone_address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0);
         client
-            .omicron_zones_put(&sled_agent_client::types::OmicronZonesConfig {
+            .omicron_zones_put(&OmicronZonesConfig {
                 generation: Generation::from(3),
-                zones: vec![sled_agent_client::types::OmicronZoneConfig {
+                zones: vec![OmicronZoneConfig {
                     id: zone_id,
                     underlay_address: *zone_address.ip(),
-                    zone_type:
-                        sled_agent_client::types::OmicronZoneType::Oximeter {
-                            address: zone_address.to_string(),
-                        },
+                    zone_type: OmicronZoneType::Oximeter {
+                        address: zone_address,
+                    },
                     filesystem_pool: Some(filesystem_pool),
                 }],
             })
