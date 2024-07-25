@@ -248,6 +248,11 @@ task: "crdb_node_id_collector"
     Collects node IDs of running CockroachDB zones
 
 
+task: "decommissioned_disk_cleaner"
+    deletes DB records for decommissioned disks, after regions and region
+    snapshots have been replaced
+
+
 task: "dns_config_external"
     watches external DNS data stored in CockroachDB
 
@@ -452,6 +457,13 @@ task: "crdb_node_id_collector"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: no blueprint
+
+task: "decommissioned_disk_cleaner"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "decommissioned_disk_cleaner" (don't know how to interpret details: Object {"deleted": Number(0), "error": Null, "error_count": Number(0), "found": Number(0), "not_ready_to_be_deleted": Number(0)})
 
 task: "external_endpoints"
   configured period: every 1m

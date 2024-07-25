@@ -6,10 +6,6 @@
 
 use crate::artifacts::WicketdArtifactStore;
 use crate::helpers::sps_to_string;
-use crate::http_entrypoints::ClearUpdateStateResponse;
-use crate::http_entrypoints::GetArtifactsAndEventReportsResponse;
-use crate::http_entrypoints::StartUpdateOptions;
-use crate::http_entrypoints::UpdateSimulatedResult;
 use crate::installinator_progress::IprStartReceiver;
 use crate::installinator_progress::IprUpdateTracker;
 use crate::mgs::make_mgs_client;
@@ -33,8 +29,6 @@ use gateway_client::types::RotCfpaSlot;
 use gateway_client::types::RotImageError;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentFirmwareSlot;
-use gateway_client::types::SpIdentifier;
-use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_messages::SpComponent;
 use gateway_messages::ROT_PAGE_SIZE;
@@ -74,6 +68,11 @@ use update_engine::events::ProgressUnits;
 use update_engine::AbortHandle;
 use update_engine::StepSpec;
 use uuid::Uuid;
+use wicket_common::inventory::SpIdentifier;
+use wicket_common::inventory::SpType;
+use wicket_common::rack_update::ClearUpdateStateResponse;
+use wicket_common::rack_update::StartUpdateOptions;
+use wicket_common::rack_update::UpdateSimulatedResult;
 use wicket_common::update_events::ComponentRegistrar;
 use wicket_common::update_events::EventBuffer;
 use wicket_common::update_events::EventReport;
@@ -96,6 +95,7 @@ use wicket_common::update_events::UpdateComponent;
 use wicket_common::update_events::UpdateEngine;
 use wicket_common::update_events::UpdateStepId;
 use wicket_common::update_events::UpdateTerminalError;
+use wicketd_api::GetArtifactsAndEventReportsResponse;
 
 #[derive(Debug)]
 struct SpUpdateData {

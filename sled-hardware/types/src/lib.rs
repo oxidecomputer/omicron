@@ -22,7 +22,7 @@ pub mod underlay;
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Baseboard {
-    Gimlet { identifier: String, model: String, revision: i64 },
+    Gimlet { identifier: String, model: String, revision: u32 },
 
     Unknown,
 
@@ -34,7 +34,7 @@ impl Baseboard {
     pub fn new_gimlet(
         identifier: String,
         model: String,
-        revision: i64,
+        revision: u32,
     ) -> Self {
         Self::Gimlet { identifier, model, revision }
     }
@@ -73,7 +73,7 @@ impl Baseboard {
         }
     }
 
-    pub fn revision(&self) -> i64 {
+    pub fn revision(&self) -> u32 {
         match self {
             Self::Gimlet { revision, .. } => *revision,
             Self::Pc { .. } => 0,

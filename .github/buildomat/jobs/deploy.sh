@@ -2,7 +2,7 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-2.0-opte-0.32"
+#: target = "lab-2.0-opte-0.33"
 #: output_rules = [
 #:  "%/var/svc/log/oxide-sled-agent:default.log*",
 #:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log*",

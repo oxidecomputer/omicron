@@ -1,5 +1,9 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use super::Generation;
-use crate::schema::switch;
+use crate::{schema::switch, SqlU32};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_types::{external_api::shared, external_api::views, identity::Asset};
@@ -12,7 +16,7 @@ use uuid::Uuid;
 pub struct SwitchBaseboard {
     pub serial_number: String,
     pub part_number: String,
-    pub revision: i64,
+    pub revision: u32,
 }
 
 /// Database representation of a Switch.
@@ -28,7 +32,7 @@ pub struct Switch {
 
     serial_number: String,
     part_number: String,
-    revision: i64,
+    revision: SqlU32,
 }
 
 impl Switch {
@@ -37,7 +41,7 @@ impl Switch {
         id: Uuid,
         serial_number: String,
         part_number: String,
-        revision: i64,
+        revision: u32,
         rack_id: Uuid,
     ) -> Self {
         Self {
@@ -47,7 +51,7 @@ impl Switch {
             rack_id,
             serial_number,
             part_number,
-            revision,
+            revision: SqlU32(revision),
         }
     }
 }
@@ -60,7 +64,7 @@ impl From<Switch> for views::Switch {
             baseboard: shared::Baseboard {
                 serial: switch.serial_number,
                 part: switch.part_number,
-                revision: switch.revision,
+                revision: *switch.revision,
             },
         }
     }

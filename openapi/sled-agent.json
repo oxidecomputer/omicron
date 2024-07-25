@@ -1414,7 +1414,8 @@
               },
               "revision": {
                 "type": "integer",
-                "format": "int64"
+                "format": "uint32",
+                "minimum": 0
               },
               "type": {
                 "type": "string",
@@ -2657,7 +2658,7 @@
         ]
       },
       "EarlyNetworkConfig": {
-        "description": "Network configuration required to bring up the control plane\n\nThe fields in this structure are those from [`super::params::RackInitializeRequest`] necessary for use beyond RSS. This is just for the initial rack configuration and cold boot purposes. Updates come from Nexus.",
+        "description": "Network configuration required to bring up the control plane\n\nThe fields in this structure are those from [`crate::rack_init::RackInitializeRequest`] necessary for use beyond RSS. This is just for the initial rack configuration and cold boot purposes. Updates come from Nexus.",
         "type": "object",
         "properties": {
           "body": {

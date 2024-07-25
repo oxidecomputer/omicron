@@ -57,11 +57,13 @@ installinator-common.workspace = true
 omicron-certificates.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
+omicron-uuid-kinds.workspace = true
 sled-hardware-types.workspace = true
 tufaceous-lib.workspace = true
 update-common.workspace = true
 update-engine.workspace = true
 wicket-common.workspace = true
+wicketd-api.workspace = true
 wicketd-client.workspace = true
 omicron-workspace-hack.workspace = true
 

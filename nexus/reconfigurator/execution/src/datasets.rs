@@ -66,7 +66,7 @@ pub(crate) async fn ensure_dataset_records_exist(
         let dataset = Dataset::new(
             id.into_untyped_uuid(),
             pool_id.into_untyped_uuid(),
-            address,
+            Some(address),
             kind.into(),
         );
         let maybe_inserted = datastore
@@ -153,7 +153,10 @@ mod tests {
 
         // Record the sleds and zpools.
         crate::tests::insert_sled_records(datastore, &blueprint).await;
-        crate::tests::insert_zpool_records(datastore, opctx, &blueprint).await;
+        crate::tests::create_disks_for_zones_using_datasets(
+            datastore, opctx, &blueprint,
+        )
+        .await;
 
         // Prior to ensuring datasets exist, there should be none.
         assert_eq!(

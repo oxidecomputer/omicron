@@ -1,8 +1,8 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Oxide Bootstrap Agent API",
-    "description": "API for interacting with individual sleds",
+    "title": "Bootstrap Agent API",
+    "description": "Per-sled API for setup and teardown",
     "contact": {
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
@@ -36,7 +36,7 @@
     },
     "/components": {
       "get": {
-        "summary": "Provides a list of components known to the bootstrap agent.",
+        "summary": "Provide a list of components known to the bootstrap agent.",
         "description": "This API is intended to allow early boot services (such as Wicket) to query the underlying component versions installed on a sled.",
         "operationId": "components_get",
         "responses": {
@@ -87,7 +87,7 @@
         }
       },
       "post": {
-        "summary": "Initializes the rack with the provided configuration.",
+        "summary": "Initialize the rack with the provided configuration.",
         "operationId": "rack_initialize",
         "requestBody": {
           "content": {
@@ -105,7 +105,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RackInitId"
+                  "$ref": "#/components/schemas/TypedUuidForRackInitKind"
                 }
               }
             }
@@ -119,7 +119,7 @@
         }
       },
       "delete": {
-        "summary": "Resets the rack to an unconfigured state.",
+        "summary": "Reset the rack to an unconfigured state.",
         "operationId": "rack_reset",
         "responses": {
           "200": {
@@ -127,7 +127,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RackResetId"
+                  "$ref": "#/components/schemas/TypedUuidForRackResetKind"
                 }
               }
             }
@@ -143,7 +143,7 @@
     },
     "/sled-initialize": {
       "delete": {
-        "summary": "Resets this particular sled to an unconfigured state.",
+        "summary": "Reset this particular sled to an unconfigured state.",
         "operationId": "sled_reset",
         "responses": {
           "204": {
@@ -217,7 +217,8 @@
               },
               "revision": {
                 "type": "integer",
-                "format": "int64"
+                "format": "uint32",
+                "minimum": 0
               },
               "type": {
                 "type": "string",
@@ -837,10 +838,6 @@
           "speed400_g"
         ]
       },
-      "RackInitId": {
-        "type": "string",
-        "format": "uuid"
-      },
       "RackInitializeRequest": {
         "description": "Configuration for the \"rack setup service\".\n\nThe Rack Setup Service should be responsible for one-time setup actions, such as CockroachDB placement and initialization.  Without operator intervention, however, these actions need a way to be automated in our deployment.",
         "type": "object",
@@ -997,7 +994,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackInitId"
+                "$ref": "#/components/schemas/TypedUuidForRackInitKind"
               },
               "status": {
                 "type": "string",
@@ -1019,7 +1016,7 @@
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/RackInitId"
+                    "$ref": "#/components/schemas/TypedUuidForRackInitKind"
                   }
                 ]
               },
@@ -1038,7 +1035,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackInitId"
+                "$ref": "#/components/schemas/TypedUuidForRackInitKind"
               },
               "message": {
                 "type": "string"
@@ -1060,7 +1057,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackInitId"
+                "$ref": "#/components/schemas/TypedUuidForRackInitKind"
               },
               "status": {
                 "type": "string",
@@ -1078,7 +1075,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackResetId"
+                "$ref": "#/components/schemas/TypedUuidForRackResetKind"
               },
               "status": {
                 "type": "string",
@@ -1100,7 +1097,7 @@
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/RackResetId"
+                    "$ref": "#/components/schemas/TypedUuidForRackResetKind"
                   }
                 ]
               },
@@ -1119,7 +1116,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackResetId"
+                "$ref": "#/components/schemas/TypedUuidForRackResetKind"
               },
               "message": {
                 "type": "string"
@@ -1141,7 +1138,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackResetId"
+                "$ref": "#/components/schemas/TypedUuidForRackResetKind"
               },
               "status": {
                 "type": "string",
@@ -1156,10 +1153,6 @@
             ]
           }
         ]
-      },
-      "RackResetId": {
-        "type": "string",
-        "format": "uuid"
       },
       "RecoverySiloConfig": {
         "description": "RecoverySiloConfig\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"silo_name\", \"user_name\", \"user_password_hash\" ], \"properties\": { \"silo_name\": { \"$ref\": \"#/components/schemas/Name\" }, \"user_name\": { \"$ref\": \"#/components/schemas/UserId\" }, \"user_password_hash\": { \"$ref\": \"#/components/schemas/NewPasswordHash\" } } } ``` </details>",
@@ -1233,6 +1226,14 @@
             ]
           }
         ]
+      },
+      "TypedUuidForRackInitKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForRackResetKind": {
+        "type": "string",
+        "format": "uuid"
       },
       "UplinkAddressConfig": {
         "type": "object",

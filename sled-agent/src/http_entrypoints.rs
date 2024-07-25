@@ -5,7 +5,6 @@
 //! HTTP entrypoint functions for the sled agent's exposed API
 
 use super::sled_agent::SledAgent;
-use crate::bootstrap::early_networking::EarlyNetworkConfig;
 use crate::bootstrap::params::AddSledRequest;
 use crate::params::{
     BootstoreStatus, CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
@@ -37,6 +36,7 @@ use omicron_common::api::internal::shared::{
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_hardware::DiskVariant;
 use sled_storage::resources::DisksManagementResult;
 use std::collections::BTreeMap;
@@ -1021,12 +1021,7 @@ async fn inventory(
 async fn sled_identifiers(
     request_context: RequestContext<SledAgent>,
 ) -> Result<HttpResponseOk<SledIdentifiers>, HttpError> {
-    request_context
-        .context()
-        .sled_identifiers()
-        .await
-        .map(HttpResponseOk)
-        .map_err(HttpError::from)
+    Ok(HttpResponseOk(request_context.context().sled_identifiers().await))
 }
 
 /// Get the internal state of the local bootstore node

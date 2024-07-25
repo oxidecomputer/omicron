@@ -498,9 +498,17 @@ async fn sdc_regions_ensure(
                     .map(|(dataset, region)| {
                         dataset
                             .address_with_port(region.port_number)
-                            .to_string()
+                            .ok_or_else(|| {
+                                ActionError::action_failed(
+                                    Error::internal_error(&format!(
+                                        "missing IP address for dataset {}",
+                                        dataset.id(),
+                                    )),
+                                )
+                            })
+                            .map(|addr| addr.to_string())
                     })
-                    .collect(),
+                    .collect::<Result<Vec<_>, ActionError>>()?,
 
                 lossy: false,
                 flush_timeout: None,

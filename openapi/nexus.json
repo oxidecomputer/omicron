@@ -10013,7 +10013,8 @@
           },
           "revision": {
             "type": "integer",
-            "format": "int64"
+            "format": "uint32",
+            "minimum": 0
           },
           "serial": {
             "type": "string"
@@ -19796,12 +19797,23 @@
       },
       "Units": {
         "description": "Measurement units for timeseries samples.",
-        "type": "string",
-        "enum": [
-          "count",
-          "bytes",
-          "seconds",
-          "nanoseconds"
+        "oneOf": [
+          {
+            "type": "string",
+            "enum": [
+              "count",
+              "bytes",
+              "seconds",
+              "nanoseconds"
+            ]
+          },
+          {
+            "description": "No meaningful units, e.g. a dimensionless quanity.",
+            "type": "string",
+            "enum": [
+              "none"
+            ]
+          }
         ]
       },
       "User": {

@@ -439,7 +439,6 @@ service_name = "switch_zone_setup"
 source.type = "local"
 source.paths = [
   { from = "smf/switch_zone_setup/manifest.xml", to = "/var/svc/manifest/site/switch_zone_setup/manifest.xml" },
-  { from = "smf/switch_zone_setup/switch_zone_setup", to = "/opt/oxide/bin/switch_zone_setup" },
   { from = "smf/switch_zone_setup/support_authorized_keys", to = "/opt/oxide/support/authorized_keys" },
   { from = "/opt/ooce/pgsql-13/lib/amd64", to = "/opt/ooce/pgsql-13/lib/amd64" },
 ]
@@ -547,10 +546,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "5ebf9626e0ad274eb515d206d102cb09d2d51f15"
+source.commit = "66d1ee7d4a5829dbbf02a152091ea051023b5b8b"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "0398e7294beaa46636eb1c0703593f67b35366aa3637e9bd0e70ded9f022a9ab"
+source.sha256 = "168d4f061245bae749926104a77d087d144ee4aea8cc6d2a49284ee26ad5ffe9"
 output.type = "zone"
 
 [package.mg-ddm-gz]
@@ -563,10 +562,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "1b385990e8648b221fd11f018f2a7ec425461c6c"
+source.commit = "220dd026e83142b83bd93123f465a64dd4600201"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "280bd6e5c30d8f1076bac9b8dbbdbc45379e76259aa6319da257192fcbf64a54"
+source.sha256 = "58c8fcec6b932f7e602ac82cc28460aa557cabae1b66947ab3cb7334b87c35d4"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -579,10 +578,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "1b385990e8648b221fd11f018f2a7ec425461c6c"
+source.commit = "220dd026e83142b83bd93123f465a64dd4600201"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "f15f8bb0e13b1a9372c895775dae96b68ff1cc5e395e6bad4389c2a97957354e"
+source.sha256 = "69fa43393a77f19713c7d76a320064e3eb58b3ea0b2953d2079a5c3edebc172e"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -594,10 +593,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "1b385990e8648b221fd11f018f2a7ec425461c6c"
+source.commit = "220dd026e83142b83bd93123f465a64dd4600201"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
-source.sha256 = "d4f2aaca20b312b6716206c335165442d6625b929eb00f0fd23f551e38216ace"
+source.sha256 = "f1103de5dda4830eb653f4d555995d08c31253116448387399a77392c08dfb54"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -645,8 +644,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "e83f4f164fd3dbb2100989a399a4fa087232ac36"
-source.sha256 = "b28247df4d301540b0a46e4d9fdf410ee6fbdb23d18c80acbd36c016a084e30e"
+source.commit = "fb571dc6512b24a777c5a9b2927a50501f6be297"
+source.sha256 = "c7971efca6500cee8edf2696ec6b38014af82bacfe88a0e583bb9bb3a591bc8d"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -672,8 +671,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "e83f4f164fd3dbb2100989a399a4fa087232ac36"
-source.sha256 = "caf988e39d800bdccb1b9423568a19ba10a79aa2b07f74bf7eb65589fd81f8b1"
+source.commit = "fb571dc6512b24a777c5a9b2927a50501f6be297"
+source.sha256 = "0a96670ce203bce7bed6a0e40842d319c2b4b8ee1a2e9210d3713423f8bd00b1"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -692,8 +691,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "e83f4f164fd3dbb2100989a399a4fa087232ac36"
-source.sha256 = "378a2f32c1850a5a62fa9b320813e342a647647d2f014ab5eced7c2d1d4f9c95"
+source.commit = "fb571dc6512b24a777c5a9b2927a50501f6be297"
+source.sha256 = "a5bda6b899bff23fccd4dd74224fd1bc44703741054b50552921efa7470cb11a"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -740,6 +739,8 @@ source.packages = [
   "switch_zone_setup.tar.gz",
   "xcvradm.tar.gz",
   "omicron-omdb.tar.gz",
+  "zone-setup.tar.gz",
+  "zone-network-install.tar.gz"
 ]
 output.type = "zone"
 
@@ -764,6 +765,8 @@ source.packages = [
   "switch_zone_setup.tar.gz",
   "sp-sim-stub.tar.gz",
   "omicron-omdb.tar.gz",
+  "zone-setup.tar.gz",
+  "zone-network-install.tar.gz"
 ]
 output.type = "zone"
 
@@ -788,6 +791,8 @@ source.packages = [
   "switch_zone_setup.tar.gz",
   "sp-sim-softnpu.tar.gz",
   "omicron-omdb.tar.gz",
+  "zone-setup.tar.gz",
+  "zone-network-install.tar.gz"
 ]
 output.type = "zone"
 

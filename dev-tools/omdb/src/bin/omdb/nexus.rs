@@ -1575,7 +1575,7 @@ async fn cmd_nexus_sleds_list_uninitialized(
         cubby: u16,
         serial: String,
         part: String,
-        revision: i64,
+        revision: u32,
     }
     let rows = sleds.into_iter().map(|sled| UninitializedSledRow {
         rack_id: sled.rack_id,

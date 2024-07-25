@@ -46,7 +46,7 @@ pub enum ServiceError {
 pub struct RunCommandError {
     zone: String,
     #[source]
-    err: crate::ExecutionError,
+    pub err: crate::ExecutionError,
 }
 
 /// Errors returned from [`RunningZone::boot`].
@@ -462,7 +462,7 @@ impl RunningZone {
     /// Note that the zone must already be configured to be booted.
     pub async fn boot(zone: InstalledZone) -> Result<Self, BootError> {
         // Boot the zone.
-        info!(zone.log, "Zone booting");
+        info!(zone.log, "Booting {} zone", zone.name);
 
         Zones::boot(&zone.name).await?;
 
@@ -479,6 +479,9 @@ impl RunningZone {
                 service: fmri.to_string(),
                 zone: zone.name.to_string(),
             })?;
+
+        // TODO https://github.com/oxidecomputer/omicron/issues/1898:
+        // Remove all non-self assembling code
 
         // If the zone is self-assembling, then SMF service(s) inside the zone
         // will be creating the listen address for the zone's service(s),
@@ -575,7 +578,6 @@ impl RunningZone {
         &self,
         address: Ipv6Addr,
     ) -> Result<(), EnsureAddressError> {
-        info!(self.inner.log, "Adding bootstrap address");
         let vnic = self.inner.bootstrap_vnic.as_ref().ok_or_else(|| {
             EnsureAddressError::MissingBootstrapVnic {
                 address: address.to_string(),
@@ -609,15 +611,13 @@ impl RunningZone {
                 port_idx,
             }
         })?;
-        // TODO-remove(#2932): Switch to using port directly once vnic is no longer needed.
-        let addrobj =
-            AddrObject::new(port.vnic_name(), name).map_err(|err| {
-                EnsureAddressError::AddrObject {
-                    request: AddressRequest::Dhcp,
-                    zone: self.inner.name.clone(),
-                    err,
-                }
-            })?;
+        let addrobj = AddrObject::new(port.name(), name).map_err(|err| {
+            EnsureAddressError::AddrObject {
+                request: AddressRequest::Dhcp,
+                zone: self.inner.name.clone(),
+                err,
+            }
+        })?;
         let zone = Some(self.inner.name.as_ref());
         if let IpAddr::V4(gateway) = port.gateway().ip() {
             let addr =
@@ -636,7 +636,7 @@ impl RunningZone {
                 &private_ip.to_string(),
                 "-interface",
                 "-ifp",
-                port.vnic_name(),
+                port.name(),
             ])?;
             self.run_cmd(&[
                 "/usr/sbin/route",
@@ -737,7 +737,7 @@ impl RunningZone {
         gz_bootstrap_addr: Ipv6Addr,
         zone_vnic_name: &str,
     ) -> Result<(), RunCommandError> {
-        self.run_cmd([
+        let args = [
             "/usr/sbin/route",
             "add",
             "-inet6",
@@ -745,7 +745,8 @@ impl RunningZone {
             &gz_bootstrap_addr.to_string(),
             "-ifp",
             zone_vnic_name,
-        ])?;
+        ];
+        self.run_cmd(args)?;
         Ok(())
     }
 
@@ -777,7 +778,7 @@ impl RunningZone {
 
     /// Return a reference to the links for this zone.
     pub fn links(&self) -> &Vec<Link> {
-        &self.inner.links
+        &self.inner.links()
     }
 
     /// Return a mutable reference to the links for this zone.
@@ -1011,6 +1012,11 @@ impl InstalledZone {
     /// Returns the filesystem path to the zone's root in the GZ.
     pub fn root(&self) -> Utf8PathBuf {
         self.zonepath.path.join(Self::ROOT_FS_PATH)
+    }
+
+    /// Return a reference to the links for this zone.
+    pub fn links(&self) -> &Vec<Link> {
+        &self.links
     }
 }
 
@@ -1293,7 +1299,7 @@ impl<'a> ZoneBuilder<'a> {
 
         let mut net_device_names: Vec<String> = opte_ports
             .iter()
-            .map(|(port, _)| port.vnic_name().to_string())
+            .map(|(port, _)| port.name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
             .chain(bootstrap_vnic.as_ref().map(|vnic| vnic.name().to_string()))
             .chain(links.iter().map(|nic| nic.name().to_string()))

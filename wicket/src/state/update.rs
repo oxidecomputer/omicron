@@ -4,6 +4,7 @@
 
 use anyhow::Result;
 use ratatui::style::Style;
+use wicket_common::rack_update::{ClearUpdateStateOptions, StartUpdateOptions};
 use wicket_common::update_events::{
     EventReport, ProgressEventKind, StepEventKind, UpdateComponent,
     UpdateStepId,
@@ -18,9 +19,7 @@ use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::fmt::Display;
-use wicketd_client::types::{
-    ArtifactId, ClearUpdateStateOptions, SemverVersion, StartUpdateOptions,
-};
+use wicketd_client::types::{ArtifactId, SemverVersion};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RackUpdateState {
@@ -259,12 +258,15 @@ impl UpdateItem {
                 }
                 | StepEventKind::StepCompleted { step, outcome, .. } => {
                     if step.info.is_last_step_in_component() {
-                        // The RoT and SP components each have two steps in
-                        // them. If the second step ("Updating RoT/SP") is
+                        // The RoT (and bootloader) and SP components each
+                        // have two steps in them. If the second step
+                        // ("Updating RoT Bootloader/RoT/SP") is
                         // skipped, then treat the component as skipped.
                         if matches!(
                             step.info.component,
-                            UpdateComponent::Sp | UpdateComponent::Rot
+                            UpdateComponent::Sp
+                                | UpdateComponent::Rot
+                                | UpdateComponent::RotBootloader
                         ) {
                             assert_eq!(
                                 step.info.id,
