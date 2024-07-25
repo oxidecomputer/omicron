@@ -296,38 +296,20 @@ impl JsonSchema for Name {
     fn json_schema(
         _: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
-        schemars::schema::SchemaObject {
-            metadata: Some(Box::new(schemars::schema::Metadata {
-                title: Some(
-                    "A name unique within the parent collection".to_string(),
-                ),
-                description: Some(
-                    "Names must begin with a lower case ASCII letter, be \
-                     composed exclusively of lowercase ASCII, uppercase \
-                     ASCII, numbers, and '-', and may not end with a '-'. \
-                     Names cannot be a UUID, but they may contain a UUID. \
-                     They can be at most 63 characters long.".to_string(),
-                ),
-                ..Default::default()
-            })),
-            instance_type: Some(schemars::schema::InstanceType::String.into()),
-            string: Some(Box::new(schemars::schema::StringValidation {
-                max_length: Some(63),
-                min_length: Some(1),
-                pattern: Some(
-                    concat!(
-                        r#"^"#,
-                        // Cannot match a UUID
-                        r#"(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)"#,
-                        r#"^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?"#,
-                        r#"$"#,
-                    )
+        name_schema(schemars::schema::Metadata {
+            title: Some(
+                "A name unique within the parent collection".to_string(),
+            ),
+            description: Some(
+                "Names must begin with a lower case ASCII letter, be \
+                 composed exclusively of lowercase ASCII, uppercase \
+                 ASCII, numbers, and '-', and may not end with a '-'. \
+                 Names cannot be a UUID, but they may contain a UUID. \
+                 They can be at most 63 characters long."
                     .to_string(),
-                )
-            })),
+            ),
             ..Default::default()
-        }
-        .into()
+        })
     }
 }
 
@@ -397,6 +379,87 @@ impl JsonSchema for NameOrId {
         }
         .into()
     }
+}
+
+/// A username for a local-only user.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(try_from = "String")]
+pub struct UserId(String);
+
+impl AsRef<str> for UserId {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
+    }
+}
+
+impl FromStr for UserId {
+    type Err = String;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        UserId::try_from(String::from(value))
+    }
+}
+
+/// Used to impl `Deserialize`
+impl TryFrom<String> for UserId {
+    type Error = String;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        // Mostly, this validation exists to cap the input size.  The specific
+        // length is not critical here.  For convenience and consistency, we use
+        // the same rules as `Name`.
+        let _ = Name::try_from(value.clone())?;
+        Ok(UserId(value))
+    }
+}
+
+impl JsonSchema for UserId {
+    fn schema_name() -> String {
+        "UserId".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        name_schema(schemars::schema::Metadata {
+            title: Some("A username for a local-only user".to_string()),
+            description: Some(
+                "Usernames must begin with a lower case ASCII letter, be \
+                 composed exclusively of lowercase ASCII, uppercase ASCII, \
+                 numbers, and '-', and may not end with a '-'. Usernames \
+                 cannot be a UUID, but they may contain a UUID. They can be at \
+                 most 63 characters long."
+                    .to_string(),
+            ),
+            ..Default::default()
+        })
+    }
+}
+
+fn name_schema(
+    metadata: schemars::schema::Metadata,
+) -> schemars::schema::Schema {
+    schemars::schema::SchemaObject {
+        metadata: Some(Box::new(metadata)),
+        instance_type: Some(schemars::schema::InstanceType::String.into()),
+        string: Some(Box::new(schemars::schema::StringValidation {
+            max_length: Some(63),
+            min_length: Some(1),
+            pattern: Some(
+                concat!(
+                    r#"^"#,
+                    // Cannot match a UUID
+                    concat!(
+                        r#"(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"#,
+                        r#"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)"#,
+                    ),
+                    r#"^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?"#,
+                    r#"$"#,
+                )
+                .to_string(),
+            ),
+        })),
+        ..Default::default()
+    }
+    .into()
 }
 
 // TODO: remove wrapper for semver::Version once this PR goes through

@@ -5,10 +5,13 @@
 //! Utilities for creating a StorageManager under test.
 
 use crate::config::MountConfig;
-use crate::disk::{OmicronPhysicalDisksConfig, RawDisk};
+use crate::disk::RawDisk;
 use crate::manager::{StorageHandle, StorageManager};
 use camino::Utf8PathBuf;
 use key_manager::StorageKeyRequester;
+use omicron_common::disk::{
+    OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig,
+};
 use omicron_uuid_kinds::ZpoolUuid;
 use slog::{info, Logger};
 use std::sync::{
@@ -333,7 +336,7 @@ impl StorageManagerTestHarness {
             .map(|raw| {
                 let identity = raw.identity();
 
-                crate::disk::OmicronPhysicalDiskConfig {
+                OmicronPhysicalDiskConfig {
                     identity: identity.clone(),
                     id: Uuid::new_v4(),
                     pool_id: ZpoolUuid::new_v4(),

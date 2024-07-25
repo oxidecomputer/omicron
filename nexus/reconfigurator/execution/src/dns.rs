@@ -471,6 +471,7 @@ mod test {
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::example;
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
+    use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_test_utils::resource_helpers::create_silo;
     use nexus_test_utils::resource_helpers::DiskTestBuilder;
     use nexus_test_utils_macros::nexus_test;
@@ -506,7 +507,6 @@ mod test {
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use sled_agent_client::ZoneKind;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::collections::HashMap;

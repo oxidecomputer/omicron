@@ -119,6 +119,7 @@ mod tests {
     use super::*;
     use nexus_db_model::Zpool;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneDisposition;
@@ -127,7 +128,6 @@ mod tests {
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use sled_agent_client::types::OmicronZoneDataset;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =

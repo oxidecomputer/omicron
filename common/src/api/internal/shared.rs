@@ -702,6 +702,35 @@ pub struct ResolvedVpcRouteSet {
     pub routes: HashSet<ResolvedVpcRoute>,
 }
 
+/// Describes the purpose of the dataset.
+#[derive(
+    Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum DatasetKind {
+    Crucible,
+    Cockroach,
+    Clickhouse,
+    ClickhouseKeeper,
+    ExternalDns,
+    InternalDns,
+}
+
+impl fmt::Display for DatasetKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use DatasetKind::*;
+        let s = match self {
+            Crucible => "crucible",
+            Cockroach => "cockroach",
+            Clickhouse => "clickhouse",
+            ClickhouseKeeper => "clickhouse_keeper",
+            ExternalDns => "external_dns",
+            InternalDns => "internal_dns",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 /// Identifiers for a single sled.
 ///
 /// This is intended primarily to be used in timeseries, to identify

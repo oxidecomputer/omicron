@@ -23,6 +23,21 @@ use std::time::Duration;
 use strum::{EnumIter, IntoEnumIterator};
 use uuid::Uuid;
 
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Certificate {
+    pub cert: String,
+    pub key: String,
+}
+
+impl std::fmt::Debug for Certificate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Certificate")
+            .field("cert", &self.cert)
+            .field("key", &"<redacted>")
+            .finish()
+    }
+}
+
 /// Runtime state of the Disk, which includes its attach state and some minimal
 /// metadata
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
