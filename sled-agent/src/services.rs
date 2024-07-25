@@ -1507,10 +1507,6 @@ impl ServiceManager {
             ServiceBuilder::new("network/dns/client")
                 .add_instance(ServiceInstanceBuilder::new("default"));
 
-        // TODO(https://github.com/oxidecomputer/omicron/issues/1898):
-        //
-        // These zones are self-assembling -- after they boot, there should
-        // be no "zlogin" necessary to initialize.
         match &request {
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
