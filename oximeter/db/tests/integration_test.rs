@@ -37,8 +37,8 @@ impl TestInput {
 
 #[tokio::test]
 async fn test_cluster() -> anyhow::Result<()> {
-    let request_timeout = Duration::from_secs(15);
     usdt::register_probes().unwrap();
+    let request_timeout = Duration::from_secs(15);
     let start = tokio::time::Instant::now();
     let logctx = test_setup_log("test_cluster");
     let log = &logctx.log;

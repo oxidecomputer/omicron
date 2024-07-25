@@ -59,11 +59,20 @@ impl DbWrite for Client {
     }
 
     /// Initialize the replicated telemetry database, creating tables as needed.
+    ///
+    /// We run both db-init files since we want all tables in production.
+    /// These files are intentionally disjoint so that we don't have to
+    /// duplicate any setup.
     async fn init_replicated_db(&self) -> Result<(), Error> {
         debug!(self.log, "initializing ClickHouse database");
         self.run_many_sql_statements(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/schema/replicated/db-init.sql"
+            "/schema/replicated/db-init-1.sql"
+        )))
+        .await?;
+        self.run_many_sql_statements(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/schema/replicated/db-init-2.sql"
         )))
         .await
     }
@@ -110,11 +119,13 @@ pub trait TestDbWrite {
 #[async_trait::async_trait]
 impl TestDbWrite for Client {
     /// Initialize the replicated telemetry database, creating tables as needed.
+    /// We run only the first db-init file, since it contains a minimum number
+    /// of tables required for replication/cluster tests.
     async fn init_test_minimal_replicated_db(&self) -> Result<(), Error> {
         debug!(self.log, "initializing ClickHouse database");
         self.run_many_sql_statements(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/schema/replicated/db-init-test.sql"
+            "/schema/replicated/db-init-1.sql"
         )))
         .await
     }

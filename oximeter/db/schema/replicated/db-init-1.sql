@@ -1,7 +1,3 @@
-/*
- * A test implementation of `db-init.sql` that only includes a few metric types.
- * The purpose of this is to reduce test startup time.
- */
 CREATE DATABASE IF NOT EXISTS oximeter ON CLUSTER oximeter_cluster;
 
 /* The version table contains metadata about the `oximeter` database */
