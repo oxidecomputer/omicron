@@ -1756,6 +1756,40 @@ table! {
 }
 
 table! {
+    snapshot_replacement (id) {
+        id -> Uuid,
+        request_time -> Timestamptz,
+        old_dataset_id -> Uuid,
+        old_region_id -> Uuid,
+        old_snapshot_id -> Uuid,
+        old_snapshot_volume_id -> Nullable<Uuid>,
+        new_region_id -> Nullable<Uuid>,
+        replacement_state -> crate::SnapshotReplacementStateEnum,
+        operating_saga_id -> Nullable<Uuid>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(zpool, region_snapshot);
+
+table! {
+    snapshot_replacement_step (id) {
+        id -> Uuid,
+        request_id -> Uuid,
+        request_time -> Timestamptz,
+        volume_id -> Uuid,
+        old_snapshot_volume_id -> Nullable<Uuid>,
+        replacement_state -> crate::SnapshotReplacementStepStateEnum,
+        operating_saga_id -> Nullable<Uuid>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    snapshot_replacement,
+    snapshot_replacement_step,
+    volume
+);
+
+table! {
     db_metadata (singleton) {
         singleton -> Bool,
         time_created -> Timestamptz,

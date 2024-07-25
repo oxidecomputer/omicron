@@ -91,6 +91,7 @@ mod silo_user;
 mod sled;
 mod sled_instance;
 mod snapshot;
+mod snapshot_replacement;
 mod ssh_key;
 mod switch;
 mod switch_interface;
