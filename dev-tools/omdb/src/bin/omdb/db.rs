@@ -306,6 +306,9 @@ enum DbCommands {
     Instances(InstancesOptions),
     /// Print information about the network
     Network(NetworkArgs),
+    /// Print information about migrations
+    #[clap(alias = "migration")]
+    Migrations(MigrationsArgs),
     /// Print information about snapshots
     Snapshots(SnapshotArgs),
     /// Validate the contents of the database
@@ -545,6 +548,75 @@ enum NetworkCommands {
 }
 
 #[derive(Debug, Args)]
+struct MigrationsArgs {
+    #[command(subcommand)]
+    command: MigrationsCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum MigrationsCommands {
+    /// List migrations
+    #[clap(alias = "ls")]
+    List(MigrationsListArgs),
+    // N.B. I'm making this a subcommand not because there are currently any
+    // other subcommands, but to reserve the optionality to add things other
+    // than `list`...
+}
+
+#[derive(Debug, Args)]
+struct MigrationsListArgs {
+    /// Include only migrations where at least one side reports the migration
+    /// is in progress.
+    ///
+    /// By default, migrations in all states are included. This can be combined
+    /// with the `--pending`, `--completed`, and `--failed` arguments to include
+    /// migrations in  multiple states.
+    #[arg(short = 'r', long, action = ArgAction::SetTrue)]
+    in_progress: bool,
+
+    /// Include only migrations where at least one side is still pending (the
+    /// sled-agent hasn't reported in yet).
+    ///
+    /// By default, migrations in all states are included. This can be combined
+    /// with the `--in-progress`, `--completed` and `--failed` arguments to
+    /// include migrations in multiple states.
+    #[arg(short = 'p', long, action = ArgAction::SetTrue)]
+    pending: bool,
+
+    /// Include only migrations where at least one side reports the migration
+    /// has completed.
+    ///
+    /// By default, migrations in all states are included. This can be combined
+    /// with the `--in-progress`, `--pending`, and `--failed` arguments to
+    /// include migrations in multiple states.
+    #[arg(short = 'c', long, action = ArgAction::SetTrue)]
+    completed: bool,
+
+    /// Include only migrations where at least one side reports the migration
+    /// has failed.
+    ///
+    /// By default, migrations in all states are included. This can be combined
+    /// with the `--pending`, `--in-progress`, and --completed` arguments to
+    /// include migrations  in multiple states.
+    #[arg(short = 'f', long, action = ArgAction::SetTrue)]
+    failed: bool,
+
+    /// Show only migrations for this instance ID.
+    ///
+    /// By default, all instances are shown. This argument be repeated to select
+    /// other instances.
+    #[arg(short = 'i', long = "instance-id")]
+    instance_ids: Vec<Uuid>,
+
+    /// Output all data from the migration record.
+    ///
+    /// This includes update and deletion timestamps, the source and target
+    /// generation numbers.
+    #[arg(short, long, action = ArgAction::SetTrue)]
+    verbose: bool,
+}
+
+#[derive(Debug, Args)]
 struct SnapshotArgs {
     #[command(subcommand)]
     command: SnapshotCommands,
@@ -729,6 +801,11 @@ impl DbArgs {
                     *verbose,
                 )
                 .await
+            }
+            DbCommands::Migrations(MigrationsArgs {
+                command: MigrationsCommands::List(args),
+            }) => {
+                cmd_db_migrations_list(&datastore, &self.fetch_opts, args).await
             }
             DbCommands::Snapshots(SnapshotArgs {
                 command: SnapshotCommands::Info(uuid),
@@ -2705,11 +2782,6 @@ async fn cmd_db_eips(
         owner_disposition: Option<BlueprintZoneDisposition>,
     }
 
-    // Display an empty cell for an Option<T> if it's None.
-    fn display_option_blank<T: Display>(opt: &Option<T>) -> String {
-        opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "".to_string())
-    }
-
     if verbose {
         for ip in &ips {
             if verbose {
@@ -4093,4 +4165,169 @@ async fn cmd_db_reconfigurator_save(
         .with_context(|| format!("write {:?}", output_path))?;
     eprintln!("wrote {}", output_path);
     Ok(())
+}
+
+// Migrations
+
+async fn cmd_db_migrations_list(
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &MigrationsListArgs,
+) -> Result<(), anyhow::Error> {
+    use db::model::Migration;
+    use db::model::MigrationState;
+    use db::schema::migration::dsl;
+    use omcrion_common::api::external::Generation;
+    use omicron_common::api::internal::nexus;
+
+    let mut state_filters = Vec::new();
+    if args.completed {
+        state_filters.push(MigrationState(nexus::MigrationState::Completed));
+    }
+    if args.failed {
+        state_filters.push(MigrationState(nexus::MigrationState::Failed));
+    }
+    if args.in_progress {
+        state_filters.push(MigrationState(nexus::MigrationState::InProgress));
+    }
+    if args.pending {
+        state_filters.push(MigrationState(nexus::MigrationState::Pending));
+    }
+
+    let mut query = dsl::migration.into_boxed();
+
+    if !fetch_opts.include_deleted {
+        query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    if !state_filters.is_empty() {
+        query = query.filter(
+            dsl::source_state
+                .eq_any(state_filters.clone())
+                .or(dsl::target_state.eq_any(state_filters)),
+        );
+    }
+
+    if !args.instance_ids.is_empty() {
+        query =
+            query.filter(dsl::instance_id.eq_any(args.instance_ids.clone()));
+    }
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct MigrationRow {
+        id: Uuid,
+        instance: Uuid,
+        source_vmm: Uuid,
+        source_state: MigrationState,
+        target_vmm: Uuid,
+        target_state: MigrationState,
+        created: chrono::DateTime<Utc>,
+        #[tabled(display_with = "display_option_blank")]
+        deleted: Option<chrono::DateTime<Utc>>,
+    }
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct VerboseMigrationRow {
+        id: Uuid,
+        instance: Uuid,
+        src_vmm: Uuid,
+        src_state: MigrationState,
+        src_generation: Generation,
+        #[tabled(display_with = "display_option_blank")]
+        src_updated: Option<chrono::DateTime<Utc>>,
+        tgt_vmm: Uuid,
+        tgt_state: MigrationState,
+        tgt_generation: Generation,
+        #[tabled(display_with = "display_option_blank")]
+        tgt_updated: Option<chrono::DateTime<Utc>>,
+        created: chrono::DateTime<Utc>,
+        #[tabled(display_with = "display_option_blank")]
+        deleted: Option<chrono::DateTime<Utc>>,
+    }
+
+    let migrations = query
+        .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
+        .order_by(dsl::time_created)
+        .select(Migration::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("listing migrations")?;
+
+    check_limit(&migrations, fetch_opts.fetch_limit, || "listing migrations");
+
+    let table = if args.verbose {
+        let rows = migrations.into_iter().map(
+            |Migration {
+                 id,
+                 instance_id,
+                 source_propolis_id,
+                 source_state,
+                 source_gen,
+                 time_source_updated,
+                 target_propolis_id,
+                 target_state,
+                 target_gen,
+                 time_target_updated,
+                 time_created,
+                 time_deleted,
+             }| VerboseMigrationRow {
+                id,
+                instance: instance_id,
+                src_vmm: source_propolis_id,
+                src_state: source_state,
+                src_generation: source_gen.0,
+                src_updated: time_source_updated,
+                tgt_vmm: target_propolis_id,
+                tgt_state: target_state,
+                tgt_generation: target_gen.0,
+                tgt_updated: time_target_updated,
+                created: time_created,
+                deleted: time_deleted,
+            },
+        );
+
+        tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string()
+    } else {
+        let rows = migrations.into_iter().map(
+            |Migration {
+                 id,
+                 instance_id,
+                 source_propolis_id,
+                 source_state,
+                 target_propolis_id,
+                 target_state,
+                 time_created,
+                 time_deleted,
+                 ..
+             }| MigrationRow {
+                id,
+                instance: instance_id,
+                source_vmm: source_propolis_id,
+                source_state,
+                target_vmm: target_propolis_id,
+                target_state,
+                created: time_created,
+                deleted: time_deleted,
+            },
+        );
+
+        tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string()
+    };
+
+    println!("{table}");
+
+    Ok(())
+}
+
+// Display an empty cell for an Option<T> if it's None.
+fn display_option_blank<T: Display>(opt: &Option<T>) -> String {
+    opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "".to_string())
 }
