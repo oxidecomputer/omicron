@@ -696,6 +696,7 @@ mod test {
                     usable_physical_ram: ByteCount::from(1024 * 1024),
                     disks,
                     zpools: vec![],
+                    datasets: vec![],
                 },
             )
             .unwrap();

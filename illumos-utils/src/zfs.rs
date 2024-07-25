@@ -7,6 +7,7 @@
 use crate::{execute, PFEXEC};
 use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
+use omicron_common::api::external::ByteCount;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::DatasetUuid;
 use std::fmt;
@@ -217,13 +218,13 @@ pub struct DatasetProperties {
     /// The full name of the dataset.
     pub name: String,
     /// Remaining space in the dataset and descendents.
-    pub avail: u64,
+    pub avail: ByteCount,
     /// Space used by dataset and descendents.
-    pub used: u64,
+    pub used: ByteCount,
     /// Maximum space usable by dataset and descendents.
-    pub quota: Option<u64>,
+    pub quota: Option<ByteCount>,
     /// Minimum space guaranteed to dataset and descendents.
-    pub reservation: Option<u64>,
+    pub reservation: Option<ByteCount>,
     /// The compression algorithm used for this dataset.
     pub compression: String,
 }
@@ -240,12 +241,20 @@ impl FromStr for DatasetProperties {
         };
 
         let name = iter.next().context("Missing 'name'")?.to_string();
-        let avail = iter.next().context("Missing 'avail'")?.parse::<u64>()?;
-        let used = iter.next().context("Missing 'used'")?.parse::<u64>()?;
+        let avail = iter
+            .next()
+            .context("Missing 'avail'")?
+            .parse::<u64>()?
+            .try_into()?;
+        let used = iter
+            .next()
+            .context("Missing 'used'")?
+            .parse::<u64>()?
+            .try_into()?;
         let quota =
             match iter.next().context("Missing 'quota'")?.parse::<u64>()? {
                 0 => None,
-                q => Some(q),
+                q => Some(q.try_into()?),
             };
         let reservation = match iter
             .next()
@@ -253,7 +262,7 @@ impl FromStr for DatasetProperties {
             .parse::<u64>()?
         {
             0 => None,
-            r => Some(r),
+            r => Some(r.try_into()?),
         };
         let compression =
             iter.next().context("Missing 'compression'")?.to_string();
@@ -790,8 +799,8 @@ mod test {
 
         assert_eq!(props.id, None);
         assert_eq!(props.name, "dataset_name");
-        assert_eq!(props.avail, 1234);
-        assert_eq!(props.used, 5678);
+        assert_eq!(props.avail.to_bytes(), 1234);
+        assert_eq!(props.used.to_bytes(), 5678);
         assert_eq!(props.quota, None);
         assert_eq!(props.reservation, None);
         assert_eq!(props.compression, "off");
@@ -808,10 +817,10 @@ mod test {
             Some("d4e1e554-7b98-4413-809e-4a42561c3d0c".parse().unwrap())
         );
         assert_eq!(props.name, "dataset_name");
-        assert_eq!(props.avail, 1234);
-        assert_eq!(props.used, 5678);
-        assert_eq!(props.quota, Some(111));
-        assert_eq!(props.reservation, Some(222));
+        assert_eq!(props.avail.to_bytes(), 1234);
+        assert_eq!(props.used.to_bytes(), 5678);
+        assert_eq!(props.quota.map(|q| q.to_bytes()), Some(111));
+        assert_eq!(props.reservation.map(|r| r.to_bytes()), Some(222));
         assert_eq!(props.compression, "off");
     }
 

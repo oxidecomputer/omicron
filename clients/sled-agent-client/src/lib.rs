@@ -58,6 +58,7 @@ progenitor::generate_api!(
         RouterVersion = omicron_common::api::internal::shared::RouterVersion,
         SourceNatConfig = omicron_common::api::internal::shared::SourceNatConfig,
         SwitchLocation = omicron_common::api::external::SwitchLocation,
+        TypedUuidForDatasetKind = omicron_uuid_kinds::DatasetUuid,
         TypedUuidForInstanceKind = omicron_uuid_kinds::InstanceUuid,
         TypedUuidForPropolisKind = omicron_uuid_kinds::PropolisUuid,
         TypedUuidForZpoolKind = omicron_uuid_kinds::ZpoolUuid,

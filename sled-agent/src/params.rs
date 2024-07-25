@@ -778,16 +778,16 @@ pub struct InventoryDataset {
 
     /// The amount of remaining space usable by the dataset (and children)
     /// assuming there is no other activity within the pool.
-    pub available: u64,
+    pub available: ByteCount,
 
     /// The amount of space consumed by this dataset and descendents.
-    pub used: u64,
+    pub used: ByteCount,
 
     /// The maximum amount of space usable by a dataset and all descendents.
-    pub quota: Option<u64>,
+    pub quota: Option<ByteCount>,
 
     /// The minimum amount of space guaranteed to a dataset and descendents.
-    pub reservation: Option<u64>,
+    pub reservation: Option<ByteCount>,
 
     /// The compression algorithm used for this dataset, if any.
     pub compression: String,

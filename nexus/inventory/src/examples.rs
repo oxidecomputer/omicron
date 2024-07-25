@@ -315,6 +315,7 @@ pub fn representative() -> Representative {
         },
     ];
     let zpools = vec![];
+    let datasets = vec![];
 
     builder
         .found_sled_inventory(
@@ -329,6 +330,7 @@ pub fn representative() -> Representative {
                 sled_agent_client::types::SledRole::Gimlet,
                 disks,
                 zpools,
+                datasets,
             ),
         )
         .unwrap();
@@ -355,6 +357,7 @@ pub fn representative() -> Representative {
                 sled_agent_client::types::SledRole::Scrimlet,
                 vec![],
                 vec![],
+                vec![],
             ),
         )
         .unwrap();
@@ -376,6 +379,7 @@ pub fn representative() -> Representative {
                 sled_agent_client::types::SledRole::Gimlet,
                 vec![],
                 vec![],
+                vec![],
             ),
         )
         .unwrap();
@@ -393,6 +397,7 @@ pub fn representative() -> Representative {
                 sled_agent_id_unknown,
                 sled_agent_client::types::Baseboard::Unknown,
                 sled_agent_client::types::SledRole::Gimlet,
+                vec![],
                 vec![],
                 vec![],
             ),
@@ -505,6 +510,7 @@ pub fn sled_agent(
     sled_role: sled_agent_client::types::SledRole,
     disks: Vec<sled_agent_client::types::InventoryDisk>,
     zpools: Vec<sled_agent_client::types::InventoryZpool>,
+    datasets: Vec<sled_agent_client::types::InventoryDataset>,
 ) -> sled_agent_client::types::Inventory {
     sled_agent_client::types::Inventory {
         baseboard,
@@ -516,5 +522,6 @@ pub fn sled_agent(
         usable_physical_ram: ByteCount::from(1024 * 1024),
         disks,
         zpools,
+        datasets,
     }
 }

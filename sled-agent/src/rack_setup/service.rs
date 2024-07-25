@@ -1591,6 +1591,7 @@ mod test {
                     })
                     .collect(),
                 zpools: vec![],
+                datasets: vec![],
             },
             true,
         )

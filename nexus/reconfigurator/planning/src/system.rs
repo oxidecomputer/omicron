@@ -551,9 +551,10 @@ impl Sled {
                         slot: i64::try_from(i).unwrap(),
                     })
                     .collect(),
-                // Zpools won't necessarily show up until our first request
-                // to provision storage, so we omit them.
+                // Zpools & Datasets won't necessarily show up until our first
+                // request to provision storage, so we omit them.
                 zpools: vec![],
+                datasets: vec![],
             }
         };
 
@@ -689,6 +690,7 @@ impl Sled {
             usable_physical_ram: inv_sled_agent.usable_physical_ram,
             disks: vec![],
             zpools: vec![],
+            datasets: vec![],
         };
 
         Sled {

@@ -3577,6 +3577,12 @@
           "baseboard": {
             "$ref": "#/components/schemas/Baseboard"
           },
+          "datasets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InventoryDataset"
+            }
+          },
           "disks": {
             "type": "array",
             "items": {
@@ -3613,6 +3619,7 @@
         },
         "required": [
           "baseboard",
+          "datasets",
           "disks",
           "reservoir_size",
           "sled_agent_address",
@@ -3621,6 +3628,69 @@
           "usable_hardware_threads",
           "usable_physical_ram",
           "zpools"
+        ]
+      },
+      "InventoryDataset": {
+        "description": "Identifies information about datasets within Oxide-managed zpools",
+        "type": "object",
+        "properties": {
+          "available": {
+            "description": "The amount of remaining space usable by the dataset (and children) assuming there is no other activity within the pool.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "compression": {
+            "description": "The compression algorithm used for this dataset, if any.",
+            "type": "string"
+          },
+          "id": {
+            "nullable": true,
+            "description": "Although datasets mandated by the control plane will have UUIDs, datasets can be created (and have been created) without UUIDs.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              }
+            ]
+          },
+          "name": {
+            "description": "This name is the full path of the dataset.",
+            "type": "string"
+          },
+          "quota": {
+            "nullable": true,
+            "description": "The maximum amount of space usable by a dataset and all descendents.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "reservation": {
+            "nullable": true,
+            "description": "The minimum amount of space guaranteed to a dataset and descendents.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "used": {
+            "description": "The amount of space consumed by this dataset and descendents.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          }
+        },
+        "required": [
+          "available",
+          "compression",
+          "name",
+          "used"
         ]
       },
       "InventoryDisk": {
