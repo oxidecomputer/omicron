@@ -1046,6 +1046,8 @@ table! {
         extent_count -> Int8,
 
         port -> Nullable<Int4>,
+
+        read_only -> Bool,
     }
 }
 

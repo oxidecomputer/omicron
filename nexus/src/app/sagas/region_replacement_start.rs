@@ -221,6 +221,13 @@ async fn srrs_get_existing_datasets_and_regions(
         .await
         .map_err(ActionError::action_failed)?;
 
+    // XXX for now, bail out if requesting the replacement of a read-only region
+    if db_region.read_only() {
+        return Err(ActionError::action_failed(String::from(
+            "replacing read-only region currently unsupported",
+        )));
+    }
+
     // Find out the existing datasets and regions that back the volume
     let datasets_and_regions = osagactx
         .datastore()
@@ -925,6 +932,7 @@ pub(crate) mod test {
                 10,
                 10,
                 1001,
+                false,
             ),
             Region::new(
                 datasets[1].id(),
@@ -933,6 +941,7 @@ pub(crate) mod test {
                 10,
                 10,
                 1002,
+                false,
             ),
             Region::new(
                 datasets[2].id(),
@@ -941,6 +950,7 @@ pub(crate) mod test {
                 10,
                 10,
                 1003,
+                false,
             ),
             Region::new(
                 datasets[3].id(),
@@ -949,6 +959,7 @@ pub(crate) mod test {
                 10,
                 10,
                 1004,
+                false,
             ),
         ];
 

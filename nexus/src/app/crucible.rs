@@ -26,7 +26,8 @@ use slog::Logger;
 // within a disk at the same time.
 const MAX_CONCURRENT_REGION_REQUESTS: usize = 3;
 
-/// Provides a way for (with BackoffError) Permanent errors to have a different error type than
+/// Provides a way for (with BackoffError) Permanent errors to have a different
+/// error type than
 /// Transient errors.
 #[derive(Debug, thiserror::Error)]
 enum WaitError {
@@ -146,12 +147,14 @@ impl super::Nexus {
         }
     }
 
-    /// Call out to Crucible agent and perform region creation.
-    async fn ensure_region_in_dataset(
+    /// Call out to Crucible agent and perform region creation. Optionally,
+    /// supply a read-only source to invoke a clone.
+    pub async fn ensure_region_in_dataset(
         &self,
         log: &Logger,
         dataset: &db::model::Dataset,
         region: &db::model::Region,
+        source: Option<String>,
     ) -> Result<Region, Error> {
         let client = self.crucible_agent_client_for_dataset(dataset)?;
         let dataset_id = dataset.id();
@@ -173,7 +176,7 @@ impl super::Nexus {
             cert_pem: None,
             key_pem: None,
             root_pem: None,
-            source: None,
+            source,
         };
 
         let create_region = || async {
@@ -593,9 +596,10 @@ impl super::Nexus {
         .await
         .map_err(|e| match e {
             WaitError::Transient(e) => {
-                // The backoff crate can be configured with a maximum elapsed time
-                // before giving up, which means that Transient could be returned
-                // here. Our current policies do **not** set this though.
+                // The backoff crate can be configured with a maximum elapsed
+                // time before giving up, which means that Transient could be
+                // returned here. Our current policies do **not** set this
+                // though.
                 Error::internal_error(&e.to_string())
             }
 
@@ -625,12 +629,10 @@ impl super::Nexus {
         backoff::retry_notify(
             backoff::retry_policy_internal_service_aggressive(),
             || async {
-                let response = match self.get_crucible_region_snapshots(
-                    log,
-                    dataset,
-                    region_id,
-                )
-                .await {
+                let response = match self
+                    .get_crucible_region_snapshots(log, dataset, region_id)
+                    .await
+                {
                     Ok(v) => Ok(v),
 
                     // Return Ok if the dataset's agent is gone, no
@@ -645,7 +647,9 @@ impl super::Nexus {
                         return Ok(());
                     }
 
-                    Err(e) => Err(BackoffError::Permanent(WaitError::Permanent(e))),
+                    Err(e) => {
+                        Err(BackoffError::Permanent(WaitError::Permanent(e)))
+                    }
                 }?;
 
                 match response.running_snapshots.get(&snapshot_id.to_string()) {
@@ -662,27 +666,23 @@ impl super::Nexus {
                             RegionState::Tombstoned => {
                                 Err(BackoffError::transient(
                                     WaitError::Transient(anyhow!(
-                                        "running_snapshot tombstoned, not deleted yet",
-                                    )
-                                )))
+                                        "running_snapshot tombstoned, not \
+                                        deleted yet",
+                                    )),
+                                ))
                             }
 
                             RegionState::Destroyed => {
-                                info!(
-                                    log,
-                                    "running_snapshot deleted",
-                                );
+                                info!(log, "running_snapshot deleted",);
 
                                 Ok(())
                             }
 
-                            _ => {
-                                Err(BackoffError::transient(
-                                    WaitError::Transient(anyhow!(
-                                        "running_snapshot unexpected state",
-                                    )
-                                )))
-                            }
+                            _ => Err(BackoffError::transient(
+                                WaitError::Transient(anyhow!(
+                                    "running_snapshot unexpected state",
+                                )),
+                            )),
                         }
                     }
 
@@ -710,20 +710,19 @@ impl super::Nexus {
                     "region_id" => %region_id,
                     "snapshot_id" => %snapshot_id,
                 );
-            }
+            },
         )
         .await
         .map_err(|e| match e {
             WaitError::Transient(e) => {
-                // The backoff crate can be configured with a maximum elapsed time
-                // before giving up, which means that Transient could be returned
-                // here. Our current policies do **not** set this though.
+                // The backoff crate can be configured with a maximum elapsed
+                // time before giving up, which means that Transient could be
+                // returned here. Our current policies do **not** set this
+                // though.
                 Error::internal_error(&e.to_string())
             }
 
-            WaitError::Permanent(e) => {
-                e
-            }
+            WaitError::Permanent(e) => e,
         })
     }
 
@@ -745,11 +744,12 @@ impl super::Nexus {
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
-        // Unlike other Crucible agent endpoints, this one is synchronous in that it
-        // is not only a request to the Crucible agent: `zfs destroy` is performed
-        // right away. However this is still a request to illumos that may not take
-        // effect right away. Wait until the snapshot no longer appears in the list
-        // of region snapshots, meaning it was not returned from `zfs list`.
+        // Unlike other Crucible agent endpoints, this one is synchronous in
+        // that it is not only a request to the Crucible agent: `zfs destroy` is
+        // performed right away. However this is still a request to illumos that
+        // may not take effect right away. Wait until the snapshot no longer
+        // appears in the list of region snapshots, meaning it was not returned
+        // from `zfs list`.
 
         let dataset_id = dataset.id();
 
@@ -838,9 +838,10 @@ impl super::Nexus {
         .await
         .map_err(|e| match e {
             WaitError::Transient(e) => {
-                // The backoff crate can be configured with a maximum elapsed time
-                // before giving up, which means that Transient could be returned
-                // here. Our current policies do **not** set this though.
+                // The backoff crate can be configured with a maximum elapsed
+                // time before giving up, which means that Transient could be
+                // returned here. Our current policies do **not** set this
+                // though.
                 Error::internal_error(&e.to_string())
             }
 
@@ -860,13 +861,13 @@ impl super::Nexus {
             return Ok(vec![]);
         }
 
-        // Allocate regions, and additionally return the dataset that the region was
-        // allocated in.
+        // Allocate regions, and additionally return the dataset that the region
+        // was allocated in.
         let datasets_and_regions: Vec<(db::model::Dataset, Region)> =
             futures::stream::iter(datasets_and_regions)
                 .map(|(dataset, region)| async move {
                     match self
-                        .ensure_region_in_dataset(log, &dataset, &region)
+                        .ensure_region_in_dataset(log, &dataset, &region, None)
                         .await
                     {
                         Ok(result) => Ok((dataset, result)),
