@@ -3485,7 +3485,7 @@
       "L4PortRange": {
         "example": "22",
         "title": "A range of IP ports",
-        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port",
+        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port.",
         "type": "string",
         "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
         "minLength": 1,
