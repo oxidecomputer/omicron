@@ -8297,6 +8297,7 @@
           "vpcs"
         ],
         "summary": "Replace firewall rules",
+        "description": "The maximum number of rules per VPC is 1024.\nTargets are used to specify the set of instances to which a firewall rule applies. You can target instances directly by name, or specify a VPC, VPC subnet, IP, or IP subnet, which will apply the rule to traffic going to all matching instances. Targets are additive: the rule applies to instances matching ANY target. The maximum number of targets is 256.\nFilters reduce the scope of a firewall rule. Without filters, the rule applies to all packets to the targets (or from the targets, if it's an outbound rule). With multiple filters, the rule applies only to packets matching ALL filters. The maximum number of each type of filter is 256.",
         "operationId": "vpc_firewall_rules_update",
         "parameters": [
           {
@@ -16026,7 +16027,7 @@
       "L4PortRange": {
         "example": "22",
         "title": "A range of IP ports",
-        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port",
+        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port.",
         "type": "string",
         "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
         "minLength": 1,
@@ -20342,7 +20343,7 @@
         "type": "object",
         "properties": {
           "action": {
-            "description": "whether traffic matching the rule should be allowed or dropped",
+            "description": "Whether traffic matching the rule should be allowed or dropped",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleAction"
@@ -20354,7 +20355,7 @@
             "type": "string"
           },
           "direction": {
-            "description": "whether this rule is for incoming or outgoing traffic",
+            "description": "Whether this rule is for incoming or outgoing traffic",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleDirection"
@@ -20362,7 +20363,7 @@
             ]
           },
           "filters": {
-            "description": "reductions on the scope of the rule",
+            "description": "Reductions on the scope of the rule",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleFilter"
@@ -20383,13 +20384,13 @@
             ]
           },
           "priority": {
-            "description": "the relative priority of this rule",
+            "description": "The relative priority of this rule",
             "type": "integer",
             "format": "uint16",
             "minimum": 0
           },
           "status": {
-            "description": "whether this rule is in effect",
+            "description": "Whether this rule is in effect",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleStatus"
@@ -20397,7 +20398,7 @@
             ]
           },
           "targets": {
-            "description": "list of sets of instances that the rule applies to",
+            "description": "Determine the set of instances that the rule applies to",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRuleTarget"
@@ -20414,7 +20415,7 @@
             "format": "date-time"
           },
           "vpc_id": {
-            "description": "the VPC to which this rule belongs",
+            "description": "The VPC to which this rule belongs",
             "type": "string",
             "format": "uuid"
           }
@@ -20449,24 +20450,26 @@
         ]
       },
       "VpcFirewallRuleFilter": {
-        "description": "Filter for a firewall rule. A given packet must match every field that is present for the rule to apply to it. A packet matches a field if any entry in that field matches the packet.",
+        "description": "Filters reduce the scope of a firewall rule. Without filters, the rule applies to all packets to the targets (or from the targets, if it's an outbound rule). With multiple filters, the rule applies only to packets matching ALL filters. The maximum number of each type of filter is 256.",
         "type": "object",
         "properties": {
           "hosts": {
             "nullable": true,
-            "description": "If present, the sources (if incoming) or destinations (if outgoing) this rule applies to.",
+            "description": "If present, host filters match the \"other end\" of traffic from the target’s perspective: for an inbound rule, they match the source of traffic. For an outbound rule, they match the destination.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRuleHostFilter"
-            }
+            },
+            "maxItems": 256
           },
           "ports": {
             "nullable": true,
-            "description": "If present, the destination ports this rule applies to.",
+            "description": "If present, the destination ports or port ranges this rule applies to.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/L4PortRange"
-            }
+            },
+            "maxItems": 256
           },
           "protocols": {
             "nullable": true,
@@ -20474,7 +20477,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRuleProtocol"
-            }
+            },
+            "maxItems": 256
           }
         }
       },
@@ -20596,7 +20600,7 @@
         ]
       },
       "VpcFirewallRuleTarget": {
-        "description": "A `VpcFirewallRuleTarget` is used to specify the set of `Instance`s to which a firewall rule applies.",
+        "description": "A `VpcFirewallRuleTarget` is used to specify the set of instances to which a firewall rule applies. You can target instances directly by name, or specify a VPC, VPC subnet, IP, or IP subnet, which will apply the rule to traffic going to all matching instances. Targets are additive: the rule applies to instances matching ANY target.",
         "oneOf": [
           {
             "description": "The rule applies to all instances in the VPC",
@@ -20701,7 +20705,7 @@
         "type": "object",
         "properties": {
           "action": {
-            "description": "whether traffic matching the rule should be allowed or dropped",
+            "description": "Whether traffic matching the rule should be allowed or dropped",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleAction"
@@ -20709,11 +20713,11 @@
             ]
           },
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "direction": {
-            "description": "whether this rule is for incoming or outgoing traffic",
+            "description": "Whether this rule is for incoming or outgoing traffic",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleDirection"
@@ -20721,7 +20725,7 @@
             ]
           },
           "filters": {
-            "description": "reductions on the scope of the rule",
+            "description": "Reductions on the scope of the rule",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleFilter"
@@ -20729,7 +20733,7 @@
             ]
           },
           "name": {
-            "description": "name of the rule, unique to this VPC",
+            "description": "Name of the rule, unique to this VPC",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -20737,13 +20741,13 @@
             ]
           },
           "priority": {
-            "description": "the relative priority of this rule",
+            "description": "The relative priority of this rule",
             "type": "integer",
             "format": "uint16",
             "minimum": 0
           },
           "status": {
-            "description": "whether this rule is in effect",
+            "description": "Whether this rule is in effect",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleStatus"
@@ -20751,11 +20755,12 @@
             ]
           },
           "targets": {
-            "description": "list of sets of instances that the rule applies to",
+            "description": "Determine the set of instances that the rule applies to",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRuleTarget"
-            }
+            },
+            "maxItems": 256
           }
         },
         "required": [
@@ -20770,14 +20775,15 @@
         ]
       },
       "VpcFirewallRuleUpdateParams": {
-        "description": "Updateable properties of a `Vpc`'s firewall Note that VpcFirewallRules are implicitly created along with a Vpc, so there is no explicit creation.",
+        "description": "Updated list of firewall rules. Will replace all existing rules.",
         "type": "object",
         "properties": {
           "rules": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRuleUpdate"
-            }
+            },
+            "maxItems": 1024
           }
         },
         "required": [

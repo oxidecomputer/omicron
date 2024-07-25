@@ -1467,7 +1467,7 @@ pub enum RouterRouteKind {
 /// its destination.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouterRoute {
-    /// common identifying metadata
+    /// Common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     /// The ID of the VPC Router to which the route belongs
@@ -1483,22 +1483,22 @@ pub struct RouterRoute {
 /// A single rule in a VPC firewall
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRule {
-    /// common identifying metadata
+    /// Common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-    /// whether this rule is in effect
+    /// Whether this rule is in effect
     pub status: VpcFirewallRuleStatus,
-    /// whether this rule is for incoming or outgoing traffic
+    /// Whether this rule is for incoming or outgoing traffic
     pub direction: VpcFirewallRuleDirection,
-    /// list of sets of instances that the rule applies to
+    /// Determine the set of instances that the rule applies to
     pub targets: Vec<VpcFirewallRuleTarget>,
-    /// reductions on the scope of the rule
+    /// Reductions on the scope of the rule
     pub filters: VpcFirewallRuleFilter,
-    /// whether traffic matching the rule should be allowed or dropped
+    /// Whether traffic matching the rule should be allowed or dropped
     pub action: VpcFirewallRuleAction,
-    /// the relative priority of this rule
+    /// The relative priority of this rule
     pub priority: VpcFirewallRulePriority,
-    /// the VPC to which this rule belongs
+    /// The VPC to which this rule belongs
     pub vpc_id: Uuid,
 }
 
@@ -1511,29 +1511,29 @@ pub struct VpcFirewallRules {
 /// A single rule in a VPC firewall
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleUpdate {
-    /// name of the rule, unique to this VPC
+    /// Name of the rule, unique to this VPC
     pub name: Name,
-    /// human-readable free-form text about a resource
+    /// Human-readable free-form text about a resource
     pub description: String,
-    /// whether this rule is in effect
+    /// Whether this rule is in effect
     pub status: VpcFirewallRuleStatus,
-    /// whether this rule is for incoming or outgoing traffic
+    /// Whether this rule is for incoming or outgoing traffic
     pub direction: VpcFirewallRuleDirection,
-    /// list of sets of instances that the rule applies to
+    /// Determine the set of instances that the rule applies to
+    #[schemars(length(max = 256))]
     pub targets: Vec<VpcFirewallRuleTarget>,
-    /// reductions on the scope of the rule
+    /// Reductions on the scope of the rule
     pub filters: VpcFirewallRuleFilter,
-    /// whether traffic matching the rule should be allowed or dropped
+    /// Whether traffic matching the rule should be allowed or dropped
     pub action: VpcFirewallRuleAction,
-    /// the relative priority of this rule
+    /// The relative priority of this rule
     pub priority: VpcFirewallRulePriority,
 }
 
-/// Updateable properties of a `Vpc`'s firewall
-/// Note that VpcFirewallRules are implicitly created along with a Vpc,
-/// so there is no explicit creation.
+/// Updated list of firewall rules. Will replace all existing rules.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleUpdateParams {
+    #[schemars(length(max = 1024))]
     pub rules: Vec<VpcFirewallRuleUpdate>,
 }
 
@@ -1553,19 +1553,24 @@ pub struct VpcFirewallRuleUpdateParams {
 #[repr(transparent)]
 pub struct VpcFirewallRulePriority(pub u16);
 
-/// Filter for a firewall rule. A given packet must match every field that is
-/// present for the rule to apply to it. A packet matches a field if any entry
-/// in that field matches the packet.
+/// Filters reduce the scope of a firewall rule. Without filters, the rule
+/// applies to all packets to the targets (or from the targets, if it's an
+/// outbound rule). With multiple filters, the rule applies only to packets
+/// matching ALL filters. The maximum number of each type of filter is 256.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleFilter {
-    /// If present, the sources (if incoming) or destinations (if outgoing)
-    /// this rule applies to.
+    /// If present, host filters match the "other end" of traffic from the
+    /// target’s perspective: for an inbound rule, they match the source of
+    /// traffic. For an outbound rule, they match the destination.
+    #[schemars(length(max = 256))]
     pub hosts: Option<Vec<VpcFirewallRuleHostFilter>>,
 
     /// If present, the networking protocols this rule applies to.
+    #[schemars(length(max = 256))]
     pub protocols: Option<Vec<VpcFirewallRuleProtocol>>,
 
-    /// If present, the destination ports this rule applies to.
+    /// If present, the destination ports or port ranges this rule applies to.
+    #[schemars(length(max = 256))]
     pub ports: Option<Vec<L4PortRange>>,
 }
 
@@ -1599,8 +1604,11 @@ pub enum VpcFirewallRuleAction {
     Deny,
 }
 
-/// A `VpcFirewallRuleTarget` is used to specify the set of `Instance`s to
-/// which a firewall rule applies.
+/// A `VpcFirewallRuleTarget` is used to specify the set of instances to which
+/// a firewall rule applies. You can target instances directly by name, or
+/// specify a VPC, VPC subnet, IP, or IP subnet, which will apply the rule to
+/// traffic going to all matching instances. Targets are additive: the rule
+/// applies to instances matching ANY target.
 #[derive(
     Clone,
     Debug,
@@ -1760,7 +1768,7 @@ impl JsonSchema for L4PortRange {
                 title: Some("A range of IP ports".to_string()),
                 description: Some(
                     "An inclusive-inclusive range of IP ports. The second port \
-                    may be omitted to represent a single port"
+                    may be omitted to represent a single port."
                         .to_string(),
                 ),
                 examples: vec!["22".into(), "6667-7000".into()],
