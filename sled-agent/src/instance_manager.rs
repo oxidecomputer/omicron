@@ -7,13 +7,6 @@
 use crate::instance::propolis_zone_name;
 use crate::instance::Instance;
 use crate::nexus::NexusClientWithResolver;
-use crate::params::InstanceExternalIpBody;
-use crate::params::InstanceMetadata;
-use crate::params::ZoneBundleMetadata;
-use crate::params::{
-    InstanceHardware, InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse,
-};
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
@@ -30,6 +23,8 @@ use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use sled_agent_types::instance::*;
+use sled_agent_types::zone_bundle::ZoneBundleMetadata;
 use sled_storage::manager::StorageHandle;
 use sled_storage::resources::AllDisks;
 use slog::Logger;

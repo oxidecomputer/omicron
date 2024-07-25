@@ -7,7 +7,6 @@
 use crate::boot_disk_os_writer::BootDiskOsWriter;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::early_networking::EarlyNetworkSetupError;
-use crate::bootstrap::params::{BaseboardId, StartSledAgentRequest};
 use crate::config::Config;
 use crate::instance_manager::InstanceManager;
 use crate::long_running_tasks::LongRunningTaskHandles;
@@ -16,12 +15,7 @@ use crate::nexus::{
     NexusClientWithResolver, NexusNotifierHandle, NexusNotifierInput,
     NexusNotifierTask,
 };
-use crate::params::{
-    DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
-    InstanceMetadata, InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse, OmicronZoneTypeExt,
-    TimeSync, VpcFirewallRule, ZoneBundleMetadata, Zpool,
-};
+use crate::params::OmicronZoneTypeExt;
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::StorageMonitorHandle;
@@ -35,7 +29,6 @@ use derive_more::From;
 use dropshot::HttpError;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zone::ZONE_PREFIX;
@@ -50,8 +43,9 @@ use omicron_common::api::internal::nexus::{
     SledInstanceState, VmmRuntimeState,
 };
 use omicron_common::api::internal::shared::{
-    HostPortConfig, RackNetworkConfig, ResolvedVpcRouteSet,
-    ResolvedVpcRouteState, SledIdentifiers,
+    HostPortConfig, RackNetworkConfig, ResolvedVpcFirewallRule,
+    ResolvedVpcRouteSet, ResolvedVpcRouteState, SledIdentifiers,
+    VirtualNetworkInterfaceHost,
 };
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
@@ -64,7 +58,20 @@ use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
 use oximeter::types::ProducerRegistry;
+use sled_agent_api::Zpool;
+use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
+use sled_agent_types::instance::{
+    InstanceExternalIpBody, InstanceHardware, InstanceMetadata,
+    InstanceMigrationSourceParams, InstancePutStateResponse,
+    InstanceStateRequested, InstanceUnregisterResponse,
+};
+use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
+use sled_agent_types::time_sync::TimeSync;
+use sled_agent_types::zone_bundle::{
+    BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
+    PriorityOrder, StorageLimit, ZoneBundleMetadata,
+};
 use sled_hardware::{underlay, HardwareManager};
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_hardware_types::Baseboard;
@@ -227,8 +234,9 @@ impl From<Error> for dropshot::HttpError {
                 BundleError::NoSuchZone { .. } => {
                     HttpError::for_not_found(None, inner.to_string())
                 }
-                BundleError::InvalidStorageLimit
-                | BundleError::InvalidCleanupPeriod => {
+                BundleError::StorageLimitCreate(_)
+                | BundleError::CleanupPeriodCreate(_)
+                | BundleError::PriorityOrderCreate(_) => {
                     HttpError::for_bad_request(None, inner.to_string())
                 }
                 _ => HttpError::for_internal_error(err.to_string()),
@@ -770,18 +778,16 @@ impl SledAgent {
     }
 
     /// Fetch the zone bundle cleanup context.
-    pub async fn zone_bundle_cleanup_context(
-        &self,
-    ) -> zone_bundle::CleanupContext {
+    pub async fn zone_bundle_cleanup_context(&self) -> CleanupContext {
         self.inner.zone_bundler.cleanup_context().await
     }
 
     /// Update the zone bundle cleanup context.
     pub async fn update_zone_bundle_cleanup_context(
         &self,
-        period: Option<zone_bundle::CleanupPeriod>,
-        storage_limit: Option<zone_bundle::StorageLimit>,
-        priority: Option<zone_bundle::PriorityOrder>,
+        period: Option<CleanupPeriod>,
+        storage_limit: Option<StorageLimit>,
+        priority: Option<PriorityOrder>,
     ) -> Result<(), Error> {
         self.inner
             .zone_bundler
@@ -793,15 +799,14 @@ impl SledAgent {
     /// Fetch the current utilization of the relevant datasets for zone bundles.
     pub async fn zone_bundle_utilization(
         &self,
-    ) -> Result<BTreeMap<Utf8PathBuf, zone_bundle::BundleUtilization>, Error>
-    {
+    ) -> Result<BTreeMap<Utf8PathBuf, BundleUtilization>, Error> {
         self.inner.zone_bundler.utilization().await.map_err(Error::from)
     }
 
     /// Trigger an explicit request to cleanup old zone bundles.
     pub async fn zone_bundle_cleanup(
         &self,
-    ) -> Result<BTreeMap<Utf8PathBuf, zone_bundle::CleanupCount>, Error> {
+    ) -> Result<BTreeMap<Utf8PathBuf, CleanupCount>, Error> {
         self.inner.zone_bundler.cleanup().await.map_err(Error::from)
     }
 
@@ -1112,7 +1117,7 @@ impl SledAgent {
     pub async fn firewall_rules_ensure(
         &self,
         vpc_vni: Vni,
-        rules: &[VpcFirewallRule],
+        rules: &[ResolvedVpcFirewallRule],
     ) -> Result<(), Error> {
         self.inner
             .port_manager
@@ -1178,6 +1183,8 @@ impl SledAgent {
     }
 
     /// Return the metric producer registry.
+    // XXX: can this be removed?
+    #[allow(dead_code)]
     pub fn metrics_registry(&self) -> &ProducerRegistry {
         self.inner.metrics_manager.registry()
     }

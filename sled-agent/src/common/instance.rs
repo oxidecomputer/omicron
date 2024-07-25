@@ -4,7 +4,6 @@
 
 //! Describes the states of VM instances.
 
-use crate::params::InstanceMigrationSourceParams;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::{
@@ -16,6 +15,7 @@ use propolis_client::types::{
     InstanceState as PropolisApiState, InstanceStateMonitorResponse,
     MigrationState as PropolisMigrationState,
 };
+use sled_agent_types::instance::InstanceMigrationSourceParams;
 
 /// The instance and VMM state that sled agent maintains on a per-VMM basis.
 #[derive(Clone, Debug)]
@@ -605,8 +605,6 @@ impl InstanceStates {
 #[cfg(test)]
 mod test {
     use super::*;
-
-    use crate::params::InstanceMigrationSourceParams;
 
     use chrono::Utc;
     use omicron_common::api::external::Generation;

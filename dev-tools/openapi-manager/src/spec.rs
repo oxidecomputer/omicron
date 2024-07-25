@@ -77,6 +77,16 @@ pub fn all_apis() -> Vec<ApiSpec> {
             extra_validation: None,
         },
         ApiSpec {
+            title: "Oxide Sled Agent API",
+            version: "0.0.1",
+            description: "API for interacting with individual sleds",
+            boundary: ApiBoundary::Internal,
+            api_description:
+                sled_agent_api::sled_agent_api_mod::stub_api_description,
+            filename: "sled-agent.json",
+            extra_validation: None,
+        },
+        ApiSpec {
             title: "Oxide Technician Port Control Service",
             version: "0.0.1",
             description: "API for use by the technician port TUI: wicket",

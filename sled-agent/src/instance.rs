@@ -12,13 +12,6 @@ use crate::instance_manager::{
     Error as ManagerError, InstanceManagerServices, InstanceTicket,
 };
 use crate::nexus::NexusClientWithResolver;
-use crate::params::ZoneBundleMetadata;
-use crate::params::{InstanceExternalIpBody, ZoneBundleCause};
-use crate::params::{
-    InstanceHardware, InstanceMetadata, InstanceMigrationSourceParams,
-    InstanceMigrationTargetParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse, VpcFirewallRule,
-};
 use crate::profile::*;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
@@ -36,7 +29,7 @@ use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, SledInstanceState, VmmRuntimeState,
 };
 use omicron_common::api::internal::shared::{
-    NetworkInterface, SourceNatConfig,
+    NetworkInterface, ResolvedVpcFirewallRule, SourceNatConfig,
 };
 use omicron_common::backoff;
 use omicron_common::zpool_name::ZpoolName;
@@ -44,6 +37,8 @@ use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid};
 use propolis_client::Client as PropolisClient;
 use rand::prelude::IteratorRandom;
 use rand::SeedableRng;
+use sled_agent_types::instance::*;
+use sled_agent_types::zone_bundle::{ZoneBundleCause, ZoneBundleMetadata};
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
@@ -222,7 +217,7 @@ enum InstanceRequest {
         tx: oneshot::Sender<SledInstanceState>,
     },
     PutState {
-        state: crate::params::InstanceStateRequested,
+        state: InstanceStateRequested,
         tx: oneshot::Sender<Result<InstancePutStateResponse, ManagerError>>,
     },
     PutMigrationIds {
@@ -339,7 +334,7 @@ struct InstanceRunner {
     source_nat: SourceNatConfig,
     ephemeral_ip: Option<IpAddr>,
     floating_ips: Vec<IpAddr>,
-    firewall_rules: Vec<VpcFirewallRule>,
+    firewall_rules: Vec<ResolvedVpcFirewallRule>,
     dhcp_config: DhcpCfg,
 
     // Disk related properties
@@ -1102,7 +1097,7 @@ impl Instance {
     pub async fn put_state(
         &self,
         tx: oneshot::Sender<Result<InstancePutStateResponse, ManagerError>>,
-        state: crate::params::InstanceStateRequested,
+        state: InstanceStateRequested,
     ) -> Result<(), Error> {
         self.tx
             .send(InstanceRequest::PutState { state, tx })
@@ -1266,7 +1261,7 @@ impl InstanceRunner {
 
     async fn put_state(
         &mut self,
-        state: crate::params::InstanceStateRequested,
+        state: InstanceStateRequested,
     ) -> Result<SledInstanceState, Error> {
         use propolis_client::types::InstanceStateRequested as PropolisRequest;
         let (propolis_state, next_published) = match state {
