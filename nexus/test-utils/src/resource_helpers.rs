@@ -432,6 +432,28 @@ pub async fn create_disk(
     .await
 }
 
+pub async fn create_snapshot(
+    client: &ClientTestContext,
+    project_name: &str,
+    disk_name: &str,
+    snapshot_name: &str,
+) -> views::Snapshot {
+    let snapshots_url = format!("/v1/snapshots?project={}", project_name);
+
+    object_create(
+        client,
+        &snapshots_url,
+        &params::SnapshotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: snapshot_name.parse().unwrap(),
+                description: format!("snapshot {:?}", snapshot_name),
+            },
+            disk: disk_name.to_string().try_into().unwrap(),
+        },
+    )
+    .await
+}
+
 pub async fn delete_disk(
     client: &ClientTestContext,
     project_name: &str,
