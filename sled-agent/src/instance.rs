@@ -131,6 +131,19 @@ pub enum Error {
 
     #[error("Instance dropped our request")]
     RequestDropped(#[from] oneshot::error::RecvError),
+
+    #[error(transparent)]
+    Terminating(#[from] Terminating),
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error("Instance is terminating")]
+pub struct Terminating(());
+
+impl From<Terminating> for ManagerError {
+    fn from(t: Terminating) -> Self {
+        Self::Instance(t.into())
+    }
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -368,6 +381,7 @@ struct InstanceRunner {
 
 impl InstanceRunner {
     async fn run(mut self) {
+        use InstanceRequest::*;
         while !self.should_terminate {
             tokio::select! {
                 biased;
@@ -404,7 +418,6 @@ impl InstanceRunner {
                 },
                 // Handle external requests to act upon the instance.
                 request = self.rx.recv() => {
-                    use InstanceRequest::*;
                     let request_variant = request.as_ref().map(|r| r.to_string());
                     let result = match request {
                         Some(RequestZoneBundle { tx }) => {
@@ -479,6 +492,42 @@ impl InstanceRunner {
             }
         }
         self.publish_state_to_nexus().await;
+
+        // Okay, now that we've terminated the instance, drain any outstanding
+        // requests in the queue, so that they see an error indicating that the
+        // instance is going away.
+        while let Some(request) = self.rx.recv().await {
+            // If the receiver for this request has been dropped, ignore it
+            // instead of bailing out, since we still need to drain the rest of
+            // the queue,
+            let _ = match request {
+                RequestZoneBundle { tx } => {
+                    tx.send(Err(Terminating(()).into())).map_err(|_| ())
+                }
+                GetFilesystemPool { tx } => tx.send(None).map_err(|_| ()),
+                CurrentState { tx } => {
+                    tx.send(self.current_state()).map_err(|_| ())
+                }
+                PutState { tx, .. } => {
+                    tx.send(Err(Terminating(()).into())).map_err(|_| ())
+                }
+                PutMigrationIds { tx, .. } => {
+                    tx.send(Err(Terminating(()).into())).map_err(|_| ())
+                }
+                Terminate { tx, .. } => {
+                    tx.send(Err(Terminating(()).into())).map_err(|_| ())
+                }
+                IssueSnapshotRequest { tx, .. } => {
+                    tx.send(Err(Terminating(()).into())).map_err(|_| ())
+                }
+                AddExternalIp { tx, .. } => {
+                    tx.send(Err(Terminating(()).into())).map_err(|_| ())
+                }
+                DeleteExternalIp { tx, .. } => {
+                    tx.send(Err(Terminating(()).into())).map_err(|_| ())
+                }
+            };
+        }
     }
 
     /// Yields this instance's ID.
