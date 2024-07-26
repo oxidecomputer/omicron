@@ -36,6 +36,7 @@ use nexus_types::internal_api::background::LookupRegionPortStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
+use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
 use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DemoSagaUuid;
@@ -1501,6 +1502,46 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     status.garbage_collect_requested.len(),
                 );
                 for line in &status.garbage_collect_requested {
+                    println!("    > {line}");
+                }
+
+                println!("    errors: {}", status.errors.len());
+                for line in &status.errors {
+                    println!("    > {line}");
+                }
+            }
+        }
+    } else if name == "region_snapshot_replacement_step" {
+        match serde_json::from_value::<RegionSnapshotReplacementStepStatus>(
+            details.clone(),
+        ) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+
+            Ok(status) => {
+                println!(
+                    "    total step records created ok: {}",
+                    status.step_records_created_ok.len(),
+                );
+                for line in &status.step_records_created_ok {
+                    println!("    > {line}");
+                }
+
+                println!(
+                    "    total step garbage collect saga invoked ok: {}",
+                    status.step_garbage_collect_invoked_ok.len(),
+                );
+                for line in &status.step_garbage_collect_invoked_ok {
+                    println!("    > {line}");
+                }
+
+                println!(
+                    "    total step saga invoked ok: {}",
+                    status.step_invoked_ok.len(),
+                );
+                for line in &status.step_invoked_ok {
                     println!("    > {line}");
                 }
 
