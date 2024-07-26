@@ -333,15 +333,6 @@ impl OmicronZoneTypeExt for OmicronZoneConfig {
     }
 }
 
-impl crate::smf_helper::Service for OmicronZoneType {
-    fn service_name(&self) -> String {
-        self.kind().service_prefix().to_owned()
-    }
-    fn smf_name(&self) -> String {
-        format!("svc:/oxide/{}", self.service_name())
-    }
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct TimeSync {
     /// The synchronization state of the sled, true when the system clock
