@@ -1,0 +1,91 @@
+{
+  "oximeter_collector:collections": {
+    "timeseries_name": "oximeter_collector:collections",
+    "field_schema": [
+      {
+        "name": "base_route",
+        "field_type": "string",
+        "source": "metric"
+      },
+      {
+        "name": "collector_id",
+        "field_type": "uuid",
+        "source": "target"
+      },
+      {
+        "name": "collector_ip",
+        "field_type": "ip_addr",
+        "source": "target"
+      },
+      {
+        "name": "collector_port",
+        "field_type": "u16",
+        "source": "target"
+      },
+      {
+        "name": "producer_id",
+        "field_type": "uuid",
+        "source": "metric"
+      },
+      {
+        "name": "producer_ip",
+        "field_type": "ip_addr",
+        "source": "metric"
+      },
+      {
+        "name": "producer_port",
+        "field_type": "u16",
+        "source": "metric"
+      }
+    ],
+    "datum_type": "cumulative_u64",
+    "created": "2024-06-24T17:15:06.069658599Z"
+  },
+  "oximeter_collector:failed_collections": {
+    "timeseries_name": "oximeter_collector:failed_collections",
+    "field_schema": [
+      {
+        "name": "base_route",
+        "field_type": "string",
+        "source": "metric"
+      },
+      {
+        "name": "collector_id",
+        "field_type": "uuid",
+        "source": "target"
+      },
+      {
+        "name": "collector_ip",
+        "field_type": "ip_addr",
+        "source": "target"
+      },
+      {
+        "name": "collector_port",
+        "field_type": "u16",
+        "source": "target"
+      },
+      {
+        "name": "producer_id",
+        "field_type": "uuid",
+        "source": "metric"
+      },
+      {
+        "name": "producer_ip",
+        "field_type": "ip_addr",
+        "source": "metric"
+      },
+      {
+        "name": "producer_port",
+        "field_type": "u16",
+        "source": "metric"
+      },
+      {
+        "name": "reason",
+        "field_type": "string",
+        "source": "metric"
+      }
+    ],
+    "datum_type": "cumulative_u64",
+    "created": "2024-06-24T17:15:06.070765692Z"
+  }
+}

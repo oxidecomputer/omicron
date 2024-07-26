@@ -11,6 +11,7 @@ use omicron_common::api::external::SwitchLocation;
 use omicron_common::api::internal::shared::AllowedSourceIps;
 use omicron_common::api::internal::shared::BgpConfig;
 use omicron_common::api::internal::shared::BgpPeerConfig;
+use omicron_common::api::internal::shared::LldpPortConfig;
 use omicron_common::api::internal::shared::PortFec;
 use omicron_common::api::internal::shared::PortSpeed;
 use omicron_common::api::internal::shared::RouteConfig;
@@ -185,6 +186,8 @@ pub struct UserSpecifiedPortConfig {
     pub autoneg: bool,
     #[serde(default)]
     pub bgp_peers: Vec<UserSpecifiedBgpPeerConfig>,
+    #[serde(default)]
+    pub lldp: Option<LldpPortConfig>,
 }
 
 /// User-specified version of [`BgpPeerConfig`].

@@ -100,6 +100,7 @@ use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
+use omicron_common::api::internal::shared::LldpAdminStatus;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
@@ -749,7 +750,7 @@ impl ServiceInner {
                     .iter()
                     .map(|config| NexusTypes::PortConfigV2 {
                         port: config.port.clone(),
-			routes: config
+                        routes: config
                             .routes
                             .iter()
                             .map(|r| NexusTypes::RouteConfig {
@@ -758,14 +759,14 @@ impl ServiceInner {
                                 vlan_id: r.vlan_id,
                             })
                             .collect(),
-			addresses: config
-			    .addresses
-			    .iter()
-			    .map(|a| NexusTypes::UplinkAddressConfig {
-				    address: a.address,
-				    vlan_id: a.vlan_id
-			    })
-			    .collect(),
+                        addresses: config
+                            .addresses
+                            .iter()
+                            .map(|a| NexusTypes::UplinkAddressConfig {
+                                address: a.address,
+                                vlan_id: a.vlan_id,
+                            })
+                            .collect(),
                         switch: config.switch.into(),
                         uplink_port_speed: config.uplink_port_speed.into(),
                         uplink_port_fec: config.uplink_port_fec.into(),
@@ -785,7 +786,8 @@ impl ServiceInner {
                                 remote_asn: b.remote_asn,
                                 min_ttl: b.min_ttl,
                                 md5_auth_key: b.md5_auth_key.clone(),
-                                multi_exit_discriminator: b.multi_exit_discriminator,
+                                multi_exit_discriminator: b
+                                    .multi_exit_discriminator,
                                 local_pref: b.local_pref,
                                 enforce_first_as: b.enforce_first_as,
                                 communities: b.communities.clone(),
@@ -794,6 +796,32 @@ impl ServiceInner {
                                 vlan_id: b.vlan_id,
                             })
                             .collect(),
+                        lldp: config.lldp.as_ref().map(|lp| {
+                            NexusTypes::LldpPortConfig {
+                                status: match lp.status {
+                                    LldpAdminStatus::Enabled => {
+                                        NexusTypes::LldpAdminStatus::Enabled
+                                    }
+                                    LldpAdminStatus::Disabled => {
+                                        NexusTypes::LldpAdminStatus::Disabled
+                                    }
+                                    LldpAdminStatus::TxOnly => {
+                                        NexusTypes::LldpAdminStatus::TxOnly
+                                    }
+                                    LldpAdminStatus::RxOnly => {
+                                        NexusTypes::LldpAdminStatus::RxOnly
+                                    }
+                                },
+                                chassis_id: lp.chassis_id.clone(),
+                                port_id: lp.port_id.clone(),
+                                system_name: lp.system_name.clone(),
+                                system_description: lp
+                                    .system_description
+                                    .clone(),
+                                port_description: lp.port_description.clone(),
+                                management_addrs: lp.management_addrs.clone(),
+                            }
+                        }),
                     })
                     .collect(),
                 bgp: config
@@ -801,7 +829,12 @@ impl ServiceInner {
                     .iter()
                     .map(|config| NexusTypes::BgpConfig {
                         asn: config.asn,
-                        originate: config.originate.iter().cloned().map(Into::into).collect(),
+                        originate: config
+                            .originate
+                            .iter()
+                            .cloned()
+                            .map(Into::into)
+                            .collect(),
                         shaper: config.shaper.clone(),
                         checker: config.checker.clone(),
                     })
@@ -809,25 +842,26 @@ impl ServiceInner {
                 bfd: config
                     .bfd
                     .iter()
-                    .map(|spec| NexusTypes::BfdPeerConfig {
-                        detection_threshold: spec.detection_threshold,
-                        local: spec.local,
-                        mode: match spec.mode {
-                            omicron_common::api::external::BfdMode::SingleHop => {
-                                nexus_client::types::BfdMode::SingleHop
-                            }
-                            omicron_common::api::external::BfdMode::MultiHop => {
-                                nexus_client::types::BfdMode::MultiHop
-                            }
-                        },
-                        remote: spec.remote,
-                        required_rx: spec.required_rx,
-                        switch: spec.switch.into(),
+                    .map(|spec| {
+                        NexusTypes::BfdPeerConfig {
+                    detection_threshold: spec.detection_threshold,
+                    local: spec.local,
+                    mode: match spec.mode {
+                        omicron_common::api::external::BfdMode::SingleHop => {
+                            nexus_client::types::BfdMode::SingleHop
+                        }
+                        omicron_common::api::external::BfdMode::MultiHop => {
+                            nexus_client::types::BfdMode::MultiHop
+                        }
+                    },
+                    remote: spec.remote,
+                    required_rx: spec.required_rx,
+                    switch: spec.switch.into(),
+                }
                     })
                     .collect(),
             }
         };
-
         info!(self.log, "rack_network_config: {:#?}", rack_network_config);
 
         let physical_disks: Vec<_> = sled_configs_by_id
