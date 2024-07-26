@@ -211,7 +211,7 @@ async fn siu_fetch_state_and_start_real_saga(
             "current.target_vmm" => ?state.target_vmm,
         );
         datastore
-            .instance_updater_unlock(&opctx, &authz_instance, &orig_lock, None)
+            .instance_updater_unlock(&opctx, &authz_instance, &orig_lock)
             .await
             .map_err(ActionError::action_failed)?;
     }
