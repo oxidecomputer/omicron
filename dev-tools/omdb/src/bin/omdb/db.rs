@@ -4177,7 +4177,7 @@ async fn cmd_db_migrations_list(
     use db::model::Migration;
     use db::model::MigrationState;
     use db::schema::migration::dsl;
-    use omcrion_common::api::external::Generation;
+    use omicron_common::api::external::Generation;
     use omicron_common::api::internal::nexus;
 
     let mut state_filters = Vec::new();
