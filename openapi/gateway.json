@@ -87,7 +87,7 @@
     "/ignition/{type}/{slot}/{command}": {
       "post": {
         "summary": "Send an ignition command targeting a specific SP.",
-        "description": "This endpoint can be used to transition a target between A2 and A3 (via power-on / power-off) or reset it.\nThe management network traffic caused by requests to this endpoint is between this MGS instance and its local ignition controller, _not_ the SP targeted by the command.",
+        "description": "This endpoint can be used to transition a target between A2 and A3 (via power-on / power-off) or reset it.\n\nThe management network traffic caused by requests to this endpoint is between this MGS instance and its local ignition controller, _not_ the SP targeted by the command.",
         "operationId": "ignition_command",
         "parameters": [
           {
@@ -134,7 +134,7 @@
     "/local/all-sp-ids": {
       "get": {
         "summary": "Get the complete list of SP identifiers this MGS instance is configured to",
-        "description": "find and communicate with.\nNote that unlike most MGS endpoints, this endpoint does not send any communication on the management network.",
+        "description": "find and communicate with.\n\nNote that unlike most MGS endpoints, this endpoint does not send any communication on the management network.",
         "operationId": "sp_all_ids",
         "responses": {
           "200": {
@@ -188,7 +188,7 @@
     "/recovery/host-phase2": {
       "post": {
         "summary": "Upload a host phase2 image that can be served to recovering hosts via the",
-        "description": "host/SP control uart.\nMGS caches this image in memory and is limited to a small, fixed number of images (potentially 1). Uploading a new image may evict the least-recently-requested image if our cache is already full.",
+        "description": "host/SP control uart.\n\nMGS caches this image in memory and is limited to a small, fixed number of images (potentially 1). Uploading a new image may evict the least-recently-requested image if our cache is already full.",
         "operationId": "recovery_host_phase2_upload",
         "requestBody": {
           "content": {
@@ -923,7 +923,7 @@
     "/sp/{type}/{slot}/component/{component}/update": {
       "post": {
         "summary": "Update an SP component",
-        "description": "Update a component of an SP according to its specific update mechanism. This interface is generic for all component types, but resolves to a mechanism specific to the given component type. This may fail for a variety of reasons including the update bundle being invalid or improperly specified or due to an error originating from the SP itself.\nNote that not all components may be updated; components without known update mechanisms will return an error without any inspection of the update bundle.\nUpdating the SP itself is done via the component name `sp`.",
+        "description": "Update a component of an SP according to its specific update mechanism. This interface is generic for all component types, but resolves to a mechanism specific to the given component type. This may fail for a variety of reasons including the update bundle being invalid or improperly specified or due to an error originating from the SP itself.\n\nNote that not all components may be updated; components without known update mechanisms will return an error without any inspection of the update bundle.\n\nUpdating the SP itself is done via the component name `sp`.",
         "operationId": "sp_component_update",
         "parameters": [
           {
@@ -1002,7 +1002,7 @@
     "/sp/{type}/{slot}/component/{component}/update-abort": {
       "post": {
         "summary": "Abort any in-progress update an SP component",
-        "description": "Aborting an update to the SP itself is done via the component name `sp`.\nOn a successful return, the update corresponding to the given UUID will no longer be in progress (either aborted or applied).",
+        "description": "Aborting an update to the SP itself is done via the component name `sp`.\n\nOn a successful return, the update corresponding to the given UUID will no longer be in progress (either aborted or applied).",
         "operationId": "sp_component_update_abort",
         "parameters": [
           {
