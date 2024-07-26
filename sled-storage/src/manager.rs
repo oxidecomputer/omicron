@@ -1086,7 +1086,6 @@ impl StorageManager {
 /// systems.
 #[cfg(all(test, target_os = "illumos"))]
 mod tests {
-    use crate::dataset::DatasetType;
     use crate::disk::RawSyntheticDisk;
     use crate::manager_test_harness::StorageManagerTestHarness;
     use crate::resources::DiskManagementError;
@@ -1094,6 +1093,7 @@ mod tests {
     use super::*;
     use camino_tempfile::tempdir_in;
     use omicron_common::api::external::Generation;
+    use omicron_common::disk::DatasetKind;
     use omicron_common::ledger;
     use omicron_test_utils::dev::test_setup_log;
     use sled_hardware::DiskFirmware;
@@ -1562,7 +1562,7 @@ mod tests {
         let dataset_id = Uuid::new_v4();
         let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
         let dataset_name =
-            DatasetName::new(zpool_name.clone(), DatasetType::Crucible);
+            DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
         harness
             .handle()
             .upsert_filesystem(dataset_id, dataset_name)
