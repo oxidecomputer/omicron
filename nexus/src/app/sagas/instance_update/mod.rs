@@ -873,10 +873,6 @@ async fn siu_update_network_config(
         }
     }
 
-    // Make sure the V2P manager background task runs to ensure the V2P mappings
-    // for this instance are up to date.
-    nexus.background_tasks.activate(&nexus.background_tasks.task_v2p_manager);
-
     Ok(())
 }
 
@@ -976,6 +972,7 @@ async fn siu_commit_instance_updates(
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, &serialized_authn);
     let log = osagactx.log();
+    let nexus = osagactx.nexus();
 
     let instance_id = authz_instance.id();
 
@@ -1006,6 +1003,24 @@ async fn siu_commit_instance_updates(
         "did_unlock" => ?did_unlock,
     );
 
+    if update.network_config.is_some() {
+        // If the update we performed changed networking configuration, activate
+        // the V2P manager and VPC router RPWs, to ensure that the V2P mapping
+        // and VPC for this instance are up to date.
+        //
+        // We do this here, rather than in the network config update action, so
+        // that the instance's state in the database reflects the new rather
+        // than the old state. Otherwise, if the networking RPW ran *before*
+        // writing the new state to CRDB, it will run with the old VMM, rather
+        // than the new one, and probably do nothing. Then, the networking
+        // config update would be delayed until the *next* background task
+        // activation. This way, we ensure that the RPW runs *after* we are in
+        // the new state.
+
+        nexus.background_tasks.task_v2p_manager.activate();
+        nexus.vpc_needed_notify_sleds();
+    }
+
     // Check if the VMM or migration state has changed while the update saga was
     // running and whether an additional update saga is now required. If one is
     // required, try to start it.
@@ -1030,7 +1045,7 @@ async fn siu_commit_instance_updates(
             "instance_id" => %instance_id,
             "error" => %error,
         );
-        osagactx.nexus().background_tasks.task_instance_updater.activate();
+        nexus.background_tasks.task_instance_updater.activate();
     }
 
     Ok(())
