@@ -989,11 +989,11 @@ async fn siu_commit_instance_updates(
 
     let did_unlock = osagactx
         .datastore()
-        .instance_updater_unlock(
+        .instance_commit_update(
             &opctx,
             &authz_instance,
             &lock,
-            Some(&update.new_runtime),
+            &update.new_runtime,
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -1154,7 +1154,7 @@ async fn unwind_instance_lock(
         || {
             osagactx
             .datastore()
-            .instance_updater_unlock(&opctx, authz_instance, &lock, None)
+            .instance_updater_unlock(&opctx, authz_instance, &lock)
             .or_else(|err| future::ready(match err {
                 // The instance record was not found. It's probably been
                 // deleted. That's fine, we can now die happily, since we won't

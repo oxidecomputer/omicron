@@ -1082,28 +1082,14 @@ impl DataStore {
         }
     }
 
-    /// Release the instance-updater lock acquired by
-    /// [`DataStore::instance_updater_lock`].
-    ///
-    /// This method will unlock the instance if (and only if) the lock is
-    /// currently held by the provided `updater_id`. If the lock is held by a
-    /// different saga UUID, the instance will remain locked. If the instance
-    /// has already been unlocked, this method will return `false`.
-    ///
-    /// # Arguments
-    ///
-    /// - `authz_instance`: the instance to attempt to unlock
-    /// - `updater_lock`: an [`UpdaterLock`] token representing the acquired
-    ///   lock to release.
-    /// - `new_runtime`: an optional [`InstanceRuntimeState`] to write
-    ///   back to the database when the lock is released. If this is [`None`],
-    ///   the instance's runtime state will not be modified.
+    /// Release the instance-updater lock on this instance, if (and only if) the
+    /// lock is currently held by the saga represented by the provided
+    /// [`UpdaterLock`] token.
     pub async fn instance_updater_unlock(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
         lock: &UpdaterLock,
-        new_runtime: Option<&InstanceRuntimeState>,
     ) -> Result<bool, Error> {
         use db::schema::instance::dsl;
 
@@ -1111,7 +1097,9 @@ impl DataStore {
         let UpdaterLock { updater_id, locked_gen } = *lock;
 
         let result = diesel::update(dsl::instance)
-            .filter(dsl::time_deleted.is_null())
+            // N.B. that we intentionally *don't* filter out instances that have
+            // been deleted. If the instance doesn't exist, whatever. It is, by
+            // definition, "unlocked"... :)
             .filter(dsl::id.eq(instance_id))
             // Only unlock the instance if:
             // - the provided updater ID matches that of the saga that has
@@ -1123,7 +1111,6 @@ impl DataStore {
             .set((
                 dsl::updater_gen.eq(Generation(locked_gen.0.next())),
                 dsl::updater_id.eq(None::<Uuid>),
-                new_runtime.cloned(),
             ))
             .check_if_exists::<Instance>(instance_id)
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
@@ -1156,7 +1143,7 @@ impl DataStore {
             // is almost certainly a programmer error.
             UpdateAndQueryResult { ref found, .. } => {
                 match found.updater_id {
-                    Some(actual_id) => {
+                    Some(actual_id) if actual_id != updater_id => {
                         slog::error!(
                             &opctx.log,
                             "attempted to release a lock held by another saga";
@@ -1166,14 +1153,114 @@ impl DataStore {
                             "found_gen" => ?found.updater_gen,
                             "locked_gen" => ?locked_gen,
                         );
-                        debug_assert_ne!(actual_id, updater_id);
                         Err(Error::internal_error(
                             "attempted to release a lock held by another saga! this is a bug!",
                         ))
                     },
+                    Some(_) =>  Ok(false),
                     None => Err(Error::internal_error(
-                            "attempted to release a lock on an instance that is not locked! this is a bug!",
-                        )),
+                        "attempted to release a lock on an instance that is not locked! this is a bug!",
+                    )),
+                }
+            }
+        }
+    }
+
+    /// Write the provided `new_runtime_state` for this instance, and release
+    /// the provided `lock`.
+    ///
+    /// This method will unlock the instance if (and only if) the lock is
+    /// currently held by the provided `updater_id`. If the lock is held by a
+    /// different saga UUID, the instance will remain locked. If the instance
+    /// has already been unlocked, this method will return `false`.
+    ///
+    /// # Arguments
+    ///
+    /// - `authz_instance`: the instance to attempt to unlock
+    /// - `updater_lock`: an [`UpdaterLock`] token representing the acquired
+    ///   lock to release.
+    /// - `new_runtime`: an [`InstanceRuntimeState`] to write
+    ///   back to the database when the lock is released. If this is [`None`],
+    ///   the instance's runtime state will not be modified.
+    pub async fn instance_commit_update(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        lock: &UpdaterLock,
+        new_runtime: &InstanceRuntimeState,
+    ) -> Result<bool, Error> {
+        use db::schema::instance::dsl;
+
+        let instance_id = authz_instance.id();
+        let UpdaterLock { updater_id, locked_gen } = *lock;
+
+        let result = diesel::update(dsl::instance)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(instance_id))
+            // Only unlock the instance if:
+            // - the provided updater ID matches that of the saga that has
+            //   currently locked this instance.
+            .filter(dsl::updater_id.eq(Some(updater_id)))
+            // - the provided updater generation matches the current updater
+            //   generation.
+            .filter(dsl::updater_gen.eq(locked_gen))
+            .filter(dsl::state_generation.lt(new_runtime.gen))
+            .set((
+                dsl::updater_gen.eq(Generation(locked_gen.0.next())),
+                dsl::updater_id.eq(None::<Uuid>),
+                new_runtime.clone(),
+            ))
+            .check_if_exists::<Instance>(instance_id)
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Instance,
+                        LookupType::ById(instance_id),
+                    ),
+                )
+            })?;
+
+        match result {
+            // If we updated the record, the lock has been released! Return
+            // `Ok(true)` to indicate that we released the lock successfully.
+            UpdateAndQueryResult { status: UpdateStatus::Updated, .. } => {
+                Ok(true)
+            }
+            // The generation has advanced past the generation at which the
+            // lock was held. This means that we have already released the
+            // lock. Return `Ok(false)` here for idempotency.
+            UpdateAndQueryResult {
+                status: UpdateStatus::NotUpdatedButExists,
+                ref found,
+            } if found.updater_gen > locked_gen => Ok(false),
+            // The instance exists, but the lock ID doesn't match our lock ID.
+            // This means we were trying to release a lock we never held, whcih
+            // is almost certainly a programmer error.
+            UpdateAndQueryResult { ref found, .. } => {
+                match found.updater_id {
+                    Some(actual_id) if actual_id != updater_id => {
+                        slog::error!(
+                            &opctx.log,
+                            "attempted to release a lock held by another saga";
+                            "instance_id" => %instance_id,
+                            "updater_id" => %updater_id,
+                            "actual_id" => %actual_id,
+                            "found_gen" => ?found.updater_gen,
+                            "locked_gen" => ?locked_gen,
+                        );
+                        Err(Error::internal_error(
+                            "attempted to release a lock held by another saga! this is a bug!",
+                        ))
+                    },
+                    Some(_) =>  Err(Error::internal_error(
+                        "attempted to commit an instance update, but the state generation has advanced!"
+                    )),
+                    None => Err(Error::internal_error(
+                        "attempted to release a lock on an instance that is not locked! this is a bug!",
+                    )),
                 }
             }
         }
@@ -1307,7 +1394,7 @@ mod tests {
 
         // unlock the instance from saga 1
         let unlocked = datastore
-            .instance_updater_unlock(&opctx, &authz_instance, &lock1, None)
+            .instance_commit_update(&opctx, &authz_instance, &lock1, None)
             .await
             .expect("instance must be unlocked by saga 1");
         assert!(unlocked, "instance must actually be unlocked");
@@ -1320,7 +1407,7 @@ mod tests {
 
         // unlock the instance from saga 2
         let unlocked = datastore
-            .instance_updater_unlock(&opctx, &authz_instance, &lock2, None)
+            .instance_commit_update(&opctx, &authz_instance, &lock2, None)
             .await
             .expect("instance must be unlocked by saga 2");
         assert!(unlocked, "instance must actually be unlocked");
@@ -1366,7 +1453,7 @@ mod tests {
         // now, unlock the instance.
         let unlocked = dbg!(
             datastore
-                .instance_updater_unlock(&opctx, &authz_instance, &lock1, None)
+                .instance_commit_update(&opctx, &authz_instance, &lock1, None)
                 .await
         )
         .expect("instance should unlock");
@@ -1375,7 +1462,7 @@ mod tests {
         // unlocking it again should also succeed...
         let unlocked = dbg!(
             datastore
-                .instance_updater_unlock(&opctx, &authz_instance, &lock2, None)
+                .instance_commit_update(&opctx, &authz_instance, &lock2, None)
                 .await
         )
         .expect("instance should unlock again");
@@ -1410,7 +1497,7 @@ mod tests {
         // attempting to unlock with a different saga ID should be an error.
         let err = dbg!(
             datastore
-                .instance_updater_unlock(
+                .instance_commit_update(
                     &opctx,
                     &authz_instance,
                     // N.B. that the `UpdaterLock` type's fields are private
@@ -1441,7 +1528,7 @@ mod tests {
         // unlocking with the correct ID should succeed.
         let unlocked = dbg!(
             datastore
-                .instance_updater_unlock(&opctx, &authz_instance, &lock1, None)
+                .instance_commit_update(&opctx, &authz_instance, &lock1, None)
                 .await
         )
         .expect("instance should unlock");
@@ -1451,7 +1538,7 @@ mod tests {
         // (where the lock is no longer held) should fail.
         let err = dbg!(
             datastore
-                .instance_updater_unlock(
+                .instance_commit_update(
                     &opctx,
                     &authz_instance,
                     // Again, these fields are private specifically to prevent
