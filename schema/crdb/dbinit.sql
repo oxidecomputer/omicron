@@ -3206,7 +3206,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_dataset (
     -- - Which collection this was
     -- - The sled reporting the disk
     -- - The name of this dataset
-    -- - The slot in which this disk was found
     PRIMARY KEY (inv_collection_id, sled_id, name)
 );
 
@@ -4171,7 +4170,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '83.0.0', NULL)
+    (TRUE, NOW(), NOW(), '84.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
