@@ -718,7 +718,8 @@ pub struct ResolvedVpcRouteSet {
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DatasetKind {
-    CockroachDb,
+    #[serde(rename = "cockroach_db")]
+    Cockroach,
     Crucible,
     Clickhouse,
     ClickhouseKeeper,
@@ -744,7 +745,7 @@ impl fmt::Display for DatasetKind {
         use DatasetKind::*;
         let s = match self {
             Crucible => "crucible",
-            CockroachDb => "cockroach_db",
+            Cockroach => "cockroach_db",
             Clickhouse => "clickhouse",
             ClickhouseKeeper => "clickhouse_keeper",
             ExternalDns => "external_dns",
@@ -767,7 +768,7 @@ impl FromStr for DatasetKind {
         use DatasetKind::*;
         let kind = match s {
             "crucible" => Crucible,
-            "cockroach" | "cockroachdb" | "cockroach_db" => CockroachDb,
+            "cockroach" | "cockroachdb" | "cockroach_db" => Cockroach,
             "clickhouse" => Clickhouse,
             "clickhouse_keeper" => ClickhouseKeeper,
             "external_dns" => ExternalDns,
