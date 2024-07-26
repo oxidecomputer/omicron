@@ -4,11 +4,12 @@
 
 //! Storage related errors
 
-use crate::dataset::{DatasetError, DatasetName};
+use crate::dataset::DatasetError;
 use crate::disk::DiskError;
 use camino::Utf8PathBuf;
 use omicron_common::api::external::ByteCountRangeError;
 use omicron_common::api::external::Generation;
+use omicron_common::disk::DatasetName;
 use uuid::Uuid;
 
 #[derive(thiserror::Error, Debug)]

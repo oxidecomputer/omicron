@@ -31,8 +31,8 @@ use crate::bootstrap::early_networking::{
 use crate::bootstrap::BootstrapNetworking;
 use crate::config::SidecarRevision;
 use crate::params::{
-    DendriteAsic, OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
-    TimeSync, ZoneBundleCause, ZoneBundleMetadata, ZoneType,
+    DendriteAsic, OmicronZoneConfigExt, OmicronZoneTypeExt, TimeSync,
+    ZoneBundleCause, ZoneBundleMetadata,
 };
 use crate::profile::*;
 use crate::smf_helper::SmfHelper;
@@ -43,7 +43,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
 use dropshot::HandlerTaskMode;
 use illumos_utils::addrobj::AddrObject;
-use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
+use illumos_utils::addrobj::IPV6_LINK_LOCAL_ADDROBJ_NAME;
 use illumos_utils::dladm::{
     Dladm, Etherstub, EtherstubVnic, GetSimnetError, PhysicalLink,
 };
@@ -62,6 +62,9 @@ use illumos_utils::{execute, PFEXEC};
 use internal_dns::resolver::Resolver;
 use itertools::Itertools;
 use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
+use nexus_sled_agent_shared::inventory::{
+    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig, ZoneKind,
+};
 use omicron_common::address::CLICKHOUSE_KEEPER_PORT;
 use omicron_common::address::CLICKHOUSE_PORT;
 use omicron_common::address::COCKROACH_PORT;
@@ -86,6 +89,7 @@ use omicron_common::api::internal::shared::{
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
+use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use once_cell::sync::OnceCell;
@@ -95,9 +99,7 @@ use sled_hardware::underlay;
 use sled_hardware::SledMode;
 use sled_hardware_types::Baseboard;
 use sled_storage::config::MountConfig;
-use sled_storage::dataset::{
-    DatasetKind, DatasetName, CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET,
-};
+use sled_storage::dataset::{CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -194,9 +196,9 @@ pub enum Error {
     #[error("Failed to access underlay device: {0}")]
     Underlay(#[from] underlay::Error),
 
-    #[error("Failed to create OPTE port for service {service}: {err}")]
+    #[error("Failed to create OPTE port for service {}: {err}", service.report_str())]
     ServicePortCreation {
-        service: String,
+        service: ZoneKind,
         err: Box<illumos_utils::opte::Error>,
     },
 
@@ -1135,17 +1137,14 @@ impl ServiceManager {
             .collect();
 
         let external_ip;
-        let (zone_type_str, nic, snat, floating_ips) = match &zone_args
+        let (zone_kind, nic, snat, floating_ips) = match &zone_args
             .omicron_type()
         {
             Some(
                 zone_type @ OmicronZoneType::Nexus { external_ip, nic, .. },
-            ) => (
-                zone_type.zone_type_str(),
-                nic,
-                None,
-                std::slice::from_ref(external_ip),
-            ),
+            ) => {
+                (zone_type.kind(), nic, None, std::slice::from_ref(external_ip))
+            }
             Some(
                 zone_type @ OmicronZoneType::ExternalDns {
                     dns_address,
@@ -1155,7 +1154,7 @@ impl ServiceManager {
             ) => {
                 external_ip = dns_address.ip();
                 (
-                    zone_type.zone_type_str(),
+                    zone_type.kind(),
                     nic,
                     None,
                     std::slice::from_ref(&external_ip),
@@ -1165,7 +1164,7 @@ impl ServiceManager {
                 zone_type @ OmicronZoneType::BoundaryNtp {
                     nic, snat_cfg, ..
                 },
-            ) => (zone_type.zone_type_str(), nic, Some(*snat_cfg), &[][..]),
+            ) => (zone_type.kind(), nic, Some(*snat_cfg), &[][..]),
             _ => unreachable!("unexpected zone type"),
         };
 
@@ -1185,7 +1184,7 @@ impl ServiceManager {
                 is_service: true,
             })
             .map_err(|err| Error::ServicePortCreation {
-                service: zone_type_str.clone(),
+                service: zone_kind,
                 err: Box::new(err),
             })?;
 
@@ -1206,7 +1205,7 @@ impl ServiceManager {
             let nat_create = || async {
                 info!(
                     self.inner.log, "creating NAT entry for service";
-                    "zone_type" => &zone_type_str,
+                    "zone_type" => zone_kind.report_str(),
                 );
 
                 dpd_client
@@ -1230,7 +1229,7 @@ impl ServiceManager {
                 warn!(
                     self.inner.log, "failed to create NAT entry for service";
                     "error" => ?error,
-                    "zone_type" => &zone_type_str,
+                    "zone_type" => zone_kind.report_str(),
                 );
             };
             retry_notify(
@@ -1464,9 +1463,9 @@ impl ServiceManager {
 
         let zone_type_str = match &request {
             ZoneArgs::Omicron(zone_config) => {
-                zone_config.zone.zone_type.zone_type_str()
+                zone_config.zone.zone_type.kind().zone_prefix()
             }
-            ZoneArgs::Switch(_) => "switch".to_string(),
+            ZoneArgs::Switch(_) => "switch",
         };
 
         // We use the fake initialiser for testing
@@ -1485,7 +1484,7 @@ impl ServiceManager {
             .with_underlay_vnic_allocator(&self.inner.underlay_vnic_allocator)
             .with_zone_root_path(request.root())
             .with_zone_image_paths(zone_image_paths.as_slice())
-            .with_zone_type(&zone_type_str)
+            .with_zone_type(zone_type_str)
             .with_datasets(datasets.as_slice())
             .with_filesystems(&filesystems)
             .with_data_links(&data_links)
@@ -2879,7 +2878,7 @@ impl ServiceManager {
                                             // cabled together.
                                             AddrObject::new(
                                                 &format!("tfportrear{}_0", i),
-                                                IPV6_LINK_LOCAL_NAME,
+                                                IPV6_LINK_LOCAL_ADDROBJ_NAME,
                                             )
                                             .unwrap()
                                         })
@@ -2891,7 +2890,7 @@ impl ServiceManager {
                                         .map(|i| {
                                             AddrObject::new(
                                                 &i.to_string(),
-                                                IPV6_LINK_LOCAL_NAME,
+                                                IPV6_LINK_LOCAL_ADDROBJ_NAME,
                                             )
                                             .unwrap()
                                         })
@@ -3049,7 +3048,7 @@ impl ServiceManager {
                 fake_install_dir,
             )
             .await
-            .map_err(|err| (zone.zone_name().to_string(), err))
+            .map_err(|err| (zone.zone_name(), err))
         });
 
         let results = futures::future::join_all(futures).await;
@@ -3475,7 +3474,7 @@ impl ServiceManager {
             // TODO: We could probably store the ZoneKind in the running zone to
             // make this "comparison to existing zones by name" mechanism a bit
             // safer.
-            if zone.name().contains(&ZoneType::CockroachDb.to_string()) {
+            if zone.name().contains(ZoneKind::CockroachDb.zone_prefix()) {
                 let address = Zones::get_address(
                     Some(zone.name()),
                     &zone.runtime.control_interface(),
@@ -3589,7 +3588,7 @@ impl ServiceManager {
         };
 
         let ntp_zone_name =
-            InstalledZone::get_zone_name(&ZoneType::Ntp.to_string(), None);
+            InstalledZone::get_zone_name(ZoneKind::NTP_PREFIX, None);
 
         let ntp_zone = existing_zones
             .iter()
@@ -3648,7 +3647,7 @@ impl ServiceManager {
                 }
             }
             Err(e) => {
-                info!(self.inner.log, "chronyc command failed: {}", e);
+                error!(self.inner.log, "chronyc command failed: {}", e);
                 Err(Error::NtpZoneNotReady)
             }
         }
@@ -4539,7 +4538,7 @@ mod test {
         zone_type: OmicronZoneType,
         tmp_dir: String,
     ) -> Result<(), Error> {
-        let zone_prefix = format!("oxz_{}", zone_type.zone_type_str());
+        let zone_prefix = format!("oxz_{}", zone_type.kind().zone_prefix());
         let _expectations = expect_new_service(&zone_prefix);
         let r = mgr
             .ensure_all_omicron_zones_persistent(

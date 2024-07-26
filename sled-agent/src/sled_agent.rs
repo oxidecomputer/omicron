@@ -17,12 +17,10 @@ use crate::nexus::{
     NexusNotifierTask,
 };
 use crate::params::{
-    DatasetsConfig, DiskStateRequested, InstanceExternalIpBody,
-    InstanceHardware, InstanceMetadata, InstanceMigrationSourceParams,
-    InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse, Inventory, OmicronPhysicalDisksConfig,
-    OmicronZonesConfig, SledRole, TimeSync, VpcFirewallRule,
-    ZoneBundleMetadata, Zpool,
+    DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
+    InstanceMetadata, InstanceMigrationSourceParams, InstancePutStateResponse,
+    InstanceStateRequested, InstanceUnregisterResponse, OmicronZoneTypeExt,
+    TimeSync, VpcFirewallRule, ZoneBundleMetadata, Zpool,
 };
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
@@ -41,6 +39,10 @@ use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zone::ZONE_PREFIX;
+use nexus_sled_agent_shared::inventory::{
+    Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
+    OmicronZonesConfig, SledRole,
+};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
@@ -59,6 +61,7 @@ use omicron_common::api::{
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
+use omicron_common::disk::{DatasetsConfig, OmicronPhysicalDisksConfig};
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
 use oximeter::types::ProducerRegistry;
@@ -1243,18 +1246,15 @@ impl SledAgent {
         let usable_physical_ram =
             self.inner.hardware.usable_physical_ram_bytes();
         let reservoir_size = self.inner.instances.reservoir_size();
-        let sled_role = if is_scrimlet {
-            crate::params::SledRole::Scrimlet
-        } else {
-            crate::params::SledRole::Gimlet
-        };
+        let sled_role =
+            if is_scrimlet { SledRole::Scrimlet } else { SledRole::Gimlet };
 
         let mut disks = vec![];
         let mut zpools = vec![];
         let mut datasets = vec![];
         let all_disks = self.storage().get_latest_disks().await;
         for (identity, variant, slot, _firmware) in all_disks.iter_all() {
-            disks.push(crate::params::InventoryDisk {
+            disks.push(InventoryDisk {
                 identity: identity.clone(),
                 variant,
                 slot,
@@ -1276,7 +1276,7 @@ impl SledAgent {
                     }
                 };
 
-            zpools.push(crate::params::InventoryZpool {
+            zpools.push(InventoryZpool {
                 id: zpool.id(),
                 total_size: ByteCount::try_from(info.size())?,
             });
@@ -1307,9 +1307,9 @@ impl SledAgent {
                 match illumos_utils::zfs::Zfs::get_dataset_properties(
                     datasets_of_interest.as_slice(),
                 ) {
-                    Ok(props) => props.into_iter().map(|prop| {
-                        crate::params::InventoryDataset::from(prop)
-                    }),
+                    Ok(props) => props
+                        .into_iter()
+                        .map(|prop| InventoryDataset::from(prop)),
                     Err(err) => {
                         warn!(
                             self.log,

@@ -702,6 +702,87 @@ pub struct ResolvedVpcRouteSet {
     pub routes: HashSet<ResolvedVpcRoute>,
 }
 
+/// Describes the purpose of the dataset.
+#[derive(
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+    Hash,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DatasetKind {
+    #[serde(rename = "cockroach_db")]
+    Cockroach,
+    Crucible,
+    Clickhouse,
+    ClickhouseKeeper,
+    ExternalDns,
+    InternalDns,
+}
+
+impl DatasetKind {
+    pub fn dataset_should_be_encrypted(&self) -> bool {
+        match self {
+            // We encrypt all datasets except Crucible.
+            //
+            // Crucible already performs encryption internally, and we
+            // avoid double-encryption.
+            DatasetKind::Crucible => false,
+            _ => true,
+        }
+    }
+}
+
+impl fmt::Display for DatasetKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use DatasetKind::*;
+        let s = match self {
+            Crucible => "crucible",
+            Cockroach => "cockroach_db",
+            Clickhouse => "clickhouse",
+            ClickhouseKeeper => "clickhouse_keeper",
+            ExternalDns => "external_dns",
+            InternalDns => "internal_dns",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DatasetKindParseError {
+    #[error("Dataset unknown: {0}")]
+    UnknownDataset(String),
+}
+
+impl FromStr for DatasetKind {
+    type Err = DatasetKindParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use DatasetKind::*;
+        let kind = match s {
+            "crucible" => Crucible,
+            "cockroach" | "cockroachdb" | "cockroach_db" => Cockroach,
+            "clickhouse" => Clickhouse,
+            "clickhouse_keeper" => ClickhouseKeeper,
+            "external_dns" => ExternalDns,
+            "internal_dns" => InternalDns,
+            _ => {
+                return Err(DatasetKindParseError::UnknownDataset(
+                    s.to_string(),
+                ))
+            }
+        };
+        Ok(kind)
+    }
+}
+
 /// Identifiers for a single sled.
 ///
 /// This is intended primarily to be used in timeseries, to identify

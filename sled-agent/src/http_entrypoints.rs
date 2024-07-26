@@ -7,12 +7,10 @@
 use super::sled_agent::SledAgent;
 use crate::bootstrap::params::AddSledRequest;
 use crate::params::{
-    BootstoreStatus, CleanupContextUpdate, DatasetsConfig, DiskEnsureBody,
-    InstanceEnsureBody, InstanceExternalIpBody, InstancePutMigrationIdsBody,
-    InstancePutStateBody, InstancePutStateResponse, InstanceUnregisterResponse,
-    Inventory, OmicronPhysicalDisksConfig, OmicronZonesConfig, SledRole,
-    TimeSync, VpcFirewallRulesEnsureBody, ZoneBundleId, ZoneBundleMetadata,
-    Zpool,
+    BootstoreStatus, CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
+    InstanceExternalIpBody, InstancePutMigrationIdsBody, InstancePutStateBody,
+    InstancePutStateResponse, InstanceUnregisterResponse, TimeSync,
+    VpcFirewallRulesEnsureBody, ZoneBundleId, ZoneBundleMetadata, Zpool,
 };
 use crate::sled_agent::Error as SledAgentError;
 use crate::zone_bundle;
@@ -27,6 +25,9 @@ use dropshot::{
 };
 use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use installinator_common::M2Slot;
+use nexus_sled_agent_shared::inventory::{
+    Inventory, OmicronZonesConfig, SledRole,
+};
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, SledInstanceState, UpdateArtifactId,
@@ -34,11 +35,13 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::shared::{
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SledIdentifiers, SwitchPorts,
 };
+use omicron_common::disk::{
+    DatasetsConfig, DiskVariant, OmicronPhysicalDisksConfig,
+};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::EarlyNetworkConfig;
-use sled_hardware::DiskVariant;
 use sled_storage::resources::DatasetsManagementResult;
 use sled_storage::resources::DisksManagementResult;
 use std::collections::BTreeMap;

@@ -1757,9 +1757,7 @@ impl DataStore {
                         0,
                         0,
                     ),
-                    sled_role: nexus_types::inventory::SledRole::from(
-                        s.sled_role,
-                    ),
+                    sled_role: s.sled_role.into(),
                     usable_hardware_threads: u32::from(
                         s.usable_hardware_threads,
                     ),

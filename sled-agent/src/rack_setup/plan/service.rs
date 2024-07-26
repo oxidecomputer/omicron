@@ -5,15 +5,14 @@
 //! Plan generation for "where should services be initialized".
 
 use crate::bootstrap::params::StartSledAgentRequest;
-use crate::params::{
-    OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig, OmicronZoneConfig,
-    OmicronZoneDataset, OmicronZoneType,
-};
 use camino::Utf8PathBuf;
 use dns_service_client::types::DnsConfigParams;
 use illumos_utils::zpool::ZpoolName;
 use internal_dns::config::{Host, Zone};
 use internal_dns::ServiceName;
+use nexus_sled_agent_shared::inventory::{
+    Inventory, OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType, SledRole,
+};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
     COCKROACHDB_REDUNDANCY, DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT,
@@ -28,6 +27,10 @@ use omicron_common::api::internal::shared::{
 use omicron_common::backoff::{
     retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
 };
+use omicron_common::disk::{
+    DatasetKind, DatasetName, DiskVariant, OmicronPhysicalDiskConfig,
+    OmicronPhysicalDisksConfig,
+};
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, SledUuid, ZpoolUuid};
 use rand::prelude::SliceRandom;
@@ -37,7 +40,7 @@ use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
 };
 use sled_agent_types::rack_init::RackInitializeRequest as Config;
-use sled_storage::dataset::{DatasetKind, DatasetName, CONFIG_DATASET};
+use sled_storage::dataset::CONFIG_DATASET;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -246,15 +249,15 @@ impl Plan {
 
         let role = client.sled_role_get().await?.into_inner();
         match role {
-            SledAgentTypes::SledRole::Gimlet => Ok(false),
-            SledAgentTypes::SledRole::Scrimlet => Ok(true),
+            SledRole::Gimlet => Ok(false),
+            SledRole::Scrimlet => Ok(true),
         }
     }
 
     async fn get_inventory(
         log: &Logger,
         address: SocketAddrV6,
-    ) -> Result<SledAgentTypes::Inventory, PlanError> {
+    ) -> Result<Inventory, PlanError> {
         let dur = std::time::Duration::from_secs(60);
         let client = reqwest::ClientBuilder::new()
             .connect_timeout(dur)
@@ -279,9 +282,7 @@ impl Plan {
             if inventory
                 .disks
                 .iter()
-                .filter(|disk| {
-                    matches!(disk.variant, SledAgentTypes::DiskVariant::U2)
-                })
+                .filter(|disk| matches!(disk.variant, DiskVariant::U2))
                 .count()
                 < MINIMUM_U2_COUNT
             {
@@ -347,9 +348,7 @@ impl Plan {
                 .inventory
                 .disks
                 .iter()
-                .filter(|disk| {
-                    matches!(disk.variant, SledAgentTypes::DiskVariant::U2)
-                })
+                .filter(|disk| matches!(disk.variant, DiskVariant::U2))
                 .map(|disk| OmicronPhysicalDiskConfig {
                     identity: disk.identity.clone(),
                     id: Uuid::new_v4(),
@@ -445,7 +444,7 @@ impl Plan {
                 )
                 .unwrap();
             let dataset_name =
-                sled.alloc_dataset_from_u2s(DatasetKind::CockroachDb)?;
+                sled.alloc_dataset_from_u2s(DatasetKind::Cockroach)?;
             let filesystem_pool = Some(dataset_name.pool().clone());
             sled.request.zones.push(OmicronZoneConfig {
                 // TODO-cleanup use TypedUuid everywhere
@@ -863,7 +862,7 @@ pub struct SledInfo {
     /// the address of the Sled Agent on the sled's subnet
     pub sled_address: SocketAddrV6,
     /// the inventory returned by the Sled
-    inventory: SledAgentTypes::Inventory,
+    inventory: Inventory,
     /// The Zpools available for usage by services
     u2_zpools: Vec<ZpoolName>,
     /// spreads components across a Sled's zpools
@@ -882,7 +881,7 @@ impl SledInfo {
         sled_id: SledUuid,
         subnet: Ipv6Subnet<SLED_PREFIX>,
         sled_address: SocketAddrV6,
-        inventory: SledAgentTypes::Inventory,
+        inventory: Inventory,
         is_scrimlet: bool,
     ) -> SledInfo {
         SledInfo {

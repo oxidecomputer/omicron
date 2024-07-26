@@ -11,13 +11,18 @@
 
 use crate::external_api::params::PhysicalDiskKind;
 use crate::external_api::params::UninitializedSledId;
-use crate::external_api::shared::Baseboard;
 use chrono::DateTime;
 use chrono::Utc;
 pub use gateway_client::types::PowerState;
 pub use gateway_client::types::RotImageError;
 pub use gateway_client::types::RotSlot;
 pub use gateway_client::types::SpType;
+use nexus_sled_agent_shared::inventory::InventoryDataset;
+use nexus_sled_agent_shared::inventory::InventoryDisk;
+use nexus_sled_agent_shared::inventory::InventoryZpool;
+use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
+use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
+use nexus_sled_agent_shared::inventory::SledRole;
 use omicron_common::api::external::ByteCount;
 pub use omicron_common::api::internal::shared::NetworkInterface;
 pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
@@ -29,11 +34,6 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-pub use sled_agent_client::types::OmicronZoneConfig;
-pub use sled_agent_client::types::OmicronZoneDataset;
-pub use sled_agent_client::types::OmicronZoneType;
-pub use sled_agent_client::types::OmicronZonesConfig;
-pub use sled_agent_client::types::SledRole;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
@@ -179,8 +179,8 @@ pub struct BaseboardId {
     pub serial_number: String,
 }
 
-impl From<Baseboard> for BaseboardId {
-    fn from(value: Baseboard) -> Self {
+impl From<crate::external_api::shared::Baseboard> for BaseboardId {
+    fn from(value: crate::external_api::shared::Baseboard) -> Self {
         BaseboardId { part_number: value.part, serial_number: value.serial }
     }
 }
@@ -365,13 +365,17 @@ impl IntoRotPage for gateway_client::types::RotCfpa {
 /// the disk is being actively managed by the control plane.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PhysicalDisk {
+    // XXX: Should this just be InventoryDisk? Do we need a separation between
+    // InventoryDisk and PhysicalDisk? The types are structurally the same, but
+    // maybe the separation is useful to indicate that a `PhysicalDisk` doesn't
+    // always show up in the inventory.
     pub identity: omicron_common::disk::DiskIdentity,
     pub variant: PhysicalDiskKind,
     pub slot: i64,
 }
 
-impl From<sled_agent_client::types::InventoryDisk> for PhysicalDisk {
-    fn from(disk: sled_agent_client::types::InventoryDisk) -> PhysicalDisk {
+impl From<InventoryDisk> for PhysicalDisk {
+    fn from(disk: InventoryDisk) -> PhysicalDisk {
         PhysicalDisk {
             identity: disk.identity,
             variant: disk.variant.into(),
@@ -389,10 +393,7 @@ pub struct Zpool {
 }
 
 impl Zpool {
-    pub fn new(
-        time_collected: DateTime<Utc>,
-        pool: sled_agent_client::types::InventoryZpool,
-    ) -> Zpool {
+    pub fn new(time_collected: DateTime<Utc>, pool: InventoryZpool) -> Zpool {
         Zpool { time_collected, id: pool.id, total_size: pool.total_size }
     }
 }
@@ -424,8 +425,8 @@ pub struct Dataset {
     pub compression: String,
 }
 
-impl From<sled_agent_client::types::InventoryDataset> for Dataset {
-    fn from(disk: sled_agent_client::types::InventoryDataset) -> Self {
+impl From<InventoryDataset> for Dataset {
+    fn from(disk: InventoryDataset) -> Self {
         Self {
             id: disk.id,
             name: disk.name,

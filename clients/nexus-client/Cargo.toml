@@ -11,6 +11,7 @@ workspace = true
 chrono.workspace = true
 futures.workspace = true
 nexus-types.workspace = true
+nexus-sled-agent-shared.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 oxnet.workspace = true

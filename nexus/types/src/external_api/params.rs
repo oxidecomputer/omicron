@@ -12,8 +12,9 @@ use omicron_common::api::external::{
     AddressLotKind, AllowedSourceIps, BfdMode, BgpPeer, ByteCount, Hostname,
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     InstanceCpuCount, LinkFec, LinkSpeed, Name, NameOrId, PaginationOrder,
-    RouteDestination, RouteTarget, SemverVersion,
+    RouteDestination, RouteTarget, SemverVersion, UserId,
 };
+use omicron_common::disk::DiskVariant;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{
@@ -390,48 +391,6 @@ pub struct UserCreate {
     pub external_id: UserId,
     /// how to set the user's login password
     pub password: UserPassword,
-}
-
-/// A username for a local-only user
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(try_from = "String")]
-pub struct UserId(String);
-
-impl AsRef<str> for UserId {
-    fn as_ref(&self) -> &str {
-        self.0.as_ref()
-    }
-}
-
-impl FromStr for UserId {
-    type Err = String;
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        UserId::try_from(String::from(value))
-    }
-}
-
-/// Used to impl `Deserialize`
-impl TryFrom<String> for UserId {
-    type Error = String;
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        // Mostly, this validation exists to cap the input size.  The specific
-        // length is not critical here.  For convenience and consistency, we use
-        // the same rules as `Name`.
-        let _ = Name::try_from(value.clone())?;
-        Ok(UserId(value))
-    }
-}
-
-impl JsonSchema for UserId {
-    fn schema_name() -> String {
-        "UserId".to_string()
-    }
-
-    fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        Name::json_schema(gen)
-    }
 }
 
 /// A password used for authenticating a local-only user
@@ -1350,12 +1309,11 @@ pub enum PhysicalDiskKind {
     U2,
 }
 
-impl From<sled_agent_client::types::DiskVariant> for PhysicalDiskKind {
-    fn from(variant: sled_agent_client::types::DiskVariant) -> Self {
-        use sled_agent_client::types::DiskVariant;
-        match variant {
-            DiskVariant::U2 => Self::U2,
-            DiskVariant::M2 => Self::M2,
+impl From<DiskVariant> for PhysicalDiskKind {
+    fn from(dv: DiskVariant) -> Self {
+        match dv {
+            DiskVariant::M2 => PhysicalDiskKind::M2,
+            DiskVariant::U2 => PhysicalDiskKind::U2,
         }
     }
 }

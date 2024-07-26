@@ -3691,7 +3691,6 @@
         "type": "string"
       },
       "OmicronPhysicalDiskConfig": {
-        "description": "OmicronPhysicalDiskConfig\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"id\", \"identity\", \"pool_id\" ], \"properties\": { \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"identity\": { \"$ref\": \"#/components/schemas/DiskIdentity\" }, \"pool_id\": { \"$ref\": \"#/components/schemas/TypedUuidForZpoolKind\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "id": {
@@ -3712,7 +3711,6 @@
         ]
       },
       "OmicronPhysicalDisksConfig": {
-        "description": "OmicronPhysicalDisksConfig\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"disks\", \"generation\" ], \"properties\": { \"disks\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/OmicronPhysicalDiskConfig\" } }, \"generation\": { \"description\": \"generation number of this configuration\\n\\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\\n\\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/Generation\" } ] } } } ``` </details>",
         "type": "object",
         "properties": {
           "disks": {
@@ -3736,7 +3734,7 @@
         ]
       },
       "OmicronZoneDataset": {
-        "description": "Describes a persistent ZFS dataset associated with an Omicron zone\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Describes a persistent ZFS dataset associated with an Omicron zone\", \"type\": \"object\", \"required\": [ \"pool_name\" ], \"properties\": { \"pool_name\": { \"$ref\": \"#/components/schemas/ZpoolName\" } } } ``` </details>",
+        "description": "Describes a persistent ZFS dataset associated with an Omicron zone",
         "type": "object",
         "properties": {
           "pool_name": {
@@ -5087,8 +5085,8 @@
         ]
       },
       "UserId": {
-        "title": "A name unique within the parent collection",
-        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
+        "title": "A username for a local-only user",
+        "description": "Usernames must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Usernames cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
         "type": "string",
         "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,

@@ -8,10 +8,10 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use crate::illumos::gpt;
-use crate::{DiskPaths, DiskVariant, Partition, PooledDiskError};
+use crate::{DiskPaths, Partition, PooledDiskError};
 use camino::Utf8Path;
 use illumos_utils::zpool::ZpoolName;
-use omicron_common::disk::DiskIdentity;
+use omicron_common::disk::{DiskIdentity, DiskVariant};
 use omicron_uuid_kinds::ZpoolUuid;
 use slog::info;
 use slog::Logger;

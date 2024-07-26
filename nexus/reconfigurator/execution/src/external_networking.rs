@@ -13,6 +13,7 @@ use nexus_db_queries::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
 use nexus_db_queries::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use nexus_db_queries::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
 use nexus_db_queries::db::DataStore;
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -20,7 +21,6 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use sled_agent_client::ZoneKind;
 use slog::debug;
 use slog::error;
 use slog::info;
@@ -40,7 +40,7 @@ pub(crate) async fn ensure_zone_external_networking_allocated(
 
         let log = opctx.log.new(slog::o!(
             "action" => "allocate-external-networking",
-            "zone_kind" => z.zone_type.kind().to_string(),
+            "zone_kind" => z.zone_type.kind().report_str(),
             "zone_id" => z.id.to_string(),
             "ip" => format!("{external_ip:?}"),
             "nic" => format!("{nic:?}"),
@@ -75,7 +75,7 @@ pub(crate) async fn ensure_zone_external_networking_deallocated(
         let kind = z.zone_type.kind();
         let log = opctx.log.new(slog::o!(
             "action" => "deallocate-external-networking",
-            "zone_kind" => z.zone_type.kind().to_string(),
+            "zone_kind" => kind.report_str(),
             "zone_id" => z.id.to_string(),
             "ip" => format!("{external_ip:?}"),
             "nic" => format!("{nic:?}"),
@@ -87,7 +87,8 @@ pub(crate) async fn ensure_zone_external_networking_deallocated(
             .with_context(|| {
                 format!(
                     "failed to delete external IP {external_ip:?} \
-                     for {kind} zone {}",
+                     for {} zone {}",
+                    kind.report_str(),
                     z.id
                 )
             })?;
@@ -106,7 +107,8 @@ pub(crate) async fn ensure_zone_external_networking_deallocated(
             .await
             .with_context(|| {
                 format!(
-                    "failed to delete service VNIC {nic:?} for {kind} zone {}",
+                    "failed to delete service VNIC {nic:?} for {} zone {}",
+                    kind.report_str(),
                     z.id
                 )
             })?;
@@ -142,7 +144,10 @@ async fn is_external_ip_already_allocated(
         .external_ip_list_service(opctx, zone_id.into_untyped_uuid())
         .await
         .with_context(|| {
-            format!("failed to look up external IPs for {zone_kind} {zone_id}")
+            format!(
+                "failed to look up external IPs for {} {zone_id}",
+                zone_kind.report_str()
+            )
         })?;
 
     // We expect to find either 0 or exactly 1 IP for any given zone. If 0,
@@ -212,7 +217,10 @@ async fn is_nic_already_allocated(
         .service_list_network_interfaces(opctx, zone_id.into_untyped_uuid())
         .await
         .with_context(|| {
-            format!("failed to look up NICs for {zone_kind} {zone_id}")
+            format!(
+                "failed to look up NICs for {} {zone_id}",
+                zone_kind.report_str()
+            )
         })?;
 
     if !allocated_nics.is_empty() {
@@ -292,8 +300,8 @@ async fn ensure_external_service_ip(
         .await
         .with_context(|| {
             format!(
-                "failed to allocate IP to {zone_kind} {zone_id}: \
-                     {external_ip:?}"
+                "failed to allocate IP to {} {zone_id}: {external_ip:?}",
+                zone_kind.report_str()
             )
         })?;
 
@@ -336,7 +344,7 @@ async fn ensure_service_nic(
         | ZoneKind::InternalDns
         | ZoneKind::InternalNtp
         | ZoneKind::Oximeter => {
-            bail!("no VPC subnet available for {zone_kind} zone")
+            bail!("no VPC subnet available for {} zone", zone_kind.report_str())
         }
     };
 
@@ -359,7 +367,7 @@ async fn ensure_service_nic(
         nic_subnet.clone(),
         IdentityMetadataCreateParams {
             name: nic.name.clone(),
-            description: format!("{zone_kind} service vNIC"),
+            description: format!("{} service vNIC", zone_kind.report_str()),
         },
         nic.ip,
         nic.mac,
@@ -376,8 +384,8 @@ async fn ensure_service_nic(
         .map_err(|err| err.into_external())
         .with_context(|| {
             format!(
-                "failed to allocate NIC to {zone_kind} {service_id}: \
-                     {nic:?}"
+                "failed to allocate NIC to {} {service_id}: {nic:?}",
+                zone_kind.report_str()
             )
         })?;
 
@@ -408,7 +416,8 @@ async fn ensure_service_nic(
         // return a scary error here and expect to never see it.
         bail!(
             "database cleanup required: unexpected NIC ({created_nic:?}) \
-             allocated for {zone_kind} {service_id}"
+             allocated for {} {service_id}",
+            zone_kind.report_str(),
         );
     }
 
@@ -426,12 +435,12 @@ mod tests {
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_model::SqlU16;
     use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
+    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneType;
-    use nexus_types::deployment::OmicronZoneDataset;
     use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;

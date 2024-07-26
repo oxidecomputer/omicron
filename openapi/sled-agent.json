@@ -2203,92 +2203,15 @@
         ]
       },
       "DatasetKind": {
-        "description": "The type of a dataset, and an auxiliary information necessary to successfully launch a zone managing the associated data.",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "cockroach_db"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "crucible"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "clickhouse"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "clickhouse_keeper"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "external_dns"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "internal_dns"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          }
+        "description": "Describes the purpose of the dataset.",
+        "type": "string",
+        "enum": [
+          "crucible",
+          "cockroach",
+          "clickhouse",
+          "clickhouse_keeper",
+          "external_dns",
+          "internal_dns"
         ]
       },
       "DatasetManagementStatus": {
@@ -3812,7 +3735,7 @@
       "L4PortRange": {
         "example": "22",
         "title": "A range of IP ports",
-        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port",
+        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port.",
         "type": "string",
         "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
         "minLength": 1,
@@ -4983,7 +4906,7 @@
         ]
       },
       "SledRole": {
-        "description": "Describes the role of the sled within the rack.\n\nNote that this may change if the sled is physically moved within the rack.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Describes the role of the sled within the rack.\\n\\nNote that this may change if the sled is physically moved within the rack.\", \"oneOf\": [ { \"description\": \"The sled is a general compute sled.\", \"type\": \"string\", \"enum\": [ \"gimlet\" ] }, { \"description\": \"The sled is attached to the network switch, and has additional responsibilities.\", \"type\": \"string\", \"enum\": [ \"scrimlet\" ] } ] } ``` </details>",
+        "description": "Describes the role of the sled within the rack.\n\nNote that this may change if the sled is physically moved within the rack.",
         "oneOf": [
           {
             "description": "The sled is a general compute sled.",

@@ -75,7 +75,7 @@
       }
     },
     "DatasetKind": {
-      "description": "The type of a dataset, and an auxiliary information necessary to successfully launch a zone managing the associated data.",
+      "description": "Describes the purpose of the dataset.",
       "oneOf": [
         {
           "type": "object",

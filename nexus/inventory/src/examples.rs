@@ -11,12 +11,19 @@ use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
+use nexus_sled_agent_shared::inventory::Baseboard;
+use nexus_sled_agent_shared::inventory::Inventory;
+use nexus_sled_agent_shared::inventory::InventoryDataset;
+use nexus_sled_agent_shared::inventory::InventoryDisk;
+use nexus_sled_agent_shared::inventory::InventoryZpool;
+use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
+use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
-use nexus_types::inventory::OmicronZonesConfig;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use omicron_common::api::external::ByteCount;
+use omicron_common::disk::DiskVariant;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::sync::Arc;
@@ -276,41 +283,41 @@ pub fn representative() -> Representative {
     // Add some disks to this first sled.
     let disks = vec![
         // Let's say we have one manufacturer for our M.2...
-        sled_agent_client::types::InventoryDisk {
+        InventoryDisk {
             identity: omicron_common::disk::DiskIdentity {
                 vendor: "macrohard".to_string(),
                 model: "box".to_string(),
                 serial: "XXIV".to_string(),
             },
-            variant: sled_agent_client::types::DiskVariant::M2,
+            variant: DiskVariant::M2,
             slot: 0,
         },
         // ... and a couple different vendors for our U.2s
-        sled_agent_client::types::InventoryDisk {
+        InventoryDisk {
             identity: omicron_common::disk::DiskIdentity {
                 vendor: "memetendo".to_string(),
                 model: "swatch".to_string(),
                 serial: "0001".to_string(),
             },
-            variant: sled_agent_client::types::DiskVariant::U2,
+            variant: DiskVariant::U2,
             slot: 1,
         },
-        sled_agent_client::types::InventoryDisk {
+        InventoryDisk {
             identity: omicron_common::disk::DiskIdentity {
                 vendor: "memetendo".to_string(),
                 model: "swatch".to_string(),
                 serial: "0002".to_string(),
             },
-            variant: sled_agent_client::types::DiskVariant::U2,
+            variant: DiskVariant::U2,
             slot: 2,
         },
-        sled_agent_client::types::InventoryDisk {
+        InventoryDisk {
             identity: omicron_common::disk::DiskIdentity {
                 vendor: "tony".to_string(),
                 model: "craystation".to_string(),
                 serial: "5".to_string(),
             },
-            variant: sled_agent_client::types::DiskVariant::U2,
+            variant: DiskVariant::U2,
             slot: 3,
         },
     ];
@@ -322,12 +329,12 @@ pub fn representative() -> Representative {
             "fake sled agent 1",
             sled_agent(
                 sled_agent_id_basic,
-                sled_agent_client::types::Baseboard::Gimlet {
+                Baseboard::Gimlet {
                     identifier: String::from("s1"),
                     model: String::from("model1"),
                     revision: 0,
                 },
-                sled_agent_client::types::SledRole::Gimlet,
+                SledRole::Gimlet,
                 disks,
                 zpools,
                 datasets,
@@ -349,12 +356,12 @@ pub fn representative() -> Representative {
             "fake sled agent 4",
             sled_agent(
                 sled_agent_id_extra,
-                sled_agent_client::types::Baseboard::Gimlet {
+                Baseboard::Gimlet {
                     identifier: sled4_bb.serial_number.clone(),
                     model: sled4_bb.part_number.clone(),
                     revision: 0,
                 },
-                sled_agent_client::types::SledRole::Scrimlet,
+                SledRole::Scrimlet,
                 vec![],
                 vec![],
                 vec![],
@@ -372,11 +379,11 @@ pub fn representative() -> Representative {
             "fake sled agent 5",
             sled_agent(
                 sled_agent_id_pc,
-                sled_agent_client::types::Baseboard::Pc {
+                Baseboard::Pc {
                     identifier: String::from("fellofftruck1"),
                     model: String::from("fellofftruck"),
                 },
-                sled_agent_client::types::SledRole::Gimlet,
+                SledRole::Gimlet,
                 vec![],
                 vec![],
                 vec![],
@@ -395,8 +402,8 @@ pub fn representative() -> Representative {
             "fake sled agent 6",
             sled_agent(
                 sled_agent_id_unknown,
-                sled_agent_client::types::Baseboard::Unknown,
-                sled_agent_client::types::SledRole::Gimlet,
+                Baseboard::Unknown,
+                SledRole::Gimlet,
                 vec![],
                 vec![],
                 vec![],
@@ -506,13 +513,13 @@ pub fn rot_page(unique: &str) -> RotPage {
 
 pub fn sled_agent(
     sled_id: SledUuid,
-    baseboard: sled_agent_client::types::Baseboard,
-    sled_role: sled_agent_client::types::SledRole,
-    disks: Vec<sled_agent_client::types::InventoryDisk>,
-    zpools: Vec<sled_agent_client::types::InventoryZpool>,
-    datasets: Vec<sled_agent_client::types::InventoryDataset>,
-) -> sled_agent_client::types::Inventory {
-    sled_agent_client::types::Inventory {
+    baseboard: Baseboard,
+    sled_role: SledRole,
+    disks: Vec<InventoryDisk>,
+    zpools: Vec<InventoryZpool>,
+    datasets: Vec<InventoryDataset>,
+) -> Inventory {
+    Inventory {
         baseboard,
         reservoir_size: ByteCount::from(1024),
         sled_role,
