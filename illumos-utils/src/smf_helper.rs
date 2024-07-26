@@ -203,12 +203,7 @@ impl<'t> SmfHelper<'t> {
 
     pub fn refresh(&self) -> Result<(), Error> {
         self.running_zone
-            .run_cmd(&[
-                SVCCFG,
-                "-s",
-                &self.default_smf_name,
-                "refresh",
-            ])
+            .run_cmd(&[SVCCFG, "-s", &self.default_smf_name, "refresh"])
             .map_err(|err| Error::ZoneCommand {
                 intent: format!(
                     "Refresh SMF manifest {}",

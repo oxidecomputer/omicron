@@ -35,7 +35,6 @@ use crate::params::{
     ZoneBundleCause, ZoneBundleMetadata,
 };
 use crate::profile::*;
-use illumos_utils::smf_helper::SmfHelper;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
@@ -55,6 +54,7 @@ use illumos_utils::running_zone::{
     EnsureAddressError, InstalledZone, RunCommandError, RunningZone,
     ZoneBuilderFactory,
 };
+use illumos_utils::smf_helper::SmfHelper;
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zpool::{PathInPool, ZpoolName};
