@@ -212,11 +212,11 @@ impl From<Error> for dropshot::HttpError {
                         // Progenitor client error it gets back.
                         HttpError::from(omicron_error)
                     }
-                    crate::instance::Error::Terminating(t) => {
+                    crate::instance::Error::Terminating => {
                         HttpError::for_client_error(
                             Some(NO_SUCH_INSTANCE.to_string()),
                             http::StatusCode::GONE,
-                            t.to_string(),
+                            instance_error.to_string(),
                         )
                     }
                     e => HttpError::for_internal_error(e.to_string()),
@@ -239,11 +239,13 @@ impl From<Error> for dropshot::HttpError {
                 | BundleError::InvalidCleanupPeriod => {
                     HttpError::for_bad_request(None, inner.to_string())
                 }
-                BundleError::Terminating(t) => HttpError::for_client_error(
-                    Some(NO_SUCH_INSTANCE.to_string()),
-                    http::StatusCode::GONE,
-                    t.to_string(),
-                ),
+                BundleError::InstanceTerminating => {
+                    HttpError::for_client_error(
+                        Some(NO_SUCH_INSTANCE.to_string()),
+                        http::StatusCode::GONE,
+                        inner.to_string(),
+                    )
+                }
                 _ => HttpError::for_internal_error(err.to_string()),
             },
             e => HttpError::for_internal_error(e.to_string()),

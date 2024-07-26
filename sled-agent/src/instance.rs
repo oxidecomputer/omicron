@@ -132,18 +132,8 @@ pub enum Error {
     #[error("Instance dropped our request")]
     RequestDropped(#[from] oneshot::error::RecvError),
 
-    #[error(transparent)]
-    Terminating(#[from] Terminating),
-}
-
-#[derive(thiserror::Error, Debug)]
-#[error("Instance is terminating")]
-pub struct Terminating(());
-
-impl From<Terminating> for ManagerError {
-    fn from(t: Terminating) -> Self {
-        Self::Instance(t.into())
-    }
+    #[error("Instance is terminating")]
+    Terminating,
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -501,30 +491,30 @@ impl InstanceRunner {
             // instead of bailing out, since we still need to drain the rest of
             // the queue,
             let _ = match request {
-                RequestZoneBundle { tx } => {
-                    tx.send(Err(Terminating(()).into())).map_err(|_| ())
-                }
+                RequestZoneBundle { tx } => tx
+                    .send(Err(BundleError::InstanceTerminating))
+                    .map_err(|_| ()),
                 GetFilesystemPool { tx } => tx.send(None).map_err(|_| ()),
                 CurrentState { tx } => {
                     tx.send(self.current_state()).map_err(|_| ())
                 }
                 PutState { tx, .. } => {
-                    tx.send(Err(Terminating(()).into())).map_err(|_| ())
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
                 PutMigrationIds { tx, .. } => {
-                    tx.send(Err(Terminating(()).into())).map_err(|_| ())
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
                 Terminate { tx, .. } => {
-                    tx.send(Err(Terminating(()).into())).map_err(|_| ())
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
                 IssueSnapshotRequest { tx, .. } => {
-                    tx.send(Err(Terminating(()).into())).map_err(|_| ())
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
                 AddExternalIp { tx, .. } => {
-                    tx.send(Err(Terminating(()).into())).map_err(|_| ())
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
                 DeleteExternalIp { tx, .. } => {
-                    tx.send(Err(Terminating(()).into())).map_err(|_| ())
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
             };
         }
