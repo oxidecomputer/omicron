@@ -6,21 +6,21 @@
 
 use crate::config::MountConfig;
 use crate::dataset::{DatasetError, M2_DEBUG_DATASET};
-use crate::disk::{
-    Disk, DiskError, OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig,
-    RawDisk,
-};
+use crate::disk::{Disk, DiskError, RawDisk};
 use crate::error::Error;
 use camino::Utf8PathBuf;
 use cfg_if::cfg_if;
 use illumos_utils::zpool::{PathInPool, ZpoolName};
 use key_manager::StorageKeyRequester;
 use omicron_common::api::external::Generation;
-use omicron_common::disk::DiskIdentity;
+use omicron_common::disk::{
+    DatasetName, DiskIdentity, DiskVariant, OmicronPhysicalDiskConfig,
+    OmicronPhysicalDisksConfig,
+};
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_hardware::{DiskFirmware, DiskVariant};
+use sled_hardware::DiskFirmware;
 use slog::{info, o, warn, Logger};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -62,7 +62,7 @@ impl DiskManagementError {
 #[derive(Debug, JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct DatasetManagementStatus {
-    pub dataset_name: crate::dataset::DatasetName,
+    pub dataset_name: DatasetName,
     pub err: Option<String>,
 }
 

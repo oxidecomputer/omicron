@@ -9,9 +9,7 @@ pub use crate::zone_bundle::ZoneBundleMetadata;
 pub use illumos_utils::opte::params::DhcpConfig;
 pub use illumos_utils::opte::params::VpcFirewallRule;
 pub use illumos_utils::opte::params::VpcFirewallRulesEnsureBody;
-use illumos_utils::zpool::ZpoolName;
-use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
+use nexus_sled_agent_shared::inventory::{OmicronZoneConfig, OmicronZoneType};
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, InstanceProperties, InstanceRuntimeState,
     SledInstanceState, VmmRuntimeState,
@@ -19,18 +17,16 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::shared::{
     NetworkInterface, SourceNatConfig,
 };
+use omicron_common::disk::{DatasetKind, DatasetName, DiskVariant};
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 pub use sled_hardware::DendriteAsic;
 use sled_hardware_types::Baseboard;
-use sled_storage::dataset::DatasetKind;
-use sled_storage::dataset::DatasetName;
 use std::collections::BTreeSet;
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
-use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
-use std::str::FromStr;
+use std::net::{IpAddr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -241,12 +237,11 @@ pub enum DiskType {
     M2,
 }
 
-impl From<sled_hardware::DiskVariant> for DiskType {
-    fn from(v: sled_hardware::DiskVariant) -> Self {
-        use sled_hardware::DiskVariant::*;
+impl From<DiskVariant> for DiskType {
+    fn from(v: DiskVariant) -> Self {
         match v {
-            U2 => Self::U2,
-            M2 => Self::M2,
+            DiskVariant::U2 => Self::U2,
+            DiskVariant::M2 => Self::M2,
         }
     }
 }
@@ -257,280 +252,41 @@ pub struct Zpool {
     pub disk_type: DiskType,
 }
 
-/// The type of zone that Sled Agent may run
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum ZoneType {
-    Clickhouse,
-    ClickhouseKeeper,
-    CockroachDb,
-    CruciblePantry,
-    Crucible,
-    ExternalDns,
-    InternalDns,
-    Nexus,
-    Ntp,
-    Oximeter,
-    Switch,
+/// Extension trait for `OmicronZoneConfig`.
+///
+/// This lives here because it is pretty specific to sled-agent, and also
+/// requires extra dependencies that nexus-sled-agent-shared doesn't have.
+pub(crate) trait OmicronZoneConfigExt {
+    fn zone_name(&self) -> String;
 }
 
-impl std::fmt::Display for ZoneType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use ZoneType::*;
-        let name = match self {
-            Clickhouse => "clickhouse",
-            ClickhouseKeeper => "clickhouse_keeper",
-            CockroachDb => "cockroachdb",
-            Crucible => "crucible",
-            CruciblePantry => "crucible_pantry",
-            ExternalDns => "external_dns",
-            InternalDns => "internal_dns",
-            Nexus => "nexus",
-            Ntp => "ntp",
-            Oximeter => "oximeter",
-            Switch => "switch",
-        };
-        write!(f, "{name}")
-    }
-}
-
-pub type OmicronPhysicalDiskConfig =
-    sled_storage::disk::OmicronPhysicalDiskConfig;
-pub type OmicronPhysicalDisksConfig =
-    sled_storage::disk::OmicronPhysicalDisksConfig;
-pub type DatasetConfig = sled_storage::disk::DatasetConfig;
-pub type DatasetsConfig = sled_storage::disk::DatasetsConfig;
-
-/// Describes the set of Omicron-managed zones running on a sled
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-pub struct OmicronZonesConfig {
-    /// generation number of this configuration
-    ///
-    /// This generation number is owned by the control plane (i.e., RSS or
-    /// Nexus, depending on whether RSS-to-Nexus handoff has happened).  It
-    /// should not be bumped within Sled Agent.
-    ///
-    /// Sled Agent rejects attempts to set the configuration to a generation
-    /// older than the one it's currently running.
-    pub generation: Generation,
-
-    /// list of running zones
-    pub zones: Vec<OmicronZoneConfig>,
-}
-
-impl OmicronZonesConfig {
-    /// Generation 1 of `OmicronZonesConfig` is always the set of no zones.
-    pub const INITIAL_GENERATION: Generation = Generation::from_u32(1);
-}
-
-impl From<OmicronZonesConfig> for sled_agent_client::types::OmicronZonesConfig {
-    fn from(local: OmicronZonesConfig) -> Self {
-        Self {
-            generation: local.generation,
-            zones: local.zones.into_iter().map(|s| s.into()).collect(),
-        }
-    }
-}
-
-/// Describes one Omicron-managed zone running on a sled
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-pub struct OmicronZoneConfig {
-    pub id: Uuid,
-    pub underlay_address: Ipv6Addr,
-
-    /// The pool on which we'll place this zone's filesystem.
-    ///
-    /// Note that this is transient -- the sled agent is permitted to
-    /// destroy the zone's dataset on this pool each time the zone is
-    /// initialized.
-    pub filesystem_pool: Option<ZpoolName>,
-    pub zone_type: OmicronZoneType,
-}
-
-impl From<OmicronZoneConfig> for sled_agent_client::types::OmicronZoneConfig {
-    fn from(local: OmicronZoneConfig) -> Self {
-        Self {
-            id: local.id,
-            underlay_address: local.underlay_address,
-            filesystem_pool: local.filesystem_pool,
-            zone_type: local.zone_type.into(),
-        }
-    }
-}
-
-impl OmicronZoneConfig {
-    /// If this kind of zone has an associated dataset, returns the dataset's
-    /// name.  Othrwise, returns `None`.
-    pub fn dataset_name(&self) -> Option<DatasetName> {
-        self.zone_type.dataset_name()
-    }
-
-    /// If this kind of zone has an associated dataset, return the dataset's
-    /// name and the associated "service address".  Otherwise, returns `None`.
-    pub fn dataset_name_and_address(
-        &self,
-    ) -> Option<(DatasetName, SocketAddrV6)> {
-        self.zone_type.dataset_name_and_address()
-    }
-
-    /// Returns the name that is (or will be) used for the illumos zone
-    /// associated with this zone
-    pub fn zone_name(&self) -> String {
+impl OmicronZoneConfigExt for OmicronZoneConfig {
+    fn zone_name(&self) -> String {
         illumos_utils::running_zone::InstalledZone::get_zone_name(
-            &self.zone_type.zone_type_str(),
+            self.zone_type.kind().zone_prefix(),
             Some(self.id),
         )
     }
 }
 
-/// Describes a persistent ZFS dataset associated with an Omicron zone
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-pub struct OmicronZoneDataset {
-    pub pool_name: ZpoolName,
-}
+/// Extension trait for `OmicronZoneType` and `OmicronZoneConfig`.
+///
+/// This lives here because it requires extra dependencies that
+/// nexus-sled-agent-shared doesn't have.
+pub(crate) trait OmicronZoneTypeExt {
+    fn as_omicron_zone_type(&self) -> &OmicronZoneType;
 
-impl From<OmicronZoneDataset> for sled_agent_client::types::OmicronZoneDataset {
-    fn from(local: OmicronZoneDataset) -> Self {
-        Self {
-            pool_name: omicron_common::zpool_name::ZpoolName::from_str(
-                &local.pool_name.to_string(),
-            )
-            .unwrap(),
-        }
-    }
-}
-
-/// Describes what kind of zone this is (i.e., what component is running in it)
-/// as well as any type-specific configuration
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum OmicronZoneType {
-    BoundaryNtp {
-        address: SocketAddrV6,
-        ntp_servers: Vec<String>,
-        dns_servers: Vec<IpAddr>,
-        domain: Option<String>,
-        /// The service vNIC providing outbound connectivity using OPTE.
-        nic: NetworkInterface,
-        /// The SNAT configuration for outbound connections.
-        snat_cfg: SourceNatConfig,
-    },
-
-    Clickhouse {
-        address: SocketAddrV6,
-        dataset: OmicronZoneDataset,
-    },
-
-    ClickhouseKeeper {
-        address: SocketAddrV6,
-        dataset: OmicronZoneDataset,
-    },
-    CockroachDb {
-        address: SocketAddrV6,
-        dataset: OmicronZoneDataset,
-    },
-
-    Crucible {
-        address: SocketAddrV6,
-        dataset: OmicronZoneDataset,
-    },
-    CruciblePantry {
-        address: SocketAddrV6,
-    },
-    ExternalDns {
-        dataset: OmicronZoneDataset,
-        /// The address at which the external DNS server API is reachable.
-        http_address: SocketAddrV6,
-        /// The address at which the external DNS server is reachable.
-        dns_address: SocketAddr,
-        /// The service vNIC providing external connectivity using OPTE.
-        nic: NetworkInterface,
-    },
-    InternalDns {
-        dataset: OmicronZoneDataset,
-        http_address: SocketAddrV6,
-        dns_address: SocketAddrV6,
-        /// The addresses in the global zone which should be created
-        ///
-        /// For the DNS service, which exists outside the sleds's typical subnet
-        /// - adding an address in the GZ is necessary to allow inter-zone
-        /// traffic routing.
-        gz_address: Ipv6Addr,
-
-        /// The address is also identified with an auxiliary bit of information
-        /// to ensure that the created global zone address can have a unique
-        /// name.
-        gz_address_index: u32,
-    },
-    InternalNtp {
-        address: SocketAddrV6,
-        ntp_servers: Vec<String>,
-        dns_servers: Vec<IpAddr>,
-        domain: Option<String>,
-    },
-    Nexus {
-        /// The address at which the internal nexus server is reachable.
-        internal_address: SocketAddrV6,
-        /// The address at which the external nexus server is reachable.
-        external_ip: IpAddr,
-        /// The service vNIC providing external connectivity using OPTE.
-        nic: NetworkInterface,
-        /// Whether Nexus's external endpoint should use TLS
-        external_tls: bool,
-        /// External DNS servers Nexus can use to resolve external hosts.
-        external_dns_servers: Vec<IpAddr>,
-    },
-    Oximeter {
-        address: SocketAddrV6,
-    },
-}
-
-impl OmicronZoneType {
-    /// Returns a canonical string identifying the type of zone this is
-    ///
-    /// This is used to construct zone names, SMF service names, etc.
-    pub fn zone_type_str(&self) -> String {
-        match self {
-            OmicronZoneType::BoundaryNtp { .. }
-            | OmicronZoneType::InternalNtp { .. } => ZoneType::Ntp,
-
-            OmicronZoneType::Clickhouse { .. } => ZoneType::Clickhouse,
-            OmicronZoneType::ClickhouseKeeper { .. } => {
-                ZoneType::ClickhouseKeeper
-            }
-            OmicronZoneType::CockroachDb { .. } => ZoneType::CockroachDb,
-            OmicronZoneType::Crucible { .. } => ZoneType::Crucible,
-            OmicronZoneType::CruciblePantry { .. } => ZoneType::CruciblePantry,
-            OmicronZoneType::ExternalDns { .. } => ZoneType::ExternalDns,
-            OmicronZoneType::InternalDns { .. } => ZoneType::InternalDns,
-            OmicronZoneType::Nexus { .. } => ZoneType::Nexus,
-            OmicronZoneType::Oximeter { .. } => ZoneType::Oximeter,
-        }
-        .to_string()
+    /// If this kind of zone has an associated dataset, return the dataset's name.
+    /// Otherwise, return `None`.
+    fn dataset_name(&self) -> Option<DatasetName> {
+        self.dataset_name_and_address().map(|(name, _)| name)
     }
 
-    /// If this kind of zone has an associated dataset, returns the dataset's
-    /// name.  Othrwise, returns `None`.
-    pub fn dataset_name(&self) -> Option<DatasetName> {
-        self.dataset_name_and_address().map(|d| d.0)
-    }
-
-    /// If this kind of zone has an associated dataset, return the dataset's
-    /// name and the associated "service address".  Otherwise, returns `None`.
-    pub fn dataset_name_and_address(
-        &self,
-    ) -> Option<(DatasetName, SocketAddrV6)> {
-        let (dataset, dataset_kind, address) = match self {
+    /// If this kind of zone has an associated dataset, return the dataset's name
+    /// and the associated "service address". Otherwise, return `None`.
+    fn dataset_name_and_address(&self) -> Option<(DatasetName, SocketAddrV6)> {
+        let (dataset, dataset_kind, address) = match self.as_omicron_zone_type()
+        {
             OmicronZoneType::BoundaryNtp { .. }
             | OmicronZoneType::InternalNtp { .. }
             | OmicronZoneType::Nexus { .. }
@@ -543,7 +299,7 @@ impl OmicronZoneType {
                 Some((dataset, DatasetKind::ClickhouseKeeper, address))
             }
             OmicronZoneType::CockroachDb { dataset, address, .. } => {
-                Some((dataset, DatasetKind::CockroachDb, address))
+                Some((dataset, DatasetKind::Cockroach, address))
             }
             OmicronZoneType::Crucible { dataset, address, .. } => {
                 Some((dataset, DatasetKind::Crucible, address))
@@ -561,142 +317,26 @@ impl OmicronZoneType {
             *address,
         ))
     }
+}
 
-    /// Does this zone require time synchronization before it is initialized?"
-    ///
-    /// This function is somewhat conservative - the set of services
-    /// that can be launched before timesync has completed is intentionally kept
-    /// small, since it would be easy to add a service that expects time to be
-    /// reasonably synchronized.
-    pub fn requires_timesync(&self) -> bool {
-        match self {
-            // These zones can be initialized and started before time has been
-            // synchronized. For the NTP zones, this should be self-evident --
-            // we need the NTP zone to actually perform time synchronization!
-            //
-            // The DNS zone is a bit of an exception here, since the NTP zone
-            // itself may rely on DNS lookups as a dependency.
-            OmicronZoneType::BoundaryNtp { .. }
-            | OmicronZoneType::InternalNtp { .. }
-            | OmicronZoneType::InternalDns { .. } => false,
-            _ => true,
-        }
+impl OmicronZoneTypeExt for OmicronZoneType {
+    fn as_omicron_zone_type(&self) -> &OmicronZoneType {
+        self
+    }
+}
+
+impl OmicronZoneTypeExt for OmicronZoneConfig {
+    fn as_omicron_zone_type(&self) -> &OmicronZoneType {
+        &self.zone_type
     }
 }
 
 impl crate::smf_helper::Service for OmicronZoneType {
     fn service_name(&self) -> String {
-        // For historical reasons, crucible-pantry is the only zone type whose
-        // SMF service does not match the canonical name that we use for the
-        // zone.
-        match self {
-            OmicronZoneType::CruciblePantry { .. } => {
-                "crucible/pantry".to_owned()
-            }
-            _ => self.zone_type_str(),
-        }
+        self.kind().service_prefix().to_owned()
     }
     fn smf_name(&self) -> String {
         format!("svc:/oxide/{}", self.service_name())
-    }
-}
-
-impl From<OmicronZoneType> for sled_agent_client::types::OmicronZoneType {
-    fn from(local: OmicronZoneType) -> Self {
-        use sled_agent_client::types::OmicronZoneType as Other;
-        match local {
-            OmicronZoneType::BoundaryNtp {
-                address,
-                ntp_servers,
-                dns_servers,
-                domain,
-                nic,
-                snat_cfg,
-            } => Other::BoundaryNtp {
-                address: address.to_string(),
-                dns_servers,
-                domain,
-                ntp_servers,
-                snat_cfg,
-                nic,
-            },
-            OmicronZoneType::Clickhouse { address, dataset } => {
-                Other::Clickhouse {
-                    address: address.to_string(),
-                    dataset: dataset.into(),
-                }
-            }
-            OmicronZoneType::ClickhouseKeeper { address, dataset } => {
-                Other::ClickhouseKeeper {
-                    address: address.to_string(),
-                    dataset: dataset.into(),
-                }
-            }
-            OmicronZoneType::CockroachDb { address, dataset } => {
-                Other::CockroachDb {
-                    address: address.to_string(),
-                    dataset: dataset.into(),
-                }
-            }
-            OmicronZoneType::Crucible { address, dataset } => Other::Crucible {
-                address: address.to_string(),
-                dataset: dataset.into(),
-            },
-            OmicronZoneType::CruciblePantry { address } => {
-                Other::CruciblePantry { address: address.to_string() }
-            }
-            OmicronZoneType::ExternalDns {
-                dataset,
-                http_address,
-                dns_address,
-                nic,
-            } => Other::ExternalDns {
-                dataset: dataset.into(),
-                http_address: http_address.to_string(),
-                dns_address: dns_address.to_string(),
-                nic,
-            },
-            OmicronZoneType::InternalDns {
-                dataset,
-                http_address,
-                dns_address,
-                gz_address,
-                gz_address_index,
-            } => Other::InternalDns {
-                dataset: dataset.into(),
-                http_address: http_address.to_string(),
-                dns_address: dns_address.to_string(),
-                gz_address,
-                gz_address_index,
-            },
-            OmicronZoneType::InternalNtp {
-                address,
-                ntp_servers,
-                dns_servers,
-                domain,
-            } => Other::InternalNtp {
-                address: address.to_string(),
-                ntp_servers,
-                dns_servers,
-                domain,
-            },
-            OmicronZoneType::Nexus {
-                internal_address,
-                external_ip,
-                nic,
-                external_tls,
-                external_dns_servers,
-            } => Other::Nexus {
-                external_dns_servers,
-                external_ip,
-                external_tls,
-                internal_address: internal_address.to_string(),
-                nic,
-            },
-            OmicronZoneType::Oximeter { address } => {
-                Other::Oximeter { address: address.to_string() }
-            }
-        }
     }
 }
 
@@ -741,40 +381,6 @@ pub struct CleanupContextUpdate {
 pub enum InstanceExternalIpBody {
     Ephemeral(IpAddr),
     Floating(IpAddr),
-}
-
-// Our SledRole and Baseboard types do not have to be identical to the Nexus
-// ones, but they generally should be, and this avoids duplication.  If it
-// becomes easier to maintain a separate copy, we should do that.
-pub type SledRole = nexus_client::types::SledRole;
-
-/// Identifies information about disks which may be attached to Sleds.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct InventoryDisk {
-    pub identity: omicron_common::disk::DiskIdentity,
-    pub variant: sled_hardware::DiskVariant,
-    pub slot: i64,
-}
-
-/// Identifies information about zpools managed by the control plane
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct InventoryZpool {
-    pub id: ZpoolUuid,
-    pub total_size: ByteCount,
-}
-
-/// Identity and basic status information about this sled agent
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct Inventory {
-    pub sled_id: Uuid,
-    pub sled_agent_address: SocketAddrV6,
-    pub sled_role: SledRole,
-    pub baseboard: Baseboard,
-    pub usable_hardware_threads: u32,
-    pub usable_physical_ram: ByteCount,
-    pub reservoir_size: ByteCount,
-    pub disks: Vec<InventoryDisk>,
-    pub zpools: Vec<InventoryZpool>,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

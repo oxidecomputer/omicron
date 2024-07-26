@@ -8,145 +8,16 @@ use anyhow::bail;
 use camino::{Utf8Path, Utf8PathBuf};
 use derive_more::From;
 use key_manager::StorageKeyRequester;
-use omicron_common::api::external::Generation;
-use omicron_common::disk::DiskIdentity;
-use omicron_common::ledger::Ledgerable;
+use omicron_common::disk::{DiskIdentity, DiskVariant};
 use omicron_common::zpool_name::{ZpoolKind, ZpoolName};
-use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use sled_hardware::{
-    DiskFirmware, DiskVariant, Partition, PooledDisk, PooledDiskError,
-    UnparsedDisk,
+    DiskFirmware, Partition, PooledDisk, PooledDiskError, UnparsedDisk,
 };
 use slog::{info, Logger};
-use uuid::Uuid;
 
 use crate::config::MountConfig;
 use crate::dataset;
-
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-)]
-pub struct OmicronPhysicalDiskConfig {
-    pub identity: DiskIdentity,
-    pub id: Uuid,
-    pub pool_id: ZpoolUuid,
-}
-
-/// Configuration information necessary to request a single dataset
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-)]
-pub struct DatasetConfig {
-    /// The UUID of the dataset being requested
-    pub id: DatasetUuid,
-
-    /// The dataset's name
-    pub name: dataset::DatasetName,
-
-    /// The compression mode to be supplied, if any
-    pub compression: Option<String>,
-
-    /// The upper bound on the amount of storage used by this dataset
-    pub quota: Option<usize>,
-
-    /// The lower bound on the amount of storage usable by this dataset
-    pub reservation: Option<usize>,
-}
-
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-pub struct DatasetsConfig {
-    /// generation number of this configuration
-    ///
-    /// This generation number is owned by the control plane (i.e., RSS or
-    /// Nexus, depending on whether RSS-to-Nexus handoff has happened).  It
-    /// should not be bumped within Sled Agent.
-    ///
-    /// Sled Agent rejects attempts to set the configuration to a generation
-    /// older than the one it's currently running.
-    ///
-    /// Note that "Generation::new()", AKA, the first generation number,
-    /// is reserved for "no datasets". This is the default configuration
-    /// for a sled before any requests have been made.
-    pub generation: Generation,
-
-    pub datasets: Vec<DatasetConfig>,
-}
-
-impl Default for DatasetsConfig {
-    fn default() -> Self {
-        Self { generation: Generation::new(), datasets: vec![] }
-    }
-}
-
-impl Ledgerable for DatasetsConfig {
-    fn is_newer_than(&self, other: &Self) -> bool {
-        self.generation > other.generation
-    }
-
-    // No need to do this, the generation number is provided externally.
-    fn generation_bump(&mut self) {}
-}
-
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-pub struct OmicronPhysicalDisksConfig {
-    /// generation number of this configuration
-    ///
-    /// This generation number is owned by the control plane (i.e., RSS or
-    /// Nexus, depending on whether RSS-to-Nexus handoff has happened).  It
-    /// should not be bumped within Sled Agent.
-    ///
-    /// Sled Agent rejects attempts to set the configuration to a generation
-    /// older than the one it's currently running.
-    pub generation: Generation,
-
-    pub disks: Vec<OmicronPhysicalDiskConfig>,
-}
-
-impl Default for OmicronPhysicalDisksConfig {
-    fn default() -> Self {
-        Self { generation: Generation::new(), disks: vec![] }
-    }
-}
-
-impl Ledgerable for OmicronPhysicalDisksConfig {
-    fn is_newer_than(&self, other: &OmicronPhysicalDisksConfig) -> bool {
-        self.generation > other.generation
-    }
-
-    // No need to do this, the generation number is provided externally.
-    fn generation_bump(&mut self) {}
-}
-
-impl OmicronPhysicalDisksConfig {
-    pub fn new() -> Self {
-        Self { generation: Generation::new(), disks: vec![] }
-    }
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum DiskError {

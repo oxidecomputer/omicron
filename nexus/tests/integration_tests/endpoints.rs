@@ -33,6 +33,7 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
+use omicron_common::api::external::UserId;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_test_utils::certificates::CertificateChain;
 use once_cell::sync::Lazy;
@@ -877,7 +878,7 @@ pub static DEMO_TIMESERIES_QUERY: Lazy<params::TimeseriesQuery> =
 // Users
 pub static DEMO_USER_CREATE: Lazy<params::UserCreate> =
     Lazy::new(|| params::UserCreate {
-        external_id: params::UserId::from_str("dummy-user").unwrap(),
+        external_id: UserId::from_str("dummy-user").unwrap(),
         password: params::UserPassword::LoginDisallowed,
     });
 

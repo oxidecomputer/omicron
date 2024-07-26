@@ -25,10 +25,10 @@ use nexus_types::external_api::views::{
 };
 use nexus_types::external_api::{params, shared};
 use omicron_common::address::{IpRange, Ipv4Range};
-use omicron_common::api::external::ObjectIdentity;
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, LookupType, Name,
 };
+use omicron_common::api::external::{ObjectIdentity, UserId};
 use omicron_test_utils::certificates::CertificateChain;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 
@@ -1776,7 +1776,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
                 Method::POST,
                 "/v1/system/identity-providers/local/users?silo=jit",
                 &params::UserCreate {
-                    external_id: params::UserId::from_str("dummy").unwrap(),
+                    external_id: UserId::from_str("dummy").unwrap(),
                     password: params::UserPassword::LoginDisallowed,
                 },
             )
@@ -1836,7 +1836,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         Method::POST,
         "/v1/login/jit/local",
         &params::UsernamePasswordCredentials {
-            username: params::UserId::from_str(admin_username).unwrap(),
+            username: UserId::from_str(admin_username).unwrap(),
             password: password.clone(),
         },
     ))
@@ -1849,7 +1849,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         Method::POST,
         "/v1/login/jit/local",
         &params::UsernamePasswordCredentials {
-            username: params::UserId::from_str("bogus").unwrap(),
+            username: UserId::from_str("bogus").unwrap(),
             password: password.clone(),
         },
     ))
@@ -2047,7 +2047,7 @@ async fn run_user_tests(
         client,
         &url_user_create,
         &params::UserCreate {
-            external_id: params::UserId::from_str("a-test-user").unwrap(),
+            external_id: UserId::from_str("a-test-user").unwrap(),
             password: params::UserPassword::LoginDisallowed,
         },
     )

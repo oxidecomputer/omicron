@@ -4,6 +4,7 @@
 
 pub use nexus_client::Client as NexusClient;
 use omicron_common::api::external::Generation;
+use omicron_common::disk::DiskVariant;
 
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
 use internal_dns::resolver::{ResolveError, Resolver};
@@ -127,15 +128,13 @@ pub(crate) trait ConvertInto<T>: Sized {
     fn convert(self) -> T;
 }
 
-impl ConvertInto<nexus_client::types::PhysicalDiskKind>
-    for sled_hardware::DiskVariant
-{
+impl ConvertInto<nexus_client::types::PhysicalDiskKind> for DiskVariant {
     fn convert(self) -> nexus_client::types::PhysicalDiskKind {
         use nexus_client::types::PhysicalDiskKind;
 
         match self {
-            sled_hardware::DiskVariant::U2 => PhysicalDiskKind::U2,
-            sled_hardware::DiskVariant::M2 => PhysicalDiskKind::M2,
+            DiskVariant::U2 => PhysicalDiskKind::U2,
+            DiskVariant::M2 => PhysicalDiskKind::M2,
         }
     }
 }
@@ -148,24 +147,6 @@ impl ConvertInto<nexus_client::types::Baseboard>
             serial: self.identifier().to_string(),
             part: self.model().to_string(),
             revision: self.revision(),
-        }
-    }
-}
-
-impl ConvertInto<nexus_client::types::DatasetKind>
-    for sled_storage::dataset::DatasetKind
-{
-    fn convert(self) -> nexus_client::types::DatasetKind {
-        use nexus_client::types::DatasetKind;
-        use sled_storage::dataset::DatasetKind::*;
-
-        match self {
-            CockroachDb => DatasetKind::Cockroach,
-            Crucible => DatasetKind::Crucible,
-            Clickhouse => DatasetKind::Clickhouse,
-            ClickhouseKeeper => DatasetKind::ClickhouseKeeper,
-            ExternalDns => DatasetKind::ExternalDns,
-            InternalDns => DatasetKind::InternalDns,
         }
     }
 }

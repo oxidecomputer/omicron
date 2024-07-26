@@ -11,23 +11,26 @@ use std::{
 
 use anyhow::{bail, Result};
 use camino::{Utf8Path, Utf8PathBuf};
+pub use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
 use omicron_common::{
     address::{
         get_64_subnet, IpRange, Ipv6Subnet, AZ_PREFIX, RACK_PREFIX, SLED_PREFIX,
     },
-    api::{external::AllowedSourceIps, internal::shared::RackNetworkConfig},
+    api::{
+        external::AllowedSourceIps,
+        internal::{nexus::Certificate, shared::RackNetworkConfig},
+    },
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware_types::Baseboard;
 
-pub type Certificate = nexus_client::types::Certificate;
-pub type RecoverySiloConfig = nexus_client::types::RecoverySiloConfig;
-
 /// Structures and routines used to maintain backwards compatibility.  The
 /// contents of this module should only be used to convert older data into the
 /// current format, and not for any ongoing run-time operations.
 pub mod back_compat {
+    use omicron_common::api::internal::nexus::Certificate;
+
     use crate::early_networking::back_compat::RackNetworkConfigV1;
 
     use super::*;

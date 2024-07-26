@@ -11,7 +11,7 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared::{self, SiloRole};
 use nexus_types::external_api::views;
-use omicron_common::api::external::Name;
+use omicron_common::api::external::{Name, UserId};
 use omicron_passwords::MIN_EXPECTED_PASSWORD_VERIFY_TIME;
 use std::str::FromStr;
 
@@ -61,13 +61,13 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
     expect_login_failure(
         client,
         &silo_name,
-        params::UserId::from_str("bigfoot").unwrap(),
+        UserId::from_str("bigfoot").unwrap(),
         params::Password::from_str("ahh").unwrap(),
     )
     .await;
 
     // Create a test user with a known password.
-    let test_user = params::UserId::from_str("abe-simpson").unwrap();
+    let test_user = UserId::from_str("abe-simpson").unwrap();
     let test_password =
         params::Password::from_str("let me in you idiot!").unwrap();
 
@@ -159,7 +159,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
 
     // Now, let's create an admin user and verify that they can change this
     // user's password.
-    let admin_user = params::UserId::from_str("comic-book-guy").unwrap();
+    let admin_user = UserId::from_str("comic-book-guy").unwrap();
     let admin_password = params::Password::from_str("toodle-ooh").unwrap();
     let admin_user_obj = create_local_user(
         client,
@@ -306,7 +306,7 @@ async fn test_local_user_with_no_initial_password(
     let silo_name = &silo.identity.name;
 
     // Create a user with no initial password.
-    let test_user = params::UserId::from_str("steven-falken").unwrap();
+    let test_user = UserId::from_str("steven-falken").unwrap();
     let created_user = create_local_user(
         client,
         silo,
@@ -385,7 +385,7 @@ async fn expect_session_invalid(
 async fn expect_login_failure(
     client: &ClientTestContext,
     silo_name: &Name,
-    username: params::UserId,
+    username: UserId,
     password: params::Password,
 ) {
     let start = std::time::Instant::now();
@@ -425,7 +425,7 @@ async fn expect_login_failure(
 async fn expect_login_success(
     client: &ClientTestContext,
     silo_name: &Name,
-    username: params::UserId,
+    username: UserId,
     password: params::Password,
 ) -> String {
     let start = std::time::Instant::now();

@@ -221,20 +221,24 @@ impl DataStore {
             .map(|rule| (rule.name().clone(), rule))
             .collect::<BTreeMap<_, _>>();
 
-        fw_rules.entry(DNS_VPC_FW_RULE.name.clone()).or_insert_with(|| {
-            VpcFirewallRule::new(
+        // these have to be done this way because the contructor returns a result
+        if !fw_rules.contains_key(&DNS_VPC_FW_RULE.name) {
+            let rule = VpcFirewallRule::new(
                 Uuid::new_v4(),
                 *SERVICES_VPC_ID,
                 &DNS_VPC_FW_RULE,
-            )
-        });
-        fw_rules.entry(NEXUS_VPC_FW_RULE.name.clone()).or_insert_with(|| {
-            VpcFirewallRule::new(
+            )?;
+            fw_rules.insert(DNS_VPC_FW_RULE.name.clone(), rule);
+        }
+
+        if !fw_rules.contains_key(&NEXUS_VPC_FW_RULE.name) {
+            let rule = VpcFirewallRule::new(
                 Uuid::new_v4(),
                 *SERVICES_VPC_ID,
                 &NEXUS_VPC_FW_RULE,
-            )
-        });
+            )?;
+            fw_rules.insert(NEXUS_VPC_FW_RULE.name.clone(), rule);
+        }
 
         let rules = fw_rules
             .into_values()
