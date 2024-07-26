@@ -1138,6 +1138,7 @@ impl DataStore {
                 status: UpdateStatus::NotUpdatedButExists,
                 ref found,
             } if found.updater_gen > locked_gen => Ok(false),
+
             // The instance exists, but the lock ID doesn't match our lock ID.
             // This means we were trying to release a lock we never held, whcih
             // is almost certainly a programmer error.
@@ -1229,6 +1230,24 @@ impl DataStore {
             UpdateAndQueryResult { status: UpdateStatus::Updated, .. } => {
                 Ok(true)
             }
+
+            // The instance has been marked as deleted, so no updates were
+            // committed!
+            UpdateAndQueryResult {
+                status: UpdateStatus::NotUpdatedButExists,
+                ref found,
+            } if found.time_deleted().is_some() => {
+                warn!(
+                    &opctx.log,
+                    "cannot commit instance update, as the instance no longer exists";
+                    "instance_id" => %instance_id,
+                    "updater_id" => %updater_id,
+                    "time_deleted" => ?found.time_deleted()
+                );
+
+                Err(LookupType::ById(instance_id).into_not_found(ResourceType::Instance))
+            }
+
             // The generation has advanced past the generation at which the
             // lock was held. This means that we have already released the
             // lock. Return `Ok(false)` here for idempotency.
@@ -1236,6 +1255,7 @@ impl DataStore {
                 status: UpdateStatus::NotUpdatedButExists,
                 ref found,
             } if found.updater_gen > locked_gen => Ok(false),
+
             // The instance exists, but the lock ID doesn't match our lock ID.
             // This means we were trying to release a lock we never held, whcih
             // is almost certainly a programmer error.
@@ -1255,7 +1275,7 @@ impl DataStore {
                             "attempted to release a lock held by another saga! this is a bug!",
                         ))
                     },
-                    Some(_) =>  Err(Error::internal_error(
+                    Some(_) =>  Err(Error::conflict(
                         "attempted to commit an instance update, but the state generation has advanced!"
                     )),
                     None => Err(Error::internal_error(
@@ -1278,6 +1298,7 @@ mod tests {
     use nexus_db_model::VmmState;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
+    use omicron_common::api::external;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
@@ -1394,7 +1415,7 @@ mod tests {
 
         // unlock the instance from saga 1
         let unlocked = datastore
-            .instance_commit_update(&opctx, &authz_instance, &lock1, None)
+            .instance_updater_unlock(&opctx, &authz_instance, &lock1)
             .await
             .expect("instance must be unlocked by saga 1");
         assert!(unlocked, "instance must actually be unlocked");
@@ -1407,7 +1428,7 @@ mod tests {
 
         // unlock the instance from saga 2
         let unlocked = datastore
-            .instance_commit_update(&opctx, &authz_instance, &lock2, None)
+            .instance_updater_unlock(&opctx, &authz_instance, &lock2)
             .await
             .expect("instance must be unlocked by saga 2");
         assert!(unlocked, "instance must actually be unlocked");
@@ -1557,6 +1578,57 @@ mod tests {
                 that is not locked! this is a bug!"
             ),
         );
+
+        // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_unlocking_a_deleted_instance_is_okay() {
+        // Setup
+        let logctx =
+            dev::test_setup_log("test_unlocking_a_deleted_instance_is_okay");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let authz_instance = create_test_instance(&datastore, &opctx).await;
+        let saga1 = Uuid::new_v4();
+
+        // put the instance in a state where it will be okay to delete later...
+        datastore
+            .instance_update_runtime(
+                &InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                &InstanceRuntimeState {
+                    time_updated: Utc::now(),
+                    r#gen: Generation(external::Generation::from_u32(2)),
+                    propolis_id: None,
+                    dst_propolis_id: None,
+                    migration_id: None,
+                    nexus_state: InstanceState::NoVmm,
+                },
+            )
+            .await
+            .expect("should update state successfully");
+
+        // lock the instance once.
+        let lock = dbg!(
+            datastore
+                .instance_updater_lock(&opctx, &authz_instance, saga1)
+                .await
+        )
+        .expect("instance should be locked");
+
+        // mark the instance as deleted
+        dbg!(datastore.project_delete_instance(&opctx, &authz_instance).await)
+            .expect("instance should be deleted");
+
+        // unlocking should still succeed.
+        dbg!(
+            datastore
+                .instance_updater_unlock(&opctx, &authz_instance, &lock)
+                .await
+        )
+        .expect("instance should unlock");
 
         // Clean up.
         db.cleanup().await.unwrap();
