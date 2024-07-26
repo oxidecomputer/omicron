@@ -33,6 +33,7 @@ use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
+use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::CollectionUuid;
@@ -1418,6 +1419,31 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     status.start_invoked_ok.len(),
                 );
                 for line in &status.start_invoked_ok {
+                    println!("    > {line}");
+                }
+
+                println!("    errors: {}", status.errors.len());
+                for line in &status.errors {
+                    println!("    > {line}");
+                }
+            }
+        }
+    } else if name == "region_snapshot_replacement_garbage_collection" {
+        match serde_json::from_value::<
+            RegionSnapshotReplacementGarbageCollectStatus,
+        >(details.clone())
+        {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+
+            Ok(status) => {
+                println!(
+                    "    total garbage collections requested: {}",
+                    status.garbage_collect_requested.len(),
+                );
+                for line in &status.garbage_collect_requested {
                     println!("    > {line}");
                 }
 
