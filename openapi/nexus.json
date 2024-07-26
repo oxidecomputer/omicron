@@ -16026,7 +16026,7 @@
             "description": "The link-layer discovery protocol (LLDP) configuration for the link.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/LldpServiceConfigCreate"
+                "$ref": "#/components/schemas/LldpLinkConfigCreate"
               }
             ]
           },
@@ -16147,10 +16147,15 @@
           }
         ]
       },
-      "LldpServiceConfig": {
+      "LldpLinkConfig": {
         "description": "A link layer discovery protocol (LLDP) service configuration.",
         "type": "object",
         "properties": {
+          "chassis_id": {
+            "nullable": true,
+            "description": "The LLDP chassis identifier TLV.",
+            "type": "string"
+          },
           "enabled": {
             "description": "Whether or not the LLDP service is enabled.",
             "type": "boolean"
@@ -16160,11 +16165,34 @@
             "type": "string",
             "format": "uuid"
           },
-          "lldp_config_id": {
+          "link_description": {
             "nullable": true,
-            "description": "The link-layer discovery protocol configuration for this service.",
-            "type": "string",
-            "format": "uuid"
+            "description": "The LLDP link description TLV.",
+            "type": "string"
+          },
+          "link_name": {
+            "nullable": true,
+            "description": "The LLDP link name TLV.",
+            "type": "string"
+          },
+          "management_ip": {
+            "nullable": true,
+            "description": "The LLDP management IP TLV.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "system_description": {
+            "nullable": true,
+            "description": "The LLDP system description TLV.",
+            "type": "string"
+          },
+          "system_name": {
+            "nullable": true,
+            "description": "The LLDP system name TLV.",
+            "type": "string"
           }
         },
         "required": [
@@ -16172,22 +16200,44 @@
           "id"
         ]
       },
-      "LldpServiceConfigCreate": {
-        "description": "The LLDP configuration associated with a port. LLDP may be either enabled or disabled, if enabled, an LLDP configuration must be provided by name or id.",
+      "LldpLinkConfigCreate": {
+        "description": "The LLDP configuration associated with a port.",
         "type": "object",
         "properties": {
+          "chassis_id": {
+            "nullable": true,
+            "description": "The LLDP chassis identifier TLV.",
+            "type": "string"
+          },
           "enabled": {
             "description": "Whether or not LLDP is enabled.",
             "type": "boolean"
           },
-          "lldp_config": {
+          "link_description": {
             "nullable": true,
-            "description": "A reference to the LLDP configuration used. Must not be `None` when `enabled` is `true`.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/NameOrId"
-              }
-            ]
+            "description": "The LLDP link description TLV.",
+            "type": "string"
+          },
+          "link_name": {
+            "nullable": true,
+            "description": "The LLDP link name TLV.",
+            "type": "string"
+          },
+          "management_ip": {
+            "nullable": true,
+            "description": "The LLDP management IP TLV.",
+            "type": "string",
+            "format": "ip"
+          },
+          "system_description": {
+            "nullable": true,
+            "description": "The LLDP system description TLV.",
+            "type": "string"
+          },
+          "system_name": {
+            "nullable": true,
+            "description": "The LLDP system name TLV.",
+            "type": "string"
           }
         },
         "required": [
@@ -19211,7 +19261,7 @@
             "description": "The name of this link.",
             "type": "string"
           },
-          "lldp_service_config_id": {
+          "lldp_link_config_id": {
             "description": "The link-layer discovery protocol service configuration id for this link.",
             "type": "string",
             "format": "uuid"
@@ -19240,7 +19290,7 @@
           "autoneg",
           "fec",
           "link_name",
-          "lldp_service_config_id",
+          "lldp_link_config_id",
           "mtu",
           "port_settings_id",
           "speed"
@@ -19502,7 +19552,7 @@
             "description": "Link-layer discovery protocol (LLDP) settings.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/LldpServiceConfig"
+              "$ref": "#/components/schemas/LldpLinkConfig"
             }
           },
           "links": {
