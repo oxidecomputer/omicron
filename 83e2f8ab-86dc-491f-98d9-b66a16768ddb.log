@@ -1,0 +1,565 @@
+root@BRM44220001:~# looker -f $( /opt/oxide/oxlog/oxlog logs oxz_nexus_3090570f-4c2b-43ae-8124-776fbad100fa --current ) -c 'r.instance_id?.contains("83e2f8ab-86dc-491f-98d9-b66a16768ddb")'
+21:25:29.253Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (dropshot_internal): received new VMM runtime state from sled agent
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    authenticated = true
+    file = nexus/src/app/instance.rs:1869
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    local_addr = [fd00:1122:3344:102::4]:12221
+    method = PUT
+    migration_state = Migrations { migration_in: None, migration_out: None }
+    propolis_id = 18a38b46-c2b3-45f4-8a77-3fbf43d2175c
+    remote_addr = [fd00:1122:3344:103::1]:54972
+    req_id = e81e031e-a27d-4e06-b5c0-2481f5eea1a4
+    uri = /instances/83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    vmm_state = VmmRuntimeState { state: Destroyed, gen: Generation(2), time_updated: 2024-07-25T21:25:29.252818945Z }
+21:25:29.257Z DEBG 3090570f-4c2b-43ae-8124-776fbad100fa (dropshot_internal): new VMM runtime state from sled agent requires an instance-update saga
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    authenticated = true
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    local_addr = [fd00:1122:3344:102::4]:12221
+    method = PUT
+    migration_in_needs_update = false
+    migration_out_needs_update = false
+    propolis_id = 18a38b46-c2b3-45f4-8a77-3fbf43d2175c
+    remote_addr = [fd00:1122:3344:103::1]:54972
+    req_id = e81e031e-a27d-4e06-b5c0-2481f5eea1a4
+    uri = /instances/83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    vmm_needs_update = true
+21:25:29.273Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (dropshot_internal): starting update saga for 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    authenticated = true
+    file = nexus/src/app/instance.rs:1371
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    local_addr = [fd00:1122:3344:102::4]:12221
+    method = PUT
+    migration_state = Migrations { migration_in: None, migration_out: None }
+    remote_addr = [fd00:1122:3344:103::1]:54972
+    req_id = e81e031e-a27d-4e06-b5c0-2481f5eea1a4
+    uri = /instances/83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    vmm_state = VmmRuntimeState { state: Destroyed, gen: Generation(2), time_updated: 2024-07-25T21:25:29.252818945Z }
+21:25:29.351Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): instance update: attempting to lock instance
+    file = nexus/src/app/sagas/instance_update/start.rs:92
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    saga_id = c5a4e62e-ff9f-4edb-aa68-9a033893a62a
+    saga_name = start-instance-update
+21:25:29.365Z DEBG 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): attempting to acquire instance updater lock
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    authenticated = true
+    current_gen = Generation(Generation(1))
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    saga_id = 734a7030-3e17-4637-9711-19bc78dbd077
+    saga_name = start-instance-update
+    saga_node = LockInstance
+    updater_id = c5a4e62e-ff9f-4edb-aa68-9a033893a62a
+21:25:29.370Z DEBG 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): attempting to acquire instance updater lock
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    authenticated = true
+    current_gen = Generation(Generation(1))
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    saga_id = 734a7030-3e17-4637-9711-19bc78dbd077
+    saga_name = start-instance-update
+    saga_node = LockInstance
+    updater_id = c5a4e62e-ff9f-4edb-aa68-9a033893a62a
+21:25:29.374Z DEBG 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): instance updater lock acquired!
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    already_locked = true
+    authenticated = true
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    locked_gen = Generation(Generation(2))
+    saga_id = 734a7030-3e17-4637-9711-19bc78dbd077
+    saga_name = start-instance-update
+    saga_node = LockInstance
+    updater_id = c5a4e62e-ff9f-4edb-aa68-9a033893a62a
+21:25:29.399Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): instance update: starting real update saga...
+    current.active_vmm = Some(Vmm { id: 18a38b46-c2b3-45f4-8a77-3fbf43d2175c, time_created: 2024-07-25T21:25:26.371086Z, time_deleted: None, instance_id: 83e2f8ab-86dc-491f-98d9-b66a16768ddb, sled_id: 7c8b0a7f-23e1-4b88-8519-eb43ed065667, propolis_ip: V6(Ipv6Network { addr: fd00:1122:3344:103::1:34, prefix: 128 }), propolis_port: SqlU16(12400), runtime: VmmRuntimeState { time_state_updated: 2024-07-25T21:25:29.252818Z, gen: Generation(Generation(2)), state: Destroyed } })
+    current.migration = None
+    current.runtime_state = InstanceRuntimeState { time_updated: 2024-07-25T21:25:26.884469Z, gen: Generation(Generation(2)), propolis_id: Some(18a38b46-c2b3-45f4-8a77-3fbf43d2175c), dst_propolis_id: None, migration_id: None, nexus_state: Vmm }
+    current.target_vmm = None
+    file = nexus/src/app/sagas/instance_update/start.rs:178
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    saga_id = 734a7030-3e17-4637-9711-19bc78dbd077
+    saga_name = start-instance-update
+    update.deprovision = true
+    update.destroy_active_vmm = Some(18a38b46-c2b3-45f4-8a77-3fbf43d2175c (propolis))
+    update.destroy_target_vmm = None
+    update.network_config_update = Some(Delete)
+    update.new_runtime_state = InstanceRuntimeState { time_updated: 2024-07-25T21:25:29.398999367Z, gen: Generation(Generation(3)), propolis_id: None, dst_propolis_id: None, migration_id: None, nexus_state: NoVmm }
+21:25:29.420Z DEBG 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): instance update: trying to become instance updater...
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    parent_lock = UpdaterLock { updater_id: c5a4e62e-ff9f-4edb-aa68-9a033893a62a, locked_gen: Generation(Generation(2)) }
+    saga_id = 41b9eb70-84a4-4397-ba86-be068cbffec7
+    saga_name = instance-update
+21:25:29.427Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): inherited lock from c5a4e62e-ff9f-4edb-aa68-9a033893a62a to 41b9eb70-84a4-4397-ba86-be068cbffec7
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    authenticated = true
+    file = nexus/db-queries/src/db/datastore/instance.rs:1051
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    locked_gen = Generation(Generation(3))
+    parent_gen = Generation(Generation(2))
+    parent_id = c5a4e62e-ff9f-4edb-aa68-9a033893a62a
+    saga_id = 07d0a44e-e348-4bd9-ada0-1e9e4eebf1ad
+    saga_name = instance-update
+    saga_node = BecomeUpdater
+    updater_id = 41b9eb70-84a4-4397-ba86-be068cbffec7
+21:25:29.427Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): instance_update: Now, I am become Updater, the destroyer of VMMs.
+    file = nexus/src/app/sagas/instance_update/mod.rs:796
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    saga_id = 41b9eb70-84a4-4397-ba86-be068cbffec7
+    saga_name = instance-update
+21:25:29.438Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): instance update: deleting network config
+    file = nexus/src/app/sagas/instance_update/mod.rs:839
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    saga_id = 07d0a44e-e348-4bd9-ada0-1e9e4eebf1ad
+    saga_name = instance-update
+21:25:29.438Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): deleting instance dpd configuration
+    file = nexus/src/app/instance_network.rs:548
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+21:25:29.453Z DEBG 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): notifying dendrite of updates
+    instance_id = Some(83e2f8ab-86dc-491f-98d9-b66a16768ddb (instance))
+    switch = switch1
+21:25:29.607Z DEBG 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): notifying dendrite of updates
+    instance_id = Some(83e2f8ab-86dc-491f-98d9-b66a16768ddb (instance))
+    switch = switch0
+21:25:29.784Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): instance update (no VMM): deallocated virtual provisioning resources
+    file = nexus/src/app/sagas/instance_update/mod.rs:918
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    records_deleted = [VirtualProvisioningCollection { id: 001de000-1334-4000-8000-000000000000, time_modified: Some(2024-07-25T21:25:29.775985Z), collection_type: "Fleet", virtual_disk_bytes_provisioned: ByteCount(ByteCount(11811160064)), cpus_provisioned: 10, ram_provisioned: ByteCount(ByteCount(10737418240)) }, VirtualProvisioningCollection { id: 64900d6e-0c92-4d8c-a035-25c1c179125f, time_modified: Some(2024-07-25T21:25:29.775985Z), collection_type: "Silo", virtual_disk_bytes_provisioned: ByteCount(ByteCount(11811160064)), cpus_provisioned: 10, ram_provisioned: ByteCount(ByteCount(10737418240)) }, VirtualProvisioningCollection { id: 73a1ed16-acc9-4913-b82e-108105e6bed2, time_modified: Some(2024-07-25T21:25:29.775985Z), collection_type: "Project", virtual_disk_bytes_provisioned: ByteCount(ByteCount(11811160064)), cpus_provisioned: 10, ram_provisioned: ByteCount(ByteCount(10737418240)) }]
+    saga_id = 07d0a44e-e348-4bd9-ada0-1e9e4eebf1ad
+    saga_name = instance-update
+21:25:29.791Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): instance update (no VMM): unassigning oximeter producer
+    file = nexus/src/app/sagas/instance_update/mod.rs:953
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    saga_id = 07d0a44e-e348-4bd9-ada0-1e9e4eebf1ad
+    saga_name = instance-update
+21:25:29.798Z DEBG 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): instance update: committing new runtime state and unlocking...
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    lock = UpdaterLock { updater_id: 41b9eb70-84a4-4397-ba86-be068cbffec7, locked_gen: Generation(Generation(3)) }
+    new_runtime = InstanceRuntimeState { time_updated: 2024-07-25T21:25:29.398999367Z, gen: Generation(Generation(3)), propolis_id: None, dst_propolis_id: None, migration_id: None, nexus_state: NoVmm }
+    saga_id = 07d0a44e-e348-4bd9-ada0-1e9e4eebf1ad
+    saga_name = instance-update
+21:25:29.834Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): instance update: committed update new runtime state!
+    did_unlock = true
+    file = nexus/src/app/sagas/instance_update/mod.rs:1001
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    new_runtime = InstanceRuntimeState { time_updated: 2024-07-25T21:25:29.398999367Z, gen: Generation(Generation(3)), propolis_id: None, dst_propolis_id: None, migration_id: None, nexus_state: NoVmm }
+    saga_id = 07d0a44e-e348-4bd9-ada0-1e9e4eebf1ad
+    saga_name = instance-update
+21:25:29.863Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): instance update (VMM destroyed): deallocating sled resource reservation
+    file = nexus/src/app/sagas/instance_update/destroyed.rs:83
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    propolis_id = 18a38b46-c2b3-45f4-8a77-3fbf43d2175c
+    saga_id = 07d0a44e-e348-4bd9-ada0-1e9e4eebf1ad
+    saga_name = instance-update
+21:25:29.872Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): instance update (VMM destroyed): marking VMM record deleted
+    file = nexus/src/app/sagas/instance_update/destroyed.rs:114
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    propolis_id = 18a38b46-c2b3-45f4-8a77-3fbf43d2175c
+    saga_id = 07d0a44e-e348-4bd9-ada0-1e9e4eebf1ad
+    saga_name = instance-update
+21:25:42.274Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (dropshot_internal): received new VMM runtime state from sled agent
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    authenticated = true
+    file = nexus/src/app/instance.rs:1869
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    local_addr = [fd00:1122:3344:102::4]:12221
+    method = PUT
+    migration_state = Migrations { migration_in: None, migration_out: None }
+    propolis_id = a549321e-e2c4-40b7-a2ba-0ae492878f0c
+    remote_addr = [fd00:1122:3344:101::1]:43502
+    req_id = b29d225b-7eb5-40c9-9055-e8011a1bce4e
+    uri = /instances/83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    vmm_state = VmmRuntimeState { state: Starting, gen: Generation(2), time_updated: 2024-07-25T21:25:42.273996740Z }
+21:25:42.279Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (dropshot_internal): received new VMM runtime state from sled agent
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    authenticated = true
+    file = nexus/src/app/instance.rs:1869
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    local_addr = [fd00:1122:3344:102::4]:12221
+    method = PUT
+    migration_state = Migrations { migration_in: None, migration_out: None }
+    propolis_id = a549321e-e2c4-40b7-a2ba-0ae492878f0c
+    remote_addr = [fd00:1122:3344:101::1]:43502
+    req_id = bbd804e9-76e0-40d9-838b-d710c45cc978
+    uri = /instances/83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    vmm_state = VmmRuntimeState { state: Running, gen: Generation(3), time_updated: 2024-07-25T21:25:42.279615082Z }
+21:25:55.258Z DEBG 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): updating instance state
+    background_task = instance_watcher
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    state = Running
+21:25:55.258Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): received new VMM runtime state from sled agent
+    background_task = instance_watcher
+    file = nexus/src/app/instance.rs:1869
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    migration_state = Migrations { migration_in: None, migration_out: None }
+    propolis_id = a549321e-e2c4-40b7-a2ba-0ae492878f0c
+    vmm_state = VmmRuntimeState { state: Running, gen: Generation(3), time_updated: 2024-07-25T21:25:42.279615082Z }
+21:26:25.342Z DEBG 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): updating instance state
+    background_task = instance_watcher
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    state = Running
+21:26:25.342Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): received new VMM runtime state from sled agent
+    background_task = instance_watcher
+    file = nexus/src/app/instance.rs:1869
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    migration_state = Migrations { migration_in: None, migration_out: None }
+    propolis_id = a549321e-e2c4-40b7-a2ba-0ae492878f0c
+    vmm_state = VmmRuntimeState { state: Running, gen: Generation(3), time_updated: 2024-07-25T21:25:42.279615082Z }
+21:26:55.245Z DEBG 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): updating instance state
+    background_task = instance_watcher
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    state = Running
+21:26:55.245Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): received new VMM runtime state from sled agent
+    background_task = instance_watcher
+    file = nexus/src/app/instance.rs:1869
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    migration_state = Migrations { migration_in: None, migration_out: None }
+    propolis_id = a549321e-e2c4-40b7-a2ba-0ae492878f0c
+    vmm_state = VmmRuntimeState { state: Running, gen: Generation(3), time_updated: 2024-07-25T21:25:42.279615082Z }
+21:27:25.806Z DEBG 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): updating instance state
+    background_task = instance_watcher
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    state = Running
+21:27:25.806Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): received new VMM runtime state from sled agent
+    background_task = instance_watcher
+    file = nexus/src/app/instance.rs:1869
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    migration_state = Migrations { migration_in: None, migration_out: None }
+    propolis_id = a549321e-e2c4-40b7-a2ba-0ae492878f0c
+    vmm_state = VmmRuntimeState { state: Running, gen: Generation(3), time_updated: 2024-07-25T21:25:42.279615082Z }
+21:27:55.254Z DEBG 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): updating instance state
+    background_task = instance_watcher
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    state = Running
+21:27:55.254Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): received new VMM runtime state from sled agent
+    background_task = instance_watcher
+    file = nexus/src/app/instance.rs:1869
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    migration_state = Migrations { migration_in: None, migration_out: None }
+    propolis_id = a549321e-e2c4-40b7-a2ba-0ae492878f0c
+    vmm_state = VmmRuntimeState { state: Running, gen: Generation(3), time_updated: 2024-07-25T21:25:42.279615082Z }
+21:28:25.653Z DEBG 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): updating instance state
+    background_task = instance_watcher
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    state = Running
+21:28:25.653Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): received new VMM runtime state from sled agent
+    background_task = instance_watcher
+    file = nexus/src/app/instance.rs:1869
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    migration_state = Migrations { migration_in: None, migration_out: None }
+    propolis_id = a549321e-e2c4-40b7-a2ba-0ae492878f0c
+    vmm_state = VmmRuntimeState { state: Running, gen: Generation(3), time_updated: 2024-07-25T21:25:42.279615082Z }
+21:28:27.578Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (dropshot_internal): received new VMM runtime state from sled agent
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    authenticated = true
+    file = nexus/src/app/instance.rs:1869
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    local_addr = [fd00:1122:3344:102::4]:12221
+    method = PUT
+    migration_state = Migrations { migration_in: None, migration_out: None }
+    propolis_id = a549321e-e2c4-40b7-a2ba-0ae492878f0c
+    remote_addr = [fd00:1122:3344:101::1]:43502
+    req_id = c2913dd1-4210-43be-986f-f0f4ac400678
+    uri = /instances/83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    vmm_state = VmmRuntimeState { state: Stopping, gen: Generation(5), time_updated: 2024-07-25T21:28:27.577646756Z }
+21:28:30.621Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (dropshot_internal): received new VMM runtime state from sled agent
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    authenticated = true
+    file = nexus/src/app/instance.rs:1869
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    local_addr = [fd00:1122:3344:102::4]:12221
+    method = PUT
+    migration_state = Migrations { migration_in: None, migration_out: None }
+    propolis_id = a549321e-e2c4-40b7-a2ba-0ae492878f0c
+    remote_addr = [fd00:1122:3344:101::1]:43502
+    req_id = cd2f9516-79a4-4dc4-9dc3-f1d74a9df395
+    uri = /instances/83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    vmm_state = VmmRuntimeState { state: Destroyed, gen: Generation(7), time_updated: 2024-07-25T21:28:30.620811030Z }
+21:28:30.635Z DEBG 3090570f-4c2b-43ae-8124-776fbad100fa (dropshot_internal): new VMM runtime state from sled agent requires an instance-update saga
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    authenticated = true
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    local_addr = [fd00:1122:3344:102::4]:12221
+    method = PUT
+    migration_in_needs_update = false
+    migration_out_needs_update = false
+    propolis_id = a549321e-e2c4-40b7-a2ba-0ae492878f0c
+    remote_addr = [fd00:1122:3344:101::1]:43502
+    req_id = cd2f9516-79a4-4dc4-9dc3-f1d74a9df395
+    uri = /instances/83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    vmm_needs_update = true
+21:28:30.651Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (dropshot_internal): starting update saga for 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    authenticated = true
+    file = nexus/src/app/instance.rs:1371
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    local_addr = [fd00:1122:3344:102::4]:12221
+    method = PUT
+    migration_state = Migrations { migration_in: None, migration_out: None }
+    remote_addr = [fd00:1122:3344:101::1]:43502
+    req_id = cd2f9516-79a4-4dc4-9dc3-f1d74a9df395
+    uri = /instances/83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    vmm_state = VmmRuntimeState { state: Destroyed, gen: Generation(7), time_updated: 2024-07-25T21:28:30.620811030Z }
+21:28:30.652Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (dropshot_internal): received new VMM runtime state from sled agent
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    authenticated = true
+    file = nexus/src/app/instance.rs:1869
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    local_addr = [fd00:1122:3344:102::4]:12221
+    method = PUT
+    migration_state = Migrations { migration_in: None, migration_out: None }
+    propolis_id = a549321e-e2c4-40b7-a2ba-0ae492878f0c
+    remote_addr = [fd00:1122:3344:101::1]:43502
+    req_id = 5e7ceff7-3899-4054-a9b5-e580da62b6cc
+    uri = /instances/83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    vmm_state = VmmRuntimeState { state: Destroyed, gen: Generation(7), time_updated: 2024-07-25T21:28:30.620811030Z }
+21:28:30.701Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): instance update: attempting to lock instance
+    file = nexus/src/app/sagas/instance_update/start.rs:92
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    saga_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+    saga_name = start-instance-update
+21:28:30.715Z DEBG 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): attempting to acquire instance updater lock
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    authenticated = true
+    current_gen = Generation(Generation(4))
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    saga_node = LockInstance
+    updater_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+21:28:30.721Z DEBG 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): attempting to acquire instance updater lock
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    authenticated = true
+    current_gen = Generation(Generation(4))
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    saga_node = LockInstance
+    updater_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+21:28:30.724Z DEBG 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): instance updater lock acquired!
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    already_locked = true
+    authenticated = true
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    locked_gen = Generation(Generation(5))
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    saga_node = LockInstance
+    updater_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+21:28:30.765Z DEBG 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): instance update: unlocking instance on unwind
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    lock = UpdaterLock { updater_id: 716a5faa-9a9d-456d-a242-32cc9a846fab, locked_gen: Generation(Generation(5)) }
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+21:28:30.768Z ERRO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): attempted to release a lock held by another saga
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    actual_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+    authenticated = true
+    file = nexus/db-queries/src/db/datastore/instance.rs:1160
+    found_gen = Generation(Generation(5))
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    locked_gen = Generation(Generation(5))
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    saga_node = LockInstance
+    updater_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+21:28:30.768Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): server error while recording saga event, retrying
+    call_count = 0
+    error = Internal Error: attempted to release a lock held by another saga! this is a bug!
+    file = nexus/src/app/sagas/instance_update/mod.rs:1202
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    lock = UpdaterLock { updater_id: 716a5faa-9a9d-456d-a242-32cc9a846fab, locked_gen: Generation(Generation(5)) }
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    total_duration = 3.72443ms
+21:28:31.082Z ERRO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): attempted to release a lock held by another saga
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    actual_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+    authenticated = true
+    file = nexus/db-queries/src/db/datastore/instance.rs:1160
+    found_gen = Generation(Generation(5))
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    locked_gen = Generation(Generation(5))
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    saga_node = LockInstance
+    updater_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+21:28:31.082Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): server error while recording saga event, retrying
+    call_count = 1
+    error = Internal Error: attempted to release a lock held by another saga! this is a bug!
+    file = nexus/src/app/sagas/instance_update/mod.rs:1202
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    lock = UpdaterLock { updater_id: 716a5faa-9a9d-456d-a242-32cc9a846fab, locked_gen: Generation(Generation(5)) }
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    total_duration = 316.89294ms
+21:28:31.634Z ERRO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): attempted to release a lock held by another saga
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    actual_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+    authenticated = true
+    file = nexus/db-queries/src/db/datastore/instance.rs:1160
+    found_gen = Generation(Generation(5))
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    locked_gen = Generation(Generation(5))
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    saga_node = LockInstance
+    updater_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+21:28:31.635Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): server error while recording saga event, retrying
+    call_count = 2
+    error = Internal Error: attempted to release a lock held by another saga! this is a bug!
+    file = nexus/src/app/sagas/instance_update/mod.rs:1202
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    lock = UpdaterLock { updater_id: 716a5faa-9a9d-456d-a242-32cc9a846fab, locked_gen: Generation(Generation(5)) }
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    total_duration = 869.80914ms
+21:28:32.994Z ERRO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): attempted to release a lock held by another saga
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    actual_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+    authenticated = true
+    file = nexus/db-queries/src/db/datastore/instance.rs:1160
+    found_gen = Generation(Generation(5))
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    locked_gen = Generation(Generation(5))
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    saga_node = LockInstance
+    updater_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+21:28:32.994Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): server error while recording saga event, retrying
+    call_count = 3
+    error = Internal Error: attempted to release a lock held by another saga! this is a bug!
+    file = nexus/src/app/sagas/instance_update/mod.rs:1202
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    lock = UpdaterLock { updater_id: 716a5faa-9a9d-456d-a242-32cc9a846fab, locked_gen: Generation(Generation(5)) }
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    total_duration = 2.228850544s
+21:28:35.581Z ERRO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): attempted to release a lock held by another saga
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    actual_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+    authenticated = true
+    file = nexus/db-queries/src/db/datastore/instance.rs:1160
+    found_gen = Generation(Generation(5))
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    locked_gen = Generation(Generation(5))
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    saga_node = LockInstance
+    updater_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+21:28:35.581Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): server error while recording saga event, retrying
+    call_count = 4
+    error = Internal Error: attempted to release a lock held by another saga! this is a bug!
+    file = nexus/src/app/sagas/instance_update/mod.rs:1202
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    lock = UpdaterLock { updater_id: 716a5faa-9a9d-456d-a242-32cc9a846fab, locked_gen: Generation(Generation(5)) }
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    total_duration = 4.816258375s
+21:28:41.493Z ERRO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): attempted to release a lock held by another saga
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    actual_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+    authenticated = true
+    file = nexus/db-queries/src/db/datastore/instance.rs:1160
+    found_gen = Generation(Generation(5))
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    locked_gen = Generation(Generation(5))
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    saga_node = LockInstance
+    updater_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+21:28:41.493Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): server error while recording saga event, retrying
+    call_count = 5
+    error = Internal Error: attempted to release a lock held by another saga! this is a bug!
+    file = nexus/src/app/sagas/instance_update/mod.rs:1202
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    lock = UpdaterLock { updater_id: 716a5faa-9a9d-456d-a242-32cc9a846fab, locked_gen: Generation(Generation(5)) }
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    total_duration = 10.728196913s
+21:28:47.821Z ERRO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): attempted to release a lock held by another saga
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    actual_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+    authenticated = true
+    file = nexus/db-queries/src/db/datastore/instance.rs:1160
+    found_gen = Generation(Generation(5))
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    locked_gen = Generation(Generation(5))
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    saga_node = LockInstance
+    updater_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+21:28:47.821Z INFO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): server error while recording saga event, retrying
+    call_count = 6
+    error = Internal Error: attempted to release a lock held by another saga! this is a bug!
+    file = nexus/src/app/sagas/instance_update/mod.rs:1202
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    lock = UpdaterLock { updater_id: 716a5faa-9a9d-456d-a242-32cc9a846fab, locked_gen: Generation(Generation(5)) }
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    total_duration = 17.055072611s
+21:29:01.460Z ERRO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): attempted to release a lock held by another saga
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    actual_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+    authenticated = true
+    file = nexus/db-queries/src/db/datastore/instance.rs:1160
+    found_gen = Generation(Generation(5))
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    locked_gen = Generation(Generation(5))
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    saga_node = LockInstance
+    updater_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+21:29:01.460Z WARN 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): instance update: server error while unlocking instance,
+                         retrying
+    call_count = 7
+    error = Internal Error: attempted to release a lock held by another saga! this is a bug!
+    file = nexus/src/app/sagas/instance_update/mod.rs:1191
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    lock = UpdaterLock { updater_id: 716a5faa-9a9d-456d-a242-32cc9a846fab, locked_gen: Generation(Generation(5)) }
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    total_duration = 30.693835165s
+21:29:17.617Z ERRO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): attempted to release a lock held by another saga
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    actual_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+    authenticated = true
+    file = nexus/db-queries/src/db/datastore/instance.rs:1160
+    found_gen = Generation(Generation(5))
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    locked_gen = Generation(Generation(5))
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    saga_node = LockInstance
+    updater_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+21:29:17.617Z WARN 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): instance update: server error while unlocking instance,
+                         retrying
+    call_count = 8
+    error = Internal Error: attempted to release a lock held by another saga! this is a bug!
+    file = nexus/src/app/sagas/instance_update/mod.rs:1191
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    lock = UpdaterLock { updater_id: 716a5faa-9a9d-456d-a242-32cc9a846fab, locked_gen: Generation(Generation(5)) }
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    total_duration = 46.850057263s
+21:30:35.990Z ERRO 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): attempted to release a lock held by another saga
+    actor_id = 001de000-05e4-4000-8000-000000000002
+    actual_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+    authenticated = true
+    file = nexus/db-queries/src/db/datastore/instance.rs:1160
+    found_gen = Generation(Generation(5))
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    locked_gen = Generation(Generation(5))
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    saga_node = LockInstance
+    updater_id = 716a5faa-9a9d-456d-a242-32cc9a846fab
+21:30:35.990Z WARN 3090570f-4c2b-43ae-8124-776fbad100fa (ServerContext): instance update: server error while unlocking instance,
+                         retrying
+    call_count = 9
+    error = Internal Error: attempted to release a lock held by another saga! this is a bug!
+    file = nexus/src/app/sagas/instance_update/mod.rs:1191
+    instance_id = 83e2f8ab-86dc-491f-98d9-b66a16768ddb
+    lock = UpdaterLock { updater_id: 716a5faa-9a9d-456d-a242-32cc9a846fab, locked_gen: Generation(Generation(5)) }
+    saga_id = 9fde65bf-fb0a-4a82-9b2b-276789f57a76
+    saga_name = start-instance-update
+    total_duration = 125.218673206s

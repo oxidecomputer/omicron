@@ -1453,7 +1453,7 @@ mod tests {
         // now, unlock the instance.
         let unlocked = dbg!(
             datastore
-                .instance_commit_update(&opctx, &authz_instance, &lock1, None)
+                .instance_updater_unlock(&opctx, &authz_instance, &lock1)
                 .await
         )
         .expect("instance should unlock");
@@ -1462,7 +1462,7 @@ mod tests {
         // unlocking it again should also succeed...
         let unlocked = dbg!(
             datastore
-                .instance_commit_update(&opctx, &authz_instance, &lock2, None)
+                .instance_updater_unlock(&opctx, &authz_instance, &lock2,)
                 .await
         )
         .expect("instance should unlock again");
@@ -1497,7 +1497,7 @@ mod tests {
         // attempting to unlock with a different saga ID should be an error.
         let err = dbg!(
             datastore
-                .instance_commit_update(
+                .instance_updater_unlock(
                     &opctx,
                     &authz_instance,
                     // N.B. that the `UpdaterLock` type's fields are private
@@ -1509,7 +1509,6 @@ mod tests {
                         updater_id: saga2,
                         locked_gen: lock1.locked_gen,
                     },
-                    None,
                 )
                 .await
         )
@@ -1528,7 +1527,7 @@ mod tests {
         // unlocking with the correct ID should succeed.
         let unlocked = dbg!(
             datastore
-                .instance_commit_update(&opctx, &authz_instance, &lock1, None)
+                .instance_updater_unlock(&opctx, &authz_instance, &lock1)
                 .await
         )
         .expect("instance should unlock");
@@ -1538,14 +1537,13 @@ mod tests {
         // (where the lock is no longer held) should fail.
         let err = dbg!(
             datastore
-                .instance_commit_update(
+                .instance_updater_unlock(
                     &opctx,
                     &authz_instance,
                     // Again, these fields are private specifically to prevent
                     // you from doing this exact thing. But, we should  still
                     // test that we handle it gracefully.
                     &UpdaterLock { updater_id: saga1, locked_gen: next_gen },
-                    None,
                 )
                 .await
         )
