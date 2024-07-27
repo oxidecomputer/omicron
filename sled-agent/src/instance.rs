@@ -487,9 +487,6 @@ impl InstanceRunner {
                 PutState { tx, .. } => {
                     tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
-                PutMigrationIds { tx, .. } => {
-                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
-                }
                 Terminate { tx, .. } => {
                     tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
