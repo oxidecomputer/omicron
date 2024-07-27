@@ -132,24 +132,10 @@ cargo run -p omicron-dev mgs-run
 
 This will print out a line similar to `omicron-dev: MGS API: http://[::1]:12225`. Note the address for use below.
 
-Another option, which may lead to quicker iteration cycles if you're modifying
-MGS or sp-sim, is to run the services by hand from the root of omicron:
-
-```
-cargo run --bin sp-sim -- sp-sim/examples/config.toml
-cargo run --bin mgs run --id c19a698f-c6f9-4a17-ae30-20d711b8f7dc --address '[::1]:12225' gateway/examples/config.toml
-```
-
-The port number in `--address` is arbitrary.
-
-**Note:** If you're adding new functionality to wicket, it is quite possible
-that sp-sim is missing support for it! Generally, sp-sim has features added to
-it on an as-needed basis.
-
 ### Using a real SP
 
 The easiest way is to change the mgs config to point to a running SP instead
-of a simulated SP
+of a simulated SP.
 
 ```
 [[switch.port]]
