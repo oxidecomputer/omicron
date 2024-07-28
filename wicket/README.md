@@ -127,7 +127,7 @@ Making this simpler is tracked in
 The easiest way to do this is to run:
 
 ```
-cargo run -p omicron-dev mgs-run
+cargo xtask omicron-dev mgs-run
 ```
 
 This will print out a line similar to `omicron-dev: MGS API: http://[::1]:12225`. Note the address for use below.
