@@ -35,7 +35,6 @@ use crate::params::{
     ZoneBundleCause, ZoneBundleMetadata,
 };
 use crate::profile::*;
-use crate::smf_helper::SmfHelper;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
@@ -55,6 +54,7 @@ use illumos_utils::running_zone::{
     EnsureAddressError, InstalledZone, RunCommandError, RunningZone,
     ZoneBuilderFactory,
 };
+use illumos_utils::smf_helper::SmfHelper;
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zpool::{PathInPool, ZpoolName};
@@ -157,7 +157,7 @@ pub enum Error {
     SledLocalZone(anyhow::Error),
 
     #[error("Failed to issue SMF command: {0}")]
-    SmfCommand(#[from] crate::smf_helper::Error),
+    SmfCommand(#[from] illumos_utils::smf_helper::Error),
 
     #[error("{}", display_zone_init_errors(.0))]
     ZoneInitialize(Vec<(String, Box<Error>)>),
@@ -498,7 +498,7 @@ enum SwitchService {
     SpSim,
 }
 
-impl crate::smf_helper::Service for SwitchService {
+impl illumos_utils::smf_helper::Service for SwitchService {
     fn service_name(&self) -> String {
         match self {
             SwitchService::ManagementGatewayService => "mgs",
@@ -1507,10 +1507,6 @@ impl ServiceManager {
             ServiceBuilder::new("network/dns/client")
                 .add_instance(ServiceInstanceBuilder::new("default"));
 
-        // TODO(https://github.com/oxidecomputer/omicron/issues/1898):
-        //
-        // These zones are self-assembling -- after they boot, there should
-        // be no "zlogin" necessary to initialize.
         match &request {
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:

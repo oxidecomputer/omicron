@@ -23,6 +23,7 @@ pub mod opte;
 pub mod route;
 pub mod running_zone;
 pub mod scf;
+pub mod smf_helper;
 pub mod svc;
 pub mod svcadm;
 pub mod vmm_reservoir;
