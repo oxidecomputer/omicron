@@ -410,7 +410,6 @@ impl<S: Simulatable + Clone + 'static> SimCollection<S> {
 
 #[cfg(test)]
 mod test {
-    use crate::params::{DiskStateRequested, InstanceStateRequested};
     use crate::sim::collection::SimObject;
     use crate::sim::disk::SimDisk;
     use crate::sim::instance::SimInstance;
@@ -428,6 +427,8 @@ mod test {
     use omicron_common::api::internal::nexus::VmmState;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::PropolisUuid;
+    use sled_agent_types::disk::DiskStateRequested;
+    use sled_agent_types::instance::InstanceStateRequested;
 
     fn make_instance(
         logctx: &LogContext,

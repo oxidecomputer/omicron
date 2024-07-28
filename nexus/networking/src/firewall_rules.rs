@@ -49,7 +49,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
     vpc: &db::model::Vpc,
     rules: &[db::model::VpcFirewallRule],
     log: &Logger,
-) -> Result<Vec<sled_agent_client::types::VpcFirewallRule>, Error> {
+) -> Result<Vec<sled_agent_client::types::ResolvedVpcFirewallRule>, Error> {
     // Collect the names of instances, subnets, and VPCs that are either
     // targets or host filters. We have to find the sleds for all the
     // targets, and we'll need information about the IP addresses or
@@ -417,16 +417,18 @@ pub async fn resolve_firewall_rules_for_sled_agent(
             .as_ref()
             .map(|protocols| protocols.iter().map(|v| v.0.into()).collect());
 
-        sled_agent_rules.push(sled_agent_client::types::VpcFirewallRule {
-            status: rule.status.0.into(),
-            direction: rule.direction.0.into(),
-            targets,
-            filter_hosts,
-            filter_ports,
-            filter_protocols,
-            action: rule.action.0.into(),
-            priority: rule.priority.0 .0,
-        });
+        sled_agent_rules.push(
+            sled_agent_client::types::ResolvedVpcFirewallRule {
+                status: rule.status.0.into(),
+                direction: rule.direction.0.into(),
+                targets,
+                filter_hosts,
+                filter_ports,
+                filter_protocols,
+                action: rule.action.0.into(),
+                priority: rule.priority.0 .0,
+            },
+        );
     }
     debug!(
         log,

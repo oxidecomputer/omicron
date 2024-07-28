@@ -11,18 +11,12 @@ use super::instance::SimInstance;
 use super::storage::CrucibleData;
 use super::storage::Storage;
 use crate::nexus::NexusClient;
-use crate::params::{
-    DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
-    InstanceMetadata, InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse,
-};
 use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
 use anyhow::bail;
 use anyhow::Context;
 use dropshot::{HttpError, HttpServer};
 use futures::lock::Mutex;
-use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use nexus_sled_agent_shared::inventory::{
     Inventory, InventoryDisk, InventoryZpool, OmicronZonesConfig, SledRole,
 };
@@ -38,6 +32,7 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::shared::{
     RackNetworkConfig, ResolvedVpcRoute, ResolvedVpcRouteSet,
     ResolvedVpcRouteState, RouterId, RouterKind, RouterVersion,
+    VirtualNetworkInterfaceHost,
 };
 use omicron_common::disk::{
     DiskIdentity, DiskVariant, OmicronPhysicalDisksConfig,
@@ -48,8 +43,14 @@ use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
 };
 use propolis_mock_server::Context as PropolisContext;
+use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
+};
+use sled_agent_types::instance::{
+    InstanceExternalIpBody, InstanceHardware, InstanceMetadata,
+    InstanceMigrationSourceParams, InstancePutStateResponse,
+    InstanceStateRequested, InstanceUnregisterResponse,
 };
 use sled_storage::resources::DisksManagementResult;
 use slog::Logger;

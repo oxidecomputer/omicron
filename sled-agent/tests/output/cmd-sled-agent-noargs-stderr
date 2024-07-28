@@ -3,9 +3,8 @@ See README.adoc for more information
 Usage: sled-agent <COMMAND>
 
 Commands:
-  openapi  Generates the OpenAPI specification
-  run      Runs the Sled Agent server
-  help     Print this message or the help of the given subcommand(s)
+  run   Runs the Sled Agent server
+  help  Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help     Print help

@@ -4,13 +4,6 @@
 
 //! HTTP entrypoint functions for the sled agent's exposed API
 
-use crate::bootstrap::params::AddSledRequest;
-use crate::params::{
-    DiskEnsureBody, InstanceEnsureBody, InstanceExternalIpBody,
-    InstancePutMigrationIdsBody, InstancePutStateBody,
-    InstancePutStateResponse, InstanceUnregisterResponse,
-    VpcFirewallRulesEnsureBody,
-};
 use dropshot::ApiDescription;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
@@ -19,11 +12,11 @@ use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
 use dropshot::{endpoint, ApiDescriptionRegisterError};
-use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use nexus_sled_agent_shared::inventory::{Inventory, OmicronZonesConfig};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
+use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use omicron_common::api::internal::shared::{
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
 };
@@ -31,7 +24,16 @@ use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::disk::DiskEnsureBody;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
+use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
+use sled_agent_types::instance::InstanceEnsureBody;
+use sled_agent_types::instance::InstanceExternalIpBody;
+use sled_agent_types::instance::InstancePutMigrationIdsBody;
+use sled_agent_types::instance::InstancePutStateBody;
+use sled_agent_types::instance::InstancePutStateResponse;
+use sled_agent_types::instance::InstanceUnregisterResponse;
+use sled_agent_types::sled::AddSledRequest;
 use sled_storage::resources::DisksManagementResult;
 use std::sync::Arc;
 use uuid::Uuid;

@@ -346,6 +346,7 @@ pub(crate) mod test {
     };
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::SimpleIdentity;
+    use sled_agent_types::instance::InstanceExternalIpBody;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -437,14 +438,12 @@ pub(crate) mod test {
         // Sled agent has a record of the new external IPs.
         let mut eips = sled_agent.external_ips.lock().await;
         let my_eips = eips.entry(instance_id.into_untyped_uuid()).or_default();
-        assert!(my_eips.iter().any(|v| matches!(
-            v,
-            omicron_sled_agent::params::InstanceExternalIpBody::Floating(_)
-        )));
-        assert!(my_eips.iter().any(|v| matches!(
-            v,
-            omicron_sled_agent::params::InstanceExternalIpBody::Ephemeral(_)
-        )));
+        assert!(my_eips
+            .iter()
+            .any(|v| matches!(v, InstanceExternalIpBody::Floating(_))));
+        assert!(my_eips
+            .iter()
+            .any(|v| matches!(v, InstanceExternalIpBody::Ephemeral(_))));
 
         // DB has records for SNAT plus the new IPs.
         let db_eips = datastore

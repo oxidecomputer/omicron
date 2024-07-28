@@ -4,6 +4,9 @@
 
 //! Disk related types shared among crates
 
+use std::fmt;
+
+use anyhow::bail;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -111,6 +114,48 @@ impl From<ZpoolKind> for DiskVariant {
         match kind {
             ZpoolKind::External => DiskVariant::U2,
             ZpoolKind::Internal => DiskVariant::M2,
+        }
+    }
+}
+
+/// Describes an M.2 slot, often in the context of writing a system image to
+/// it.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub enum M2Slot {
+    A,
+    B,
+}
+
+impl fmt::Display for M2Slot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::A => f.write_str("A"),
+            Self::B => f.write_str("B"),
+        }
+    }
+}
+
+impl TryFrom<i64> for M2Slot {
+    type Error = anyhow::Error;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        match value {
+            // Gimlet should have 2 M.2 drives: drive A is assigned slot 17, and
+            // drive B is assigned slot 18.
+            17 => Ok(Self::A),
+            18 => Ok(Self::B),
+            _ => bail!("unexpected M.2 slot {value}"),
         }
     }
 }

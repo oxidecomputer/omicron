@@ -13,7 +13,6 @@ cfg_if::cfg_if! {
 }
 
 mod firewall_rules;
-pub mod params;
 mod port;
 mod port_manager;
 

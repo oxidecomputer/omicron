@@ -69,6 +69,7 @@ serde.workspace = true
 serde_human_bytes.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 sha3.workspace = true
+sled-agent-api.workspace = true
 sled-agent-client.workspace = true
 sled-agent-types.workspace = true
 sled-hardware.workspace = true
@@ -103,8 +104,6 @@ guppy.workspace = true
 http.workspace = true
 hyper.workspace = true
 omicron-test-utils.workspace = true
-openapi-lint.workspace = true
-openapiv3.workspace = true
 pretty_assertions.workspace = true
 rcgen.workspace = true
 subprocess.workspace = true

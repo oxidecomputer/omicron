@@ -21,7 +21,7 @@ progenitor::generate_api!(
     replace = {
         Duration = std::time::Duration,
         EventReportForInstallinatorSpec = installinator_common::EventReport,
-        M2Slot = installinator_common::M2Slot,
+        M2Slot = omicron_common::disk::M2Slot,
         ProgressEventForGenericSpec = installinator_common::ProgressEvent<update_engine::NestedSpec>,
         ProgressEventForInstallinatorSpec = installinator_common::ProgressEvent,
         StepEventForGenericSpec = installinator_common::StepEvent<update_engine::NestedSpec>,

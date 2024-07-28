@@ -3,7 +3,15 @@
 Internal types shared between Nexus and sled-agent, with extra dependencies not
 in omicron-common.
 
-**This crate should only be used for internal types and data structures.**
+## Guidelines
+
+This crate should only be used for **internal types and data structures.**
+
+It should only be used for types that are used by **both `sled-agent-types` and `nexus-types`**. Prefer to put types in `sled-agent-types` or `nexus-types` if possible.
+
+- If a type is used by `sled-agent-api`, as well as any part of Nexus except `nexus-types`, put it in `sled-agent-types`.
+- If a type is used by `nexus-internal-api`, as well as any part of sled-agent except `sled-agent-types`, put it in `nexus-types`.
+- Only if a type is used by both `sled-agent-types` and `nexus-types` should it go here.
 
 ## Why not omicron-common?
 
@@ -28,9 +36,10 @@ tokio-postgres, a dependency that is not a necessary component of sled-agent.
 ## Why not sled-agent-types or nexus-types?
 
 Types that are primarily used by sled-agent or nexus should continue to go in
-those crates. However, types shared by both should go here. `sled-agent-types`
-and `nexus-types` can thus avoid a dependency on each other: they're both "on
-the same level" and neither dependency direction is clearly correct.
+those crates. However, types used by both `nexus-types` and `sled-agent-types`
+should go here. `sled-agent-types` and `nexus-types` can thus avoid a
+dependency on each other: they're both "on the same level" and neither
+dependency direction is clearly correct.
 
 ## Why not Progenitor-generated types?
 

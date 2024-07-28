@@ -3709,6 +3709,7 @@ name = "installinator-client"
 version = "0.1.0"
 dependencies = [
  "installinator-common",
+ "omicron-common",
  "omicron-workspace-hack",
  "progenitor",
  "regress",
@@ -3729,6 +3730,7 @@ dependencies = [
  "camino",
  "illumos-utils",
  "libc",
+ "omicron-common",
  "omicron-workspace-hack",
  "proptest",
  "schemars",
@@ -4996,7 +4998,9 @@ dependencies = [
  "omicron-workspace-hack",
  "schemars",
  "serde",
+ "serde_json",
  "sled-hardware-types",
+ "thiserror",
  "uuid",
 ]
 
@@ -5695,6 +5699,7 @@ dependencies = [
  "serde_with",
  "similar-asserts",
  "sled-agent-client",
+ "sled-agent-types",
  "slog",
  "slog-async",
  "slog-dtrace",
@@ -5924,8 +5929,6 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "once_cell",
- "openapi-lint",
- "openapiv3",
  "opte-ioctl",
  "oximeter",
  "oximeter-instruments",
@@ -5943,6 +5946,7 @@ dependencies = [
  "serde_human_bytes",
  "serde_json",
  "sha3",
+ "sled-agent-api",
  "sled-agent-client",
  "sled-agent-types",
  "sled-hardware",
@@ -6223,6 +6227,7 @@ dependencies = [
  "oximeter-api",
  "serde_json",
  "similar",
+ "sled-agent-api",
  "supports-color",
  "wicketd-api",
 ]
@@ -8989,6 +8994,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "sled-agent-api"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "dropshot",
+ "nexus-sled-agent-shared",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+ "sled-agent-types",
+ "sled-hardware-types",
+ "sled-storage",
+ "uuid",
+]
+
+[[package]]
 name = "sled-agent-client"
 version = "0.1.0"
 dependencies = [
@@ -9015,19 +9038,24 @@ name = "sled-agent-types"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "bootstore",
  "camino",
  "camino-tempfile",
+ "chrono",
  "nexus-sled-agent-shared",
  "omicron-common",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=66d1ee7d4a5829dbbf02a152091ea051023b5b8b)",
  "rcgen",
  "schemars",
  "serde",
+ "serde_human_bytes",
  "serde_json",
+ "sha3",
  "sled-hardware-types",
  "sled-storage",
  "slog",

@@ -260,7 +260,8 @@ impl super::Nexus {
         opctx: &OpContext,
         vpc: &db::model::Vpc,
         rules: &[db::model::VpcFirewallRule],
-    ) -> Result<Vec<sled_agent_client::types::VpcFirewallRule>, Error> {
+    ) -> Result<Vec<sled_agent_client::types::ResolvedVpcFirewallRule>, Error>
+    {
         nexus_networking::resolve_firewall_rules_for_sled_agent(
             &self.db_datastore,
             opctx,

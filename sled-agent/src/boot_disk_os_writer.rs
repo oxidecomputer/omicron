@@ -5,8 +5,6 @@
 //! This module provides `BootDiskOsWriter`, via which sled-agent can write new
 //! OS images to its boot disks.
 
-use crate::http_entrypoints::BootDiskOsWriteProgress;
-use crate::http_entrypoints::BootDiskOsWriteStatus;
 use async_trait::async_trait;
 use bytes::Bytes;
 use camino::Utf8PathBuf;
@@ -14,10 +12,12 @@ use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
 use futures::Stream;
 use futures::TryStreamExt;
-use installinator_common::M2Slot;
 use installinator_common::RawDiskWriter;
+use omicron_common::disk::M2Slot;
 use sha3::Digest;
 use sha3::Sha3_256;
+use sled_agent_types::boot_disk::BootDiskOsWriteProgress;
+use sled_agent_types::boot_disk::BootDiskOsWriteStatus;
 use slog::Logger;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
@@ -37,18 +37,16 @@ use tokio::sync::oneshot::error::TryRecvError;
 use tokio::sync::watch;
 use uuid::Uuid;
 
-impl BootDiskOsWriteStatus {
-    fn from_result(
-        update_id: Uuid,
-        result: &Result<(), Arc<BootDiskOsWriteError>>,
-    ) -> Self {
-        match result {
-            Ok(()) => Self::Complete { update_id },
-            Err(err) => Self::Failed {
-                update_id,
-                message: DisplayErrorChain::new(err).to_string(),
-            },
-        }
+fn to_boot_disk_status(
+    update_id: Uuid,
+    result: &Result<(), Arc<BootDiskOsWriteError>>,
+) -> BootDiskOsWriteStatus {
+    match result {
+        Ok(()) => BootDiskOsWriteStatus::Complete { update_id },
+        Err(err) => BootDiskOsWriteStatus::Failed {
+            update_id,
+            message: DisplayErrorChain::new(err).to_string(),
+        },
     }
 }
 
@@ -393,9 +391,7 @@ impl BootDiskOsWriter {
                 match running.complete_rx.try_recv() {
                     Ok(result) => {
                         let update_id = running.update_id;
-                        let status = BootDiskOsWriteStatus::from_result(
-                            update_id, &result,
-                        );
+                        let status = to_boot_disk_status(update_id, &result);
                         slot.insert(WriterState::Complete(TaskCompleteState {
                             update_id,
                             result,
@@ -413,9 +409,7 @@ impl BootDiskOsWriter {
                         let update_id = running.update_id;
                         let result =
                             Err(Arc::new(BootDiskOsWriteError::TaskPanic));
-                        let status = BootDiskOsWriteStatus::from_result(
-                            update_id, &result,
-                        );
+                        let status = to_boot_disk_status(update_id, &result);
                         slot.insert(WriterState::Complete(TaskCompleteState {
                             update_id,
                             result,
@@ -425,10 +419,7 @@ impl BootDiskOsWriter {
                 }
             }
             WriterState::Complete(complete) => {
-                BootDiskOsWriteStatus::from_result(
-                    complete.update_id,
-                    &complete.result,
-                )
+                to_boot_disk_status(complete.update_id, &complete.result)
             }
         }
     }

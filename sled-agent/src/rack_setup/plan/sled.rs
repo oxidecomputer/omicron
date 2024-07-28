@@ -4,16 +4,15 @@
 
 //! Plan generation for "how should sleds be initialized".
 
-use crate::bootstrap::params::StartSledAgentRequestBody;
-use crate::bootstrap::{
-    config::BOOTSTRAP_AGENT_RACK_INIT_PORT, params::StartSledAgentRequest,
-};
+use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use camino::Utf8PathBuf;
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::rack_init::back_compat::RackInitializeRequestV1 as ConfigV1;
 use sled_agent_types::rack_init::RackInitializeRequest as Config;
+use sled_agent_types::sled::StartSledAgentRequest;
+use sled_agent_types::sled::StartSledAgentRequestBody;
 use sled_storage::dataset::CONFIG_DATASET;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;

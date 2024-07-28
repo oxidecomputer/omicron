@@ -5,7 +5,6 @@
 //! Convert Omicron VPC firewall rules to OPTE firewall rules.
 
 use super::net_to_cidr;
-use crate::opte::params::VpcFirewallRule;
 use crate::opte::Vni;
 use macaddr::MacAddr6;
 use omicron_common::api::external::VpcFirewallRuleAction;
@@ -13,6 +12,7 @@ use omicron_common::api::external::VpcFirewallRuleDirection;
 use omicron_common::api::external::VpcFirewallRuleProtocol;
 use omicron_common::api::external::VpcFirewallRuleStatus;
 use omicron_common::api::internal::nexus::HostIdentifier;
+use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 use oxide_vpc::api::Address;
 use oxide_vpc::api::Direction;
 use oxide_vpc::api::Filters;
@@ -34,7 +34,7 @@ trait FromVpcFirewallRule {
     fn protos(&self) -> Vec<ProtoFilter>;
 }
 
-impl FromVpcFirewallRule for VpcFirewallRule {
+impl FromVpcFirewallRule for ResolvedVpcFirewallRule {
     fn action(&self) -> FirewallAction {
         match self.action {
             VpcFirewallRuleAction::Allow => FirewallAction::Allow,
@@ -118,7 +118,7 @@ impl FromVpcFirewallRule for VpcFirewallRule {
 /// a single host address and protocol, so we must unroll rules with multiple
 /// hosts/protocols.
 pub fn opte_firewall_rules(
-    rules: &[VpcFirewallRule],
+    rules: &[ResolvedVpcFirewallRule],
     vni: &Vni,
     mac: &MacAddr6,
 ) -> Vec<FirewallRule> {

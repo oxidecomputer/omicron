@@ -4,9 +4,9 @@
 
 use std::{collections::BTreeSet, fmt, net::SocketAddr};
 
-use anyhow::bail;
 use camino::Utf8PathBuf;
 use illumos_utils::zpool;
+use omicron_common::disk::M2Slot;
 use schemars::{
     gen::SchemaGenerator,
     schema::{Schema, SchemaObject},
@@ -162,47 +162,6 @@ impl WriteOutput {
         }
 
         not_written
-    }
-}
-
-/// An M.2 slot that was written.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-)]
-pub enum M2Slot {
-    A,
-    B,
-}
-
-impl fmt::Display for M2Slot {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::A => f.write_str("A"),
-            Self::B => f.write_str("B"),
-        }
-    }
-}
-
-impl TryFrom<i64> for M2Slot {
-    type Error = anyhow::Error;
-
-    fn try_from(value: i64) -> Result<Self, Self::Error> {
-        match value {
-            // Gimlet should have 2 M.2 drives: drive A is assigned slot 17, and
-            // drive B is assigned slot 18.
-            17 => Ok(Self::A),
-            18 => Ok(Self::B),
-            _ => bail!("unexpected M.2 slot {value}"),
-        }
     }
 }
 

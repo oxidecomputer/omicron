@@ -5,7 +5,6 @@
 //! Simulated sled agent implementation
 
 use crate::nexus::NexusClient;
-use crate::params::DiskStateRequested;
 use crate::sim::simulatable::Simulatable;
 use async_trait::async_trait;
 use dropshot::ConfigLogging;
@@ -20,6 +19,7 @@ use omicron_common::api::internal::nexus::ProducerKind;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use propolis_client::types::DiskAttachmentState as PropolisDiskState;
+use sled_agent_types::disk::DiskStateRequested;
 use std::net::{Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;

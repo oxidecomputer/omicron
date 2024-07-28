@@ -16,11 +16,14 @@ use bytes::Buf;
 use camino::{Utf8Path, Utf8PathBuf};
 use illumos_utils::zpool::{Zpool, ZpoolName};
 use installinator_common::{
-    ControlPlaneZonesSpec, ControlPlaneZonesStepId, M2Slot, RawDiskWriter,
-    StepContext, StepProgress, StepResult, StepSuccess, UpdateEngine,
-    WriteComponent, WriteError, WriteOutput, WriteSpec, WriteStepId,
+    ControlPlaneZonesSpec, ControlPlaneZonesStepId, RawDiskWriter, StepContext,
+    StepProgress, StepResult, StepSuccess, UpdateEngine, WriteComponent,
+    WriteError, WriteOutput, WriteSpec, WriteStepId,
 };
-use omicron_common::update::{ArtifactHash, ArtifactHashId};
+use omicron_common::{
+    disk::M2Slot,
+    update::{ArtifactHash, ArtifactHashId},
+};
 use sha2::{Digest, Sha256};
 use slog::{info, warn, Logger};
 use tokio::{
