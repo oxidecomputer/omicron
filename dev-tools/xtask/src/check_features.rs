@@ -11,6 +11,20 @@ use std::{collections::HashSet, process::Command};
 
 const SUPPORTED_ARCHITECTURES: [&str; 1] = ["x86_64"];
 const CI_EXCLUDED_FEATURES: [&str; 2] = ["image-trampoline", "image-standard"];
+const CI_MUTUALLY_EXCLUSIVE_FEATURES: &[&str] = &[
+    // The "include-" features are from omicron-dev. They aren't actually
+    // mutually exclusive, but we only really care about one feature being
+    // enabled at a time as well as all at once (that's covered by the default
+    // feature that already comes with omicron-dev).
+    //
+    // These should stay in sync with the list of "include-*" features in
+    // dev-tools/omicron-dev/Cargo.toml.
+    "include-cert",
+    "include-clickhouse",
+    "include-db",
+    "include-mgs",
+    "include-nexus",
+];
 
 #[derive(Parser)]
 pub struct Args {
@@ -20,6 +34,9 @@ pub struct Args {
     /// Features to exclude from the check.
     #[clap(long, value_name = "FEATURES")]
     exclude_features: Option<Vec<String>>,
+    /// Features to mark as mutually exclusive.
+    #[clap(long, value_name = "FEATURES")]
+    mutually_exclusive_features: Option<Vec<String>>,
     /// Depth of the feature powerset to check.
     #[clap(long, value_name = "NUM")]
     depth: Option<usize>,
@@ -67,11 +84,38 @@ pub fn run_cmd(args: Args) -> Result<()> {
 
         // Add the `--exclude-features` flag if we are running in CI mode.
         command.args(["--exclude-features", &ex]);
+
+        let mutually_exclusive =
+            if let Some(mut features) = args.mutually_exclusive_features {
+                // Extend the list of mutually exclusive features with the CI
+                // defaults.
+                features.extend(
+                    CI_MUTUALLY_EXCLUSIVE_FEATURES
+                        .into_iter()
+                        .map(|s| s.to_string()),
+                );
+
+                // Remove duplicates.
+                let mutually_exclusive =
+                    features.into_iter().collect::<HashSet<_>>();
+
+                mutually_exclusive.into_iter().collect::<Vec<_>>().join(",")
+            } else {
+                CI_MUTUALLY_EXCLUSIVE_FEATURES.join(",")
+            };
+
+        // Add the `--mutually-exclusive-features` flag if it was provided.
+        command.args(["--mutually-exclusive-features", &mutually_exclusive]);
     } else {
         install_cargo_hack(&cargo, args.install_version)?;
         // Add "only" the `--exclude-features` flag if it was provided.
         if let Some(features) = args.exclude_features {
             command.args(["--exclude-features", &features.join(",")]);
+        }
+        // Add "only" the `--mutually-exclusive-features` flag if it was provided.
+        if let Some(features) = args.mutually_exclusive_features {
+            command
+                .args(["--mutually-exclusive-features", &features.join(",")]);
         }
     }
 

@@ -5535,7 +5535,6 @@ dependencies = [
  "oxide-client",
  "pq-sys",
  "rcgen",
- "signal-hook",
  "signal-hook-tokio",
  "subprocess",
  "tokio",
