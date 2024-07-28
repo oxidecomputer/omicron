@@ -5535,7 +5535,6 @@ dependencies = [
  "oxide-client",
  "pq-sys",
  "rcgen",
- "signal-hook",
  "signal-hook-tokio",
  "subprocess",
  "tokio",
@@ -11626,24 +11625,33 @@ dependencies = [
  "cargo_metadata",
  "cargo_toml",
  "clap",
- "flate2",
  "fs-err",
- "futures",
  "macaddr",
- "reqwest",
  "serde",
+ "swrite",
+ "tabled",
+ "toml 0.8.15",
+ "usdt",
+]
+
+[[package]]
+name = "xtask-downloader"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "clap",
+ "flate2",
+ "futures",
+ "omicron-workspace-hack",
+ "reqwest",
  "sha2",
  "slog",
  "slog-async",
- "slog-bunyan",
  "slog-term",
  "strum",
- "swrite",
- "tabled",
  "tar",
  "tokio",
- "toml 0.8.15",
- "usdt",
 ]
 
 [[package]]
