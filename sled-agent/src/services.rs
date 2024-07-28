@@ -2533,14 +2533,12 @@ impl ServiceManager {
                                                 &device_names[0].clone(),
                                             );
                                     } else {
-                                        return Err(
-                                            Error::SwitchZone(
-                                                anyhow::anyhow!(
-                                                    "{dev_cnt} devices needed \
+                                        return Err(Error::SwitchZone(
+                                            anyhow::anyhow!(
+                                                "{dev_cnt} devices needed \
                                                     for tofino asic"
-                                                ),
                                             ),
-                                        );
+                                        ));
                                     }
                                     dendrite_config = dendrite_config
                                         .add_property(
@@ -3918,10 +3916,9 @@ impl ServiceManager {
                 // the next request with our new request.
                 *request = new_request;
             }
-            (
-                SwitchZoneState::Running { request, zone },
-                Some(new_request),
-            ) if request.addresses != new_request.addresses => {
+            (SwitchZoneState::Running { request, zone }, Some(new_request))
+                if request.addresses != new_request.addresses =>
+            {
                 // If the switch zone is running but we have new addresses, it
                 // means we're moving from the bootstrap to the underlay
                 // network.  We need to add an underlay address and route in the
@@ -4279,10 +4276,8 @@ impl ServiceManager {
         let zone = self
             .initialize_zone(zone_args, filesystems, data_links, None)
             .await?;
-        *sled_zone = SwitchZoneState::Running {
-            request: request.clone(),
-            zone,
-        };
+        *sled_zone =
+            SwitchZoneState::Running { request: request.clone(), zone };
         Ok(())
     }
 
@@ -4295,10 +4290,7 @@ impl ServiceManager {
         loop {
             {
                 let mut sled_zone = self.inner.switch_zone.lock().await;
-                match self
-                    .try_initialize_switch_zone(&mut sled_zone)
-                    .await
-                {
+                match self.try_initialize_switch_zone(&mut sled_zone).await {
                     Ok(()) => return,
                     Err(e) => warn!(
                         self.inner.log,
