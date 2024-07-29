@@ -88,9 +88,7 @@ impl SwitchZoneUser {
         Ok(())
     }
 
-    fn assign_user_profiles(
-        &self,
-    ) -> Result<(), ExecutionError> {
+    fn assign_user_profiles(&self) -> Result<(), ExecutionError> {
         let profiles = self.profiles.join(",");
 
         execute(
@@ -164,13 +162,15 @@ impl SwitchZoneUser {
                 log, "Enable password-less login for user";
                 "user" => &self.user,
             );
-            self.enable_passwordless_login()?;
+            self.enable_passwordless_login()
+                .context("failed to enable passwordless login")?;
         } else {
             info!(
                 log, "Disable password-based logins";
                 "user" => &self.user,
             );
-            self.disable_password_based_login()?;
+            self.disable_password_based_login()
+                .context("failed to disable passwordless login")?;
         };
 
         // If `self.profiles` is empty, this will _remove_ all profiles. This is
@@ -180,7 +180,8 @@ impl SwitchZoneUser {
             "user" => &self.user,
             "profiles" => ?self.profiles,
         );
-        self.assign_user_profiles()?;
+        self.assign_user_profiles()
+            .context("failed to assign user profiles")?;
 
         if let Some(homedir) = &self.homedir {
             info!(
@@ -188,7 +189,8 @@ impl SwitchZoneUser {
                 "user" => &self.user,
                 "home directory" => ?homedir,
             );
-            self.set_up_home_directory_and_startup_files(homedir)?;
+            self.set_up_home_directory_and_startup_files(homedir)
+                .context("failed to set up home directory")?;
         }
 
         Ok(())
