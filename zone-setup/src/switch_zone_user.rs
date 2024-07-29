@@ -92,24 +92,11 @@ impl SwitchZoneUser {
         &self,
         profiles: &[String],
     ) -> Result<(), ExecutionError> {
-        let mut profile_list: String = Default::default();
-        for profile in profiles {
-            // TODO-john need separator?
-            profile_list.push_str(&profile)
-        }
+        let profiles = profiles.join(",");
 
-        execute(&mut std::process::Command::new("usermod").args([
-            "-P",
-            &profile_list,
-            &self.user,
-        ]))?;
-        Ok(())
-    }
-
-    fn remove_user_profiles(&self) -> Result<(), ExecutionError> {
         execute(
             &mut std::process::Command::new("usermod")
-                .args(["-P", "", &self.user]),
+                .args(["-P", &profiles, &self.user]),
         )?;
         Ok(())
     }
@@ -135,7 +122,6 @@ impl SwitchZoneUser {
             format!("Could not copy file from /root/.profile to {homedir}")
         })?;
 
-        // TODO-john check for recursive version
         // Not using std::os::unix::fs::chown here because it doesn't support
         // recursive option.
         let cmd = std::process::Command::new("chown")
@@ -200,7 +186,7 @@ impl SwitchZoneUser {
                 log, "Remove user profiles";
                 "user" => &self.user,
             );
-            self.remove_user_profiles()?;
+            self.assign_user_profiles(&[])?;
         };
 
         if let Some(homedir) = &self.homedir {
