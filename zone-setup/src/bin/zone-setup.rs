@@ -301,7 +301,7 @@ async fn chrony_setup(
     args: ChronySetupArgs,
     log: &Logger,
 ) -> anyhow::Result<()> {
-    println!("running chrony setup: {args:?}");
+    info!(log, "running chrony setup"; "args" => ?args);
 
     generate_chrony_config(args, log)?;
 
