@@ -17,6 +17,7 @@ use omicron_common::backoff::{retry_notify, retry_policy_local, BackoffError};
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::services::SWITCH_ZONE_BASEBOARD_FILE;
+use oxnet::Ipv6Net;
 use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
 use slog::{info, Logger};
 use std::fmt::Write as _;
@@ -98,9 +99,8 @@ struct ChronySetupArgs {
     )]
     servers: Vec<String>,
     /// allowed IPv6 range
-    /// TODO-john cleanup
     #[arg(short, long)]
-    allow: Option<String>,
+    allow: Ipv6Net,
 }
 
 #[derive(Debug, Args)]
@@ -444,9 +444,7 @@ maxslewrate 2708.333
         if is_boundary { boundary_ntp_tpl } else { internal_ntp_tpl }
             .to_string();
 
-    if let Some(allow) = allow {
-        new_config = new_config.replace("@ALLOW@", &allow);
-    }
+    new_config = new_config.replace("@ALLOW@", &allow.to_string());
 
     if is_boundary {
         for s in servers {

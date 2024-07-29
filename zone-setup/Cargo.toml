@@ -14,6 +14,7 @@ dropshot.workspace = true
 illumos-utils.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
+oxnet.workspace = true
 serde_json.workspace = true
 sled-hardware-types.workspace = true
 slog.workspace = true

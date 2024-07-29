@@ -11771,6 +11771,7 @@ dependencies = [
  "omicron-common",
  "omicron-sled-agent",
  "omicron-workspace-hack",
+ "oxnet",
  "serde_json",
  "sled-hardware-types",
  "slog",
