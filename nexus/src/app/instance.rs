@@ -590,6 +590,10 @@ impl super::Nexus {
 
                     return Ok(state);
                 }
+                // If there's a previous VMM left behind by an unwinding start
+                // saga, no big deal. We can still start the instance, and the
+                // start saga will remove the dead VMM, allowing it to be reaped.
+                DbVmmState::SagaUnwound => {}
                 DbVmmState::Stopped => {
                     let propolis_id = instance
                         .runtime()
