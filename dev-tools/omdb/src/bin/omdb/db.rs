@@ -4247,21 +4247,16 @@ async fn cmd_db_migrations_list(
         deleted: Option<chrono::DateTime<Utc>>,
     }
 
-    let migrations = datastore
-        .pool_connection_for_tests()
-        .await?
-        .transaction_async(|conn| async move {
-            // Selecting all migration records requires a full table scan
-            conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
-            query
-                .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
-                .order_by(dsl::time_created)
-                .select(Migration::as_select())
-                .load_async(&conn)
-                .await
-                .context("listing migrations")
-        })
-        .await?;
+    let migrations = query
+        .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
+        .order_by(dsl::time_created)
+        // This is just to prove to CRDB that it can use the
+        // migrations-by-time-created index, it doesn't actually do anything.
+        .filter(dsl::time_created.gt(chrono::DateTime::UNIX_EPOCH))
+        .select(Migration::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("listing migrations")?;
 
     check_limit(&migrations, fetch_opts.fetch_limit, || "listing migrations");
 
