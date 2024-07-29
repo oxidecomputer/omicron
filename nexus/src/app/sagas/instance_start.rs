@@ -235,22 +235,33 @@ async fn sis_move_to_starting(
 
     // For idempotency, refetch the instance to see if this step already applied
     // its desired update.
-    let (.., db_instance) = LookupPath::new(&opctx, &datastore)
+    let (_, _, authz_instance, ..) = LookupPath::new(&opctx, &datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .fetch_for(authz::Action::Modify)
         .await
         .map_err(ActionError::action_failed)?;
+    let state = datastore
+        .instance_fetch_with_vmm(&opctx, &authz_instance)
+        .await
+        .map_err(ActionError::action_failed)?;
 
-    match db_instance.runtime().propolis_id {
+    let db_instance = state.instance();
+
+    match state.vmm() {
         // If this saga's Propolis ID is already written to the record, then
         // this step must have completed already and is being retried, so
         // proceed.
-        Some(db_id) if db_id == propolis_id.into_untyped_uuid() => {
+        Some(vmm) if vmm.id == propolis_id.into_untyped_uuid() => {
             info!(osagactx.log(), "start saga: Propolis ID already set";
                   "instance_id" => %instance_id);
 
-            Ok(db_instance)
+            return Ok(db_instance.clone());
         }
+
+        // If the instance has a Propolis ID, but the Propolis was left behind
+        // by a previous start saga unwinding, that's fine, we can just clear it
+        // out and proceed as though there was no Propolis ID here.
+        Some(vmm) if vmm.runtime.state == db::model::VmmState::SagaUnwound => {}
 
         // If the instance has a different Propolis ID, a competing start saga
         // must have started the instance already, so unwind.
@@ -266,33 +277,33 @@ async fn sis_move_to_starting(
         // this point causes the VMM's state, which is Starting, to supersede
         // the instance's state, so this won't cause the instance to appear to
         // be running before Propolis thinks it has started.)
-        None => {
-            let new_runtime = db::model::InstanceRuntimeState {
-                nexus_state: db::model::InstanceState::Vmm,
-                propolis_id: Some(propolis_id.into_untyped_uuid()),
-                time_updated: Utc::now(),
-                gen: db_instance.runtime().gen.next().into(),
-                ..db_instance.runtime_state
-            };
-
-            // Bail if another actor managed to update the instance's state in
-            // the meantime.
-            if !osagactx
-                .datastore()
-                .instance_update_runtime(&instance_id, &new_runtime)
-                .await
-                .map_err(ActionError::action_failed)?
-            {
-                return Err(ActionError::action_failed(Error::conflict(
-                    "instance changed state before it could be started",
-                )));
-            }
-
-            let mut new_record = db_instance.clone();
-            new_record.runtime_state = new_runtime;
-            Ok(new_record)
-        }
+        None => {}
     }
+
+    let new_runtime = db::model::InstanceRuntimeState {
+        nexus_state: db::model::InstanceState::Vmm,
+        propolis_id: Some(propolis_id.into_untyped_uuid()),
+        time_updated: Utc::now(),
+        gen: db_instance.runtime().gen.next().into(),
+        ..db_instance.runtime_state
+    };
+
+    // Bail if another actor managed to update the instance's state in
+    // the meantime.
+    if !osagactx
+        .datastore()
+        .instance_update_runtime(&instance_id, &new_runtime)
+        .await
+        .map_err(ActionError::action_failed)?
+    {
+        return Err(ActionError::action_failed(Error::conflict(
+            "instance changed state before it could be started",
+        )));
+    }
+
+    let mut new_record = db_instance.clone();
+    new_record.runtime_state = new_runtime;
+    Ok(new_record)
 }
 
 async fn sis_move_to_starting_undo(
