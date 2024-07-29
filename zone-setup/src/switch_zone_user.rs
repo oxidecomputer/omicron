@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::{bail, Context};
+use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
 use illumos_utils::{execute, ExecutionError};
 use slog::{info, Logger};
@@ -121,20 +121,12 @@ impl SwitchZoneUser {
 
         // Not using std::os::unix::fs::chown here because it doesn't support
         // recursive option.
-        let cmd = std::process::Command::new("chown")
-            .args(["-R", &self.user, homedir.as_str()])
-            .output()
-            .with_context(|| {
-                format!("Could not execute `chown -R {} {homedir}`", self.user)
-            })?;
+        execute(&mut std::process::Command::new("chown").args([
+            "-R",
+            &self.user,
+            homedir.as_str(),
+        ]))?;
 
-        if !cmd.status.success() {
-            bail!(
-                "Could not change ownership: {} status: {}",
-                homedir,
-                cmd.status
-            );
-        }
         Ok(())
     }
 
