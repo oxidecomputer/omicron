@@ -140,12 +140,15 @@ impl InstanceAndActiveVmm {
             //   active VMM ID has been unlinked by an update saga.
             (
                 InstanceState::Vmm,
-                Some(
-                    VmmState::Stopped
-                    | VmmState::Destroyed
-                    | VmmState::SagaUnwound,
-                ),
+                Some(VmmState::Stopped | VmmState::Destroyed),
             ) => external::InstanceState::Stopping,
+            // - An instance with a "saga unwound" VMM, on the other hand, can
+            //   be treated as "stopped", since --- unlike "destroyed" --- a new
+            //   start saga can run at any time by just clearing out the old VMM
+            //   ID.
+            (InstanceState::Vmm, Some(VmmState::SagaUnwound)) => {
+                external::InstanceState::Stopped
+            }
             // - An instance with no VMM is always "stopped" (as long as it's
             //   not "starting" etc.)
             (InstanceState::NoVmm, _vmm_state) => {
@@ -635,6 +638,13 @@ impl DataStore {
             .filter(vmm_dsl::id.eq(src_propolis_id))
             .filter(vmm_dsl::state.eq_any(ALLOWED_ACTIVE_VMM_STATES))
             .select(vmm_dsl::instance_id);
+        // Subquery for checking if a present target VMM ID points at a VMM
+        // that's in the saga-unwound state (in which it would be okay to clear
+        // out that VMM).
+        let target_vmm_unwound = vmm_dsl::vmm
+            .filter(vmm_dsl::id.eq(target_propolis_id))
+            .filter(vmm_dsl::state.eq(VmmState::SagaUnwound))
+            .select(vmm_dsl::instance_id);
 
         diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
@@ -648,9 +658,13 @@ impl DataStore {
                 // `check_if_exists` which returns the prior state, and still
                 // fail to update the record if another migration/target VMM ID
                 // is already there.
-                (dsl::migration_id
-                    .is_null()
-                    .and(dsl::target_propolis_id.is_null()))
+                (dsl::migration_id.is_null().and(
+                    dsl::target_propolis_id
+                        .is_null()
+                        // It's okay to clobber a previously-set target VMM ID
+                        // if (and only if!) it's in the saga-unwound state.
+                        .or(dsl::id.eq_any(target_vmm_unwound)),
+                ))
                 .or(dsl::migration_id
                     .eq(Some(migration_id))
                     .and(dsl::target_propolis_id.eq(Some(target_propolis_id)))),

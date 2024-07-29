@@ -41,6 +41,11 @@ impl VmmState {
             VmmState::SagaUnwound => "saga_unwound",
         }
     }
+
+    /// States in which it is safe to deallocate a VMM's sled resources and mark
+    /// it as deleted.
+    pub const DESTROYABLE_STATES: &'static [Self] =
+        &[Self::Destroyed, Self::SagaUnwound];
 }
 
 impl fmt::Display for VmmState {

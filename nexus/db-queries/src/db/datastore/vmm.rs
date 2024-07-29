@@ -249,7 +249,7 @@ impl DataStore {
     ///
     /// A VMM is considered "abandoned" if (and only if):
     ///
-    /// - It is in the `Destroyed` state.
+    /// - It is in the `Destroyed` or `SagaUnwound` state.
     /// - It is not currently running an instance, and it is also not the
     ///   migration target of any instance (i.e. it is not pointed to by
     ///   any instance record's `active_propolis_id` and `target_propolis_id`
@@ -261,16 +261,15 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Vmm> {
         use crate::db::schema::instance::dsl as instance_dsl;
-        let destroyed = DbVmmState::Destroyed;
+
         paginated(dsl::vmm, dsl::id, pagparams)
             // In order to be considered "abandoned", a VMM must be:
-            // - in the `Destroyed` state
-            .filter(dsl::state.eq(destroyed))
+            // - in the `Destroyed` or `SagaUnwound` state
+            .filter(dsl::state.eq_any(DbVmmState::DESTROYABLE_STATES))
             // - not deleted yet
             .filter(dsl::time_deleted.is_null())
             // - not pointed to by any instance's `active_propolis_id` or
             //   `target_propolis_id`.
-            //
             .left_join(
                 // Left join with the `instance` table on the VMM's instance ID, so
                 // that we can check if the instance pointed to by this VMM (if

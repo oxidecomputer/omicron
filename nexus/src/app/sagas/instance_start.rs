@@ -247,6 +247,10 @@ async fn sis_move_to_starting(
 
     let db_instance = state.instance();
 
+    // If `true`, we have unlinked a Propolis ID left behind by a previous
+    // unwinding start saga, and we should activate the activate the abandoned
+    // VMM reaper background task once we've written back the instance record.
+    let mut abandoned_unwound_vmm = false;
     match state.vmm() {
         // If this saga's Propolis ID is already written to the record, then
         // this step must have completed already and is being retried, so
@@ -261,7 +265,9 @@ async fn sis_move_to_starting(
         // If the instance has a Propolis ID, but the Propolis was left behind
         // by a previous start saga unwinding, that's fine, we can just clear it
         // out and proceed as though there was no Propolis ID here.
-        Some(vmm) if vmm.runtime.state == db::model::VmmState::SagaUnwound => {}
+        Some(vmm) if vmm.runtime.state == db::model::VmmState::SagaUnwound => {
+            abandoned_unwound_vmm = true;
+        }
 
         // If the instance has a different Propolis ID, a competing start saga
         // must have started the instance already, so unwind.
@@ -299,6 +305,11 @@ async fn sis_move_to_starting(
         return Err(ActionError::action_failed(Error::conflict(
             "instance changed state before it could be started",
         )));
+    }
+
+    // Don't fear the reaper!
+    if abandoned_unwound_vmm {
+        osagactx.nexus().background_tasks.task_abandoned_vmm_reaper.activate();
     }
 
     let mut new_record = db_instance.clone();
