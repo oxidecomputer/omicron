@@ -105,6 +105,9 @@ pub enum MainToConnMsg {
 // complete), or established connection (handshake complete - whether connecting
 // client or accepting server).
 pub struct PeerConnHandle {
+    // Hold onto this handle to indicate ownership (though note that dropping
+    // a Tokio handle does not cause the task to be cancelled).
+    #[allow(dead_code)]
     pub handle: JoinHandle<()>,
     pub tx: mpsc::Sender<MainToConnMsg>,
 
@@ -120,7 +123,9 @@ pub struct AcceptedConnHandle {
     pub handle: JoinHandle<()>,
     pub tx: mpsc::Sender<MainToConnMsg>,
 
-    // The canonical IP with ephemeral port of the peer
+    // The canonical IP with ephemeral port of the peer. Not currently used,
+    // but useful for debugging.
+    #[allow(dead_code)]
     pub addr: SocketAddrV6,
     // This is used to differentiate stale `ConnToMainMsg`s from cancelled tasks
     // with the same addr from each other

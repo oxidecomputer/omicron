@@ -165,6 +165,7 @@ enum NexusNotifierMsg {
 }
 
 #[derive(Debug)]
+#[allow(unused)]
 pub struct NexusNotifierTaskStatus {
     pub nexus_known_info: Option<NexusKnownInfo>,
     pub has_pending_notification: bool,
