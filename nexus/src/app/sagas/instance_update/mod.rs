@@ -431,7 +431,10 @@ impl UpdatesRequired {
         // Has the active VMM been destroyed?
         let destroy_active_vmm =
             snapshot.active_vmm.as_ref().and_then(|active_vmm| {
-                if active_vmm.runtime.state == VmmState::Destroyed {
+                if matches!(
+                    active_vmm.runtime.state,
+                    VmmState::Destroyed | VmmState::SagaUnwound
+                ) {
                     let id = PropolisUuid::from_untyped_uuid(active_vmm.id);
                     // Unlink the active VMM ID. If the active VMM was destroyed
                     // because a migration out completed, the next block, which
@@ -465,7 +468,10 @@ impl UpdatesRequired {
 
         let destroy_target_vmm =
             snapshot.target_vmm.as_ref().and_then(|target_vmm| {
-                if target_vmm.runtime.state == VmmState::Destroyed {
+                if matches!(
+                    target_vmm.runtime.state,
+                    VmmState::Destroyed | VmmState::SagaUnwound
+                ) {
                     // Unlink the target VMM ID.
                     new_runtime.dst_propolis_id = None;
                     update_required = true;
