@@ -208,7 +208,7 @@ async fn switch_zone_setup(
         false,
         "/bin/bash".to_string(),
     )
-    .with_homedir("/home/support".to_string())
+    .with_homedir("/home/support".into())
     .with_profiles(vec!["Primary Administrator".to_string()]);
 
     let users = [wicket_user, support_user];
