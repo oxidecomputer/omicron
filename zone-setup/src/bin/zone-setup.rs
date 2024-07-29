@@ -76,6 +76,7 @@ struct CommonNetworkingArgs {
 struct OpteInterfaceArgs {
     #[arg(short, long, value_parser = parse_string_rejecting_unknown)]
     interface: String,
+    /// OPTE-specific gateway for external connectivity via boundary services
     #[arg(short, long)]
     gateway: Ipv4Addr,
     #[arg(short = 'p', long)]
