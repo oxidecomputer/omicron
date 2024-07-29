@@ -5,6 +5,7 @@
 //! CLI to set up zone configuration
 
 use anyhow::{anyhow, Context};
+use clap::builder::NonEmptyStringValueParser;
 use clap::{ArgAction, Args, Parser, Subcommand};
 use illumos_utils::addrobj::{AddrObject, IPV6_LINK_LOCAL_ADDROBJ_NAME};
 use illumos_utils::ipadm::Ipadm;
@@ -49,10 +50,10 @@ enum ZoneSetupCommand {
 // sled-agent hasn't populated our SMF config correctly. Reject this at argument
 // parsing time.
 fn parse_string_rejecting_unknown(s: &str) -> anyhow::Result<String> {
-    if s != "unknown" {
-        Ok(s.to_string())
-    } else {
+    if s.is_empty() || s == "unknown" {
         Err(anyhow!("missing input value"))
+    } else {
+        Ok(s.to_string())
     }
 }
 
@@ -60,7 +61,9 @@ fn parse_string_rejecting_unknown(s: &str) -> anyhow::Result<String> {
 struct CommonNetworkingArgs {
     #[arg(short, long, value_parser = parse_string_rejecting_unknown)]
     datalink: String,
-    // TODO-john test flag with no args, replace comment
+    // The `num_args = 0..=1` here allows passing the `-g` gateway flag with no
+    // value; the SMF manifest for the switch zone will do this when the
+    // underlay isn't up yet.
     #[arg(short, long, num_args = 0..=1)]
     gateway: Option<Ipv6Addr>,
     /// list of static addresses
@@ -87,9 +90,15 @@ struct ChronySetupArgs {
     #[arg(short, long, action = ArgAction::Set)]
     boundary: bool,
     /// list of NTP servers
-    #[arg(short, long, num_args = 1..)]
+    #[arg(
+        short,
+        long,
+        num_args = 1..,
+        value_parser = NonEmptyStringValueParser::default(),
+    )]
     servers: Vec<String>,
     /// allowed IPv6 range
+    /// TODO-john cleanup
     #[arg(short, long)]
     allow: Option<String>,
 }
@@ -106,15 +115,22 @@ struct SwitchZoneArgs {
     #[arg(short = 'a', long)]
     bootstrap_addr: Ipv6Addr,
     /// bootstrap VNIC name
-    // TODO-john test empty string
-    #[arg(short = 'v', long)]
+    #[arg(
+        short = 'v',
+        long,
+        value_parser = NonEmptyStringValueParser::default(),
+    )]
     bootstrap_vnic: String,
     /// global zone local link IPv6 address
     #[arg(short, long)]
     gz_local_link_addr: Ipv6Addr,
     /// list of links that require link local addresses
-    // TODO-john test space separation
-    #[arg(short, long, num_args = 0..)]
+    #[arg(
+        short,
+        long,
+        num_args = 0..,
+        value_parser = NonEmptyStringValueParser::default(),
+    )]
     link_local_links: Vec<String>,
 }
 
