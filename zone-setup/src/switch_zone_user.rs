@@ -17,7 +17,7 @@ pub struct SwitchZoneUser {
     nopasswd: bool,
     homedir: Option<Utf8PathBuf>,
     shell: String,
-    profiles: Option<Vec<String>>,
+    profiles: Vec<String>,
 }
 
 impl SwitchZoneUser {
@@ -35,7 +35,7 @@ impl SwitchZoneUser {
             nopasswd,
             homedir: None,
             shell,
-            profiles: None,
+            profiles: Vec::new(),
         }
     }
 
@@ -45,7 +45,7 @@ impl SwitchZoneUser {
     }
 
     pub fn with_profiles(mut self, profiles: Vec<String>) -> Self {
-        self.profiles = Some(profiles);
+        self.profiles = profiles;
         self
     }
 
@@ -90,9 +90,8 @@ impl SwitchZoneUser {
 
     fn assign_user_profiles(
         &self,
-        profiles: &[String],
     ) -> Result<(), ExecutionError> {
-        let profiles = profiles.join(",");
+        let profiles = self.profiles.join(",");
 
         execute(
             &mut std::process::Command::new("usermod")
@@ -174,20 +173,14 @@ impl SwitchZoneUser {
             self.disable_password_based_login()?;
         };
 
-        if let Some(profiles) = &self.profiles {
-            info!(
-                log, "Assign user profiles";
-                "user" => &self.user,
-                "profiles" => ?profiles,
-            );
-            self.assign_user_profiles(profiles)?;
-        } else {
-            info!(
-                log, "Remove user profiles";
-                "user" => &self.user,
-            );
-            self.assign_user_profiles(&[])?;
-        };
+        // If `self.profiles` is empty, this will _remove_ all profiles. This is
+        // intentional.
+        info!(
+            log, "Assign user profiles";
+            "user" => &self.user,
+            "profiles" => ?self.profiles,
+        );
+        self.assign_user_profiles()?;
 
         if let Some(homedir) = &self.homedir {
             info!(
