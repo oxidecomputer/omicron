@@ -489,6 +489,22 @@ output.type = "zone"
 
 # Packages not built within Omicron, but which must be imported.
 
+[package.omicron-faux-mgs]
+# This package bundles a `faux-mgs` binary into `/usr/bin` in the switch zone,
+# allowing `pilot sp ...` to work without needing to manually scp a `faux-mgs`
+# binary in during support operations. (On rare occasions a support operator may
+# still need to do that to get a more recent faux-mgs.)
+service_name = "faux_mgs"
+only_for_targets.image = "standard"
+source.type = "prebuilt"
+source.repo = "management-gateway-service"
+# In general, this commit should match the pinned revision of `gateway-sp-comms`
+# in `Cargo.toml`.
+source.commit = "319e7b92db69792ab8efa4c68554ad0cf83adf93"
+source.sha256 = "f4cbc480c8cfc2605c13b319291e69cbf8c213bb9c625ff79d339f90a7124358"
+output.type = "zone"
+output.intermediate_only = true
+
 # Refer to
 #   https://github.com/oxidecomputer/crucible/blob/main/package/README.md
 # for instructions on building this manually.
@@ -728,6 +744,7 @@ only_for_targets.switch = "asic"
 only_for_targets.image = "standard"
 source.type = "composite"
 source.packages = [
+  "omicron-faux-mgs.tar.gz",
   "omicron-gateway-asic.tar.gz",
   "dendrite-asic.tar.gz",
   "lldp.tar.gz",

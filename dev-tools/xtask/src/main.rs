@@ -15,7 +15,6 @@ mod check_workspace_deps;
 mod clippy;
 #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
 mod external;
-mod omicron_dev;
 mod usdt;
 
 #[cfg(target_os = "illumos")]
@@ -53,9 +52,6 @@ enum Cmds {
     ///
     /// For more information, see dev-tools/openapi-manager/README.adoc.
     Openapi(external::External),
-
-    /// Run Omicron development tasks
-    OmicronDev(omicron_dev::OmicronDevArgs),
 
     #[cfg(target_os = "illumos")]
     /// Build a TUF repo
@@ -100,7 +96,6 @@ fn main() -> Result<()> {
         Cmds::CheckWorkspaceDeps => check_workspace_deps::run_cmd(),
         Cmds::Download(external) => external.exec_bin("xtask-downloader"),
         Cmds::Openapi(external) => external.exec_bin("openapi-manager"),
-        Cmds::OmicronDev(args) => omicron_dev::run_cmd(args),
         #[cfg(target_os = "illumos")]
         Cmds::Releng(external) => {
             external.cargo_args(["--release"]).exec_bin("omicron-releng")

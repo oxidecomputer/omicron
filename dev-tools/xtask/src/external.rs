@@ -31,9 +31,6 @@ use clap::Parser;
     disable_version_flag(true)
 )]
 pub struct External {
-    #[clap(skip)]
-    external_args: Vec<String>,
-
     #[clap(trailing_var_arg(true), allow_hyphen_values(true))]
     args: Vec<OsString>,
 
@@ -55,17 +52,6 @@ impl External {
         self
     }
 
-    /// Add additional arguments for the underlying command.
-    ///
-    /// These arguments go after `--` and before `self.args`.
-    pub fn external_args(
-        mut self,
-        args: impl IntoIterator<Item = impl Into<String>>,
-    ) -> External {
-        self.external_args.extend(args.into_iter().map(|s| s.into()));
-        self
-    }
-
     pub fn exec_example(self, example_target: impl AsRef<OsStr>) -> Result<()> {
         self.exec_common("--example", example_target.as_ref())
     }
@@ -75,14 +61,8 @@ impl External {
     }
 
     fn exec_common(mut self, kind: &'static str, target: &OsStr) -> Result<()> {
-        let error = self
-            .command
-            .arg(kind)
-            .arg(target)
-            .arg("--")
-            .args(self.external_args)
-            .args(self.args)
-            .exec();
+        let error =
+            self.command.arg(kind).arg(target).arg("--").args(self.args).exec();
         Err(error).context("failed to exec `cargo run`")
     }
 }

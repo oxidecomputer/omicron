@@ -2349,6 +2349,7 @@ mod tests {
                     10,
                     10,
                     10001,
+                    false,
                 );
 
                 region_and_volume_ids[i].0 = region.id();

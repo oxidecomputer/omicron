@@ -14,24 +14,25 @@ omicron-rpaths.workspace = true
 anyhow.workspace = true
 camino.workspace = true
 clap.workspace = true
-dropshot = { workspace = true, optional = true }
-futures = { workspace = true, optional = true }
-gateway-messages = { workspace = true, optional = true }
-gateway-test-utils = { workspace = true, optional = true }
+dropshot.workspace = true
+futures.workspace = true
+gateway-messages.workspace = true
+gateway-test-utils.workspace = true
 libc.workspace = true
-nexus-config = { workspace = true, optional = true }
-nexus-test-interface = { workspace = true, optional = true }
-nexus-test-utils = { workspace = true, features = ["omicron-dev"], optional = true }
+nexus-config.workspace = true
+nexus-test-utils = { workspace = true, features = ["omicron-dev"] }
+nexus-test-interface.workspace = true
 omicron-common.workspace = true
-omicron-nexus = { workspace = true, optional = true }
-omicron-test-utils = { workspace = true, optional = true }
+omicron-nexus.workspace = true
+omicron-test-utils.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
-rcgen = { workspace = true, optional = true }
-signal-hook-tokio = { workspace = true, optional = true }
+rcgen.workspace = true
+signal-hook.workspace = true
+signal-hook-tokio.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
-tokio-postgres = { workspace = true, optional = true }
-toml = { workspace = true, optional = true }
+tokio-postgres.workspace = true
+toml.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
@@ -48,29 +49,3 @@ subprocess.workspace = true
 [[bin]]
 name = "omicron-dev"
 doc = false
-
-[[test]]
-name = "test_omicron_dev"
-required-features = ["default"]
-
-[features]
-# default-features set to all of the below features for two reasons:
-#
-# 1. Backwards compatibility with existing users of this crate.
-# 2. rust-analyzer will build the crate with all features enabled by default.
-#
-# The xtask uses --no-default-features to ensure that only the right set of
-# features is built.
-default = ["include-cert", "include-clickhouse", "include-db", "include-mgs", "include-nexus"]
-
-# Each feature corresponds to one file in `src`, and is feature-flagged in
-# lib.rs.
-#
-# NOTE: When adding a new feature, also add it to:
-# - the `default` feature list above
-# - CI_MUTUALLY_EXCLUSIVE_FEATURES in dev-tools/xtask/src/check_features.rs
-include-cert = ["dep:rcgen"]
-include-clickhouse = ["dep:dropshot", "dep:futures", "dep:omicron-test-utils", "dep:signal-hook-tokio"]
-include-db = ["dep:futures", "dep:omicron-test-utils", "dep:signal-hook-tokio", "dep:tokio-postgres"]
-include-mgs = ["dep:futures", "dep:gateway-messages", "dep:gateway-test-utils", "dep:signal-hook-tokio"]
-include-nexus = ["dep:dropshot", "dep:futures", "dep:nexus-config", "dep:nexus-test-interface", "dep:nexus-test-utils", "dep:omicron-nexus",  "dep:signal-hook-tokio", "dep:toml"]

@@ -35,7 +35,6 @@ use crate::params::{
     ZoneBundleCause, ZoneBundleMetadata,
 };
 use crate::profile::*;
-use crate::smf_helper::SmfHelper;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
@@ -55,6 +54,7 @@ use illumos_utils::running_zone::{
     EnsureAddressError, InstalledZone, RunCommandError, RunningZone,
     ZoneBuilderFactory,
 };
+use illumos_utils::smf_helper::SmfHelper;
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zpool::{PathInPool, ZpoolName};
@@ -121,6 +121,9 @@ use illumos_utils::zone::MockZones as Zones;
 use illumos_utils::zone::Zones;
 
 const IPV6_UNSPECIFIED: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
+
+const COCKROACH: &str = "/opt/oxide/cockroachdb/bin/cockroach";
+
 pub const SWITCH_ZONE_BASEBOARD_FILE: &str = "/opt/oxide/baseboard.json";
 
 #[derive(thiserror::Error, Debug, slog_error_chain::SlogInlineError)]
@@ -153,11 +156,11 @@ pub enum Error {
     #[error("No U.2 devices found with a {ZONE_DATASET} mountpoint")]
     U2NotFound,
 
-    #[error("Sled-local zone error: {0}")]
-    SledLocalZone(anyhow::Error),
+    #[error("Switch zone error: {0}")]
+    SwitchZone(anyhow::Error),
 
     #[error("Failed to issue SMF command: {0}")]
-    SmfCommand(#[from] crate::smf_helper::Error),
+    SmfCommand(#[from] illumos_utils::smf_helper::Error),
 
     #[error("{}", display_zone_init_errors(.0))]
     ZoneInitialize(Vec<(String, Box<Error>)>),
@@ -206,8 +209,8 @@ pub enum Error {
     #[error("Error contacting dpd: {0}")]
     DpdError(#[from] DpdError<DpdTypes::Error>),
 
-    #[error("Failed to create Vnic in sled-local zone: {0}")]
-    SledLocalVnicCreation(illumos_utils::dladm::CreateVnicError),
+    #[error("Failed to create Vnic in the switch zone: {0}")]
+    SwitchZoneVnicCreation(illumos_utils::dladm::CreateVnicError),
 
     #[error("Failed to add GZ addresses: {message}: {err}")]
     GzAddress {
@@ -498,7 +501,7 @@ enum SwitchService {
     SpSim,
 }
 
-impl crate::smf_helper::Service for SwitchService {
+impl illumos_utils::smf_helper::Service for SwitchService {
     fn service_name(&self) -> String {
         match self {
             SwitchService::ManagementGatewayService => "mgs",
@@ -544,9 +547,9 @@ impl<'a> ZoneArgs<'a> {
         }
     }
 
-    /// If this is a sled-local (switch) zone, iterate over the services it's
+    /// If this is a switch zone, iterate over the services it's
     /// supposed to be running
-    pub fn sled_local_services(
+    pub fn switch_zone_services(
         &self,
     ) -> Box<dyn Iterator<Item = &'a SwitchService> + 'a> {
         match self {
@@ -586,8 +589,8 @@ impl Task {
     }
 }
 
-/// Describes the state of a sled-local zone.
-enum SledLocalZone {
+/// Describes the state of a switch zone.
+enum SwitchZoneState {
     // The zone is not currently running.
     Disabled,
     // The zone is still initializing - it may be awaiting the initialization
@@ -645,7 +648,7 @@ type ZoneMap = BTreeMap<String, OmicronZone>;
 pub struct ServiceManagerInner {
     log: Logger,
     global_zone_bootstrap_link_local_address: Ipv6Addr,
-    switch_zone: Mutex<SledLocalZone>,
+    switch_zone: Mutex<SwitchZoneState>,
     sled_mode: SledMode,
     time_sync_config: TimeSyncConfig,
     time_synced: AtomicBool,
@@ -727,7 +730,7 @@ impl ServiceManager {
                     .global_zone_bootstrap_link_local_ip,
                 // TODO(https://github.com/oxidecomputer/omicron/issues/725):
                 // Load the switch zone if it already exists?
-                switch_zone: Mutex::new(SledLocalZone::Disabled),
+                switch_zone: Mutex::new(SwitchZoneState::Disabled),
                 sled_mode,
                 time_sync_config,
                 time_synced: AtomicBool::new(false),
@@ -943,7 +946,7 @@ impl ServiceManager {
     // physical devices need to be mapped into the zone when it is created.
     fn devices_needed(zone_args: &ZoneArgs<'_>) -> Result<Vec<String>, Error> {
         let mut devices = vec![];
-        for svc_details in zone_args.sled_local_services() {
+        for svc_details in zone_args.switch_zone_services() {
             match svc_details {
                 SwitchService::Dendrite {
                     asic: DendriteAsic::TofinoAsic,
@@ -991,7 +994,7 @@ impl ServiceManager {
                 .inner
                 .bootstrap_vnic_allocator
                 .new_bootstrap()
-                .map_err(Error::SledLocalVnicCreation)?;
+                .map_err(Error::SwitchZoneVnicCreation)?;
             Ok(Some((link, self.inner.switch_zone_bootstrap_address)))
         } else {
             Ok(None)
@@ -1027,7 +1030,7 @@ impl ServiceManager {
             Error::Underlay(underlay::Error::SystemDetection(e))
         })?;
 
-        for svc_details in zone_args.sled_local_services() {
+        for svc_details in zone_args.switch_zone_services() {
             match &svc_details {
                 SwitchService::Tfport { pkt_source, asic: _ } => {
                     // The tfport service requires a MAC device to/from which
@@ -1251,7 +1254,7 @@ impl ServiceManager {
             "dtrace_user".to_string(),
             "dtrace_proc".to_string(),
         ];
-        for svc_details in zone_args.sled_local_services() {
+        for svc_details in zone_args.switch_zone_services() {
             match svc_details {
                 SwitchService::Tfport { .. } => {
                     needed.push("sys_dl_config".to_string());
@@ -1507,10 +1510,6 @@ impl ServiceManager {
             ServiceBuilder::new("network/dns/client")
                 .add_instance(ServiceInstanceBuilder::new("default"));
 
-        // TODO(https://github.com/oxidecomputer/omicron/issues/1898):
-        //
-        // These zones are self-assembling -- after they boot, there should
-        // be no "zlogin" necessary to initialize.
         match &request {
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
@@ -2530,7 +2529,7 @@ impl ServiceManager {
                                                 &device_names[0].clone(),
                                             );
                                     } else {
-                                        return Err(Error::SledLocalZone(
+                                        return Err(Error::SwitchZone(
                                             anyhow::anyhow!(
                                                 "{dev_cnt} devices needed \
                                                     for tofino asic"
@@ -3077,7 +3076,7 @@ impl ServiceManager {
         name: &str,
     ) -> Result<ZoneBundleMetadata, BundleError> {
         // Search for the named zone.
-        if let SledLocalZone::Running { zone, .. } =
+        if let SwitchZoneState::Running { zone, .. } =
             &*self.inner.switch_zone.lock().await
         {
             if zone.name() == name {
@@ -3487,7 +3486,7 @@ impl ServiceManager {
                     "Initializing CRDB Cluster - sending request to {host}"
                 );
                 if let Err(err) = zone.runtime.run_cmd(&[
-                    "/opt/oxide/cockroachdb/bin/cockroach",
+                    COCKROACH,
                     "init",
                     "--insecure",
                     "--host",
@@ -3503,7 +3502,7 @@ impl ServiceManager {
                 info!(log, "Formatting CRDB");
                 zone.runtime
                     .run_cmd(&[
-                        "/opt/oxide/cockroachdb/bin/cockroach",
+                        COCKROACH,
                         "sql",
                         "--insecure",
                         "--host",
@@ -3514,7 +3513,7 @@ impl ServiceManager {
                     .map_err(|err| Error::CockroachInit { err })?;
                 zone.runtime
                     .run_cmd(&[
-                        "/opt/oxide/cockroachdb/bin/cockroach",
+                        COCKROACH,
                         "sql",
                         "--insecure",
                         "--host",
@@ -3670,7 +3669,7 @@ impl ServiceManager {
             // A pure gimlet sled should not be trying to activate a switch
             // zone.
             SledMode::Gimlet => {
-                return Err(Error::SledLocalZone(anyhow::anyhow!(
+                return Err(Error::SwitchZone(anyhow::anyhow!(
                     "attempted to activate switch zone on non-scrimlet sled"
                 )))
             }
@@ -3753,7 +3752,7 @@ impl ServiceManager {
         let request =
             SwitchZoneConfig { id: Uuid::new_v4(), addresses, services };
 
-        self.ensure_zone(
+        self.ensure_switch_zone(
             // request=
             Some(request),
             // filesystems=
@@ -3806,15 +3805,15 @@ impl ServiceManager {
         let mut switch_zone = self.inner.switch_zone.lock().await;
 
         let zone = match &mut *switch_zone {
-            SledLocalZone::Running { zone, .. } => zone,
-            SledLocalZone::Disabled => {
-                return Err(Error::SledLocalZone(anyhow!(
+            SwitchZoneState::Running { zone, .. } => zone,
+            SwitchZoneState::Disabled => {
+                return Err(Error::SwitchZone(anyhow!(
                     "Cannot configure switch zone uplinks: \
                      switch zone disabled"
                 )));
             }
-            SledLocalZone::Initializing { .. } => {
-                return Err(Error::SledLocalZone(anyhow!(
+            SwitchZoneState::Initializing { .. } => {
+                return Err(Error::SwitchZone(anyhow!(
                     "Cannot configure switch zone uplinks: \
                      switch zone still initializing"
                 )));
@@ -3847,7 +3846,7 @@ impl ServiceManager {
 
     /// Ensures that no switch zone is active.
     pub async fn deactivate_switch(&self) -> Result<(), Error> {
-        self.ensure_zone(
+        self.ensure_switch_zone(
             // request=
             None,
             // filesystems=
@@ -3858,32 +3857,32 @@ impl ServiceManager {
         .await
     }
 
-    // Forcefully initialize a sled-local zone.
+    // Forcefully initialize a sled-local switch zone.
     //
-    // This is a helper function for "ensure_zone".
-    fn start_zone(
+    // This is a helper function for "ensure_switch_zone".
+    fn start_switch_zone(
         self,
-        zone: &mut SledLocalZone,
+        zone: &mut SwitchZoneState,
         request: SwitchZoneConfig,
         filesystems: Vec<zone::Fs>,
         data_links: Vec<String>,
     ) {
         let (exit_tx, exit_rx) = oneshot::channel();
-        *zone = SledLocalZone::Initializing {
+        *zone = SwitchZoneState::Initializing {
             request,
             filesystems,
             data_links,
             worker: Some(Task {
                 exit_tx,
                 initializer: tokio::task::spawn(async move {
-                    self.initialize_zone_loop(exit_rx).await
+                    self.initialize_switch_zone_loop(exit_rx).await
                 }),
             }),
         };
     }
 
     // Moves the current state to align with the "request".
-    async fn ensure_zone(
+    async fn ensure_switch_zone(
         &self,
         request: Option<SwitchZoneConfig>,
         filesystems: Vec<zone::Fs>,
@@ -3895,9 +3894,9 @@ impl ServiceManager {
         let zone_typestr = "switch";
 
         match (&mut *sled_zone, request) {
-            (SledLocalZone::Disabled, Some(request)) => {
+            (SwitchZoneState::Disabled, Some(request)) => {
                 info!(log, "Enabling {zone_typestr} zone (new)");
-                self.clone().start_zone(
+                self.clone().start_switch_zone(
                     &mut sled_zone,
                     request,
                     filesystems,
@@ -3905,7 +3904,7 @@ impl ServiceManager {
                 );
             }
             (
-                SledLocalZone::Initializing { request, .. },
+                SwitchZoneState::Initializing { request, .. },
                 Some(new_request),
             ) => {
                 info!(log, "Enabling {zone_typestr} zone (already underway)");
@@ -3913,7 +3912,7 @@ impl ServiceManager {
                 // the next request with our new request.
                 *request = new_request;
             }
-            (SledLocalZone::Running { request, zone }, Some(new_request))
+            (SwitchZoneState::Running { request, zone }, Some(new_request))
                 if request.addresses != new_request.addresses =>
             {
                 // If the switch zone is running but we have new addresses, it
@@ -4225,31 +4224,31 @@ impl ServiceManager {
                     }
                 }
             }
-            (SledLocalZone::Running { .. }, Some(_)) => {
+            (SwitchZoneState::Running { .. }, Some(_)) => {
                 info!(log, "Enabling {zone_typestr} zone (already complete)");
             }
-            (SledLocalZone::Disabled, None) => {
+            (SwitchZoneState::Disabled, None) => {
                 info!(log, "Disabling {zone_typestr} zone (already complete)");
             }
-            (SledLocalZone::Initializing { worker, .. }, None) => {
+            (SwitchZoneState::Initializing { worker, .. }, None) => {
                 info!(log, "Disabling {zone_typestr} zone (was initializing)");
                 worker.take().unwrap().stop().await;
-                *sled_zone = SledLocalZone::Disabled;
+                *sled_zone = SwitchZoneState::Disabled;
             }
-            (SledLocalZone::Running { zone, .. }, None) => {
+            (SwitchZoneState::Running { zone, .. }, None) => {
                 info!(log, "Disabling {zone_typestr} zone (was running)");
                 let _ = zone.stop().await;
-                *sled_zone = SledLocalZone::Disabled;
+                *sled_zone = SwitchZoneState::Disabled;
             }
         }
         Ok(())
     }
 
-    async fn try_initialize_sled_local_zone(
+    async fn try_initialize_switch_zone(
         &self,
-        sled_zone: &mut SledLocalZone,
+        sled_zone: &mut SwitchZoneState,
     ) -> Result<(), Error> {
-        let SledLocalZone::Initializing {
+        let SwitchZoneState::Initializing {
             request,
             filesystems,
             data_links,
@@ -4273,18 +4272,21 @@ impl ServiceManager {
         let zone = self
             .initialize_zone(zone_args, filesystems, data_links, None)
             .await?;
-        *sled_zone = SledLocalZone::Running { request: request.clone(), zone };
+        *sled_zone =
+            SwitchZoneState::Running { request: request.clone(), zone };
         Ok(())
     }
 
     // Body of a tokio task responsible for running until the switch zone is
     // inititalized, or it has been told to stop.
-    async fn initialize_zone_loop(&self, mut exit_rx: oneshot::Receiver<()>) {
+    async fn initialize_switch_zone_loop(
+        &self,
+        mut exit_rx: oneshot::Receiver<()>,
+    ) {
         loop {
             {
                 let mut sled_zone = self.inner.switch_zone.lock().await;
-                match self.try_initialize_sled_local_zone(&mut sled_zone).await
-                {
+                match self.try_initialize_switch_zone(&mut sled_zone).await {
                     Ok(()) => return,
                     Err(e) => warn!(
                         self.inner.log,
