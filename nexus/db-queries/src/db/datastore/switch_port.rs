@@ -248,7 +248,7 @@ impl DataStore {
     ) -> DeleteResult {
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let selector = match &params.port_settings {
+        let selector = match &params.configuration {
             None => return Err(Error::invalid_request("name or id required")),
             Some(name_or_id) => name_or_id,
         };
@@ -273,7 +273,7 @@ impl DataStore {
                     }
                 }
             } else {
-                let name = match &params.port_settings {
+                let name = match &params.configuration {
                     Some(name_or_id) => name_or_id.to_string(),
                     None => String::new(),
                 };

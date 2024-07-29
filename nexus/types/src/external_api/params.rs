@@ -1780,25 +1780,38 @@ pub struct Address {
 /// Select a port settings object by an optional name or id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct SwitchPortSettingsSelector {
-    /// An optional name or id to use when selecting port settings.
-    pub port_settings: Option<NameOrId>,
+    /// An optional name or id to use when selecting a switch port configuration.
+    pub configuration: Option<NameOrId>,
 }
 
 /// Select a port settings info object by name or id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct SwitchPortSettingsInfoSelector {
-    /// A name or id to use when selecting switch port settings info objects.
-    pub name_or_id: NameOrId,
+    /// A name or id to use when selecting a switch port configuration.
+    pub configuration: NameOrId,
 }
 
-/// Select a link settings i nfo object by port settings name and link name.
+/// Select a link settings info object by port settings name and link name.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct SwitchPortSettingsLinkInfoSelector {
-    /// A name or id to use when selecting switch port settings info objects.
-    pub name_or_id: NameOrId,
+    /// A name or id to use when selecting a switch port configuration.
+    pub configuration: NameOrId,
 
     /// Link name
     pub link: Name,
+}
+
+/// Select an interface settings info object by port settings name, link name, and interface name.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SwitchPortSettingsLinkInterfaceInfoSelector {
+    /// A name or id to use when selecting a switch port configuration.
+    pub configuration: NameOrId,
+
+    /// Link name
+    pub link: Name,
+
+    /// Interface name
+    pub interface: Name,
 }
 
 /// Select a switch port by name.
@@ -1821,6 +1834,13 @@ pub struct SwitchPortSelector {
 /// Select switch port interfaces by id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct SwitchPortPageSelector {
+    /// An optional switch port id to use when listing switch ports.
+    pub switch_port_id: Option<Uuid>,
+}
+
+/// Select switch port interface config by id
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SwitchPortInterfaceConfigPageSelector {
     /// An optional switch port id to use when listing switch ports.
     pub switch_port_id: Option<Uuid>,
 }
