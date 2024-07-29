@@ -208,14 +208,14 @@ async fn switch_zone_setup(
             "links" => ?links,
         );
         for link in &links {
-            Zones::ensure_has_link_local_v6_address(
-                None,
-                // TODO-john unwrap
-                &AddrObject::new(link, IPV6_LINK_LOCAL_ADDROBJ_NAME).unwrap(),
-            )
-            .with_context(|| {
-                format!("Could not ensure link local link {link:?}")
+            let addrobj = AddrObject::new(link, IPV6_LINK_LOCAL_ADDROBJ_NAME)
+                .with_context(|| {
+                format!("invalid link name for addrobj: {link:?}")
             })?;
+            Zones::ensure_has_link_local_v6_address(None, &addrobj)
+                .with_context(|| {
+                    format!("Could not ensure link local link {link:?}")
+                })?;
         }
     }
 
