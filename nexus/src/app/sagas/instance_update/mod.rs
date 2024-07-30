@@ -144,29 +144,29 @@
 //! When an `instance-update` saga is started, it attempts to [acquire the
 //! updater lock][instance_updater_lock]. If the lock is already held by another
 //! update saga, then the update saga completes immediately. Otherwise, the saga
-//! then queries CRDB for a snapshot of the current state of the `instance``
-//! record, the active and migration-target `vmm` records (if any exist), and
-//! the current `migration` record (if one exists). This snapshot represents the
-//! state from which the update will be applied, and must be read only after
-//! locking the instance to ensure that it cannot race with another saga.
+//! then queries CRDB for the current state of the `instance` record, the active
+//! and migration-target `vmm` records (if any exist), and the current
+//! `migration` record (if one exists). This snapshot represents the state from
+//! which the update will be applied, and must be read only after locking the
+//! instance to ensure that it cannot race with another saga.
 //!
 //! This is where another of this saga's weird quirks shows up: the shape of the
 //! saga DAG we wish to execute depends on this instance, active VMM, target
-//! VMM, and migration snapshot. But, because this snapshot may only be taken
-//! once the lock is acquired, and --- as we discussed above --- the
-//! instance-updater lock may only ever be acquired within a saga, we arrive at
-//! a bit of a weird impasse: we can't determine what saga DAG to build without
-//! looking at the snapshot, but we can't take the snapshot until we've already
-//! started a saga. To solve this, we've split this saga into two pieces: the
-//! first, `start-instance-update`, is a very small saga that just tries to lock
-//! the instance, and upon doing so, loads the instance snapshot from the
-//! database and prepares and executes the "real" instance update saga. Once the
-//! "real" saga starts, it "inherits" the lock from the start saga by performing
-//! [the SQL equivalent equivalent of a compare-and-swap
+//! VMM, and migration. But, because the precondition for the saga state may
+//! only be read once the lock is acquired, and --- as we discussed above ---
+//! the instance-updater lock may only ever be acquired within a saga, we arrive
+//! at a bit of a weird impasse: we can't determine what saga DAG to build
+//! without looking at the initial state, but we can't load the state until
+//! we've already started a saga. To solve this, we've split this saga into two
+//! pieces: the first, `start-instance-update`, is a very small saga that just
+//! tries to lock the instance, and upon doing so, loads the instance state from
+//! the database and prepares and executes the "real" instance update saga. Once
+//! the "real" saga starts, it "inherits" the lock from the start saga by
+//! performing [the SQL equivalent equivalent of a compare-and-swap
 //! operation][instance_updater_inherit_lock] with its own UUID.
 //!
-//! The DAG for the "real" update saga depends on the snapshot read within the
-//! lock, and since the lock was never released, that snapshot remains valid for
+//! The DAG for the "real" update saga depends on the state read within the
+//! lock, and since the lock was never released, that state remains valid for
 //! its execution. As the final action of the update saga, the instance record's
 //! new runtime state is written back to the database and the lock is released,
 //! in a [single atomic operation][instance_updater_unlock]. Should the update
@@ -258,7 +258,7 @@ use super::{
     ACTION_GENERATE_ID,
 };
 use crate::app::db::datastore::instance;
-use crate::app::db::datastore::InstanceSnapshot;
+use crate::app::db::datastore::InstanceGestalt;
 use crate::app::db::datastore::VmmStateUpdateResult;
 use crate::app::db::lookup::LookupPath;
 use crate::app::db::model::ByteCount;
@@ -417,7 +417,7 @@ struct Deprovision {
 impl UpdatesRequired {
     fn for_snapshot(
         log: &slog::Logger,
-        snapshot: &InstanceSnapshot,
+        snapshot: &InstanceGestalt,
     ) -> Option<Self> {
         let mut new_runtime = snapshot.instance.runtime().clone();
         new_runtime.gen = Generation(new_runtime.gen.next());
@@ -2059,7 +2059,7 @@ mod test {
     struct MigrationTest {
         outcome: MigrationOutcome,
         instance_id: InstanceUuid,
-        initial_state: InstanceSnapshot,
+        initial_state: InstanceGestalt,
         authz_instance: authz::Instance,
         opctx: OpContext,
     }
