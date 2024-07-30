@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 /// built against
 ///
 /// This must be updated when you change the database schema.  Refer to
-cc/// schema/crdb/README.adoc in the root of this repository for details.
+/// schema/crdb/README.adoc in the root of this repository for details.
 pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(85, 0, 0);
 
 /// List of all past database schema versions, in *reverse* order
