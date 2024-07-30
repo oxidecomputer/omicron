@@ -2053,12 +2053,19 @@ mod tests {
         // automock'd things used during this test
         let _mock_vnic_contexts = mock_vnic_contexts();
 
-        let rt_handle = tokio::runtime::Handle::current();
-
         // time out while booting zone, on purpose!
         let boot_ctx = MockZones::boot_context();
-        boot_ctx.expect().return_once(move |_| {
-            rt_handle.block_on(tokio::time::sleep(TIMEOUT_DURATION * 2));
+        let start = tokio::time::Instant::now();
+        boot_ctx.expect().times(1).return_once(move |_| {
+            // We need something that will look like the zone taking a long time
+            // to boot, but we cannot use a `tokio::time` construct here since
+            // this is a blocking context and we cannot call `block_on()`
+            // recursively. We advance time by this amount below, so this will
+            // most likely result in a small number of additional sleeps until
+            // the timeout has really elased.
+            while start.elapsed() < TIMEOUT_DURATION * 2 {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
             Ok(())
         });
         let wait_ctx = illumos_utils::svc::wait_for_service_context();
@@ -2103,8 +2110,13 @@ mod tests {
             .await
             .expect("failed to send Instance::put_state");
 
+        // Timeout our future waiting for the instance-state-change at
+        // `TIMEOUT_DURATION`, which should fail because zone boot will take
+        // twice that by construction.
         let timeout_fut = timeout(TIMEOUT_DURATION, put_rx);
 
+        // And advance time by twice that, so that the actual
+        // `MockZones::boot()` call should be exercised (or will be soon).
         tokio::time::advance(TIMEOUT_DURATION * 2).await;
 
         tokio::time::resume();
