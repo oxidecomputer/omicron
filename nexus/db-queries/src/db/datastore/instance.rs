@@ -199,13 +199,13 @@ impl From<InstanceAndActiveVmm> for external::Instance {
     }
 }
 
-/// A complete snapshot of the database records describing the current state of
+/// The totality of database records describing the current state of
 /// an instance: the [`Instance`] record itself, along with its active [`Vmm`],
 /// target [`Vmm`], and current [`Migration`], if they exist.
 ///
 /// This is returned by [`DataStore::instance_fetch_all`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct InstanceSnapshot {
+pub struct InstanceGestalt {
     /// The instance record.
     pub instance: Instance,
     /// The [`Vmm`] record pointed to by the instance's `active_propolis_id`, if
@@ -485,7 +485,7 @@ impl DataStore {
     /// instance in a single atomic query.
     ///
     /// If an instance with the provided UUID exists, this method returns an
-    /// [`InstanceSnapshot`], which contains the following:
+    /// [`InstanceGestalt`], which contains the following:
     ///
     /// - The [`Instance`] record itself,
     /// - The instance's active [`Vmm`] record, if the `active_propolis_id`
@@ -498,7 +498,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-    ) -> LookupResult<InstanceSnapshot> {
+    ) -> LookupResult<InstanceGestalt> {
         opctx.authorize(authz::Action::Read, authz_instance).await?;
 
         use db::schema::instance::dsl as instance_dsl;
@@ -564,7 +564,7 @@ impl DataStore {
                     )
                 })?;
 
-        Ok(InstanceSnapshot { instance, migration, active_vmm, target_vmm })
+        Ok(InstanceGestalt { instance, migration, active_vmm, target_vmm })
     }
 
     // TODO-design It's tempting to return the updated state of the Instance
