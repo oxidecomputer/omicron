@@ -218,7 +218,7 @@ ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
 TTL toDateTime(timestamp) + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef32 ON CLUSTER oximeter_cluster
-AS oximeter.measurements_cumulativeuf32_local
+AS oximeter.measurements_cumulativef32_local
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_cumulativef32_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
 CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami8_local ON CLUSTER oximeter_cluster

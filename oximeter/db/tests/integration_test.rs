@@ -71,24 +71,21 @@ async fn test_cluster() -> anyhow::Result<()> {
     );
     wait_for_ping(&client1).await?;
     wait_for_ping(&client2).await?;
-    wait_for_keepers(&deployment, (1..=3).collect()).await?;
-    let end = tokio::time::Instant::now();
-    println!("deploy setup time = {:?}", end - start);
+    wait_for_keepers(&deployment, (1..=num_keepers).collect()).await?;
+    println!("deploy setup time = {:?}", start.elapsed());
 
     let start = tokio::time::Instant::now();
     client1
         .init_test_minimal_replicated_db()
         .await
         .context("failed to initialize db")?;
-    let end = tokio::time::Instant::now();
-    println!("init replicated db time = {:?}", end - start);
+    println!("init replicated db time = {:?}", start.elapsed());
 
     // Ensure our database tables show up on both servers
     let start = tokio::time::Instant::now();
     let output1 = client1.list_replicated_tables().await?;
     let output2 = client2.list_replicated_tables().await?;
-    let end = tokio::time::Instant::now();
-    println!("list tables time = {:?}", end - start);
+    println!("list tables time = {:?}", start.elapsed());
     assert_eq!(output1, output2);
 
     let input = TestInput::default();
@@ -102,13 +99,11 @@ async fn test_cluster() -> anyhow::Result<()> {
         input.n_cpus,
         input.n_samples,
     );
-    let end = tokio::time::Instant::now();
-    println!("generate samples time = {:?}", end - start);
+    println!("generate samples time = {:?}", start.elapsed());
     assert_eq!(samples.len(), input.n_points());
     let start = tokio::time::Instant::now();
     client1.insert_samples(&samples).await.expect("failed to insert samples");
-    let end = tokio::time::Instant::now();
-    println!("insert samples time = {:?}", end - start);
+    println!("insert samples time = {:?}", start.elapsed());
 
     // Get all the samples from the replica where the data was inserted
     let start = tokio::time::Instant::now();
@@ -116,8 +111,7 @@ async fn test_cluster() -> anyhow::Result<()> {
         .oxql_query("get virtual_machine:cpu_busy")
         .await
         .expect("failed to get all samples");
-    let end = tokio::time::Instant::now();
-    println!("query samples from client1 time = {:?}", end - start);
+    println!("query samples from client1 time = {:?}", start.elapsed());
 
     // Ensure the samples are correct on this replica
     assert_input_and_output(&input, &samples, &oxql_res1);
@@ -126,8 +120,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     wait_for_num_points(&client2, samples.len())
         .await
         .expect("failed to get samples from client2");
-    let end = tokio::time::Instant::now();
-    println!("query samples from client2 time = {:?}", end - start);
+    println!("query samples from client2 time = {:?}", start.elapsed());
 
     // Add a 3rd clickhouse server and wait for it to come up
     deployment.add_server().expect("failed to launch a 3rd clickhouse server");
@@ -150,8 +143,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     wait_for_num_points(&client3, samples.len())
         .await
         .expect("failed to get samples from client3");
-    let end = tokio::time::Instant::now();
-    println!("query samples from client3 time = {:?}", end - start);
+    println!("query samples from client3 time = {:?}", start.elapsed());
 
     // Let's stop replica 1 and write some data to replica 3
     // When we bring replica 1 back up we should see data get replicated to it.

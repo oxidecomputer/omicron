@@ -57,7 +57,7 @@ use tokio::fs;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const CLICKHOUSE_DB_MISSING: &'static str = "Database oximeter does not exist";
 const CLICKHOUSE_DB_VERSION_MISSING: &'static str =
     "Table oximeter.version does not exist";
@@ -85,22 +85,7 @@ pub struct Client {
 impl Client {
     /// Construct a new ClickHouse client of the database at `address`.
     pub fn new(address: SocketAddr, log: &Logger) -> Self {
-        let id = Uuid::new_v4();
-        let log = log.new(slog::o!(
-            "component" => "clickhouse-client",
-            "id" => id.to_string(),
-        ));
-        let client = reqwest::Client::new();
-        let url = format!("http://{}", address);
-        let schema = Mutex::new(BTreeMap::new());
-        Self {
-            _id: id,
-            log,
-            url,
-            client,
-            schema,
-            request_timeout: DEFAULT_REQUEST_TIMEOUT,
-        }
+        Self::new_with_request_timeout(address, log, DEFAULT_REQUEST_TIMEOUT)
     }
 
     /// Construct a new ClickHouse client of the database at `address`, and a
