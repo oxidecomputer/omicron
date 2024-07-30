@@ -126,7 +126,7 @@ pub struct SledInstanceState {
     /// The current state of any inbound migration to this VMM.
     pub migration_in: Option<MigrationRuntimeState>,
 
-    /// The state of any outbound migration to this VMM.
+    /// The state of any outbound migration from this VMM.
     pub migration_out: Option<MigrationRuntimeState>,
 }
 
