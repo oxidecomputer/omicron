@@ -263,10 +263,7 @@ impl InstanceStates {
             migration: &mut MigrationRuntimeState,
             now: DateTime<Utc>,
         ) {
-            if matches!(
-                migration.state,
-                MigrationState::InProgress | MigrationState::Pending
-            ) {
+            if !migration.state.is_terminal() {
                 migration.gen = migration.gen.next();
                 migration.time_updated = now;
                 migration.state = MigrationState::Failed;
