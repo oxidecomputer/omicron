@@ -166,7 +166,7 @@ impl InstanceManager {
                 instance_runtime,
                 vmm_runtime,
                 propolis_addr,
-                sled_identifiers,
+                sled_identifiers: Box::new(sled_identifiers),
                 metadata,
                 tx,
             })
@@ -349,7 +349,12 @@ enum InstanceManagerRequest {
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         propolis_addr: SocketAddr,
-        sled_identifiers: SledIdentifiers,
+        // These are boxed because they are, apparently, quite large, and Clippy
+        // whinges about the overall size of this variant relative to the
+        // others. Since we will generally send `EnsureRegistered` requests much
+        // less frequently than most of the others, boxing this seems like a
+        // reasonable choice...
+        sled_identifiers: Box<SledIdentifiers>,
         metadata: InstanceMetadata,
         tx: oneshot::Sender<Result<SledInstanceState, Error>>,
     },
@@ -480,7 +485,7 @@ impl InstanceManagerRunner {
                                 instance_runtime,
                                 vmm_runtime,
                                 propolis_addr,
-                                sled_identifiers,
+                                *sled_identifiers,
                                 metadata
                             ).await).map_err(|_| Error::FailedSendClientClosed)
                         },

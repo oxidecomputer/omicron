@@ -986,6 +986,7 @@ impl Instance {
     /// * `services`: A set of instance manager-provided services.
     /// * `sled_identifiers`: Sled-related metadata used to track statistics.
     /// * `metadata`: Instance-related metadata used to track statistics.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         log: Logger,
         id: InstanceUuid,
