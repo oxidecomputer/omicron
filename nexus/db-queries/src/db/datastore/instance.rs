@@ -368,6 +368,9 @@ impl DataStore {
 
         vmm_dsl::vmm
             .filter(vmm_dsl::state.eq(VmmState::Destroyed))
+            // If the VMM record has already been deleted, we don't need to do
+            // anything about it --- someone already has.
+            .filter(vmm_dsl::time_deleted.is_null())
             .inner_join(
                 dsl::instance.on(dsl::active_propolis_id
                     .eq(vmm_dsl::id.nullable())
@@ -612,6 +615,11 @@ impl DataStore {
     /// `target_propolis_id`, if the instance does not currently have an active
     /// migration, and the active VMM is in the [`VmmState::Running`] or
     /// [`VmmState::Rebooting`] states.
+    ///
+    /// Note that a non-NULL `target_propolis_id` will be overwritten, if (and
+    /// only if) the target VMM record is in [`VmmState::SagaUnwound`],
+    /// indicating that it was left behind by a failed `instance-migrate` saga
+    /// unwinding.
     pub async fn instance_set_migration_ids(
         &self,
         opctx: &OpContext,
@@ -636,6 +644,7 @@ impl DataStore {
         // that we can use it in a `filter` on the update query.
         let vmm_ok = vmm_dsl::vmm
             .filter(vmm_dsl::id.eq(src_propolis_id))
+            .filter(vmm_dsl::time_deleted.is_null())
             .filter(vmm_dsl::state.eq_any(ALLOWED_ACTIVE_VMM_STATES))
             .select(vmm_dsl::instance_id);
         // Subquery for checking if a present target VMM ID points at a VMM
@@ -643,6 +652,10 @@ impl DataStore {
         // out that VMM).
         let target_vmm_unwound = vmm_dsl::vmm
             .filter(vmm_dsl::id.nullable().eq(dsl::target_propolis_id))
+            // Don't filter out target VMMs with `time_deleted` set here --- we
+            // *shouldn't* have deleted the VMM without unlinking it from the
+            // instance record, but if something did, we should still allow the
+            // ID to be clobbered.
             .filter(vmm_dsl::state.eq(VmmState::SagaUnwound))
             .select(vmm_dsl::instance_id);
 
@@ -683,25 +696,12 @@ impl DataStore {
                 &*self.pool_connection_authorized(opctx).await?,
             )
             .await
-            .map_err(|e| {
-                // Turning all these errors into `NotFound` errors is a bit
-                // unfortunate. The query will not find anything fail if the
-                // instance ID actually doesn't exist, *or* if any of the "is
-                // it valid to set migration IDs in the current state?" checks
-                // fail, which should probably be `Error::Conflict`
-                // instead...but, we can't really tell which is the case here.
-                //
-                // TODO(eliza): Perhaps these should all be mapped to `Conflict`
-                // instead? It's arguably correct to say that trying to set
-                // migration IDs for an instance that doesn't exist is sort of a
-                // "conflict", for a significantly broad definition of "conflcit"...
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Instance,
-                        LookupType::ById(instance_id.into_untyped_uuid()),
-                    ),
-                )
+            .map_err(|error| {
+                Error::conflict(format!(
+                    "cannot set migration ID {migration_id} for instance \
+                     {instance_id} (perhaps a previous migration is already \
+                     set): {error:#}"
+                ))
             })
     }
 
@@ -710,6 +710,12 @@ impl DataStore {
     ///
     /// This method will only unset the instance's migration IDs if they match
     /// the provided ones.
+    /// # Returns
+    ///
+    /// - `Ok(true)` if the migration IDs were unset,
+    /// - `Ok(false)` if the instance IDs have *already* been unset (this method
+    ///   is idempotent)
+    /// - `Err` if the database query returned an error.
     pub async fn instance_unset_migration_ids(
         &self,
         opctx: &OpContext,
