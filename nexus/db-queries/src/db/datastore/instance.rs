@@ -642,7 +642,7 @@ impl DataStore {
         // that's in the saga-unwound state (in which it would be okay to clear
         // out that VMM).
         let target_vmm_unwound = vmm_dsl::vmm
-            .filter(vmm_dsl::id.eq(target_propolis_id))
+            .filter(vmm_dsl::id.nullable().eq(dsl::target_propolis_id))
             .filter(vmm_dsl::state.eq(VmmState::SagaUnwound))
             .select(vmm_dsl::instance_id);
 
@@ -684,6 +684,17 @@ impl DataStore {
             )
             .await
             .map_err(|e| {
+                // Turning all these errors into `NotFound` errors is a bit
+                // unfortunate. The query will not find anything fail if the
+                // instance ID actually doesn't exist, *or* if any of the "is
+                // it valid to set migration IDs in the current state?" checks
+                // fail, which should probably be `Error::Conflict`
+                // instead...but, we can't really tell which is the case here.
+                //
+                // TODO(eliza): Perhaps these should all be mapped to `Conflict`
+                // instead? It's arguably correct to say that trying to set
+                // migration IDs for an instance that doesn't exist is sort of a
+                // "conflict", for a significantly broad definition of "conflcit"...
                 public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByLookup(
@@ -1815,6 +1826,267 @@ mod tests {
             Some(dbg!(migration.id)),
             "fetched migration must be the instance's migration"
         );
+
+        // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_instance_set_migration_ids() {
+        // Setup
+        let logctx = dev::test_setup_log("test_instance_set_migration_ids");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let authz_instance = create_test_instance(&datastore, &opctx).await;
+
+        // Create the first VMM in a state where `set_migration_ids` should
+        // *fail* (Stopped). We will assert that we cannot set the migration
+        // IDs, and then advance it to Running, when we can start the migration.
+        let vmm1 = datastore
+            .vmm_insert(
+                &opctx,
+                Vmm {
+                    id: Uuid::new_v4(),
+                    time_created: Utc::now(),
+                    time_deleted: None,
+                    instance_id: authz_instance.id(),
+                    sled_id: Uuid::new_v4(),
+                    propolis_ip: "10.1.9.32".parse().unwrap(),
+                    propolis_port: 420.into(),
+                    runtime: VmmRuntimeState {
+                        time_state_updated: Utc::now(),
+                        r#gen: Generation::new(),
+                        state: VmmState::Stopped,
+                    },
+                },
+            )
+            .await
+            .expect("active VMM should be inserted successfully!");
+
+        let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
+        let instance = datastore
+            .instance_refetch(&opctx, &authz_instance)
+            .await
+            .expect("instance should be there");
+        datastore
+            .instance_update_runtime(
+                &instance_id,
+                &InstanceRuntimeState {
+                    time_updated: Utc::now(),
+                    r#gen: Generation(instance.runtime_state.gen.0.next()),
+                    nexus_state: InstanceState::Vmm,
+                    propolis_id: Some(vmm1.id),
+                    ..instance.runtime_state.clone()
+                },
+            )
+            .await
+            .expect("instance update should work");
+
+        let vmm2 = datastore
+            .vmm_insert(
+                &opctx,
+                Vmm {
+                    id: Uuid::new_v4(),
+                    time_created: Utc::now(),
+                    time_deleted: None,
+                    instance_id: authz_instance.id(),
+                    sled_id: Uuid::new_v4(),
+                    propolis_ip: "10.1.9.42".parse().unwrap(),
+                    propolis_port: 420.into(),
+                    runtime: VmmRuntimeState {
+                        time_state_updated: Utc::now(),
+                        r#gen: Generation::new(),
+                        state: VmmState::Running,
+                    },
+                },
+            )
+            .await
+            .expect("second VMM should insert");
+
+        // make a migration...
+        let migration = datastore
+            .migration_insert(
+                &opctx,
+                Migration::new(Uuid::new_v4(), instance_id, vmm1.id, vmm2.id),
+            )
+            .await
+            .expect("migration should be inserted successfully!");
+
+        // Our first attempt to set migration IDs should fail, because the
+        // active VMM is Stopped.
+        let res = dbg!(
+            datastore
+                .instance_set_migration_ids(
+                    &opctx,
+                    instance_id,
+                    PropolisUuid::from_untyped_uuid(vmm1.id),
+                    migration.id,
+                    PropolisUuid::from_untyped_uuid(vmm2.id),
+                )
+                .await
+        );
+        assert!(res.is_err());
+
+        // Okay, now, advance the active VMM to Running, and try again.
+        let updated = dbg!(
+            datastore
+                .vmm_update_runtime(
+                    &PropolisUuid::from_untyped_uuid(vmm1.id),
+                    &VmmRuntimeState {
+                        time_state_updated: Utc::now(),
+                        r#gen: Generation(vmm2.runtime.r#gen.0.next()),
+                        state: VmmState::Running,
+                    },
+                )
+                .await
+        )
+        .expect("updating VMM state should be fine");
+        assert!(updated);
+
+        // Now, it should work!
+        let instance = dbg!(
+            datastore
+                .instance_set_migration_ids(
+                    &opctx,
+                    instance_id,
+                    PropolisUuid::from_untyped_uuid(vmm1.id),
+                    migration.id,
+                    PropolisUuid::from_untyped_uuid(vmm2.id),
+                )
+                .await
+        )
+        .expect("setting migration IDs should succeed");
+        assert_eq!(instance.runtime().dst_propolis_id, Some(vmm2.id));
+        assert_eq!(instance.runtime().migration_id, Some(migration.id));
+
+        // Doing it again should be idempotent, and the instance record
+        // shouldn't change.
+        let instance2 = dbg!(
+            datastore
+                .instance_set_migration_ids(
+                    &opctx,
+                    instance_id,
+                    PropolisUuid::from_untyped_uuid(vmm1.id),
+                    migration.id,
+                    PropolisUuid::from_untyped_uuid(vmm2.id),
+                )
+                .await
+        )
+        .expect("setting the same migration IDs a second time should succeed");
+        assert_eq!(
+            instance.runtime().dst_propolis_id,
+            instance2.runtime().dst_propolis_id
+        );
+        assert_eq!(
+            instance.runtime().migration_id,
+            instance2.runtime().migration_id
+        );
+        let instance = instance2;
+
+        // Trying to set a new migration should fail, as long as the prior stuff
+        // is still in place.
+        let vmm3 = datastore
+            .vmm_insert(
+                &opctx,
+                Vmm {
+                    id: Uuid::new_v4(),
+                    time_created: Utc::now(),
+                    time_deleted: None,
+                    instance_id: authz_instance.id(),
+                    sled_id: Uuid::new_v4(),
+                    propolis_ip: "10.1.9.42".parse().unwrap(),
+                    propolis_port: 420.into(),
+                    runtime: VmmRuntimeState {
+                        time_state_updated: Utc::now(),
+                        r#gen: Generation::new(),
+                        state: VmmState::Running,
+                    },
+                },
+            )
+            .await
+            .expect("third VMM should insert");
+        let migration2 = datastore
+            .migration_insert(
+                &opctx,
+                Migration::new(Uuid::new_v4(), instance_id, vmm1.id, vmm3.id),
+            )
+            .await
+            .expect("migration should be inserted successfully!");
+        dbg!(
+            datastore
+                .instance_set_migration_ids(
+                    &opctx,
+                    instance_id,
+                    PropolisUuid::from_untyped_uuid(vmm1.id),
+                    migration2.id,
+                    PropolisUuid::from_untyped_uuid(vmm3.id),
+                )
+                .await
+        ).expect_err("trying to set migration IDs should fail when a previous migration and VMM are still there");
+
+        // Pretend the previous migration saga has unwound the VMM
+        let updated = dbg!(
+            datastore
+                .vmm_update_runtime(
+                    &PropolisUuid::from_untyped_uuid(vmm2.id),
+                    &VmmRuntimeState {
+                        time_state_updated: Utc::now(),
+                        r#gen: Generation(vmm2.runtime.r#gen.0.next().next()),
+                        state: VmmState::SagaUnwound,
+                    },
+                )
+                .await
+        )
+        .expect("updating VMM state should be fine");
+        assert!(updated);
+
+        // It should still fail due to the presence of the migration ID.
+        dbg!(
+            datastore
+                .instance_set_migration_ids(
+                    &opctx,
+                    instance_id,
+                    PropolisUuid::from_untyped_uuid(vmm1.id),
+                    migration2.id,
+                    PropolisUuid::from_untyped_uuid(vmm3.id),
+                )
+                .await
+        ).expect_err("trying to set migration IDs should fail when a previous migration ID is still there");
+
+        // Remove the migration ID.
+        let updated = dbg!(datastore
+            .instance_update_runtime(
+                &instance_id,
+                &InstanceRuntimeState {
+                    time_updated: Utc::now(),
+                    r#gen: Generation(instance.runtime_state.gen.0.next()),
+                    nexus_state: InstanceState::Vmm,
+                    propolis_id: Some(vmm1.id),
+                    migration_id: None,
+                    ..instance.runtime_state.clone()
+                },
+            )
+            .await
+            .expect("instance update should work"));
+        assert!(updated);
+
+        // Now that the migration ID is gone, we should be able to clobber the
+        // SagaUnwound VMM ID.
+        let instance = dbg!(
+            datastore
+                .instance_set_migration_ids(
+                    &opctx,
+                    instance_id,
+                    PropolisUuid::from_untyped_uuid(vmm1.id),
+                    migration2.id,
+                    PropolisUuid::from_untyped_uuid(vmm3.id),
+                )
+                .await
+        )
+        .expect("replacing SagaUnwound VMM should work");
+        assert_eq!(instance.runtime().migration_id, Some(migration2.id));
+        assert_eq!(instance.runtime().dst_propolis_id, Some(vmm3.id));
 
         // Clean up.
         db.cleanup().await.unwrap();
