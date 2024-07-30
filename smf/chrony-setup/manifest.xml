@@ -25,9 +25,19 @@
   </property_group>
 
   <property_group name="config" type="application">
+    <!-- Whether this is a boundary or internal NTP zone -->
     <propval name="boundary" type="boolean" value="false" />
+    <!--
+      DNS name for the pool of boundary NTP servers. (Only used if this is
+      an internal NTP zone.)
+    -->
     <propval name="boundary_pool" type="astring" value="" />
+    <!--
+        Upstream NTP server. May be specifid more than once. (At least one is
+        required.)
+    -->
     <propval name="server" type="astring" value="" />
+    <!-- Allowed IPv6 range for clients (typically the rack subnet) -->
     <propval name="allow" type="astring" value="" />
   </property_group>
 

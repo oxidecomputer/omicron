@@ -11,7 +11,7 @@ use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 /// chrony does not support SRV records. This name resolves to AAAA records for
 /// each boundary NTP zone, and then we can point internal NTP chrony instances
 /// at this name for it to find the boundary NTP zones.
-pub const BOUNDARY_NTP_DNS_NAME: &str = "boundary.ntp";
+pub const BOUNDARY_NTP_DNS_NAME: &str = "boundary-ntp";
 
 /// Name for the control plane DNS zone
 pub const DNS_ZONE: &str = "control-plane.oxide.internal";
