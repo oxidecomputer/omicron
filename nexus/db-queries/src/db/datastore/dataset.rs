@@ -292,6 +292,7 @@ mod test {
                 zpool_id,
                 Some("[::1]:0".parse().unwrap()),
                 DatasetKind::Crucible,
+                None,
             ))
             .await
             .expect("failed to insert dataset")
@@ -325,6 +326,7 @@ mod test {
                 zpool_id,
                 Some("[::1]:12345".parse().unwrap()),
                 DatasetKind::Cockroach,
+                None,
             ))
             .await
             .expect("failed to do-nothing insert dataset");
@@ -341,6 +343,7 @@ mod test {
                 zpool_id,
                 Some("[::1]:0".parse().unwrap()),
                 DatasetKind::Cockroach,
+                None,
             ))
             .await
             .expect("failed to upsert dataset");
@@ -373,6 +376,7 @@ mod test {
                 zpool_id,
                 Some("[::1]:12345".parse().unwrap()),
                 DatasetKind::Cockroach,
+                None,
             ))
             .await
             .expect("failed to do-nothing insert dataset");

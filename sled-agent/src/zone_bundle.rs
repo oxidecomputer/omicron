@@ -691,6 +691,9 @@ pub enum BundleError {
 
     #[error("Failed to get ZFS property value")]
     GetProperty(#[from] GetValueError),
+
+    #[error("Instance is terminating")]
+    InstanceTerminating,
 }
 
 // Helper function to write an array of bytes into the tar archive, with

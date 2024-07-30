@@ -41,6 +41,7 @@ pub struct Dataset {
 
     pub kind: DatasetKind,
     pub size_used: Option<i64>,
+    zone_name: Option<String>,
 }
 
 impl Dataset {
@@ -49,6 +50,7 @@ impl Dataset {
         pool_id: Uuid,
         addr: Option<SocketAddrV6>,
         kind: DatasetKind,
+        zone_name: Option<String>,
     ) -> Self {
         let size_used = match kind {
             DatasetKind::Crucible => Some(0),
@@ -63,6 +65,7 @@ impl Dataset {
             port: addr.map(|addr| addr.port().into()),
             kind,
             size_used,
+            zone_name,
         }
     }
 

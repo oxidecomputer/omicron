@@ -182,6 +182,7 @@ impl From<Error> for omicron_common::api::external::Error {
 // Provide a more specific HTTP error for some sled agent errors.
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
+        const NO_SUCH_INSTANCE: &str = "NO_SUCH_INSTANCE";
         match err {
             Error::Instance(crate::instance_manager::Error::Instance(
                 instance_error,
@@ -214,13 +215,20 @@ impl From<Error> for dropshot::HttpError {
                         // Progenitor client error it gets back.
                         HttpError::from(omicron_error)
                     }
+                    crate::instance::Error::Terminating => {
+                        HttpError::for_client_error(
+                            Some(NO_SUCH_INSTANCE.to_string()),
+                            http::StatusCode::GONE,
+                            instance_error.to_string(),
+                        )
+                    }
                     e => HttpError::for_internal_error(e.to_string()),
                 }
             }
             Error::Instance(
                 e @ crate::instance_manager::Error::NoSuchInstance(_),
             ) => HttpError::for_not_found(
-                Some("NO_SUCH_INSTANCE".to_string()),
+                Some(NO_SUCH_INSTANCE.to_string()),
                 e.to_string(),
             ),
             Error::ZoneBundle(ref inner) => match inner {
@@ -233,6 +241,13 @@ impl From<Error> for dropshot::HttpError {
                 BundleError::InvalidStorageLimit
                 | BundleError::InvalidCleanupPeriod => {
                     HttpError::for_bad_request(None, inner.to_string())
+                }
+                BundleError::InstanceTerminating => {
+                    HttpError::for_client_error(
+                        Some(NO_SUCH_INSTANCE.to_string()),
+                        http::StatusCode::GONE,
+                        inner.to_string(),
+                    )
                 }
                 _ => HttpError::for_internal_error(err.to_string()),
             },
@@ -820,9 +835,13 @@ impl SledAgent {
         let datasets_result = self.storage().datasets_ensure(config).await?;
         info!(self.log, "datasets ensure: Updated storage");
 
-        // TODO: See omicron_physical_disks_ensure, below - do we similarly
-        // need to ensure that old datasets are no longer in-use before we
-        // return here?
+        // TODO(https://github.com/oxidecomputer/omicron/issues/6177):
+        // At the moment, we don't actually remove any datasets -- this function
+        // just adds new datasets.
+        //
+        // Once we start removing old datasets, we should probably ensure that
+        // they are not longer in-use before returning (similar to
+        // omicron_physical_disks_ensure).
 
         Ok(datasets_result)
     }

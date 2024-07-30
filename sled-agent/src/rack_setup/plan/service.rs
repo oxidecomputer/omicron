@@ -925,7 +925,7 @@ impl SledInfo {
         // enumerates the valid zpool indexes.
         let allocator = self
             .u2_zpool_allocators
-            .entry(kind)
+            .entry(kind.clone())
             .or_insert_with(|| Box::new(0..self.u2_zpools.len()));
         match allocator.next() {
             None => Err(PlanError::NotEnoughSleds),

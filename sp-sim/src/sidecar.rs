@@ -44,6 +44,7 @@ use gateway_messages::SpError;
 use gateway_messages::SpPort;
 use gateway_messages::SpStateV2;
 use gateway_messages::StartupOptions;
+use gateway_types::component::SpState;
 use slog::debug;
 use slog::info;
 use slog::warn;
@@ -81,8 +82,8 @@ impl Drop for Sidecar {
 
 #[async_trait]
 impl SimulatedSp for Sidecar {
-    async fn state(&self) -> omicron_gateway::http_entrypoints::SpState {
-        omicron_gateway::http_entrypoints::SpState::from(
+    async fn state(&self) -> SpState {
+        SpState::from(
             self.handler.as_ref().unwrap().lock().await.sp_state_impl(),
         )
     }

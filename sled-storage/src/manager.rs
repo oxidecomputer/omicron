@@ -706,21 +706,22 @@ impl StorageManager {
                 } else if config.generation == ledger_data.generation {
                     info!(
                         log,
-                        "Requested geenration number matches prior request",
+                        "Requested generation number matches prior request",
                     );
 
                     if ledger_data != &config {
-                        error!(log, "Requested configuration changed (with the same generation)");
+                        error!(
+                            log,
+                            "Requested configuration changed (with the same generation)";
+                            "generation" => ?config.generation
+                        );
                         return Err(Error::DatasetConfigurationChanged {
                             generation: config.generation,
                         });
                     }
+                } else {
+                    info!(log, "Request looks newer than prior requests");
                 }
-
-                info!(
-                    log,
-                    "Request looks newer than (or identical to) prior requests"
-                );
                 ledger
             }
             None => {
@@ -745,6 +746,11 @@ impl StorageManager {
         Ok(result)
     }
 
+    // Attempts to ensure that each dataset exist.
+    //
+    // Does not return an error, because the [DatasetsManagementResult] type
+    // includes details about all possible errors that may occur on
+    // a per-dataset granularity.
     async fn datasets_ensure_internal(
         &mut self,
         log: &Logger,
@@ -770,7 +776,7 @@ impl StorageManager {
         };
 
         if let Err(err) = self.ensure_dataset(config).await {
-            warn!(log, "Failed to ensure dataset"; "err" => ?err);
+            warn!(log, "Failed to ensure dataset"; "dataset" => ?status.dataset_name, "err" => ?err);
             status.err = Some(err.to_string());
         };
 
@@ -989,11 +995,22 @@ impl StorageManager {
             )));
         }
 
-        // TODO: Revisit these args, they might need more configuration
-        // tweaking.
-        let zoned = true;
+        let zoned = config.name.dataset().zoned();
+        let mountpoint_path = if zoned {
+            Utf8PathBuf::from("/data")
+        } else {
+            config.name.pool().dataset_mountpoint(
+                &Utf8PathBuf::from("/"),
+                &config.name.dataset().to_string(),
+            )
+        };
+        let mountpoint = Mountpoint::Path(mountpoint_path);
+
         let fs_name = &config.name.full_name();
         let do_format = true;
+
+        // The "crypt" dataset needs these details, but should already exist
+        // by the time we're creating datasets inside.
         let encryption_details = None;
         let size_details = Some(illumos_utils::zfs::SizeDetails {
             quota: config.quota,
@@ -1002,7 +1019,7 @@ impl StorageManager {
         });
         Zfs::ensure_filesystem(
             fs_name,
-            Mountpoint::Path(Utf8PathBuf::from("/data")),
+            mountpoint,
             zoned,
             do_format,
             encryption_details,

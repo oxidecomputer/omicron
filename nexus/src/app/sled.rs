@@ -292,13 +292,12 @@ impl super::Nexus {
 
     // Datasets (contained within zpools)
 
-    /// Upserts a dataset into the database, updating it if it already exists.
-    pub(crate) async fn upsert_dataset(
+    /// Upserts a crucible dataset into the database, updating it if it already exists.
+    pub(crate) async fn upsert_crucible_dataset(
         &self,
         id: Uuid,
         zpool_id: Uuid,
         address: SocketAddrV6,
-        kind: DatasetKind,
     ) -> Result<(), Error> {
         info!(
             self.log,
@@ -307,8 +306,9 @@ impl super::Nexus {
             "dataset_id" => id.to_string(),
             "address" => address.to_string()
         );
+        let kind = DatasetKind::Crucible;
         let dataset =
-            db::model::Dataset::new(id, zpool_id, Some(address), kind);
+            db::model::Dataset::new(id, zpool_id, Some(address), kind, None);
         self.db_datastore.dataset_upsert(dataset).await?;
         Ok(())
     }

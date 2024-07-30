@@ -907,6 +907,7 @@ mod test {
                             zpool.pool_id,
                             bogus_addr,
                             DatasetKind::Crucible,
+                            None,
                         );
 
                         let datastore = datastore.clone();
@@ -1279,6 +1280,7 @@ mod test {
                     zpool_id,
                     bogus_addr,
                     DatasetKind::Crucible,
+                    None,
                 );
                 let datastore = datastore.clone();
                 async move {
@@ -1379,6 +1381,7 @@ mod test {
                     zpool_id,
                     bogus_addr,
                     DatasetKind::Crucible,
+                    None,
                 );
                 let datastore = datastore.clone();
                 async move {
@@ -1454,6 +1457,7 @@ mod test {
                 zpool_id,
                 bogus_addr,
                 DatasetKind::Crucible,
+                None,
             );
             datastore.dataset_upsert(dataset).await.unwrap();
             physical_disk_ids.push(physical_disk_id);

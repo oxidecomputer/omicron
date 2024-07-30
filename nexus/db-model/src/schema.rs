@@ -1027,6 +1027,7 @@ table! {
 
         kind -> crate::DatasetKindEnum,
         size_used -> Nullable<Int8>,
+        zone_name -> Nullable<Text>,
     }
 }
 
@@ -1046,6 +1047,8 @@ table! {
         extent_count -> Int8,
 
         port -> Nullable<Int4>,
+
+        read_only -> Bool,
     }
 }
 
