@@ -3,6 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Subcommand: cargo xtask download
+//!
+//! This is a separate binary because it requires many dependencies that other
+//! parts of `cargo xtask` do not.
 
 use anyhow::{bail, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
