@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use illumos_utils::running_zone::RunningZone;
+use crate::running_zone::RunningZone;
+use crate::zone::SVCCFG;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -10,7 +11,7 @@ pub enum Error {
     ZoneCommand {
         intent: String,
         #[source]
-        err: illumos_utils::running_zone::RunCommandError,
+        err: crate::running_zone::RunCommandError,
     },
 }
 
@@ -44,7 +45,7 @@ impl<'t> SmfHelper<'t> {
     {
         self.running_zone
             .run_cmd(&[
-                illumos_utils::zone::SVCCFG,
+                SVCCFG,
                 "-s",
                 &self.default_smf_name,
                 "setprop",
@@ -70,7 +71,7 @@ impl<'t> SmfHelper<'t> {
     {
         self.running_zone
             .run_cmd(&[
-                illumos_utils::zone::SVCCFG,
+                SVCCFG,
                 "-s",
                 &self.smf_name,
                 "addpropvalue",
@@ -98,7 +99,7 @@ impl<'t> SmfHelper<'t> {
     {
         self.running_zone
             .run_cmd(&[
-                illumos_utils::zone::SVCCFG,
+                SVCCFG,
                 "-s",
                 &self.default_smf_name,
                 "addpropvalue",
@@ -124,7 +125,7 @@ impl<'t> SmfHelper<'t> {
     {
         self.running_zone
             .run_cmd(&[
-                illumos_utils::zone::SVCCFG,
+                SVCCFG,
                 "-s",
                 &self.smf_name,
                 "addpg",
@@ -148,7 +149,7 @@ impl<'t> SmfHelper<'t> {
     {
         self.running_zone
             .run_cmd(&[
-                illumos_utils::zone::SVCCFG,
+                SVCCFG,
                 "-s",
                 &self.smf_name,
                 "delpg",
@@ -176,7 +177,7 @@ impl<'t> SmfHelper<'t> {
         match self
             .running_zone
             .run_cmd(&[
-                illumos_utils::zone::SVCCFG,
+                SVCCFG,
                 "-s",
                 &self.default_smf_name,
                 "delpropvalue",
@@ -202,12 +203,7 @@ impl<'t> SmfHelper<'t> {
 
     pub fn refresh(&self) -> Result<(), Error> {
         self.running_zone
-            .run_cmd(&[
-                illumos_utils::zone::SVCCFG,
-                "-s",
-                &self.default_smf_name,
-                "refresh",
-            ])
+            .run_cmd(&[SVCCFG, "-s", &self.default_smf_name, "refresh"])
             .map_err(|err| Error::ZoneCommand {
                 intent: format!(
                     "Refresh SMF manifest {}",

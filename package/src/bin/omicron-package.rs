@@ -430,14 +430,15 @@ async fn download_prebuilt(
     }
 
     let digest = context.finish();
-    if digest.as_ref() != expected_digest {
-        bail!(
-            "Digest mismatch downloading {package_name}: Saw {}, expected {}",
+    if digest.as_ref() == expected_digest {
+        Ok(())
+    } else {
+        Err(anyhow!("Failed validating download of {url}").context(format!(
+            "Digest mismatch on {package_name}: Saw {}, expected {}",
             hex::encode(digest.as_ref()),
             hex::encode(expected_digest)
-        );
+        )))
     }
-    Ok(())
 }
 
 // Ensures a package exists, either by creating it or downloading it.
@@ -484,7 +485,7 @@ async fn ensure_package(
                             let msg = format!("Failed to download prebuilt ({attempts_left} attempts remaining)");
                             progress.set_error_message(msg.into());
                             if attempts_left == 0 {
-                                bail!("Failed to download package: {err}");
+                                return Err(err);
                             }
                             tokio::time::sleep(config.retry_duration).await;
                             progress.reset();

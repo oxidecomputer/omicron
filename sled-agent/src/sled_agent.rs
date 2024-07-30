@@ -180,6 +180,7 @@ impl From<Error> for omicron_common::api::external::Error {
 // Provide a more specific HTTP error for some sled agent errors.
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
+        const NO_SUCH_INSTANCE: &str = "NO_SUCH_INSTANCE";
         match err {
             Error::Instance(crate::instance_manager::Error::Instance(
                 instance_error,
@@ -212,13 +213,20 @@ impl From<Error> for dropshot::HttpError {
                         // Progenitor client error it gets back.
                         HttpError::from(omicron_error)
                     }
+                    crate::instance::Error::Terminating => {
+                        HttpError::for_client_error(
+                            Some(NO_SUCH_INSTANCE.to_string()),
+                            http::StatusCode::GONE,
+                            instance_error.to_string(),
+                        )
+                    }
                     e => HttpError::for_internal_error(e.to_string()),
                 }
             }
             Error::Instance(
                 e @ crate::instance_manager::Error::NoSuchInstance(_),
             ) => HttpError::for_not_found(
-                Some("NO_SUCH_INSTANCE".to_string()),
+                Some(NO_SUCH_INSTANCE.to_string()),
                 e.to_string(),
             ),
             Error::ZoneBundle(ref inner) => match inner {
@@ -231,6 +239,13 @@ impl From<Error> for dropshot::HttpError {
                 BundleError::InvalidStorageLimit
                 | BundleError::InvalidCleanupPeriod => {
                     HttpError::for_bad_request(None, inner.to_string())
+                }
+                BundleError::InstanceTerminating => {
+                    HttpError::for_client_error(
+                        Some(NO_SUCH_INSTANCE.to_string()),
+                        http::StatusCode::GONE,
+                        inner.to_string(),
+                    )
                 }
                 _ => HttpError::for_internal_error(err.to_string()),
             },

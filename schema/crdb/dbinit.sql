@@ -592,7 +592,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.region (
     blocks_per_extent INT NOT NULL,
     extent_count INT NOT NULL,
 
-    port INT4
+    port INT4,
+
+    read_only BOOL NOT NULL
 );
 
 /*
@@ -4156,7 +4158,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '84.0.0', NULL)
+    (TRUE, NOW(), NOW(), '85.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

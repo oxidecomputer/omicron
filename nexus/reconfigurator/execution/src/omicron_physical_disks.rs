@@ -451,6 +451,7 @@ mod test {
                 10,
                 10,
                 1,
+                false,
             )
         };
         let conn = datastore.pool_connection_for_tests().await.unwrap();

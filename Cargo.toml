@@ -20,6 +20,7 @@ members = [
     "cockroach-admin/types",
     "common",
     "dev-tools/crdb-seed",
+    "dev-tools/downloader",
     "dev-tools/omdb",
     "dev-tools/omicron-dev",
     "dev-tools/openapi-manager",
@@ -30,9 +31,11 @@ members = [
     "dns-server",
     "dns-server-api",
     "end-to-end-tests",
+    "gateway",
+    "gateway-api",
     "gateway-cli",
     "gateway-test-utils",
-    "gateway",
+    "gateway-types",
     "illumos-utils",
     "installinator-api",
     "installinator-common",
@@ -120,6 +123,7 @@ default-members = [
     "cockroach-admin/types",
     "common",
     "dev-tools/crdb-seed",
+    "dev-tools/downloader",
     "dev-tools/omdb",
     "dev-tools/omicron-dev",
     "dev-tools/openapi-manager",
@@ -133,9 +137,11 @@ default-members = [
     "dns-server-api",
     # Do not include end-to-end-tests in the list of default members, as its
     # tests only work on a deployed control plane.
+    "gateway",
+    "gateway-api",
     "gateway-cli",
     "gateway-test-utils",
-    "gateway",
+    "gateway-types",
     "illumos-utils",
     "installinator-api",
     "installinator-common",
@@ -315,10 +321,20 @@ flume = "0.11.0"
 foreign-types = "0.3.2"
 fs-err = "2.11.0"
 futures = "0.3.30"
+gateway-api = { path = "gateway-api" }
 gateway-client = { path = "clients/gateway-client" }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "c85a4ca043aaa389df12aac5348d8a3feda28762", default-features = false, features = ["std"] }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "c85a4ca043aaa389df12aac5348d8a3feda28762" }
+# If you're updating the pinned revision of these MGS dependencies, you should
+# also update the git commit revision for the `omicron-faux-mgs` package in
+# `package-manifest.toml`. Failure to do so won't cause incorrect behavior, but
+# does mean the `faux-mgs` shipped with the switch zone would be out of date
+# relative to the MGS proper shipped in that same switch zone. (Generally this
+# is "fine", because SP/MGS communication maintains forwards and backwards
+# compatibility, but will mean that faux-mgs might be missing new
+# functionality.)
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "319e7b92db69792ab8efa4c68554ad0cf83adf93", default-features = false, features = ["std"] }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "319e7b92db69792ab8efa4c68554ad0cf83adf93" }
 gateway-test-utils = { path = "gateway-test-utils" }
+gateway-types = { path = "gateway-types" }
 gethostname = "0.4.3"
 glob = "0.3.1"
 guppy = "0.17.5"

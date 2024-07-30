@@ -262,6 +262,7 @@ mod tests {
                 10,
                 10,
                 1,
+                false,
             )
         };
         let region_id = region.id();

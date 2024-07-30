@@ -43,6 +43,9 @@ pub struct Region {
     // The port that was returned when the region was created. This field didn't
     // originally exist, so records may not have it filled in.
     port: Option<SqlU16>,
+
+    // A region may be read-only
+    read_only: bool,
 }
 
 impl Region {
@@ -53,6 +56,7 @@ impl Region {
         blocks_per_extent: u64,
         extent_count: u64,
         port: u16,
+        read_only: bool,
     ) -> Self {
         Self {
             identity: RegionIdentity::new(Uuid::new_v4()),
@@ -62,6 +66,7 @@ impl Region {
             blocks_per_extent: blocks_per_extent as i64,
             extent_count: extent_count as i64,
             port: Some(port.into()),
+            read_only,
         }
     }
 
@@ -90,5 +95,8 @@ impl Region {
     }
     pub fn port(&self) -> Option<u16> {
         self.port.map(|port| port.into())
+    }
+    pub fn read_only(&self) -> bool {
+        self.read_only
     }
 }

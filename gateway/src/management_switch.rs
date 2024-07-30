@@ -69,12 +69,54 @@ impl SpIdentifier {
     }
 }
 
+impl From<gateway_types::component::SpIdentifier> for SpIdentifier {
+    fn from(id: gateway_types::component::SpIdentifier) -> Self {
+        Self {
+            typ: id.typ.into(),
+            // id.slot may come from an untrusted source, but usize >= 32 bits
+            // on any platform that will run this code, so unwrap is fine
+            slot: usize::try_from(id.slot).unwrap(),
+        }
+    }
+}
+
+impl From<SpIdentifier> for gateway_types::component::SpIdentifier {
+    fn from(id: SpIdentifier) -> Self {
+        Self {
+            typ: id.typ.into(),
+            // id.slot comes from a trusted source (crate::management_switch)
+            // and will not exceed u32::MAX
+            slot: u32::try_from(id.slot).unwrap(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SpType {
     Switch,
     Sled,
     Power,
+}
+
+impl From<gateway_types::component::SpType> for SpType {
+    fn from(typ: gateway_types::component::SpType) -> Self {
+        match typ {
+            gateway_types::component::SpType::Sled => Self::Sled,
+            gateway_types::component::SpType::Power => Self::Power,
+            gateway_types::component::SpType::Switch => Self::Switch,
+        }
+    }
+}
+
+impl From<SpType> for gateway_types::component::SpType {
+    fn from(typ: SpType) -> Self {
+        match typ {
+            SpType::Sled => Self::Sled,
+            SpType::Power => Self::Power,
+            SpType::Switch => Self::Switch,
+        }
+    }
 }
 
 // We derive `Serialize` to be able to send `SwitchPort`s to usdt probes, but

@@ -48,7 +48,8 @@ impl super::Nexus {
                 snapshot: NameOrId::Id(_),
                 ..
             } => Err(Error::invalid_request(
-              "when providing snpashot as an ID, prject should not be specified"
+              "when providing snapshot as an ID, project should not \
+              be specified"
             )),
             _ => Err(Error::invalid_request(
               "snapshot should either be an ID or project should be specified"
