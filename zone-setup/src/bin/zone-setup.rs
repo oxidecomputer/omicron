@@ -5,7 +5,9 @@
 //! CLI to set up zone configuration
 
 use anyhow::{anyhow, Context};
-use clap::builder::NonEmptyStringValueParser;
+use clap::builder::{
+    NonEmptyStringValueParser, StringValueParser, TypedValueParser,
+};
 use clap::{ArgAction, Args, Parser, Subcommand};
 use illumos_utils::addrobj::{AddrObject, IPV6_LINK_LOCAL_ADDROBJ_NAME};
 use illumos_utils::ipadm::Ipadm;
@@ -104,13 +106,19 @@ struct ChronySetupArgs {
     allow: Ipv6Net,
 }
 
+// The default clap parser for `serde_json::Value` is to wrap the argument in a
+// `Value::String`; this value parser parses the argument as JSON instead.
+fn json_value_parser() -> impl TypedValueParser<Value = serde_json::Value> {
+    StringValueParser::new().try_map(|s| s.parse())
+}
+
 #[derive(Debug, Args)]
 struct SwitchZoneArgs {
     /// path to the baseboard file
     #[arg(short, long, default_value = SWITCH_ZONE_BASEBOARD_FILE)]
     baseboard_file: PathBuf,
     /// baseboard info JSON blob
-    #[arg(short = 'i', long)]
+    #[arg(short = 'i', long, value_parser = json_value_parser())]
     baseboard_info: serde_json::Value,
     /// bootstrap IPv6 address
     #[arg(short = 'a', long)]
