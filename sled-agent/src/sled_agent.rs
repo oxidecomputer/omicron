@@ -818,9 +818,13 @@ impl SledAgent {
         let datasets_result = self.storage().datasets_ensure(config).await?;
         info!(self.log, "datasets ensure: Updated storage");
 
-        // TODO: See omicron_physical_disks_ensure, below - do we similarly
-        // need to ensure that old datasets are no longer in-use before we
-        // return here?
+        // TODO(https://github.com/oxidecomputer/omicron/issues/6177):
+        // At the moment, we don't actually remove any datasets -- this function
+        // just adds new datasets.
+        //
+        // Once we start removing old datasets, we should probably ensure that
+        // they are not longer in-use before returning (similar to
+        // omicron_physical_disks_ensure).
 
         Ok(datasets_result)
     }

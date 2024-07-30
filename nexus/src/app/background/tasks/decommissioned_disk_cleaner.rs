@@ -246,6 +246,7 @@ mod tests {
                     0,
                 )),
                 DatasetKind::Crucible,
+                None,
             ))
             .await
             .unwrap();

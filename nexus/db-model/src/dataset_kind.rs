@@ -22,6 +22,9 @@ impl_enum_type!(
     ClickhouseKeeper => b"clickhouse_keeper"
     ExternalDns => b"external_dns"
     InternalDns => b"internal_dns"
+    ZoneRoot => b"zone_root"
+    Zone => b"zone"
+    Debug => b"debug"
 );
 
 impl From<internal::shared::DatasetKind> for DatasetKind {
@@ -41,6 +44,9 @@ impl From<internal::shared::DatasetKind> for DatasetKind {
             internal::shared::DatasetKind::InternalDns => {
                 DatasetKind::InternalDns
             }
+            internal::shared::DatasetKind::ZoneRoot => DatasetKind::ZoneRoot,
+            internal::shared::DatasetKind::Zone { .. } => DatasetKind::Zone,
+            internal::shared::DatasetKind::Debug => DatasetKind::Debug,
         }
     }
 }

@@ -1027,6 +1027,7 @@ table! {
 
         kind -> crate::DatasetKindEnum,
         size_used -> Nullable<Int8>,
+        zone_name -> Nullable<Text>,
     }
 }
 

@@ -725,7 +725,7 @@ impl ServiceInner {
                         dataset_id: zone.id,
                         request: NexusTypes::DatasetPutRequest {
                             address: dataset_address.to_string(),
-                            kind: *dataset_name.dataset(),
+                            kind: dataset_name.dataset().clone(),
                         },
                     })
                 }

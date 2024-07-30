@@ -896,24 +896,28 @@ pub(crate) mod test {
                 Uuid::new_v4(),
                 Some("[fd00:1122:3344:101::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
+                None,
             ),
             Dataset::new(
                 Uuid::new_v4(),
                 Uuid::new_v4(),
                 Some("[fd00:1122:3344:102::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
+                None,
             ),
             Dataset::new(
                 Uuid::new_v4(),
                 Uuid::new_v4(),
                 Some("[fd00:1122:3344:103::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
+                None,
             ),
             Dataset::new(
                 Uuid::new_v4(),
                 Uuid::new_v4(),
                 Some("[fd00:1122:3344:104::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
+                None,
             ),
         ];
 

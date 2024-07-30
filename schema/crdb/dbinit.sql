@@ -507,7 +507,10 @@ CREATE TYPE IF NOT EXISTS omicron.public.dataset_kind AS ENUM (
   'clickhouse',
   'clickhouse_keeper',
   'external_dns',
-  'internal_dns'
+  'internal_dns',
+  'zone_root',
+  'zone',
+  'debug'
 );
 
 /*
@@ -533,6 +536,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.dataset (
     /* An upper bound on the amount of space that might be in-use */
     size_used INT,
 
+    /* Only valid if kind = zone -- the name of this zone */
+    zone_name TEXT,
+
     /* Crucible must make use of 'size_used'; other datasets manage their own storage */
     CONSTRAINT size_used_column_set_for_crucible CHECK (
       (kind != 'crucible') OR
@@ -542,6 +548,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.dataset (
     CONSTRAINT ip_and_port_set_for_crucible CHECK (
       (kind != 'crucible') OR
       (kind = 'crucible' AND ip IS NOT NULL and port IS NOT NULL)
+    ),
+
+    CONSTRAINT zone_name_for_zone_kind CHECK (
+      (kind != 'zone') OR
+      (kind = 'zone' AND zone_name IS NOT NULL)
     )
 );
 

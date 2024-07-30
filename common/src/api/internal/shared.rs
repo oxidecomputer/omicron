@@ -709,7 +709,6 @@ pub struct ResolvedVpcRouteSet {
     Deserialize,
     JsonSchema,
     Clone,
-    Copy,
     PartialEq,
     Eq,
     Ord,
@@ -718,6 +717,11 @@ pub struct ResolvedVpcRouteSet {
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DatasetKind {
+    // Durable datasets for zones
+
+    // This renaming exists for backwards compatibility -- this enum variant
+    // was serialized to "all-zones-request" as "cockroach_db" and should
+    // stay that way, unless we perform an explicit schema change.
     #[serde(rename = "cockroach_db")]
     Cockroach,
     Crucible,
@@ -725,6 +729,15 @@ pub enum DatasetKind {
     ClickhouseKeeper,
     ExternalDns,
     InternalDns,
+
+    // Zone filesystems
+    ZoneRoot,
+    Zone {
+        name: String,
+    },
+
+    // Other datasets
+    Debug,
 }
 
 impl DatasetKind {
@@ -738,18 +751,50 @@ impl DatasetKind {
             _ => true,
         }
     }
+
+    /// Returns true if this dataset is delegated to a non-global zone.
+    pub fn zoned(&self) -> bool {
+        use DatasetKind::*;
+        match self {
+            Cockroach | Crucible | Clickhouse | ClickhouseKeeper
+            | ExternalDns | InternalDns => true,
+            ZoneRoot | Zone { .. } | Debug => false,
+        }
+    }
+
+    /// Returns the zone name, if this is dataset for a zone filesystem.
+    ///
+    /// Otherwise, returns "None".
+    pub fn zone_name(&self) -> Option<String> {
+        if let DatasetKind::Zone { name } = self {
+            Some(name.clone())
+        } else {
+            None
+        }
+    }
 }
 
+// Be cautious updating this implementation:
+//
+// - It should align with [DatasetKind::FromStr], below
+// - The strings here are used here comprise the dataset name, stored durably
+// on-disk
 impl fmt::Display for DatasetKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use DatasetKind::*;
         let s = match self {
             Crucible => "crucible",
-            Cockroach => "cockroach_db",
+            Cockroach => "cockroachdb",
             Clickhouse => "clickhouse",
             ClickhouseKeeper => "clickhouse_keeper",
             ExternalDns => "external_dns",
             InternalDns => "internal_dns",
+            ZoneRoot => "zone",
+            Zone { name } => {
+                write!(f, "zone/{}", name)?;
+                return Ok(());
+            }
+            Debug => "debug",
         };
         write!(f, "{}", s)
     }
@@ -768,7 +813,7 @@ impl FromStr for DatasetKind {
         use DatasetKind::*;
         let kind = match s {
             "crucible" => Crucible,
-            "cockroach" | "cockroachdb" | "cockroach_db" => Cockroach,
+            "cockroachdb" | "cockroach_db" => Cockroach,
             "clickhouse" => Clickhouse,
             "clickhouse_keeper" => ClickhouseKeeper,
             "external_dns" => ExternalDns,
