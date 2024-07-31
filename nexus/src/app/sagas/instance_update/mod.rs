@@ -439,7 +439,10 @@ struct UpdatesRequired {
     /// deallocated.
     deprovision: Option<Deprovision>,
 
-    /// If this is [`Some`],
+    /// If this is [`Some`], then a network configuration update must be
+    /// performed: either updating NAT configuration and V2P mappings when the
+    /// instance has moved to a new sled, or deleting them if it is no longer
+    /// incarnated.
     network_config: Option<NetworkConfigUpdate>,
 }
 

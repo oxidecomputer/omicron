@@ -124,6 +124,11 @@ impl InstanceAndActiveVmm {
             //   Instead, we'll continue to report the instance's state as
             //   "migrating" until an instance-update saga has resolved the
             //   outcome of the migration, since only the instance-update saga
+            //   can complete the migration and update the instance record to
+            //   point at its new active VMM. No new instance-migrate,
+            //   instance-stop, or instance-delete saga can be started
+            //   until this occurs.
+            //
             //   If the instance actually *has* stopped or failed before a
             //   successful migration out, this is fine, because an
             //   instance-update saga will come along and remove the active VMM
