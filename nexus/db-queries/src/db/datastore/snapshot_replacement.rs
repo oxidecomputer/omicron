@@ -137,22 +137,6 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    pub async fn get_snapshot_replacement_request(
-        &self,
-        opctx: &OpContext,
-        id: Uuid,
-    ) -> Result<SnapshotReplacement, Error> {
-        use db::schema::snapshot_replacement::dsl;
-
-        dsl::snapshot_replacement
-            .filter(dsl::id.eq(id))
-            .get_result_async::<SnapshotReplacement>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
     pub async fn get_requested_snapshot_replacements(
         &self,
         opctx: &OpContext,
