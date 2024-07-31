@@ -10,7 +10,7 @@ use anyhow::Result;
 use clap::{Args, ColorChoice, Parser, Subcommand};
 
 use super::{
-    preflight::PreflightArgs, rack_setup::SetupArgs,
+    inventory::InventoryArgs, preflight::PreflightArgs, rack_setup::SetupArgs,
     rack_update::RackUpdateArgs, upload::UploadArgs,
 };
 
@@ -49,6 +49,7 @@ impl ShellApp {
                 args.exec(log, wicketd_addr, self.global_opts).await
             }
             ShellCommand::Preflight(args) => args.exec(log, wicketd_addr).await,
+            ShellCommand::Inventory(args) => args.exec(log, wicketd_addr).await,
         }
     }
 }
@@ -100,4 +101,8 @@ enum ShellCommand {
     /// Run checks prior to setting up the rack.
     #[command(subcommand)]
     Preflight(PreflightArgs),
+
+    /// Enumerate rack components
+    #[command(subcommand)]
+    Inventory(InventoryArgs),
 }
