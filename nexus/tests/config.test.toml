@@ -134,10 +134,9 @@ lookup_region_port.period_secs = 60
 # to be executed in a timely manner, so for integration tests, we don't want to
 # *rely* on the instance-updater background task for running these sagas.
 #
-# Therefore, set a period long enough that this task won't activate during a
-# reasonable integration test execution. Tests for the instance-updater task
-# will explictly activate it.
-instance_updater.period_secs = 600
+# Therefore, disable the background task during tests.
+instance_updater.disable = true
+instance_updater.period_secs = 60
 
 [default_region_allocation_strategy]
 # we only have one sled in the test environment, so we need to use the
