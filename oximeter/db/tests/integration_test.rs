@@ -10,6 +10,7 @@ use omicron_test_utils::dev::test_setup_log;
 use oximeter::test_util;
 use oximeter_db::{Client, DbWrite, OxqlResult, Sample, TestDbWrite};
 use slog::{info, Logger};
+use std::collections::BTreeSet;
 use std::default::Default;
 use std::time::Duration;
 
@@ -34,6 +35,76 @@ impl TestInput {
     fn n_points(&self) -> usize {
         self.n_projects * self.n_instances * self.n_cpus * self.n_samples
     }
+}
+
+/// Ensure `db-init-1.sql` and `db-init-2.sql` contain disjoint sets of tables.
+#[tokio::test]
+async fn test_schemas_disjoint() -> anyhow::Result<()> {
+    let request_timeout = Duration::from_secs(15);
+    let logctx = test_setup_log("test_schemas_disjoint");
+    let log = &logctx.log;
+
+    let (parent_dir, prefix) = log_prefix_for_test(logctx.test_name());
+    let path = parent_dir.join(format!("{prefix}-oximeter-clickward-test"));
+    std::fs::create_dir(&path)?;
+
+    let mut deployment = Deployment::new_with_default_port_config(
+        path.clone(),
+        "oximeter_cluster".to_string(),
+    );
+
+    // We are not testing replication here. We are just testing that the tables
+    // loaded by each sql file are not loaded by the other sql file.
+    let num_keepers = 1;
+    let num_replicas = 1;
+    deployment
+        .generate_config(num_keepers, num_replicas)
+        .context("failed to generate config")?;
+    deployment.deploy().context("failed to deploy")?;
+
+    let client1 = Client::new_with_request_timeout(
+        deployment.http_addr(1.into())?,
+        log,
+        request_timeout,
+    );
+
+    wait_for_ping(&client1).await?;
+    wait_for_keepers(&deployment, vec![KeeperId(1)]).await?;
+
+    // Load all the tables inserted by `db-init-1.sql`
+    client1.init_replicated_db_from_file(1).await?;
+    let tables1 = client1
+        .list_replicated_tables()
+        .await
+        .expect("failed to read replicated tables");
+
+    // Drop the database so that we can insert the tables from `db-init-2.sql`
+    client1.wipe_replicated_db().await.expect("failed to wipe db");
+
+    // Load all the tables inserted by `db-init-2.sql`
+    client1.init_replicated_db_from_file(2).await?;
+    let tables2: BTreeSet<_> = client1
+        .list_replicated_tables()
+        .await
+        .expect("failed to read replicated tables")
+        .into_iter()
+        .collect();
+
+    // Ensure that tables1 and tables2 are disjoint
+    for table in &tables1 {
+        assert!(
+            !tables2.contains(table),
+            "table `{}` exists in both `db-init-1.sql` and `db-init-2.sql`",
+            table
+        );
+    }
+
+    info!(log, "Cleaning up test");
+    deployment.teardown()?;
+    std::fs::remove_dir_all(path)?;
+    logctx.cleanup_successful();
+
+    Ok(())
 }
 
 #[tokio::test]
