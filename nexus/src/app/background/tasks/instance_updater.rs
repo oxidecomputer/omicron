@@ -26,14 +26,19 @@ use tokio::task::JoinSet;
 pub struct InstanceUpdater {
     datastore: Arc<DataStore>,
     sagas: Arc<dyn StartSaga>,
+    disable: bool,
 }
 
 impl InstanceUpdater {
-    pub fn new(datastore: Arc<DataStore>, sagas: Arc<dyn StartSaga>) -> Self {
-        InstanceUpdater { datastore, sagas }
+    pub fn new(
+        datastore: Arc<DataStore>,
+        sagas: Arc<dyn StartSaga>,
+        disable: bool,
+    ) -> Self {
+        InstanceUpdater { datastore, sagas, disable }
     }
 
-    async fn activate2(
+    async fn actually_activate(
         &mut self,
         opctx: &OpContext,
         stats: &mut ActivationStats,
@@ -205,43 +210,49 @@ impl BackgroundTask for InstanceUpdater {
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
             let mut stats = ActivationStats::default();
-            let error = match self.activate2(opctx, &mut stats).await {
-                Ok(()) => {
-                    slog::info!(
-                        &opctx.log,
-                        "instance updater activation completed";
-                        "destroyed_active_vmms" => stats.destroyed_active_vmms,
-                        "terminated_active_migrations" => stats.terminated_active_migrations,
-                        "update_sagas_started" => stats.sagas_started,
-                        "update_sagas_completed" => stats.sagas_completed,
-                    );
-                    debug_assert_eq!(
-                        stats.sagas_failed,
-                        0,
-                        "if the task completed successfully, then no sagas \
-                         should have failed",
-                    );
-                    debug_assert_eq!(
-                        stats.saga_start_failures,
-                        0,
-                        "if the task completed successfully, all sagas \
-                         should have started successfully"
-                    );
-                    None
-                }
-                Err(error) => {
-                    slog::warn!(
-                        &opctx.log,
-                        "instance updater activation failed!";
-                        "error" => %error,
-                        "destroyed_active_vmms" => stats.destroyed_active_vmms,
-                        "terminated_active_migrations" => stats.terminated_active_migrations,
-                        "update_sagas_started" => stats.sagas_started,
-                        "update_sagas_completed" => stats.sagas_completed,
-                        "update_sagas_failed" => stats.sagas_failed,
-                        "update_saga_start_failures" => stats.saga_start_failures,
-                    );
-                    Some(error.to_string())
+
+            let error = if self.disable {
+                slog::info!(&opctx.log, "background instance updater explicitly disabled");
+                None
+            } else {
+                match self.actually_activate(opctx, &mut stats).await {
+                    Ok(()) => {
+                        slog::info!(
+                            &opctx.log,
+                            "instance updater activation completed";
+                            "destroyed_active_vmms" => stats.destroyed_active_vmms,
+                            "terminated_active_migrations" => stats.terminated_active_migrations,
+                            "update_sagas_started" => stats.sagas_started,
+                            "update_sagas_completed" => stats.sagas_completed,
+                        );
+                        debug_assert_eq!(
+                            stats.sagas_failed,
+                            0,
+                            "if the task completed successfully, then no sagas \
+                            should have failed",
+                        );
+                        debug_assert_eq!(
+                            stats.saga_start_failures,
+                            0,
+                            "if the task completed successfully, all sagas \
+                            should have started successfully"
+                        );
+                        None
+                    }
+                    Err(error) => {
+                        slog::warn!(
+                            &opctx.log,
+                            "instance updater activation failed!";
+                            "error" => %error,
+                            "destroyed_active_vmms" => stats.destroyed_active_vmms,
+                            "terminated_active_migrations" => stats.terminated_active_migrations,
+                            "update_sagas_started" => stats.sagas_started,
+                            "update_sagas_completed" => stats.sagas_completed,
+                            "update_sagas_failed" => stats.sagas_failed,
+                            "update_saga_start_failures" => stats.saga_start_failures,
+                        );
+                        Some(error.to_string())
+                    }
                 }
             };
             json!({
