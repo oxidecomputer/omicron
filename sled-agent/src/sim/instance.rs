@@ -21,9 +21,6 @@ use propolis_client::types::{
     InstanceMigrationStatus as PropolisMigrationStatus,
     InstanceState as PropolisInstanceState, InstanceStateMonitorResponse,
 };
-use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -31,17 +28,9 @@ use uuid::Uuid;
 
 use crate::common::instance::{Action as InstanceAction, InstanceStates};
 
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct SimulateMigrationSource {
-    pub(in crate::sim) migration_id: Uuid,
-    pub(in crate::sim) result: SimulatedMigrationResult,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub(in crate::sim) enum SimulatedMigrationResult {
-    Success,
-    Failure,
-}
+pub use sled_agent_client::{
+    SimulateMigrationSource, SimulatedMigrationResult,
+};
 
 #[derive(Clone, Debug)]
 enum MonitorChange {
