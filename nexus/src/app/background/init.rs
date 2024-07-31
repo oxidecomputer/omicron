@@ -640,17 +640,10 @@ impl BackgroundTasksInitializer {
                 sagas.clone(),
                 config.instance_updater.disable,
             );
-            let period = if config.instance_updater.disable {
-                // If we're explicitly disabled by the config, don't waste
-                // energy activating the background task just to have it do nothing.
-                std::time::Duration::MAX
-            } else {
-                config.instance_updater.period_secs
-            };
             driver.register( TaskDefinition {
                 name: "instance_updater",
                 description: "detects if instances require update sagas and schedules them",
-                period,
+                period: config.instance_watcher.period_secs,
                 task_impl: Box::new(updater),
                 opctx: opctx.child(BTreeMap::new()),
                 watchers: vec![],
