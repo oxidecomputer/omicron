@@ -107,6 +107,19 @@ async fn test_schemas_disjoint() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Test that replicated/clustered clickhouse setups work as we expect.
+///
+/// Note that we are querying from [distributed](
+/// https://clickhouse.com/docs/en/engines/table-engines/special/distributed)
+/// tables here, but we are not sharding. This test assumes that all inserts
+/// and queries therefore access data from the contacted server, since we have
+/// full replicas at all servers. The "first healthy node" should always be
+/// the one we contact. Regardless, even if the contacted node proxies to a
+/// different server this test ensures that we are able to query the latest
+/// data. While we could always guarantee we are inserting to or querying from
+/// the contacted server by using the `_local` tables instead of the distributed
+/// tables used by oxql, that would not be what we do in production, and so
+/// doesn't make much sense in an integration test.
 #[tokio::test]
 async fn test_cluster() -> anyhow::Result<()> {
     usdt::register_probes().unwrap();

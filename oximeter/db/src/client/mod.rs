@@ -1176,24 +1176,6 @@ async fn handle_db_response(
     }
 }
 
-/// A trait allowing a [`Client`] to use the sql methods directly.
-///
-/// In general, clients should use oxql, but in many tests we use the SQL methods.
-/// For integration test purposes we need to make them public. However, we don't
-/// want to expose these functions for general consumption without extra clarity.
-#[async_trait::async_trait]
-pub trait RawSql {
-    async fn execute(&self, sql: String) -> Result<(), Error>;
-}
-
-#[async_trait::async_trait]
-impl RawSql for Client {
-    async fn execute(&self, sql: String) -> Result<(), Error> {
-        self.execute_with_body(sql).await?;
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::dbwrite::UnrolledSampleRows;
