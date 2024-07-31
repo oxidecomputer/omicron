@@ -248,7 +248,7 @@
 //! database and networking configuration *to match a state change that has
 //! already occurred.*
 //!
-//! Consider the folliwng: if we run an `instance-start` saga, and the instance
+//! Consider the following: if we run an `instance-start` saga, and the instance
 //! cannot actually be started, of course we would want the unwinding saga to
 //! undo any database changes it has made, because the instance was not actually
 //! started. Failing to undo those changes when an `instance-start` saga unwinds
