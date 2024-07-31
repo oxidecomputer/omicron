@@ -16,6 +16,8 @@ use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
 use futures::stream::StreamExt;
+#[cfg(target_os = "illumos")]
+use illumos_utils::ipadm::Ipadm;
 use omicron_common::address::SLED_AGENT_PORT;
 use sled_agent_client::types::CleanupContextUpdate;
 use sled_agent_client::types::Duration;
@@ -247,53 +249,21 @@ async fn fetch_underlay_address() -> anyhow::Result<Ipv6Addr> {
     #[cfg(target_os = "illumos")]
     {
         const EXPECTED_ADDR_OBJ: &str = "underlay0/sled6";
-        let output = Command::new("ipadm")
-            .arg("show-addr")
-            .arg("-p")
-            .arg("-o")
-            .arg("addr")
-            .arg(EXPECTED_ADDR_OBJ)
-            .output()
-            .await?;
-        // If we failed because there was no such interface, then fall back to
-        // localhost.
-        if !output.status.success() {
-            match std::str::from_utf8(&output.stderr) {
-                Err(_) => bail!(
-                    "ipadm command failed unexpectedly, stderr:\n{}",
-                    String::from_utf8_lossy(&output.stderr)
-                ),
-                Ok(out) => {
-                    if out.contains("Address object not found") {
-                        eprintln!(
-                            "Expected addrobj '{}' not found, using localhost",
-                            EXPECTED_ADDR_OBJ,
-                        );
-                        return Ok(Ipv6Addr::LOCALHOST);
-                    } else {
-                        bail!(
-                            "ipadm subcommand failed unexpectedly, stderr:\n{}",
-                            String::from_utf8_lossy(&output.stderr),
-                        );
-                    }
-                }
-            }
+        match Ipadm::addrobj_addr(EXPECTED_ADDR_OBJ) {
+            // If we failed because there was no such interface, then fall back
+            // to localhost.
+            Ok(None) => return Ok(Ipv6Addr::LOCALHOST),
+            Ok(Some(addr)) => addr
+                .trim()
+                .split_once('/')
+                .context("expected a /64 subnet")?
+                .0
+                .parse()
+                .context("invalid IPv6 address"),
+            Err(e) => bail!(
+                "failed to get address for addrobj {EXPECTED_ADDR_OBJ}: {e}",
+            ),
         }
-        let out = std::str::from_utf8(&output.stdout)
-            .context("non-UTF8 output in ipadm")?;
-        let lines: Vec<_> = out.trim().lines().collect();
-        anyhow::ensure!(
-            lines.len() == 1,
-            "No addresses or more than one address on expected interface '{}'",
-            EXPECTED_ADDR_OBJ
-        );
-        lines[0]
-            .trim()
-            .split_once('/')
-            .context("expected a /64 subnet")?
-            .0
-            .parse()
-            .context("invalid IPv6 address")
     }
 }
 
