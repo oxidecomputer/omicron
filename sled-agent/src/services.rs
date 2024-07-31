@@ -3670,10 +3670,7 @@ impl ServiceManager {
     ) -> Result<(), Error> {
         let log =
             self.inner.log.new(o!("stage" => "switch zone initialization"));
-        info!(
-            log,
-            "Enabling switch zone services on scrimlet"
-        );
+        info!(log, "Enabling switch zone services on scrimlet");
         let mut filesystems: Vec<zone::Fs> = vec![];
         let mut data_links: Vec<String> = vec![];
 
@@ -3956,11 +3953,7 @@ impl ServiceManager {
                     if *addr == Ipv6Addr::LOCALHOST {
                         continue;
                     }
-                    info!(
-                        log,
-                        "Ensuring address {} exists",
-                        addr.to_string()
-                    );
+                    info!(log, "Ensuring address {} exists", addr.to_string());
                     let addr_request =
                         AddressRequest::new_static(IpAddr::V6(*addr), None);
                     zone.ensure_address(addr_request).await?;
@@ -4053,10 +4046,7 @@ impl ServiceManager {
                             )
                         }
                         SwitchService::Dendrite { .. } => {
-                            info!(
-                                log,
-                                "configuring dendrite service"
-                            );
+                            info!(log, "configuring dendrite service");
                             if let Some(info) = self.inner.sled_info.get() {
                                 smfh.setprop_default_instance(
                                     "config/rack_id",
@@ -4067,10 +4057,7 @@ impl ServiceManager {
                                     info.config.sled_id,
                                 )?;
                             } else {
-                                info!(
-                                    log,
-                                    "no rack_id/sled_id available yet"
-                                );
+                                info!(log, "no rack_id/sled_id available yet");
                             }
                             smfh.delpropvalue_default_instance(
                                 "config/address",

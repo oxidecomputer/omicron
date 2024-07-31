@@ -32,12 +32,13 @@ impl ProfileBuilder {
         log: &Logger,
         installed_zone: &InstalledZone,
     ) -> Result<(), std::io::Error> {
-        let profile_info = format!("Profile for {}:\n{}", installed_zone.name(), self);
+        let profile_info =
+            format!("Profile for {}:\n{}", installed_zone.name(), self);
         if installed_zone.name() == SWITCH_ZONE_NAME {
-            info!(log, "{profile_info}"; "stage" => "switch zone initialization");            
+            info!(log, "{profile_info}"; "stage" => "switch zone initialization");
         } else {
-        info!(log, "{profile_info}");
-}
+            info!(log, "{profile_info}");
+        }
         let profile_path = installed_zone.site_profile_xml_path();
 
         tokio::fs::write(&profile_path, format!("{self}").as_bytes()).await?;

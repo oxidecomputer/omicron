@@ -12,7 +12,7 @@ use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
-use crate::zone::{AddressRequest, ZONE_PREFIX, SWITCH_ZONE_NAME};
+use crate::zone::{AddressRequest, SWITCH_ZONE_NAME, ZONE_PREFIX};
 use crate::zpool::{PathInPool, ZpoolName};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
