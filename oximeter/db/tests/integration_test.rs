@@ -9,6 +9,7 @@ use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::test_setup_log;
 use oximeter::test_util;
 use oximeter_db::{Client, DbWrite, OxqlResult, Sample, TestDbWrite};
+use slog::{info, Logger};
 use std::default::Default;
 use std::time::Duration;
 
@@ -73,20 +74,20 @@ async fn test_cluster() -> anyhow::Result<()> {
     wait_for_ping(&client2).await?;
     wait_for_keepers(&deployment, (1..=num_keepers).map(KeeperId).collect())
         .await?;
-    println!("deploy setup time = {:?}", start.elapsed());
+    info!(log, "deploy setup time = {:?}", start.elapsed());
 
     let start = tokio::time::Instant::now();
     client1
         .init_test_minimal_replicated_db()
         .await
         .context("failed to initialize db")?;
-    println!("init replicated db time = {:?}", start.elapsed());
+    info!(log, "init replicated db time = {:?}", start.elapsed());
 
     // Ensure our database tables show up on both servers
     let start = tokio::time::Instant::now();
     let output1 = client1.list_replicated_tables().await?;
     let output2 = client2.list_replicated_tables().await?;
-    println!("list tables time = {:?}", start.elapsed());
+    info!(log, "list tables time = {:?}", start.elapsed());
     assert_eq!(output1, output2);
 
     let input = TestInput::default();
@@ -100,11 +101,11 @@ async fn test_cluster() -> anyhow::Result<()> {
         input.n_cpus,
         input.n_samples,
     );
-    println!("generate samples time = {:?}", start.elapsed());
+    info!(log, "generate samples time = {:?}", start.elapsed());
     assert_eq!(samples.len(), input.n_points());
     let start = tokio::time::Instant::now();
     client1.insert_samples(&samples).await.expect("failed to insert samples");
-    println!("insert samples time = {:?}", start.elapsed());
+    info!(log, "insert samples time = {:?}", start.elapsed());
 
     // Get all the samples from the replica where the data was inserted
     let start = tokio::time::Instant::now();
@@ -112,16 +113,16 @@ async fn test_cluster() -> anyhow::Result<()> {
         .oxql_query("get virtual_machine:cpu_busy")
         .await
         .expect("failed to get all samples");
-    println!("query samples from client1 time = {:?}", start.elapsed());
+    info!(log, "query samples from client1 time = {:?}", start.elapsed());
 
     // Ensure the samples are correct on this replica
     assert_input_and_output(&input, &samples, &oxql_res1);
 
     let start = tokio::time::Instant::now();
-    wait_for_num_points(&client2, samples.len())
+    wait_for_num_points(&log, &client2, samples.len())
         .await
         .expect("failed to get samples from client2");
-    println!("query samples from client2 time = {:?}", start.elapsed());
+    info!(log, "query samples from client2 time = {:?}", start.elapsed());
 
     // Add a 3rd clickhouse server and wait for it to come up
     deployment.add_server().expect("failed to launch a 3rd clickhouse server");
@@ -131,6 +132,7 @@ async fn test_cluster() -> anyhow::Result<()> {
         request_timeout,
     );
     wait_for_ping(&client3).await?;
+    info!(log, "successfully pinged client server 3");
 
     // We need to initiate copying from existing replicated tables by creating
     // the DB and those tables on the new node.
@@ -138,18 +140,21 @@ async fn test_cluster() -> anyhow::Result<()> {
         .init_test_minimal_replicated_db()
         .await
         .expect("failed to initialized db");
+    info!(log, "successfully pinged client server 3");
 
     // Wait for all the data to be copied to node 3
     let start = tokio::time::Instant::now();
-    wait_for_num_points(&client3, samples.len())
+    wait_for_num_points(&log, &client3, samples.len())
         .await
         .expect("failed to get samples from client3");
-    println!("query samples from client3 time = {:?}", start.elapsed());
+    info!(log, "query samples from client3 time = {:?}", start.elapsed());
 
     // Let's stop replica 1 and write some data to replica 3
     // When we bring replica 1 back up we should see data get replicated to it.
     // Data should also get replicated to replica 2 immediately.
     deployment.stop_server(1.into()).unwrap();
+
+    info!(log, "successfully stopped server 1");
 
     // Generate some new samples and insert them at replica3
     let samples = test_util::generate_test_samples(
@@ -158,13 +163,16 @@ async fn test_cluster() -> anyhow::Result<()> {
         input.n_cpus,
         input.n_samples,
     );
-    client3.insert_samples(&samples).await.expect("failed to insert samples");
+    client3
+        .insert_samples(&samples)
+        .await
+        .expect("failed to insert samples at server3");
 
     // Ensure that both replica 3 and replica 2 have the samples
-    wait_for_num_points(&client3, samples.len() * 2)
+    wait_for_num_points(&log, &client3, samples.len() * 2)
         .await
         .expect("failed to get samples from client3");
-    wait_for_num_points(&client2, samples.len() * 2)
+    wait_for_num_points(&log, &client2, samples.len() * 2)
         .await
         .expect("failed to get samples from client2");
 
@@ -173,15 +181,15 @@ async fn test_cluster() -> anyhow::Result<()> {
         .start_server(1.into())
         .expect("failed to restart clickhouse server 1");
     wait_for_ping(&client1).await.expect("failed to ping server 1");
-    wait_for_num_points(&client1, samples.len() * 2)
+    wait_for_num_points(&log, &client1, samples.len() * 2)
         .await
         .expect("failed to get samples from client1");
 
     // Remove a keeper node
-    deployment.remove_keeper(KeeperId(2)).expect("failed to remove keeper");
+    deployment.remove_keeper(KeeperId(2)).expect("failed to remove keeper 2");
 
     // Querying from any node should still work after a keeper is removed
-    wait_for_num_points(&client1, samples.len() * 2)
+    wait_for_num_points(&log, &client1, samples.len() * 2)
         .await
         .expect("failed to get samples from client1");
 
@@ -192,28 +200,39 @@ async fn test_cluster() -> anyhow::Result<()> {
         input.n_cpus,
         input.n_samples,
     );
-    client3.insert_samples(&samples).await.expect("failed to insert samples");
-    wait_for_num_points(&client2, samples.len() * 3)
+    client3
+        .insert_samples(&samples)
+        .await
+        .expect("failed to insert samples at server3");
+    wait_for_num_points(&log, &client2, samples.len() * 3)
         .await
         .expect("failed to get samples from client1");
 
     // Stop another keeper
-    deployment.stop_keeper(1.into()).expect("failed to stop keeper");
+    deployment.stop_keeper(1.into()).expect("failed to stop keeper 1");
 
     // We should still be able to query
-    wait_for_num_points(&client3, samples.len() * 3)
+    wait_for_num_points(&log, &client3, samples.len() * 3)
         .await
         .expect("failed to get samples from client1");
 
-    println!("Attempting to insert samples without keeper quorum");
+    info!(log, "Attempting to insert samples without keeper quorum");
     let samples = test_util::generate_test_samples(
         input.n_projects,
         input.n_instances,
         input.n_cpus,
         input.n_samples,
     );
+    // We are expecting a timeout here. Typical inserts take on the order of a
+    // few hundred milliseconds. To shorten the length of our test, we create a
+    // new client with a shorter timeout.
+    let client1_short_timeout = Client::new_with_request_timeout(
+        deployment.http_addr(1.into())?,
+        log,
+        Duration::from_secs(2),
+    );
     // We have lost quorum and should not be able to insert
-    client1
+    client1_short_timeout
         .insert_samples(&samples)
         .await
         .expect_err("insert succeeded without keeper quorum");
@@ -230,7 +249,7 @@ async fn test_cluster() -> anyhow::Result<()> {
         input.n_samples,
     );
     client1.insert_samples(&samples).await.expect("failed to insert samples");
-    wait_for_num_points(&client2, samples.len() * 4)
+    wait_for_num_points(&log, &client2, samples.len() * 4)
         .await
         .expect("failed to get samples from client1");
 
@@ -249,11 +268,11 @@ async fn test_cluster() -> anyhow::Result<()> {
         input.n_samples,
     );
     client1.insert_samples(&samples).await.expect("failed to insert samples");
-    wait_for_num_points(&client2, samples.len() * 5)
+    wait_for_num_points(&log, &client2, samples.len() * 5)
         .await
         .expect("failed to get samples from client1");
 
-    println!("Cleaning up test");
+    info!(log, "Cleaning up test");
     deployment.teardown()?;
     std::fs::remove_dir_all(path)?;
     logctx.cleanup_successful();
@@ -288,6 +307,7 @@ fn assert_input_and_output(
 /// Wait for the number of `samples` inserted to equal the number of `points`
 /// returned at the replica that `client` is speaking to.
 async fn wait_for_num_points(
+    log: &Logger,
     client: &Client,
     n_samples: usize,
 ) -> anyhow::Result<()> {
@@ -300,7 +320,8 @@ async fn wait_for_num_points(
                     poll::CondCheckError::<oximeter_db::Error>::NotYet
                 })?;
             if total_points(&oxql_res) != n_samples {
-                println!(
+                info!(
+                    log,
                     "received {}, expected {}",
                     total_points(&oxql_res),
                     n_samples
@@ -324,8 +345,8 @@ async fn wait_for_keepers(
     ids: Vec<KeeperId>,
 ) -> anyhow::Result<()> {
     let mut keepers = vec![];
-    for id in ids {
-        keepers.push(KeeperClient::new(deployment.keeper_addr(id)?));
+    for id in &ids {
+        keepers.push(KeeperClient::new(deployment.keeper_addr(*id)?));
     }
 
     poll::wait_for_condition(
@@ -355,7 +376,7 @@ async fn wait_for_keepers(
         &Duration::from_secs(30),
     )
     .await
-    .context("failed to contact all keepers")?;
+    .with_context(|| format!("failed to contact all keepers: {ids:?}"))?;
 
     Ok(())
 }
@@ -373,6 +394,8 @@ async fn wait_for_ping(client: &Client) -> anyhow::Result<()> {
         &Duration::from_secs(10),
     )
     .await
-    .context("failed to ping clickhouse server")?;
+    .with_context(|| {
+        format!("failed to ping clickhouse server: {}", client.url())
+    })?;
     Ok(())
 }

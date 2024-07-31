@@ -106,6 +106,11 @@ impl Client {
         Self { _id: id, log, url, client, schema, request_timeout }
     }
 
+    /// Return the url the client is trying to connect to
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
     /// Ping the ClickHouse server to verify connectivitiy.
     pub async fn ping(&self) -> Result<(), Error> {
         handle_db_response(
