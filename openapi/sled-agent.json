@@ -4518,7 +4518,7 @@
           },
           "migration_out": {
             "nullable": true,
-            "description": "The state of any outbound migration to this VMM.",
+            "description": "The state of any outbound migration from this VMM.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/MigrationRuntimeState"
