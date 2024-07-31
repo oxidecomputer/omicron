@@ -1221,13 +1221,13 @@ impl<'a> BlueprintBuilder<'a> {
         allocator.alloc().ok_or(Error::OutOfAddresses { sled_id })
     }
 
-    // Selects a zpools for this zone type.
-    //
-    // This zpool may be used for either durable storage or transient
-    // storage - the usage is up to the caller.
-    //
-    // If `zone_kind` already exists on `sled_id`, it is prevented
-    // from using the same zpool as exisitng zones with the same kind.
+    /// Selects a zpool for this zone type.
+    ///
+    /// This zpool may be used for either durable storage or transient
+    /// storage - the usage is up to the caller.
+    ///
+    /// If `zone_kind` already exists on `sled_id`, it is prevented
+    /// from using the same zpool as existing zones with the same kind.
     fn sled_select_zpool(
         &self,
         sled_id: SledUuid,
