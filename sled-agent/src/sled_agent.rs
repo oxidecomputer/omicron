@@ -1011,6 +1011,7 @@ impl SledAgent {
                 instance_runtime,
                 vmm_runtime,
                 propolis_addr,
+                self.sled_identifiers(),
                 metadata,
             )
             .await
@@ -1240,7 +1241,7 @@ impl SledAgent {
     /// interested in the switch identifiers, MGS is the current best way to do
     /// that, by asking for the local switch's slot, and then that switch's SP
     /// state.
-    pub(crate) async fn sled_identifiers(&self) -> SledIdentifiers {
+    pub(crate) fn sled_identifiers(&self) -> SledIdentifiers {
         let baseboard = self.inner.hardware.baseboard();
         SledIdentifiers {
             rack_id: self.inner.start_request.body.rack_id,
