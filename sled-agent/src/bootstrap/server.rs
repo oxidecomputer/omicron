@@ -32,7 +32,7 @@ use futures::StreamExt;
 use illumos_utils::dladm;
 use illumos_utils::zfs;
 use illumos_utils::zone;
-use illumos_utils::zone::Zones;
+use illumos_utils::zone::{Zones, SWITCH_ZONE_NAME};
 use internal_dns::resolver::Resolver;
 use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
 use omicron_common::ledger;
@@ -625,7 +625,7 @@ impl Inner {
             // We only return one error though -- hopefully that's enough to
             // signal to the caller that this failed.
             .for_each_concurrent_then_try(CONCURRENCY_CAP, |zone| async move {
-                if zone.name() != "oxz_switch" {
+                if zone.name() != SWITCH_ZONE_NAME {
                     Zones::halt_and_remove(zone.name()).await?;
                 }
                 Ok(())

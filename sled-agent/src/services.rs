@@ -640,6 +640,10 @@ impl OmicronZone {
     fn name(&self) -> &str {
         self.runtime.name()
     }
+
+    fn zone_type(&self) -> &str {
+        self.config.zone.zone_type.kind().zone_prefix()
+    }
 }
 
 type ZoneMap = BTreeMap<String, OmicronZone>;
@@ -3058,7 +3062,10 @@ impl ServiceManager {
         for result in results {
             match result {
                 Ok(zone) => {
-                    info!(self.inner.log, "Zone started"; "zone" => zone.name());
+                    info!(
+                        self.inner.log, "Omicron zone (type {}) started", zone.zone_type();
+                        "zone" => zone.name()
+                    );
                     new_zones.push(zone);
                 }
                 Err((name, error)) => {
@@ -3661,7 +3668,12 @@ impl ServiceManager {
         underlay_info: Option<(Ipv6Addr, Option<&RackNetworkConfig>)>,
         baseboard: Baseboard,
     ) -> Result<(), Error> {
-        info!(self.inner.log, "Ensuring scrimlet services (enabling services)");
+        let log =
+            self.inner.log.new(o!("stage" => "switch zone initialization"));
+        info!(
+            log,
+            "Enabling switch zone services on scrimlet"
+        );
         let mut filesystems: Vec<zone::Fs> = vec![];
         let mut data_links: Vec<String> = vec![];
 
@@ -3781,7 +3793,8 @@ impl ServiceManager {
         switch_zone_ip: Ipv6Addr,
         rack_network_config: &RackNetworkConfig,
     ) -> Result<(), Error> {
-        let log = &self.inner.log;
+        let log =
+            &self.inner.log.new(o!("stage" => "switch zone initialization"));
 
         // Configure uplinks via DPD in our switch zone.
         let our_ports = EarlyNetworkSetup::new(log)
@@ -3798,6 +3811,9 @@ impl ServiceManager {
         &self,
         our_ports: Vec<HostPortConfig>,
     ) -> Result<(), Error> {
+        let log =
+            &self.inner.log.new(o!("stage" => "switch zone initialization"));
+
         // We expect the switch zone to be running, as we're called immediately
         // after `ensure_zone()` above and we just successfully configured
         // uplinks via DPD running in our switch zone. If somehow we're in any
@@ -3820,7 +3836,7 @@ impl ServiceManager {
             }
         };
 
-        info!(self.inner.log, "Setting up uplinkd service");
+        info!(log, "Setting up uplinkd service");
         let smfh = SmfHelper::new(&zone, &SwitchService::Uplink);
 
         // We want to delete all the properties in the `uplinks` group, but we
@@ -3831,9 +3847,13 @@ impl ServiceManager {
 
         for port_config in &our_ports {
             for addr in &port_config.addrs {
-                info!(self.inner.log, "configuring port: {port_config:?}");
+                let prop_name = format!("uplinks/{}_0", port_config.port);
+                info!(
+                    log,
+                    "Adding new property to uplinkd service. Name: {prop_name} Value: {}", addr.to_string(),
+                );
                 smfh.addpropvalue_type(
-                    &format!("uplinks/{}_0", port_config.port,),
+                    &prop_name,
                     &addr.to_string(),
                     "astring",
                 )?;
@@ -3888,7 +3908,8 @@ impl ServiceManager {
         filesystems: Vec<zone::Fs>,
         data_links: Vec<String>,
     ) -> Result<(), Error> {
-        let log = &self.inner.log;
+        let log =
+            self.inner.log.new(o!("stage" => "switch zone initialization"));
 
         let mut sled_zone = self.inner.switch_zone.lock().await;
         let zone_typestr = "switch";
@@ -3936,7 +3957,7 @@ impl ServiceManager {
                         continue;
                     }
                     info!(
-                        self.inner.log,
+                        log,
                         "Ensuring address {} exists",
                         addr.to_string()
                     );
@@ -3944,7 +3965,7 @@ impl ServiceManager {
                         AddressRequest::new_static(IpAddr::V6(*addr), None);
                     zone.ensure_address(addr_request).await?;
                     info!(
-                        self.inner.log,
+                        log,
                         "Ensuring address {} exists - OK",
                         addr.to_string()
                     );
@@ -3954,7 +3975,7 @@ impl ServiceManager {
                 // available now as well.
                 if let Some(info) = self.inner.sled_info.get() {
                     info!(
-                        self.inner.log,
+                        log,
                         "Ensuring there is a default route";
                         "gateway" => ?info.underlay_address,
                     );
@@ -3968,7 +3989,7 @@ impl ServiceManager {
                         Err(e) => {
                             if e.to_string().contains("entry exists") {
                                 info!(
-                                    self.inner.log,
+                                    log,
                                     "Default route already exists";
                                     "gateway" => ?info.underlay_address,
                                 )
@@ -3984,7 +4005,7 @@ impl ServiceManager {
 
                     match service {
                         SwitchService::ManagementGatewayService => {
-                            info!(self.inner.log, "configuring MGS service");
+                            info!(log, "configuring MGS service");
                             // Remove any existing `config/address` values
                             // without deleting the property itself.
                             smfh.delpropvalue_default_instance(
@@ -4017,7 +4038,7 @@ impl ServiceManager {
                                 )?;
                             } else {
                                 error!(
-                                    self.inner.log,
+                                    log,
                                     concat!(
                                         "rack_id not present,",
                                         " even though underlay address exists"
@@ -4027,13 +4048,13 @@ impl ServiceManager {
 
                             smfh.refresh()?;
                             info!(
-                                self.inner.log,
+                                log,
                                 "refreshed MGS service with new configuration"
                             )
                         }
                         SwitchService::Dendrite { .. } => {
                             info!(
-                                self.inner.log,
+                                log,
                                 "configuring dendrite service"
                             );
                             if let Some(info) = self.inner.sled_info.get() {
@@ -4047,7 +4068,7 @@ impl ServiceManager {
                                 )?;
                             } else {
                                 info!(
-                                    self.inner.log,
+                                    log,
                                     "no rack_id/sled_id available yet"
                                 );
                             }
@@ -4080,7 +4101,7 @@ impl ServiceManager {
                                 }
                             }
                             smfh.refresh()?;
-                            info!(self.inner.log, "refreshed dendrite service with new configuration")
+                            info!(log, "refreshed dendrite service with new configuration")
                         }
                         SwitchService::Wicketd { .. } => {
                             if let Some(&address) = first_address {
@@ -4088,7 +4109,7 @@ impl ServiceManager {
                                     Ipv6Subnet::<AZ_PREFIX>::new(address);
 
                                 info!(
-                                    self.inner.log, "configuring wicketd";
+                                    log, "configuring wicketd";
                                     "rack_subnet" => %rack_subnet.net().addr(),
                                 );
 
@@ -4098,16 +4119,16 @@ impl ServiceManager {
                                 )?;
 
                                 smfh.refresh()?;
-                                info!(self.inner.log, "refreshed wicketd service with new configuration")
+                                info!(log, "refreshed wicketd service with new configuration")
                             } else {
                                 error!(
-                                    self.inner.log,
+                                    log,
                                     "underlay address unexpectedly missing",
                                 );
                             }
                         }
                         SwitchService::Lldpd { .. } => {
-                            info!(self.inner.log, "configuring lldp service");
+                            info!(log, "configuring lldp service");
                             smfh.delpropvalue_default_instance(
                                 "config/address",
                                 "*",
@@ -4120,7 +4141,7 @@ impl ServiceManager {
                                 )?;
                             }
                             smfh.refresh()?;
-                            info!(self.inner.log, "refreshed lldpd service with new configuration")
+                            info!(log, "refreshed lldpd service with new configuration")
                         }
                         SwitchService::Tfport { .. } => {
                             // Since tfport and dpd communicate using localhost,
@@ -4140,7 +4161,7 @@ impl ServiceManager {
                             // nothing to configure
                         }
                         SwitchService::Mgd => {
-                            info!(self.inner.log, "configuring mgd service");
+                            info!(log, "configuring mgd service");
                             smfh.delpropvalue_default_instance(
                                 "config/dns_servers",
                                 "*",
@@ -4173,12 +4194,12 @@ impl ServiceManager {
                             }
                             smfh.refresh()?;
                             info!(
-                                self.inner.log,
+                                log,
                                 "refreshed mgd service with new configuration"
                             )
                         }
                         SwitchService::MgDdm { mode } => {
-                            info!(self.inner.log, "configuring mg-ddm service");
+                            info!(log, "configuring mg-ddm service");
                             smfh.delpropvalue_default_instance(
                                 "config/mode",
                                 "*",
@@ -4219,7 +4240,7 @@ impl ServiceManager {
                                 }
                             }
                             smfh.refresh()?;
-                            info!(self.inner.log, "refreshed mg-ddm service with new configuration")
+                            info!(log, "refreshed mg-ddm service with new configuration")
                         }
                     }
                 }
@@ -4258,6 +4279,8 @@ impl ServiceManager {
             return Ok(());
         };
 
+        let log =
+            self.inner.log.new(o!("stage" => "switch zone initialization"));
         // The switch zone must use the ramdisk in order to receive requests
         // from RSS to initialize the rack. This enables the initialization of
         // trust quorum to derive disk encryption keys for U.2 devices. If the
@@ -4268,7 +4291,7 @@ impl ServiceManager {
         let zone_request =
             SwitchZoneConfigLocal { root, zone: request.clone() };
         let zone_args = ZoneArgs::Switch(&zone_request);
-        info!(self.inner.log, "Starting switch zone",);
+        info!(log, "Starting switch zone",);
         let zone = self
             .initialize_zone(zone_args, filesystems, data_links, None)
             .await?;

@@ -12,7 +12,7 @@ use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
-use crate::zone::{AddressRequest, ZONE_PREFIX};
+use crate::zone::{AddressRequest, ZONE_PREFIX, SWITCH_ZONE_NAME};
 use crate::zpool::{PathInPool, ZpoolName};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
@@ -469,7 +469,12 @@ impl RunningZone {
     /// Note that the zone must already be configured to be booted.
     pub async fn boot(zone: InstalledZone) -> Result<Self, BootError> {
         // Boot the zone.
-        info!(zone.log, "Booting {} zone", zone.name);
+        let boot_zone_log = format!("Booting {} zone", zone.name);
+        if zone.name == SWITCH_ZONE_NAME {
+            info!(zone.log, "{boot_zone_log}"; "stage" => "switch zone initialization");
+        } else {
+            info!(zone.log, "{boot_zone_log}");
+        }
 
         Zones::boot(&zone.name).await?;
 
