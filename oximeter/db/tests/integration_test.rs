@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::Context;
-use clickward::{Deployment, KeeperClient, KeeperError};
+use clickward::{Deployment, KeeperClient, KeeperError, KeeperId};
 use dropshot::test_util::log_prefix_for_test;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::test_setup_log;
@@ -60,18 +60,19 @@ async fn test_cluster() -> anyhow::Result<()> {
     deployment.deploy().context("failed to deploy")?;
 
     let client1 = Client::new_with_request_timeout(
-        deployment.http_addr(1)?,
+        deployment.http_addr(1.into())?,
         log,
         request_timeout,
     );
     let client2 = Client::new_with_request_timeout(
-        deployment.http_addr(2)?,
+        deployment.http_addr(2.into())?,
         log,
         request_timeout,
     );
     wait_for_ping(&client1).await?;
     wait_for_ping(&client2).await?;
-    wait_for_keepers(&deployment, (1..=num_keepers).collect()).await?;
+    wait_for_keepers(&deployment, (1..=num_keepers).map(KeeperId).collect())
+        .await?;
     println!("deploy setup time = {:?}", start.elapsed());
 
     let start = tokio::time::Instant::now();
@@ -125,7 +126,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     // Add a 3rd clickhouse server and wait for it to come up
     deployment.add_server().expect("failed to launch a 3rd clickhouse server");
     let client3 = Client::new_with_request_timeout(
-        deployment.http_addr(3)?,
+        deployment.http_addr(3.into())?,
         log,
         request_timeout,
     );
@@ -148,7 +149,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     // Let's stop replica 1 and write some data to replica 3
     // When we bring replica 1 back up we should see data get replicated to it.
     // Data should also get replicated to replica 2 immediately.
-    deployment.stop_server(1).unwrap();
+    deployment.stop_server(1.into()).unwrap();
 
     // Generate some new samples and insert them at replica3
     let samples = test_util::generate_test_samples(
@@ -168,14 +169,16 @@ async fn test_cluster() -> anyhow::Result<()> {
         .expect("failed to get samples from client2");
 
     // Restart node 1 and wait for the data to replicate
-    deployment.start_server(1).expect("failed to restart clickhouse server 1");
+    deployment
+        .start_server(1.into())
+        .expect("failed to restart clickhouse server 1");
     wait_for_ping(&client1).await.expect("failed to ping server 1");
     wait_for_num_points(&client1, samples.len() * 2)
         .await
         .expect("failed to get samples from client1");
 
     // Remove a keeper node
-    deployment.remove_keeper(2).expect("failed to remove keeper");
+    deployment.remove_keeper(KeeperId(2)).expect("failed to remove keeper");
 
     // Querying from any node should still work after a keeper is removed
     wait_for_num_points(&client1, samples.len() * 2)
@@ -195,7 +198,7 @@ async fn test_cluster() -> anyhow::Result<()> {
         .expect("failed to get samples from client1");
 
     // Stop another keeper
-    deployment.stop_keeper(1).expect("failed to stop keeper");
+    deployment.stop_keeper(1.into()).expect("failed to stop keeper");
 
     // We should still be able to query
     wait_for_num_points(&client3, samples.len() * 3)
@@ -216,8 +219,8 @@ async fn test_cluster() -> anyhow::Result<()> {
         .expect_err("insert succeeded without keeper quorum");
 
     // Bringing the keeper back up should allow us to insert again
-    deployment.start_keeper(1).expect("failed to restart keeper");
-    wait_for_keepers(&deployment, vec![1, 3])
+    deployment.start_keeper(1.into()).expect("failed to restart keeper");
+    wait_for_keepers(&deployment, [1, 3].map(KeeperId).into_iter().collect())
         .await
         .expect("failed to sync keepers");
     let samples = test_util::generate_test_samples(
@@ -233,9 +236,12 @@ async fn test_cluster() -> anyhow::Result<()> {
 
     // Add a new keeper to restore fault tolerance and try again
     deployment.add_keeper().expect("Failed to add keeeper");
-    wait_for_keepers(&deployment, vec![1, 3, 4])
-        .await
-        .expect("failed to sync keepers");
+    wait_for_keepers(
+        &deployment,
+        [1, 3, 4].map(KeeperId).into_iter().collect(),
+    )
+    .await
+    .expect("failed to sync keepers");
     let samples = test_util::generate_test_samples(
         input.n_projects,
         input.n_instances,
@@ -315,7 +321,7 @@ async fn wait_for_num_points(
 /// Wait for all keeper servers to be capable of handling commands
 async fn wait_for_keepers(
     deployment: &Deployment,
-    ids: Vec<u64>,
+    ids: Vec<KeeperId>,
 ) -> anyhow::Result<()> {
     let mut keepers = vec![];
     for id in ids {
