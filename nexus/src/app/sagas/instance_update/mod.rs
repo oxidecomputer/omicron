@@ -89,9 +89,9 @@
 //! reliably, we require that all mutations of an instance` record are performed
 //! by a saga. The following sagas currently touch the `instance` record:
 //!
-//! - [`instance_start`](super::instance_start)
-//! - [`instance_migrate`](super::instance_migrate)
-//! - [`instance_delete`](super::instance_delete)
+//! - [`instance_start`]
+//! - [`instance_migrate`]
+//! - [`instance_delete`]
 //! - `instance_update` (this saga)
 //!
 //! For most of these sagas, the instance state machine itself guards against
@@ -236,6 +236,48 @@
 //! fails to acquire the lock and exits, it activates the background task as
 //! well. This ensures that we will attempt the update again.
 //!
+//! ### On Unwinding
+//!
+//! Typically, when a Nexus saga unwinds, each node's reverse action undoes any
+//! changes made by the forward action. The `instance-update` saga, however, is
+//! a bit different: most of its nodes don't have reverse actions that undo the
+//! action they performed. This is because, unlike `instance-start`,
+//! `instance-migrate``, or `instance-delete`, the instance-update saga is
+//! **not** attempting to perform a state change for the instance that was
+//! requested by an operator. Instead, it is attempting to update the
+//! database and networking configuration *to match a state change that has
+//! already occurred.*
+//!
+//! Consider the folliwng: if we run an `instance-start` saga, and the instance
+//! cannot actually be started, of course we would want the unwinding saga to
+//! undo any database changes it has made, because the instance was not actually
+//! started. Failing to undo those changes when an `instance-start` saga unwinds
+//! would mean the database is left in a state that does not reflect reality, as
+//! the instance was not actually started. On the other hand, suppose an
+//! instance's active VMM shuts down and we start an `instance-update` saga to
+//! move it to the `Destroyed` state. Even if some action along the way fails, the
+//! instance is still `Destroyed``; that state transition has *already happened*
+//! on the sled, and unwinding the update saga cannot and should not un-destroy
+//! the VMM.
+//!
+//! So, unlike other sagas, we want to leave basically anything we've
+//! successfully done in place when unwinding, because even if the update is
+//! incomplete, we have still brought Nexus' understanding of the instance
+//! *closer* to reality. If there was something we weren't able to do, one of
+//! the instance-update-related RPWs[^rpws] will start a new update saga to try
+//! it again. Because saga actions are idempotent, attempting to do something
+//! that was already successfully performed a second time isn't a problem, and
+//! we don't need to undo it.
+//!
+//! The one exception to this is, as [discussed
+//! above](#the-instance-updater-lock-or-distributed-raii), unwinding instance
+//! update sagas MUST always release the instance-updater lock, so that a
+//! subsequent saga can update the instance. Thus, the saga actions which lock
+//! the instance have reverse actions that release the updater lock.
+//!
+//! [`instance_start`]: super::instance_start
+//! [`instance_migrate`]: super::instance_migrate
+//! [`instance_delete`]: super::instance_delete
 //! [instance_updater_lock]:
 //!     crate::app::db::datastore::DataStore::instance_updater_lock
 //! [instance_updater_inherit_lock]:
@@ -252,6 +294,8 @@
 //! [^3]: Even if the Nexus instance that processed the state update died
 //!     between when it wrote the state to CRDB and when it started the
 //!     requisite update saga!
+//! [^rpws]: Either the `instance-updater` or `abandoned-vmm-reaper` background
+//!     tasks, as appropriate.
 
 use super::{
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
@@ -1382,16 +1426,17 @@ mod test {
 
         // Unlike most other sagas, we actually don't unwind the work performed
         // by an update saga, as we would prefer that at least some of it
-        // succeeds. The only thing  that *needs* to be rolled back when an
+        // succeeds. The only thing that *needs* to be rolled back when an
         // instance-update saga fails is that the updater lock *MUST* be
-        // released so that a subsequent saga can run.
-        //
+        // released so that a subsequent saga can run. See the section "on
+        // unwinding" in the documentation comment at the top of the
+        // instance-update module for details.
+        assert_instance_unlocked(instance);
         // Additionally, we assert that the instance record is in a
         // consistent state, ensuring that all changes to the instance record
         // are atomic. This is important *because* we won't roll back changes
         // to the instance: if we're going to leave them in place, they can't
         // be partially applied, even if we unwound partway through the saga.
-        assert_instance_unlocked(instance);
         assert_instance_record_is_consistent(instance);
 
         // Throw away the instance so that subsequent unwinding
