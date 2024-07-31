@@ -274,7 +274,7 @@ cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
 ciborium = "0.2.2"
 clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
-clickward = { git = "https://github.com/oxidecomputer/clickward", rev = "bf0edff3382aaa43abc8122571226f86063c18dc" }
+clickward = { git = "https://github.com/oxidecomputer/clickward", rev = "604f0a676f504eb3784b6d6277c4274c5dbc0a27" }
 cockroach-admin-api = { path = "cockroach-admin/api" }
 cockroach-admin-client = { path = "clients/cockroach-admin-client" }
 cockroach-admin-types = { path = "cockroach-admin/types" }

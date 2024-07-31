@@ -3,7 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::Context;
-use clickward::{Deployment, KeeperClient, KeeperError, KeeperId};
+use clickward::{
+    BasePorts, Deployment, DeploymentConfig, KeeperClient, KeeperError,
+    KeeperId,
+};
 use dropshot::test_util::log_prefix_for_test;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::test_setup_log;
@@ -132,10 +135,23 @@ async fn test_cluster() -> anyhow::Result<()> {
     let path = parent_dir.join(format!("{prefix}-oximeter-clickward-test"));
     std::fs::create_dir(&path)?;
 
-    let mut deployment = Deployment::new_with_default_port_config(
-        path.clone(),
-        "oximeter_cluster".to_string(),
-    );
+    // We use the default ports in `test_schemas_disjoint` and must use a
+    // separate set here in case the two tests run concurrently.
+    let base_ports = BasePorts {
+        keeper: 19000,
+        raft: 19100,
+        clickhouse_tcp: 19200,
+        clickhouse_http: 19300,
+        clickhouse_interserver_http: 19400,
+    };
+
+    let config = DeploymentConfig {
+        path: path.clone(),
+        base_ports,
+        cluster_name: "oximeter_cluster".to_string(),
+    };
+
+    let mut deployment = Deployment::new(config);
 
     let num_keepers = 3;
     let num_replicas = 2;

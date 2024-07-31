@@ -1076,7 +1076,7 @@ checksum = "98cc8fbded0c607b7ba9dd60cd98df59af97e84d24e49c8557331cfc26d301ce"
 [[package]]
 name = "clickward"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/clickward?rev=bf0edff3382aaa43abc8122571226f86063c18dc#bf0edff3382aaa43abc8122571226f86063c18dc"
+source = "git+https://github.com/oxidecomputer/clickward?rev=604f0a676f504eb3784b6d6277c4274c5dbc0a27#604f0a676f504eb3784b6d6277c4274c5dbc0a27"
 dependencies = [
  "anyhow",
  "camino",
