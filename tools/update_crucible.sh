@@ -18,6 +18,7 @@ function usage {
 PACKAGES=(
   "crucible"
   "crucible-pantry"
+  "crucible-dtrace"
 )
 
 CRATES=(
