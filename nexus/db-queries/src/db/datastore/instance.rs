@@ -1128,9 +1128,7 @@ impl DataStore {
         let UpdaterLock { updater_id, locked_gen } = *lock;
 
         let result = diesel::update(dsl::instance)
-            // N.B. that we intentionally *don't* filter out instances that have
-            // been deleted. If the instance doesn't exist, whatever. It is, by
-            // definition, "unlocked"... :)
+            .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(instance_id))
             // Only unlock the instance if:
             // - the provided updater ID matches that of the saga that has
