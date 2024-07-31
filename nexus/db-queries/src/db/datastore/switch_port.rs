@@ -33,6 +33,7 @@ use ipnetwork::IpNetwork;
 use nexus_db_model::{
     SqlU16, SqlU32, SqlU8, SwitchPortBgpPeerConfigAllowExport,
     SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
+    SwitchPortGeometry,
 };
 use nexus_types::external_api::params;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -625,6 +626,116 @@ impl DataStore {
                 )
             }
         })
+    }
+
+    pub async fn switch_port_configuration_geometry_get(
+        &self,
+        opctx: &OpContext,
+        name_or_id: NameOrId,
+    ) -> LookupResult<SwitchPortGeometry> {
+        use db::schema::switch_port_settings as port_settings;
+        use db::schema::switch_port_settings::dsl as port_settings_dsl;
+        use db::schema::switch_port_settings_port_config as config;
+        use db::schema::switch_port_settings_port_config::dsl;
+
+        let query = match name_or_id {
+            NameOrId::Id(id) => {
+                // find port config using port settings id
+                port_settings_dsl::switch_port_settings
+                        .inner_join(dsl::switch_port_settings_port_config.on(
+                            dsl::port_settings_id.eq(port_settings_dsl::id),
+                        ))
+                        .filter(port_settings::id.eq(id))
+                        .into_boxed()
+            }
+            NameOrId::Name(name) => {
+                // find port config using port settings name
+                port_settings_dsl::switch_port_settings
+                        .inner_join(dsl::switch_port_settings_port_config.on(
+                            dsl::port_settings_id.eq(port_settings_dsl::id),
+                        ))
+                        .filter(port_settings::name.eq(name.to_string()))
+                        .into_boxed()
+            }
+        };
+
+        let geometry: SwitchPortGeometry = query
+            .select(config::geometry)
+            .limit(1)
+            .first_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(geometry)
+    }
+
+    pub async fn switch_port_configuration_geometry_set(
+        &self,
+        opctx: &OpContext,
+        name_or_id: NameOrId,
+        new_geometry: SwitchPortGeometry,
+    ) -> CreateResult<SwitchPortGeometry> {
+        use db::schema::switch_port_settings as port_settings;
+        use db::schema::switch_port_settings::dsl as port_settings_dsl;
+        use db::schema::switch_port_settings_port_config::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        self.transaction_retry_wrapper("switch_port_configuration_geometry_set")
+            .transaction(&conn, |conn| {
+                let identity = name_or_id.clone();
+                async move {
+                    // we query for the parent record instead of trusting that the
+                    // uuid is valid, since we don't have true referential integrity between
+                    // the tables
+                    let table =
+                        port_settings_dsl::switch_port_settings.inner_join(
+                            dsl::switch_port_settings_port_config
+                                .on(dsl::port_settings_id
+                                    .eq(port_settings_dsl::id)),
+                        );
+
+                    let query = match identity {
+                        NameOrId::Id(id) => {
+                            // find port config using port settings id
+                            table.filter(port_settings::id.eq(id)).into_boxed()
+                        }
+                        NameOrId::Name(name) => {
+                            // find port config using port settings name
+                            table
+                                .filter(
+                                    port_settings::name.eq(name.to_string()),
+                                )
+                                .into_boxed()
+                        }
+                    };
+
+                    // get settings id
+                    let port_settings_id: Uuid = query
+                        .select(port_settings_dsl::id)
+                        .limit(1)
+                        .first_async(&conn)
+                        .await?;
+
+                    let port_config = SwitchPortConfig {
+                        port_settings_id,
+                        geometry: new_geometry,
+                    };
+
+                    // create or update geometry
+                    diesel::insert_into(dsl::switch_port_settings_port_config)
+                        .values(port_config)
+                        .on_conflict(dsl::port_settings_id)
+                        .do_update()
+                        .set(dsl::geometry.eq(new_geometry))
+                        .execute_async(&conn)
+                        .await?;
+
+                    Ok(new_geometry)
+                }
+            })
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     // switch ports

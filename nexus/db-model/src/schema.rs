@@ -1871,3 +1871,8 @@ joinable!(instance_ssh_key -> instance (instance_id));
 allow_tables_to_appear_in_same_query!(sled, sled_instance);
 
 joinable!(network_interface -> probe (parent_id));
+
+allow_tables_to_appear_in_same_query!(
+    switch_port_settings,
+    switch_port_settings_port_config
+);

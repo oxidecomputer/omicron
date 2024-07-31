@@ -7282,7 +7282,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SwitchPortGeometry"
+                "$ref": "#/components/schemas/SwitchPortConfigCreate"
               }
             }
           },

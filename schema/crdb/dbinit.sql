@@ -4132,6 +4132,10 @@ CREATE INDEX IF NOT EXISTS lookup_region_snapshot_by_snapshot_id on omicron.publ
     snapshot_id
 );
 
+
+/* Lookup switch port settings by name */
+CREATE INDEX IF NOT EXISTS switch_port_settings_name ON omicron.public.switch_port_settings (name);
+
 /*
  * Keep this at the end of file so that the database does not contain a version
  * until it is fully populated.
@@ -4143,7 +4147,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '82.0.0', NULL)
+    (TRUE, NOW(), NOW(), '83.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

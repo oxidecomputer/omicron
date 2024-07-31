@@ -3951,11 +3951,13 @@ async fn networking_switch_port_configuration_geometry_view(
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let query = path_params.into_inner().configuration;
+        let config = path_params.into_inner().configuration;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
-        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
-        todo!("fetch geometry")
+        let geometry = nexus
+            .switch_port_configuration_geometry_get(&opctx, config)
+            .await?;
+        Ok(HttpResponseOk(geometry.into()))
     };
     apictx
         .context
@@ -3973,16 +3975,22 @@ async fn networking_switch_port_configuration_geometry_view(
 async fn networking_switch_port_configuration_geometry_set(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::SwitchPortSettingsInfoSelector>,
-    new_settings: TypedBody<params::SwitchPortGeometry>,
+    new_settings: TypedBody<params::SwitchPortConfigCreate>,
 ) -> Result<HttpResponseCreated<SwitchPortGeometry>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let query = path_params.into_inner().configuration;
+        let config = path_params.into_inner().configuration;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
-        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
-        todo!("set geometry")
+        let geometry = nexus
+            .switch_port_configuration_geometry_set(
+                &opctx,
+                config,
+                new_settings.into_inner().geometry.into(),
+            )
+            .await?;
+        Ok(HttpResponseCreated(geometry.into()))
     };
     apictx
         .context
