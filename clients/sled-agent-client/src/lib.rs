@@ -509,19 +509,28 @@ impl TestInterfaces for Client {
     }
 }
 
-// N.B. that this needs to be kept in sync with the types defined in
-// `sled_agent::sim`! AFAICT this is the first simulated-only interface that has
-// a body, so I wasn't sure whether there was a nice way to do this without
-// creating a cyclic dependency or taking a giant pile of query params instead
-// of JSON...
+/// Parameters to the `/instances/{id}/sim-migration-source` test API.
+///
+/// This message type is not included in the OpenAPI spec, because this API
+/// exists only in test builds.
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct SimulateMigrationSource {
+    /// The ID of the migration out of the instance's current active VMM.
     pub migration_id: Uuid,
+    /// What migration result (success or failure) to simulate.
     pub result: SimulatedMigrationResult,
 }
 
+/// The result of a simulated migration out from an instance's current active
+/// VMM.
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub enum SimulatedMigrationResult {
+    /// Simulate a successful migration out.
     Success,
+    /// Simulate a failed migration out.
+    ///
+    /// # Note
+    ///
+    /// This is not currently implemented by the simulated sled-agent.
     Failure,
 }
