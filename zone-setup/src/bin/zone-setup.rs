@@ -4,8 +4,11 @@
 
 //! CLI to set up zone configuration
 
-use anyhow::anyhow;
-use clap::{arg, command, value_parser, Arg, ArgMatches, Command};
+use anyhow::{anyhow, Context};
+use clap::builder::{
+    NonEmptyStringValueParser, StringValueParser, TypedValueParser,
+};
+use clap::{ArgAction, Args, Parser, Subcommand};
 use illumos_utils::addrobj::{AddrObject, IPV6_LINK_LOCAL_ADDROBJ_NAME};
 use illumos_utils::ipadm::Ipadm;
 use illumos_utils::route::{Gateway, Route};
@@ -16,290 +19,189 @@ use omicron_common::backoff::{retry_notify, retry_policy_local, BackoffError};
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::services::SWITCH_ZONE_BASEBOARD_FILE;
-use serde_json::Value;
+use oxnet::Ipv6Net;
 use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
 use slog::{info, Logger};
+use std::fmt::Write as _;
 use std::fs::{metadata, read_to_string, set_permissions, write, OpenOptions};
-use std::io::Write;
+use std::io::Write as _;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::unix::fs::chown;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use uzers::{get_group_by_name, get_user_by_name};
 use zone_setup::switch_zone_user::SwitchZoneUser;
 
-pub const HOSTS_FILE: &str = "/etc/inet/hosts";
-pub const CHRONY_CONFIG_FILE: &str = "/etc/inet/chrony.conf";
-pub const LOGADM_CONFIG_FILE: &str = "/etc/logadm.d/chrony.logadm.conf";
-pub const ROOT: &str = "root";
-pub const SYS: &str = "sys";
-
-pub const COMMON_NW_CMD: &str = "common-networking";
-pub const OPTE_INTERFACE_CMD: &str = "opte-interface";
-pub const CHRONY_SETUP_CMD: &str = "chrony-setup";
-pub const SWITCH_ZONE_SETUP_CMD: &str = "switch-zone";
-
-fn parse_ip(s: &str) -> anyhow::Result<IpAddr> {
-    if s == "unknown" {
-        return Err(anyhow!("ERROR: Missing input value"));
-    };
-    s.parse().map_err(|_| anyhow!("ERROR: Invalid IP address"))
+#[derive(Debug, Parser)]
+struct ZoneSetup {
+    #[command(subcommand)]
+    command: ZoneSetupCommand,
 }
 
-fn parse_ipv4(s: &str) -> anyhow::Result<Ipv4Addr> {
-    if s == "unknown" {
-        return Err(anyhow!("ERROR: Missing input value"));
-    };
-    s.parse().map_err(|_| anyhow!("ERROR: Invalid IPv4 address"))
+#[derive(Debug, Subcommand)]
+enum ZoneSetupCommand {
+    /// Sets up common networking configuration across all zones
+    CommonNetworking(CommonNetworkingArgs),
+    /// Sets up OPTE interface
+    OpteInterface(OpteInterfaceArgs),
+    /// Sets up Chrony configuration for NTP zone
+    ChronySetup(ChronySetupArgs),
+    /// Sets up switch zone configuration
+    SwitchZone(SwitchZoneArgs),
 }
 
-fn parse_ipv6(s: &str) -> anyhow::Result<Ipv6Addr> {
-    if s == "unknown" {
-        return Err(anyhow!("ERROR: Missing input value"));
-    };
-    s.parse().map_err(|_| anyhow!("ERROR: Invalid IPv6 address"))
-}
-
-fn parse_datalink(s: &str) -> anyhow::Result<String> {
-    if s == "unknown" {
-        return Err(anyhow!("ERROR: Missing data link"));
-    };
-    s.parse().map_err(|_| anyhow!("ERROR: Invalid data link"))
-}
-
-fn parse_opte_iface(s: &str) -> anyhow::Result<String> {
-    if s == "unknown" {
-        return Err(anyhow!("ERROR: Missing OPTE interface"));
-    };
-    s.parse().map_err(|_| anyhow!("ERROR: Invalid OPTE interface"))
-}
-
-fn parse_chrony_conf(s: &str) -> anyhow::Result<String> {
-    if s == "" {
-        return Err(anyhow!("ERROR: Missing chrony configuration file"));
-    };
-
-    s.parse().map_err(|_| anyhow!("ERROR: Invalid chrony configuration file"))
-}
-
-fn parse_wicket_conf(s: &str) -> anyhow::Result<String> {
-    if s == "" {
-        return Err(anyhow!("ERROR: Missing baseboard configuration file"));
-    };
-
-    s.parse()
-        .map_err(|_| anyhow!("ERROR: Invalid baseboard configuration file"))
-}
-
-fn parse_baseboard_info(s: &str) -> anyhow::Result<String> {
-    if s == "" {
-        return Err(anyhow!("ERROR: Missing baseboard information"));
-    };
-
-    let _: Value = serde_json::from_str(s)
-        .map_err(|_| anyhow!("ERROR: Value cannot be parsed as JSON"))?;
-
-    s.parse()
-        .map_err(|_| anyhow!("ERROR: Invalid baseboard configuration file"))
-}
-
-fn parse_boundary(s: &str) -> anyhow::Result<bool> {
-    s.parse().map_err(|_| anyhow!("ERROR: Invalid boundary input"))
-}
-
-#[tokio::main]
-async fn main() {
-    if let Err(message) = do_run().await {
-        fatal(message);
+// Some of our `String` cli arguments may be set to the literal "unknown" if
+// sled-agent hasn't populated our SMF config correctly. Reject this at argument
+// parsing time.
+fn parse_string_rejecting_unknown(s: &str) -> anyhow::Result<String> {
+    if s.is_empty() || s == "unknown" {
+        Err(anyhow!("missing input value"))
+    } else {
+        Ok(s.to_string())
     }
 }
 
-async fn do_run() -> Result<(), CmdError> {
+#[derive(Debug, Args)]
+struct CommonNetworkingArgs {
+    #[arg(short, long, value_parser = parse_string_rejecting_unknown)]
+    datalink: String,
+    // The `num_args = 0..=1` here allows passing the `-g` gateway flag with no
+    // value; the SMF manifest for the switch zone will do this when the
+    // underlay isn't up yet.
+    #[arg(short, long, num_args = 0..=1)]
+    gateway: Option<Ipv6Addr>,
+    /// list of static addresses
+    #[arg(short, long, num_args = 1..)]
+    static_addrs: Vec<Ipv6Addr>,
+}
+
+#[derive(Debug, Args)]
+struct OpteInterfaceArgs {
+    #[arg(short, long, value_parser = parse_string_rejecting_unknown)]
+    interface: String,
+    /// OPTE-specific gateway for external connectivity via boundary services
+    #[arg(short, long)]
+    gateway: Ipv4Addr,
+    #[arg(short = 'p', long)]
+    ip: IpAddr,
+}
+
+#[derive(Debug, Args)]
+struct ChronySetupArgs {
+    /// chrony configuration file
+    #[arg(short, long, default_value = CHRONY_CONFIG_FILE)]
+    file: PathBuf,
+    /// whether this is a boundary or internal NTP zone
+    #[arg(short, long, action = ArgAction::Set)]
+    boundary: bool,
+    /// list of NTP servers
+    #[arg(
+        short,
+        long,
+        num_args = 1..,
+        value_parser = NonEmptyStringValueParser::default(),
+    )]
+    servers: Vec<String>,
+    /// allowed IPv6 range
+    #[arg(short, long)]
+    allow: Ipv6Net,
+}
+
+// The default clap parser for `serde_json::Value` is to wrap the argument in a
+// `Value::String`; this value parser parses the argument as JSON instead.
+fn json_value_parser() -> impl TypedValueParser<Value = serde_json::Value> {
+    StringValueParser::new().try_map(|s| s.parse())
+}
+
+#[derive(Debug, Args)]
+struct SwitchZoneArgs {
+    /// path to the baseboard file
+    #[arg(short, long, default_value = SWITCH_ZONE_BASEBOARD_FILE)]
+    baseboard_file: PathBuf,
+    /// baseboard info JSON blob
+    #[arg(short = 'i', long, value_parser = json_value_parser())]
+    baseboard_info: serde_json::Value,
+    /// bootstrap IPv6 address
+    #[arg(short = 'a', long)]
+    bootstrap_addr: Ipv6Addr,
+    /// bootstrap VNIC name
+    #[arg(
+        short = 'v',
+        long,
+        value_parser = NonEmptyStringValueParser::default(),
+    )]
+    bootstrap_vnic: String,
+    /// global zone local link IPv6 address
+    #[arg(short, long)]
+    gz_local_link_addr: Ipv6Addr,
+    /// list of links that require link local addresses
+    #[arg(
+        short,
+        long,
+        num_args = 0..,
+        value_parser = NonEmptyStringValueParser::default(),
+    )]
+    link_local_links: Vec<String>,
+}
+
+const HOSTS_FILE: &str = "/etc/inet/hosts";
+const CHRONY_CONFIG_FILE: &str = "/etc/inet/chrony.conf";
+const LOGADM_CONFIG_FILE: &str = "/etc/logadm.d/chrony.logadm.conf";
+const ROOT: &str = "root";
+const SYS: &str = "sys";
+
+#[tokio::main]
+async fn main() {
+    if let Err(err) = do_run().await {
+        fatal(CmdError::Failure(err));
+    }
+}
+
+async fn do_run() -> anyhow::Result<()> {
     let log = dropshot::ConfigLogging::File {
         path: "/dev/stderr".into(),
         level: dropshot::ConfigLoggingLevel::Info,
         if_exists: dropshot::ConfigLoggingIfExists::Append,
     }
     .to_logger("zone-setup")
-    .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+    .context("failed to construct stderr logger")?;
 
-    let matches = command!()
-        .subcommand(
-            Command::new(COMMON_NW_CMD)
-                .about(
-                    "Sets up common networking configuration across all zones",
-                )
-                .arg(
-                    arg!(
-                        -d --datalink <STRING> "datalink"
-                    )
-                    .required(true)
-                    .value_parser(parse_datalink),
-                )
-                .arg(
-                    // We are taking a list of values so that clap
-                    // allows us to set a flag without values in the
-                    // SMF manifest. This will happen with the switch
-                    // zone when the underlay isn't up yet.
-                    Arg::new("gateway")
-                    .short('g')
-                    .long("gateway")
-                    .num_args(0..=1)
-                    .value_parser(value_parser!(Ipv6Addr))
-                    .help("Underlay address")
-                )
-                .arg(
-                    Arg::new("static_addrs")
-                    .short('s')
-                    .long("static_addrs")
-                    .num_args(1..)
-                    .value_delimiter(' ')
-                    .value_parser(parse_ipv6)
-                    .help("List of static addresses separated by a space")
-                    .required(true)
-                ),
-        )
-        .subcommand(
-            Command::new(OPTE_INTERFACE_CMD)
-                .about("Sets up OPTE interface")
-                .arg(
-                    arg!(
-                        -i --opte_interface <STRING> "opte_interface"
-                    )
-                    .required(true)
-                    .value_parser(parse_opte_iface),
-                )
-                .arg(
-                    arg!(
-                        -g --opte_gateway <Ipv4Addr> "opte_gateway"
-                    )
-                    .required(true)
-                    .value_parser(parse_ipv4),
-                )
-                .arg(
-                    arg!(
-                        -p --opte_ip <IpAddr> "opte_ip"
-                    )
-                    .required(true)
-                    .value_parser(parse_ip),
-                ),
-        )
-        .subcommand(
-            Command::new(SWITCH_ZONE_SETUP_CMD)
-                .about("Sets up switch zone configuration")
-                .arg(
-                    arg!(
-                        -b --baseboard_file <STRING> "baseboard_file"
-                    )
-                    .default_value(SWITCH_ZONE_BASEBOARD_FILE)
-                    .value_parser(parse_wicket_conf),
-                )
-                .arg(
-                    arg!(
-                        -i --baseboard_info <STRING> "baseboard_info"
-                    )
-                    .required(true)
-                    .value_parser(parse_baseboard_info),
-                )
-                .arg(
-                    arg!(
-                        -a --bootstrap_addr <Ipv6Addr> "bootstrap_addr"
-                    )
-                    .required(true)
-                    .value_parser(parse_ipv6),
-                )
-                .arg(
-                    arg!(
-                        -v --bootstrap_vnic <String> "bootstrap_vnic"
-                    )
-                    .required(true),
-                )
-                .arg(
-                    arg!(
-                        -g --gz_local_link_addr <Ipv6Addr> "gz_local_link_addr"
-                    )
-                    .required(true)
-                    .value_parser(parse_ipv6),
-                )
-                .arg(
-                    Arg::new("link_local_links")
-                    .short('l')
-                    .long("link_local_links")
-                    .num_args(0..)
-                    .value_delimiter(' ')
-                    .value_parser(value_parser!(String))
-                    .help("List of links that require link local addresses")
-                ),
-        )
-        .subcommand(
-            Command::new(CHRONY_SETUP_CMD)
-                .about("Sets up Chrony configuration for NTP zone")
-                .arg(
-                    arg!(-f --file <String> "Chrony configuration file")
-                    .default_value(CHRONY_CONFIG_FILE)
-                    .value_parser(parse_chrony_conf)
-                )
-                .arg(
-                    arg!(-b --boundary <bool> "Whether this is a boundary or internal NTP zone")
-                    .required(true)
-                    .value_parser(parse_boundary),
-                )
-                .arg(
-                    Arg::new("servers")
-                    .short('s')
-                    .long("servers")
-                    .num_args(1..)
-                    .value_delimiter(' ')
-                    .value_parser(value_parser!(String))
-                    .help("List of NTP servers separated by a space")
-                    .required(true)
-                )
-                .arg(
-                    arg!(-a --allow <String> "Allowed IPv6 range")
-                    .num_args(0..=1)
-                ),
-        )
-        .get_matches();
+    let args = ZoneSetup::parse();
 
-    if let Some(matches) = matches.subcommand_matches(COMMON_NW_CMD) {
-        common_nw_set_up(matches, log.clone()).await?;
+    match args.command {
+        ZoneSetupCommand::CommonNetworking(args) => {
+            common_nw_set_up(args, &log).await
+        }
+        ZoneSetupCommand::OpteInterface(args) => {
+            opte_interface_set_up(args, &log).await
+        }
+        ZoneSetupCommand::ChronySetup(args) => chrony_setup(args, &log).await,
+        ZoneSetupCommand::SwitchZone(args) => {
+            switch_zone_setup(args, &log).await
+        }
     }
-
-    if let Some(matches) = matches.subcommand_matches(OPTE_INTERFACE_CMD) {
-        opte_interface_set_up(matches, log.clone()).await?;
-    }
-
-    if let Some(matches) = matches.subcommand_matches(CHRONY_SETUP_CMD) {
-        chrony_setup(matches, log.clone()).await?;
-    }
-
-    if let Some(matches) = matches.subcommand_matches(SWITCH_ZONE_SETUP_CMD) {
-        switch_zone_setup(matches, log.clone()).await?;
-    }
-
-    Ok(())
 }
 
 async fn switch_zone_setup(
-    matches: &ArgMatches,
-    log: Logger,
-) -> Result<(), CmdError> {
-    let file: &String = matches.get_one("baseboard_file").unwrap();
-    let info: &String = matches.get_one("baseboard_info").unwrap();
-    let bootstrap_addr: &Ipv6Addr = matches.get_one("bootstrap_addr").unwrap();
-    let bootstrap_vnic: &String = matches.get_one("bootstrap_vnic").unwrap();
-    let gz_local_link_addr: &Ipv6Addr =
-        matches.get_one("gz_local_link_addr").unwrap();
-    let links = if let Some(l) = matches.get_many::<String>("link_local_links")
-    {
-        Some(l.collect::<Vec<_>>())
-    } else {
-        None
-    };
+    args: SwitchZoneArgs,
+    log: &Logger,
+) -> anyhow::Result<()> {
+    let SwitchZoneArgs {
+        baseboard_file: file,
+        baseboard_info: info,
+        bootstrap_addr,
+        bootstrap_vnic,
+        gz_local_link_addr,
+        link_local_links: links,
+    } = args;
 
-    info!(&log, "Generating baseboard.json file"; "baseboard file" => ?file, "baseboard info" => ?info);
-    generate_switch_zone_baseboard_file(file, info)?;
+    info!(
+        log, "Generating baseboard.json file";
+        "baseboard file" => %file.display(),
+        "baseboard info" => ?info,
+    );
+    generate_switch_zone_baseboard_file(&file, info)?;
 
-    info!(&log, "Setting up the users required for wicket and support");
+    info!(log, "Setting up the users required for wicket and support");
     let wicket_user = SwitchZoneUser::new(
         "wicket".to_string(),
         "wicket".to_string(),
@@ -315,178 +217,149 @@ async fn switch_zone_setup(
         false,
         "/bin/bash".to_string(),
     )
-    .with_homedir("/home/support".to_string())
+    .with_homedir("/home/support".into())
     .with_profiles(vec!["Primary Administrator".to_string()]);
 
-    let users = vec![wicket_user, support_user];
+    let users = [wicket_user, support_user];
     for u in users {
-        u.setup_switch_zone_user(&log)?;
+        u.setup_switch_zone_user(log)?;
     }
 
-    if let Some(links) = links {
-        info!(&log, "Ensuring link local links"; "links" => ?links);
-        for link in &links {
-            Zones::ensure_has_link_local_v6_address(
-                None,
-                &AddrObject::new(link, IPV6_LINK_LOCAL_ADDROBJ_NAME).unwrap(),
-            )
-            .map_err(|err| {
-                CmdError::Failure(anyhow!(
-                    "Could not ensure link local link {:?}: {}",
-                    links,
-                    err
-                ))
-            })?;
-        }
+    if links.is_empty() {
+        info!(log, "No link local links to be configured");
     } else {
-        info!(&log, "No link local links to be configured");
-    };
-
-    info!(&log, "Ensuring bootstrap address exists in zone";
-    "bootstrap address" => ?bootstrap_addr, "bootstrap vnic" => ?bootstrap_vnic);
-    let addrtype =
-        AddressRequest::new_static(std::net::IpAddr::V6(*bootstrap_addr), None);
-    let addrobj_name = "bootstrap6";
-    let addrobj =
-        AddrObject::new(&bootstrap_vnic, addrobj_name).map_err(|err| {
-            CmdError::Failure(anyhow!(
-                "Could not create new addrobj {:?}: {}",
-                addrobj_name,
-                err
-            ))
-        })?;
-
-    let _ = Zones::create_address_internal(None, &addrobj, addrtype).map_err(
-        |err| {
-            CmdError::Failure(anyhow!(
-                "Could not create bootstrap address {} {:?}: {}",
-                addrobj,
-                addrtype,
-                err
-            ))
-        },
-    )?;
+        info!(
+            log, "Ensuring link local links";
+            "links" => ?links,
+        );
+        for link in &links {
+            let addrobj = AddrObject::new(link, IPV6_LINK_LOCAL_ADDROBJ_NAME)
+                .with_context(|| {
+                format!("invalid link name for addrobj: {link:?}")
+            })?;
+            Zones::ensure_has_link_local_v6_address(None, &addrobj)
+                .with_context(|| {
+                    format!("Could not ensure link local link {link:?}")
+                })?;
+        }
+    }
 
     info!(
-        &log,
-        "Forwarding bootstrap traffic via {} to {}",
-        bootstrap_vnic,
-        gz_local_link_addr
+        log, "Ensuring bootstrap address exists in zone";
+        "bootstrap address" => ?bootstrap_addr,
+        "bootstrap vnic" => ?bootstrap_vnic,
+    );
+    let addrtype =
+        AddressRequest::new_static(std::net::IpAddr::V6(bootstrap_addr), None);
+    let addrobj_name = "bootstrap6";
+    let addrobj =
+        AddrObject::new(&bootstrap_vnic, addrobj_name).with_context(|| {
+            format!("Could not create new addrobj {addrobj_name:?}")
+        })?;
+
+    let _ = Zones::create_address_internal(None, &addrobj, addrtype)
+        .with_context(|| {
+            format!("Could not create bootstrap address {addrobj} {addrtype:?}")
+        })?;
+
+    info!(
+        log,
+        "Forwarding bootstrap traffic via {bootstrap_vnic} to \
+         {gz_local_link_addr}",
     );
     Route::add_bootstrap_route(
         BOOTSTRAP_PREFIX,
-        *gz_local_link_addr,
+        gz_local_link_addr,
         &bootstrap_vnic,
     )
-    .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+    .with_context(|| {
+        format!(
+            "Could not add bootstrap route via {bootstrap_vnic} \
+             to {gz_local_link_addr}"
+        )
+    })?;
 
     Ok(())
 }
 
 fn generate_switch_zone_baseboard_file(
-    file: &String,
-    info: &String,
-) -> Result<(), CmdError> {
-    let mut config_file = OpenOptions::new()
+    file: &Path,
+    info: serde_json::Value,
+) -> anyhow::Result<()> {
+    let config_file = OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
         .open(file)
-        .map_err(|err| {
-            CmdError::Failure(anyhow!(
-                "Could not create baseboard configuration file {}: {}",
-                file,
-                err
-            ))
+        .with_context(|| {
+            format!(
+                "Could not create baseboard configuration file {}",
+                file.display(),
+            )
         })?;
-    config_file.write(info.as_bytes()).map_err(|err| {
-        CmdError::Failure(anyhow!(
-            "Could not write to baseboard configuration file {}: {}",
-            file,
-            err
-        ))
+    serde_json::to_writer(config_file, &info).with_context(|| {
+        format!(
+            "Could not write to baseboard configuration file {}",
+            file.display(),
+        )
     })?;
     Ok(())
 }
 
 async fn chrony_setup(
-    matches: &ArgMatches,
-    log: Logger,
-) -> Result<(), CmdError> {
-    let servers =
-        matches.get_many::<String>("servers").unwrap().collect::<Vec<_>>();
-    let allow: Option<&String> = matches.get_one("allow");
+    args: ChronySetupArgs,
+    log: &Logger,
+) -> anyhow::Result<()> {
+    info!(log, "running chrony setup"; "args" => ?args);
 
-    let file: &String = matches.get_one("file").unwrap();
-    let is_boundary: &bool = matches.get_one("boundary").unwrap();
-    println!(
-        "servers: {:?}\nfile: {}\nallow: {:?}\nboundary: {:?}",
-        servers, file, allow, is_boundary
-    );
-
-    generate_chrony_config(&log, is_boundary, allow, file, servers)?;
+    generate_chrony_config(args, log)?;
 
     // The NTP zone delivers a logadm fragment into /etc/logadm.d/ that needs to
-    // be added to the system's /etc/logadm.conf. Unfortunately, the service which
-    // does this - system/logadm-upgrade - only processes files with mode 444 and
-    // root:sys ownership so we need to adjust things here (until omicron package
-    // supports including ownership and permissions in the generated tar files).
-    info!(&log, "Setting mode 444 and root:sys ownership to logadm fragment file"; "logadm config" => ?LOGADM_CONFIG_FILE);
+    // be added to the system's /etc/logadm.conf. Unfortunately, the service
+    // which does this - system/logadm-upgrade - only processes files with mode
+    // 444 and root:sys ownership so we need to adjust things here (until
+    // omicron package supports including ownership and permissions in the
+    // generated tar files).
+    info!(
+        log, "Setting mode 444 and root:sys ownership to logadm fragment file";
+        "logadm config" => ?LOGADM_CONFIG_FILE,
+    );
     set_permissions_for_logadm_config()?;
 
-    info!(&log, "Updating logadm"; "logadm config" => ?LOGADM_CONFIG_FILE);
+    info!(
+        log, "Updating logadm";
+        "logadm config" => ?LOGADM_CONFIG_FILE,
+    );
     Svcadm::refresh_logadm_upgrade()
-        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+        .context("failed to refresh logadm-upgrade")?;
 
     Ok(())
 }
 
-fn set_permissions_for_logadm_config() -> Result<(), CmdError> {
+fn set_permissions_for_logadm_config() -> anyhow::Result<()> {
     let mut perms = metadata(LOGADM_CONFIG_FILE)
-        .map_err(|err| {
-            CmdError::Failure(anyhow!(
-        "Could not retrieve chrony logadm configuration file {} metadata: {}",
-        LOGADM_CONFIG_FILE,
-        err
-    ))
+        .with_context(|| {
+            format!("failed to read metadata of {LOGADM_CONFIG_FILE}")
         })?
         .permissions();
     perms.set_readonly(true);
-    set_permissions(LOGADM_CONFIG_FILE, perms).map_err(|err| {
-            CmdError::Failure(anyhow!(
-                "Could not set 444 permissions on chrony logadm configuration file {}: {}",
-                LOGADM_CONFIG_FILE,
-                err
-            ))
-        })?;
+    set_permissions(LOGADM_CONFIG_FILE, perms).with_context(|| {
+        format!("failed to set 444 permissions on {LOGADM_CONFIG_FILE}")
+    })?;
 
-    let root_uid = match get_user_by_name(ROOT) {
-        Some(user) => user.uid(),
-        None => {
-            return Err(CmdError::Failure(anyhow!(format!(
-                "Could not retrieve ID from user: {}",
-                ROOT
-            ))))
-        }
-    };
+    let root_uid = get_user_by_name(ROOT)
+        .with_context(|| format!("failed to look up user {ROOT}"))?
+        .uid();
 
-    let sys_gid = match get_group_by_name(SYS) {
-        Some(group) => group.gid(),
-        None => {
-            return Err(CmdError::Failure(anyhow!(format!(
-                "Could not retrieve ID from group: {}",
-                SYS
-            ))))
-        }
-    };
+    let sys_gid = get_group_by_name(SYS)
+        .with_context(|| format!("failed to look up group {SYS}"))?
+        .gid();
 
-    chown(LOGADM_CONFIG_FILE, Some(root_uid), Some(sys_gid)).map_err(
-        |err| {
-            CmdError::Failure(anyhow!(
-                "Could not set ownership of logadm configuration file {}: {}",
-                LOGADM_CONFIG_FILE,
-                err
-            ))
+    chown(LOGADM_CONFIG_FILE, Some(root_uid), Some(sys_gid)).with_context(
+        || {
+            format!(
+            "could not set ownership to {ROOT}:{SYS} on {LOGADM_CONFIG_FILE}"
+            )
         },
     )?;
 
@@ -494,14 +367,10 @@ fn set_permissions_for_logadm_config() -> Result<(), CmdError> {
 }
 
 fn generate_chrony_config(
+    args: ChronySetupArgs,
     log: &Logger,
-    is_boundary: &bool,
-    allow: Option<&String>,
-    file: &String,
-    servers: Vec<&String>,
-) -> Result<(), CmdError> {
-    let internal_ntp_tpl = String::from(
-        "#
+) -> anyhow::Result<()> {
+    let internal_ntp_tpl = "#
 # Configuration file for an internal NTP server - one which communicates with
 # boundary NTP servers within the rack.
 #
@@ -527,11 +396,9 @@ makestep 1.0 3
 leapsecmode slew
 maxslewrate 2708.333
 
-",
-    );
+";
 
-    let boundary_ntp_tpl = String::from(
-        "#
+    let boundary_ntp_tpl = "#
 # Configuration file for a boundary NTP server - one which communicates with
 # NTP servers outside the rack.
 #
@@ -573,42 +440,44 @@ makestep 0.1 3
 leapsecmode slew
 maxslewrate 2708.333
 
-",
-    );
+";
 
-    let mut contents =
-        if *is_boundary { boundary_ntp_tpl } else { internal_ntp_tpl };
+    let ChronySetupArgs {
+        file: config_path,
+        boundary: is_boundary,
+        servers,
+        allow,
+    } = args;
 
-    if let Some(allow) = allow {
-        contents = contents.replace("@ALLOW@", &allow.to_string());
-    }
+    let mut new_config =
+        if is_boundary { boundary_ntp_tpl } else { internal_ntp_tpl }
+            .to_string();
 
-    let new_config = if *is_boundary {
+    new_config = new_config.replace("@ALLOW@", &allow.to_string());
+
+    if is_boundary {
         for s in servers {
-            let str_line = format!(
-                "pool {} iburst maxdelay 0.1 minpoll 0 maxpoll 3 maxsources 16\n",
-                s
-            );
-            contents.push_str(&str_line)
+            writeln!(
+                &mut new_config,
+                "pool {s} iburst maxdelay 0.1 minpoll 0 maxpoll 3 maxsources 16"
+            )
+            .expect("write to String is infallible");
         }
-        contents
     } else {
         for s in servers {
-            let str_line = format!("server {} iburst minpoll 0 maxpoll 4\n", s);
-            contents.push_str(&str_line)
+            writeln!(&mut new_config, "server {s} iburst minpoll 0 maxpoll 4")
+                .expect("write to String is infallible");
         }
-        contents
-    };
+    }
 
     // We read the contents from the old configuration file if it existed
     // so that we can verify if it changed.
-    let old_file = if Path::exists(Path::new(file)) {
-        Some(read_to_string(file).map_err(|err| {
-            CmdError::Failure(anyhow!(
-                "Could not read old chrony configuration file {}: {}",
-                file,
-                err
-            ))
+    let old_file = if config_path.exists() {
+        Some(read_to_string(&config_path).with_context(|| {
+            format!(
+                "failed reading old chrony config file {}",
+                config_path.display(),
+            )
         })?)
     } else {
         None
@@ -618,142 +487,109 @@ maxslewrate 2708.333
         .write(true)
         .create(true)
         .truncate(true)
-        .open(file)
-        .map_err(|err| {
-            CmdError::Failure(anyhow!(
-                "Could not create chrony configuration file {}: {}",
-                file,
-                err
-            ))
+        .open(&config_path)
+        .with_context(|| {
+            format!(
+                "failed to create chrony config config_path {}",
+                config_path.display(),
+            )
         })?;
-    config_file.write(new_config.as_bytes()).map_err(|err| {
-        CmdError::Failure(anyhow!(
-            "Could not write to chrony configuration file {}: {}",
-            file,
-            err
-        ))
+    config_file.write(new_config.as_bytes()).with_context(|| {
+        format!(
+            "failed writing chrony configuration file {}",
+            config_path.display(),
+        )
     })?;
 
-    if old_file.clone().is_some_and(|f| f != new_config) {
-        info!(&log, "Chrony configuration file has changed";
-        "old configuration file" => ?old_file, "new configuration file" => ?new_config,);
+    if let Some(old_config) = old_file {
+        if old_config != new_config {
+            info!(
+                log, "Chrony configuration file has changed";
+                "old configuration file" => ?old_config,
+                "new configuration file" => ?new_config,
+            );
+        }
     }
 
     Ok(())
 }
 
 async fn common_nw_set_up(
-    matches: &ArgMatches,
-    log: Logger,
-) -> Result<(), CmdError> {
-    let datalink: &String = matches.get_one("datalink").unwrap();
-    let static_addrs = matches
-        .get_many::<Ipv6Addr>("static_addrs")
-        .unwrap()
-        .collect::<Vec<_>>();
-    let gateway = if let Some(g) = matches.get_many::<Ipv6Addr>("gateway") {
-        Some(g.collect::<Vec<_>>())
-    } else {
-        None
-    };
-    let zonename = zone::current().await.map_err(|err| {
-        CmdError::Failure(anyhow!(
-            "Could not determine local zone name: {}",
-            err
-        ))
+    args: CommonNetworkingArgs,
+    log: &Logger,
+) -> anyhow::Result<()> {
+    let zonename =
+        zone::current().await.context("could not determine local zone name")?;
+    let CommonNetworkingArgs { datalink, gateway, static_addrs } = args;
+
+    info!(
+        log,
+        "Ensuring IP interface exists on datalink";
+        "datalink" => &datalink
+    );
+    Ipadm::ensure_ip_interface_exists(&datalink).with_context(|| {
+        format!(
+            "failed to ensure temporary IP interface on datalink {datalink}",
+        )
     })?;
 
     info!(
-        &log,
-        "Ensuring IP interface exists on datalink";
-        "datalink" => datalink
+        log, "Setting MTU to 9000 for IPv6 and IPv4";
+        "datalink" => &datalink,
     );
-    Ipadm::ensure_ip_interface_exists(datalink)
-        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
-
-    info!(&log, "Setting MTU to 9000 for IPv6 and IPv4"; "datalink" => ?datalink);
     Ipadm::set_interface_mtu(&datalink)
-        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+        .with_context(|| format!("failed to set MTU on datalink {datalink}"))?;
 
     if static_addrs.is_empty() {
         info!(
-            &log,
-            "No static addresses provided, will not ensure static and auto-configured addresses are set on the IP interface"
+            log,
+            "No static addresses provided; will not ensure static and \
+             auto-configured addresses are set on the IP interface"
         );
-    }
-
-    for addr in &static_addrs {
-        if **addr != Ipv6Addr::LOCALHOST {
-            info!(
-                &log,
-                "Ensuring static and auto-configured addresses are set on the IP interface";
-                "data link" => ?datalink,
-                "static address" => ?addr,
-            );
-            Ipadm::create_static_and_autoconfigured_addrs(&datalink, addr)
-                .map_err(|err| CmdError::Failure(anyhow!(err)))?;
-        } else {
-            info!(
-                &log,
-                "Static address is localhost, will not ensure it's set on the IP interface"
-            );
-        }
-    }
-
-    match gateway {
-        // Only the switch zone will sometimes have an unknown underlay address at zone boot.
-        None => info!(&log, "Underlay is not available yet. Not ensuring there is a default route"),
-        Some(gw) => {
-            if gw.is_empty() {
-                info!(&log, "Underlay is not available yet. Not ensuring there is a default route");
+    } else {
+        for &addr in &static_addrs {
+            if addr != Ipv6Addr::LOCALHOST {
+                info!(
+                    log,
+                    "Ensuring static and auto-configured addresses are set on \
+                     the IP interface";
+                    "data link" => ?datalink,
+                    "static address" => %addr);
+                Ipadm::create_static_and_autoconfigured_addrs(&datalink, &addr)
+                    .with_context(|| {
+                        format!(
+                            "failed to ensure static address {addr} on \
+                             datalink {datalink}",
+                        )
+                    })?;
             } else {
-                // We can safely retrieve the first address only as the CLI only accepts a single item.
-                let gw = gw.first().unwrap();
-
-                // Ensuring default route with gateway must happen after peer agents have been initialized.
-                // Omicron zones will be able ensure a default route with gateway immediately, but the
-                // switch zone on the secondary scrimlet might need a few tries while it waits.
-                retry_notify(
-                  retry_policy_local(),
-                  || async {
-                        info!(&log, "Ensuring there is a default route"; "gateway" => ?gw);
-                        Route::ensure_default_route_with_gateway(Gateway::Ipv6(**gw))
-                        .map_err(|err| {
-                            match err {
-                                ExecutionError::CommandFailure(ref e) => {
-                                    if e.stdout.contains("Network is unreachable") {
-                                        BackoffError::transient(
-                                            CmdError::Failure(anyhow!(err)),
-                                        )
-                                    } else {
-                                        BackoffError::permanent(
-                                            CmdError::Failure(anyhow!(err)),
-                                        )
-                                    }
-                                }
-                                _ => {
-                                    BackoffError::permanent(
-                                        CmdError::Failure(anyhow!(err)),
-                                    )
-                                }
-                            }
-                        })
-                },
-                |err, delay| {
-                    info!(
-                        &log,
-                        "Cannot ensure there is a default route yet (retrying in {:?})",
-                        delay;
-                        "error" => ?err
-                    );
-                },
-                )
-                .await?;
+                info!(
+                    log,
+                    "Static address is localhost; will not ensure it's set on \
+                     the IP interface"
+                );
             }
         }
     }
 
-    info!(&log, "Populating hosts file for zone"; "zonename" => ?zonename);
+    match gateway {
+        // Only the switch zone will sometimes have an unknown underlay address
+        // at zone boot.
+        None => {
+            info!(
+                log,
+                "Underlay is not available yet; will not ensure default route",
+            );
+        }
+        Some(gw) => {
+            ensure_default_route_via_gateway_with_retries(gw, log).await?;
+        }
+    }
+
+    info!(
+        log, "Populating hosts file for zone";
+        "zonename" => ?zonename,
+    );
     let mut hosts_contents = String::from(
         r#"
 ::1 localhost loghost
@@ -761,39 +597,101 @@ async fn common_nw_set_up(
 "#,
     );
 
-    for addr in static_addrs.clone() {
-        let s = format!(
-            r#"{addr} {zonename}.local {zonename}
-"#
-        );
-        hosts_contents.push_str(s.as_str())
+    for addr in static_addrs {
+        writeln!(&mut hosts_contents, "{addr} {zonename}.local {zonename}")
+            .expect("write to String is infallible");
     }
 
     write(HOSTS_FILE, hosts_contents)
-        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+        .with_context(|| format!("failed to write hosts file {HOSTS_FILE}"))?;
 
     Ok(())
 }
 
+async fn ensure_default_route_via_gateway_with_retries(
+    gateway: Ipv6Addr,
+    log: &Logger,
+) -> anyhow::Result<()> {
+    // Helper to attach error context in the retry loop below.
+    let err_with_context = |err: ExecutionError| {
+        anyhow!(err).context(format!(
+            "failed to ensure default route via gateway {gateway}",
+        ))
+    };
+
+    let gateway = Gateway::Ipv6(gateway);
+
+    // Ensuring default route with gateway must happen after peer agents
+    // have been initialized. Omicron zones will be able ensure a
+    // default route with gateway immediately, but the switch zone on
+    // the secondary scrimlet might need a few tries while it waits.
+    retry_notify(
+        retry_policy_local(),
+        || async {
+            info!(
+                log, "Ensuring there is a default route";
+                "gateway" => ?gateway,
+            );
+            Route::ensure_default_route_with_gateway(gateway).map_err(|err| {
+                match err {
+                    ExecutionError::CommandFailure(ref e) => {
+                        if e.stdout.contains("Network is unreachable") {
+                            BackoffError::transient(err_with_context(err))
+                        } else {
+                            BackoffError::permanent(err_with_context(err))
+                        }
+                    }
+                    _ => BackoffError::permanent(err_with_context(err)),
+                }
+            })
+        },
+        |err, delay| {
+            info!(
+                log,
+                "Cannot ensure there is a default route yet (retrying in {:?})",
+                delay;
+                "error" => #%err
+            );
+        },
+    )
+    .await
+}
+
 async fn opte_interface_set_up(
-    matches: &ArgMatches,
-    log: Logger,
-) -> Result<(), CmdError> {
-    let interface: &String = matches.get_one("opte_interface").unwrap();
-    let gateway: Ipv4Addr = *matches.get_one("opte_gateway").unwrap();
-    let opte_ip: &IpAddr = matches.get_one("opte_ip").unwrap();
+    args: OpteInterfaceArgs,
+    log: &Logger,
+) -> anyhow::Result<()> {
+    let OpteInterfaceArgs { interface, gateway, ip } = args;
+    info!(
+        log,
+        "Creating gateway on the OPTE IP interface if it doesn't already exist";
+        "OPTE interface" => ?interface
+    );
+    Ipadm::create_opte_gateway(&interface).with_context(|| {
+        format!("failed to create OPTE gateway on interface {interface}")
+    })?;
 
-    info!(&log, "Creating gateway on the OPTE IP interface if it doesn't already exist"; "OPTE interface" => ?interface);
-    Ipadm::create_opte_gateway(interface)
-        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+    info!(
+        log, "Ensuring there is a gateway route";
+        "OPTE gateway" => ?gateway,
+        "OPTE interface" => ?interface,
+        "OPTE IP" => ?ip,
+    );
+    Route::ensure_opte_route(&gateway, &interface, &ip).with_context(|| {
+        format!(
+            "failed to ensure OPTE gateway route on interface {interface} \
+                 with gateway {gateway} and IP {ip}",
+        )
+    })?;
 
-    info!(&log, "Ensuring there is a gateway route"; "OPTE gateway" => ?gateway, "OPTE interface" => ?interface, "OPTE IP" => ?opte_ip);
-    Route::ensure_opte_route(&gateway, interface, &opte_ip)
-        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
-
-    info!(&log, "Ensuring there is a default route"; "gateway" => ?gateway);
+    info!(
+        log, "Ensuring there is a default route";
+        "gateway" => ?gateway,
+    );
     Route::ensure_default_route_with_gateway(Gateway::Ipv4(gateway))
-        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+        .with_context(|| {
+            format!("failed to ensure default route via gateway {gateway}")
+        })?;
 
     Ok(())
 }

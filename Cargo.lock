@@ -11775,12 +11775,14 @@ name = "zone-setup"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
  "clap",
  "dropshot",
  "illumos-utils",
  "omicron-common",
  "omicron-sled-agent",
  "omicron-workspace-hack",
+ "oxnet",
  "serde_json",
  "sled-hardware-types",
  "slog",
