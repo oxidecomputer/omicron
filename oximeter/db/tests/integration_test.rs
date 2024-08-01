@@ -12,7 +12,7 @@ use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::test_setup_log;
 use oximeter::test_util;
 use oximeter_db::{Client, DbWrite, OxqlResult, Sample, TestDbWrite};
-use slog::{info, Logger};
+use slog::{debug, info, Logger};
 use std::collections::BTreeSet;
 use std::default::Default;
 use std::time::Duration;
@@ -71,8 +71,8 @@ async fn test_schemas_disjoint() -> anyhow::Result<()> {
         request_timeout,
     );
 
-    wait_for_ping(&client1).await?;
-    wait_for_keepers(&deployment, vec![KeeperId(1)]).await?;
+    wait_for_ping(log, &client1).await?;
+    wait_for_keepers(log, &deployment, vec![KeeperId(1)]).await?;
 
     // Load all the tables inserted by `db-init-1.sql`
     client1.init_replicated_db_from_file(1).await?;
@@ -170,10 +170,14 @@ async fn test_cluster() -> anyhow::Result<()> {
         log,
         request_timeout,
     );
-    wait_for_ping(&client1).await?;
-    wait_for_ping(&client2).await?;
-    wait_for_keepers(&deployment, (1..=num_keepers).map(KeeperId).collect())
-        .await?;
+    wait_for_ping(log, &client1).await?;
+    wait_for_ping(log, &client2).await?;
+    wait_for_keepers(
+        log,
+        &deployment,
+        (1..=num_keepers).map(KeeperId).collect(),
+    )
+    .await?;
     info!(log, "deploy setup time = {:?}", start.elapsed());
 
     let start = tokio::time::Instant::now();
@@ -231,7 +235,7 @@ async fn test_cluster() -> anyhow::Result<()> {
         log,
         request_timeout,
     );
-    wait_for_ping(&client3).await?;
+    wait_for_ping(log, &client3).await?;
     info!(log, "successfully pinged client server 3");
 
     // We need to initiate copying from existing replicated tables by creating
@@ -280,7 +284,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     deployment
         .start_server(1.into())
         .expect("failed to restart clickhouse server 1");
-    wait_for_ping(&client1).await.expect("failed to ping server 1");
+    wait_for_ping(log, &client1).await.expect("failed to ping server 1");
     wait_for_num_points(&log, &client1, samples.len() * 2)
         .await
         .expect("failed to get samples from client1");
@@ -339,9 +343,13 @@ async fn test_cluster() -> anyhow::Result<()> {
 
     // Bringing the keeper back up should allow us to insert again
     deployment.start_keeper(1.into()).expect("failed to restart keeper");
-    wait_for_keepers(&deployment, [1, 3].map(KeeperId).into_iter().collect())
-        .await
-        .expect("failed to sync keepers");
+    wait_for_keepers(
+        log,
+        &deployment,
+        [1, 3].map(KeeperId).into_iter().collect(),
+    )
+    .await
+    .expect("failed to sync keepers");
     let samples = test_util::generate_test_samples(
         input.n_projects,
         input.n_instances,
@@ -356,6 +364,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     // Add a new keeper to restore fault tolerance and try again
     deployment.add_keeper().expect("Failed to add keeeper");
     wait_for_keepers(
+        log,
         &deployment,
         [1, 3, 4].map(KeeperId).into_iter().collect(),
     )
@@ -441,6 +450,7 @@ async fn wait_for_num_points(
 
 /// Wait for all keeper servers to be capable of handling commands
 async fn wait_for_keepers(
+    log: &Logger,
     deployment: &Deployment,
     ids: Vec<KeeperId>,
 ) -> anyhow::Result<()> {
@@ -458,11 +468,20 @@ async fn wait_for_keepers(
                         // The node isn't really up yet
                         if config.len() != keepers.len() {
                             done = false;
+                            debug!(log, "Keeper config not set";
+                                "addr" => keeper.addr(),
+                                "expected" => keepers.len(),
+                                "got" => config.len()
+                            );
                             break;
                         }
                     }
-                    Err(_) => {
+                    Err(e) => {
                         done = false;
+                        debug!(log, "Keeper connection error: {}", e;
+                            "addr" => keeper.addr()
+                        );
+                        break;
                     }
                 }
             }
@@ -478,11 +497,12 @@ async fn wait_for_keepers(
     .await
     .with_context(|| format!("failed to contact all keepers: {ids:?}"))?;
 
+    info!(log, "Keepers ready: {ids:?}");
     Ok(())
 }
 
 /// Try to ping the server until it is responds.
-async fn wait_for_ping(client: &Client) -> anyhow::Result<()> {
+async fn wait_for_ping(log: &Logger, client: &Client) -> anyhow::Result<()> {
     poll::wait_for_condition(
         || async {
             client
@@ -497,5 +517,6 @@ async fn wait_for_ping(client: &Client) -> anyhow::Result<()> {
     .with_context(|| {
         format!("failed to ping clickhouse server: {}", client.url())
     })?;
+    info!(log, "Clickhouse server ready: {}", client.url());
     Ok(())
 }
