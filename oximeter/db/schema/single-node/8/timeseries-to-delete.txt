@@ -1,0 +1,6 @@
+physical_data_link:bytes_received
+physical_data_link:bytes_sent
+physical_data_link:errors_received
+physical_data_link:errors_sent
+physical_data_link:packets_received
+physical_data_link:packets_sent

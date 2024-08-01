@@ -4,35 +4,54 @@
 
 //! Metrics produced by the sled-agent for collection by oximeter.
 
+use illumos_utils::running_zone::RunningZone;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
-use oximeter::types::MetricsError;
-use oximeter::types::ProducerRegistry;
-use oximeter_instruments::kstat::link;
+use omicron_common::api::internal::shared::SledIdentifiers;
+use oximeter_instruments::kstat::link::sled_data_link::SledDataLink;
 use oximeter_instruments::kstat::CollectionDetails;
 use oximeter_instruments::kstat::Error as KstatError;
 use oximeter_instruments::kstat::KstatSampler;
 use oximeter_instruments::kstat::TargetId;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
-use sled_hardware_types::Baseboard;
 use slog::Logger;
+use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
-use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Duration;
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 /// The interval on which we ask `oximeter` to poll us for metric data.
-pub(crate) const METRIC_COLLECTION_INTERVAL: Duration = Duration::from_secs(30);
+const METRIC_COLLECTION_INTERVAL: Duration = Duration::from_secs(30);
 
 /// The interval on which we sample link metrics.
-pub(crate) const LINK_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
+//
+// TODO(https://github.com/oxidecomputer/omicron/issues/5695)
+// These should probably be sampled much densely. We may want to wait for
+// https://github.com/oxidecomputer/omicron/issues/740, which would handle
+// pagination between the producer and collector, as sampling at < 1s for many
+// links could lead to quite large requests. Or we can eat the memory cost for
+// now.
+const LINK_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
+
+/// The interval after which we expire kstat-based collection of transient
+/// links.
+///
+/// This applies to VNICs and OPTE ports. Physical links are never expired,
+/// since we should never expect them to disappear. While we strive to get
+/// notifications before these transient links are deleted, it's always possible
+/// we miss that, and so the data collection fails. If that fails for more than
+/// this interval, we stop attempting to collect its data.
+const TRANSIENT_LINK_EXPIRATION_INTERVAL: Duration = Duration::from_secs(60);
 
 /// The maximum Dropshot request size for the metrics server.
 const METRIC_REQUEST_MAX_SIZE: usize = 10 * 1024 * 1024;
+
+/// Size of the queue used to send messages to the metrics task.
+const QUEUE_SIZE: usize = 64;
 
 /// An error during sled-agent metric production.
 #[derive(Debug, thiserror::Error)]
@@ -40,88 +59,360 @@ pub enum Error {
     #[error("Kstat-based metric failure")]
     Kstat(#[source] KstatError),
 
-    #[error("Failed to insert metric producer into registry")]
-    Registry(#[source] MetricsError),
-
-    #[error("Failed to fetch hostname")]
-    Hostname(#[source] std::io::Error),
-
-    #[error("Non-UTF8 hostname")]
-    NonUtf8Hostname,
-
-    #[error("Missing NULL byte in hostname")]
-    HostnameMissingNull,
-
     #[error("Failed to start metric producer server")]
     ProducerServer(#[source] oximeter_producer::Error),
 }
 
-// Basic metadata about the sled agent used when publishing metrics.
-#[derive(Clone, Debug)]
-struct SledIdentifiers {
-    sled_id: Uuid,
-    rack_id: Uuid,
-    baseboard: Baseboard,
+/// Messages sent to the sled-agent metrics collection task.
+///
+/// The sled-agent publish metrics to Oximeter, including statistics about
+/// datalinks. This metrics task runs in the background, and code that creates
+/// or deletes objects can notify this task to start / stop tracking statistics
+/// for them.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(test, allow(dead_code))]
+pub(crate) enum Message {
+    /// Start tracking the named physical link.
+    ///
+    /// This is only use on startup, to track the underlays.
+    TrackPhysical { zone_name: String, name: String },
+    /// Track the named VNIC.
+    TrackVnic { zone_name: String, name: String },
+    /// Stop tracking the named VNIC.
+    UntrackVnic { name: String },
+    /// Track the named OPTE port.
+    TrackOptePort { zone_name: String, name: String },
+    /// Stop tracking the named OPTE port.
+    UntrackOptePort { name: String },
+    // TODO-completeness: We will probably want to track other kinds of
+    // statistics here too. For example, we could send messages when a zone is
+    // created / destroyed to track zonestats; we might also want to support
+    // passing an explicit `oximeter::Producer` type in, so that other code
+    // could attach their own producers.
 }
 
-/// Type managing all oximeter metrics produced by the sled-agent.
-//
-// TODO-completeness: We probably want to get kstats or other metrics in to this
-// type from other parts of the code, possibly before the `SledAgent` itself
-// exists. This is similar to the storage resources or other objects, most of
-// which are essentially an `Arc<Mutex<Inner>>`. It would be nice to avoid that
-// pattern, but until we have more statistics, it's not clear whether that's
-// worth it right now.
-#[derive(Clone)]
-pub struct MetricsManager {
-    metadata: Arc<SledIdentifiers>,
-    _log: Logger,
+/// Helper to define kinds of tracked links.
+struct LinkKind;
+
+impl LinkKind {
+    const PHYSICAL: &'static str = "physical";
+    const VNIC: &'static str = "vnic";
+    const OPTE: &'static str = "opte";
+}
+
+/// The main task used to collect and publish sled-agent metrics.
+async fn metrics_task(
+    sled_identifiers: SledIdentifiers,
     kstat_sampler: KstatSampler,
-    // TODO-scalability: We may want to generalize this to store any kind of
-    // tracked target, and use a naming scheme that allows us pick out which
-    // target we're interested in from the arguments.
-    //
-    // For example, we can use the link name to do this, for any physical or
-    // virtual link, because they need to be unique. We could also do the same
-    // for disks or memory. If we wanted to guarantee uniqueness, we could
-    // namespace them internally, e.g., `"datalink:{link_name}"` would be the
-    // real key.
-    tracked_links: Arc<Mutex<BTreeMap<String, TargetId>>>,
-    producer_server: Arc<ProducerServer>,
+    _server: ProducerServer,
+    log: Logger,
+    mut rx: mpsc::Receiver<Message>,
+) {
+    let mut tracked_links: BTreeMap<String, TargetId> = BTreeMap::new();
+
+    // Main polling loop, waiting for messages from other pieces of the code to
+    // track various statistics.
+    loop {
+        let Some(message) = rx.recv().await else {
+            error!(log, "channel closed, exiting");
+            return;
+        };
+        trace!(log, "received message"; "message" => ?message);
+        match message {
+            Message::TrackPhysical { zone_name, name } => {
+                let link = SledDataLink {
+                    kind: LinkKind::PHYSICAL.into(),
+                    link_name: name.into(),
+                    rack_id: sled_identifiers.rack_id,
+                    sled_id: sled_identifiers.sled_id,
+                    sled_model: sled_identifiers.model.clone().into(),
+                    sled_revision: sled_identifiers.revision,
+                    sled_serial: sled_identifiers.serial.clone().into(),
+                    zone_name: zone_name.into(),
+                };
+                add_datalink(&log, &mut tracked_links, &kstat_sampler, link)
+                    .await;
+            }
+            Message::TrackVnic { zone_name, name } => {
+                let link = SledDataLink {
+                    kind: LinkKind::VNIC.into(),
+                    link_name: name.into(),
+                    rack_id: sled_identifiers.rack_id,
+                    sled_id: sled_identifiers.sled_id,
+                    sled_model: sled_identifiers.model.clone().into(),
+                    sled_revision: sled_identifiers.revision,
+                    sled_serial: sled_identifiers.serial.clone().into(),
+                    zone_name: zone_name.into(),
+                };
+                add_datalink(&log, &mut tracked_links, &kstat_sampler, link)
+                    .await;
+            }
+            Message::UntrackVnic { name } => {
+                remove_datalink(&log, &mut tracked_links, &kstat_sampler, name)
+                    .await
+            }
+            Message::TrackOptePort { zone_name, name } => {
+                let link = SledDataLink {
+                    kind: LinkKind::OPTE.into(),
+                    link_name: name.into(),
+                    rack_id: sled_identifiers.rack_id,
+                    sled_id: sled_identifiers.sled_id,
+                    sled_model: sled_identifiers.model.clone().into(),
+                    sled_revision: sled_identifiers.revision,
+                    sled_serial: sled_identifiers.serial.clone().into(),
+                    zone_name: zone_name.into(),
+                };
+                add_datalink(&log, &mut tracked_links, &kstat_sampler, link)
+                    .await;
+            }
+            Message::UntrackOptePort { name } => {
+                remove_datalink(&log, &mut tracked_links, &kstat_sampler, name)
+                    .await
+            }
+        }
+    }
+}
+
+/// Stop tracking a link by name.
+async fn remove_datalink(
+    log: &Logger,
+    tracked_links: &mut BTreeMap<String, TargetId>,
+    kstat_sampler: &KstatSampler,
+    name: String,
+) {
+    match tracked_links.remove(&name) {
+        Some(id) => match kstat_sampler.remove_target(id).await {
+            Ok(_) => {
+                debug!(
+                    log,
+                    "Removed VNIC from tracked links";
+                    "link_name" => name,
+                );
+            }
+            Err(err) => {
+                error!(
+                    log,
+                    "Failed to remove VNIC from kstat sampler, \
+                    metrics may still be produced for it";
+                    "link_name" => name,
+                    "error" => ?err,
+                );
+            }
+        },
+        None => {
+            debug!(
+                log,
+                "received message to delete VNIC, but \
+                it is not in the list of tracked links";
+                "link_name" => name,
+            );
+        }
+    }
+}
+
+/// Start tracking a new link of the specified kind.
+async fn add_datalink(
+    log: &Logger,
+    tracked_links: &mut BTreeMap<String, TargetId>,
+    kstat_sampler: &KstatSampler,
+    link: SledDataLink,
+) {
+    match tracked_links.entry(link.link_name.to_string()) {
+        Entry::Vacant(entry) => {
+            let details = if is_transient_link(&link.kind) {
+                CollectionDetails::duration(
+                    LINK_SAMPLE_INTERVAL,
+                    TRANSIENT_LINK_EXPIRATION_INTERVAL,
+                )
+            } else {
+                CollectionDetails::never(LINK_SAMPLE_INTERVAL)
+            };
+            let kind = link.kind.clone();
+            let zone_name = link.zone_name.clone();
+            match kstat_sampler.add_target(link, details).await {
+                Ok(id) => {
+                    debug!(
+                        log,
+                        "Added new link to kstat sampler";
+                        "link_name" => entry.key(),
+                        "link_kind" => %kind,
+                        "zone_name" => %zone_name,
+                    );
+                    entry.insert(id);
+                }
+                Err(err) => {
+                    error!(
+                        log,
+                        "Failed to add VNIC to kstat sampler, \
+                        no metrics will be collected for it";
+                        "link_name" => entry.key(),
+                        "link_kind" => %kind,
+                        "zone_name" => %zone_name,
+                        "error" => ?err,
+                    );
+                }
+            }
+        }
+        Entry::Occupied(entry) => {
+            debug!(
+                log,
+                "received message to track VNIC, \
+                but it is already being tracked";
+                "link_name" => entry.key(),
+            );
+        }
+    }
+}
+
+/// Return true if this is considered a transient link, from the perspective of
+/// its expiration behavior.
+fn is_transient_link(kind: &str) -> bool {
+    kind == LinkKind::VNIC || kind == LinkKind::OPTE
+}
+
+/// Manages sled-based metrics reported to Oximeter.
+///
+/// This object is used to sample kernel statistics and produce other Oximeter
+/// metrics for the sled agent. It runs a small background task responsible for
+/// actually generating / reporting samples. Users operate with it through the
+/// `MetricsHandle`.
+#[derive(Debug)]
+pub struct MetricsManager {
+    /// Receive-side of a channel used to pass the background task messages.
+    #[cfg_attr(test, allow(dead_code))]
+    tx: mpsc::Sender<Message>,
+    /// The background task itself.
+    _task: tokio::task::JoinHandle<()>,
 }
 
 impl MetricsManager {
     /// Construct a new metrics manager.
-    ///
-    /// This takes a few key pieces of identifying information that are used
-    /// when reporting sled-specific metrics.
     pub fn new(
-        sled_id: Uuid,
-        rack_id: Uuid,
-        baseboard: Baseboard,
-        sled_address: Ipv6Addr,
-        log: Logger,
+        log: &Logger,
+        identifiers: SledIdentifiers,
+        address: Ipv6Addr,
     ) -> Result<Self, Error> {
-        let producer_server =
-            start_producer_server(&log, sled_id, sled_address)?;
-        let kstat_sampler = KstatSampler::new(&log).map_err(Error::Kstat)?;
-        producer_server
+        let sampler = KstatSampler::new(log).map_err(Error::Kstat)?;
+        let server = start_producer_server(&log, identifiers.sled_id, address)?;
+        server
             .registry()
-            .register_producer(kstat_sampler.clone())
-            .map_err(Error::Registry)?;
-        let tracked_links = Arc::new(Mutex::new(BTreeMap::new()));
-        Ok(Self {
-            metadata: Arc::new(SledIdentifiers { sled_id, rack_id, baseboard }),
-            _log: log,
-            kstat_sampler,
-            tracked_links,
-            producer_server,
-        })
+            .register_producer(sampler.clone())
+            .expect("actually infallible");
+        let (tx, rx) = mpsc::channel(QUEUE_SIZE);
+        let task_log = log.new(o!("component" => "metrics-task"));
+        let _task = tokio::task::spawn(metrics_task(
+            identifiers,
+            sampler,
+            server,
+            task_log,
+            rx,
+        ));
+        Ok(Self { tx, _task })
     }
 
-    /// Return a reference to the contained producer registry.
-    pub fn registry(&self) -> &ProducerRegistry {
-        self.producer_server.registry()
+    /// Return a queue that can be used to send requests to the metrics task.
+    pub fn request_queue(&self) -> MetricsRequestQueue {
+        MetricsRequestQueue(self.tx.clone())
+    }
+}
+
+/// A cheap handle used to send requests to the metrics task.
+#[derive(Clone, Debug)]
+pub struct MetricsRequestQueue(mpsc::Sender<Message>);
+
+impl MetricsRequestQueue {
+    #[cfg(test)]
+    #[allow(dead_code)]
+    /// Return both halves of the queue used to send messages to the collection
+    /// task, for use in testing.
+    pub(crate) fn for_test() -> (Self, mpsc::Receiver<Message>) {
+        let (tx, rx) = mpsc::channel(QUEUE_SIZE);
+        (Self(tx), rx)
+    }
+
+    /// Ask the task to start tracking the named physical datalink.
+    pub async fn track_physical(
+        &self,
+        zone_name: impl Into<String>,
+        name: impl Into<String>,
+    ) {
+        let _ = self
+            .0
+            .send(Message::TrackPhysical {
+                zone_name: zone_name.into(),
+                name: name.into(),
+            })
+            .await;
+    }
+
+    /// Ask the task to start tracking the named VNIC.
+    pub async fn track_vnic(
+        &self,
+        zone_name: impl Into<String>,
+        name: impl Into<String>,
+    ) {
+        let _ = self
+            .0
+            .send(Message::TrackVnic {
+                zone_name: zone_name.into(),
+                name: name.into(),
+            })
+            .await;
+    }
+
+    /// Ask the task to stop tracking the named VNIC.
+    pub async fn untrack_vnic(&self, name: impl Into<String>) {
+        let _ = self.0.send(Message::UntrackVnic { name: name.into() }).await;
+    }
+
+    /// Ask the task to start tracking the named OPTE port.
+    pub async fn track_opte_port(
+        &self,
+        zone_name: impl Into<String>,
+        name: impl Into<String>,
+    ) {
+        let _ = self
+            .0
+            .send(Message::TrackOptePort {
+                zone_name: zone_name.into(),
+                name: name.into(),
+            })
+            .await;
+    }
+
+    /// Ask the task to stop tracking the named OPTE port.
+    pub async fn untrack_opte_port(&self, name: impl Into<String>) {
+        let _ =
+            self.0.send(Message::UntrackOptePort { name: name.into() }).await;
+    }
+
+    /// Track all datalinks in a zone.
+    ///
+    /// This will collect and track:
+    ///
+    /// - The bootstrap VNIC, if it exists.
+    /// - The underlay control VNIC, which always exists.
+    /// - Any OPTE ports, which only exist for those with external connectivity.
+    pub async fn track_zone_links(&self, running_zone: &RunningZone) {
+        let zone_name = running_zone.name();
+        self.track_vnic(zone_name, running_zone.control_vnic_name()).await;
+        if let Some(bootstrap_vnic) = running_zone.bootstrap_vnic_name() {
+            self.track_vnic(zone_name, bootstrap_vnic).await;
+        }
+        for port in running_zone.opte_port_names() {
+            self.track_opte_port(zone_name, port).await;
+        }
+    }
+
+    /// Stop tracking all datalinks in a zone.
+    pub async fn untrack_zone_links(&self, running_zone: &RunningZone) {
+        self.untrack_vnic(running_zone.control_vnic_name()).await;
+        if let Some(bootstrap_vnic) = running_zone.bootstrap_vnic_name() {
+            self.untrack_vnic(bootstrap_vnic).await;
+        }
+        for port in running_zone.opte_port_names() {
+            self.untrack_opte_port(port).await;
+        }
     }
 }
 
@@ -130,9 +421,8 @@ fn start_producer_server(
     log: &Logger,
     sled_id: Uuid,
     sled_address: Ipv6Addr,
-) -> Result<Arc<ProducerServer>, Error> {
+) -> Result<ProducerServer, Error> {
     let log = log.new(slog::o!("component" => "producer-server"));
-    let registry = ProducerRegistry::with_id(sled_id);
 
     // Listen on any available socket, using our underlay address.
     let address = SocketAddr::new(sled_address.into(), 0);
@@ -141,7 +431,7 @@ fn start_producer_server(
     let registration_address = None;
     let config = oximeter_producer::Config {
         server_info: ProducerEndpoint {
-            id: registry.producer_id(),
+            id: sled_id,
             kind: ProducerKind::SledAgent,
             address,
             interval: METRIC_COLLECTION_INTERVAL,
@@ -150,84 +440,5 @@ fn start_producer_server(
         request_body_max_bytes: METRIC_REQUEST_MAX_SIZE,
         log: LogConfig::Logger(log),
     };
-    ProducerServer::start(&config).map(Arc::new).map_err(Error::ProducerServer)
-}
-
-impl MetricsManager {
-    /// Track metrics for a physical datalink.
-    pub async fn track_physical_link(
-        &self,
-        link_name: impl AsRef<str>,
-        interval: Duration,
-    ) -> Result<(), Error> {
-        let hostname = hostname()?;
-        let link = link::physical_data_link::PhysicalDataLink {
-            rack_id: self.metadata.rack_id,
-            sled_id: self.metadata.sled_id,
-            serial: self.serial_number().into(),
-            hostname: hostname.into(),
-            link_name: link_name.as_ref().to_string().into(),
-        };
-        let details = CollectionDetails::never(interval);
-        let id = self
-            .kstat_sampler
-            .add_target(link, details)
-            .await
-            .map_err(Error::Kstat)?;
-        self.tracked_links
-            .lock()
-            .unwrap()
-            .insert(link_name.as_ref().to_string(), id);
-        Ok(())
-    }
-
-    /// Stop tracking metrics for a datalink.
-    ///
-    /// This works for both physical and virtual links.
-    #[allow(dead_code)]
-    pub async fn stop_tracking_link(
-        &self,
-        link_name: impl AsRef<str>,
-    ) -> Result<(), Error> {
-        let maybe_id =
-            self.tracked_links.lock().unwrap().remove(link_name.as_ref());
-        if let Some(id) = maybe_id {
-            self.kstat_sampler.remove_target(id).await.map_err(Error::Kstat)
-        } else {
-            Ok(())
-        }
-    }
-
-    // Return the serial number out of the baseboard, if one exists.
-    fn serial_number(&self) -> String {
-        match &self.metadata.baseboard {
-            Baseboard::Gimlet { identifier, .. } => identifier.clone(),
-            Baseboard::Unknown => String::from("unknown"),
-            Baseboard::Pc { identifier, .. } => identifier.clone(),
-        }
-    }
-}
-
-// Return the current hostname if possible.
-fn hostname() -> Result<String, Error> {
-    // See netdb.h
-    const MAX_LEN: usize = 256;
-    let mut out = vec![0u8; MAX_LEN + 1];
-    if unsafe {
-        libc::gethostname(out.as_mut_ptr() as *mut libc::c_char, MAX_LEN)
-    } == 0
-    {
-        // Split into subslices by NULL bytes.
-        //
-        // We should have a NULL byte, since we've asked for no more than 255
-        // bytes in a 256 byte buffer, but you never know.
-        let Some(chunk) = out.split(|x| *x == 0).next() else {
-            return Err(Error::HostnameMissingNull);
-        };
-        let s = std::ffi::CString::new(chunk)
-            .map_err(|_| Error::NonUtf8Hostname)?;
-        s.into_string().map_err(|_| Error::NonUtf8Hostname)
-    } else {
-        Err(std::io::Error::last_os_error()).map_err(|_| Error::NonUtf8Hostname)
-    }
+    ProducerServer::start(&config).map_err(Error::ProducerServer)
 }

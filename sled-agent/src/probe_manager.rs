@@ -1,3 +1,4 @@
+use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClientWithResolver;
 use anyhow::{anyhow, Result};
 use illumos_utils::dladm::Etherstub;
@@ -59,6 +60,7 @@ pub(crate) struct ProbeManagerInner {
     vnic_allocator: VnicAllocator<Etherstub>,
     storage: StorageHandle,
     port_manager: PortManager,
+    metrics_queue: MetricsRequestQueue,
     running_probes: Mutex<RunningProbes>,
 }
 
@@ -69,6 +71,7 @@ impl ProbeManager {
         etherstub: Etherstub,
         storage: StorageHandle,
         port_manager: PortManager,
+        metrics_queue: MetricsRequestQueue,
         log: Logger,
     ) -> Self {
         Self {
@@ -87,6 +90,7 @@ impl ProbeManager {
                 sled_id,
                 storage,
                 port_manager,
+                metrics_queue,
             }),
         }
     }
@@ -345,6 +349,10 @@ impl ProbeManagerInner {
         rz.ensure_address_for_port("overlay", 0).await?;
         info!(self.log, "started probe {}", probe.id);
 
+        // Notify the sled-agent's metrics task to start tracking the VNIC and
+        // any OPTE ports in the zone.
+        self.metrics_queue.track_zone_links(&rz).await;
+
         self.running_probes.lock().await.zones.insert(probe.id, rz);
 
         Ok(())
@@ -375,12 +383,19 @@ impl ProbeManagerInner {
     ) {
         match probes.zones.remove(&id) {
             Some(mut running_zone) => {
+                // TODO-correctness: There are no physical links in the zone, is
+                // this intended to delete the control VNIC?
                 for l in running_zone.links_mut() {
                     if let Err(e) = l.delete() {
                         error!(self.log, "delete probe link {}: {e}", l.name());
                     }
                 }
+
+                // Ask the sled-agent to stop tracking our datalinks, and then
+                // delete the OPTE ports.
+                self.metrics_queue.untrack_zone_links(&running_zone).await;
                 running_zone.release_opte_ports();
+
                 if let Err(e) = running_zone.stop().await {
                     error!(self.log, "stop probe: {e}")
                 }

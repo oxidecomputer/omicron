@@ -17,11 +17,6 @@ pub const VNIC_PREFIX: &str = "ox";
 pub const VNIC_PREFIX_CONTROL: &str = "oxControl";
 pub const VNIC_PREFIX_BOOTSTRAP: &str = "oxBootstrap";
 
-/// Prefix used to name VNICs over xde devices / OPTE ports.
-// TODO-correctness: Remove this when `xde` devices can be directly used beneath
-// Viona, and thus plumbed directly to guests.
-pub const VNIC_PREFIX_GUEST: &str = "vopte";
-
 /// Path to the DLADM command.
 pub const DLADM: &str = "/usr/sbin/dladm";
 
@@ -41,6 +36,9 @@ pub const BOOTSTRAP_ETHERSTUB_VNIC_NAME: &str = "bootstrap0";
 
 /// The prefix for Chelsio link names.
 pub const CHELSIO_LINK_PREFIX: &str = "cxgbe";
+
+/// The prefix for OPTE link names
+pub const OPTE_LINK_PREFIX: &str = "opte";
 
 /// Errors returned from [`Dladm::find_physical`].
 #[derive(thiserror::Error, Debug)]
