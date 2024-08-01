@@ -109,12 +109,12 @@ fn print_bootstrap_sled_data(data: &ConfiguredBootstrapSledData) {
 
     // Print status indicator
     let status = match address {
-        None => format!("{}", '✔'.green()),
-        Some(_) => format!("{}", '⚠'.red()),
+        None => format!("{}", 'o'.green()),
+        Some(_) => format!("{}", 'x'.red()),
     };
 
     let addr_fmt = match address {
-        None => "".to_string(),
+        None => "not_available".to_string(),
         Some(addr) => format!("\t{}", addr),
     };
 
