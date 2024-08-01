@@ -69,7 +69,10 @@ impl BootstrapAgentStartup {
         // exist before entering any zones.
         illumos_utils::running_zone::ensure_contract_reaper(&base_log);
 
-        let log = base_log.new(o!("component" => "BootstrapAgentStartup"));
+        let log = base_log.new(o!(
+            "component" => "BootstrapAgentStartup",
+            "stage" => "switch zone initialization",
+        ));
 
         // Perform several blocking startup tasks first; we move `config` and
         // `log` into this task, and on success, it gives them back to us.

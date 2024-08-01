@@ -60,6 +60,7 @@ pub struct LongRunningTaskHandles {
     pub zone_bundler: ZoneBundler,
 }
 
+// TODO: SOme logging here
 /// Spawn all long running tasks
 pub async fn spawn_all_longrunning_tasks(
     log: &Logger,
@@ -183,7 +184,7 @@ fn spawn_hardware_monitor(
     hardware_manager: &HardwareManager,
     storage_handle: &StorageHandle,
 ) -> (oneshot::Sender<SledAgent>, oneshot::Sender<ServiceManager>) {
-    info!(log, "Starting HardwareMonitor");
+    info!(log, "Starting HardwareMonitor"; "stage" => "switch zone initialization");
     let (mut monitor, sled_agent_started_tx, service_manager_ready_tx) =
         HardwareMonitor::new(log, hardware_manager, storage_handle);
     tokio::spawn(async move {
@@ -206,9 +207,11 @@ async fn spawn_bootstore_tasks(
     )
     .unwrap();
 
+   // let log = log.new(o!("stage" => "switch zone initialization"));
+    // TODO: Add some logging here?
     // Create and spawn the bootstore
     info!(log, "Starting Bootstore");
-    let (mut node, node_handle) = bootstore::Node::new(config, log).await;
+    let (mut node, node_handle) = bootstore::Node::new(config, &log).await;
     tokio::spawn(async move { node.run().await });
 
     // Spawn a task for polling DDMD and updating bootstore with peer addresses

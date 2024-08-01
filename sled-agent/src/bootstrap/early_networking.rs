@@ -360,15 +360,19 @@ impl<'a> EarlyNetworkSetup<'a> {
         rack_network_config: &RackNetworkConfig,
         switch_zone_underlay_ip: Ipv6Addr,
     ) -> Result<Vec<PortConfig>, EarlyNetworkSetupError> {
+        let log = self.log.new(o!("stage" => "switch zone initialization"));
         // First, we have to know which switch we are: ask MGS.
         info!(
-            self.log,
+            log,
             "Determining physical location of our switch zone at \
              {switch_zone_underlay_ip}",
         );
         let mgs_client = MgsClient::new(
             &format!("http://[{}]:{}", switch_zone_underlay_ip, MGS_PORT),
-            self.log.new(o!("component" => "MgsClient")),
+            self.log.new(o!(
+                "component" => "MgsClient",
+                "stage" => "switch zone initialization",
+            )),
         );
         let switch_slot = retry_notify(
             retry_policy_local(),
@@ -381,7 +385,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             },
             |error, delay| {
                 warn!(
-                    self.log,
+                    log,
                     "Failed to get switch ID from MGS (retrying in {delay:?})";
                     "error" => ?error,
                 );
@@ -410,7 +414,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             .collect::<Vec<_>>();
 
         info!(
-            self.log,
+            log,
             "Initializing {} Uplinks on {switch_location:?} at \
              {switch_zone_underlay_ip}",
             our_ports.len(),
@@ -419,7 +423,10 @@ impl<'a> EarlyNetworkSetup<'a> {
             &format!("http://[{}]:{}", switch_zone_underlay_ip, DENDRITE_PORT),
             dpd_client::ClientState {
                 tag: OMICRON_DPD_TAG.into(),
-                log: self.log.new(o!("component" => "DpdClient")),
+                log: self.log.new(o!(
+                    "component" => "DpdClient",
+                    "stage" => "switch zone initialization",
+                )),
             },
         );
 
@@ -432,9 +439,9 @@ impl<'a> EarlyNetworkSetup<'a> {
             self.wait_for_dendrite(&dpd).await;
 
             info!(
-                self.log,
+                log,
                 "Configuring default uplink on switch";
-                "config" => #?dpd_port_settings
+                "config" => ?dpd_port_settings
             );
             dpd.port_settings_apply(
                 &port_id,
@@ -454,7 +461,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                 "http://{}",
                 &SocketAddrV6::new(switch_zone_underlay_ip, MGD_PORT, 0, 0)
             ),
-            self.log.clone(),
+            log.clone(),
         );
 
         let mut config: Option<BgpConfig> = None;

@@ -3670,7 +3670,12 @@ impl ServiceManager {
     ) -> Result<(), Error> {
         let log =
             self.inner.log.new(o!("stage" => "switch zone initialization"));
-        info!(log, "Enabling switch zone services on scrimlet");
+        info!(
+            log,
+            "Enabling switch zone services on scrimlet";
+            "underlay info" => ?underlay_info,
+            "baseboard" => ?baseboard
+        );
         let mut filesystems: Vec<zone::Fs> = vec![];
         let mut data_links: Vec<String> = vec![];
 

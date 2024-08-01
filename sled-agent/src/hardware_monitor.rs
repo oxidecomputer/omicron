@@ -145,6 +145,11 @@ impl HardwareMonitor {
                     let tofino_loaded =
                         self.tofino_manager.become_ready(service_manager);
                     if tofino_loaded {
+                        info!(
+                            self.log,
+                            "Tofino ASIC is loaded. Activating switch zone on scrimlet";
+                            "stage" => "switch zone initialization"
+                        );
                         self.activate_switch().await;
                     }
                 }
@@ -234,7 +239,11 @@ impl HardwareMonitor {
                     )
                     .await
                 {
-                    error!(self.log, "Failed to activate switch"; e);
+                    error!(
+                        self.log,
+                        "Failed to activate switch"; e,
+                        "stage" => "switch zone initialization"
+                    );
                 }
             }
             TofinoManager::NotReady { tofino_loaded } => {
