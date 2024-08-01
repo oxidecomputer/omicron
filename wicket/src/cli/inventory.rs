@@ -119,5 +119,5 @@ fn print_bootstrap_sled_data(data: &ConfiguredBootstrapSledData) {
     };
 
     // The rest of the data
-    println!("{status} Cubby {cubby}\t{identifier}{addr_fmt}");
+    println!("{status} Cubby {:02}\t{identifier}{addr_fmt}", cubby);
 }
