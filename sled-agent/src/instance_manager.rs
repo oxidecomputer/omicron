@@ -28,6 +28,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
+use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use sled_storage::manager::StorageHandle;
@@ -148,6 +149,7 @@ impl InstanceManager {
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         propolis_addr: SocketAddr,
+        sled_identifiers: SledIdentifiers,
         metadata: InstanceMetadata,
     ) -> Result<SledInstanceState, Error> {
         let (tx, rx) = oneshot::channel();
@@ -160,6 +162,7 @@ impl InstanceManager {
                 instance_runtime,
                 vmm_runtime,
                 propolis_addr,
+                sled_identifiers,
                 metadata,
                 tx,
             })
@@ -362,6 +365,7 @@ enum InstanceManagerRequest {
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         propolis_addr: SocketAddr,
+        sled_identifiers: SledIdentifiers,
         metadata: InstanceMetadata,
         tx: oneshot::Sender<Result<SledInstanceState, Error>>,
     },
@@ -485,10 +489,20 @@ impl InstanceManagerRunner {
                             instance_runtime,
                             vmm_runtime,
                             propolis_addr,
+                            sled_identifiers,
                             metadata,
                             tx,
                         }) => {
-                            tx.send(self.ensure_registered(instance_id, propolis_id, hardware, instance_runtime, vmm_runtime, propolis_addr, metadata).await).map_err(|_| Error::FailedSendClientClosed)
+                            tx.send(self.ensure_registered(
+                                instance_id,
+                                propolis_id,
+                                hardware,
+                                instance_runtime,
+                                vmm_runtime,
+                                propolis_addr,
+                                sled_identifiers,
+                                metadata
+                            ).await).map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(EnsureUnregistered { instance_id, tx }) => {
                             self.ensure_unregistered(tx, instance_id).await
@@ -572,6 +586,7 @@ impl InstanceManagerRunner {
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         propolis_addr: SocketAddr,
+        sled_identifiers: SledIdentifiers,
         metadata: InstanceMetadata,
     ) -> Result<SledInstanceState, Error> {
         info!(
@@ -638,6 +653,7 @@ impl InstanceManagerRunner {
                     ticket,
                     state,
                     services,
+                    sled_identifiers,
                     metadata,
                 )?;
                 let _old =

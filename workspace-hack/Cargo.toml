@@ -82,7 +82,7 @@ openapiv3 = { version = "2.0.0", default-features = false, features = ["skip_ser
 peg-runtime = { version = "0.8.3", default-features = false, features = ["std"] }
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
 petgraph = { version = "0.6.5", features = ["serde-1"] }
-postgres-types = { version = "0.2.6", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
+postgres-types = { version = "0.2.7", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 predicates = { version = "3.1.0" }
 proc-macro2 = { version = "1.0.86" }
 regex = { version = "1.10.5" }
@@ -105,11 +105,11 @@ subtle = { version = "2.5.0" }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.72", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.36", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1.38.1", features = ["full", "test-util"] }
-tokio-postgres = { version = "0.7.10", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
+tokio-postgres = { version = "0.7.11", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-stream = { version = "0.1.15", features = ["net"] }
 tokio-util = { version = "0.7.11", features = ["codec", "io-util"] }
 toml = { version = "0.7.8" }
-toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.16", features = ["serde"] }
+toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.20", features = ["serde"] }
 tracing = { version = "0.1.40", features = ["log"] }
 trust-dns-proto = { version = "0.22.0" }
 unicode-bidi = { version = "0.3.15" }
@@ -187,7 +187,7 @@ openapiv3 = { version = "2.0.0", default-features = false, features = ["skip_ser
 peg-runtime = { version = "0.8.3", default-features = false, features = ["std"] }
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
 petgraph = { version = "0.6.5", features = ["serde-1"] }
-postgres-types = { version = "0.2.6", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
+postgres-types = { version = "0.2.7", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 predicates = { version = "3.1.0" }
 proc-macro2 = { version = "1.0.86" }
 regex = { version = "1.10.5" }
@@ -212,11 +212,11 @@ syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.72", features = ["extra
 time = { version = "0.3.36", features = ["formatting", "local-offset", "macros", "parsing"] }
 time-macros = { version = "0.2.18", default-features = false, features = ["formatting", "parsing"] }
 tokio = { version = "1.38.1", features = ["full", "test-util"] }
-tokio-postgres = { version = "0.7.10", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
+tokio-postgres = { version = "0.7.11", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-stream = { version = "0.1.15", features = ["net"] }
 tokio-util = { version = "0.7.11", features = ["codec", "io-util"] }
 toml = { version = "0.7.8" }
-toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.16", features = ["serde"] }
+toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.20", features = ["serde"] }
 tracing = { version = "0.1.40", features = ["log"] }
 trust-dns-proto = { version = "0.22.0" }
 unicode-bidi = { version = "0.3.15" }
@@ -268,7 +268,7 @@ dof = { version = "0.3.0", default-features = false, features = ["des"] }
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.34", features = ["fs", "termios"] }
-toml_datetime = { version = "0.6.6", default-features = false, features = ["serde"] }
+toml_datetime = { version = "0.6.8", default-features = false, features = ["serde"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 
 [target.x86_64-unknown-illumos.build-dependencies]
@@ -276,7 +276,7 @@ dof = { version = "0.3.0", default-features = false, features = ["des"] }
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.34", features = ["fs", "termios"] }
-toml_datetime = { version = "0.6.6", default-features = false, features = ["serde"] }
+toml_datetime = { version = "0.6.8", default-features = false, features = ["serde"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 
 ### END HAKARI SECTION

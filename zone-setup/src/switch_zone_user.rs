@@ -2,8 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::anyhow;
-use omicron_common::cmd::CmdError;
+use anyhow::Context;
+use camino::{Utf8Path, Utf8PathBuf};
+use illumos_utils::{execute, ExecutionError};
 use slog::{info, Logger};
 use std::fs::{copy, create_dir_all};
 use uzers::{get_group_by_name, get_user_by_name};
@@ -14,9 +15,9 @@ pub struct SwitchZoneUser {
     group: String,
     gecos: String,
     nopasswd: bool,
-    homedir: Option<String>,
+    homedir: Option<Utf8PathBuf>,
     shell: String,
-    profiles: Option<Vec<String>>,
+    profiles: Vec<String>,
 }
 
 impl SwitchZoneUser {
@@ -34,271 +35,156 @@ impl SwitchZoneUser {
             nopasswd,
             homedir: None,
             shell,
-            profiles: None,
+            profiles: Vec::new(),
         }
     }
 
-    pub fn with_homedir(mut self, homedir: String) -> Self {
+    pub fn with_homedir(mut self, homedir: Utf8PathBuf) -> Self {
         self.homedir = Some(homedir);
         self
     }
 
     pub fn with_profiles(mut self, profiles: Vec<String>) -> Self {
-        self.profiles = Some(profiles);
+        self.profiles = profiles;
         self
     }
 
-    fn add_new_group_for_user(&self) -> Result<(), CmdError> {
-        match get_group_by_name(&self.group) {
-            Some(_) => {}
-            None => {
-                let cmd = std::process::Command::new("groupadd")
-                    .arg(&self.group)
-                    .output()
-                    .map_err(|err| {
-                        CmdError::Failure(anyhow!(
-                            "Could not execute `groupadd {}`: {}",
-                            self.group,
-                            err
-                        ))
-                    })?;
-
-                if !cmd.status.success() {
-                    return Err(CmdError::Failure(anyhow!(
-                        "Could not add group: {} status: {}",
-                        self.group,
-                        cmd.status
-                    )));
-                }
-            }
-        };
-        Ok(())
-    }
-
-    fn add_new_user(&self) -> Result<(), CmdError> {
-        match get_user_by_name(&self.user) {
-            Some(_) => {}
-            None => {
-                let cmd = std::process::Command::new("useradd")
-                    .args([
-                        "-m",
-                        "-s",
-                        &self.shell,
-                        "-g",
-                        &self.group,
-                        "-c",
-                        &self.gecos,
-                        &self.user,
-                    ])
-                    .output()
-                    .map_err(|err| {
-                        CmdError::Failure(anyhow!(
-                            "Could not execute `useradd -m -s {} -g {} -c {} {}`: {}",
-                            self.shell, self.group, self.gecos, self.user, err
-                        ))
-                    })?;
-
-                if !cmd.status.success() {
-                    return Err(CmdError::Failure(anyhow!(
-                        "Could not add user: {} status: {}",
-                        self.user,
-                        cmd.status
-                    )));
-                }
-            }
-        };
-        Ok(())
-    }
-
-    fn enable_passwordless_login(&self) -> Result<(), CmdError> {
-        let cmd = std::process::Command::new("passwd")
-            .args(["-d", &self.user])
-            .output()
-            .map_err(|err| {
-                CmdError::Failure(anyhow!(
-                    "Could not execute `passwd -d {}`: {}",
-                    self.user,
-                    err
-                ))
-            })?;
-
-        if !cmd.status.success() {
-            return Err(CmdError::Failure(anyhow!(
-                "Could not enable password-less login: {} status: {}",
-                self.user,
-                cmd.status
-            )));
+    fn add_new_group_for_user(&self) -> Result<(), ExecutionError> {
+        if get_group_by_name(&self.group).is_none() {
+            execute(
+                &mut std::process::Command::new("groupadd").arg(&self.group),
+            )?;
         }
         Ok(())
     }
 
-    fn disable_password_based_login(&self) -> Result<(), CmdError> {
-        let cmd = std::process::Command::new("passwd")
-            .args(["-N", &self.user])
-            .output()
-            .map_err(|err| {
-                CmdError::Failure(anyhow!(
-                    "Could not execute `passwd -N {}`: {}",
-                    self.user,
-                    err
-                ))
-            })?;
-
-        if !cmd.status.success() {
-            return Err(CmdError::Failure(anyhow!(
-                "Could not disable password-based logins: {} status: {}",
-                self.user,
-                cmd.status
-            )));
+    fn add_new_user(&self) -> Result<(), ExecutionError> {
+        if get_user_by_name(&self.user).is_none() {
+            execute(&mut std::process::Command::new("useradd").args([
+                "-m",
+                "-s",
+                &self.shell,
+                "-g",
+                &self.group,
+                "-c",
+                &self.gecos,
+                &self.user,
+            ]))?;
         }
         Ok(())
     }
 
-    fn assign_user_profiles(&self) -> Result<(), CmdError> {
-        let Some(ref profiles) = self.profiles else {
-            return Err(CmdError::Failure(anyhow!(
-                "Profile list must not be empty to assign user profiles",
-            )));
-        };
-
-        let mut profile_list: String = Default::default();
-        for profile in profiles {
-            profile_list.push_str(&profile)
-        }
-
-        let cmd = std::process::Command::new("usermod")
-            .args(["-P", &profile_list, &self.user])
-            .output()
-            .map_err(|err| {
-                CmdError::Failure(anyhow!(
-                    "Could not execute `usermod -P {} {}`: {}",
-                    profile_list,
-                    self.user,
-                    err
-                ))
-            })?;
-
-        if !cmd.status.success() {
-            return Err(CmdError::Failure(anyhow!(
-                "Could not assign user profiles: {} status: {}",
-                self.user,
-                cmd.status
-            )));
-        }
+    fn enable_passwordless_login(&self) -> Result<(), ExecutionError> {
+        execute(
+            &mut std::process::Command::new("passwd").args(["-d", &self.user]),
+        )?;
         Ok(())
     }
 
-    fn remove_user_profiles(&self) -> Result<(), CmdError> {
-        let cmd = std::process::Command::new("usermod")
-            .args(["-P", "", &self.user])
-            .output()
-            .map_err(|err| {
-                CmdError::Failure(anyhow!(
-                    "Could not execute `usermod -P '' {}`: {}",
-                    self.user,
-                    err
-                ))
-            })?;
-
-        if !cmd.status.success() {
-            return Err(CmdError::Failure(anyhow!(
-                "Could not remove user profiles: {} status: {}",
-                self.user,
-                cmd.status
-            )));
-        }
+    fn disable_password_based_login(&self) -> Result<(), ExecutionError> {
+        execute(
+            &mut std::process::Command::new("passwd").args(["-N", &self.user]),
+        )?;
         Ok(())
     }
 
-    fn set_up_home_directory_and_startup_files(&self) -> Result<(), CmdError> {
-        let Some(ref homedir) = self.homedir else {
-            return Err(CmdError::Failure(anyhow!(
-                "A home directory must be provided to set up home directory and startup files",
-            )));
-        };
+    fn assign_user_profiles(&self) -> Result<(), ExecutionError> {
+        let profiles = self.profiles.join(",");
 
-        create_dir_all(&homedir).map_err(|err| {
-            CmdError::Failure(anyhow!(
-                "Could not execute create directory {} and its parents: {}",
-                &homedir,
-                err
-            ))
+        execute(
+            &mut std::process::Command::new("usermod")
+                .args(["-P", &profiles, &self.user]),
+        )?;
+        Ok(())
+    }
+
+    fn set_up_home_directory_and_startup_files(
+        &self,
+        homedir: &Utf8Path,
+    ) -> anyhow::Result<()> {
+        create_dir_all(&homedir).with_context(|| {
+            format!(
+                "Could not execute create directory {} and its parents",
+                homedir,
+            )
         })?;
 
-        let mut home_bashrc = homedir.clone();
-        home_bashrc.push_str("/.bashrc");
-        copy("/root/.bashrc", &home_bashrc).map_err(|err| {
-            CmdError::Failure(anyhow!(
-                "Could not copy file from /root/.bashrc to {}: {}",
-                &homedir,
-                err
-            ))
+        let home_bashrc = homedir.join(".bashrc");
+        copy("/root/.bashrc", &home_bashrc).with_context(|| {
+            format!("Could not copy file from /root/.bashrc to {homedir}")
         })?;
 
-        let mut home_profile = homedir.clone();
-        home_profile.push_str("/.profile");
-        copy("/root/.profile", &home_profile).map_err(|err| {
-            CmdError::Failure(anyhow!(
-                "Could not copy file from /root/.profile to {}: {}",
-                &homedir,
-                err
-            ))
+        let home_profile = homedir.join(".profile");
+        copy("/root/.profile", &home_profile).with_context(|| {
+            format!("Could not copy file from /root/.profile to {homedir}")
         })?;
 
         // Not using std::os::unix::fs::chown here because it doesn't support
         // recursive option.
-        let cmd = std::process::Command::new("chown")
-            .args(["-R", &self.user, &homedir])
-            .output()
-            .map_err(|err| {
-                CmdError::Failure(anyhow!(
-                    "Could not execute `chown -R {} {}`: {}",
-                    self.user,
-                    homedir,
-                    err
-                ))
-            })?;
+        execute(&mut std::process::Command::new("chown").args([
+            "-R",
+            &self.user,
+            homedir.as_str(),
+        ]))?;
 
-        if !cmd.status.success() {
-            return Err(CmdError::Failure(anyhow!(
-                "Could not change ownership: {} status: {}",
-                homedir,
-                cmd.status
-            )));
-        }
         Ok(())
     }
 
-    pub fn setup_switch_zone_user(self, log: &Logger) -> Result<(), CmdError> {
-        info!(&log, "Add a new group for the user"; "group" => ?self.group, "user" => ?self.user);
-        self.add_new_group_for_user()?;
+    pub fn setup_switch_zone_user(self, log: &Logger) -> anyhow::Result<()> {
+        info!(
+            log, "Add a new group for the user";
+            "group" => &self.group,
+            "user" => &self.user,
+        );
+        self.add_new_group_for_user().context("failed to create group")?;
 
-        info!(&log, "Add the user"; "user" => ?self.user, "shell" => ?self.shell,
-        "group" => &self.group, "gecos" => &self.gecos);
-        self.add_new_user()?;
+        info!(
+            log, "Add the user";
+            "user" => &self.user,
+            "shell" => &self.shell,
+            "group" => &self.group,
+            "gecos" => &self.gecos,
+        );
+        self.add_new_user().context("failed to create user")?;
 
-        // Either enable password-less login (wicket) or disable password-based logins
-        // completely (support, which logs in via ssh key).
+        // Either enable password-less login (wicket) or disable password-based
+        // logins completely (support, which logs in via ssh key).
         if self.nopasswd {
-            info!(&log, "Enable password-less login for user"; "user" => ?self.user);
-            self.enable_passwordless_login()?;
+            info!(
+                log, "Enable password-less login for user";
+                "user" => &self.user,
+            );
+            self.enable_passwordless_login()
+                .context("failed to enable passwordless login")?;
         } else {
-            info!(&log, "Disable password-based logins"; "user" => ?self.user);
-            self.disable_password_based_login()?;
+            info!(
+                log, "Disable password-based logins";
+                "user" => &self.user,
+            );
+            self.disable_password_based_login()
+                .context("failed to disable passwordless login")?;
         };
 
-        if let Some(_) = &self.profiles {
-            info!(&log, "Assign user profiles"; "user" => ?self.user, "profiles" => ?self.profiles);
-            self.assign_user_profiles()?;
-        } else {
-            info!(&log, "Remove user profiles"; "user" => ?self.user);
-            self.remove_user_profiles()?;
-        };
+        // If `self.profiles` is empty, this will _remove_ all profiles. This is
+        // intentional.
+        info!(
+            log, "Assign user profiles";
+            "user" => &self.user,
+            "profiles" => ?self.profiles,
+        );
+        self.assign_user_profiles()
+            .context("failed to assign user profiles")?;
 
-        if let Some(_) = self.homedir {
-            info!(&log, "Set up home directory and startup files"; "user" => ?self.user, "home directory" => ?self.homedir);
-            self.set_up_home_directory_and_startup_files()?;
+        if let Some(homedir) = &self.homedir {
+            info!(
+                log, "Set up home directory and startup files";
+                "user" => &self.user,
+                "home directory" => ?homedir,
+            );
+            self.set_up_home_directory_and_startup_files(homedir)
+                .context("failed to set up home directory")?;
         }
+
         Ok(())
     }
 }
