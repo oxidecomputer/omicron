@@ -15,9 +15,9 @@
 * recover a sled whose host software is arbitrarily broken (similar to mupdate)
 * update the host OS, service processor, control plane components, and other software on the sled
 
-Let's walk through how someone might add a new sled to an existing system using Reconfigurator.
+// TODO an omdb demo here would be useful
 
-// XXX-dap a demo using omdb would be nice.
+Let's walk through how someone might add a new sled to an existing system using Reconfigurator.
 
 1. The user makes an API request to add the sled.footnote:[There is a bit more to this flow.  There's an API request to list sleds that are physically present but not part of the system.  The user is expected to compare that list against what they expect and then make an API request to add the specific sled they expect to be there (by serial number).]  This request succeeds immediately but has not done most of the work yet.
 2. The user makes an API request to invoke the **planner** (one of two main parts of Reconfigurator).  The planner generates a new **blueprint**.
@@ -98,7 +98,7 @@ Reconfigurator manages the set of Omicron zones running on each sled.  How can w
 
 First, we apply a generation number to "the set of Omicron zones" on each sled.  Blueprints store _for each sled_ (1) the set of zones on that sled (and their configuration) and (2) the generation number.  Any time we want to change the set of zones on a sled, we make a new blueprint with the updated set of zones and the next generation number.  Execution is really simple: we make an API call to sled agent specifying the new set of zones _and_ the new generation number.  Sled Agent keeps track of the last generation number that it saw and rejects requests with an older one.  Now, if multiple Nexus instances execute the latest target, all will succeed and the first one that reaches each Sled Agent will actually update the zones on that sled.  If there's also a Nexus executing an older blueprint, it will be rejected.
 
-// XXX-dap mermaid diagram showing concurrent execution
+// TODO mermaid diagram showing concurrent execution
 --
 
 This approach can be applied to many other areas like DNS configuration, too.  Other areas (e.g., the process of updating database state to reflect internal IP allocations) sometimes require different, _ad hoc_ mechanisms.  In all cases, though, the goals are what we said above: attempting to execute a stale blueprint must never move the system backwards and as long as _something_ is executing the newer blueprint, the system should eventually get to the new target.
