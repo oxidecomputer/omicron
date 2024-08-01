@@ -213,7 +213,13 @@ impl DataStore {
             m.as_ref().map(|m| m.migration_id)
         }
 
-        if migration_id(migration_in) == migration_id(migration_out) {
+        // If both a migration-in and migration-out update was provided for this
+        // VMM, they can't be from the same migration, since migrating from a
+        // VMM to itself wouldn't make sense...
+        let migration_out_id = migration_id(migration_out);
+        if migration_out_id.is_some()
+            && migration_out_id == migration_id(migration_in)
+        {
             return Err(Error::conflict(
                 "migrating from a VMM to itself is nonsensical",
             ))
