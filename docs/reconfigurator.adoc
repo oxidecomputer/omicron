@@ -1,0 +1,183 @@
+:showtitle:
+:numbered:
+:toc: left
+
+= Reconfigurator
+
+== Introduction
+
+**Reconfigurator** is a system within Nexus for carrying out all kinds of system changes in a controlled way.  Examples of what Reconfigurator can do today or that we plan to extend it to do in the future:
+
+* add a new sled to a system (deploying any components it needs to be able to run customer workloads or participate in the control plane)
+* expunge a sled from a system (i.e., respond to the permanent physical removal of a sled)
+* deploy a new instance of a component (e.g., Nexus) to scale it out or replace one that's failed
+* remove an instance of a component (e.g., Nexus) to scale it down or as part of moving it to another sled
+* recover a sled whose host software is arbitrarily broken (similar to mupdate)
+* update the host OS, service processor, control plane components, and other software on the sled
+
+Let's walk through how someone might add a new sled to an existing system using Reconfigurator.
+
+// XXX-dap a demo using omdb would be nice.
+
+1. The user makes an API request to add the sled.footnote:[There is a bit more to this flow.  There's an API request to list sleds that are physically present but not part of the system.  The user is expected to compare that list against what they expect and then make an API request to add the specific sled they expect to be there (by serial number).]  This request succeeds immediately but has not done most of the work yet.
+2. The user makes an API request to invoke the **planner** (one of two main parts of Reconfigurator).  The planner generates a new **blueprint**.
+3. Optional: the user has a chance to compare the new blueprint against the existing one.  This lets them see what the system is going to do before committing to it.
+4. The user makes an API request to make the new blueprint the current system **target blueprint**.
+5. Reconfigurator does the rest: it starts **executing** the blueprint.  This means trying to make reality match the blueprint.  This process continues in a loop basically forever.footnote:[The process does not stop once reality matches the blueprint because reality can change after that point and the system may need to take action again.]
+
+NOTE: Currently, these "user"-driven steps are carried out using `omdb`, which means that in production systems they can really only be done by an Oxide employee with access via the technician port.  The long-term goal is to automate all of this so that planning and execution both happen continuously and automatically.
+
+You might notice that the only step that has anything to do with adding a sled is the first one.  This is where a user communicated a change to the **intended state** of the world.  Everything Reconfigurator does follows a pattern just like this:
+
+1. A user changes the intended state of the world.
+2. The user invokes the planner to generate a new blueprint.
+3. The user makes the new blueprint the current target.
+4. Reconfigurator executes the target blueprint.
+
+Reconfigurator makes heavy use of well-established patterns, most notably:
+
+* The "Reconciler" pattern (which we've elsewhere called the "Reliable Persistent Workflow" or "RPW" pattern -- see <<rfd373>>).  In this pattern, a system is constantly comparing an intended state of the world against the actual state, determining what to do to bring them in line, and then doing it.  **This is very different from distributed sagas, where the set of steps to be taken is fixed up front and cannot change if either the intended state or the actual state changes.**  Reconcilers are not necessarily _better_ than distributed sagas.  Each is suited to different use cases.
+* The <<plan-execute-pattern>>, in which complex operations are separated into a planning phase and an execution phase.  This separation is fundamental to Reconfigurator.
+
+== Reconfigurator overview
+
+Important data:
+
+* **Policy** describes _intended_ system state in terms that a user or Oxide technician might want to control: what release the system is running, what sleds are part of the system, how many CockroachDB nodes there should be, etc.
+* **Inventory collections** describe the actual state of the system, particularly what hardware exists, what versions of what software components are running everywhere, the software's configuration, etc.
+* **Blueprints** are very detailed descriptions of the intended state of the system.  Blueprints are stored in CockroachDB.  They are described in detail below.
+* At any given time, there is one **target blueprint** that the system is continuously trying to make real.  This is stored in CockroachDB.
+
+Reconfigurator consists mainly of:
+
+* a **planner** that takes as input the latest policy and the latest state of the system (including inventory collections and other database state) and produces a **blueprint**.  Generating a blueprint does not make it the new target!  The new blueprint is a _possible_ next state of the world.  Only when it's made the current target does the system attempt to make that blueprint real.
+* an **executor** that attempts to **execute a blueprint** -- that is, attempts to make reality match that blueprint.
+
+It's important that users be able to change the intended state (change policy, generate a new blueprint, and make that blueprint the target) even when the previous target has not been fully executed yet.footnote:[It's tempting to try to simplify things by disallowing users from changing the intended state while the previous blueprint is being executed.  But there are many cases where this behavior is necessary.  Imagine the operator requests that the system gracefully remove one sled.  So the system starts live-migrating customer instances on that sled to other sleds.  Then the sled suddenly fails permanently (i.e., catches fire).  If we couldn't change the intended next state to say "this sled is gone", then the system would be stuck forever waiting for those instances to successfully live-migrate, which they never will.  This is just one example.  Besides that, if there were any kind of bug causes Reconfigurator to get stuck, fixing it or working around it requires that the operator or Oxide support be able to change the intended state even though the system hasn't reached the current intended state (which it never will because it's stuck).]
+
+The process of executing a blueprint involves a bunch of database queries and API calls to Sled Agent, Service Processors (via MGS), Dendrite, etc.  As a result:
+
+* Executing a blueprint is not atomic.
+* Executing a blueprint can take a while.
+* Any of the individual actions required to execute a blueprint can fail.
+* The component executing the blueprint (Nexus) can itself fail, either transiently or permanently.
+* To deal with that last problem, we have multiple Nexus instances.  But that means it's conceivable that multiple Nexus instances attempt to execute different blueprints concurrently or attempt to take conflicting actions to execute the same blueprint.
+
+=== The primacy of planning
+
+To make all this work:
+
+* Blueprints are immutable.  (If Nexus wants to change one, it creates a new one based on that one instead.)
+* Blueprints must be specific enough that there are **no meaningful choices for Nexus to make at execution time**.  For example, when provisioning a new zone, the blueprint specifies the new zone's id, what sled it's on, its IP address, and every other detail needed to provision it.
+* CockroachDB is the source of truth for which blueprint is the current target.
+* Every blueprint has a **parent blueprint**. A blueprint can only be made the target if its parent is the current target.
+
+The planner is synchronous, mostly deterministic, relatively simple, and highly testable.  This approach essentially moves all coordination among Nexus instances into the planning step.  Put differently: Nexus instances can generate blueprints independently, but only one will become the target, and that one is always an incremental step from the previous target.  Many tasks that would be hard to do in a distributed way (like allocating IPs or enforcing constraints like "no more than one CockroachDB node may be down for update at once") can be reduced to pretty straightforward, highly testable planner logic.
+
+As a consequence of all this:
+
+* At any given time, any Nexus instance may generate a new blueprint and make it the new system target (subject to the constraints above).  Multiple Nexus instances can generate blueprints concurrently.  They can also attempt to set the target concurrently.  CockroachDB's strong consistency ensures that only one blueprint can be the target at any time.
+* At any given time, any Nexus instance may be attempting to execute (realize) a blueprint that it believes is the latest target.  It may no longer be the current target, though.
+* Nexus instances do not directly coordinate with each other at all.
+
+=== Execution
+
+While our approach moves a lot of tricky allocation / assignment problems to the planning step, execution brings its own complexity for two main reasons: Nexus instances can execute blueprints concurrently and any Nexus instance may be executing an old blueprint (i.e., one that _was_ the target, but is not any more).footnote:[These are unavoidable consequences of _not_ doing leader election to choose one Nexus to carry out execution.  Why not do that?  Because that creates harder problems like monitoring that Nexus, determining when it seems to have failed or become stuck, failover -- including in cases where that Nexus is _not_ stuck or failed, but merely partitioned -- etc.  This is all possible, but hard, and these code paths are not often tested in production systems.  With our approach, there is one main code path and it's frequently tested.  (Admittedly, it can still do different things depending on what's executing concurrently.)]
+
+Even when these things happen, we want that the system:
+
+* never moves backwards (i.e., towards a previous target)
+* converges towards the current target
+
+This is easier than it sounds.  Take the example of managing Omicron zones.
+
+[sidebar]
+.Example: managing Omicron zones
+--
+Reconfigurator manages the set of Omicron zones running on each sled.  How can we ensure that when changes are made, the system only moves forward even when there are multiple Nexus instances executing blueprints concurrently and some might be executing older versions?
+
+First, we apply a generation number to "the set of Omicron zones" on each sled.  Blueprints store _for each sled_ (1) the set of zones on that sled (and their configuration) and (2) the generation number.  Any time we want to change the set of zones on a sled, we make a new blueprint with the updated set of zones and the next generation number.  Execution is really simple: we make an API call to sled agent specifying the new set of zones _and_ the new generation number.  Sled Agent keeps track of the last generation number that it saw and rejects requests with an older one.  Now, if multiple Nexus instances execute the latest target, all will succeed and the first one that reaches each Sled Agent will actually update the zones on that sled.  If there's also a Nexus executing an older blueprint, it will be rejected.
+
+// XXX-dap mermaid diagram showing concurrent execution
+--
+
+This approach can be applied to many other areas like DNS configuration, too.  Other areas (e.g., the process of updating database state to reflect internal IP allocations) sometimes require different, _ad hoc_ mechanisms.  In all cases, though, the goals are what we said above: attempting to execute a stale blueprint must never move the system backwards and as long as _something_ is executing the newer blueprint, the system should eventually get to the new target.
+
+== Reconfigurator control: autonomous vs. manual
+
+=== Long-term goal: autonomous operation
+
+The long-term goal is to enable autonomous operation of both the **planner** and **executor**:
+
+[source,text]
+----
+The Planner
+
+    fleet policy  (database state, inventory)   (latest blueprint)
+             \               |               /
+              \              |              /
+               +----------+  |  +----------/
+                          |  |  |
+                          v  v  v
+
+                         "planner"
+              (eventually a background task)
+                             |
+                             v                      no
+                    is a new blueprint necessary? ------> done
+                             |
+                             | yes
+                             v
+                    generate a new blueprint
+                             |
+                             |
+                             v
+                    commit blueprint to database
+                             |
+                             |
+                             v
+                           done
+----
+
+[source,text]
+----
+The Executor
+
+           target blueprint  latest inventory
+                     |             |
+                     |             |
+                     +----+   +----+
+                          |   |
+                          v   v
+
+                        "executor"
+                     (background task)
+                            |
+                            v
+                    determine actions needed
+                    take actions
+----
+
+This planner will evaluate whether the current (target) blueprint is consistent with the current policy.  If not, the task generates a new blueprint that _is_ consistent with the current policy and attempts to make that the new target.  (Multiple Nexus instances could try to do this concurrently.  CockroachDB's strong consistency ensures that only one can win.  The other Nexus instances must go back to evaluating the winning blueprint before trying to change it again -- otherwise two Nexus instances might fight over two equivalent blueprints.)
+
+The execution task will evaluate whether the state reflected in the latest inventory collection is consistent with the current target blueprint.  If not, it executes operations to bring reality into line with the blueprint.  This means provisioning new zones, removing old zones, adding instances to DNS, removing instances from DNS, carrying out firmware updates, etc.
+
+=== Currently: plan on-demand, execute continuously
+
+We're being cautious about rolling out that kind of automation.  Instead, today, `omdb` can be used to:
+
+* invoke the planner explicitly to generate a new blueprint
+* set a blueprint to be the current target
+* enable or disable execution of the current target blueprint.  If execution is enabled, all Nexus instances will concurrently attempt to execute the blueprint.
+
+`omdb` uses the Nexus internal API to do these things.  Since this can only be done using `omdb`, Reconfigurator can really only be used by Oxide engineering and support, not customers.
+
+To get to the long term vision where the system is doing all this on its own in response to operator input, we'll need to get confidence that continually executing the planner will have no ill effects on working systems.  This might involve more operational experience with it, more safeties, and tools for pausing execution, previewing what it _would_ do, etc.
+
+[bibliography]
+== References
+
+* [[[rfd373, RFD 373]]] https://373.rfd.oxide.computer/[RFD 373 Reliable Persistent Workflows]
+* [[[rfd418, RFD 418]]] https://418.rfd.oxide.computer/[RFD 418 Towards automated system update]
+* [[[plan-execute-pattern, Plan-Execute Pattern]]] https://mmapped.blog/posts/29-plan-execute[The plan-execute pattern]
+
