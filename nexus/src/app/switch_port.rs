@@ -9,6 +9,7 @@ use dpd_client::types::LinkId;
 use dpd_client::types::PortId;
 use http::StatusCode;
 use nexus_db_model::SwitchPortGeometry;
+use nexus_db_model::SwitchPortLinkConfig;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -148,6 +149,17 @@ impl super::Nexus {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         self.db_datastore
             .switch_port_configuration_geometry_set(opctx, name_or_id, geometry)
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_link_list(
+        &self,
+        opctx: &OpContext,
+        name_or_id: NameOrId,
+    ) -> ListResultVec<SwitchPortLinkConfig> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_link_list(opctx, name_or_id)
             .await
     }
 

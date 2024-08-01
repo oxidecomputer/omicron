@@ -638,24 +638,21 @@ impl DataStore {
         use db::schema::switch_port_settings_port_config as config;
         use db::schema::switch_port_settings_port_config::dsl;
 
+        let dataset = port_settings_dsl::switch_port_settings.inner_join(
+            dsl::switch_port_settings_port_config
+                .on(dsl::port_settings_id.eq(port_settings_dsl::id)),
+        );
+
         let query = match name_or_id {
             NameOrId::Id(id) => {
                 // find port config using port settings id
-                port_settings_dsl::switch_port_settings
-                        .inner_join(dsl::switch_port_settings_port_config.on(
-                            dsl::port_settings_id.eq(port_settings_dsl::id),
-                        ))
-                        .filter(port_settings::id.eq(id))
-                        .into_boxed()
+                dataset.filter(port_settings::id.eq(id)).into_boxed()
             }
             NameOrId::Name(name) => {
                 // find port config using port settings name
-                port_settings_dsl::switch_port_settings
-                        .inner_join(dsl::switch_port_settings_port_config.on(
-                            dsl::port_settings_id.eq(port_settings_dsl::id),
-                        ))
-                        .filter(port_settings::name.eq(name.to_string()))
-                        .into_boxed()
+                dataset
+                    .filter(port_settings::name.eq(name.to_string()))
+                    .into_boxed()
             }
         };
 
@@ -688,7 +685,7 @@ impl DataStore {
                     // we query for the parent record instead of trusting that the
                     // uuid is valid, since we don't have true referential integrity between
                     // the tables
-                    let table =
+                    let dataset =
                         port_settings_dsl::switch_port_settings.inner_join(
                             dsl::switch_port_settings_port_config
                                 .on(dsl::port_settings_id
@@ -698,11 +695,13 @@ impl DataStore {
                     let query = match identity {
                         NameOrId::Id(id) => {
                             // find port config using port settings id
-                            table.filter(port_settings::id.eq(id)).into_boxed()
+                            dataset
+                                .filter(port_settings::id.eq(id))
+                                .into_boxed()
                         }
                         NameOrId::Name(name) => {
                             // find port config using port settings name
-                            table
+                            dataset
                                 .filter(
                                     port_settings::name.eq(name.to_string()),
                                 )
@@ -736,6 +735,42 @@ impl DataStore {
             })
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn switch_port_configuration_link_list(
+        &self,
+        opctx: &OpContext,
+        name_or_id: NameOrId,
+    ) -> ListResultVec<SwitchPortLinkConfig> {
+        use db::schema::switch_port_settings as port_settings;
+        use db::schema::switch_port_settings::dsl as port_settings_dsl;
+        use db::schema::switch_port_settings_link_config::dsl as link_dsl;
+
+        let dataset = port_settings_dsl::switch_port_settings.inner_join(
+            link_dsl::switch_port_settings_link_config
+                .on(link_dsl::port_settings_id.eq(port_settings_dsl::id)),
+        );
+
+        let query = match name_or_id {
+            NameOrId::Id(id) => {
+                // find port config using port settings id
+                dataset.filter(port_settings::id.eq(id)).into_boxed()
+            }
+            NameOrId::Name(name) => {
+                // find port config using port settings name
+                dataset
+                    .filter(port_settings::name.eq(name.to_string()))
+                    .into_boxed()
+            }
+        };
+
+        let configs: Vec<SwitchPortLinkConfig> = query
+            .select(SwitchPortLinkConfig::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(configs)
     }
 
     // switch ports

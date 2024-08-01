@@ -4013,11 +4013,12 @@ async fn networking_switch_port_configuration_link_list(
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let query = path_params.into_inner().configuration;
+        let config = path_params.into_inner().configuration;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
-        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
-        todo!("list links")
+        let settings =
+            nexus.switch_port_configuration_link_list(&opctx, config).await?;
+        Ok(HttpResponseOk(settings.into_iter().map(Into::into).collect()))
     };
     apictx
         .context
