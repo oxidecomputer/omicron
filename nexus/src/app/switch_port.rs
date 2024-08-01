@@ -8,6 +8,7 @@ use db::datastore::SwitchPortSettingsCombinedResult;
 use dpd_client::types::LinkId;
 use dpd_client::types::PortId;
 use http::StatusCode;
+use nexus_db_model::SwitchPortConfig;
 use nexus_db_model::SwitchPortGeometry;
 use nexus_db_model::SwitchPortLinkConfig;
 use nexus_db_queries::authz;
@@ -133,7 +134,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
-    ) -> LookupResult<SwitchPortGeometry> {
+    ) -> LookupResult<SwitchPortConfig> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.db_datastore
             .switch_port_configuration_geometry_get(opctx, name_or_id)
@@ -145,7 +146,7 @@ impl super::Nexus {
         opctx: &OpContext,
         name_or_id: NameOrId,
         geometry: SwitchPortGeometry,
-    ) -> LookupResult<SwitchPortGeometry> {
+    ) -> CreateResult<SwitchPortConfig> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         self.db_datastore
             .switch_port_configuration_geometry_set(opctx, name_or_id, geometry)

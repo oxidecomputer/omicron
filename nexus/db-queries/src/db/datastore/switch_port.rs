@@ -632,10 +632,9 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         name_or_id: NameOrId,
-    ) -> LookupResult<SwitchPortGeometry> {
+    ) -> LookupResult<SwitchPortConfig> {
         use db::schema::switch_port_settings as port_settings;
         use db::schema::switch_port_settings::dsl as port_settings_dsl;
-        use db::schema::switch_port_settings_port_config as config;
         use db::schema::switch_port_settings_port_config::dsl;
 
         let dataset = port_settings_dsl::switch_port_settings.inner_join(
@@ -656,8 +655,8 @@ impl DataStore {
             }
         };
 
-        let geometry: SwitchPortGeometry = query
-            .select(config::geometry)
+        let geometry: SwitchPortConfig = query
+            .select(SwitchPortConfig::as_select())
             .limit(1)
             .first_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -671,7 +670,7 @@ impl DataStore {
         opctx: &OpContext,
         name_or_id: NameOrId,
         new_geometry: SwitchPortGeometry,
-    ) -> CreateResult<SwitchPortGeometry> {
+    ) -> CreateResult<SwitchPortConfig> {
         use db::schema::switch_port_settings as port_settings;
         use db::schema::switch_port_settings::dsl as port_settings_dsl;
         use db::schema::switch_port_settings_port_config::dsl;
@@ -723,14 +722,14 @@ impl DataStore {
 
                     // create or update geometry
                     diesel::insert_into(dsl::switch_port_settings_port_config)
-                        .values(port_config)
+                        .values(port_config.clone())
                         .on_conflict(dsl::port_settings_id)
                         .do_update()
                         .set(dsl::geometry.eq(new_geometry))
                         .execute_async(&conn)
                         .await?;
 
-                    Ok(new_geometry)
+                    Ok(port_config)
                 }
             })
             .await

@@ -44,7 +44,6 @@ use nexus_types::external_api::{
     params::{BgpPeerConfig, RouteConfig},
     shared::{BfdStatus, ProbeInfo},
 };
-use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByName;
 use omicron_common::api::external::http_pagination::PaginatedByNameOrId;
@@ -72,7 +71,6 @@ use omicron_common::api::external::Probe;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::SwitchPort;
-use omicron_common::api::external::SwitchPortGeometry;
 use omicron_common::api::external::SwitchPortSettings;
 use omicron_common::api::external::SwitchPortSettingsView;
 use omicron_common::api::external::TufRepoGetResponse;
@@ -81,6 +79,9 @@ use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::api::external::{
     http_pagination::data_page_params_for, AggregateBgpMessageHistory,
+};
+use omicron_common::api::external::{
+    http_pagination::marker_for_name, SwitchPortConfig,
 };
 use omicron_common::api::external::{
     http_pagination::marker_for_name_or_id, SwitchPortLinkConfig,
@@ -3947,7 +3948,7 @@ async fn networking_switch_port_configuration_view(
 async fn networking_switch_port_configuration_geometry_view(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::SwitchPortSettingsInfoSelector>,
-) -> Result<HttpResponseOk<SwitchPortGeometry>, HttpError> {
+) -> Result<HttpResponseOk<SwitchPortConfig>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
@@ -3976,7 +3977,7 @@ async fn networking_switch_port_configuration_geometry_set(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::SwitchPortSettingsInfoSelector>,
     new_settings: TypedBody<params::SwitchPortConfigCreate>,
-) -> Result<HttpResponseCreated<SwitchPortGeometry>, HttpError> {
+) -> Result<HttpResponseCreated<SwitchPortConfig>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;

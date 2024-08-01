@@ -7248,7 +7248,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SwitchPortGeometry2"
+                  "$ref": "#/components/schemas/SwitchPortConfig"
                 }
               }
             }
@@ -7294,7 +7294,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SwitchPortGeometry2"
+                  "$ref": "#/components/schemas/SwitchPortConfig"
                 }
               }
             }
