@@ -874,7 +874,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ad639525b1c67b6a298f378417b060fbc04618bea559482a8484381cce27d965"
 dependencies = [
  "serde",
- "toml 0.8.15",
+ "toml 0.8.19",
 ]
 
 [[package]]
@@ -1988,7 +1988,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "toml 0.8.15",
+ "toml 0.8.19",
  "trust-dns-client",
  "trust-dns-proto",
  "trust-dns-resolver",
@@ -2070,7 +2070,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "toml 0.8.15",
+ "toml 0.8.19",
  "uuid",
 ]
 
@@ -2113,7 +2113,7 @@ dependencies = [
  "slog-term",
  "tokio",
  "tokio-rustls 0.25.0",
- "toml 0.8.15",
+ "toml 0.8.19",
  "usdt",
  "uuid",
  "version_check",
@@ -2277,7 +2277,7 @@ dependencies = [
  "sled-agent-types",
  "socket2 0.5.7",
  "tokio",
- "toml 0.8.15",
+ "toml 0.8.19",
  "trust-dns-resolver",
  "uuid",
 ]
@@ -3565,7 +3565,7 @@ dependencies = [
  "smf",
  "thiserror",
  "tokio",
- "toml 0.8.15",
+ "toml 0.8.19",
  "uuid",
  "whoami",
  "zone 0.3.0",
@@ -4616,7 +4616,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "tokio-postgres",
- "toml 0.8.15",
+ "toml 0.8.19",
  "uuid",
 ]
 
@@ -5432,7 +5432,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
- "toml 0.8.15",
+ "toml 0.8.19",
  "url",
 ]
 
@@ -5480,7 +5480,7 @@ dependencies = [
  "test-strategy",
  "thiserror",
  "tokio",
- "toml 0.8.15",
+ "toml 0.8.19",
  "uuid",
 ]
 
@@ -5505,7 +5505,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "toml 0.8.15",
+ "toml 0.8.19",
  "uuid",
 ]
 
@@ -5540,7 +5540,7 @@ dependencies = [
  "subprocess",
  "tokio",
  "tokio-postgres",
- "toml 0.8.15",
+ "toml 0.8.19",
 ]
 
 [[package]]
@@ -5582,7 +5582,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-tungstenite 0.20.1",
- "toml 0.8.15",
+ "toml 0.8.19",
  "uuid",
 ]
 
@@ -5810,7 +5810,7 @@ dependencies = [
  "tar",
  "thiserror",
  "tokio",
- "toml 0.8.15",
+ "toml 0.8.19",
  "walkdir",
 ]
 
@@ -5858,7 +5858,7 @@ dependencies = [
  "slog-term",
  "tar",
  "tokio",
- "toml 0.8.15",
+ "toml 0.8.19",
  "tufaceous-lib",
 ]
 
@@ -5964,7 +5964,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "toml 0.8.15",
+ "toml 0.8.19",
  "usdt",
  "uuid",
  "zeroize",
@@ -6123,7 +6123,7 @@ dependencies = [
  "toml 0.7.8",
  "toml_datetime",
  "toml_edit 0.19.15",
- "toml_edit 0.22.16",
+ "toml_edit 0.22.20",
  "tracing",
  "trust-dns-proto",
  "unicode-bidi",
@@ -6413,7 +6413,7 @@ dependencies = [
  "oximeter-timeseries-macro",
  "prettyplease",
  "syn 2.0.72",
- "toml 0.8.15",
+ "toml 0.8.19",
  "uuid",
 ]
 
@@ -6482,7 +6482,7 @@ dependencies = [
  "subprocess",
  "thiserror",
  "tokio",
- "toml 0.8.15",
+ "toml 0.8.19",
  "uuid",
 ]
 
@@ -6561,7 +6561,7 @@ dependencies = [
  "strum",
  "syn 2.0.72",
  "thiserror",
- "toml 0.8.15",
+ "toml 0.8.19",
  "trybuild",
  "uuid",
 ]
@@ -8302,7 +8302,7 @@ dependencies = [
  "serde",
  "tempfile",
  "thiserror",
- "toml 0.8.15",
+ "toml 0.8.19",
  "toolchain_find",
 ]
 
@@ -8758,9 +8758,9 @@ dependencies = [
 
 [[package]]
 name = "serde_spanned"
-version = "0.6.6"
+version = "0.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79e674e01f999af37c49f70a6ede167a8a60b2503e56c5599532a65baa5969a0"
+checksum = "eb5b1b31579f3811bf615c144393417496f152e12ac8b7663bf664f4a815306d"
 dependencies = [
  "serde",
 ]
@@ -9032,7 +9032,7 @@ dependencies = [
  "sled-storage",
  "slog",
  "thiserror",
- "toml 0.8.15",
+ "toml 0.8.19",
  "uuid",
 ]
 
@@ -9354,7 +9354,7 @@ dependencies = [
  "slog-dtrace",
  "thiserror",
  "tokio",
- "toml 0.8.15",
+ "toml 0.8.19",
 ]
 
 [[package]]
@@ -10181,21 +10181,21 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.8.15"
+version = "0.8.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac2caab0bf757388c6c0ae23b3293fdb463fee59434529014f85e3263b995c28"
+checksum = "a1ed1f98e3fdc28d6d910e6737ae6ab1a93bf1985935a1193e68f93eeb68d24e"
 dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "toml_edit 0.22.16",
+ "toml_edit 0.22.20",
 ]
 
 [[package]]
 name = "toml_datetime"
-version = "0.6.6"
+version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4badfd56924ae69bcc9039335b2e017639ce3f9b001c393c1b2d1ef846ce2cbf"
+checksum = "0dd7358ecb8fc2f8d014bf86f6f638ce72ba252a2c3a2572f2a795f1d23efb41"
 dependencies = [
  "serde",
 ]
@@ -10215,15 +10215,15 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.22.16"
+version = "0.22.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "278f3d518e152219c994ce877758516bca5e118eaed6996192a774fb9fbf0788"
+checksum = "583c44c02ad26b0c3f3066fe629275e50627026c51ac2e595cca4c230ce1ce1d"
 dependencies = [
  "indexmap 2.2.6",
  "serde",
  "serde_spanned",
  "toml_datetime",
- "winnow 0.6.8",
+ "winnow 0.6.18",
 ]
 
 [[package]]
@@ -10443,7 +10443,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "termcolor",
- "toml 0.8.15",
+ "toml 0.8.19",
 ]
 
 [[package]]
@@ -10503,7 +10503,7 @@ dependencies = [
  "slog",
  "tar",
  "tokio",
- "toml 0.8.15",
+ "toml 0.8.19",
  "tough",
  "url",
  "zip",
@@ -11188,8 +11188,8 @@ dependencies = [
  "textwrap",
  "tokio",
  "tokio-util",
- "toml 0.8.15",
- "toml_edit 0.22.16",
+ "toml 0.8.19",
+ "toml_edit 0.22.20",
  "tui-tree-widget",
  "unicode-width",
  "update-engine",
@@ -11219,7 +11219,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "toml 0.8.15",
+ "toml 0.8.19",
  "update-engine",
 ]
 
@@ -11308,7 +11308,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "toml 0.8.15",
+ "toml 0.8.19",
  "tough",
  "trust-dns-resolver",
  "tufaceous",
@@ -11568,9 +11568,9 @@ dependencies = [
 
 [[package]]
 name = "winnow"
-version = "0.6.8"
+version = "0.6.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3c52e9c97a68071b23e836c9380edae937f17b9c4667bd021973efc689f618d"
+checksum = "68a9bda4691f099d435ad181000724da8e5899daa10713c2d432552b9ccd3a6f"
 dependencies = [
  "memchr",
 ]
@@ -11631,7 +11631,7 @@ dependencies = [
  "serde",
  "swrite",
  "tabled",
- "toml 0.8.15",
+ "toml 0.8.19",
  "usdt",
 ]
 
