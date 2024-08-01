@@ -2290,6 +2290,7 @@ mod test {
                 .nexus
                 .datastore()
                 .vmm_and_migration_update_runtime(
+                    &self.opctx,
                     vmm_id,
                     &new_runtime,
                     migrations,
@@ -2346,6 +2347,7 @@ mod test {
                 .nexus
                 .datastore()
                 .vmm_and_migration_update_runtime(
+                    &self.opctx,
                     vmm_id,
                     &new_runtime,
                     migrations,
