@@ -6,12 +6,16 @@
 
 use super::DataStore;
 use crate::context::OpContext;
+use crate::db;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::model::{Migration, MigrationState};
+use crate::db::model::Generation;
+use crate::db::model::Migration;
+use crate::db::model::MigrationState;
 use crate::db::pagination::paginated;
 use crate::db::schema::migration::dsl;
 use crate::db::update_and_check::UpdateAndCheck;
+use crate::db::update_and_check::UpdateAndQueryResult;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -23,6 +27,7 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::internal::nexus;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PropolisUuid;
 use uuid::Uuid;
 
 impl DataStore {
@@ -122,6 +127,50 @@ impl DataStore {
                 UpdateStatus::NotUpdatedButExists => false,
             })
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub(crate) async fn migration_update_source_on_connection(
+        &self,
+        conn: &async_bb8_diesel::Connection<db::DbConnection>,
+        vmm_id: &PropolisUuid,
+        migration: &nexus::MigrationRuntimeState,
+    ) -> Result<UpdateAndQueryResult<Migration>, diesel::result::Error> {
+        let generation = Generation(migration.r#gen);
+        diesel::update(dsl::migration)
+            .filter(dsl::id.eq(migration.migration_id))
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::source_gen.lt(generation))
+            .filter(dsl::source_propolis_id.eq(vmm_id.into_untyped_uuid()))
+            .set((
+                dsl::source_state.eq(MigrationState(migration.state)),
+                dsl::source_gen.eq(generation),
+                dsl::time_source_updated.eq(migration.time_updated),
+            ))
+            .check_if_exists::<Migration>(migration.migration_id)
+            .execute_and_check(conn)
+            .await
+    }
+
+    pub(crate) async fn migration_update_target_on_connection(
+        &self,
+        conn: &async_bb8_diesel::Connection<db::DbConnection>,
+        vmm_id: &PropolisUuid,
+        migration: &nexus::MigrationRuntimeState,
+    ) -> Result<UpdateAndQueryResult<Migration>, diesel::result::Error> {
+        let generation = Generation(migration.r#gen);
+        diesel::update(dsl::migration)
+            .filter(dsl::id.eq(migration.migration_id))
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::target_gen.lt(generation))
+            .filter(dsl::target_propolis_id.eq(vmm_id.into_untyped_uuid()))
+            .set((
+                dsl::target_state.eq(MigrationState(migration.state)),
+                dsl::target_gen.eq(generation),
+                dsl::time_target_updated.eq(migration.time_updated),
+            ))
+            .check_if_exists::<Migration>(migration.migration_id)
+            .execute_and_check(conn)
+            .await
     }
 }
 

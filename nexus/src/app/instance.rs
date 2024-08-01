@@ -1853,6 +1853,7 @@ pub(crate) async fn notify_instance_updated(
 
     let result = datastore
         .vmm_and_migration_update_runtime(
+            &opctx,
             propolis_id,
             // TODO(eliza): probably should take this by value...
             &new_runtime_state.vmm_state.clone().into(),
