@@ -207,7 +207,7 @@ async fn spawn_bootstore_tasks(
     )
     .unwrap();
 
-   // let log = log.new(o!("stage" => "switch zone initialization"));
+    // let log = log.new(o!("stage" => "switch zone initialization"));
     // TODO: Add some logging here?
     // Create and spawn the bootstore
     info!(log, "Starting Bootstore");
