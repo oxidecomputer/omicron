@@ -376,7 +376,14 @@ mod tests {
             .await
             .expect("migration should be inserted successfully!");
 
-        // pretend we have just migrated in from vmm1 to vmm2
+        info!(
+            &logctx.log,
+            "pretending to migrate from vmm1 to vmm2";
+            "vmm1" => ?vmm1,
+            "vmm2" => ?vmm2,
+            "migration" => ?migration1,
+        );
+
         let vmm1_migration_out = nexus::MigrationRuntimeState {
             migration_id: migration1.id,
             state: nexus::MigrationState::Completed,
@@ -444,6 +451,137 @@ mod tests {
         );
         assert_eq!(
             db_migration1.target_gen,
+            Generation(Generation::new().0.next()),
+        );
+
+        // now, let's simulate a second migration, out of vmm2.
+        let vmm3 = datastore
+            .vmm_insert(
+                &opctx,
+                Vmm {
+                    id: Uuid::new_v4(),
+                    time_created: Utc::now(),
+                    time_deleted: None,
+                    instance_id: instance_id.into_untyped_uuid(),
+                    sled_id: Uuid::new_v4(),
+                    propolis_ip: "10.1.9.69".parse().unwrap(),
+                    propolis_port: 420.into(),
+                    runtime: VmmRuntimeState {
+                        time_state_updated: Utc::now(),
+                        r#gen: Generation::new(),
+                        state: VmmState::Running,
+                    },
+                },
+            )
+            .await
+            .expect("VMM 2 should be inserted successfully!");
+
+        let migration2 = datastore
+            .migration_insert(
+                &opctx,
+                Migration::new(Uuid::new_v4(), instance_id, vmm2.id, vmm3.id),
+            )
+            .await
+            .expect("migration 2 should be inserted successfully!");
+        info!(
+            &logctx.log,
+            "pretending to migrate from vmm2 to vmm3";
+            "vmm2" => ?vmm2,
+            "vmm3" => ?vmm3,
+            "migration" => ?migration2,
+        );
+
+        let vmm2_migration_out = nexus::MigrationRuntimeState {
+            migration_id: migration2.id,
+            state: nexus::MigrationState::Completed,
+            r#gen: Generation::new().0.next(),
+            time_updated: Utc::now(),
+        };
+        datastore
+            .vmm_and_migration_update_runtime(
+                PropolisUuid::from_untyped_uuid(vmm2.id),
+                &VmmRuntimeState {
+                    time_state_updated: Utc::now(),
+                    r#gen: Generation(vmm2.runtime.r#gen.0.next()),
+                    state: VmmState::Destroyed,
+                },
+                Migrations {
+                    migration_in: Some(&vmm2_migration_in),
+                    migration_out: Some(&vmm2_migration_out),
+                },
+            )
+            .await
+            .expect("vmm2 state should update");
+
+        let vmm3_migration_in = nexus::MigrationRuntimeState {
+            migration_id: migration2.id,
+            // Let's make this fail, just for fun...
+            state: nexus::MigrationState::Failed,
+            r#gen: Generation::new().0.next(),
+            time_updated: Utc::now(),
+        };
+        datastore
+            .vmm_and_migration_update_runtime(
+                PropolisUuid::from_untyped_uuid(vmm3.id),
+                &VmmRuntimeState {
+                    time_state_updated: Utc::now(),
+                    r#gen: Generation(vmm3.runtime.r#gen.0.next()),
+                    state: VmmState::Destroyed,
+                },
+                Migrations {
+                    migration_in: Some(&vmm3_migration_in),
+                    migration_out: None,
+                },
+            )
+            .await
+            .expect("vmm3 state should update");
+
+        let all_migrations = datastore
+            .instance_list_migrations(
+                &opctx,
+                instance_id,
+                &DataPageParams::max_page(),
+            )
+            .await
+            .expect("must list migrations");
+        assert_eq!(all_migrations.len(), 2);
+
+        // the previous migration should not have closed.
+        let new_db_migration1 = all_migrations
+            .iter()
+            .find(|m| m.id == migration1.id)
+            .expect("query must include migration1");
+        assert_eq!(new_db_migration1.source_state, db_migration1.source_state);
+        assert_eq!(new_db_migration1.source_gen, db_migration1.source_gen);
+        assert_eq!(
+            db_migration1.time_source_updated,
+            new_db_migration1.time_source_updated
+        );
+        assert_eq!(new_db_migration1.target_state, db_migration1.target_state);
+        assert_eq!(new_db_migration1.target_gen, db_migration1.target_gen,);
+        assert_eq!(
+            new_db_migration1.time_target_updated,
+            db_migration1.time_target_updated,
+        );
+
+        let db_migration2 = all_migrations
+            .iter()
+            .find(|m| m.id == migration2.id)
+            .expect("query must include migration2");
+        assert_eq!(
+            new_db_migration2.source_state,
+            db::model::MigrationState::COMPLETED
+        );
+        assert_eq!(
+            db_migration2.target_state,
+            db::model::MigrationState::FAILED
+        );
+        assert_eq!(
+            db_migration2.source_gen,
+            Generation(Generation::new().0.next()),
+        );
+        assert_eq!(
+            db_migration2.target_gen,
             Generation(Generation::new().0.next()),
         );
 
