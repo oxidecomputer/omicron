@@ -657,12 +657,12 @@ impl DataStore {
     pub async fn get_snapshot_replacement_step_by_id(
         &self,
         opctx: &OpContext,
-        id: Uuid,
+        snapshot_replacement_step_id: Uuid,
     ) -> Result<SnapshotReplacementStep, Error> {
         use db::schema::snapshot_replacement_step::dsl;
 
         dsl::snapshot_replacement_step
-            .filter(dsl::id.eq(id))
+            .filter(dsl::id.eq(snapshot_replacement_step_id))
             .get_result_async::<SnapshotReplacementStep>(
                 &*self.pool_connection_authorized(opctx).await?,
             )
