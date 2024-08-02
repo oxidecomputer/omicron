@@ -1074,6 +1074,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98cc8fbded0c607b7ba9dd60cd98df59af97e84d24e49c8557331cfc26d301ce"
 
 [[package]]
+name = "clickward"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/clickward?rev=ceec762e6a87d2a22bf56792a3025e145caa095e#ceec762e6a87d2a22bf56792a3025e145caa095e"
+dependencies = [
+ "anyhow",
+ "camino",
+ "clap",
+ "derive_more",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "clipboard-win"
 version = "5.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6496,8 +6511,10 @@ dependencies = [
  "bcs",
  "bytes",
  "camino",
+ "camino-tempfile",
  "chrono",
  "clap",
+ "clickward",
  "crossterm",
  "dropshot",
  "expectorate",
