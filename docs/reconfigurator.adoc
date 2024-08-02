@@ -29,10 +29,11 @@ NOTE: Currently, these "user"-driven steps are carried out using `omdb`, which m
 
 You might notice that the only step that has anything to do with adding a sled is the first one.  This is where a user communicated a change to the **intended state** of the world.  Everything Reconfigurator does follows a pattern just like this:
 
-1. A user changes the intended state of the world.
-2. The user invokes the planner to generate a new blueprint.
-3. The user makes the new blueprint the current target.
-4. Reconfigurator executes the target blueprint.
+1. In the background, Reconfigurator is constantly updating its view of the actual state of the world.
+2. A user changes the intended state of the world.
+3. The user invokes the planner to generate a new blueprint.
+4. The user makes the new blueprint the current target.
+5. Reconfigurator executes the target blueprint.
 
 Reconfigurator makes heavy use of well-established patterns, most notably:
 
