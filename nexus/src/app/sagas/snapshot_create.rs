@@ -100,7 +100,6 @@ use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use crate::external_api::params;
 use anyhow::anyhow;
-use crucible_agent_client::{types::RegionId, Client as CrucibleAgentClient};
 use nexus_db_model::Generation;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
@@ -1246,60 +1245,15 @@ async fn ssc_start_running_snapshot(
             )));
         };
 
-        // Create a Crucible agent client
-        let url = format!("http://{}", dataset_addr);
-        let client = CrucibleAgentClient::new(&url);
-
-        info!(
-            log,
-            "contacting crucible agent to confirm region exists";
-            "dataset" => ?dataset,
-            "region" => ?region,
-            "url" => url,
-        );
-
-        // Validate with the Crucible agent that the snapshot exists
-        let crucible_region = retry_until_known_result(log, || async {
-            client.region_get(&RegionId(region.id().to_string())).await
-        })
-        .await
-        .map_err(|e| e.to_string())
-        .map_err(ActionError::action_failed)?;
-
-        info!(
-            log,
-            "confirmed the region exists with crucible agent";
-            "crucible region" => ?crucible_region
-        );
-
-        let crucible_snapshot = retry_until_known_result(log, || async {
-            client
-                .region_get_snapshot(
-                    &RegionId(region.id().to_string()),
-                    &snapshot_id.to_string(),
-                )
-                .await
-        })
-        .await
-        .map_err(|e| e.to_string())
-        .map_err(ActionError::action_failed)?;
-
-        info!(
-            log,
-            "successfully accessed crucible snapshot";
-            "crucible snapshot" => ?crucible_snapshot
-        );
-
         // Start the snapshot running
-        let crucible_running_snapshot =
-            retry_until_known_result(log, || async {
-                client
-                    .region_run_snapshot(
-                        &RegionId(region.id().to_string()),
-                        &snapshot_id.to_string(),
-                    )
-                    .await
-            })
+        let (crucible_region, _, crucible_running_snapshot) = osagactx
+            .nexus()
+            .ensure_crucible_running_snapshot(
+                &log,
+                &dataset,
+                region.id(),
+                snapshot_id,
+            )
             .await
             .map_err(|e| e.to_string())
             .map_err(ActionError::action_failed)?;
@@ -1307,7 +1261,7 @@ async fn ssc_start_running_snapshot(
         info!(
             log,
             "successfully started running region snapshot";
-            "crucible running snapshot" => ?crucible_running_snapshot
+            "running snapshot" => ?crucible_running_snapshot
         );
 
         // Map from the region to the snapshot
@@ -1320,6 +1274,7 @@ async fn ssc_start_running_snapshot(
                 0
             )
         );
+
         let snapshot_addr = format!(
             "{}",
             SocketAddrV6::new(
@@ -1329,6 +1284,7 @@ async fn ssc_start_running_snapshot(
                 0
             )
         );
+
         info!(log, "map {} to {}", region_addr, snapshot_addr);
         map.insert(region_addr, snapshot_addr.clone());
 
