@@ -142,7 +142,8 @@
           "uplink_port_speed": "speed40_g",
           "uplink_port_fec": "none",
           "bgp_peers": [],
-          "autoneg": false
+          "autoneg": false,
+          "lldp": null
         },
         {
           "routes": [
@@ -163,7 +164,8 @@
           "uplink_port_speed": "speed40_g",
           "uplink_port_fec": "none",
           "bgp_peers": [],
-          "autoneg": false
+          "autoneg": false,
+          "lldp": null
         }
       ],
       "bgp": [],

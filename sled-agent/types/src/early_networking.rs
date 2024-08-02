@@ -299,6 +299,7 @@ pub mod back_compat {
                 uplink_port_fec: v1.uplink_port_fec,
                 bgp_peers: v1.bgp_peers.clone(),
                 autoneg: v1.autoneg,
+                lldp: None,
             }
         }
     }
@@ -342,6 +343,7 @@ pub mod back_compat {
                 uplink_port_fec: value.uplink_port_fec,
                 bgp_peers: vec![],
                 autoneg: false,
+                lldp: None,
             }
         }
     }
@@ -512,6 +514,7 @@ mod tests {
                         uplink_port_fec: uplink.uplink_port_fec,
                         autoneg: false,
                         bgp_peers: vec![],
+                        lldp: None,
                     }],
                     bgp: vec![],
                     bfd: vec![],
@@ -592,6 +595,7 @@ mod tests {
                         uplink_port_fec: port.uplink_port_fec,
                         autoneg: false,
                         bgp_peers: vec![],
+                        lldp: None,
                     }],
                     bgp: vec![],
                     bfd: vec![],
