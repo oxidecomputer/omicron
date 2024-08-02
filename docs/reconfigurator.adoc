@@ -25,7 +25,7 @@ Let's walk through how someone might add a new sled to an existing system using 
 4. The user makes an API request to make the new blueprint the current system **target blueprint**.
 5. Reconfigurator does the rest: it starts **executing** the blueprint.  This means trying to make reality match the blueprint.  This process continues in a loop basically forever.footnote:[The process does not stop once reality matches the blueprint because reality can change after that point and the system may need to take action again.]
 
-NOTE: Currently, these "user"-driven steps are carried out using `omdb`, which means that in production systems they can really only be done by an Oxide employee with access via the technician port.  The long-term goal is to automate all of this so that planning and execution both happen continuously and automatically.
+NOTE: Currently, these "user"-driven steps are carried out using `omdb`, which means that in production systems they can really only be done by an Oxide employee with access via the technician port.  The long-term goal is to automate all of this so that planning and execution both happen continuously and automatically.  In that world, the user only has to do step 1.
 
 You might notice that the only step that has anything to do with adding a sled is the first one.  This is where a user communicated a change to the **intended state** of the world.  Everything Reconfigurator does follows a pattern just like this:
 
@@ -44,13 +44,13 @@ Reconfigurator makes heavy use of well-established patterns, most notably:
 Important data:
 
 * **Policy** describes _intended_ system state in terms that a user or Oxide technician might want to control: what release the system is running, what sleds are part of the system, how many CockroachDB nodes there should be, etc.
-* **Inventory collections** describe the actual state of the system, particularly what hardware exists, what versions of what software components are running everywhere, the software's configuration, etc.
+* **Inventory collections** seek to describe the actual state of the system, particularly what hardware exists, what versions of what software components are running everywhere, the software's configuration, etc.  Note that collecting this information is necessarily non-atomic (since it's distributed) and individual steps can fail.  So when using inventory collections, Reconfigurator is always looking at a potentially incomplete and outdated view of reality.
 * **Blueprints** are very detailed descriptions of the intended state of the system.  Blueprints are stored in CockroachDB.  They are described in detail below.
 * At any given time, there is one **target blueprint** that the system is continuously trying to make real.  This is stored in CockroachDB.
 
 Reconfigurator consists mainly of:
 
-* a **planner** that takes as input the latest policy and the latest state of the system (including inventory collections and other database state) and produces a **blueprint**.  Generating a blueprint does not make it the new target!  The new blueprint is a _possible_ next state of the world.  Only when it's made the current target does the system attempt to make that blueprint real.
+* a **planner** that takes as input the latest policy and the latest state of the system (including inventory collections and other database state) and produces a **blueprint**.  Generating a blueprint does not make it the new target!  The new blueprint is a _possible_ next state of the world.  Only when it's made the current target does the system attempt to make that blueprint real.  (It's also possible that a blueprint _never_ becomes the target.  So the planning process must not actually _change_ any state, only propose changes.)
 * an **executor** that attempts to **execute a blueprint** -- that is, attempts to make reality match that blueprint.
 
 It's important that users be able to change the intended state (change policy, generate a new blueprint, and make that blueprint the target) even when the previous target has not been fully executed yet.footnote:[It's tempting to try to simplify things by disallowing users from changing the intended state while the previous blueprint is being executed.  But there are many cases where this behavior is necessary.  Imagine the operator requests that the system gracefully remove one sled.  So the system starts live-migrating customer instances on that sled to other sleds.  Then the sled suddenly fails permanently (i.e., catches fire).  If we couldn't change the intended next state to say "this sled is gone", then the system would be stuck forever waiting for those instances to successfully live-migrate, which they never will.  This is just one example.  Besides that, if there were any kind of bug causes Reconfigurator to get stuck, fixing it or working around it requires that the operator or Oxide support be able to change the intended state even though the system hasn't reached the current intended state (which it never will because it's stuck).]
@@ -77,7 +77,7 @@ The planner is synchronous, mostly deterministic, relatively simple, and highly 
 As a consequence of all this:
 
 * At any given time, any Nexus instance may generate a new blueprint and make it the new system target (subject to the constraints above).  Multiple Nexus instances can generate blueprints concurrently.  They can also attempt to set the target concurrently.  CockroachDB's strong consistency ensures that only one blueprint can be the target at any time.
-* At any given time, any Nexus instance may be attempting to execute (realize) a blueprint that it believes is the latest target.  It may no longer be the current target, though.
+* At any given time, any Nexus instance may be attempting to execute (realize) a blueprint that it believes is the latest target.  It may no longer be the current target, though.  Details are discussed below.
 * Nexus instances do not directly coordinate with each other at all.
 
 === Execution
@@ -133,6 +133,10 @@ The Planner
                              |
                              v
                     commit blueprint to database
+                             |
+                             |
+                             v
+                    make blueprint the target
                              |
                              |
                              v
