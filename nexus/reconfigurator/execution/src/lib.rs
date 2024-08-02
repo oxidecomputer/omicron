@@ -24,6 +24,7 @@ use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
+use uuid::Uuid;
 
 mod cockroachdb;
 mod datasets;
@@ -32,6 +33,7 @@ mod external_networking;
 mod omicron_physical_disks;
 mod omicron_zones;
 mod overridables;
+mod sagas;
 mod sled_state;
 
 pub use dns::blueprint_external_dns_config;
@@ -80,6 +82,7 @@ pub async fn realize_blueprint<S>(
     resolver: &Resolver,
     blueprint: &Blueprint,
     nexus_label: S,
+    nexus_id: Uuid, // XXX-dap type, and replace nexus_label too?
 ) -> Result<(), Vec<anyhow::Error>>
 where
     String: From<S>,
@@ -90,6 +93,7 @@ where
         resolver,
         blueprint,
         nexus_label,
+        nexus_id,
         &Default::default(),
     )
     .await
@@ -101,6 +105,7 @@ pub async fn realize_blueprint_with_overrides<S>(
     resolver: &Resolver,
     blueprint: &Blueprint,
     nexus_label: S,
+    nexus_id: Uuid, // XXX-dap type, and replace nexus_label too?
     overrides: &Overridables,
 ) -> Result<(), Vec<anyhow::Error>>
 where
@@ -233,14 +238,39 @@ where
     omicron_physical_disks::decommission_expunged_disks(&opctx, datastore)
         .await?;
 
+    // From this point on, we'll assume that any errors that we encounter do
+    // *not* require stopping execution.  We'll just accumulate them and return
+    // them all at the end.
+    //
+    // TODO We should probably do this with more of the errors above, too.
+    let mut errors = Vec::new();
+
+    // For any expunged Nexus zones, re-assign in-progress sagas to some other
+    // Nexus.  If this fails for some reason, it doesn't affect anything else.
+    let sec_id = nexus_db_model::SecId(nexus_id);
+    if let Err(error) = sagas::reassign_sagas_from_expunged(
+        &opctx, datastore, blueprint, sec_id,
+    )
+    .await
+    .context("failed to re-assign sagas")
+    {
+        errors.push(error);
+    }
+
     // This is likely to error if any cluster upgrades are in progress (which
     // can take some time), so it should remain at the end so that other parts
     // of the blueprint can progress normally.
-    cockroachdb::ensure_settings(&opctx, datastore, blueprint)
-        .await
-        .map_err(|err| vec![err])?;
+    if let Err(error) =
+        cockroachdb::ensure_settings(&opctx, datastore, blueprint).await
+    {
+        errors.push(error);
+    }
 
-    Ok(())
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
 }
 
 #[cfg(test)]

@@ -76,12 +76,14 @@ impl BlueprintExecutor {
             });
         }
 
+        let nexus_id = todo!(); // XXX-dap
         let result = nexus_reconfigurator_execution::realize_blueprint(
             opctx,
             &self.datastore,
             &self.resolver,
             blueprint,
             &self.nexus_label,
+            nexus_id,
         )
         .await;
 
