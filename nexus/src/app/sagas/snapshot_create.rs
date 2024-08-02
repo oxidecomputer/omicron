@@ -137,6 +137,10 @@ pub(crate) struct Params {
 // snapshot create saga: actions
 declare_saga_actions! {
     snapshot_create;
+    TAKE_VOLUME_LOCK -> "volume_lock" {
+        + ssc_take_volume_lock
+        - ssc_take_volume_lock_undo
+    }
     REGIONS_ALLOC -> "datasets_and_regions" {
         + ssc_alloc_regions
         - ssc_alloc_regions_undo
@@ -200,6 +204,9 @@ declare_saga_actions! {
     FINALIZE_SNAPSHOT_RECORD -> "finalized_snapshot" {
         + ssc_finalize_snapshot_record
     }
+    RELEASE_VOLUME_LOCK -> "volume_unlock" {
+        + ssc_release_volume_lock
+    }
 }
 
 // snapshot create saga: definition
@@ -236,6 +243,14 @@ impl NexusSaga for SagaSnapshotCreate {
             "GenerateDestinationVolumeId",
             ACTION_GENERATE_ID.as_ref(),
         ));
+
+        builder.append(Node::action(
+            "lock_id",
+            "GenerateLockId",
+            ACTION_GENERATE_ID.as_ref(),
+        ));
+
+        builder.append(take_volume_lock_action());
 
         // (DB) Allocate region space for snapshot to store blocks post-scrub
         builder.append(regions_alloc_action());
@@ -291,6 +306,8 @@ impl NexusSaga for SagaSnapshotCreate {
             builder.append(detach_disk_from_pantry_action());
         }
 
+        builder.append(release_volume_lock_action());
+
         Ok(builder.build()?)
     }
 }
@@ -298,6 +315,106 @@ impl NexusSaga for SagaSnapshotCreate {
 // snapshot create saga: action implementations
 
 async fn ssc_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
+    Ok(())
+}
+
+async fn ssc_take_volume_lock(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let lock_id = sagactx.lookup::<Uuid>("lock_id")?;
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    // Without a lock on the volume, this saga can race with the region
+    // replacement saga, causing (at least!) two problems:
+    //
+    // - the request that this saga sends to a propolis to create a snapshot
+    //   races with the vcr_replace request that the region replacement drive
+    //   saga sends. Imagining that the region set for a disk's volume is [A, B,
+    //   C] before either saga starts, then the following scenarios can occur:
+    //
+    //   1. the snapshot request lands before the vcr_replace request, meaning
+    //      snapshots are created for the A, B, and C regions, but the region
+    //      set was then modified to [A, B, D]: this means that two of the three
+    //      regions have associated snapshots, and this will cause this saga to
+    //      unwind when it checks that the associated region snapshots were
+    //      created ok. as it's currently written, this saga could also error
+    //      during unwind, as it's trying to clean up the snapshots for A, B,
+    //      and C, and it could see a "Not Found" when querying C for the
+    //      snapshot.
+    //
+    //   2. the vcr_replace request lands before the snapshot request, meaning
+    //      snapshots would be created for the A, B, and D regions. this is a
+    //      problem because D is new (having been allocated to replace C), and
+    //      the upstairs could be performing live repair. taking a snapshot of
+    //      an upstairs during live repair means either:
+    //
+    //      a. the Upstairs will reject it, causing this saga to unwind ok
+    //
+    //      b. the Upstairs will allow it, meaning any read-only Upstairs that
+    //         uses the associated snapshots ([A', B', D']) will detect that
+    //         reconciliation is required, not be able to perform reconciliation
+    //         because it is read-only, and panic. note: accepting and
+    //         performing a snapshot during live repair is almost certainly a
+    //         bug in Crucible, not Nexus!
+    //
+    //      if the upstairs is _not_ performing live repair yet, then the
+    //      snapshot could succeed. This means each of the A, B, and D regions
+    //      will have an associated snapshot, but the D snapshot is of a blank
+    //      region! the same problem will occur as 2b: a read-only Upstairs that
+    //      uses those snapshots as targets will panic because the data doesn't
+    //      match and it can't perform reconciliation.
+    //
+    // - get_allocated_regions will change during the execution of this saga,
+    //   due to region replacement(s) occurring.
+    //
+    // With a lock on the volume, the snapshot creation and region replacement
+    // drive sagas are serialized. Note this does mean that region replacement
+    // is blocked by a snapshot being created, and snapshot creation is blocked
+    // by region replacement.
+
+    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+        .disk_id(params.disk_id)
+        .fetch()
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    osagactx
+        .datastore()
+        .volume_repair_lock(&opctx, disk.volume_id, lock_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
+async fn ssc_take_volume_lock_undo(
+    sagactx: NexusActionContext,
+) -> anyhow::Result<()> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let lock_id = sagactx.lookup::<Uuid>("lock_id")?;
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+        .disk_id(params.disk_id)
+        .fetch()
+        .await?;
+
+    osagactx
+        .datastore()
+        .volume_repair_unlock(&opctx, disk.volume_id, lock_id)
+        .await?;
+
     Ok(())
 }
 
@@ -1536,6 +1653,33 @@ async fn ssc_finalize_snapshot_record(
     info!(log, "snapshot finalized!");
 
     Ok(snapshot)
+}
+
+async fn ssc_release_volume_lock(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let lock_id = sagactx.lookup::<Uuid>("lock_id")?;
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+        .disk_id(params.disk_id)
+        .fetch()
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    osagactx
+        .datastore()
+        .volume_repair_unlock(&opctx, disk.volume_id, lock_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
 }
 
 // helper functions
