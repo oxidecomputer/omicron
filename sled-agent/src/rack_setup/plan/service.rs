@@ -28,8 +28,8 @@ use omicron_common::backoff::{
     retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::disk::{
-    DatasetKind, DatasetName, DiskVariant, OmicronPhysicalDiskConfig,
-    OmicronPhysicalDisksConfig,
+    DatasetsConfig, DatasetKind, DatasetName, DiskVariant,
+    OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, SledUuid, ZpoolUuid};
@@ -109,6 +109,9 @@ pub enum PlanError {
 pub struct SledConfig {
     /// Control plane disks configured for this sled
     pub disks: OmicronPhysicalDisksConfig,
+
+    /// Datasets configured for this sled
+    pub datasets: DatasetsConfig,
 
     /// zones configured for this sled
     pub zones: Vec<OmicronZoneConfig>,

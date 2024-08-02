@@ -38,6 +38,7 @@ use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
+use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
 use omicron_uuid_kinds::GenericUuid;
@@ -448,7 +449,7 @@ struct Sled {
     sled_subnet: Ipv6Subnet<SLED_PREFIX>,
     inventory_sp: Option<(u16, SpState)>,
     inventory_sled_agent: Inventory,
-    zpools: BTreeMap<ZpoolUuid, SledDisk>,
+    zpools: BTreeMap<ZpoolUuid, (SledDisk, Vec<DatasetConfig>)>,
     policy: SledPolicy,
 }
 
@@ -485,7 +486,8 @@ impl Sled {
                     policy: PhysicalDiskPolicy::InService,
                     state: PhysicalDiskState::Active,
                 };
-                (zpool, disk)
+                let datasets = vec![];
+                (zpool, (disk, datasets))
             })
             .collect();
         let inventory_sp = match hardware {
@@ -547,8 +549,8 @@ impl Sled {
                 disks: zpools
                     .values()
                     .enumerate()
-                    .map(|(i, d)| InventoryDisk {
-                        identity: d.disk_identity.clone(),
+                    .map(|(i, (disk, _datasets))| InventoryDisk {
+                        identity: disk.disk_identity.clone(),
                         variant: DiskVariant::U2,
                         slot: i64::try_from(i).unwrap(),
                     })

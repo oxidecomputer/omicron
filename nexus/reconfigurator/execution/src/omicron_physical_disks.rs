@@ -169,6 +169,7 @@ mod test {
                 id,
                 blueprint_zones: BTreeMap::new(),
                 blueprint_disks,
+                blueprint_datasets: BTreeMap::new(),
                 sled_state: BTreeMap::new(),
                 cockroachdb_setting_preserve_downgrade:
                     CockroachDbPreserveDowngrade::DoNotModify,

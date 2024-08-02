@@ -8,17 +8,19 @@
 use crate::inventory::ZoneType;
 use crate::omicron_zone_config::{OmicronZone, OmicronZoneNic};
 use crate::schema::{
-    blueprint, bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
+    blueprint, bp_omicron_dataset, bp_omicron_physical_disk, bp_omicron_zone,
+    bp_omicron_zone_nic, bp_sled_omicron_datasets,
     bp_sled_omicron_physical_disks, bp_sled_omicron_zones, bp_sled_state,
     bp_target,
 };
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
-    impl_enum_type, ipv6, Generation, MacAddr, Name, SledState, SqlU16, SqlU32,
-    SqlU8,
+    impl_enum_type, ipv6, ByteCount, Generation, MacAddr, Name, SledState,
+    SqlU16, SqlU32, SqlU8,
 };
 use chrono::{DateTime, Utc};
 use ipnetwork::IpNetwork;
+use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintTarget;
@@ -31,7 +33,7 @@ use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use omicron_uuid_kinds::{ExternalIpKind, SledKind, ZpoolKind};
+use omicron_uuid_kinds::{DatasetKind, ExternalIpKind, SledKind, ZpoolKind};
 use uuid::Uuid;
 
 /// See [`nexus_types::deployment::Blueprint`].
@@ -196,6 +198,61 @@ impl From<BpOmicronPhysicalDisk> for BlueprintPhysicalDiskConfig {
         }
     }
 }
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_sled_omicron_datasets)]
+pub struct BpSledOmicronDatasets {
+    pub blueprint_id: Uuid,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub generation: Generation,
+}
+
+impl BpSledOmicronDatasets {
+//    pub fn new(
+//        blueprint_id: Uuid,
+//        sled_id: Uuid,
+//    ) {
+//    }
+}
+
+/// DB representation of [BlueprintDatasetConfig]
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_omicron_dataset)]
+pub struct BpOmicronDataset {
+    pub blueprint_id: Uuid,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub id: DbTypedUuid<DatasetKind>,
+
+    pub pool_id: DbTypedUuid<ZpoolKind>,
+    pub kind: crate::DatasetKind,
+    zone_name: Option<String>,
+
+    pub quota: Option<ByteCount>,
+    pub reservation: Option<ByteCount>,
+    pub compression: Option<String>,
+}
+
+impl BpOmicronDataset {
+    // TODO: Needs constructor?
+}
+
+impl TryFrom<BpOmicronDataset> for BlueprintDatasetConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(dataset: BpOmicronDataset) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: dataset.id.into(),
+            pool: omicron_common::zpool_name::ZpoolName::new_external(
+                dataset.pool_id.into(),
+            ),
+            kind: crate::DatasetKind::try_into_api(dataset.kind, dataset.zone_name)?,
+            quota: dataset.quota.map(|b| b.into()),
+            reservation: dataset.reservation.map(|b| b.into()),
+            compression: dataset.compression,
+        })
+    }
+}
+
 
 /// See [`nexus_types::deployment::BlueprintZonesConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]

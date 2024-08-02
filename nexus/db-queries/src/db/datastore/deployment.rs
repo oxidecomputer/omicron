@@ -38,11 +38,13 @@ use nexus_db_model::Blueprint as DbBlueprint;
 use nexus_db_model::BpOmicronPhysicalDisk;
 use nexus_db_model::BpOmicronZone;
 use nexus_db_model::BpOmicronZoneNic;
+use nexus_db_model::BpSledOmicronDatasets;
 use nexus_db_model::BpSledOmicronPhysicalDisks;
 use nexus_db_model::BpSledOmicronZones;
 use nexus_db_model::BpSledState;
 use nexus_db_model::BpTarget;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintTarget;
@@ -450,6 +452,50 @@ impl DataStore {
             blueprint_physical_disks
         };
 
+        // Do the same thing we just did for zones, but for datasets too.
+        let mut blueprint_datasets: BTreeMap<
+            SledUuid,
+            BlueprintDatasetsConfig,
+        > = {
+            use db::schema::bp_sled_omicron_datasets::dsl;
+
+            let mut blueprint_datasets = BTreeMap::new();
+            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::bp_sled_omicron_datasets,
+                    dsl::sled_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(blueprint_id))
+                .select(BpSledOmicronDatasets::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+                paginator = p.found_batch(&batch, &|s| s.sled_id);
+
+                for s in batch {
+                    let old = blueprint_datasets.insert(
+                        s.sled_id.into(),
+                        BlueprintDatasetsConfig {
+                            generation: *s.generation,
+                            datasets: Vec::new(),
+                        },
+                    );
+                    bail_unless!(
+                        old.is_none(),
+                        "found duplicate sled ID in bp_sled_omicron_datasets: {}",
+                        s.sled_id
+                    );
+                }
+            }
+
+            blueprint_datasets
+        };
+
         // Assemble a mutable map of all the NICs found, by NIC id.  As we
         // match these up with the corresponding zone below, we'll remove items
         // from this set.  That way we can tell if the same NIC was used twice
@@ -617,11 +663,16 @@ impl DataStore {
         for (_, disks_config) in blueprint_disks.iter_mut() {
             disks_config.disks.sort_unstable_by_key(|d| d.id);
         }
+        // Sort all datasets to match what blueprint builders do.
+        for (_, datasets_config) in blueprint_datasets.iter_mut() {
+            datasets_config.datasets.sort_unstable_by_key(|d| d.id);
+        }
 
         Ok(Blueprint {
             id: blueprint_id,
             blueprint_zones,
             blueprint_disks,
+            blueprint_datasets,
             sled_state,
             parent_blueprint_id,
             internal_dns_version,
@@ -1418,16 +1469,20 @@ mod tests {
             .map(|i| {
                 (
                     ZpoolUuid::new_v4(),
-                    SledDisk {
-                        disk_identity: DiskIdentity {
-                            vendor: String::from("v"),
-                            serial: format!("s-{i}"),
-                            model: String::from("m"),
+                    (
+                        SledDisk {
+                            disk_identity: DiskIdentity {
+                                vendor: String::from("v"),
+                                serial: format!("s-{i}"),
+                                model: String::from("m"),
+                            },
+                            disk_id: PhysicalDiskUuid::new_v4(),
+                            policy: PhysicalDiskPolicy::InService,
+                            state: PhysicalDiskState::Active,
                         },
-                        disk_id: PhysicalDiskUuid::new_v4(),
-                        policy: PhysicalDiskPolicy::InService,
-                        state: PhysicalDiskState::Active,
-                    },
+                        // Datasets
+                        vec![]
+                    )
                 )
             })
             .collect();

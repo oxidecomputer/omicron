@@ -21,6 +21,7 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::SourceNatConfigError;
+use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -453,7 +454,7 @@ pub struct SledResources {
     /// storage)
     // NOTE: I'd really like to make this private, to make it harder to
     // accidentally pick a zpool that is not in-service.
-    pub zpools: BTreeMap<ZpoolUuid, SledDisk>,
+    pub zpools: BTreeMap<ZpoolUuid, (SledDisk, Vec<DatasetConfig>)>,
 
     /// the IPv6 subnet of this sled on the underlay network
     ///
@@ -465,7 +466,7 @@ pub struct SledResources {
 impl SledResources {
     /// Returns if the zpool is provisionable (known, in-service, and active).
     pub fn zpool_is_provisionable(&self, zpool: &ZpoolUuid) -> bool {
-        let Some(disk) = self.zpools.get(zpool) else { return false };
+        let Some((disk, _datasets)) = self.zpools.get(zpool) else { return false };
         disk.provisionable()
     }
 
@@ -474,7 +475,7 @@ impl SledResources {
         &self,
         filter: ZpoolFilter,
     ) -> impl Iterator<Item = &ZpoolUuid> + '_ {
-        self.zpools.iter().filter_map(move |(zpool, disk)| {
+        self.zpools.iter().filter_map(move |(zpool, (disk, _datasets))| {
             filter
                 .matches_policy_and_state(disk.policy, disk.state)
                 .then_some(zpool)
@@ -485,10 +486,21 @@ impl SledResources {
         &self,
         filter: DiskFilter,
     ) -> impl Iterator<Item = (&ZpoolUuid, &SledDisk)> + '_ {
-        self.zpools.iter().filter_map(move |(zpool, disk)| {
+        self.zpools.iter().filter_map(move |(zpool, (disk, _datasets))| {
             filter
                 .matches_policy_and_state(disk.policy, disk.state)
                 .then_some((zpool, disk))
+        })
+    }
+
+    pub fn all_datasets(
+        &self,
+        filter: ZpoolFilter,
+    ) -> impl Iterator<Item = (&ZpoolUuid, &Vec<DatasetConfig>)> + '_ {
+        self.zpools.iter().filter_map(move |(zpool, (disk, datasets))| {
+            filter
+                .matches_policy_and_state(disk.policy, disk.state)
+                .then_some((zpool, datasets))
         })
     }
 }

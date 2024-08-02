@@ -152,14 +152,14 @@ pub struct DatasetConfig {
     /// The dataset's name
     pub name: DatasetName,
 
-    /// The compression mode to be supplied, if any
-    pub compression: Option<String>,
-
     /// The upper bound on the amount of storage used by this dataset
-    pub quota: Option<usize>,
+    pub quota: Option<u64>,
 
     /// The lower bound on the amount of storage usable by this dataset
-    pub reservation: Option<usize>,
+    pub reservation: Option<u64>,
+
+    /// The compression mode to be supplied, if any
+    pub compression: Option<String>,
 }
 
 #[derive(

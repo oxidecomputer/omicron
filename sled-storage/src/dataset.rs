@@ -32,16 +32,16 @@ pub const M2_BACKING_DATASET: &'static str = "backing";
 cfg_if! {
     if #[cfg(any(test, feature = "testing"))] {
         // Tuned for zone_bundle tests
-        pub const DEBUG_DATASET_QUOTA: usize = 1 << 20;
+        pub const DEBUG_DATASET_QUOTA: u64 = 1 << 20;
     } else {
         // TODO-correctness: This value of 100GiB is a pretty wild guess, and should be
         // tuned as needed.
-        pub const DEBUG_DATASET_QUOTA: usize = 100 * (1 << 30);
+        pub const DEBUG_DATASET_QUOTA: u64 = 100 * (1 << 30);
     }
 }
 // TODO-correctness: This value of 100GiB is a pretty wild guess, and should be
 // tuned as needed.
-pub const DUMP_DATASET_QUOTA: usize = 100 * (1 << 30);
+pub const DUMP_DATASET_QUOTA: u64 = 100 * (1 << 30);
 // passed to zfs create -o compression=
 pub const DUMP_DATASET_COMPRESSION: &'static str = "gzip-9";
 
@@ -96,7 +96,7 @@ struct ExpectedDataset {
     // Name for the dataset
     name: &'static str,
     // Optional quota, in _bytes_
-    quota: Option<usize>,
+    quota: Option<u64>,
     // Identifies if the dataset should be deleted on boot
     wipe: bool,
     // Optional compression mode
@@ -108,7 +108,7 @@ impl ExpectedDataset {
         ExpectedDataset { name, quota: None, wipe: false, compression: None }
     }
 
-    const fn quota(mut self, quota: usize) -> Self {
+    const fn quota(mut self, quota: u64) -> Self {
         self.quota = Some(quota);
         self
     }

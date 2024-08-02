@@ -2,12 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{DatasetKind, Generation, Region, SqlU16};
+use super::{ByteCount, DatasetKind, Generation, Region, SqlU16};
 use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
 use crate::schema::{dataset, region};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
+use omicron_common::api::external::Error;
+use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
@@ -42,6 +46,10 @@ pub struct Dataset {
     pub kind: DatasetKind,
     pub size_used: Option<i64>,
     zone_name: Option<String>,
+
+    quota: Option<ByteCount>,
+    reservation: Option<ByteCount>,
+    compression: Option<String>,
 }
 
 impl Dataset {
@@ -66,6 +74,9 @@ impl Dataset {
             kind,
             size_used,
             zone_name,
+            quota: None,
+            reservation: None,
+            compression: None,
         }
     }
 
@@ -75,6 +86,25 @@ impl Dataset {
 
     pub fn address_with_port(&self, port: u16) -> Option<SocketAddrV6> {
         Some(SocketAddrV6::new(Ipv6Addr::from(self.ip?), port, 0, 0))
+    }
+}
+
+impl TryFrom<Dataset> for omicron_common::disk::DatasetConfig {
+    type Error = Error;
+
+    fn try_from(dataset: Dataset) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: DatasetUuid::from_untyped_uuid(dataset.identity.id),
+            name: omicron_common::disk::DatasetName::new(
+                omicron_common::zpool_name::ZpoolName::new_external(
+                    ZpoolUuid::from_untyped_uuid(dataset.pool_id),
+                ),
+                dataset.kind.try_into_api(dataset.zone_name)?,
+            ),
+            quota: dataset.quota.map(|q| q.to_bytes()),
+            reservation: dataset.reservation.map(|r| r.to_bytes()),
+            compression: dataset.compression,
+        })
     }
 }
 

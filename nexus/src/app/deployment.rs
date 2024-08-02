@@ -137,6 +137,8 @@ impl super::Nexus {
             .await?;
         let zpool_rows =
             datastore.zpool_list_all_external_batched(opctx).await?;
+        let dataset_rows =
+            datastore.dataset_list_all_batched(opctx, None).await?;
         let ip_pool_range_rows = {
             let (authz_service_ip_pool, _) =
                 datastore.ip_pools_service_lookup(opctx).await?;
@@ -172,6 +174,7 @@ impl super::Nexus {
         let planning_input = PlanningInputFromDb {
             sled_rows: &sled_rows,
             zpool_rows: &zpool_rows,
+            dataset_rows: &dataset_rows,
             ip_pool_range_rows: &ip_pool_range_rows,
             external_ip_rows: &external_ip_rows,
             service_nic_rows: &service_nic_rows,

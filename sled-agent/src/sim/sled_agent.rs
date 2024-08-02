@@ -40,7 +40,7 @@ use omicron_common::api::internal::shared::{
     ResolvedVpcRouteState, RouterId, RouterKind, RouterVersion,
 };
 use omicron_common::disk::{
-    DiskIdentity, DiskVariant, OmicronPhysicalDisksConfig,
+    DatasetsConfig, DiskIdentity, DiskVariant, OmicronPhysicalDisksConfig,
 };
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, ZpoolUuid};
 use oxnet::Ipv6Net;
@@ -891,6 +891,12 @@ impl SledAgent {
             // TODO: Make this more real?
             datasets: vec![],
         })
+    }
+
+    pub async fn datasets_list(
+        &self,
+    ) -> Result<DatasetsConfig, HttpError> {
+        todo!();
     }
 
     pub async fn omicron_physical_disks_list(

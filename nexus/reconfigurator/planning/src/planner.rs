@@ -249,6 +249,15 @@ impl<'a> Planner<'a> {
                 // we send this request first.
             }
 
+            // TODO: Ensure the "baseline" datasets exist (zone root, debug)
+            // TODO: Ensure all durable datasets exist (with zone allocation)
+            // TODO: Ensure all transient datasets exist (with zone allocation)
+            //
+            // NOTE: Make sure this works even if the zone was already
+            // provisioned?
+            //
+            // TODO: Ensure that all these datasets get deleted eventually?
+
             // Check for an NTP zone.  Every sled should have one.  If it's not
             // there, all we can do is provision that one zone.  We have to wait
             // for that to succeed and synchronize the clock before we can
@@ -339,7 +348,32 @@ impl<'a> Planner<'a> {
             }
         }
 
-        self.do_plan_add_discretionary_zones(&sleds_waiting_for_ntp_zone)
+        self.do_plan_add_discretionary_zones(&sleds_waiting_for_ntp_zone)?;
+
+        // Now that we've added all the disks and zones we plan on adding,
+        // ensure that all sleds have the datasets they need to have.
+        self.do_plan_datasets()?;
+
+        Ok(())
+    }
+
+    fn do_plan_datasets(&mut self) -> Result<(), Error> {
+        for (sled_id, sled_resources) in self.input.all_sled_resources(SledFilter::InService) {
+            if let EnsureMultiple::Changed { added, removed } =
+                self.blueprint.sled_ensure_datasets(sled_id, &sled_resources)? {
+                info!(
+                    &self.log,
+                    "altered datasets";
+                    "sled_id" => %sled_id
+                );
+                self.blueprint.record_operation(Operation::UpdateDatasets {
+                    sled_id,
+                    added,
+                    removed,
+                });
+            }
+        }
+        Ok(())
     }
 
     fn do_plan_add_discretionary_zones(
@@ -1173,13 +1207,20 @@ mod test {
         for _ in 0..NEW_IN_SERVICE_DISKS {
             sled_details.resources.zpools.insert(
                 ZpoolUuid::from(zpool_rng.next()),
-                new_sled_disk(PhysicalDiskPolicy::InService),
+                (
+                    new_sled_disk(PhysicalDiskPolicy::InService),
+                    vec![],
+                )
+
             );
         }
         for _ in 0..NEW_EXPUNGED_DISKS {
             sled_details.resources.zpools.insert(
                 ZpoolUuid::from(zpool_rng.next()),
-                new_sled_disk(PhysicalDiskPolicy::Expunged),
+                (
+                    new_sled_disk(PhysicalDiskPolicy::Expunged),
+                    vec![],
+                )
             );
         }
 
@@ -1247,7 +1288,7 @@ mod test {
             }
         }
         let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
-        let (_, disk) = sled_details
+        let (_, (disk, _datasets)) = sled_details
             .resources
             .zpools
             .iter_mut()
@@ -1362,7 +1403,7 @@ mod test {
         // For that pool, find the physical disk behind it, and mark it
         // expunged.
         let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
-        let disk = sled_details
+        let (disk, _datasets) = sled_details
             .resources
             .zpools
             .get_mut(&pool_to_expunge.id())

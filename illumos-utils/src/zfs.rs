@@ -206,8 +206,8 @@ pub struct EncryptionDetails {
 
 #[derive(Debug, Default)]
 pub struct SizeDetails {
-    pub quota: Option<usize>,
-    pub reservation: Option<usize>,
+    pub quota: Option<u64>,
+    pub reservation: Option<u64>,
     pub compression: Option<String>,
 }
 
@@ -485,8 +485,8 @@ impl Zfs {
     fn apply_properties(
         name: &str,
         mountpoint: &Mountpoint,
-        quota: Option<usize>,
-        reservation: Option<usize>,
+        quota: Option<u64>,
+        reservation: Option<u64>,
         compression: Option<String>,
     ) -> Result<(), EnsureFilesystemError> {
         if let Some(quota) = quota {

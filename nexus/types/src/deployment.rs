@@ -23,11 +23,14 @@ use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::ZoneKind;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
+use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::ExternalIpUuid;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
@@ -145,6 +148,9 @@ pub struct Blueprint {
 
     /// A map of sled id -> disks in use on each sled.
     pub blueprint_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
+
+    /// A map of sled id -> datasets in use on each sled
+    pub blueprint_datasets: BTreeMap<SledUuid, BlueprintDatasetsConfig>,
 
     /// which blueprint this blueprint is based on
     pub parent_blueprint_id: Option<Uuid>,
@@ -921,6 +927,24 @@ pub type BlueprintPhysicalDisksConfig =
 
 pub type BlueprintPhysicalDiskConfig =
     omicron_common::disk::OmicronPhysicalDiskConfig;
+
+/// Information about Omicron datasets as recorded in a blueprint.
+#[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+pub struct BlueprintDatasetsConfig {
+    pub generation: Generation,
+    pub datasets: Vec<BlueprintDatasetConfig>,
+}
+
+/// Information about a dataset as recorded in a blueprint
+#[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+pub struct BlueprintDatasetConfig {
+    pub id: DatasetUuid,
+    pub pool: ZpoolName,
+    pub kind: DatasetKind,
+    pub quota: Option<ByteCount>,
+    pub reservation: Option<ByteCount>,
+    pub compression: Option<String>,
+}
 
 /// Describe high-level metadata about a blueprint
 // These fields are a subset of [`Blueprint`], and include only the data we can
