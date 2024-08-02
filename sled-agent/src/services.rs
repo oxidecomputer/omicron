@@ -4863,10 +4863,11 @@ mod test {
                 "Should have received a message about the zone's VNIC within the timeout"
             )
             .expect("Should have received a message about the zone's VNIC");
+        let zone_name = format!("oxz_ntp_{}", id);
         assert_eq!(
             message,
             metrics::Message::TrackVnic {
-                zone_name: "global".into(),
+                zone_name,
                 name: "oxControlService0".into()
             },
         );
@@ -5006,10 +5007,11 @@ mod test {
                 "Should have received a message about the zone's VNIC within the timeout"
             )
             .expect("Should have received a message about the zone's VNIC");
+        let zone_name = format!("oxz_ntp_{}", id);
         assert_eq!(
             message,
             metrics::Message::TrackVnic {
-                zone_name: "global".into(),
+                zone_name,
                 name: "oxControlService0".into()
             },
         );
