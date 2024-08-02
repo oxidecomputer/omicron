@@ -1739,8 +1739,8 @@ macro_rules! i64_dist_from {
                 Self {
                     bins: bins.into_iter().map(i64::from).collect(),
                     counts,
-                    min: Some(hist.min() as i64),
-                    max: Some(hist.max() as i64),
+                    min: Some(i64::from(hist.min())),
+                    max: Some(i64::from(hist.max())),
                     sum_of_samples: hist.sum_of_samples(),
                     squared_mean: hist.squared_mean(),
                     p50: Some(hist.p50q()),
@@ -1808,8 +1808,8 @@ macro_rules! f64_dist_from {
                 Self {
                     bins: bins.into_iter().map(f64::from).collect(),
                     counts,
-                    min: Some(hist.min() as f64),
-                    max: Some(hist.max() as f64),
+                    min: Some(f64::from(hist.min())),
+                    max: Some(f64::from(hist.max())),
                     sum_of_samples: hist.sum_of_samples() as f64,
                     squared_mean: hist.squared_mean(),
                     p50: Some(hist.p50q()),

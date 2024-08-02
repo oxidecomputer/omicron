@@ -1613,11 +1613,6 @@ async fn ip_pool_list(
         .await
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct IpPoolPathParam {
-    pub pool_name: Name,
-}
-
 /// Create IP pool
 #[endpoint {
     method = POST,
@@ -6275,19 +6270,6 @@ async fn sled_physical_disk_list(
 }
 
 // Metrics
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct SystemMetricParams {
-    /// A silo ID. If unspecified, get aggregate metrics across all silos.
-    pub silo_id: Option<Uuid>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct SiloMetricParams {
-    /// A project ID. If unspecified, get aggregate metrics across all projects
-    /// in current silo.
-    pub project_id: Option<Uuid>,
-}
 
 #[derive(Display, Deserialize, JsonSchema)]
 #[display(style = "snake_case")]

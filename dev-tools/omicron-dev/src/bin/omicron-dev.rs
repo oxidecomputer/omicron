@@ -601,7 +601,7 @@ async fn cmd_cert_create(args: &CertCreateArgs) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-#[cfg_attr(not(mac), allow(clippy::useless_conversion))]
+#[cfg_attr(not(target_os = "macos"), allow(clippy::useless_conversion))]
 fn write_private_file(
     path: &Utf8Path,
     contents: &[u8],
