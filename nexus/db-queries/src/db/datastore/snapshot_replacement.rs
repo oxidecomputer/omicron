@@ -166,6 +166,7 @@ impl DataStore {
             .filter(
                 dsl::replacement_state.eq(SnapshotReplacementState::Running),
             )
+            .filter(dsl::operating_saga_id.is_null())
             .get_results_async::<SnapshotReplacement>(
                 &*self.pool_connection_authorized(opctx).await?,
             )
@@ -534,6 +535,7 @@ impl DataStore {
                     .filter(
                         dsl::replacement_state.eq(SnapshotReplacementState::Running),
                     )
+                    .filter(dsl::operating_saga_id.is_null())
                     .set((
                         dsl::replacement_state.eq(SnapshotReplacementState::Complete),
                     ))
