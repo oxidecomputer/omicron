@@ -1194,7 +1194,7 @@ mod test {
             datastore,
             resolver,
             &blueprint,
-            "test-suite",
+            Uuid::new_v4(),
             &overrides,
         )
         .await
@@ -1332,7 +1332,7 @@ mod test {
             datastore,
             resolver,
             &blueprint2,
-            "test-suite",
+            Uuid::new_v4(),
             &overrides,
         )
         .await
@@ -1406,7 +1406,7 @@ mod test {
             datastore,
             resolver,
             &blueprint2,
-            "test-suite",
+            Uuid::new_v4(),
             &overrides,
         )
         .await
@@ -1442,7 +1442,7 @@ mod test {
             datastore,
             resolver,
             &blueprint2,
-            "test-suite",
+            Uuid::new_v4(),
             &overrides,
         )
         .await
@@ -1536,7 +1536,7 @@ mod test {
             datastore,
             resolver,
             &blueprint,
-            "test-suite",
+            Uuid::new_v4(),
             &overrides,
         )
         .await

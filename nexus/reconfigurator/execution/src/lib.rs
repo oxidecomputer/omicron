@@ -76,41 +76,32 @@ impl From<nexus_db_model::Sled> for Sled {
 ///
 /// The assumption is that callers are running this periodically or in a loop to
 /// deal with transient errors or changes in the underlying system state.
-pub async fn realize_blueprint<S>(
+pub async fn realize_blueprint(
     opctx: &OpContext,
     datastore: &DataStore,
     resolver: &Resolver,
     blueprint: &Blueprint,
-    nexus_label: S,
-    nexus_id: Uuid, // XXX-dap type, and replace nexus_label too?
-) -> Result<(), Vec<anyhow::Error>>
-where
-    String: From<S>,
-{
+    nexus_id: Uuid,
+) -> Result<bool, Vec<anyhow::Error>> {
     realize_blueprint_with_overrides(
         opctx,
         datastore,
         resolver,
         blueprint,
-        nexus_label,
         nexus_id,
         &Default::default(),
     )
     .await
 }
 
-pub async fn realize_blueprint_with_overrides<S>(
+pub async fn realize_blueprint_with_overrides(
     opctx: &OpContext,
     datastore: &DataStore,
     resolver: &Resolver,
     blueprint: &Blueprint,
-    nexus_label: S,
-    nexus_id: Uuid, // XXX-dap type, and replace nexus_label too?
+    nexus_id: Uuid,
     overrides: &Overridables,
-) -> Result<(), Vec<anyhow::Error>>
-where
-    String: From<S>,
-{
+) -> Result<bool, Vec<anyhow::Error>> {
     let opctx = opctx.child(BTreeMap::from([(
         "comment".to_string(),
         blueprint.comment.clone(),
@@ -205,7 +196,7 @@ where
     dns::deploy_dns(
         &opctx,
         datastore,
-        String::from(nexus_label),
+        nexus_id.to_string(),
         blueprint,
         &sleds_by_id,
         overrides,
@@ -248,14 +239,18 @@ where
     // For any expunged Nexus zones, re-assign in-progress sagas to some other
     // Nexus.  If this fails for some reason, it doesn't affect anything else.
     let sec_id = nexus_db_model::SecId(nexus_id);
-    if let Err(error) = sagas::reassign_sagas_from_expunged(
+    let reassigned = sagas::reassign_sagas_from_expunged(
         &opctx, datastore, blueprint, sec_id,
     )
     .await
-    .context("failed to re-assign sagas")
-    {
-        errors.push(error);
-    }
+    .context("failed to re-assign sagas");
+    let needs_saga_recovery = match reassigned {
+        Ok(needs_recovery) => needs_recovery,
+        Err(error) => {
+            errors.push(error);
+            false
+        }
+    };
 
     // This is likely to error if any cluster upgrades are in progress (which
     // can take some time), so it should remain at the end so that other parts
@@ -267,7 +262,7 @@ where
     }
 
     if errors.is_empty() {
-        Ok(())
+        Ok(needs_saga_recovery)
     } else {
         Err(errors)
     }

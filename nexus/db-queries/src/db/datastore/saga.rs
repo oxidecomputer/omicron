@@ -13,7 +13,6 @@ use crate::db::model::Generation;
 use crate::db::pagination::paginated;
 use crate::db::pagination::paginated_multicolumn;
 use crate::db::pagination::Paginator;
-use crate::db::pool::DbConnection;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -24,23 +23,6 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use std::ops::Add;
-
-/// Reports the result of `sagas_reassign_sec_batched()`.
-///
-/// Callers need to know two things:
-///
-/// 1. Whether any sagas may have been re-assigned
-///    (because they'll want to kick off saga recovery for them)
-/// 2. Whether any errors were encountered
-#[derive(Debug)]
-pub(crate) enum Reassigned {
-    /// We successfully re-assigned all sagas that needed it
-    All { count: u32 },
-    /// We encountered an error and cannot tell how many sagas were re-assigned.
-    /// It was at least this many.  (The count can be zero, but it's still
-    /// possible that some were re-assigned.)
-    AtLeast { count: u32, error: Error },
-}
 
 impl DataStore {
     pub async fn saga_create(
@@ -228,63 +210,23 @@ impl DataStore {
         Ok(events)
     }
 
-    pub async fn sagas_reassign_sec_all_batched(
-        &self,
-        opctx: &OpContext,
-        nexus_zone_ids: &[db::saga_types::SecId],
-        new_sec_id: db::saga_types::SecId,
-    ) -> Reassigned {
-        let now = chrono::Utc::now();
-        let conn = match self.pool_connection_authorized(opctx).await {
-            Ok(c) => c,
-            Err(error) => return Reassigned::AtLeast { count: 0, error },
-        };
-
-        let mut count = 0;
-        let limit: u32 = SQL_BATCH_SIZE.get();
-        loop {
-            debug!(&opctx.log, "sagas_reassign_sec_batched";
-                "count_so_far" => count);
-            match self
-                .sagas_reassign_sec(
-                    &conn,
-                    opctx,
-                    nexus_zone_ids,
-                    new_sec_id,
-                    limit,
-                    now,
-                )
-                .await
-            {
-                Ok(c) => {
-                    count += c;
-                    if c < limit {
-                        break;
-                    }
-                }
-                Err(error) => {
-                    return Reassigned::AtLeast { count, error };
-                }
-            }
-        }
-
-        Reassigned::All { count }
-    }
-
     // XXX-dap TODO-doc
-    async fn sagas_reassign_sec(
+    pub async fn sagas_reassign_sec(
         &self,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         nexus_zone_ids: &[db::saga_types::SecId],
         new_sec_id: db::saga_types::SecId,
-        limit: u32,
-        time: chrono::DateTime<chrono::Utc>,
-    ) -> Result<u32, Error> {
-        use db::schema::saga::dsl;
-
+    ) -> Result<usize, Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
+        let now = chrono::Utc::now();
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // It would be more robust to do this in batches.  However, Diesel does
+        // not appear to support the UPDATE ... LIMIT syntax using the normal
+        // builder.  In practice, it's extremely unlikely we'd have so many
+        // in-progress sagas that this would be a problem.
+        use db::schema::saga::dsl;
         diesel::update(
             dsl::saga
                 .filter(dsl::current_sec.is_not_null())
@@ -293,26 +235,16 @@ impl DataStore {
                 ))
                 .filter(dsl::saga_state.ne(db::saga_types::SagaCachedState(
                     steno::SagaCachedState::Done,
-                )))
-                .limit(i64::from(limit)),
+                ))),
         )
         .set((
             dsl::current_sec.eq(Some(new_sec_id)),
             dsl::adopt_generation.eq(dsl::adopt_generation.add(1)),
-            dsl::adopt_time.eq(time),
+            dsl::adopt_time.eq(now),
         ))
-        .execute_async(conn)
+        .execute_async(&*conn)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-        .and_then(|c_usize| {
-            u32::try_from(c_usize).map_err(|_| {
-                Error::internal_error(&format!(
-                    "database reported unexpected count of \
-                    records updated (did not fit into u32): {}",
-                    c_usize,
-                ))
-            })
-        })
     }
 }
 
