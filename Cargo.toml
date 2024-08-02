@@ -19,10 +19,15 @@ members = [
     "cockroach-admin/api",
     "cockroach-admin/types",
     "common",
+    "dev-tools/cert-dev",
+    "dev-tools/ch-dev",
     "dev-tools/crdb-seed",
+    "dev-tools/db-dev",
     "dev-tools/downloader",
+    "dev-tools/mgs-dev",
     "dev-tools/omdb",
     "dev-tools/omicron-dev",
+    "dev-tools/omicron-dev-lib",
     "dev-tools/openapi-manager",
     "dev-tools/oxlog",
     "dev-tools/reconfigurator-cli",
@@ -122,10 +127,15 @@ default-members = [
     "cockroach-admin/api",
     "cockroach-admin/types",
     "common",
+    "dev-tools/cert-dev",
+    "dev-tools/ch-dev",
     "dev-tools/crdb-seed",
+    "dev-tools/db-dev",
     "dev-tools/downloader",
+    "dev-tools/mgs-dev",
     "dev-tools/omdb",
     "dev-tools/omicron-dev",
+    "dev-tools/omicron-dev-lib",
     "dev-tools/openapi-manager",
     "dev-tools/oxlog",
     "dev-tools/reconfigurator-cli",
@@ -405,6 +415,7 @@ num = { version = "0.4.3", default-features = false, features = [ "libm" ] }
 omicron-certificates = { path = "certificates" }
 omicron-cockroach-admin = { path = "cockroach-admin" }
 omicron-common = { path = "common" }
+omicron-dev-lib = { path = "dev-tools/omicron-dev-lib" }
 omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
 omicron-omdb = { path = "dev-tools/omdb" }

@@ -914,6 +914,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "099a5357d84c4c61eb35fc8eafa9a79a902c2f76911e5747ced4e032edd8d9b4"
 
 [[package]]
+name = "cert-dev"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "camino-tempfile",
+ "clap",
+ "libc",
+ "omicron-test-utils",
+ "omicron-workspace-hack",
+ "openssl",
+ "rcgen",
+ "subprocess",
+ "tokio",
+]
+
+[[package]]
 name = "cexpr"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -943,6 +960,23 @@ name = "cfg_aliases"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
+
+[[package]]
+name = "ch-dev"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "dropshot",
+ "futures",
+ "libc",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "omicron-workspace-hack",
+ "pq-sys",
+ "signal-hook-tokio",
+ "tokio",
+]
 
 [[package]]
 name = "chacha20"
@@ -1630,6 +1664,27 @@ dependencies = [
  "fancy-regex",
  "libtest-mimic",
  "walkdir",
+]
+
+[[package]]
+name = "db-dev"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "clap",
+ "expectorate",
+ "futures",
+ "libc",
+ "omicron-dev-lib",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "omicron-workspace-hack",
+ "pq-sys",
+ "signal-hook-tokio",
+ "subprocess",
+ "tokio",
+ "tokio-postgres",
 ]
 
 [[package]]
@@ -4376,6 +4431,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "mgs-dev"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "futures",
+ "gateway-messages",
+ "gateway-test-utils",
+ "libc",
+ "omicron-workspace-hack",
+ "signal-hook-tokio",
+ "tokio",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5514,33 +5584,36 @@ name = "omicron-dev"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "camino",
- "camino-tempfile",
  "clap",
  "dropshot",
  "expectorate",
  "futures",
- "gateway-messages",
- "gateway-test-utils",
  "libc",
  "nexus-config",
  "nexus-test-interface",
  "nexus-test-utils",
- "omicron-common",
+ "omicron-dev-lib",
  "omicron-nexus",
  "omicron-rpaths",
  "omicron-test-utils",
  "omicron-workspace-hack",
- "openssl",
  "oxide-client",
  "pq-sys",
- "rcgen",
- "signal-hook",
  "signal-hook-tokio",
  "subprocess",
  "tokio",
  "tokio-postgres",
  "toml 0.8.19",
+]
+
+[[package]]
+name = "omicron-dev-lib"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "omicron-test-utils",
+ "omicron-workspace-hack",
+ "subprocess",
 ]
 
 [[package]]
