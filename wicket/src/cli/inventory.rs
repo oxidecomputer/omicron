@@ -109,8 +109,8 @@ fn print_bootstrap_sled_data(data: &ConfiguredBootstrapSledData) {
 
     // Print status indicator
     let status = match address {
-        None => format!("{}", 'o'.green()),
-        Some(_) => format!("{}", 'x'.red()),
+        None => format!("{}", '✔'.green()),
+        Some(_) => format!("{}", '⚠'.red()),
     };
 
     let addr_fmt = match address {
