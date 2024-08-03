@@ -112,7 +112,7 @@ Commands:
   reconfigurator-save  Save the current Reconfigurator inputs to a file
   region               Print information about regions
   region-replacement   Query for information about region replacements, optionally manually
-                           triggering one
+                       triggering one
   sleds                Print information about sleds
   instances            Print information about customer instances
   network              Print information about the network
@@ -155,7 +155,7 @@ Commands:
   reconfigurator-save  Save the current Reconfigurator inputs to a file
   region               Print information about regions
   region-replacement   Query for information about region replacements, optionally manually
-                           triggering one
+                       triggering one
   sleds                Print information about sleds
   instances            Print information about customer instances
   network              Print information about the network
