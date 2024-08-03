@@ -231,43 +231,43 @@ zeroize = { version = "1.7.0", features = ["std", "zeroize_derive"] }
 
 [target.x86_64-unknown-linux-gnu.dependencies]
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
-linux-raw-sys = { version = "0.4.13", default-features = false, features = ["elf", "errno", "general", "ioctl", "no_std", "std"] }
+linux-raw-sys = { version = "0.4.13", default-features = false, features = ["elf", "errno", "general", "ioctl", "no_std", "std", "system"] }
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
-linux-raw-sys = { version = "0.4.13", default-features = false, features = ["elf", "errno", "general", "ioctl", "no_std", "std"] }
+linux-raw-sys = { version = "0.4.13", default-features = false, features = ["elf", "errno", "general", "ioctl", "no_std", "std", "system"] }
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
 
 [target.x86_64-apple-darwin.dependencies]
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
 
 [target.x86_64-apple-darwin.build-dependencies]
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
 
 [target.aarch64-apple-darwin.dependencies]
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
 
 [target.aarch64-apple-darwin.build-dependencies]
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
 
 [target.x86_64-unknown-illumos.dependencies]
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
 toml_datetime = { version = "0.6.8", default-features = false, features = ["serde"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 
@@ -275,7 +275,7 @@ toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", featu
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
 toml_datetime = { version = "0.6.8", default-features = false, features = ["serde"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 
