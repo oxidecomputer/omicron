@@ -433,8 +433,11 @@ mod test {
         //
         // Anyway, if we try again with a broken database, we should get a
         // ServiceUnavailable error, which indicates a transient failure.
-        let pool =
-            Arc::new(db::Pool::new_failfast_for_tests(&logctx.log, &cfg));
+        let pool = Arc::new(db::Pool::new_failfast_for_tests(
+            &logctx.log,
+            &cfg,
+            std::time::Duration::from_millis(1),
+        ));
         // We need to create the datastore before tearing down the database, as
         // it verifies the schema version of the DB while booting.
         let datastore = Arc::new(

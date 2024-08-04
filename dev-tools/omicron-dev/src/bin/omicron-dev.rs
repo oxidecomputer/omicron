@@ -119,8 +119,8 @@ async fn cmd_db_run(args: &DbRunArgs) -> Result<(), anyhow::Error> {
     // Now start CockroachDB.  This process looks bureaucratic (create arg
     // builder, then create starter, then start it) because we want to be able
     // to print what's happening before we do it.
-    let mut db_arg_builder =
-        dev::db::CockroachStarterBuilder::new().listen_port(args.listen_port);
+    let mut db_arg_builder = dev::db::CockroachStarterBuilder::new();
+    db_arg_builder.listen_port(args.listen_port);
 
     // NOTE: The stdout strings here are not intended to be stable, but they are
     // used by the test suite.

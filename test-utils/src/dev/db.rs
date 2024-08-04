@@ -66,6 +66,10 @@ const COCKROACHDB_VERSION: &str =
 /// that this directory gets cleaned up as long as this program exits normally.
 #[derive(Debug)]
 pub struct CockroachStarterBuilder {
+    /// If true, launch CRDB in single-node mode
+    single_node: bool,
+    /// optional values for the --join option
+    join_ports: Vec<u16>,
     /// optional value for the --store-dir option
     store_dir: Option<PathBuf>,
     /// optional value for the listening port
@@ -101,21 +105,6 @@ impl CockroachStarterBuilder {
         for (key, value) in std::env::vars_os() {
             builder.env(key, value);
         }
-
-        // We use single-node insecure mode listening only on localhost.  We
-        // consider this secure enough for development (including the test
-        // suite), though it does allow anybody on the system to do anything
-        // with this database (including fill up all disk space).  (It wouldn't
-        // be unreasonable to secure this with certificates even though we're
-        // on localhost.
-        //
-        // If we decide to let callers customize various listening addresses, we
-        // should be careful about making it too easy to generate a more
-        // insecure configuration.
-        builder
-            .arg("start-single-node")
-            .arg("--insecure")
-            .arg("--http-addr=:0");
         builder
     }
 
@@ -127,6 +116,8 @@ impl CockroachStarterBuilder {
     /// `cockroach` itself.
     fn new_raw(cmd: &str) -> CockroachStarterBuilder {
         CockroachStarterBuilder {
+            single_node: true,
+            join_ports: vec![],
             store_dir: None,
             listen_port: COCKROACHDB_DEFAULT_LISTEN_PORT,
             env: BTreeMap::new(),
@@ -135,6 +126,16 @@ impl CockroachStarterBuilder {
             start_timeout: COCKROACHDB_START_TIMEOUT_DEFAULT,
             redirect_stdio: false,
         }
+    }
+
+    pub fn single_node(&mut self, single_node: bool) -> &mut Self {
+        self.single_node = single_node;
+        self
+    }
+
+    pub fn join_ports(&mut self, join_ports: Vec<u16>) -> &mut Self {
+        self.join_ports = join_ports;
+        self
     }
 
     /// Redirect stdout and stderr for the "cockroach" process to files within
@@ -165,7 +166,7 @@ impl CockroachStarterBuilder {
     /// Sets the listening port for the PostgreSQL and CockroachDB protocols
     ///
     /// We always listen only on `[::1]`.
-    pub fn listen_port(mut self, listen_port: u16) -> Self {
+    pub fn listen_port(&mut self, listen_port: u16) -> &mut Self {
         self.listen_port = listen_port;
         self
     }
@@ -209,6 +210,32 @@ impl CockroachStarterBuilder {
                 CockroachStarterBuilder::temp_path(&temp_dir, "data")
                     .into_os_string()
             });
+
+        let start =
+            if self.single_node { "start-single-node" } else { "start" };
+
+        // We use single-node insecure mode listening only on localhost.  We
+        // consider this secure enough for development (including the test
+        // suite), though it does allow anybody on the system to do anything
+        // with this database (including fill up all disk space).  (It wouldn't
+        // be unreasonable to secure this with certificates even though we're
+        // on localhost.
+        //
+        // If we decide to let callers customize various listening addresses, we
+        // should be careful about making it too easy to generate a more
+        // insecure configuration.
+        self.arg(start).arg("--insecure").arg("--http-addr=:0");
+
+        if !self.join_ports.is_empty() {
+            let addrs = self
+                .join_ports
+                .iter()
+                .map(|port| format!("[::1]:{port}"))
+                .collect::<Vec<_>>()
+                .join(",");
+
+            self.arg("--join").arg(addrs);
+        }
 
         // Disable the CockroachDB automatic emergency ballast file. By default
         // CockroachDB creates a 1 GiB ballast file on startup; because we start
@@ -559,6 +586,29 @@ impl CockroachInstance {
         &self.temp_dir_path
     }
 
+    /// Initializes the cluster.
+    ///
+    /// This is only necessary when running a multi-node cluster.
+    pub async fn initialize_multinode(
+        &self,
+        port: u16,
+    ) -> Result<(), anyhow::Error> {
+        let mut cmd = tokio::process::Command::new(COCKROACHDB_BIN);
+        let output = cmd
+            .args(&["init", "--insecure", "--host"])
+            .arg(format!("[::]:{port}"))
+            .output()
+            .await?;
+        if !output.status.success() {
+            bail!(
+                "Failed to initialize: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        Ok(())
+    }
+
     /// Returns a connection to the underlying database
     pub async fn connect(&self) -> Result<Client, tokio_postgres::Error> {
         Client::connect(self.pg_config(), tokio_postgres::NoTls).await
@@ -598,19 +648,31 @@ impl CockroachInstance {
 
     /// Cleans up the child process and temporary directory
     ///
-    /// If the child process is still running, it will be killed with SIGKILL and
+    /// If the child process is still running, it will be killed with SIGTERM and
     /// this function will wait for it to exit.  Then the temporary directory
     /// will be cleaned up.
     pub async fn cleanup(&mut self) -> Result<(), anyhow::Error> {
-        // SIGTERM the process and wait for it to exit so that we can remove the
+        self.cleanup_internal(libc::SIGTERM).await
+    }
+
+    /// An alternative to "cleanup", which forcefully kills the Cockroach node.
+    pub async fn cleanup_forceful(&mut self) -> Result<(), anyhow::Error> {
+        self.cleanup_internal(libc::SIGKILL).await
+    }
+
+    async fn cleanup_internal(
+        &mut self,
+        signal: libc::c_int,
+    ) -> Result<(), anyhow::Error> {
+        // Signal the process and wait for it to exit so that we can remove the
         // temporary directory that we may have used to store its data.  We
         // don't care what the result of the process was.
         if let Some(child_process) = self.child_process.as_mut() {
             let pid = child_process.id().expect("Missing child PID") as i32;
             let success =
-                0 == unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+                0 == unsafe { libc::kill(pid as libc::pid_t, signal) };
             if !success {
-                bail!("Failed to send SIGTERM to DB");
+                bail!("Failed to send signal {signal} to DB");
             }
             child_process.wait().await.context("waiting for child process")?;
             self.child_process = None;
