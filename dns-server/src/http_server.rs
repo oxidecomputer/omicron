@@ -22,7 +22,7 @@ impl Context {
 }
 
 pub fn api() -> dropshot::ApiDescription<Context> {
-    dns_server_api::dns_server_api::api_description::<DnsServerApiImpl>()
+    dns_server_api::dns_server_api_mod::api_description::<DnsServerApiImpl>()
         .expect("registered DNS server entrypoints")
 }
 
