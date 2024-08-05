@@ -59,7 +59,7 @@ impl InventoryArgs {
                     bootstrap_sleds
                         .iter()
                         .map(|desc| {
-                            let cubby = desc.id.slot;
+                            let slot = desc.id.slot;
 
                             let identifier = match &desc.baseboard {
                                 Baseboard::Gimlet { identifier, .. } => {
@@ -74,7 +74,7 @@ impl InventoryArgs {
                             let address = desc.bootstrap_ip;
 
                             ConfiguredBootstrapSledData {
-                                cubby,
+                                slot,
                                 identifier,
                                 address,
                             }
@@ -99,13 +99,13 @@ impl InventoryArgs {
 
 #[derive(Serialize)]
 struct ConfiguredBootstrapSledData {
-    cubby: u32,
+    slot: u32,
     identifier: String,
     address: Option<Ipv6Addr>,
 }
 
 fn print_bootstrap_sled_data(data: &ConfiguredBootstrapSledData) {
-    let ConfiguredBootstrapSledData { cubby, identifier, address } = data;
+    let ConfiguredBootstrapSledData { slot, identifier, address } = data;
 
     // Print status indicator
     let status = match address {
@@ -114,10 +114,10 @@ fn print_bootstrap_sled_data(data: &ConfiguredBootstrapSledData) {
     };
 
     let addr_fmt = match address {
-        None => "not_available".to_string(),
+        None => "(not available)".to_string(),
         Some(addr) => format!("\t{}", addr),
     };
 
     // The rest of the data
-    println!("{status} Cubby {:02}\t{identifier}{addr_fmt}", cubby);
+    println!("{status} Cubby {:02}\t{identifier}{addr_fmt}", slot);
 }
