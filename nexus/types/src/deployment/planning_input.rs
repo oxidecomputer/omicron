@@ -466,7 +466,9 @@ pub struct SledResources {
 impl SledResources {
     /// Returns if the zpool is provisionable (known, in-service, and active).
     pub fn zpool_is_provisionable(&self, zpool: &ZpoolUuid) -> bool {
-        let Some((disk, _datasets)) = self.zpools.get(zpool) else { return false };
+        let Some((disk, _datasets)) = self.zpools.get(zpool) else {
+            return false;
+        };
         disk.provisionable()
     }
 

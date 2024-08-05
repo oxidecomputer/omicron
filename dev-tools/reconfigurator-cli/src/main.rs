@@ -754,7 +754,7 @@ fn cmd_blueprint_edit(
                 .context("failed to add Nexus zone")?;
             assert_matches::assert_matches!(
                 added,
-                EnsureMultiple::Changed { added: 1, removed: 0 }
+                EnsureMultiple::Changed { added: 1, updated: 0, removed: 0 }
             );
             format!("added Nexus zone to sled {}", sled_id)
         }
@@ -766,7 +766,7 @@ fn cmd_blueprint_edit(
                 .context("failed to add CockroachDB zone")?;
             assert_matches::assert_matches!(
                 added,
-                EnsureMultiple::Changed { added: 1, removed: 0 }
+                EnsureMultiple::Changed { added: 1, updated: 0, removed: 0 }
             );
             format!("added CockroachDB zone to sled {}", sled_id)
         }

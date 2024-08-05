@@ -1296,7 +1296,10 @@ mod test {
         let rv = builder
             .sled_ensure_zone_multiple_nexus(sled_id, nalready + 1)
             .unwrap();
-        assert_eq!(rv, EnsureMultiple::Changed { added: 1, removed: 0 });
+        assert_eq!(
+            rv,
+            EnsureMultiple::Changed { added: 1, updated: 0, removed: 0 }
+        );
         let blueprint2 = builder.build();
         eprintln!("blueprint2: {}", blueprint2.display());
         // Figure out the id of the new zone.

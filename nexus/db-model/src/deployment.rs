@@ -208,11 +208,11 @@ pub struct BpSledOmicronDatasets {
 }
 
 impl BpSledOmicronDatasets {
-//    pub fn new(
-//        blueprint_id: Uuid,
-//        sled_id: Uuid,
-//    ) {
-//    }
+    //    pub fn new(
+    //        blueprint_id: Uuid,
+    //        sled_id: Uuid,
+    //    ) {
+    //    }
 }
 
 /// DB representation of [BlueprintDatasetConfig]
@@ -245,14 +245,16 @@ impl TryFrom<BpOmicronDataset> for BlueprintDatasetConfig {
             pool: omicron_common::zpool_name::ZpoolName::new_external(
                 dataset.pool_id.into(),
             ),
-            kind: crate::DatasetKind::try_into_api(dataset.kind, dataset.zone_name)?,
+            kind: crate::DatasetKind::try_into_api(
+                dataset.kind,
+                dataset.zone_name,
+            )?,
             quota: dataset.quota.map(|b| b.into()),
             reservation: dataset.reservation.map(|b| b.into()),
             compression: dataset.compression,
         })
     }
 }
-
 
 /// See [`nexus_types::deployment::BlueprintZonesConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]

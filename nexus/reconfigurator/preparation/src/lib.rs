@@ -91,7 +91,9 @@ impl PlanningInputFromDb<'_> {
 
         let mut zpools_by_sled_id = {
             // Gather all the datasets first, by Zpool ID
-            let mut datasets: Vec<_> = self.dataset_rows.iter()
+            let mut datasets: Vec<_> = self
+                .dataset_rows
+                .iter()
                 .map(|dataset| {
                     (
                         ZpoolUuid::from_untyped_uuid(dataset.pool_id),
@@ -102,7 +104,8 @@ impl PlanningInputFromDb<'_> {
             datasets.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
             let mut datasets_by_zpool: BTreeMap<_, Vec<_>> = BTreeMap::new();
             for (zpool_id, dataset) in datasets {
-                datasets_by_zpool.entry(zpool_id)
+                datasets_by_zpool
+                    .entry(zpool_id)
                     .or_default()
                     .push(DatasetConfig::try_from(dataset)?);
             }
@@ -124,7 +127,9 @@ impl PlanningInputFromDb<'_> {
                     state: disk.disk_state.into(),
                 };
 
-                let datasets = datasets_by_zpool.remove(&zpool_id).unwrap_or_else(|| vec![]);
+                let datasets = datasets_by_zpool
+                    .remove(&zpool_id)
+                    .unwrap_or_else(|| vec![]);
                 sled_zpool_names.insert(zpool_id, (disk, datasets));
             }
             zpools

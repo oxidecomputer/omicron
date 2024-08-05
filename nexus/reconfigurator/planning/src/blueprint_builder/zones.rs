@@ -254,7 +254,7 @@ mod tests {
                                         state: PhysicalDiskState::Active,
                                     },
                                     // Datasets: Leave empty
-                                    vec![]
+                                    vec![],
                                 ),
                             )]),
                         },

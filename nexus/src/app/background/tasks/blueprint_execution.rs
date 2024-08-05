@@ -128,9 +128,10 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::{
-        blueprint_zone_type, Blueprint, BlueprintDatasetsConfig, BlueprintPhysicalDisksConfig,
-        BlueprintTarget, BlueprintZoneConfig, BlueprintZoneDisposition,
-        BlueprintZoneType, BlueprintZonesConfig, CockroachDbPreserveDowngrade,
+        blueprint_zone_type, Blueprint, BlueprintDatasetsConfig,
+        BlueprintPhysicalDisksConfig, BlueprintTarget, BlueprintZoneConfig,
+        BlueprintZoneDisposition, BlueprintZoneType, BlueprintZonesConfig,
+        CockroachDbPreserveDowngrade,
     };
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;

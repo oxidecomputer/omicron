@@ -230,7 +230,7 @@ impl<'a> Planner<'a> {
         {
             // First, we need to ensure that sleds are using their expected
             // disks. This is necessary before we can allocate any zones.
-            if let EnsureMultiple::Changed { added, removed } =
+            if let EnsureMultiple::Changed { added, updated, removed } =
                 self.blueprint.sled_ensure_disks(sled_id, &sled_resources)?
             {
                 info!(
@@ -241,6 +241,7 @@ impl<'a> Planner<'a> {
                 self.blueprint.record_operation(Operation::UpdateDisks {
                     sled_id,
                     added,
+                    updated,
                     removed,
                 });
 
@@ -358,9 +359,12 @@ impl<'a> Planner<'a> {
     }
 
     fn do_plan_datasets(&mut self) -> Result<(), Error> {
-        for (sled_id, sled_resources) in self.input.all_sled_resources(SledFilter::InService) {
-            if let EnsureMultiple::Changed { added, removed } =
-                self.blueprint.sled_ensure_datasets(sled_id, &sled_resources)? {
+        for (sled_id, sled_resources) in
+            self.input.all_sled_resources(SledFilter::InService)
+        {
+            if let EnsureMultiple::Changed { added, updated, removed } =
+                self.blueprint.sled_ensure_datasets(sled_id, &sled_resources)?
+            {
                 info!(
                     &self.log,
                     "altered datasets";
@@ -369,6 +373,7 @@ impl<'a> Planner<'a> {
                 self.blueprint.record_operation(Operation::UpdateDatasets {
                     sled_id,
                     added,
+                    updated,
                     removed,
                 });
             }
@@ -549,7 +554,7 @@ impl<'a> Planner<'a> {
                 }
             };
             match result {
-                EnsureMultiple::Changed { added, removed: _ } => {
+                EnsureMultiple::Changed { added, updated: _, removed: _ } => {
                     info!(
                         self.log, "will add {added} Nexus zone(s) to sled";
                         "sled_id" => %sled_id,
@@ -1207,20 +1212,13 @@ mod test {
         for _ in 0..NEW_IN_SERVICE_DISKS {
             sled_details.resources.zpools.insert(
                 ZpoolUuid::from(zpool_rng.next()),
-                (
-                    new_sled_disk(PhysicalDiskPolicy::InService),
-                    vec![],
-                )
-
+                (new_sled_disk(PhysicalDiskPolicy::InService), vec![]),
             );
         }
         for _ in 0..NEW_EXPUNGED_DISKS {
             sled_details.resources.zpools.insert(
                 ZpoolUuid::from(zpool_rng.next()),
-                (
-                    new_sled_disk(PhysicalDiskPolicy::Expunged),
-                    vec![],
-                )
+                (new_sled_disk(PhysicalDiskPolicy::Expunged), vec![]),
             );
         }
 

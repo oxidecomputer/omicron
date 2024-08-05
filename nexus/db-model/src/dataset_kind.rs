@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use omicron_common::api::internal;
 use omicron_common::api::external::Error;
+use omicron_common::api::internal;
 use serde::{Deserialize, Serialize};
 
 impl_enum_type!(
@@ -29,7 +29,10 @@ impl_enum_type!(
 );
 
 impl DatasetKind {
-    pub fn try_into_api(self, zone_name: Option<String>) -> Result<internal::shared::DatasetKind, Error> {
+    pub fn try_into_api(
+        self,
+        zone_name: Option<String>,
+    ) -> Result<internal::shared::DatasetKind, Error> {
         use internal::shared::DatasetKind as ApiKind;
         let k = match (self, zone_name) {
             (Self::Crucible, None) => ApiKind::Crucible,
@@ -41,8 +44,12 @@ impl DatasetKind {
             (Self::ZoneRoot, None) => ApiKind::ZoneRoot,
             (Self::Zone, Some(name)) => ApiKind::Zone { name },
             (Self::Debug, None) => ApiKind::Debug,
-            (Self::Zone, None) => return Err(Error::internal_error("Zone kind needs name")),
-            (_, Some(_)) => return Err(Error::internal_error("Only zone kind needs name")),
+            (Self::Zone, None) => {
+                return Err(Error::internal_error("Zone kind needs name"))
+            }
+            (_, Some(_)) => {
+                return Err(Error::internal_error("Only zone kind needs name"))
+            }
         };
 
         Ok(k)
