@@ -4213,40 +4213,6 @@ async fn cmd_db_migrations_list(
             query.filter(dsl::instance_id.eq_any(args.instance_ids.clone()));
     }
 
-    #[derive(Tabled)]
-    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-    struct MigrationRow {
-        id: Uuid,
-        instance: Uuid,
-        source_vmm: Uuid,
-        source_state: MigrationState,
-        target_vmm: Uuid,
-        target_state: MigrationState,
-        created: chrono::DateTime<Utc>,
-        #[tabled(display_with = "display_option_blank")]
-        deleted: Option<chrono::DateTime<Utc>>,
-    }
-
-    #[derive(Tabled)]
-    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-    struct VerboseMigrationRow {
-        id: Uuid,
-        instance: Uuid,
-        src_vmm: Uuid,
-        src_state: MigrationState,
-        src_generation: Generation,
-        #[tabled(display_with = "display_option_blank")]
-        src_updated: Option<chrono::DateTime<Utc>>,
-        tgt_vmm: Uuid,
-        tgt_state: MigrationState,
-        tgt_generation: Generation,
-        #[tabled(display_with = "display_option_blank")]
-        tgt_updated: Option<chrono::DateTime<Utc>>,
-        created: chrono::DateTime<Utc>,
-        #[tabled(display_with = "display_option_blank")]
-        deleted: Option<chrono::DateTime<Utc>>,
-    }
-
     let migrations = query
         .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
         .order_by(dsl::time_created)
@@ -4261,6 +4227,26 @@ async fn cmd_db_migrations_list(
     check_limit(&migrations, fetch_opts.fetch_limit, || "listing migrations");
 
     let table = if args.verbose {
+        // If verbose mode is enabled, include the migration's ID as well as the
+        // source and target updated timestamps.
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct VerboseMigrationRow {
+            created: chrono::DateTime<Utc>,
+            id: Uuid,
+            instance: Uuid,
+            src_state: MigrationState,
+            tgt_state: MigrationState,
+            src_vmm: Uuid,
+            tgt_vmm: Uuid,
+            #[tabled(display_with = "display_option_blank")]
+            src_updated: Option<chrono::DateTime<Utc>>,
+            #[tabled(display_with = "display_option_blank")]
+            tgt_updated: Option<chrono::DateTime<Utc>>,
+            #[tabled(display_with = "display_option_blank")]
+            deleted: Option<chrono::DateTime<Utc>>,
+        }
+
         let rows = migrations.into_iter().map(
             |Migration {
                  id,
@@ -4280,11 +4266,9 @@ async fn cmd_db_migrations_list(
                 instance: instance_id,
                 src_vmm: source_propolis_id,
                 src_state: source_state,
-                src_generation: source_gen.0,
                 src_updated: time_source_updated,
                 tgt_vmm: target_propolis_id,
                 tgt_state: target_state,
-                tgt_generation: target_gen.0,
                 tgt_updated: time_target_updated,
                 created: time_created,
                 deleted: time_deleted,
@@ -4295,10 +4279,34 @@ async fn cmd_db_migrations_list(
             .with(tabled::settings::Style::empty())
             .with(tabled::settings::Padding::new(0, 1, 0, 0))
             .to_string()
+    } else if args.instance_ids.len() == 1 {
+        // If only the migrations for a single instance are shown, we omit the
+        // instance ID row for conciseness sake.
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct SingleInstanceMigrationRow {
+            created: chrono::DateTime<Utc>,
+            src_state: MigrationState,
+            tgt_state: MigrationState,
+            src_vmm: Uuid,
+            tgt_vmm: Uuid,
+        }
     } else {
+        // Otherwise, the default format includes the instance ID, but omits
+        // most of the timestamps for brevity.
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct MigrationRow {
+            created: chrono::DateTime<Utc>,
+            instance: Uuid,
+            src_state: MigrationState,
+            tgt_state: MigrationState,
+            src_vmm: Uuid,
+            tgt_vmm: Uuid,
+        }
+
         let rows = migrations.into_iter().map(
             |Migration {
-                 id,
                  instance_id,
                  source_propolis_id,
                  source_state,
@@ -4308,14 +4316,12 @@ async fn cmd_db_migrations_list(
                  time_deleted,
                  ..
              }| MigrationRow {
-                id,
                 instance: instance_id,
-                source_vmm: source_propolis_id,
-                source_state,
-                target_vmm: target_propolis_id,
-                target_state,
+                src_vmm: source_propolis_id,
+                src_state: source_state,
+                tgt_vmm: target_propolis_id,
+                tgt_state: target_state,
                 created: time_created,
-                deleted: time_deleted,
             },
         );
 
