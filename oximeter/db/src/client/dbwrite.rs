@@ -234,6 +234,12 @@ impl Client {
             // TODO-robustness We've verified the schema, so this is likely a transient failure.
             // But we may want to check the actual error condition, and, if possible, continue
             // inserting any remaining data.
+            debug!(
+                self.log,
+                "about to insert rows into table";
+                "n_rows" => rows.len(),
+                "table_name" => &table_name,
+            );
             self.execute(body).await?;
             debug!(
                 self.log,
@@ -309,6 +315,7 @@ impl Client {
                 return Err(e);
             }
         }
+        debug!(self.log, "no new timeseries schema");
         Ok(())
     }
 
