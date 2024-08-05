@@ -91,9 +91,23 @@ declare_saga_actions! {
     // those tables. Because the `instance` table is queried in the public API,
     // we take care to ensure that it doesn't have "dangling pointers" to
     // records in the `vmm` and `migration` tables that don't exist yet.
+    //
+    // Note that unwinding this action does *not* clear the migration IDs from
+    // the instance record. This is to avoid a potential race with the instance
+    // update saga where:
+    //
+    // - a `instance-migrate` saga sets the migration IDs at instance state
+    //   generation  _N_
+    // - an `instance-update` saga increments the instance's state generation to
+    //   _N_ + 1
+    // - the `instance-migrate` saga unwinds and attempts to clear the migration
+    //   IDs, but can't, because the state generation has advanced.
+    //
+    // Instead, we leave the migration IDs in place and rely on setting the VMM
+    // state to `SagaUnwound` to indicate to other future `instance-migrate`
+    // sagas that it's okay to start a new migration.
     SET_MIGRATION_IDS -> "set_migration_ids" {
         + sim_set_migration_ids
-        - sim_clear_migration_ids
     }
 
     // This step registers the instance with the destination sled. Care is
@@ -366,48 +380,6 @@ async fn sim_set_migration_ids(
         )
         .await
         .map_err(ActionError::action_failed)
-}
-
-async fn sim_clear_migration_ids(
-    sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-    let db_instance = params.instance;
-    let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
-    let src_propolis_id = PropolisUuid::from_untyped_uuid(params.src_vmm.id);
-    let migration_id = sagactx.lookup::<Uuid>("migrate_id")?;
-    let dst_propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
-
-    info!(osagactx.log(), "clearing migration IDs for saga unwind";
-          "instance_id" => %db_instance.id(),
-          "migration_id" => %migration_id,
-          "src_propolis_id" => %src_propolis_id,
-          "dst_propolis_id" => %dst_propolis_id);
-
-    if let Err(e) = osagactx
-        .datastore()
-        .instance_unset_migration_ids(
-            &opctx,
-            instance_id,
-            migration_id,
-            dst_propolis_id,
-        )
-        .await
-    {
-        warn!(osagactx.log(),
-              "Error clearing migration IDs during rollback";
-              "instance_id" => %instance_id,
-              "src_propolis_id" => %src_propolis_id,
-              "dst_propolis_id" => %dst_propolis_id,
-              "error" => ?e);
-    }
-
-    Ok(())
 }
 
 async fn sim_ensure_destination_propolis(
