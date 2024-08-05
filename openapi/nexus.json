@@ -6305,6 +6305,95 @@
         }
       }
     },
+    "/v1/system/networking/address-lot/{address_lot}/blocks/add": {
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Add block to address lot",
+        "operationId": "networking_address_lot_block_add",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "address_lot",
+            "description": "Name or ID of the address lot",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddressLotBlockAddRemove"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressLotBlock"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/address-lot/{address_lot}/blocks/remove": {
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Remove block from address lot",
+        "operationId": "networking_address_lot_block_remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "address_lot",
+            "description": "Name or ID of the address lot",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddressLotBlockAddRemove"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/networking/allow-list": {
       "get": {
         "tags": [
@@ -9729,8 +9818,8 @@
           "last_address"
         ]
       },
-      "AddressLotBlockCreate": {
-        "description": "Parameters for creating an address lot block. Fist and last addresses are inclusive.",
+      "AddressLotBlockAddRemove": {
+        "description": "Parameters for adding or removing an address lot block. First and last addresses are inclusive.",
         "type": "object",
         "properties": {
           "first_address": {
@@ -9774,13 +9863,6 @@
         "description": "Parameters for creating an address lot.",
         "type": "object",
         "properties": {
-          "blocks": {
-            "description": "The blocks to add along with the new address lot.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AddressLotBlockCreate"
-            }
-          },
           "description": {
             "type": "string"
           },
@@ -9797,7 +9879,6 @@
           }
         },
         "required": [
-          "blocks",
           "description",
           "kind",
           "name"
@@ -9807,13 +9888,6 @@
         "description": "An address lot and associated blocks resulting from creating an address lot.",
         "type": "object",
         "properties": {
-          "blocks": {
-            "description": "The address lot blocks that were created.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AddressLotBlock"
-            }
-          },
           "lot": {
             "description": "The address lot that was created.",
             "allOf": [
@@ -9824,7 +9898,6 @@
           }
         },
         "required": [
-          "blocks",
           "lot"
         ]
       },

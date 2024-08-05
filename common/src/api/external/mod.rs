@@ -2112,9 +2112,6 @@ impl std::fmt::Display for Digest {
 pub struct AddressLotCreateResponse {
     /// The address lot that was created.
     pub lot: AddressLot,
-
-    /// The address lot blocks that were created.
-    pub blocks: Vec<AddressLotBlock>,
 }
 
 /// Represents an address lot object, containing the id of the lot that can be
