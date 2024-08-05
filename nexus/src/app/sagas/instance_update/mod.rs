@@ -675,7 +675,23 @@ const NETWORK_CONFIG_UPDATE: &str = "network_config_update";
 declare_saga_actions! {
     instance_update;
 
-    // Become the instance updater
+    // Become the instance updater.
+    //
+    // This action inherits the instance-updater lock from the
+    // `start-instance-update` saga, which attempts to compare-and-swap in a new
+    // saga UUID. This ensuring that only one child update saga is
+    // actually allowed to proceed, even if the `start-instance-update` saga's
+    // "fetch_instance_and_start_real_saga" executes multiple times, avoiding
+    // duplicate work.
+    //
+    // Unwinding this action releases the updater lock. In addition, it
+    // activates the `instance-updater` background task to ensure that a new
+    // update saga is started in a timely manner, to perform the work that the
+    // unwinding saga was *supposed* to do. Since this action only succeeds if
+    // the lock was acquired, and this saga is only started if updates are
+    // required, having this action activate the background task when unwinding
+    // avoids unneeded activations when a saga fails just because it couldn't
+    // get the lock.
     BECOME_UPDATER -> "updater_lock" {
         + siu_become_updater
         - siu_unbecome_updater
@@ -861,6 +877,16 @@ async fn siu_unbecome_updater(
 
     unwind_instance_lock(lock, serialized_authn, authz_instance, &sagactx)
         .await;
+
+    // Now that we've released the lock, activate the `instance-updater`
+    // background task to make sure that a new instance update saga is started
+    // if the instance still needs to be updated.
+    sagactx
+        .user_data()
+        .nexus()
+        .background_tasks
+        .task_instance_updater
+        .activate();
 
     Ok(())
 }
