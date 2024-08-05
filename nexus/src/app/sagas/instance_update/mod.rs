@@ -475,7 +475,6 @@ impl UpdatesRequired {
 
         let mut update_required = false;
         let mut network_config = None;
-        let mut deprovision = false;
 
         // Has the active VMM been destroyed?
         let destroy_active_vmm =
@@ -487,31 +486,14 @@ impl UpdatesRequired {
                     // handles migration updates, will set this to the new VMM's ID,
                     // instead.
                     new_runtime.propolis_id = None;
-                    new_runtime.nexus_state = InstanceState::NoVmm;
                     update_required = true;
-                    // If and only if the active VMM was destroyed *and* we did
-                    // not successfully migrate out of it, the instance's
-                    // virtual provisioning records and oximeter producer must
-                    // be cleaned up.
-                    //
-                    // If the active VMM was destroyed as a result of a
-                    // successful migration out, the subsequent code for
-                    // determining what to do with the migration will change
-                    // this back.
-                    deprovision = true;
-                    // Similarly, if the active VMM was destroyed and the
-                    // instance has not migrated out of it, we must delete the
-                    // instance's network configuration. Again, if there was a
-                    // migration out, the subsequent migration-handling code
-                    // will change this to a network config update if the
-                    // instance is now living somewhere else.
-                    network_config = Some(NetworkConfigUpdate::Delete);
                     Some(id)
                 } else {
                     None
                 }
             });
 
+        // Okay, what about the target?
         let destroy_target_vmm =
             snapshot.target_vmm.as_ref().and_then(|target_vmm| {
                 if target_vmm.runtime.state == VmmState::Destroyed {
@@ -594,7 +576,23 @@ impl UpdatesRequired {
                     new_runtime.propolis_id =
                         Some(migration.target_propolis_id);
                     network_config = Some(NetworkConfigUpdate::to_vmm(new_vmm));
-                    update_required = true;
+                }
+
+                // Welp, the migration has succeeded, but the target Propolis
+                // has also gone away. This is functionally equivalent to having
+                // the active VMM go to `Destroyed`, so now we have no active
+                // VMM anymore.
+                if destroy_target_vmm.is_some() {
+                    info!(
+                        log,
+                        "instance update (migration completed): target VMM \
+                         has gone away, destroying it!";
+                        "instance_id" => %instance_id,
+                        "migration_id" => %migration.id,
+                        "src_propolis_id" => %migration.source_propolis_id,
+                        "target_propolis_id" => %migration.target_propolis_id,
+                    );
+                    new_runtime.propolis_id = None;
                 }
 
                 // If the target reports that the migration has completed,
@@ -614,18 +612,41 @@ impl UpdatesRequired {
                     );
                     new_runtime.migration_id = None;
                     new_runtime.dst_propolis_id = None;
-                    update_required = true;
                 }
 
-                // Even if the active VMM was destroyed (and we set the
-                // instance's state to `NoVmm` above), it has successfully
-                // migrated, so leave it in the VMM state and don't deallocate
-                // virtual provisioning records --- the instance is still
-                // incarnated.
-                new_runtime.nexus_state = InstanceState::Vmm;
-                deprovision = false;
+                update_required = true;
             }
         }
+
+        // If the *new* state no longer has a `propolis_id` field, that means
+        // that the active VMM was destroyed without a successful migration out
+        // (or, we migrated out to a target VMM that was immediately destroyed,
+        // which...seems weird but certainly could happen). In that case, the
+        // instance is no longer incarnated on a sled, and we must update the
+        // state of the world to reflect that.
+        let deprovision = if new_runtime.propolis_id.is_none() {
+            update_required = true;
+            // We no longer have a VMM.
+            new_runtime.nexus_state = InstanceState::NoVmm;
+            // If the active VMM was destroyed and the instance has not migrated
+            // out of it, we must delete the instance's network configuration.
+            //
+            // This clobbers a previously-set network config update to a new
+            // VMM, because if we set one above, we must have subsequently
+            // discovered that there actually *is* no new VMM anymore!
+            network_config = Some(NetworkConfigUpdate::Delete);
+            // The instance's virtual provisioning records must be deallocated,
+            // as it is no longer consuming any virtual resources. Providing a
+            // set of virtual provisioning counters to deallocate also indicates
+            // that the instance's oximeter producer should be cleaned up.
+            Some(Deprovision {
+                project_id: snapshot.instance.project_id,
+                cpus_diff: i64::from(snapshot.instance.ncpus.0 .0),
+                ram_diff: snapshot.instance.memory,
+            })
+        } else {
+            None
+        };
 
         if !update_required {
             return None;
@@ -635,11 +656,7 @@ impl UpdatesRequired {
             new_runtime,
             destroy_active_vmm,
             destroy_target_vmm,
-            deprovision: deprovision.then(|| Deprovision {
-                project_id: snapshot.instance.project_id,
-                cpus_diff: i64::from(snapshot.instance.ncpus.0 .0),
-                ram_diff: snapshot.instance.memory,
-            }),
+            deprovision,
             network_config,
         })
     }
