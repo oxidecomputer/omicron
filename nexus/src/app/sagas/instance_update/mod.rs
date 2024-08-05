@@ -1883,7 +1883,7 @@ mod test {
             .source(MigrationState::Failed, VmmState::Running)
             .setup_test(cptestctx, &other_sleds)
             .await
-            .run_saga_basic_usage_succeeds_test(cptestctx)
+            .run_actions_succeed_idempotently_test(cptestctx)
             .await;
     }
 
@@ -1945,7 +1945,7 @@ mod test {
             .source(MigrationState::Failed, VmmState::Running)
             .setup_test(cptestctx, &other_sleds)
             .await
-            .run_saga_basic_usage_succeeds_test(cptestctx)
+            .run_actions_succeed_idempotently_test(cptestctx)
             .await;
     }
 
@@ -2007,7 +2007,7 @@ mod test {
             .source(MigrationState::Failed, VmmState::Destroyed)
             .setup_test(cptestctx, &other_sleds)
             .await
-            .run_saga_basic_usage_succeeds_test(cptestctx)
+            .run_actions_succeed_idempotently_test(cptestctx)
             .await;
     }
 
@@ -2069,7 +2069,7 @@ mod test {
             .source(MigrationState::Failed, VmmState::Destroyed)
             .setup_test(cptestctx, &other_sleds)
             .await
-            .run_saga_basic_usage_succeeds_test(cptestctx)
+            .run_actions_succeed_idempotently_test(cptestctx)
             .await;
     }
 
