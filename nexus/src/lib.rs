@@ -57,18 +57,8 @@ extern crate slog;
 /// to stdout.
 pub fn run_openapi_external() -> Result<(), String> {
     external_api()
-        .openapi("Oxide Region API", "20240502.0")
+        .openapi("Oxide Region API", "20240821.0")
         .description("API for interacting with the Oxide control plane")
-        .contact_url("https://oxide.computer")
-        .contact_email("api@oxide.computer")
-        .write(&mut std::io::stdout())
-        .map_err(|e| e.to_string())
-}
-
-pub fn run_openapi_internal() -> Result<(), String> {
-    internal_api()
-        .openapi("Nexus internal API", "0.0.1")
-        .description("Nexus internal API")
         .contact_url("https://oxide.computer")
         .contact_email("api@oxide.computer")
         .write(&mut std::io::stdout())
@@ -262,8 +252,8 @@ impl nexus_test_interface::NexusServer for Server {
         datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
         internal_dns_zone_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
-        recovery_silo: nexus_types::internal_api::params::RecoverySiloConfig,
-        certs: Vec<nexus_types::internal_api::params::Certificate>,
+        recovery_silo: nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
+        certs: Vec<omicron_common::api::internal::nexus::Certificate>,
         disable_sled_id: Uuid,
     ) -> Self {
         // Perform the "handoff from RSS".

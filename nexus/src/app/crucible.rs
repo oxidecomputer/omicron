@@ -26,7 +26,8 @@ use slog::Logger;
 // within a disk at the same time.
 const MAX_CONCURRENT_REGION_REQUESTS: usize = 3;
 
-/// Provides a way for (with BackoffError) Permanent errors to have a different error type than
+/// Provides a way for (with BackoffError) Permanent errors to have a different
+/// error type than
 /// Transient errors.
 #[derive(Debug, thiserror::Error)]
 enum WaitError {
@@ -69,11 +70,17 @@ impl super::Nexus {
     fn crucible_agent_client_for_dataset(
         &self,
         dataset: &db::model::Dataset,
-    ) -> CrucibleAgentClient {
-        CrucibleAgentClient::new_with_client(
-            &format!("http://{}", dataset.address()),
+    ) -> Result<CrucibleAgentClient, Error> {
+        let Some(addr) = dataset.address() else {
+            return Err(Error::internal_error(
+                "Missing crucible dataset address",
+            ));
+        };
+
+        Ok(CrucibleAgentClient::new_with_client(
+            &format!("http://{}", addr),
             self.reqwest_client.clone(),
-        )
+        ))
     }
 
     /// Return if the Crucible agent is expected to be there and answer Nexus:
@@ -91,14 +98,65 @@ impl super::Nexus {
         Ok(!on_in_service_physical_disk)
     }
 
-    /// Call out to Crucible agent and perform region creation.
-    async fn ensure_region_in_dataset(
+    /// Return a region's associated address
+    pub async fn region_addr(
+        &self,
+        log: &Logger,
+        region_id: Uuid,
+    ) -> Result<SocketAddrV6, Error> {
+        // If a region port was previously recorded, return the address right
+        // away
+
+        if let Some(addr) = self.datastore().region_addr(region_id).await? {
+            return Ok(addr);
+        }
+
+        // Otherwise, ask the appropriate Crucible agent
+
+        let dataset = {
+            let region = self.datastore().get_region(region_id).await?;
+            self.datastore().dataset_get(region.dataset_id()).await?
+        };
+
+        let Some(returned_region) =
+            self.maybe_get_crucible_region(log, &dataset, region_id).await?
+        else {
+            // The Crucible agent didn't think the region exists? It could have
+            // been concurrently deleted, or otherwise garbage collected.
+            warn!(log, "no region for id {region_id} from Crucible Agent");
+            return Err(Error::Gone);
+        };
+
+        // Record the returned port
+        self.datastore()
+            .region_set_port(region_id, returned_region.port_number)
+            .await?;
+
+        // Return the address with the port that was just recorded - guard again
+        // against the case where the region record could have been concurrently
+        // deleted
+        match self.datastore().region_addr(region_id).await {
+            Ok(Some(addr)) => Ok(addr),
+
+            Ok(None) => {
+                warn!(log, "region {region_id} deleted");
+                Err(Error::Gone)
+            }
+
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Call out to Crucible agent and perform region creation. Optionally,
+    /// supply a read-only source to invoke a clone.
+    pub async fn ensure_region_in_dataset(
         &self,
         log: &Logger,
         dataset: &db::model::Dataset,
         region: &db::model::Region,
+        source: Option<String>,
     ) -> Result<Region, Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset);
+        let client = self.crucible_agent_client_for_dataset(dataset)?;
         let dataset_id = dataset.id();
 
         let Ok(extent_count) = u32::try_from(region.extent_count()) else {
@@ -118,7 +176,7 @@ impl super::Nexus {
             cert_pem: None,
             key_pem: None,
             root_pem: None,
-            source: None,
+            source,
         };
 
         let create_region = || async {
@@ -176,7 +234,7 @@ impl super::Nexus {
             );
         };
 
-        let region = backoff::retry_notify(
+        let returned_region = backoff::retry_notify(
             backoff::retry_policy_internal_service(),
             create_region,
             log_create_failure,
@@ -194,7 +252,14 @@ impl super::Nexus {
             WaitError::Permanent(e) => e,
         })?;
 
-        Ok(region.into_inner())
+        let returned_region = returned_region.into_inner();
+
+        // Record the returned port
+        self.datastore()
+            .region_set_port(region.id(), returned_region.port_number)
+            .await?;
+
+        Ok(returned_region)
     }
 
     /// Returns a Ok(Some(Region)) if a region with id {region_id} exists,
@@ -205,7 +270,7 @@ impl super::Nexus {
         dataset: &db::model::Dataset,
         region_id: Uuid,
     ) -> Result<Option<Region>, Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset);
+        let client = self.crucible_agent_client_for_dataset(dataset)?;
         let dataset_id = dataset.id();
 
         let result = ProgenitorOperationRetry::new(
@@ -247,7 +312,7 @@ impl super::Nexus {
         dataset: &db::model::Dataset,
         region_id: Uuid,
     ) -> Result<GetSnapshotResponse, Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset);
+        let client = self.crucible_agent_client_for_dataset(dataset)?;
         let dataset_id = dataset.id();
 
         let result = ProgenitorOperationRetry::new(
@@ -287,7 +352,7 @@ impl super::Nexus {
         dataset: &db::model::Dataset,
         region_id: Uuid,
     ) -> Result<(), Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset);
+        let client = self.crucible_agent_client_for_dataset(dataset)?;
         let dataset_id = dataset.id();
 
         let result = ProgenitorOperationRetry::new(
@@ -330,7 +395,7 @@ impl super::Nexus {
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset);
+        let client = self.crucible_agent_client_for_dataset(dataset)?;
         let dataset_id = dataset.id();
 
         let result = ProgenitorOperationRetry::new(
@@ -379,7 +444,7 @@ impl super::Nexus {
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset);
+        let client = self.crucible_agent_client_for_dataset(dataset)?;
         let dataset_id = dataset.id();
 
         let result = ProgenitorOperationRetry::new(
@@ -531,9 +596,10 @@ impl super::Nexus {
         .await
         .map_err(|e| match e {
             WaitError::Transient(e) => {
-                // The backoff crate can be configured with a maximum elapsed time
-                // before giving up, which means that Transient could be returned
-                // here. Our current policies do **not** set this though.
+                // The backoff crate can be configured with a maximum elapsed
+                // time before giving up, which means that Transient could be
+                // returned here. Our current policies do **not** set this
+                // though.
                 Error::internal_error(&e.to_string())
             }
 
@@ -563,12 +629,10 @@ impl super::Nexus {
         backoff::retry_notify(
             backoff::retry_policy_internal_service_aggressive(),
             || async {
-                let response = match self.get_crucible_region_snapshots(
-                    log,
-                    dataset,
-                    region_id,
-                )
-                .await {
+                let response = match self
+                    .get_crucible_region_snapshots(log, dataset, region_id)
+                    .await
+                {
                     Ok(v) => Ok(v),
 
                     // Return Ok if the dataset's agent is gone, no
@@ -583,7 +647,9 @@ impl super::Nexus {
                         return Ok(());
                     }
 
-                    Err(e) => Err(BackoffError::Permanent(WaitError::Permanent(e))),
+                    Err(e) => {
+                        Err(BackoffError::Permanent(WaitError::Permanent(e)))
+                    }
                 }?;
 
                 match response.running_snapshots.get(&snapshot_id.to_string()) {
@@ -600,27 +666,23 @@ impl super::Nexus {
                             RegionState::Tombstoned => {
                                 Err(BackoffError::transient(
                                     WaitError::Transient(anyhow!(
-                                        "running_snapshot tombstoned, not deleted yet",
-                                    )
-                                )))
+                                        "running_snapshot tombstoned, not \
+                                        deleted yet",
+                                    )),
+                                ))
                             }
 
                             RegionState::Destroyed => {
-                                info!(
-                                    log,
-                                    "running_snapshot deleted",
-                                );
+                                info!(log, "running_snapshot deleted",);
 
                                 Ok(())
                             }
 
-                            _ => {
-                                Err(BackoffError::transient(
-                                    WaitError::Transient(anyhow!(
-                                        "running_snapshot unexpected state",
-                                    )
-                                )))
-                            }
+                            _ => Err(BackoffError::transient(
+                                WaitError::Transient(anyhow!(
+                                    "running_snapshot unexpected state",
+                                )),
+                            )),
                         }
                     }
 
@@ -648,20 +710,19 @@ impl super::Nexus {
                     "region_id" => %region_id,
                     "snapshot_id" => %snapshot_id,
                 );
-            }
+            },
         )
         .await
         .map_err(|e| match e {
             WaitError::Transient(e) => {
-                // The backoff crate can be configured with a maximum elapsed time
-                // before giving up, which means that Transient could be returned
-                // here. Our current policies do **not** set this though.
+                // The backoff crate can be configured with a maximum elapsed
+                // time before giving up, which means that Transient could be
+                // returned here. Our current policies do **not** set this
+                // though.
                 Error::internal_error(&e.to_string())
             }
 
-            WaitError::Permanent(e) => {
-                e
-            }
+            WaitError::Permanent(e) => e,
         })
     }
 
@@ -683,11 +744,12 @@ impl super::Nexus {
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
-        // Unlike other Crucible agent endpoints, this one is synchronous in that it
-        // is not only a request to the Crucible agent: `zfs destroy` is performed
-        // right away. However this is still a request to illumos that may not take
-        // effect right away. Wait until the snapshot no longer appears in the list
-        // of region snapshots, meaning it was not returned from `zfs list`.
+        // Unlike other Crucible agent endpoints, this one is synchronous in
+        // that it is not only a request to the Crucible agent: `zfs destroy` is
+        // performed right away. However this is still a request to illumos that
+        // may not take effect right away. Wait until the snapshot no longer
+        // appears in the list of region snapshots, meaning it was not returned
+        // from `zfs list`.
 
         let dataset_id = dataset.id();
 
@@ -776,9 +838,10 @@ impl super::Nexus {
         .await
         .map_err(|e| match e {
             WaitError::Transient(e) => {
-                // The backoff crate can be configured with a maximum elapsed time
-                // before giving up, which means that Transient could be returned
-                // here. Our current policies do **not** set this though.
+                // The backoff crate can be configured with a maximum elapsed
+                // time before giving up, which means that Transient could be
+                // returned here. Our current policies do **not** set this
+                // though.
                 Error::internal_error(&e.to_string())
             }
 
@@ -798,13 +861,13 @@ impl super::Nexus {
             return Ok(vec![]);
         }
 
-        // Allocate regions, and additionally return the dataset that the region was
-        // allocated in.
+        // Allocate regions, and additionally return the dataset that the region
+        // was allocated in.
         let datasets_and_regions: Vec<(db::model::Dataset, Region)> =
             futures::stream::iter(datasets_and_regions)
                 .map(|(dataset, region)| async move {
                     match self
-                        .ensure_region_in_dataset(log, &dataset, &region)
+                        .ensure_region_in_dataset(log, &dataset, &region, None)
                         .await
                     {
                         Ok(result) => Ok((dataset, result)),

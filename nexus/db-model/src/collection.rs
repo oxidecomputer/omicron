@@ -152,4 +152,8 @@ pub trait DatastoreAttachTargetConfig<ResourceType>:
     type ResourceTimeDeletedColumn: Column<Table = <Self::ResourceIdColumn as Column>::Table>
         + Default
         + ExpressionMethods;
+
+    /// Controls whether a resource may be attached to a new collection without
+    /// first being explicitly detached from the previous one
+    const ALLOW_FROM_ATTACHED: bool = false;
 }

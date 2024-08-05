@@ -64,18 +64,15 @@
 //! completing execution, and unconditionally calls the "handoff to Nexus" API
 //! thereafter.
 
-use super::config::SetupServiceConfig as Config;
 use super::plan::service::SledConfig;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use crate::bootstrap::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkConfigBody, EarlyNetworkSetup,
-    EarlyNetworkSetupError,
+    EarlyNetworkSetup, EarlyNetworkSetupError,
 };
-use crate::bootstrap::params::BootstrapAddressDiscovery;
 use crate::bootstrap::params::StartSledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
-use crate::nexus::{d2n_params, ConvertInto};
-use crate::params::{OmicronZoneType, OmicronZonesConfig, TimeSync};
+use crate::nexus::d2n_params;
+use crate::params::{OmicronZoneTypeExt, TimeSync};
 use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
 };
@@ -91,6 +88,9 @@ use internal_dns::ServiceName;
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
+use nexus_sled_agent_shared::inventory::{
+    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
+};
 use nexus_types::deployment::{
     Blueprint, BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
     BlueprintZoneDisposition, BlueprintZonesConfig,
@@ -103,6 +103,9 @@ use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
+use omicron_common::disk::{
+    OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig,
+};
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use omicron_uuid_kinds::SledUuid;
@@ -110,6 +113,12 @@ use omicron_uuid_kinds::{ExternalIpUuid, GenericUuid};
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
+};
+use sled_agent_types::early_networking::{
+    EarlyNetworkConfig, EarlyNetworkConfigBody,
+};
+use sled_agent_types::rack_init::{
+    BootstrapAddressDiscovery, RackInitializeRequest as Config,
 };
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_storage::dataset::CONFIG_DATASET;
@@ -296,18 +305,16 @@ impl ServiceInner {
             plan.services.iter().map(|(sled_address, config)| async move {
                 self.initialize_storage_on_sled(
                     *sled_address,
-                    SledAgentTypes::OmicronPhysicalDisksConfig {
+                    OmicronPhysicalDisksConfig {
                         generation: config.disks.generation,
                         disks: config
                             .disks
                             .disks
                             .iter()
-                            .map(|disk| {
-                                SledAgentTypes::OmicronPhysicalDiskConfig {
-                                    identity: disk.identity.clone(),
-                                    id: disk.id,
-                                    pool_id: disk.pool_id,
-                                }
+                            .map(|disk| OmicronPhysicalDiskConfig {
+                                identity: disk.identity.clone(),
+                                id: disk.id,
+                                pool_id: disk.pool_id,
                             })
                             .collect(),
                     },
@@ -330,7 +337,7 @@ impl ServiceInner {
     async fn initialize_storage_on_sled(
         &self,
         sled_address: SocketAddrV6,
-        storage_config: SledAgentTypes::OmicronPhysicalDisksConfig,
+        storage_config: OmicronPhysicalDisksConfig,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
         let client = reqwest::ClientBuilder::new()
@@ -432,8 +439,7 @@ impl ServiceInner {
                 log,
                 "attempting to set up sled's Omicron zones: {:?}", zones_config
             );
-            let result =
-                client.omicron_zones_put(&zones_config.clone().into()).await;
+            let result = client.omicron_zones_put(zones_config).await;
             let Err(error) = result else {
                 return Ok::<
                     (),
@@ -719,7 +725,7 @@ impl ServiceInner {
                         dataset_id: zone.id,
                         request: NexusTypes::DatasetPutRequest {
                             address: dataset_address.to_string(),
-                            kind: dataset_name.dataset().clone().convert(),
+                            kind: dataset_name.dataset().kind(),
                         },
                     })
                 }
@@ -1367,11 +1373,11 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
 ) -> Result<Blueprint, InvalidOmicronZoneType> {
     // Helper to convert an `OmicronZoneConfig` into a `BlueprintZoneConfig`.
     // This is separate primarily so rustfmt doesn't lose its mind.
-    let to_bp_zone_config = |z: &crate::params::OmicronZoneConfig| {
+    let to_bp_zone_config = |z: &OmicronZoneConfig| {
         // All initial zones are in-service.
         let disposition = BlueprintZoneDisposition::InService;
         BlueprintZoneConfig::from_omicron_zone_config(
-            z.clone().into(),
+            z.clone(),
             disposition,
             // This is pretty weird: IP IDs don't exist yet, so it's fine for us
             // to make them up (Nexus will record them as a part of the
@@ -1396,7 +1402,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
                     .disks
                     .disks
                     .iter()
-                    .map(|d| SledAgentTypes::OmicronPhysicalDiskConfig {
+                    .map(|d| OmicronPhysicalDiskConfig {
                         identity: d.identity.clone(),
                         id: d.id,
                         pool_id: d.pool_id,
@@ -1545,18 +1551,17 @@ impl<'a> OmicronZonesConfigGenerator<'a> {
 
 #[cfg(test)]
 mod test {
-    use super::OmicronZonesConfigGenerator;
-    use crate::{
-        params::OmicronZoneType,
-        rack_setup::plan::service::{Plan as ServicePlan, SledInfo},
+    use super::{Config, OmicronZonesConfigGenerator};
+    use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
+    use nexus_sled_agent_shared::inventory::{
+        Baseboard, Inventory, InventoryDisk, OmicronZoneType, SledRole,
     };
     use omicron_common::{
         address::{get_sled_address, Ipv6Subnet, SLED_PREFIX},
         api::external::{ByteCount, Generation},
-        disk::DiskIdentity,
+        disk::{DiskIdentity, DiskVariant},
     };
     use omicron_uuid_kinds::{GenericUuid, SledUuid};
-    use sled_agent_client::types as SledAgentTypes;
 
     fn make_sled_info(
         sled_id: SledUuid,
@@ -1568,22 +1573,22 @@ mod test {
             sled_id,
             subnet,
             sled_agent_address,
-            SledAgentTypes::Inventory {
+            Inventory {
                 sled_id: sled_id.into_untyped_uuid(),
-                sled_agent_address: sled_agent_address.to_string(),
-                sled_role: SledAgentTypes::SledRole::Scrimlet,
-                baseboard: SledAgentTypes::Baseboard::Unknown,
+                sled_agent_address,
+                sled_role: SledRole::Scrimlet,
+                baseboard: Baseboard::Unknown,
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::from_gibibytes_u32(16),
                 reservoir_size: ByteCount::from_gibibytes_u32(0),
                 disks: (0..u2_count)
-                    .map(|i| SledAgentTypes::InventoryDisk {
+                    .map(|i| InventoryDisk {
                         identity: DiskIdentity {
                             vendor: "test-manufacturer".to_string(),
                             serial: format!("test-{sled_id}-#{i}"),
                             model: "v1".to_string(),
                         },
-                        variant: SledAgentTypes::DiskVariant::U2,
+                        variant: DiskVariant::U2,
                         slot: i.try_into().unwrap(),
                     })
                     .collect(),
@@ -1594,7 +1599,7 @@ mod test {
     }
 
     fn make_test_service_plan() -> ServicePlan {
-        let rss_config = crate::bootstrap::params::test_config();
+        let rss_config = Config::test_config();
         let fake_sleds = vec![
             make_sled_info(
                 SledUuid::new_v4(),

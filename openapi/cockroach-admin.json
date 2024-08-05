@@ -1,8 +1,8 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Oxide CockroachDb Cluster Admin API",
-    "description": "API for interacting with the Oxide control plane's CockroachDb cluster",
+    "title": "CockroachDB Cluster Admin API",
+    "description": "API for interacting with the Oxide control plane's CockroachDB cluster",
     "contact": {
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
@@ -10,17 +10,51 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/node/id": {
-      "get": {
-        "summary": "Get the CockroachDB node ID of the local cockroach instance.",
-        "operationId": "node_id",
+    "/node/decommission": {
+      "post": {
+        "summary": "Decommission a node from the CRDB cluster.",
+        "operationId": "node_decommission",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NodeId"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NodeId"
+                  "$ref": "#/components/schemas/NodeDecommission"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/node/id": {
+      "get": {
+        "summary": "Get the CockroachDB node ID of the local cockroach instance.",
+        "operationId": "local_node_id",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalNodeId"
                 }
               }
             }
@@ -36,7 +70,7 @@
     },
     "/node/status": {
       "get": {
-        "summary": "Get the status of all nodes in the CRDB cluster",
+        "summary": "Get the status of all nodes in the CRDB cluster.",
         "operationId": "node_status",
         "responses": {
           "200": {
@@ -94,7 +128,7 @@
           "request_id"
         ]
       },
-      "NodeId": {
+      "LocalNodeId": {
         "description": "CockroachDB Node ID",
         "type": "object",
         "properties": {
@@ -113,6 +147,120 @@
         "required": [
           "node_id",
           "zone_id"
+        ]
+      },
+      "NodeDecommission": {
+        "type": "object",
+        "properties": {
+          "is_decommissioning": {
+            "type": "boolean"
+          },
+          "is_draining": {
+            "type": "boolean"
+          },
+          "is_live": {
+            "type": "boolean"
+          },
+          "membership": {
+            "$ref": "#/components/schemas/NodeMembership"
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "replicas": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "is_decommissioning",
+          "is_draining",
+          "is_live",
+          "membership",
+          "node_id",
+          "notes",
+          "replicas"
+        ]
+      },
+      "NodeId": {
+        "type": "object",
+        "properties": {
+          "node_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id"
+        ]
+      },
+      "NodeMembership": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "active"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "decommissioning"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "decommissioned"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "value"
+            ]
+          }
         ]
       },
       "NodeStatus": {

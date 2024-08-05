@@ -22,12 +22,12 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 use ratatui::Frame;
-use wicketd_client::types::RotState;
-use wicketd_client::types::SpComponentCaboose;
-use wicketd_client::types::SpComponentInfo;
-use wicketd_client::types::SpComponentPresence;
-use wicketd_client::types::SpIgnition;
-use wicketd_client::types::SpState;
+use wicket_common::inventory::RotState;
+use wicket_common::inventory::SpComponentCaboose;
+use wicket_common::inventory::SpComponentInfo;
+use wicket_common::inventory::SpComponentPresence;
+use wicket_common::inventory::SpIgnition;
+use wicket_common::inventory::SpState;
 
 enum PopupKind {
     Ignition,
@@ -770,12 +770,12 @@ fn inventory_description(component: &Component) -> Text {
                         .into(),
                     );
                 }
-                if let Some(_) = slot_a_error {
+                if let Some(e) = slot_a_error {
                     spans.push(
                         vec![
                             nest_bullet(),
                             Span::styled("Image status: ", label_style),
-                            Span::styled("Error: ", bad_style),
+                            Span::styled(format!("Error: {e:?}"), bad_style),
                         ]
                         .into(),
                     );
@@ -813,12 +813,12 @@ fn inventory_description(component: &Component) -> Text {
                         .into(),
                     );
                 }
-                if let Some(_) = slot_b_error {
+                if let Some(e) = slot_b_error {
                     spans.push(
                         vec![
                             nest_bullet(),
                             Span::styled("Image status: ", label_style),
-                            Span::styled("Error: ", bad_style),
+                            Span::styled(format!("Error: {e:?}"), bad_style),
                         ]
                         .into(),
                     );
@@ -844,9 +844,9 @@ fn inventory_description(component: &Component) -> Text {
                     ]
                     .into(),
                 );
-                if let Some(caboose) =
-                    sp.rot().and_then(|r| r.caboose_stage0.as_ref())
-                {
+                if let Some(caboose) = sp.rot().and_then(|r| {
+                    r.caboose_stage0.as_ref().map_or(None, |x| x.as_ref())
+                }) {
                     append_caboose(&mut spans, nest_bullet(), caboose);
                 } else {
                     spans.push(
@@ -857,12 +857,12 @@ fn inventory_description(component: &Component) -> Text {
                         .into(),
                     );
                 }
-                if let Some(_) = stage0_error {
+                if let Some(e) = stage0_error {
                     spans.push(
                         vec![
                             nest_bullet(),
                             Span::styled("Image status: ", label_style),
-                            Span::styled("Error: ", bad_style),
+                            Span::styled(format!("Error: {e:?}"), bad_style),
                         ]
                         .into(),
                     );
@@ -889,9 +889,9 @@ fn inventory_description(component: &Component) -> Text {
                     ]
                     .into(),
                 );
-                if let Some(caboose) =
-                    sp.rot().and_then(|r| r.caboose_stage0next.as_ref())
-                {
+                if let Some(caboose) = sp.rot().and_then(|r| {
+                    r.caboose_stage0next.as_ref().map_or(None, |x| x.as_ref())
+                }) {
                     append_caboose(&mut spans, nest_bullet(), caboose);
                 } else {
                     spans.push(
@@ -902,12 +902,12 @@ fn inventory_description(component: &Component) -> Text {
                         .into(),
                     );
                 }
-                if let Some(_) = stage0next_error {
+                if let Some(e) = stage0next_error {
                     spans.push(
                         vec![
                             nest_bullet(),
                             Span::styled("Image status: ", label_style),
-                            Span::styled("Error: ", bad_style),
+                            Span::styled(format!("Error: {e:?}"), bad_style),
                         ]
                         .into(),
                     );

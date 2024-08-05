@@ -112,7 +112,6 @@ pub use dns::DnsVersionUpdateBuilder;
 pub use instance::InstanceAndActiveVmm;
 pub use inventory::DataStoreInventoryTest;
 use nexus_db_model::AllSchemaVersions;
-pub use probe::ProbeInfo;
 pub use rack::RackInit;
 pub use rack::SledUnderlayAllocationResult;
 pub use region::RegionAllocationFor;
@@ -395,9 +394,9 @@ mod test {
         BlockSize, ConsoleSession, Dataset, DatasetKind, ExternalIp,
         PhysicalDisk, PhysicalDiskKind, PhysicalDiskPolicy, PhysicalDiskState,
         Project, Rack, Region, SiloUser, SledBaseboard, SledSystemHardware,
-        SledUpdate, SshKey, VpcSubnet, Zpool,
+        SledUpdate, SshKey, Zpool,
     };
-    use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
+    use crate::db::queries::vpc_subnet::InsertVpcSubnetQuery;
     use chrono::{Duration, Utc};
     use futures::stream;
     use futures::StreamExt;
@@ -893,7 +892,8 @@ mod test {
                 .collect()
                 .await;
 
-            let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
+            let bogus_addr =
+                Some(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0));
 
             let datasets = stream::iter(zpools)
                 .map(|zpool| {
@@ -1267,7 +1267,8 @@ mod test {
             .collect()
             .await;
 
-        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
+        let bogus_addr =
+            Some(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0));
 
         // 1 dataset per zpool
         stream::iter(zpool_ids.clone())
@@ -1366,7 +1367,8 @@ mod test {
                 .collect()
                 .await;
 
-        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
+        let bogus_addr =
+            Some(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0));
 
         // 1 dataset per zpool
         stream::iter(zpool_ids)
@@ -1445,7 +1447,8 @@ mod test {
                 physical_disk_id,
             )
             .await;
-            let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
+            let bogus_addr =
+                Some(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0));
             let dataset = Dataset::new(
                 Uuid::new_v4(),
                 zpool_id,
@@ -1600,11 +1603,7 @@ mod test {
             "172.30.0.0/22".parse().unwrap(),
             "fd00::/64".parse().unwrap(),
         );
-        let values = FilterConflictingVpcSubnetRangesQuery::new(subnet);
-        let query =
-            diesel::insert_into(db::schema::vpc_subnet::dsl::vpc_subnet)
-                .values(values)
-                .returning(VpcSubnet::as_returning());
+        let query = InsertVpcSubnetQuery::new(subnet);
         println!("{}", diesel::debug_query(&query));
         let explanation = query.explain_async(&conn).await.unwrap();
         assert!(

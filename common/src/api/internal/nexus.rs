@@ -23,6 +23,21 @@ use std::time::Duration;
 use strum::{EnumIter, IntoEnumIterator};
 use uuid::Uuid;
 
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Certificate {
+    pub cert: String,
+    pub key: String,
+}
+
+impl std::fmt::Debug for Certificate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Certificate")
+            .field("cert", &self.cert)
+            .field("key", &"<redacted>")
+            .finish()
+    }
+}
+
 /// Runtime state of the Disk, which includes its attach state and some minimal
 /// metadata
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -273,15 +288,10 @@ pub struct UpdateArtifactId {
 //
 // 1. Add it here.
 //
-// 2. Add the new kind to <repo root>/{nexus-client,sled-agent-client}/lib.rs.
+// 2. Add the new kind to <repo root>/clients/src/lib.rs.
 //    The mapping from `UpdateArtifactKind::*` to `types::UpdateArtifactKind::*`
 //    must be left as a `todo!()` for now; `types::UpdateArtifactKind` will not
 //    be updated with the new variant until step 5 below.
-//
-// 3. Add it to the sql database schema under (CREATE TYPE
-//    omicron.public.update_artifact_kind).
-//
-//    TODO: After omicron ships this would likely involve a DB migration.
 //
 // 4. Add the new kind and the mapping to its `update_artifact_kind` to
 //    <repo root>/nexus/db-model/src/update_artifact.rs
@@ -324,6 +334,7 @@ pub enum KnownArtifactKind {
     // Sled Artifacts
     GimletSp,
     GimletRot,
+    GimletRotBootloader,
     Host,
     Trampoline,
     ControlPlane,
@@ -331,10 +342,12 @@ pub enum KnownArtifactKind {
     // PSC Artifacts
     PscSp,
     PscRot,
+    PscRotBootloader,
 
     // Switch Artifacts
     SwitchSp,
     SwitchRot,
+    SwitchRotBootloader,
 }
 
 impl KnownArtifactKind {

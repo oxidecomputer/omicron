@@ -13,7 +13,9 @@ use chrono::DateTime;
 use chrono::Utc;
 use db_macros::Resource;
 use diesel::AsChangeset;
+use ipnetwork::IpNetwork;
 use ipnetwork::NetworkSize;
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::{external, internal};
@@ -21,7 +23,6 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::VnicUuid;
-use sled_agent_client::ZoneKind;
 use uuid::Uuid;
 
 /// The max number of interfaces that may be associated with a resource,
@@ -64,11 +65,13 @@ pub struct NetworkInterface {
     //
     // If user requests an address of either kind, give exactly that and not the other.
     // If neither is specified, auto-assign one of each?
-    pub ip: ipnetwork::IpNetwork,
+    pub ip: IpNetwork,
 
     pub slot: SqlU8,
     #[diesel(column_name = is_primary)]
     pub primary: bool,
+
+    pub transit_ips: Vec<IpNetwork>,
 }
 
 impl NetworkInterface {
@@ -102,6 +105,7 @@ impl NetworkInterface {
             vni: external::Vni::try_from(0).unwrap(),
             primary: self.primary,
             slot: *self.slot,
+            transit_ips: self.transit_ips.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -122,11 +126,13 @@ pub struct InstanceNetworkInterface {
     pub subnet_id: Uuid,
 
     pub mac: MacAddr,
-    pub ip: ipnetwork::IpNetwork,
+    pub ip: IpNetwork,
 
     pub slot: SqlU8,
     #[diesel(column_name = is_primary)]
     pub primary: bool,
+
+    pub transit_ips: Vec<IpNetwork>,
 }
 
 /// Service Network Interface DB model.
@@ -145,7 +151,7 @@ pub struct ServiceNetworkInterface {
     pub subnet_id: Uuid,
 
     pub mac: MacAddr,
-    pub ip: ipnetwork::IpNetwork,
+    pub ip: IpNetwork,
 
     pub slot: SqlU8,
     #[diesel(column_name = is_primary)]
@@ -155,26 +161,11 @@ pub struct ServiceNetworkInterface {
 impl ServiceNetworkInterface {
     /// Generate a suitable [`Name`] for the given Omicron zone ID and kind.
     pub fn name(zone_id: OmicronZoneUuid, zone_kind: ZoneKind) -> Name {
-        // Ideally we'd use `zone_kind.to_string()` here, but that uses
-        // underscores as separators which aren't allowed in `Name`s. We also
-        // preserve some existing naming behavior where NTP external networking
-        // is just called "ntp", not "boundary-ntp".
-        //
-        // Most of these zone kinds do not get external networking and therefore
-        // we don't need to be able to generate names for them, but it's simpler
-        // to give them valid descriptions than worry about error handling here.
-        let prefix = match zone_kind {
-            ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => "ntp",
-            ZoneKind::Clickhouse => "clickhouse",
-            ZoneKind::ClickhouseKeeper => "clickhouse-keeper",
-            ZoneKind::CockroachDb => "cockroach",
-            ZoneKind::Crucible => "crucible",
-            ZoneKind::CruciblePantry => "crucible-pantry",
-            ZoneKind::ExternalDns => "external-dns",
-            ZoneKind::InternalDns => "internal-dns",
-            ZoneKind::Nexus => "nexus",
-            ZoneKind::Oximeter => "oximeter",
-        };
+        // Most of these zone kinds do not get external networking and
+        // therefore we don't need to be able to generate names for them, but
+        // it's simpler to give them valid descriptions than worry about error
+        // handling here.
+        let prefix = zone_kind.name_prefix();
 
         // Now that we have a valid prefix, we know this format string
         // always produces a valid `Name`, so we'll unwrap here.
@@ -242,6 +233,7 @@ impl NetworkInterface {
             ip: self.ip,
             slot: self.slot,
             primary: self.primary,
+            transit_ips: self.transit_ips,
         }
     }
 
@@ -290,6 +282,7 @@ impl From<InstanceNetworkInterface> for NetworkInterface {
             ip: iface.ip,
             slot: iface.slot,
             primary: iface.primary,
+            transit_ips: iface.transit_ips,
         }
     }
 }
@@ -313,6 +306,7 @@ impl From<ServiceNetworkInterface> for NetworkInterface {
             ip: iface.ip,
             slot: iface.slot,
             primary: iface.primary,
+            transit_ips: vec![],
         }
     }
 }
@@ -460,6 +454,7 @@ pub struct NetworkInterfaceUpdate {
     pub time_modified: DateTime<Utc>,
     #[diesel(column_name = is_primary)]
     pub primary: Option<bool>,
+    pub transit_ips: Vec<IpNetwork>,
 }
 
 impl From<InstanceNetworkInterface> for external::InstanceNetworkInterface {
@@ -472,6 +467,11 @@ impl From<InstanceNetworkInterface> for external::InstanceNetworkInterface {
             ip: iface.ip.ip(),
             mac: *iface.mac,
             primary: iface.primary,
+            transit_ips: iface
+                .transit_ips
+                .into_iter()
+                .map(Into::into)
+                .collect(),
         }
     }
 }
@@ -484,6 +484,11 @@ impl From<params::InstanceNetworkInterfaceUpdate> for NetworkInterfaceUpdate {
             description: params.identity.description,
             time_modified: Utc::now(),
             primary,
+            transit_ips: params
+                .transit_ips
+                .into_iter()
+                .map(Into::into)
+                .collect(),
         }
     }
 }

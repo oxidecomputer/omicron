@@ -49,6 +49,7 @@ mod test {
     ) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let log = &cptestctx.logctx.log;
         let opctx = OpContext::for_background(
             log.clone(),
@@ -87,11 +88,18 @@ mod test {
             settings.preserve_downgrade,
             CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string()
         );
+        // Record the zpools so we don't fail to ensure datasets (unrelated to
+        // crdb settings) during blueprint execution.
+        crate::tests::create_disks_for_zones_using_datasets(
+            datastore, &opctx, &blueprint,
+        )
+        .await;
         // Execute the initial blueprint.
         let overrides = Overridables::for_test(cptestctx);
         crate::realize_blueprint_with_overrides(
             &opctx,
             datastore,
+            resolver,
             &blueprint,
             "test-suite",
             &overrides,

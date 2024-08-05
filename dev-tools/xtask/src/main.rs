@@ -9,10 +9,13 @@
 use anyhow::{Context, Result};
 use cargo_metadata::Metadata;
 use clap::{Parser, Subcommand};
+use std::env;
+use std::os::unix::process::CommandExt;
+use std::process::Command;
 
+mod check_features;
 mod check_workspace_deps;
 mod clippy;
-mod download;
 #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
 mod external;
 mod usdt;
@@ -38,13 +41,20 @@ enum Cmds {
     /// Run Argon2 hash with specific parameters (quick performance check)
     Argon2(external::External),
 
+    /// Check that all features are flagged correctly
+    CheckFeatures(check_features::Args),
     /// Check that dependencies are not duplicated in any packages in the
     /// workspace
     CheckWorkspaceDeps,
     /// Run configured clippy checks
     Clippy(clippy::ClippyArgs),
     /// Download binaries, OpenAPI specs, and other out-of-repo utilities.
-    Download(download::DownloadArgs),
+    Download(external::External),
+
+    /// Manage OpenAPI specifications.
+    ///
+    /// For more information, see dev-tools/openapi-manager/README.adoc.
+    Openapi(external::External),
 
     #[cfg(target_os = "illumos")]
     /// Build a TUF repo
@@ -78,16 +88,30 @@ enum Cmds {
     },
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let args = Args::parse();
     match args.cmd {
         Cmds::Argon2(external) => {
             external.cargo_args(["--release"]).exec_example("argon2")
         }
         Cmds::Clippy(args) => clippy::run_cmd(args),
+        Cmds::CheckFeatures(args) => check_features::run_cmd(args),
         Cmds::CheckWorkspaceDeps => check_workspace_deps::run_cmd(),
-        Cmds::Download(args) => download::run_cmd(args).await,
+        Cmds::Download(external) => {
+            // Allow specialized environments (e.g., testbed/a4x2) that can't
+            // `cargo run ...` to specify a path to `xtask-downloader` via an
+            // environment variable.
+            if let Ok(bin_path) = env::var("XTASK_DOWNLOADER_BIN") {
+                let error = Command::new(&bin_path)
+                    .args(external.trailing_args())
+                    .exec();
+                Err(error)
+                    .with_context(|| format!("failed to exec `{bin_path}`"))
+            } else {
+                external.exec_bin("xtask-downloader")
+            }
+        }
+        Cmds::Openapi(external) => external.exec_bin("openapi-manager"),
         #[cfg(target_os = "illumos")]
         Cmds::Releng(external) => {
             external.cargo_args(["--release"]).exec_bin("omicron-releng")

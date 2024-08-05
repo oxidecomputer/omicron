@@ -65,6 +65,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::UserId;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -86,7 +87,7 @@ pub struct RackInit {
     pub external_dns: InitialDnsGroup,
     pub recovery_silo: external_params::SiloCreate,
     pub recovery_silo_fq_dns_name: String,
-    pub recovery_user_id: external_params::UserId,
+    pub recovery_user_id: UserId,
     pub recovery_user_password_hash: omicron_passwords::PasswordHashString,
     pub dns_update: DnsVersionUpdateBuilder,
     pub allowed_source_ips: AllowedSourceIps,
@@ -429,7 +430,7 @@ impl DataStore {
         log: &slog::Logger,
         recovery_silo: external_params::SiloCreate,
         recovery_silo_fq_dns_name: String,
-        recovery_user_id: external_params::UserId,
+        recovery_user_id: UserId,
         recovery_user_password_hash: omicron_passwords::PasswordHashString,
         dns_update: DnsVersionUpdateBuilder,
     ) -> Result<(), RackInitError> {
@@ -520,6 +521,7 @@ impl DataStore {
         // For services with external connectivity, we record their
         // explicit IP allocation and create a service NIC as well.
         let zone_type = &zone_config.zone_type;
+        let zone_report_str = zone_type.kind().report_str();
         let service_ip_nic = match zone_type {
             BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns { nic, dns_address, .. },
@@ -534,7 +536,7 @@ impl DataStore {
                         name: nic.name.clone(),
                         description: format!(
                             "{} service vNIC",
-                            zone_type.kind()
+                            zone_report_str
                         ),
                     },
                     nic.ip,
@@ -558,7 +560,7 @@ impl DataStore {
                         name: nic.name.clone(),
                         description: format!(
                             "{} service vNIC",
-                            zone_type.kind()
+                            zone_report_str
                         ),
                     },
                     nic.ip,
@@ -580,7 +582,7 @@ impl DataStore {
                         name: nic.name.clone(),
                         description: format!(
                             "{} service vNIC",
-                            zone_type.kind()
+                            zone_report_str
                         ),
                     },
                     nic.ip,
@@ -602,8 +604,7 @@ impl DataStore {
         let Some((external_ip, db_nic)) = service_ip_nic else {
             info!(
                 log,
-                "No networking records needed for {} service",
-                zone_type.kind(),
+                "No networking records needed for {} service", zone_report_str,
             );
             return Ok(());
         };
@@ -619,7 +620,7 @@ impl DataStore {
                     log,
                     "Initializing Rack: Failed to allocate \
                      IP address for {}",
-                    zone_type.kind();
+                     zone_report_str;
                     "err" => %err,
                 );
                 match err.retryable() {
@@ -648,7 +649,7 @@ impl DataStore {
         info!(
             log,
             "Inserted networking records for {} service",
-            zone_type.kind(),
+            zone_type.kind().report_str(),
         );
 
         Ok(())
@@ -1011,6 +1012,7 @@ mod test {
     use nexus_reconfigurator_planning::system::{
         SledBuilder, SystemDescription,
     };
+    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
@@ -1035,12 +1037,12 @@ mod test {
         IdentityMetadataCreateParams, MacAddr, Vni,
     };
     use omicron_common::api::internal::shared::SourceNatConfig;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{ExternalIpUuid, OmicronZoneUuid};
     use omicron_uuid_kinds::{GenericUuid, ZpoolUuid};
     use omicron_uuid_kinds::{SledUuid, TypedUuid};
     use oxnet::IpNet;
-    use sled_agent_client::types::OmicronZoneDataset;
     use std::collections::{BTreeMap, HashMap};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
     use std::num::NonZeroU32;
@@ -1287,6 +1289,10 @@ mod test {
     fn_to_get_all!(ip_pool_range, IpPoolRange);
     fn_to_get_all!(dataset, Dataset);
 
+    fn random_zpool() -> ZpoolName {
+        ZpoolName::new_external(ZpoolUuid::new_v4())
+    }
+
     fn random_dataset() -> OmicronZoneDataset {
         OmicronZoneDataset {
             pool_name: illumos_utils::zpool::ZpoolName::new_external(
@@ -1361,6 +1367,7 @@ mod test {
         let mut macs = MacAddr::iter_system();
 
         let mut blueprint_zones = BTreeMap::new();
+        let dataset = random_dataset();
         blueprint_zones.insert(
             SledUuid::from_untyped_uuid(sled1.id()),
             BlueprintZonesConfig {
@@ -1370,9 +1377,10 @@ mod test {
                         disposition: BlueprintZoneDisposition::InService,
                         id: external_dns_id,
                         underlay_address: Ipv6Addr::LOCALHOST,
+                        filesystem_pool: Some(dataset.pool_name.clone()),
                         zone_type: BlueprintZoneType::ExternalDns(
                             blueprint_zone_type::ExternalDns {
-                                dataset: random_dataset(),
+                                dataset,
                                 http_address: "[::1]:80".parse().unwrap(),
                                 dns_address: OmicronZoneExternalFloatingAddr {
                                     id: ExternalIpUuid::new_v4(),
@@ -1390,6 +1398,7 @@ mod test {
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
+                                    transit_ips: vec![],
                                 },
                             },
                         ),
@@ -1398,6 +1407,7 @@ mod test {
                         disposition: BlueprintZoneDisposition::InService,
                         id: ntp1_id,
                         underlay_address: Ipv6Addr::LOCALHOST,
+                        filesystem_pool: Some(random_zpool()),
                         zone_type: BlueprintZoneType::BoundaryNtp(
                             blueprint_zone_type::BoundaryNtp {
                                 address: "[::1]:80".parse().unwrap(),
@@ -1416,6 +1426,7 @@ mod test {
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
+                                    transit_ips: vec![],
                                 },
                                 external_ip: OmicronZoneExternalSnatIp {
                                     id: ExternalIpUuid::new_v4(),
@@ -1439,6 +1450,7 @@ mod test {
                         disposition: BlueprintZoneDisposition::InService,
                         id: nexus_id,
                         underlay_address: Ipv6Addr::LOCALHOST,
+                        filesystem_pool: Some(random_zpool()),
                         zone_type: BlueprintZoneType::Nexus(
                             blueprint_zone_type::Nexus {
                                 internal_address: "[::1]:80".parse().unwrap(),
@@ -1462,6 +1474,7 @@ mod test {
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
+                                    transit_ips: vec![],
                                 },
                             },
                         ),
@@ -1470,6 +1483,7 @@ mod test {
                         disposition: BlueprintZoneDisposition::InService,
                         id: ntp2_id,
                         underlay_address: Ipv6Addr::LOCALHOST,
+                        filesystem_pool: Some(random_zpool()),
                         zone_type: BlueprintZoneType::BoundaryNtp(
                             blueprint_zone_type::BoundaryNtp {
                                 address: "[::1]:80".parse().unwrap(),
@@ -1488,6 +1502,7 @@ mod test {
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
+                                    transit_ips: vec![],
                                 },
                                 external_ip: OmicronZoneExternalSnatIp {
                                     id: ExternalIpUuid::new_v4(),
@@ -1510,6 +1525,7 @@ mod test {
                     disposition: BlueprintZoneDisposition::InService,
                     id: ntp3_id,
                     underlay_address: Ipv6Addr::LOCALHOST,
+                    filesystem_pool: Some(random_zpool()),
                     zone_type: BlueprintZoneType::InternalNtp(
                         blueprint_zone_type::InternalNtp {
                             address: "[::1]:80".parse().unwrap(),
@@ -1692,6 +1708,7 @@ mod test {
                         disposition: BlueprintZoneDisposition::InService,
                         id: nexus_id1,
                         underlay_address: Ipv6Addr::LOCALHOST,
+                        filesystem_pool: Some(random_zpool()),
                         zone_type: BlueprintZoneType::Nexus(
                             blueprint_zone_type::Nexus {
                                 internal_address: "[::1]:80".parse().unwrap(),
@@ -1715,6 +1732,7 @@ mod test {
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
+                                    transit_ips: vec![],
                                 },
                             },
                         ),
@@ -1723,6 +1741,7 @@ mod test {
                         disposition: BlueprintZoneDisposition::InService,
                         id: nexus_id2,
                         underlay_address: Ipv6Addr::LOCALHOST,
+                        filesystem_pool: Some(random_zpool()),
                         zone_type: BlueprintZoneType::Nexus(
                             blueprint_zone_type::Nexus {
                                 internal_address: "[::1]:80".parse().unwrap(),
@@ -1746,6 +1765,7 @@ mod test {
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
+                                    transit_ips: vec![],
                                 },
                             },
                         ),
@@ -1963,6 +1983,7 @@ mod test {
                     disposition: BlueprintZoneDisposition::InService,
                     id: nexus_id,
                     underlay_address: Ipv6Addr::LOCALHOST,
+                    filesystem_pool: Some(random_zpool()),
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:80".parse().unwrap(),
@@ -1984,6 +2005,7 @@ mod test {
                                 vni: Vni::SERVICES_VNI,
                                 primary: true,
                                 slot: 0,
+                                transit_ips: vec![],
                             },
                         },
                     ),
@@ -2060,6 +2082,7 @@ mod test {
         let mut macs = MacAddr::iter_system();
 
         let mut blueprint_zones = BTreeMap::new();
+        let dataset = random_dataset();
         blueprint_zones.insert(
             SledUuid::from_untyped_uuid(sled.id()),
             BlueprintZonesConfig {
@@ -2069,9 +2092,10 @@ mod test {
                         disposition: BlueprintZoneDisposition::InService,
                         id: external_dns_id,
                         underlay_address: Ipv6Addr::LOCALHOST,
+                        filesystem_pool: Some(dataset.pool_name.clone()),
                         zone_type: BlueprintZoneType::ExternalDns(
                             blueprint_zone_type::ExternalDns {
-                                dataset: random_dataset(),
+                                dataset,
                                 http_address: "[::1]:80".parse().unwrap(),
                                 dns_address: OmicronZoneExternalFloatingAddr {
                                     id: ExternalIpUuid::new_v4(),
@@ -2089,6 +2113,7 @@ mod test {
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
+                                    transit_ips: vec![],
                                 },
                             },
                         ),
@@ -2097,6 +2122,7 @@ mod test {
                         disposition: BlueprintZoneDisposition::InService,
                         id: nexus_id,
                         underlay_address: Ipv6Addr::LOCALHOST,
+                        filesystem_pool: Some(random_zpool()),
                         zone_type: BlueprintZoneType::Nexus(
                             blueprint_zone_type::Nexus {
                                 internal_address: "[::1]:80".parse().unwrap(),
@@ -2120,6 +2146,7 @@ mod test {
                                     vni: Vni::SERVICES_VNI,
                                     primary: true,
                                     slot: 0,
+                                    transit_ips: vec![],
                                 },
                             },
                         ),

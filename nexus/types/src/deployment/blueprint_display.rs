@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Types helpful for rendering [`Blueprints`].
+//! Types helpful for rendering blueprints.
 
 use omicron_common::api::external::Generation;
 use std::fmt;
@@ -176,7 +176,6 @@ pub trait BpSledSubtableData {
 }
 
 /// A table specific to a sled resource, such as a zone or disk.
-/// `BpSledSubtable`s are always nested under [`BpSledTable`]s.
 pub struct BpSledSubtable {
     table_name: &'static str,
     column_names: &'static [&'static str],

@@ -10,15 +10,11 @@ use super::disk::SimDisk;
 use super::instance::SimInstance;
 use super::storage::CrucibleData;
 use super::storage::Storage;
-use crate::bootstrap::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkConfigBody,
-};
 use crate::nexus::NexusClient;
 use crate::params::{
     DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
     InstanceMetadata, InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse, Inventory,
-    OmicronPhysicalDisksConfig, OmicronZonesConfig, SledRole,
+    InstanceStateRequested, InstanceUnregisterResponse,
 };
 use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
@@ -27,6 +23,9 @@ use anyhow::Context;
 use dropshot::{HttpError, HttpServer};
 use futures::lock::Mutex;
 use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
+use nexus_sled_agent_shared::inventory::{
+    Inventory, InventoryDisk, InventoryZpool, OmicronZonesConfig, SledRole,
+};
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
 };
@@ -36,14 +35,22 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, VmmRuntimeState,
 };
-use omicron_common::api::internal::shared::RackNetworkConfig;
-use omicron_common::disk::DiskIdentity;
+use omicron_common::api::internal::shared::{
+    RackNetworkConfig, ResolvedVpcRoute, ResolvedVpcRouteSet,
+    ResolvedVpcRouteState, RouterId, RouterKind, RouterVersion,
+};
+use omicron_common::disk::{
+    DiskIdentity, DiskVariant, OmicronPhysicalDisksConfig,
+};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, ZpoolUuid};
 use oxnet::Ipv6Net;
 use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
 };
 use propolis_mock_server::Context as PropolisContext;
+use sled_agent_types::early_networking::{
+    EarlyNetworkConfig, EarlyNetworkConfigBody,
+};
 use sled_storage::resources::DisksManagementResult;
 use slog::Logger;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -77,6 +84,7 @@ pub struct SledAgent {
         Mutex<Option<(HttpServer<Arc<PropolisContext>>, PropolisClient)>>,
     /// lists of external IPs assigned to instances
     pub external_ips: Mutex<HashMap<Uuid, HashSet<InstanceExternalIpBody>>>,
+    pub vpc_routes: Mutex<HashMap<RouterId, RouteSet>>,
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
@@ -182,6 +190,7 @@ impl SledAgent {
             disk_id_to_region_ids: Mutex::new(HashMap::new()),
             v2p_mappings: Mutex::new(HashSet::new()),
             external_ips: Mutex::new(HashMap::new()),
+            vpc_routes: Mutex::new(HashMap::new()),
             mock_propolis: Mutex::new(None),
             config: config.clone(),
             fake_zones: Mutex::new(OmicronZonesConfig {
@@ -312,6 +321,24 @@ impl SledAgent {
                 .contains_key(&instance_id.into_untyped_uuid())
                 .await
             {
+                let metadata = propolis_client::types::InstanceMetadata {
+                    project_id: metadata.project_id,
+                    silo_id: metadata.silo_id,
+                    sled_id: self.id,
+                    sled_model: self
+                        .config
+                        .hardware
+                        .baseboard
+                        .model()
+                        .to_string(),
+                    sled_revision: self.config.hardware.baseboard.revision(),
+                    sled_serial: self
+                        .config
+                        .hardware
+                        .baseboard
+                        .identifier()
+                        .to_string(),
+                };
                 let properties = propolis_client::types::InstanceProperties {
                     id: propolis_id.into_untyped_uuid(),
                     name: hardware.properties.hostname.to_string(),
@@ -320,7 +347,7 @@ impl SledAgent {
                     bootrom_id: Uuid::default(),
                     memory: hardware.properties.memory.to_whole_mebibytes(),
                     vcpus: hardware.properties.ncpus.0 as u8,
-                    metadata: metadata.into(),
+                    metadata,
                 };
                 let body = propolis_client::types::InstanceEnsureRequest {
                     properties,
@@ -358,6 +385,18 @@ impl SledAgent {
         for disk_request in &hardware.disks {
             let vcr = &disk_request.volume_construction_request;
             self.map_disk_ids_to_region_ids(&vcr).await?;
+        }
+
+        let mut routes = self.vpc_routes.lock().await;
+        for nic in &hardware.nics {
+            let my_routers = [
+                RouterId { vni: nic.vni, kind: RouterKind::System },
+                RouterId { vni: nic.vni, kind: RouterKind::Custom(nic.subnet) },
+            ];
+
+            for router in my_routers {
+                routes.entry(router).or_default();
+            }
         }
 
         Ok(instance_run_time_state)
@@ -576,7 +615,7 @@ impl SledAgent {
         id: Uuid,
         identity: DiskIdentity,
     ) {
-        let variant = sled_hardware::DiskVariant::U2;
+        let variant = DiskVariant::U2;
         self.storage
             .lock()
             .await
@@ -833,7 +872,7 @@ impl SledAgent {
             disks: storage
                 .physical_disks()
                 .values()
-                .map(|info| crate::params::InventoryDisk {
+                .map(|info| InventoryDisk {
                     identity: info.identity.clone(),
                     variant: info.variant,
                     slot: info.slot,
@@ -843,7 +882,7 @@ impl SledAgent {
                 .zpools()
                 .iter()
                 .map(|(id, zpool)| {
-                    Ok(crate::params::InventoryZpool {
+                    Ok(InventoryZpool {
                         id: *id,
                         total_size: ByteCount::try_from(zpool.total_size())?,
                     })
@@ -879,4 +918,49 @@ impl SledAgent {
     pub async fn drop_dataset(&self, zpool_id: ZpoolUuid, dataset_id: Uuid) {
         self.storage.lock().await.drop_dataset(zpool_id, dataset_id)
     }
+
+    pub async fn list_vpc_routes(&self) -> Vec<ResolvedVpcRouteState> {
+        let routes = self.vpc_routes.lock().await;
+        routes
+            .iter()
+            .map(|(k, v)| ResolvedVpcRouteState { id: *k, version: v.version })
+            .collect()
+    }
+
+    pub async fn set_vpc_routes(&self, new_routes: Vec<ResolvedVpcRouteSet>) {
+        let mut routes = self.vpc_routes.lock().await;
+        for new in new_routes {
+            // Disregard any route information for a subnet we don't have.
+            let Some(old) = routes.get(&new.id) else {
+                continue;
+            };
+
+            // We have to handle subnet router changes, as well as
+            // spurious updates from multiple Nexus instances.
+            // If there's a UUID match, only update if vers increased,
+            // otherwise take the update verbatim (including loss of version).
+            match (old.version, new.version) {
+                (Some(old_vers), Some(new_vers))
+                    if !old_vers.is_replaced_by(&new_vers) =>
+                {
+                    continue;
+                }
+                _ => {}
+            };
+
+            routes.insert(
+                new.id,
+                RouteSet { version: new.version, routes: new.routes },
+            );
+        }
+    }
+}
+
+/// Stored routes (and usage count) for a given VPC/subnet.
+//  NB: We aren't doing post count tracking here to unsubscribe
+//      from (VNI, subnet) pairs.
+#[derive(Debug, Clone, Default)]
+pub struct RouteSet {
+    pub version: Option<RouterVersion>,
+    pub routes: HashSet<ResolvedVpcRoute>,
 }

@@ -6,9 +6,7 @@
 
 use crate::boot_disk_os_writer::BootDiskOsWriter;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
-use crate::bootstrap::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkSetupError,
-};
+use crate::bootstrap::early_networking::EarlyNetworkSetupError;
 use crate::bootstrap::params::{BaseboardId, StartSledAgentRequest};
 use crate::config::Config;
 use crate::instance_manager::InstanceManager;
@@ -21,12 +19,12 @@ use crate::nexus::{
 use crate::params::{
     DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
     InstanceMetadata, InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse, Inventory,
-    OmicronPhysicalDisksConfig, OmicronZonesConfig, SledRole, TimeSync,
-    VpcFirewallRule, ZoneBundleMetadata, Zpool,
+    InstanceStateRequested, InstanceUnregisterResponse, OmicronZoneTypeExt,
+    TimeSync, VpcFirewallRule, ZoneBundleMetadata, Zpool,
 };
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
+use crate::storage_monitor::StorageMonitorHandle;
 use crate::updates::{ConfigUpdates, UpdateManager};
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
 use crate::zone_bundle;
@@ -41,6 +39,9 @@ use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zone::ZONE_PREFIX;
+use nexus_sled_agent_shared::inventory::{
+    Inventory, InventoryDisk, InventoryZpool, OmicronZonesConfig, SledRole,
+};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
@@ -49,7 +50,8 @@ use omicron_common::api::internal::nexus::{
     SledInstanceState, VmmRuntimeState,
 };
 use omicron_common::api::internal::shared::{
-    HostPortConfig, RackNetworkConfig,
+    HostPortConfig, RackNetworkConfig, ResolvedVpcRouteSet,
+    ResolvedVpcRouteState, SledIdentifiers,
 };
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
@@ -58,9 +60,11 @@ use omicron_common::api::{
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
+use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
 use oximeter::types::ProducerRegistry;
+use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_hardware::{underlay, HardwareManager};
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_hardware_types::Baseboard;
@@ -122,6 +126,9 @@ pub enum Error {
     #[error("Error managing storage: {0}")]
     Storage(#[from] sled_storage::error::Error),
 
+    #[error("Error monitoring storage: {0}")]
+    StorageMonitor(#[from] crate::storage_monitor::Error),
+
     #[error("Error updating: {0}")]
     Download(#[from] crate::updates::Error),
 
@@ -151,6 +158,9 @@ pub enum Error {
 
     #[error("Metrics error: {0}")]
     Metrics(#[from] crate::metrics::Error),
+
+    #[error("Expected revision to fit in a u32, but found {0}")]
+    UnexpectedRevision(i64),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -169,6 +179,7 @@ impl From<Error> for omicron_common::api::external::Error {
 // Provide a more specific HTTP error for some sled agent errors.
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
+        const NO_SUCH_INSTANCE: &str = "NO_SUCH_INSTANCE";
         match err {
             Error::Instance(crate::instance_manager::Error::Instance(
                 instance_error,
@@ -201,13 +212,20 @@ impl From<Error> for dropshot::HttpError {
                         // Progenitor client error it gets back.
                         HttpError::from(omicron_error)
                     }
+                    crate::instance::Error::Terminating => {
+                        HttpError::for_client_error(
+                            Some(NO_SUCH_INSTANCE.to_string()),
+                            http::StatusCode::GONE,
+                            instance_error.to_string(),
+                        )
+                    }
                     e => HttpError::for_internal_error(e.to_string()),
                 }
             }
             Error::Instance(
                 e @ crate::instance_manager::Error::NoSuchInstance(_),
             ) => HttpError::for_not_found(
-                Some("NO_SUCH_INSTANCE".to_string()),
+                Some(NO_SUCH_INSTANCE.to_string()),
                 e.to_string(),
             ),
             Error::ZoneBundle(ref inner) => match inner {
@@ -220,6 +238,13 @@ impl From<Error> for dropshot::HttpError {
                 BundleError::InvalidStorageLimit
                 | BundleError::InvalidCleanupPeriod => {
                     HttpError::for_bad_request(None, inner.to_string())
+                }
+                BundleError::InstanceTerminating => {
+                    HttpError::for_client_error(
+                        Some(NO_SUCH_INSTANCE.to_string()),
+                        http::StatusCode::GONE,
+                        inner.to_string(),
+                    )
                 }
                 _ => HttpError::for_internal_error(err.to_string()),
             },
@@ -275,6 +300,10 @@ struct SledAgentInner {
 
     // Component of Sled Agent responsible for storage and dataset management.
     storage: StorageHandle,
+
+    // Component of Sled Agent responsible for monitoring storage and updating
+    // dump devices.
+    storage_monitor: StorageMonitorHandle,
 
     // Component of Sled Agent responsible for managing Propolis instances.
     instances: InstanceManager,
@@ -561,6 +590,9 @@ impl SledAgent {
                 subnet: request.body.subnet,
                 start_request: request,
                 storage: long_running_task_handles.storage_manager.clone(),
+                storage_monitor: long_running_task_handles
+                    .storage_monitor_handle
+                    .clone(),
                 instances,
                 probes,
                 hardware: long_running_task_handles.hardware_manager.clone(),
@@ -807,7 +839,60 @@ impl SledAgent {
         &self,
         config: OmicronPhysicalDisksConfig,
     ) -> Result<DisksManagementResult, Error> {
-        Ok(self.storage().omicron_physical_disks_ensure(config).await?)
+        info!(self.log, "physical disks ensure");
+        // Tell the storage subsystem which disks should be managed.
+        let disk_result =
+            self.storage().omicron_physical_disks_ensure(config).await?;
+        info!(self.log, "physical disks ensure: Updated storage");
+
+        // Grab a view of the latest set of disks, alongside a generation
+        // number.
+        //
+        // This generation is at LEAST as high as our last call through
+        // omicron_physical_disks_ensure. It may actually be higher, if a
+        // concurrent operation occurred.
+        //
+        // "latest_disks" has a generation number, which is important for other
+        // subcomponents of Sled Agent to consider. If multiple requests to
+        // ensure disks arrive concurrently, it's important to "only advance
+        // forward" as requested by Nexus.
+        //
+        // For example: if we receive the following requests concurrently:
+        // - Use Disks {A, B, C}, generation = 1
+        // - Use Disks {A, B, C, D}, generation = 2
+        //
+        // If we ignore generation numbers, it's possible that we start using
+        // "disk D" -- e.g., for instance filesystems -- and then immediately
+        // delete it when we process the request with "generation 1".
+        //
+        // By keeping these requests ordered, we prevent this thrashing, and
+        // ensure that we always progress towards the last-requested state.
+        let latest_disks = self.storage().get_latest_disks().await;
+        let our_gen = latest_disks.generation();
+        info!(self.log, "physical disks ensure: Propagating new generation of disks"; "generation" => ?our_gen);
+
+        // Ensure that the StorageMonitor, and the dump devices, have committed
+        // to start using new disks and stop using old ones.
+        self.inner.storage_monitor.await_generation(*our_gen).await?;
+        info!(self.log, "physical disks ensure: Updated storage monitor");
+
+        // Ensure that the ZoneBundler, if it was creating a bundle referencing
+        // the old U.2s, has stopped using them.
+        self.inner.zone_bundler.await_completion_of_prior_bundles().await;
+        info!(self.log, "physical disks ensure: Updated zone bundler");
+
+        // Ensure that all probes, at least after our call to
+        // "omicron_physical_disks_ensure", stop using any disks that
+        // may have been in-service from before that request.
+        self.inner.probes.use_only_these_disks(&latest_disks).await;
+        info!(self.log, "physical disks ensure: Updated probes");
+
+        // Do the same for instances - mark them failed if they were using
+        // expunged disks.
+        self.inner.instances.use_only_these_disks(latest_disks).await?;
+        info!(self.log, "physical disks ensure: Updated instances");
+
+        Ok(disk_result)
     }
 
     /// List the Omicron zone configuration that's currently running
@@ -900,6 +985,7 @@ impl SledAgent {
                 instance_runtime,
                 vmm_runtime,
                 propolis_addr,
+                self.sled_identifiers(),
                 metadata,
             )
             .await
@@ -1096,6 +1182,17 @@ impl SledAgent {
         self.inner.bootstore.clone()
     }
 
+    pub fn list_vpc_routes(&self) -> Vec<ResolvedVpcRouteState> {
+        self.inner.port_manager.vpc_routes_list()
+    }
+
+    pub fn set_vpc_routes(
+        &self,
+        routes: Vec<ResolvedVpcRouteSet>,
+    ) -> Result<(), Error> {
+        self.inner.port_manager.vpc_routes_ensure(routes).map_err(Error::from)
+    }
+
     /// Return the metric producer registry.
     pub fn metrics_registry(&self) -> &ProducerRegistry {
         self.inner.metrics_manager.registry()
@@ -1107,6 +1204,26 @@ impl SledAgent {
 
     pub(crate) fn boot_disk_os_writer(&self) -> &BootDiskOsWriter {
         &self.inner.boot_disk_os_writer
+    }
+
+    /// Return identifiers for this sled.
+    ///
+    /// This is mostly used to identify timeseries data with the originating
+    /// sled.
+    ///
+    /// NOTE: This only returns the identifiers for the _sled_ itself. If you're
+    /// interested in the switch identifiers, MGS is the current best way to do
+    /// that, by asking for the local switch's slot, and then that switch's SP
+    /// state.
+    pub(crate) fn sled_identifiers(&self) -> SledIdentifiers {
+        let baseboard = self.inner.hardware.baseboard();
+        SledIdentifiers {
+            rack_id: self.inner.start_request.body.rack_id,
+            sled_id: self.inner.id,
+            model: baseboard.model().to_string(),
+            revision: baseboard.revision(),
+            serial: baseboard.identifier().to_string(),
+        }
     }
 
     /// Return basic information about ourselves: identity and status
@@ -1123,17 +1240,14 @@ impl SledAgent {
         let usable_physical_ram =
             self.inner.hardware.usable_physical_ram_bytes();
         let reservoir_size = self.inner.instances.reservoir_size();
-        let sled_role = if is_scrimlet {
-            crate::params::SledRole::Scrimlet
-        } else {
-            crate::params::SledRole::Gimlet
-        };
+        let sled_role =
+            if is_scrimlet { SledRole::Scrimlet } else { SledRole::Gimlet };
 
         let mut disks = vec![];
         let mut zpools = vec![];
         let all_disks = self.storage().get_latest_disks().await;
-        for (identity, variant, slot) in all_disks.iter_all() {
-            disks.push(crate::params::InventoryDisk {
+        for (identity, variant, slot, _firmware) in all_disks.iter_all() {
+            disks.push(InventoryDisk {
                 identity: identity.clone(),
                 variant,
                 slot,
@@ -1155,7 +1269,7 @@ impl SledAgent {
                     }
                 };
 
-            zpools.push(crate::params::InventoryZpool {
+            zpools.push(InventoryZpool {
                 id: zpool.id(),
                 total_size: ByteCount::try_from(info.size())?,
             });

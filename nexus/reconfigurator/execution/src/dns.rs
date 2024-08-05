@@ -457,6 +457,7 @@ mod test {
     use crate::overridables::Overridables;
     use crate::Sled;
     use dns_service_client::DnsDiff;
+    use internal_dns::resolver::Resolver;
     use internal_dns::ServiceName;
     use internal_dns::DNS_ZONE;
     use nexus_db_model::DnsGroup;
@@ -470,7 +471,9 @@ mod test {
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::example;
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
+    use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_test_utils::resource_helpers::create_silo;
+    use nexus_test_utils::resource_helpers::DiskTestBuilder;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
@@ -499,10 +502,11 @@ mod test {
     use omicron_common::address::SLED_PREFIX;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
-    use sled_agent_client::ZoneKind;
+    use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
@@ -621,6 +625,9 @@ mod test {
                 disposition: BlueprintZoneDisposition::Quiesced,
                 id: out_of_service_id,
                 underlay_address: out_of_service_addr,
+                filesystem_pool: Some(ZpoolName::new_external(
+                    ZpoolUuid::new_v4(),
+                )),
                 zone_type: BlueprintZoneType::Oximeter(
                     blueprint_zone_type::Oximeter {
                         address: SocketAddrV6::new(
@@ -1134,8 +1141,17 @@ mod test {
     async fn test_silos_external_dns_end_to_end(
         cptestctx: &ControlPlaneTestContext,
     ) {
+        // Add a zpool to all sleds, just to ensure that all new zones can find
+        // a transient filesystem wherever they end up being placed.
+        DiskTestBuilder::new(&cptestctx)
+            .on_all_sleds()
+            .with_zpool_count(1)
+            .build()
+            .await;
+
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let log = &cptestctx.logctx.log;
         let opctx = OpContext::for_background(
             log.clone(),
@@ -1164,11 +1180,19 @@ mod test {
         blueprint.cockroachdb_setting_preserve_downgrade =
             CockroachDbPreserveDowngrade::DoNotModify;
 
+        // Record the zpools so we don't fail to ensure datasets (unrelated to
+        // DNS) during blueprint execution.
+        crate::tests::create_disks_for_zones_using_datasets(
+            datastore, &opctx, &blueprint,
+        )
+        .await;
+
         // Now, execute the initial blueprint.
         let overrides = Overridables::for_test(cptestctx);
         crate::realize_blueprint_with_overrides(
             &opctx,
             datastore,
+            resolver,
             &blueprint,
             "test-suite",
             &overrides,
@@ -1193,6 +1217,7 @@ mod test {
             cptestctx,
             &opctx,
             datastore,
+            resolver,
             &blueprint,
             &overrides,
             "squidport",
@@ -1305,6 +1330,7 @@ mod test {
         crate::realize_blueprint_with_overrides(
             &opctx,
             datastore,
+            resolver,
             &blueprint2,
             "test-suite",
             &overrides,
@@ -1378,6 +1404,7 @@ mod test {
         crate::realize_blueprint_with_overrides(
             &opctx,
             datastore,
+            resolver,
             &blueprint2,
             "test-suite",
             &overrides,
@@ -1399,6 +1426,7 @@ mod test {
             &cptestctx,
             &opctx,
             datastore,
+            resolver,
             &blueprint2,
             &overrides,
             "tickety-boo",
@@ -1412,6 +1440,7 @@ mod test {
         crate::realize_blueprint_with_overrides(
             &opctx,
             datastore,
+            resolver,
             &blueprint2,
             "test-suite",
             &overrides,
@@ -1457,6 +1486,7 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
         opctx: &OpContext,
         datastore: &DataStore,
+        resolver: &Resolver,
         blueprint: &Blueprint,
         overrides: &Overridables,
         silo_name: &str,
@@ -1504,6 +1534,7 @@ mod test {
         crate::realize_blueprint_with_overrides(
             &opctx,
             datastore,
+            resolver,
             &blueprint,
             "test-suite",
             &overrides,

@@ -22,7 +22,7 @@ use tokio::sync::mpsc::{
     unbounded_channel, UnboundedReceiver, UnboundedSender,
 };
 use tokio::time::{interval, Duration};
-use wicketd_client::types::AbortUpdateOptions;
+use wicket_common::rack_update::AbortUpdateOptions;
 
 use crate::events::EventReportMap;
 use crate::helpers::get_update_test_error;
@@ -176,6 +176,10 @@ impl RunnerCore {
             Action::StartUpdate(component_id) => {
                 if let Some(wicketd) = wicketd {
                     let options = CreateStartUpdateOptions {
+                        force_update_rot_bootloader: self
+                            .state
+                            .force_update_state
+                            .force_update_rot_bootloader,
                         force_update_rot: self
                             .state
                             .force_update_state

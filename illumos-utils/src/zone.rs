@@ -14,6 +14,7 @@ use std::net::{IpAddr, Ipv6Addr};
 
 use crate::addrobj::AddrObject;
 use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
+use crate::zpool::PathInPool;
 use crate::{execute, PFEXEC};
 use omicron_common::address::SLED_PREFIX;
 
@@ -282,7 +283,7 @@ impl Zones {
     #[allow(clippy::too_many_arguments)]
     pub async fn install_omicron_zone(
         log: &Logger,
-        zone_root_path: &Utf8Path,
+        zone_root_path: &PathInPool,
         zone_name: &str,
         zone_image: &Utf8Path,
         datasets: &[zone::Dataset],
@@ -319,10 +320,9 @@ impl Zones {
             true,
             zone::CreationOptions::Blank,
         );
-        let path = zone_root_path.join(zone_name);
         cfg.get_global()
             .set_brand("omicron1")
-            .set_path(&path)
+            .set_path(&zone_root_path.path)
             .set_autoboot(false)
             .set_ip_type(zone::IpType::Exclusive);
         if !limit_priv.is_empty() {
@@ -640,7 +640,7 @@ impl Zones {
     //
     // Does NOT check if the address already exists.
     #[allow(clippy::needless_lifetimes)]
-    fn create_address_internal<'a>(
+    pub fn create_address_internal<'a>(
         zone: Option<&'a str>,
         addrobj: &AddrObject,
         addrtype: AddressRequest,

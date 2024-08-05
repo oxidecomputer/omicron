@@ -5,10 +5,13 @@
 //! Utilities for creating a StorageManager under test.
 
 use crate::config::MountConfig;
-use crate::disk::{OmicronPhysicalDisksConfig, RawDisk};
+use crate::disk::RawDisk;
 use crate::manager::{StorageHandle, StorageManager};
 use camino::Utf8PathBuf;
 use key_manager::StorageKeyRequester;
+use omicron_common::disk::{
+    OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig,
+};
 use omicron_uuid_kinds::ZpoolUuid;
 use slog::{info, Logger};
 use std::sync::{
@@ -123,6 +126,7 @@ impl Drop for StorageManagerTestHarness {
 impl StorageManagerTestHarness {
     /// Creates a new StorageManagerTestHarness with no associated disks.
     pub async fn new(log: &Logger) -> Self {
+        #[cfg(all(test, feature = "testing"))]
         illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let tmp = camino_tempfile::tempdir_in("/var/tmp")
             .expect("Failed to make temporary directory");
@@ -300,6 +304,18 @@ impl StorageManagerTestHarness {
             .expect("Failed to remove vdev");
     }
 
+    // Update a vdev.
+    //
+    // Note: currently the only portion of a vdev that we update is the firmware
+    // metadata.
+    pub async fn update_vdev(&mut self, raw: &RawDisk) {
+        self.handle
+            .detected_raw_disk_update(raw.clone())
+            .await
+            .await
+            .expect("Failed to update vdev");
+    }
+
     // Adds a vdev to the set of "tracked" devices.
     pub async fn add_vdev_as(&mut self, raw_disk: RawDisk) {
         self.handle
@@ -320,7 +336,7 @@ impl StorageManagerTestHarness {
             .map(|raw| {
                 let identity = raw.identity();
 
-                crate::disk::OmicronPhysicalDiskConfig {
+                OmicronPhysicalDiskConfig {
                     identity: identity.clone(),
                     id: Uuid::new_v4(),
                     pool_id: ZpoolUuid::new_v4(),

@@ -6,28 +6,33 @@
 <service name='oxide/zone-network-setup' type='service' version='1'>
   <create_default_instance enabled='true' />
 
-  <!-- Run after the operating system's svc:/network/physical service is done. -->
-  <dependency name='physical' grouping='require_all' restart_on='none'
+  <!-- Run after the zone's networking stack is up. -->
+  <dependency name='network' grouping='require_all' restart_on='none'
     type='service'>
-  <service_fmri value='svc:/network/physical:default' />
+  <service_fmri value='svc:/milestone/network:default' />
   </dependency>
 
-  <dependency name='multi_user' grouping='require_all' restart_on='none'
-    type='service'>
-  <service_fmri value='svc:/milestone/multi-user:default' />
+  <!-- The zone-setup binary is not ready to run until its initial properties
+          have been set by the sled-agent, which happens after the
+          `manifest-import` service is running.
+  -->
+  <dependency name='manifest-import' type='service' grouping='require_all' restart_on='none'>
+    <service_fmri value='svc:/system/manifest-import:default' />
   </dependency>
 
   <exec_method type='method' name='start'
     exec='/opt/oxide/zone-setup-cli/bin/zone-setup common-networking -d %{config/datalink} -s %{config/static_addr} -g %{config/gateway}'
     timeout_seconds='0' />
-  
+
+  <exec_method type='method' name='stop' exec=':true' timeout_seconds='0' />
+
   <property_group name='startd' type='framework'>
     <propval name='duration' type='astring' value='transient' />
   </property_group>
 
   <property_group name='config' type='application'>
     <propval name='datalink' type='astring' value='unknown' />
-    <propval name='gateway' type='astring' value='unknown' />
+    <propval name='gateway' type='astring' value='' />
     <propval name='static_addr' type='astring' value='unknown' />
   </property_group>
 

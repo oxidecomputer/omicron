@@ -3,25 +3,28 @@ use anyhow::{anyhow, Result};
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::params::VpcFirewallRule;
-use illumos_utils::opte::{DhcpCfg, PortManager};
+use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::Zones;
-use nexus_client::types::{ProbeExternalIp, ProbeInfo};
+use nexus_client::types::{
+    BackgroundTasksActivateRequest, ProbeExternalIp, ProbeInfo,
+};
 use omicron_common::api::external::{
-    VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRulePriority,
-    VpcFirewallRuleStatus,
+    Generation, VpcFirewallRuleAction, VpcFirewallRuleDirection,
+    VpcFirewallRulePriority, VpcFirewallRuleStatus,
 };
 use omicron_common::api::internal::shared::NetworkInterface;
-use rand::prelude::SliceRandom;
+use rand::prelude::IteratorRandom;
 use rand::SeedableRng;
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::manager::StorageHandle;
+use sled_storage::resources::AllDisks;
 use slog::{error, warn, Logger};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, MutexGuard};
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use uuid::Uuid;
@@ -43,6 +46,11 @@ pub(crate) struct ProbeManager {
     inner: Arc<ProbeManagerInner>,
 }
 
+struct RunningProbes {
+    storage_generation: Option<Generation>,
+    zones: HashMap<Uuid, RunningZone>,
+}
+
 pub(crate) struct ProbeManagerInner {
     join_handle: Mutex<Option<JoinHandle<()>>>,
     nexus_client: NexusClientWithResolver,
@@ -51,7 +59,7 @@ pub(crate) struct ProbeManagerInner {
     vnic_allocator: VnicAllocator<Etherstub>,
     storage: StorageHandle,
     port_manager: PortManager,
-    running_probes: Mutex<HashMap<Uuid, RunningZone>>,
+    running_probes: Mutex<RunningProbes>,
 }
 
 impl ProbeManager {
@@ -70,7 +78,10 @@ impl ProbeManager {
                     VNIC_ALLOCATOR_SCOPE,
                     etherstub,
                 ),
-                running_probes: Mutex::new(HashMap::new()),
+                running_probes: Mutex::new(RunningProbes {
+                    storage_generation: None,
+                    zones: HashMap::new(),
+                }),
                 nexus_client,
                 log,
                 sled_id,
@@ -82,6 +93,51 @@ impl ProbeManager {
 
     pub(crate) async fn run(&self) {
         self.inner.run().await;
+    }
+
+    /// Removes any probes using filesystem roots on zpools that are not
+    /// contained in the set of "disks".
+    pub(crate) async fn use_only_these_disks(&self, disks: &AllDisks) {
+        let u2_set: HashSet<_> = disks.all_u2_zpools().into_iter().collect();
+        let mut probes = self.inner.running_probes.lock().await;
+
+        // Consider the generation number on the incoming request to avoid
+        // applying old requests.
+        let requested_generation = *disks.generation();
+        if let Some(last_gen) = probes.storage_generation {
+            if last_gen >= requested_generation {
+                // This request looks old, ignore it.
+                info!(self.inner.log, "use_only_these_disks: Ignoring request";
+                    "last_gen" => ?last_gen, "requested_gen" => ?requested_generation);
+                return;
+            }
+        }
+        probes.storage_generation = Some(requested_generation);
+        info!(self.inner.log, "use_only_these_disks: Processing new request";
+            "gen" => ?requested_generation);
+
+        let to_remove = probes
+            .zones
+            .iter()
+            .filter_map(|(id, probe)| {
+                let Some(probe_pool) = probe.root_zpool() else {
+                    // No known pool for this probe
+                    info!(self.inner.log, "use_only_these_disks: Cannot read filesystem pool"; "id" => ?id);
+                    return None;
+                };
+
+                if !u2_set.contains(probe_pool) {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        for probe_id in to_remove {
+            info!(self.inner.log, "use_only_these_disks: Removing probe"; "probe_id" => ?probe_id);
+            self.inner.remove_probe_locked(&mut probes, probe_id).await;
+        }
     }
 }
 
@@ -179,24 +235,44 @@ impl ProbeManagerInner {
                     }
                 };
 
-                self.add(target.difference(&current)).await;
+                let n_added = self.add(target.difference(&current)).await;
                 self.remove(current.difference(&target)).await;
                 self.check(current.intersection(&target)).await;
+
+                // If we have created some new probes, we may need the control plane
+                // to provide us with valid routes for the VPC the probe belongs to.
+                if n_added > 0 {
+                    if let Err(e) = self
+                        .nexus_client
+                        .client()
+                        .bgtask_activate(&BackgroundTasksActivateRequest {
+                            bgtask_names: vec!["vpc_route_manager".into()],
+                        })
+                        .await
+                    {
+                        error!(self.log, "get routes for probe: {e}");
+                    }
+                }
             }
         })
     }
 
     /// Add a set of probes to this sled.
-    async fn add<'a, I>(self: &Arc<Self>, probes: I)
+    ///
+    /// Returns the number of inserted probes.
+    async fn add<'a, I>(self: &Arc<Self>, probes: I) -> usize
     where
         I: Iterator<Item = &'a ProbeState>,
     {
+        let mut i = 0;
         for probe in probes {
             info!(self.log, "adding probe {}", probe.id);
             if let Err(e) = self.add_probe(probe).await {
                 error!(self.log, "add probe: {e}");
             }
+            i += 1;
         }
+        i
     }
 
     /// Add a probe to this sled. This sets up resources for the probe zone
@@ -204,14 +280,15 @@ impl ProbeManagerInner {
     /// boots the probe zone.
     async fn add_probe(self: &Arc<Self>, probe: &ProbeState) -> Result<()> {
         let mut rng = rand::rngs::StdRng::from_entropy();
-        let root = self
+        let current_disks = self
             .storage
             .get_latest_disks()
             .await
-            .all_u2_mountpoints(ZONE_DATASET)
+            .all_u2_mountpoints(ZONE_DATASET);
+        let zone_root_path = current_disks
+            .into_iter()
             .choose(&mut rng)
-            .ok_or_else(|| anyhow!("u2 not found"))?
-            .clone();
+            .ok_or_else(|| anyhow!("u2 not found"))?;
 
         let nic = probe
             .interface
@@ -223,12 +300,12 @@ impl ProbeManagerInner {
             .get(0)
             .ok_or(anyhow!("expected an external ip"))?;
 
-        let port = self.port_manager.create_port(
-            &nic,
-            None,
-            Some(eip.ip),
-            &[], // floating ips
-            &[VpcFirewallRule {
+        let port = self.port_manager.create_port(PortCreateParams {
+            nic,
+            source_nat: None,
+            ephemeral_ip: Some(eip.ip),
+            floating_ips: &[],
+            firewall_rules: &[VpcFirewallRule {
                 status: VpcFirewallRuleStatus::Enabled,
                 direction: VpcFirewallRuleDirection::Inbound,
                 targets: vec![nic.clone()],
@@ -238,14 +315,15 @@ impl ProbeManagerInner {
                 action: VpcFirewallRuleAction::Allow,
                 priority: VpcFirewallRulePriority(100),
             }],
-            DhcpCfg::default(),
-        )?;
+            dhcp_config: DhcpCfg::default(),
+            is_service: false,
+        })?;
 
         let installed_zone = ZoneBuilderFactory::default()
             .builder()
             .with_log(self.log.clone())
             .with_underlay_vnic_allocator(&self.vnic_allocator)
-            .with_zone_root_path(&root)
+            .with_zone_root_path(zone_root_path)
             .with_zone_image_paths(&["/opt/oxide".into()])
             .with_zone_type("probe")
             .with_unique_name(probe.id)
@@ -267,13 +345,13 @@ impl ProbeManagerInner {
         rz.ensure_address_for_port("overlay", 0).await?;
         info!(self.log, "started probe {}", probe.id);
 
-        self.running_probes.lock().await.insert(probe.id, rz);
+        self.running_probes.lock().await.zones.insert(probe.id, rz);
 
         Ok(())
     }
 
     /// Remove a set of probes from this sled.
-    async fn remove<'a, I>(self: &Arc<Self>, probes: I)
+    async fn remove<'a, I>(&self, probes: I)
     where
         I: Iterator<Item = &'a ProbeState>,
     {
@@ -285,8 +363,17 @@ impl ProbeManagerInner {
 
     /// Remove a probe from this sled. This tears down the zone and it's
     /// network resources.
-    async fn remove_probe(self: &Arc<Self>, id: Uuid) {
-        match self.running_probes.lock().await.remove(&id) {
+    async fn remove_probe(&self, id: Uuid) {
+        let mut probes = self.running_probes.lock().await;
+        self.remove_probe_locked(&mut probes, id).await
+    }
+
+    async fn remove_probe_locked(
+        &self,
+        probes: &mut MutexGuard<'_, RunningProbes>,
+        id: Uuid,
+    ) {
+        match probes.zones.remove(&id) {
             Some(mut running_zone) => {
                 for l in running_zone.links_mut() {
                     if let Err(e) = l.delete() {

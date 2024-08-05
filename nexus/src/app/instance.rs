@@ -20,6 +20,7 @@ use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
+use nexus_db_model::Vmm;
 use nexus_db_model::VmmState as DbVmmState;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
@@ -378,7 +379,8 @@ impl super::Nexus {
         };
 
         let saga_outputs = self
-            .execute_saga::<sagas::instance_create::SagaInstanceCreate>(
+            .sagas
+            .saga_execute::<sagas::instance_create::SagaInstanceCreate>(
                 saga_params,
             )
             .await?;
@@ -461,10 +463,11 @@ impl super::Nexus {
             instance,
             boundary_switches,
         };
-        self.execute_saga::<sagas::instance_delete::SagaInstanceDelete>(
-            saga_params,
-        )
-        .await?;
+        self.sagas
+            .saga_execute::<sagas::instance_delete::SagaInstanceDelete>(
+                saga_params,
+            )
+            .await?;
         Ok(())
     }
 
@@ -509,10 +512,11 @@ impl super::Nexus {
             src_vmm: vmm.clone(),
             migrate_params: params,
         };
-        self.execute_saga::<sagas::instance_migrate::SagaInstanceMigrate>(
-            saga_params,
-        )
-        .await?;
+        self.sagas
+            .saga_execute::<sagas::instance_migrate::SagaInstanceMigrate>(
+                saga_params,
+            )
+            .await?;
 
         // TODO correctness TODO robustness TODO design
         // Should we lookup the instance again here?
@@ -756,10 +760,11 @@ impl super::Nexus {
             db_instance: instance.clone(),
         };
 
-        self.execute_saga::<sagas::instance_start::SagaInstanceStart>(
-            saga_params,
-        )
-        .await?;
+        self.sagas
+            .saga_execute::<sagas::instance_start::SagaInstanceStart>(
+                saga_params,
+            )
+            .await?;
 
         self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
     }
@@ -1541,15 +1546,16 @@ impl super::Nexus {
     ) -> Result<(), Error> {
         notify_instance_updated(
             &self.datastore(),
-            &self.resolver().await,
+            self.resolver(),
             &self.opctx_alloc,
             opctx,
             &self.log,
             instance_id,
             new_runtime_state,
-            self.v2p_notification_tx.clone(),
+            &self.background_tasks.task_v2p_manager,
         )
         .await?;
+        self.vpc_needed_notify_sleds();
         Ok(())
     }
 
@@ -1561,7 +1567,7 @@ impl super::Nexus {
         instance_lookup: &lookup::Instance<'_>,
         params: &params::InstanceSerialConsoleRequest,
     ) -> Result<params::InstanceSerialConsoleData, Error> {
-        let client = self
+        let (_, client) = self
             .propolis_client_for_instance(
                 opctx,
                 instance_lookup,
@@ -1602,7 +1608,7 @@ impl super::Nexus {
         instance_lookup: &lookup::Instance<'_>,
         params: &params::InstanceSerialConsoleStreamRequest,
     ) -> Result<(), Error> {
-        let client_addr = match self
+        let (_, client_addr) = match self
             .propolis_addr_for_instance(
                 opctx,
                 instance_lookup,
@@ -1657,12 +1663,14 @@ impl super::Nexus {
         }
     }
 
+    /// Return a propolis address for the instance, along with the VMM identity
+    /// that it's for.
     async fn propolis_addr_for_instance(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         action: authz::Action,
-    ) -> Result<SocketAddr, Error> {
+    ) -> Result<(Vmm, SocketAddr), Error> {
         let (.., authz_instance) = instance_lookup.lookup_for(action).await?;
 
         let state = self
@@ -1676,8 +1684,9 @@ impl super::Nexus {
                 DbVmmState::Running
                 | DbVmmState::Rebooting
                 | DbVmmState::Migrating => {
-                    Ok(SocketAddr::new(vmm.propolis_ip.ip(), vmm.propolis_port.into()))
+                    Ok((vmm.clone(), SocketAddr::new(vmm.propolis_ip.ip(), vmm.propolis_port.into())))
                 }
+
                 DbVmmState::Starting
                 | DbVmmState::Stopping
                 | DbVmmState::Stopped
@@ -1687,6 +1696,7 @@ impl super::Nexus {
                         vmm.runtime.state,
                     )))
                 }
+
                 DbVmmState::Destroyed | DbVmmState::SagaUnwound => Err(Error::invalid_request(
                     "cannot connect to serial console of instance in state \"Stopped\"",
                 )),
@@ -1700,16 +1710,21 @@ impl super::Nexus {
         }
     }
 
-    async fn propolis_client_for_instance(
+    /// Return a propolis client for the instance, along with the VMM identity
+    /// that it's for.
+    pub(crate) async fn propolis_client_for_instance(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         action: authz::Action,
-    ) -> Result<propolis_client::Client, Error> {
-        let client_addr = self
+    ) -> Result<(Vmm, propolis_client::Client), Error> {
+        let (vmm, client_addr) = self
             .propolis_addr_for_instance(opctx, instance_lookup, action)
             .await?;
-        Ok(propolis_client::Client::new(&format!("http://{}", client_addr)))
+        Ok((
+            vmm,
+            propolis_client::Client::new(&format!("http://{}", client_addr)),
+        ))
     }
 
     async fn proxy_instance_serial_ws(
@@ -1927,7 +1942,8 @@ impl super::Nexus {
         };
 
         let saga_outputs = self
-            .execute_saga::<sagas::instance_ip_attach::SagaInstanceIpAttach>(
+            .sagas
+            .saga_execute::<sagas::instance_ip_attach::SagaInstanceIpAttach>(
                 saga_params,
             )
             .await?;
@@ -1956,7 +1972,8 @@ impl super::Nexus {
         };
 
         let saga_outputs = self
-            .execute_saga::<sagas::instance_ip_detach::SagaInstanceIpDetach>(
+            .sagas
+            .saga_execute::<sagas::instance_ip_detach::SagaInstanceIpDetach>(
                 saga_params,
             )
             .await?;
@@ -1988,7 +2005,7 @@ pub(crate) async fn notify_instance_updated(
     log: &slog::Logger,
     instance_id: &InstanceUuid,
     new_runtime_state: &nexus::SledInstanceState,
-    v2p_notification_tx: tokio::sync::watch::Sender<()>,
+    v2p_manager: &crate::app::background::Activator,
 ) -> Result<Option<InstanceUpdateResult>, Error> {
     let propolis_id = new_runtime_state.propolis_id;
 
@@ -2028,7 +2045,7 @@ pub(crate) async fn notify_instance_updated(
         &authz_instance,
         db_instance.runtime(),
         &new_runtime_state.instance_state,
-        v2p_notification_tx.clone(),
+        v2p_manager,
     )
     .await?;
 
@@ -2093,40 +2110,6 @@ pub(crate) async fn notify_instance_updated(
             &new_runtime_state.migration_state,
         )
         .await;
-
-    // Has a migration terminated? If so,mark the migration record as deleted if
-    // and only if both sides of the migration are in a terminal state.
-    if let Some(nexus::MigrationRuntimeState {
-        migration_id,
-        state,
-        role,
-        ..
-    }) = new_runtime_state.migration_state
-    {
-        if state.is_terminal() {
-            info!(
-                log,
-                "migration has terminated, trying to delete it...";
-                "instance_id" => %instance_id,
-                "propolis_id" => %propolis_id,
-                "migration_id" => %propolis_id,
-                "migration_state" => %state,
-                "migration_role" => %role,
-            );
-            if !datastore.migration_terminate(opctx, migration_id).await? {
-                info!(
-                    log,
-                    "did not mark migration record as deleted (the other half \
-                    may not yet have reported termination)";
-                    "instance_id" => %instance_id,
-                    "propolis_id" => %propolis_id,
-                    "migration_id" => %propolis_id,
-                    "migration_state" => %state,
-                    "migration_role" => %role,
-                );
-            }
-        }
-    }
 
     // If the VMM is now in a terminal state, make sure its resources get
     // cleaned up.

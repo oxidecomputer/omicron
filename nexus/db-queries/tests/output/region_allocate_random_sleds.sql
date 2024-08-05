@@ -9,7 +9,9 @@ WITH
         region.volume_id,
         region.block_size,
         region.blocks_per_extent,
-        region.extent_count
+        region.extent_count,
+        region.port,
+        region.read_only
       FROM
         region
       WHERE
@@ -95,11 +97,13 @@ WITH
         $6 AS volume_id,
         $7 AS block_size,
         $8 AS blocks_per_extent,
-        $9 AS extent_count
+        $9 AS extent_count,
+        NULL AS port,
+        $10 AS read_only
       FROM
         shuffled_candidate_datasets
       LIMIT
-        $10 - (SELECT count(*) FROM old_regions)
+        $11 - (SELECT count(*) FROM old_regions)
     ),
   proposed_dataset_changes
     AS (
@@ -118,7 +122,7 @@ WITH
       SELECT
         (
           (
-            (SELECT count(*) FROM old_regions LIMIT 1) < $11
+            (SELECT count(*) FROM old_regions LIMIT 1) < $12
             AND CAST(
                 IF(
                   (
@@ -128,7 +132,7 @@ WITH
                         + (SELECT count(*) FROM existing_zpools LIMIT 1)
                       )
                     )
-                    >= $12
+                    >= $13
                   ),
                   'TRUE',
                   'Not enough space'
@@ -145,7 +149,7 @@ WITH
                       + (SELECT count(*) FROM old_regions LIMIT 1)
                     )
                   )
-                  >= $13
+                  >= $14
                 ),
                 'TRUE',
                 'Not enough datasets'
@@ -181,7 +185,7 @@ WITH
                       1
                   )
                 )
-                >= $14
+                >= $15
               ),
               'TRUE',
               'Not enough unique zpools selected'
@@ -203,7 +207,9 @@ WITH
             volume_id,
             block_size,
             blocks_per_extent,
-            extent_count
+            extent_count,
+            port,
+            read_only
           )
       SELECT
         candidate_regions.id,
@@ -213,7 +219,9 @@ WITH
         candidate_regions.volume_id,
         candidate_regions.block_size,
         candidate_regions.blocks_per_extent,
-        candidate_regions.extent_count
+        candidate_regions.extent_count,
+        candidate_regions.port,
+        candidate_regions.read_only
       FROM
         candidate_regions
       WHERE
@@ -226,7 +234,9 @@ WITH
         region.volume_id,
         region.block_size,
         region.blocks_per_extent,
-        region.extent_count
+        region.extent_count,
+        region.port,
+        region.read_only
     ),
   updated_datasets
     AS (
@@ -279,7 +289,9 @@ WITH
     old_regions.volume_id,
     old_regions.block_size,
     old_regions.blocks_per_extent,
-    old_regions.extent_count
+    old_regions.extent_count,
+    old_regions.port,
+    old_regions.read_only
   FROM
     old_regions INNER JOIN dataset ON old_regions.dataset_id = dataset.id
 )
@@ -303,7 +315,9 @@ UNION
       inserted_regions.volume_id,
       inserted_regions.block_size,
       inserted_regions.blocks_per_extent,
-      inserted_regions.extent_count
+      inserted_regions.extent_count,
+      inserted_regions.port,
+      inserted_regions.read_only
     FROM
       inserted_regions
       INNER JOIN updated_datasets ON inserted_regions.dataset_id = updated_datasets.id

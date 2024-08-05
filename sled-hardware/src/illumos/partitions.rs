@@ -8,10 +8,10 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use crate::illumos::gpt;
-use crate::{DiskPaths, DiskVariant, Partition, PooledDiskError};
+use crate::{DiskPaths, Partition, PooledDiskError};
 use camino::Utf8Path;
 use illumos_utils::zpool::ZpoolName;
-use omicron_common::disk::DiskIdentity;
+use omicron_common::disk::{DiskIdentity, DiskVariant};
 use omicron_uuid_kinds::ZpoolUuid;
 use slog::info;
 use slog::Logger;
@@ -75,6 +75,8 @@ pub enum NvmeFormattingError {
     NvmeInit(#[from] libnvme::NvmeInitError),
     #[error(transparent)]
     Nvme(#[from] libnvme::NvmeError),
+    #[error(transparent)]
+    NvmeController(#[from] libnvme::controller::NvmeControllerError),
     #[error("Device is missing expected LBA format")]
     LbaFormatMissing,
     #[error("Device has {0} active namespaces but we expected 1")]

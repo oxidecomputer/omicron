@@ -8,7 +8,6 @@
 //! than the representation of "virtual disks" which would be presented
 //! through Nexus' external API.
 
-use crate::params::OmicronPhysicalDisksConfig;
 use crate::sim::http_entrypoints_pantry::ExpectedDigest;
 use crate::sim::SledAgent;
 use anyhow::{self, bail, Result};
@@ -20,12 +19,13 @@ use dropshot::HandlerTaskMode;
 use dropshot::HttpError;
 use futures::lock::Mutex;
 use omicron_common::disk::DiskIdentity;
+use omicron_common::disk::DiskVariant;
+use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::types::VolumeConstructionRequest;
-use sled_hardware::DiskVariant;
 use sled_storage::resources::DiskManagementStatus;
 use sled_storage::resources::DisksManagementResult;
 use slog::Logger;
@@ -975,6 +975,7 @@ impl PantryServer {
                 // - bulk writes into disks
                 request_body_max_bytes: 8192 * 1024,
                 default_handler_task_mode: HandlerTaskMode::Detached,
+                log_headers: vec![],
             },
             super::http_entrypoints_pantry::api(),
             pantry.clone(),

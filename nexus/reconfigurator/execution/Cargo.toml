@@ -11,6 +11,7 @@ omicron-rpaths.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+cockroach-admin-client.workspace = true
 dns-service-client.workspace = true
 chrono.workspace = true
 futures.workspace = true
@@ -19,6 +20,7 @@ nexus-config.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
 nexus-networking.workspace = true
+nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true

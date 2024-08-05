@@ -17,11 +17,14 @@ use db_macros::Resource;
 use diesel::Queryable;
 use diesel::Selectable;
 use ipnetwork::IpNetwork;
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
+use nexus_types::external_api::shared::ProbeExternalIp;
+use nexus_types::external_api::shared::ProbeExternalIpKind;
 use nexus_types::external_api::views;
 use nexus_types::inventory::SourceNatConfig;
 use omicron_common::api::external::Error;
@@ -34,7 +37,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::InstanceExternalIpBody;
-use sled_agent_client::ZoneKind;
 use slog_error_chain::SlogInlineError;
 use std::convert::TryFrom;
 use std::net::IpAddr;
@@ -187,6 +189,27 @@ impl TryFrom<&'_ ExternalIp> for OmicronZoneExternalIp {
                 }))
             }
             IpKind::Ephemeral => Err(OmicronZoneExternalIpError::EphemeralIp),
+        }
+    }
+}
+
+impl From<ExternalIp> for ProbeExternalIp {
+    fn from(value: ExternalIp) -> Self {
+        Self {
+            ip: value.ip.ip(),
+            first_port: value.first_port.0,
+            last_port: value.last_port.0,
+            kind: value.kind.into(),
+        }
+    }
+}
+
+impl From<IpKind> for ProbeExternalIpKind {
+    fn from(value: IpKind) -> Self {
+        match value {
+            IpKind::SNat => ProbeExternalIpKind::Snat,
+            IpKind::Ephemeral => ProbeExternalIpKind::Ephemeral,
+            IpKind::Floating => ProbeExternalIpKind::Floating,
         }
     }
 }
@@ -383,7 +406,7 @@ impl IncompleteExternalIp {
                     IpKind::Floating,
                     None,
                     Some(name),
-                    Some(zone_kind.to_string()),
+                    Some(zone_kind.report_str().to_string()),
                     state,
                 )
             }

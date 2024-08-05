@@ -62,6 +62,7 @@ use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_model::NetworkInterface;
 use nexus_db_model::NetworkInterfaceKind;
+use nexus_db_model::PhysicalDisk;
 use nexus_db_model::Probe;
 use nexus_db_model::Project;
 use nexus_db_model::Region;
@@ -96,7 +97,10 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
+use nexus_types::external_api::views::PhysicalDiskPolicy;
+use nexus_types::external_api::views::PhysicalDiskState;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::identity::Resource;
@@ -281,14 +285,18 @@ pub struct DbFetchOptions {
 enum DbCommands {
     /// Print information about the rack
     Rack(RackArgs),
-    /// Print information about disks
+    /// Print information about virtual disks
     Disks(DiskArgs),
     /// Print information about internal and external DNS
     Dns(DnsArgs),
     /// Print information about collected hardware/software inventory
     Inventory(InventoryArgs),
+    /// Print information about physical disks
+    PhysicalDisks(PhysicalDisksArgs),
     /// Save the current Reconfigurator inputs to a file
     ReconfiguratorSave(ReconfiguratorSaveArgs),
+    /// Print information about regions
+    Region(RegionArgs),
     /// Query for information about region replacements, optionally manually
     /// triggering one.
     RegionReplacement(RegionReplacementArgs),
@@ -298,10 +306,15 @@ enum DbCommands {
     Instances(InstancesOptions),
     /// Print information about the network
     Network(NetworkArgs),
+    /// Print information about migrations
+    #[clap(alias = "migration")]
+    Migrations(MigrationsArgs),
     /// Print information about snapshots
     Snapshots(SnapshotArgs),
     /// Validate the contents of the database
     Validate(ValidateArgs),
+    /// Print information about volumes
+    Volumes(VolumeArgs),
 }
 
 #[derive(Debug, Args)]
@@ -405,8 +418,8 @@ enum InventoryCommands {
     Cabooses,
     /// list and show details from particular collections
     Collections(CollectionsArgs),
-    /// show all physical disks every found
-    PhysicalDisks(PhysicalDisksArgs),
+    /// show all physical disks ever found
+    PhysicalDisks(InvPhysicalDisksArgs),
     /// list all root of trust pages ever found
     RotPages,
 }
@@ -435,12 +448,19 @@ struct CollectionsShowArgs {
 }
 
 #[derive(Debug, Args, Clone, Copy)]
-struct PhysicalDisksArgs {
+struct InvPhysicalDisksArgs {
     #[clap(long)]
     collection_id: Option<CollectionUuid>,
 
     #[clap(long, requires("collection_id"))]
     sled_id: Option<SledUuid>,
+}
+
+#[derive(Debug, Args)]
+struct PhysicalDisksArgs {
+    /// Show disks that match the given filter
+    #[clap(short = 'F', long, value_enum)]
+    filter: Option<DiskFilter>,
 }
 
 #[derive(Debug, Args)]
@@ -454,6 +474,18 @@ struct SledsArgs {
     /// Show sleds that match the given filter
     #[clap(short = 'F', long, value_enum)]
     filter: Option<SledFilter>,
+}
+
+#[derive(Debug, Args)]
+struct RegionArgs {
+    #[command(subcommand)]
+    command: RegionCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum RegionCommands {
+    /// List regions that are still missing ports
+    ListRegionsMissingPorts,
 }
 
 #[derive(Debug, Args)]
@@ -516,6 +548,75 @@ enum NetworkCommands {
 }
 
 #[derive(Debug, Args)]
+struct MigrationsArgs {
+    #[command(subcommand)]
+    command: MigrationsCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum MigrationsCommands {
+    /// List migrations
+    #[clap(alias = "ls")]
+    List(MigrationsListArgs),
+    // N.B. I'm making this a subcommand not because there are currently any
+    // other subcommands, but to reserve the optionality to add things other
+    // than `list`...
+}
+
+#[derive(Debug, Args)]
+struct MigrationsListArgs {
+    /// Include only migrations where at least one side reports the migration
+    /// is in progress.
+    ///
+    /// By default, migrations in all states are included. This can be combined
+    /// with the `--pending`, `--completed`, and `--failed` arguments to include
+    /// migrations in  multiple states.
+    #[arg(short = 'r', long, action = ArgAction::SetTrue)]
+    in_progress: bool,
+
+    /// Include only migrations where at least one side is still pending (the
+    /// sled-agent hasn't reported in yet).
+    ///
+    /// By default, migrations in all states are included. This can be combined
+    /// with the `--in-progress`, `--completed` and `--failed` arguments to
+    /// include migrations in multiple states.
+    #[arg(short = 'p', long, action = ArgAction::SetTrue)]
+    pending: bool,
+
+    /// Include only migrations where at least one side reports the migration
+    /// has completed.
+    ///
+    /// By default, migrations in all states are included. This can be combined
+    /// with the `--in-progress`, `--pending`, and `--failed` arguments to
+    /// include migrations in multiple states.
+    #[arg(short = 'c', long, action = ArgAction::SetTrue)]
+    completed: bool,
+
+    /// Include only migrations where at least one side reports the migration
+    /// has failed.
+    ///
+    /// By default, migrations in all states are included. This can be combined
+    /// with the `--pending`, `--in-progress`, and --completed` arguments to
+    /// include migrations  in multiple states.
+    #[arg(short = 'f', long, action = ArgAction::SetTrue)]
+    failed: bool,
+
+    /// Show only migrations for this instance ID.
+    ///
+    /// By default, all instances are shown. This argument be repeated to select
+    /// other instances.
+    #[arg(short = 'i', long = "instance-id")]
+    instance_ids: Vec<Uuid>,
+
+    /// Output all data from the migration record.
+    ///
+    /// This includes update and deletion timestamps, the source and target
+    /// generation numbers.
+    #[arg(short, long, action = ArgAction::SetTrue)]
+    verbose: bool,
+}
+
+#[derive(Debug, Args)]
 struct SnapshotArgs {
     #[command(subcommand)]
     command: SnapshotCommands,
@@ -550,6 +651,26 @@ enum ValidateCommands {
     /// Crucible agent says were deleted, or region snapshots that Nexus doesn't
     /// know about.
     ValidateRegionSnapshots,
+}
+
+#[derive(Debug, Args)]
+struct VolumeArgs {
+    #[command(subcommand)]
+    command: VolumeCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum VolumeCommands {
+    /// Get info for a specific volume
+    Info(VolumeInfoArgs),
+    /// Summarize current volumes
+    List,
+}
+
+#[derive(Debug, Args)]
+struct VolumeInfoArgs {
+    /// The UUID of the volume
+    uuid: Uuid,
 }
 
 impl DbArgs {
@@ -597,6 +718,15 @@ impl DbArgs {
                 )
                 .await
             }
+            DbCommands::PhysicalDisks(args) => {
+                cmd_db_physical_disks(
+                    &opctx,
+                    &datastore,
+                    &self.fetch_opts,
+                    args,
+                )
+                .await
+            }
             DbCommands::ReconfiguratorSave(reconfig_save_args) => {
                 cmd_db_reconfigurator_save(
                     &opctx,
@@ -605,6 +735,9 @@ impl DbArgs {
                 )
                 .await
             }
+            DbCommands::Region(RegionArgs {
+                command: RegionCommands::ListRegionsMissingPorts,
+            }) => cmd_db_region_missing_porst(&opctx, &datastore).await,
             DbCommands::RegionReplacement(RegionReplacementArgs {
                 command: RegionReplacementCommands::List(args),
             }) => {
@@ -669,6 +802,11 @@ impl DbArgs {
                 )
                 .await
             }
+            DbCommands::Migrations(MigrationsArgs {
+                command: MigrationsCommands::List(args),
+            }) => {
+                cmd_db_migrations_list(&datastore, &self.fetch_opts, args).await
+            }
             DbCommands::Snapshots(SnapshotArgs {
                 command: SnapshotCommands::Info(uuid),
             }) => cmd_db_snapshot_info(&opctx, &datastore, uuid).await,
@@ -681,6 +819,12 @@ impl DbArgs {
             DbCommands::Validate(ValidateArgs {
                 command: ValidateCommands::ValidateRegionSnapshots,
             }) => cmd_db_validate_region_snapshots(&datastore).await,
+            DbCommands::Volumes(VolumeArgs {
+                command: VolumeCommands::Info(uuid),
+            }) => cmd_db_volume_info(&datastore, uuid).await,
+            DbCommands::Volumes(VolumeArgs {
+                command: VolumeCommands::List,
+            }) => cmd_db_volume_list(&datastore, &self.fetch_opts).await,
         }
     }
 }
@@ -1126,6 +1270,38 @@ async fn cmd_db_disk_info(
 
     println!("{}", table);
 
+    get_and_display_vcr(disk.volume_id, datastore).await?;
+    Ok(())
+}
+
+// Given a UUID, search the database for a volume with that ID
+// If found, attempt to parse the .data field into a VolumeConstructionRequest
+// and display it if successful.
+async fn get_and_display_vcr(
+    volume_id: Uuid,
+    datastore: &DataStore,
+) -> Result<(), anyhow::Error> {
+    // Get the VCR from the volume and display selected parts.
+    use db::schema::volume::dsl as volume_dsl;
+    let volumes = volume_dsl::volume
+        .filter(volume_dsl::id.eq(volume_id))
+        .limit(1)
+        .select(Volume::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("loading requested volume")?;
+
+    for v in volumes {
+        match serde_json::from_str(&v.data()) {
+            Ok(vcr) => {
+                println!("\nVCR from volume ID {volume_id}");
+                print_vcr(vcr, 0);
+            }
+            Err(e) => {
+                println!("Volume had invalid VCR in data field: {e}");
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1368,6 +1544,68 @@ async fn cmd_db_disk_physical(
     Ok(())
 }
 
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct PhysicalDiskRow {
+    id: Uuid,
+    serial: String,
+    vendor: String,
+    model: String,
+    sled_id: Uuid,
+    policy: PhysicalDiskPolicy,
+    state: PhysicalDiskState,
+}
+
+impl From<PhysicalDisk> for PhysicalDiskRow {
+    fn from(d: PhysicalDisk) -> Self {
+        PhysicalDiskRow {
+            id: d.id(),
+            serial: d.serial.clone(),
+            vendor: d.vendor.clone(),
+            model: d.model.clone(),
+            sled_id: d.sled_id,
+            policy: d.disk_policy.into(),
+            state: d.disk_state.into(),
+        }
+    }
+}
+
+/// Run `omdb db physical-disks`.
+async fn cmd_db_physical_disks(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &PhysicalDisksArgs,
+) -> Result<(), anyhow::Error> {
+    let limit = fetch_opts.fetch_limit;
+    let filter = match args.filter {
+        Some(filter) => filter,
+        None => {
+            eprintln!(
+                "note: listing all in-service disks \
+                 (use -F to filter, e.g. -F in-service)"
+            );
+            DiskFilter::InService
+        }
+    };
+
+    let sleds = datastore
+        .physical_disk_list(&opctx, &first_page(limit), filter)
+        .await
+        .context("listing physical disks")?;
+    check_limit(&sleds, limit, || String::from("listing physical disks"));
+
+    let rows = sleds.into_iter().map(|s| PhysicalDiskRow::from(s));
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(1, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
 // SERVICES
 
 // Snapshots
@@ -1468,8 +1706,10 @@ async fn cmd_db_snapshot_info(
         .context("loading requested snapshot")?;
 
     let mut dest_volume_ids = Vec::new();
+    let mut source_volume_ids = Vec::new();
     let rows = snapshots.into_iter().map(|snapshot| {
         dest_volume_ids.push(snapshot.destination_volume_id);
+        source_volume_ids.push(snapshot.volume_id);
         SnapshotRow::from(snapshot)
     });
     if rows.len() == 0 {
@@ -1483,6 +1723,10 @@ async fn cmd_db_snapshot_info(
 
     println!("{}", table);
 
+    println!("SOURCE VOLUME VCR:");
+    for vol in source_volume_ids {
+        get_and_display_vcr(vol, datastore).await?;
+    }
     for vol_id in dest_volume_ids {
         // Get the dataset backing this volume.
         let regions = datastore.get_allocated_regions(vol_id).await?;
@@ -1517,7 +1761,234 @@ async fn cmd_db_snapshot_info(
             .with(tabled::settings::Padding::new(0, 1, 0, 0))
             .to_string();
 
+        println!("DESTINATION REGION INFO:");
         println!("{}", table);
+        println!("DESTINATION VOLUME VCR:");
+        get_and_display_vcr(vol_id, datastore).await?;
+    }
+
+    Ok(())
+}
+
+// Volumes
+/// Run `omdb db volume list`.
+async fn cmd_db_volume_list(
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct VolumeRow {
+        id: String,
+        created: String,
+        modified: String,
+        deleted: String,
+    }
+
+    let ctx = || "listing volumes".to_string();
+
+    use db::schema::volume::dsl;
+    let mut query = dsl::volume.into_boxed();
+    if !fetch_opts.include_deleted {
+        query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    let volumes = query
+        .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
+        .select(Volume::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("loading volumes")?;
+
+    check_limit(&volumes, fetch_opts.fetch_limit, ctx);
+
+    let rows = volumes.into_iter().map(|volume| VolumeRow {
+        id: volume.id().to_string(),
+        created: volume.time_created().to_string(),
+        modified: volume.time_modified().to_string(),
+        deleted: match volume.time_deleted {
+            Some(time) => time.to_string(),
+            None => "NULL".to_string(),
+        },
+    });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+/// Run `omdb db volume info <UUID>`.
+async fn cmd_db_volume_info(
+    datastore: &DataStore,
+    args: &VolumeInfoArgs,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct VolumeRow {
+        id: String,
+        created: String,
+        modified: String,
+        deleted: String,
+    }
+
+    use db::schema::volume::dsl as volume_dsl;
+
+    let volumes = volume_dsl::volume
+        .filter(volume_dsl::id.eq(args.uuid))
+        .limit(1)
+        .select(Volume::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("loading requested volume")?;
+
+    let mut vcrs = Vec::new();
+    let rows = volumes.into_iter().map(|volume| {
+        match serde_json::from_str(&volume.data()) {
+            Ok(vcr) => {
+                vcrs.push(vcr);
+            }
+            Err(e) => {
+                println!("Volume had invalid VCR in data field: {e}");
+            }
+        }
+
+        VolumeRow {
+            id: volume.id().to_string(),
+            created: volume.time_created().to_string(),
+            modified: volume.time_modified().to_string(),
+            deleted: match volume.time_deleted {
+                Some(time) => time.to_string(),
+                None => "NULL".to_string(),
+            },
+        }
+    });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    for vcr in vcrs {
+        print_vcr(vcr, 0);
+    }
+    Ok(())
+}
+
+// Print the fields that I want to see of a VolumeConstructionRequests
+// This will call itself on all sub_volumes and read_only_parents it finds.
+// We use the pad variable to indicate how much indent we want to display
+// information at.  Each time we recurse into another VCR layer, we increase
+// the amount of indention.
+fn print_vcr(vcr: VolumeConstructionRequest, pad: usize) {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct VCRVolume {
+        id: String,
+        bs: String,
+        sub_volumes: usize,
+        read_only_parent: bool,
+    }
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct VCRRegion {
+        id: String,
+        bs: String,
+        bpe: u64,
+        ec: u32,
+        gen: u64,
+        read_only: bool,
+    }
+
+    let indent = " ".repeat(pad);
+    match vcr {
+        VolumeConstructionRequest::Volume {
+            id,
+            block_size,
+            sub_volumes,
+            read_only_parent,
+        } => {
+            let row = VCRVolume {
+                id: id.to_string(),
+                bs: block_size.to_string(),
+                sub_volumes: sub_volumes.len(),
+                read_only_parent: read_only_parent.is_some(),
+            };
+            let table = tabled::Table::new(&[row])
+                .with(tabled::settings::Style::empty())
+                .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                .to_string();
+
+            // Shift the entire table over our indent amount.
+            let indented_table: String = table
+                .lines()
+                .map(|line| format!("{}{}", indent, line))
+                .collect::<Vec<String>>()
+                .join("\n");
+            println!("{}\n", indented_table);
+
+            for (index, sv) in sub_volumes.iter().enumerate() {
+                println!("{indent}SUB VOLUME {index}");
+                print_vcr(sv.clone(), pad + 4);
+                println!("");
+            }
+
+            if let Some(rop) = read_only_parent {
+                println!("{indent}READ ONLY PARENT:");
+                print_vcr(*rop, pad + 4);
+            }
+        }
+        VolumeConstructionRequest::Region {
+            block_size,
+            blocks_per_extent,
+            extent_count,
+            gen,
+            opts,
+        } => {
+            let row = VCRRegion {
+                id: opts.id.to_string(),
+                bs: block_size.to_string(),
+                bpe: blocks_per_extent,
+                ec: extent_count,
+                gen,
+                read_only: opts.read_only,
+            };
+            let table = tabled::Table::new(&[row])
+                .with(tabled::settings::Style::empty())
+                .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                .to_string();
+
+            // Shift the entire table over our indent amount.
+            let indented_table: String = table
+                .lines()
+                .map(|line| format!("{}{}", indent, line))
+                .collect::<Vec<String>>()
+                .join("\n");
+            println!("{}", indented_table);
+            for target in opts.target {
+                println!("{indent}{target}");
+            }
+        }
+        _ => {
+            println!("{indent}Unsupported volume type");
+        }
+    }
+}
+
+/// List all regions still missing ports
+async fn cmd_db_region_missing_porst(
+    opctx: &OpContext,
+    datastore: &DataStore,
+) -> Result<(), anyhow::Error> {
+    let regions: Vec<Region> = datastore.regions_missing_ports(opctx).await?;
+
+    for region in regions {
+        println!("{:?}", region.id());
     }
 
     Ok(())
@@ -2311,11 +2782,6 @@ async fn cmd_db_eips(
         owner_disposition: Option<BlueprintZoneDisposition>,
     }
 
-    // Display an empty cell for an Option<T> if it's None.
-    fn display_option_blank<T: Display>(opt: &Option<T>) -> String {
-        opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "".to_string())
-    }
-
     if verbose {
         for ip in &ips {
             if verbose {
@@ -2764,7 +3230,12 @@ async fn cmd_db_validate_region_snapshots(
         use crucible_agent_client::types::State;
         use crucible_agent_client::Client as CrucibleAgentClient;
 
-        let url = format!("http://{}", dataset.address());
+        let Some(dataset_addr) = dataset.address() else {
+            eprintln!("Dataset {} missing an IP address", dataset.id());
+            continue;
+        };
+
+        let url = format!("http://{}", dataset_addr);
         let client = CrucibleAgentClient::new(&url);
 
         let actual_region_snapshots = client
@@ -2825,7 +3296,7 @@ async fn cmd_db_validate_region_snapshots(
                                     dataset_id: region_snapshot.dataset_id,
                                     region_id: region_snapshot.region_id,
                                     snapshot_id: region_snapshot.snapshot_id,
-                                    dataset_addr: dataset.address(),
+                                    dataset_addr,
                                     error: String::from(
                                         "region snapshot was deleted, please remove its record",
                                     ),
@@ -2840,7 +3311,7 @@ async fn cmd_db_validate_region_snapshots(
                                     dataset_id: region_snapshot.dataset_id,
                                     region_id: region_snapshot.region_id,
                                     snapshot_id: region_snapshot.snapshot_id,
-                                    dataset_addr: dataset.address(),
+                                    dataset_addr,
                                     error: String::from(
                                         "NEXUS BUG: region snapshot was deleted, but the higher level snapshot was not!",
                                     ),
@@ -2869,7 +3340,7 @@ async fn cmd_db_validate_region_snapshots(
                                 dataset_id: region_snapshot.dataset_id,
                                 region_id: region_snapshot.region_id,
                                 snapshot_id: region_snapshot.snapshot_id,
-                                dataset_addr: dataset.address(),
+                                dataset_addr,
                                 error: format!(
                                     "AGENT BUG: region snapshot was deleted but has a running snapshot in state {:?}!",
                                     running_snapshot.state,
@@ -2919,7 +3390,12 @@ async fn cmd_db_validate_region_snapshots(
         use crucible_agent_client::types::State;
         use crucible_agent_client::Client as CrucibleAgentClient;
 
-        let url = format!("http://{}", dataset.address());
+        let Some(dataset_addr) = dataset.address() else {
+            eprintln!("Dataset {} missing an IP address", dataset.id());
+            continue;
+        };
+
+        let url = format!("http://{}", dataset_addr);
         let client = CrucibleAgentClient::new(&url);
 
         let actual_region_snapshots = client
@@ -2937,7 +3413,7 @@ async fn cmd_db_validate_region_snapshots(
                     dataset_id: dataset.id(),
                     region_id: region.id(),
                     snapshot_id,
-                    dataset_addr: dataset.address(),
+                    dataset_addr,
                     error: String::from(
                         "Nexus does not know about this snapshot!",
                     ),
@@ -2962,7 +3438,7 @@ async fn cmd_db_validate_region_snapshots(
                             dataset_id: dataset.id(),
                             region_id: region.id(),
                             snapshot_id,
-                            dataset_addr: dataset.address(),
+                            dataset_addr,
                             error: String::from(
                                 "Nexus does not know about this running snapshot!"
                             ),
@@ -3156,7 +3632,7 @@ async fn cmd_db_inventory_cabooses(
 async fn cmd_db_inventory_physical_disks(
     conn: &DataStoreConnection<'_>,
     limit: NonZeroU32,
-    args: PhysicalDisksArgs,
+    args: InvPhysicalDisksArgs,
 ) -> Result<(), anyhow::Error> {
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -3196,7 +3672,7 @@ async fn cmd_db_inventory_physical_disks(
         slot: disk.slot,
         vendor: disk.vendor,
         model: disk.model.clone(),
-        serial: disk.model.clone(),
+        serial: disk.serial.clone(),
         variant: format!("{:?}", disk.variant),
     });
 
@@ -3612,7 +4088,11 @@ fn inv_collection_print_sleds(collection: &Collection) {
 
             println!("    ZONES FOUND");
             for z in &zones.zones.zones {
-                println!("      zone {} (type {})", z.id, z.zone_type.kind());
+                println!(
+                    "      zone {} (type {})",
+                    z.id,
+                    z.zone_type.kind().report_str()
+                );
             }
         } else {
             println!("  warning: no zone information found");
@@ -3685,4 +4165,176 @@ async fn cmd_db_reconfigurator_save(
         .with_context(|| format!("write {:?}", output_path))?;
     eprintln!("wrote {}", output_path);
     Ok(())
+}
+
+// Migrations
+
+async fn cmd_db_migrations_list(
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &MigrationsListArgs,
+) -> Result<(), anyhow::Error> {
+    use db::model::Migration;
+    use db::model::MigrationState;
+    use db::schema::migration::dsl;
+    use omicron_common::api::internal::nexus;
+
+    let mut state_filters = Vec::new();
+    if args.completed {
+        state_filters.push(MigrationState(nexus::MigrationState::Completed));
+    }
+    if args.failed {
+        state_filters.push(MigrationState(nexus::MigrationState::Failed));
+    }
+    if args.in_progress {
+        state_filters.push(MigrationState(nexus::MigrationState::InProgress));
+    }
+    if args.pending {
+        state_filters.push(MigrationState(nexus::MigrationState::Pending));
+    }
+
+    let mut query = dsl::migration.into_boxed();
+
+    if !fetch_opts.include_deleted {
+        query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    if !state_filters.is_empty() {
+        query = query.filter(
+            dsl::source_state
+                .eq_any(state_filters.clone())
+                .or(dsl::target_state.eq_any(state_filters)),
+        );
+    }
+
+    if !args.instance_ids.is_empty() {
+        query =
+            query.filter(dsl::instance_id.eq_any(args.instance_ids.clone()));
+    }
+
+    let migrations = query
+        .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
+        .order_by(dsl::time_created)
+        // This is just to prove to CRDB that it can use the
+        // migrations-by-time-created index, it doesn't actually do anything.
+        .filter(dsl::time_created.gt(chrono::DateTime::UNIX_EPOCH))
+        .select(Migration::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("listing migrations")?;
+
+    check_limit(&migrations, fetch_opts.fetch_limit, || "listing migrations");
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct Vmms {
+        src_state: MigrationState,
+        tgt_state: MigrationState,
+        src_vmm: Uuid,
+        tgt_vmm: Uuid,
+    }
+
+    impl From<&'_ Migration> for Vmms {
+        fn from(
+            &Migration {
+                source_propolis_id,
+                target_propolis_id,
+                source_state,
+                target_state,
+                ..
+            }: &Migration,
+        ) -> Self {
+            Self {
+                src_state: source_state,
+                tgt_state: target_state,
+                src_vmm: source_propolis_id,
+                tgt_vmm: target_propolis_id,
+            }
+        }
+    }
+
+    let table = if args.verbose {
+        // If verbose mode is enabled, include the migration's ID as well as the
+        // source and target updated timestamps.
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct VerboseMigrationRow {
+            created: chrono::DateTime<Utc>,
+            id: Uuid,
+            instance: Uuid,
+            #[tabled(inline)]
+            vmms: Vmms,
+            #[tabled(display_with = "display_option_blank")]
+            src_updated: Option<chrono::DateTime<Utc>>,
+            #[tabled(display_with = "display_option_blank")]
+            tgt_updated: Option<chrono::DateTime<Utc>>,
+            #[tabled(display_with = "display_option_blank")]
+            deleted: Option<chrono::DateTime<Utc>>,
+        }
+
+        let rows = migrations.into_iter().map(|m| VerboseMigrationRow {
+            id: m.id,
+            instance: m.instance_id,
+            vmms: Vmms::from(&m),
+            src_updated: m.time_source_updated,
+            tgt_updated: m.time_target_updated,
+            created: m.time_created,
+            deleted: m.time_deleted,
+        });
+
+        tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string()
+    } else if args.instance_ids.len() == 1 {
+        // If only the migrations for a single instance are shown, we omit the
+        // instance ID row for conciseness sake.
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct SingleInstanceMigrationRow {
+            created: chrono::DateTime<Utc>,
+            #[tabled(inline)]
+            vmms: Vmms,
+        }
+        let rows = migrations.into_iter().map(|m| SingleInstanceMigrationRow {
+            created: m.time_created,
+            vmms: Vmms::from(&m),
+        });
+
+        tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string()
+    } else {
+        // Otherwise, the default format includes the instance ID, but omits
+        // most of the timestamps for brevity.
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct MigrationRow {
+            created: chrono::DateTime<Utc>,
+            instance: Uuid,
+            #[tabled(inline)]
+            vmms: Vmms,
+        }
+
+        let rows = migrations.into_iter().map(|m| MigrationRow {
+            created: m.time_created,
+            instance: m.instance_id,
+            vmms: Vmms::from(&m),
+        });
+
+        tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string()
+    };
+
+    println!("{table}");
+
+    Ok(())
+}
+
+// Display an empty cell for an Option<T> if it's None.
+fn display_option_blank<T: Display>(opt: &Option<T>) -> String {
+    opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "".to_string())
 }

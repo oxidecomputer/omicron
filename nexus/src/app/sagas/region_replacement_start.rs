@@ -48,7 +48,6 @@ use super::{
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
     ACTION_GENERATE_ID,
 };
-use crate::app::sagas::common_storage::get_region_from_agent;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::RegionAllocationStrategy;
 use crate::app::{authn, db};
@@ -221,6 +220,13 @@ async fn srrs_get_existing_datasets_and_regions(
         .get_region(params.request.old_region_id)
         .await
         .map_err(ActionError::action_failed)?;
+
+    // XXX for now, bail out if requesting the replacement of a read-only region
+    if db_region.read_only() {
+        return Err(ActionError::action_failed(String::from(
+            "replacing read-only region currently unsupported",
+        )));
+    }
 
     // Find out the existing datasets and regions that back the volume
     let datasets_and_regions = osagactx
@@ -450,76 +456,54 @@ async fn srrs_get_old_region_address(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
-    // It was a mistake not to record the port of a region in the Region record.
-    // However, we haven't needed it until now! If the Crucible agent is gone
-    // (which it will be if the disk is expunged), assume that the region in the
-    // read/write portion of the volume with the same dataset address (there
-    // should only be one due to the allocation strategy!) is the old region.
+    // Either retrieve the address from the database (because the port was
+    // previously recorded), or attempt grabbing the port from the corresponding
+    // Crucible agent: the sled or disk may not be physically gone, or we may be
+    // running in a test where the allocation strategy does not mandate distinct
+    // sleds.
 
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
+    let maybe_addr =
+        osagactx.nexus().region_addr(log, params.request.old_region_id).await;
 
-    let db_region = osagactx
-        .datastore()
-        .get_region(params.request.old_region_id)
-        .await
-        .map_err(ActionError::action_failed)?;
+    match maybe_addr {
+        Ok(addr) => Ok(addr),
 
-    let targets = osagactx
-        .datastore()
-        .get_dataset_rw_regions_in_volume(
-            &opctx,
-            db_region.dataset_id(),
-            db_region.volume_id(),
-        )
-        .await
-        .map_err(ActionError::action_failed)?;
+        Err(Error::Gone) => {
+            // It was a mistake not to record the port of a region in the Region
+            // record.  However, we haven't needed it until now! If the Crucible
+            // agent is gone (which it will be if the disk is expunged), assume
+            // that the region in the read/write portion of the volume with the
+            // same dataset address (there should only be one due to the
+            // allocation strategy!) is the old region.
 
-    if targets.len() == 1 {
-        // If there's a single RW region in the volume that matches this
-        // region's dataset, then it must match. Return the target
-        Ok(targets[0])
-    } else {
-        // Otherwise, Nexus cannot know which region to target for replacement.
-        // Attempt grabbing the id from the corresponding Crucible agent: the
-        // sled or disk may not be physically gone, or we may be running in a
-        // test where the allocation strategy does not mandate distinct sleds.
+            let opctx = crate::context::op_context_for_saga_action(
+                &sagactx,
+                &params.serialized_authn,
+            );
 
-        let db_dataset = osagactx
-            .datastore()
-            .dataset_get(db_region.dataset_id())
-            .await
-            .map_err(ActionError::action_failed)?;
+            let db_region = osagactx
+                .datastore()
+                .get_region(params.request.old_region_id)
+                .await
+                .map_err(ActionError::action_failed)?;
 
-        match get_region_from_agent(
-            &db_dataset.address(),
-            params.request.old_region_id,
-        )
-        .await
-        {
-            Ok(region) => {
-                // If the Crucible agent is still answering (i.e. if a region
-                // replacement was requested and the sled is still there, or if
-                // this is running in a test), then we know the port number for
-                // the region.
-                Ok(SocketAddrV6::new(
-                    *db_dataset.address().ip(),
-                    region.port_number,
-                    0,
-                    0,
-                ))
-            }
+            let targets = osagactx
+                .datastore()
+                .get_dataset_rw_regions_in_volume(
+                    &opctx,
+                    db_region.dataset_id(),
+                    db_region.volume_id(),
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
 
-            Err(e) => {
-                error!(
-                    log,
-                    "error contacting crucible agent: {e}";
-                    "address" => ?db_dataset.address(),
-                );
-
-                // Bail out here!
+            if targets.len() == 1 {
+                // If there's a single RW region in the volume that matches this
+                // region's dataset, then it must match. Return the target.
+                Ok(targets[0])
+            } else {
+                // Otherwise, Nexus cannot know the region's port. Return an
+                // error.
                 Err(ActionError::action_failed(format!(
                     "{} regions match dataset {} in volume {}",
                     targets.len(),
@@ -528,6 +512,8 @@ async fn srrs_get_old_region_address(
                 )))
             }
         }
+
+        Err(e) => Err(ActionError::action_failed(e)),
     }
 }
 
@@ -555,12 +541,13 @@ async fn srrs_replace_region_in_volume(
         "ensured_dataset_and_region",
     )?;
 
-    let new_region_address = SocketAddrV6::new(
-        *new_dataset.address().ip(),
-        ensured_region.port_number,
-        0,
-        0,
-    );
+    let Some(new_address) = new_dataset.address() else {
+        return Err(ActionError::action_failed(Error::internal_error(
+            "Dataset missing IP address",
+        )));
+    };
+    let new_region_address =
+        SocketAddrV6::new(*new_address.ip(), ensured_region.port_number, 0, 0);
 
     // If this node is rerun, the forward action will have overwritten
     // db_region's volume id, so get the cached copy.
@@ -632,12 +619,11 @@ async fn srrs_replace_region_in_volume_undo(
         "ensured_dataset_and_region",
     )?;
 
-    let new_region_address = SocketAddrV6::new(
-        *new_dataset.address().ip(),
-        ensured_region.port_number,
-        0,
-        0,
-    );
+    let Some(new_address) = new_dataset.address() else {
+        anyhow::bail!("Dataset missing IP address");
+    };
+    let new_region_address =
+        SocketAddrV6::new(*new_address.ip(), ensured_region.port_number, 0, 0);
 
     // The forward action will have overwritten db_region's volume id, so get
     // the cached copy.
@@ -799,7 +785,6 @@ pub(crate) mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
-    use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Asset;
     use sled_agent_client::types::VolumeConstructionRequest;
@@ -807,6 +792,8 @@ pub(crate) mod test {
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+    type DiskTest<'a> =
+        nexus_test_utils::resource_helpers::DiskTest<'a, crate::Server>;
 
     const DISK_NAME: &str = "my-disk";
     const PROJECT_NAME: &str = "springfield-squidport";
@@ -816,7 +803,7 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let mut disk_test = DiskTest::new(cptestctx).await;
-        disk_test.add_zpool_with_dataset(&cptestctx).await;
+        disk_test.add_zpool_with_dataset(cptestctx.first_sled()).await;
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
@@ -864,19 +851,18 @@ pub(crate) mod test {
             .unwrap();
 
         // Run the region replacement start saga
-        let dag = create_saga_dag::<SagaRegionReplacementStart>(Params {
+        let params = Params {
             serialized_authn: Serialized::for_opctx(&opctx),
             request: request.clone(),
             allocation_strategy: RegionAllocationStrategy::Random {
                 seed: None,
             },
-        })
-        .unwrap();
-
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-
-        // Actually run the saga
-        let output = nexus.run_saga(runnable_saga).await.unwrap();
+        };
+        let output = nexus
+            .sagas
+            .saga_execute::<SagaRegionReplacementStart>(params)
+            .await
+            .unwrap();
 
         // Validate the state transition
         let result = datastore
@@ -915,25 +901,25 @@ pub(crate) mod test {
             Dataset::new(
                 Uuid::new_v4(),
                 Uuid::new_v4(),
-                "[fd00:1122:3344:101::1]:12345".parse().unwrap(),
+                Some("[fd00:1122:3344:101::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
             ),
             Dataset::new(
                 Uuid::new_v4(),
                 Uuid::new_v4(),
-                "[fd00:1122:3344:102::1]:12345".parse().unwrap(),
+                Some("[fd00:1122:3344:102::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
             ),
             Dataset::new(
                 Uuid::new_v4(),
                 Uuid::new_v4(),
-                "[fd00:1122:3344:103::1]:12345".parse().unwrap(),
+                Some("[fd00:1122:3344:103::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
             ),
             Dataset::new(
                 Uuid::new_v4(),
                 Uuid::new_v4(),
-                "[fd00:1122:3344:104::1]:12345".parse().unwrap(),
+                Some("[fd00:1122:3344:104::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
             ),
         ];
@@ -945,6 +931,8 @@ pub(crate) mod test {
                 512_i64.try_into().unwrap(),
                 10,
                 10,
+                1001,
+                false,
             ),
             Region::new(
                 datasets[1].id(),
@@ -952,6 +940,8 @@ pub(crate) mod test {
                 512_i64.try_into().unwrap(),
                 10,
                 10,
+                1002,
+                false,
             ),
             Region::new(
                 datasets[2].id(),
@@ -959,6 +949,8 @@ pub(crate) mod test {
                 512_i64.try_into().unwrap(),
                 10,
                 10,
+                1003,
+                false,
             ),
             Region::new(
                 datasets[3].id(),
@@ -966,6 +958,8 @@ pub(crate) mod test {
                 512_i64.try_into().unwrap(),
                 10,
                 10,
+                1004,
+                false,
             ),
         ];
 
@@ -1009,7 +1003,7 @@ pub(crate) mod test {
 
     pub(crate) async fn verify_clean_slate(
         cptestctx: &ControlPlaneTestContext,
-        test: &DiskTest,
+        test: &DiskTest<'_>,
         request: &RegionReplacement,
         affected_volume_original: &Volume,
         affected_region_original: &Region,
@@ -1033,11 +1027,11 @@ pub(crate) mod test {
 
     async fn three_region_allocations_exist(
         datastore: &DataStore,
-        test: &DiskTest,
+        test: &DiskTest<'_>,
     ) -> bool {
         let mut count = 0;
 
-        for zpool in &test.zpools {
+        for zpool in test.zpools() {
             for dataset in &zpool.datasets {
                 if datastore
                     .regions_total_occupied_size(dataset.id)
@@ -1132,7 +1126,7 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let mut disk_test = DiskTest::new(cptestctx).await;
-        disk_test.add_zpool_with_dataset(&cptestctx).await;
+        disk_test.add_zpool_with_dataset(cptestctx.first_sled()).await;
 
         let log = &cptestctx.logctx.log;
 
@@ -1209,7 +1203,7 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let mut disk_test = DiskTest::new(cptestctx).await;
-        disk_test.add_zpool_with_dataset(&cptestctx).await;
+        disk_test.add_zpool_with_dataset(cptestctx.first_sled()).await;
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;

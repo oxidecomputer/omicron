@@ -5,11 +5,6 @@
 //! Support for user-provided RSS configuration options.
 
 use crate::bootstrap_addrs::BootstrapPeers;
-use crate::http_entrypoints::CertificateUploadResponse;
-use crate::http_entrypoints::CurrentRssUserConfig;
-use crate::http_entrypoints::CurrentRssUserConfigSensitive;
-use crate::http_entrypoints::SetBgpAuthKeyStatus;
-use crate::RackV1Inventory;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
@@ -22,7 +17,6 @@ use bootstrap_agent_client::types::RackInitializeRequest;
 use bootstrap_agent_client::types::RecoverySiloConfig;
 use bootstrap_agent_client::types::UserId;
 use display_error_chain::DisplayErrorChain;
-use gateway_client::types::SpType;
 use omicron_certificates::CertificateError;
 use omicron_common::address;
 use omicron_common::address::Ipv4Range;
@@ -40,6 +34,8 @@ use std::mem;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use thiserror::Error;
+use wicket_common::inventory::RackV1Inventory;
+use wicket_common::inventory::SpType;
 use wicket_common::rack_setup::BgpAuthKey;
 use wicket_common::rack_setup::BgpAuthKeyId;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
@@ -50,6 +46,10 @@ use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 use wicket_common::rack_setup::UserSpecifiedPortConfig;
 use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
+use wicketd_api::CertificateUploadResponse;
+use wicketd_api::CurrentRssUserConfig;
+use wicketd_api::CurrentRssUserConfigSensitive;
+use wicketd_api::SetBgpAuthKeyStatus;
 
 // TODO-correctness For now, we always use the same rack subnet when running
 // RSS. When we get to multirack, this will be wrong, but there are many other
@@ -130,7 +130,7 @@ impl CurrentRssConfig {
                 let baseboard = Baseboard::new_gimlet(
                     state.serial_number.clone(),
                     state.model.clone(),
-                    state.revision.into(),
+                    state.revision,
                 );
                 let bootstrap_ip = bootstrap_sleds.get(&baseboard).copied();
                 Some(BootstrapSledDescription {
@@ -296,7 +296,7 @@ impl CurrentRssConfig {
             external_certificates: self.external_certificates.clone(),
             recovery_silo: RecoverySiloConfig {
                 silo_name: Name::try_from(RECOVERY_SILO_NAME).unwrap(),
-                user_name: UserId(RECOVERY_SILO_USERNAME.into()),
+                user_name: UserId::try_from(RECOVERY_SILO_USERNAME).unwrap(),
                 user_password_hash,
             },
             rack_network_config,

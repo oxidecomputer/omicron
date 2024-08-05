@@ -13,14 +13,13 @@ async-trait.workspace = true
 clap.workspace = true
 dropshot.workspace = true
 futures.workspace = true
-omicron-gateway.workspace = true
 gateway-messages.workspace = true
+gateway-types.workspace = true
 hex = { workspace = true, features = [ "serde" ] }
 omicron-common.workspace = true
 serde.workspace = true
 slog.workspace = true
 slog-dtrace.workspace = true
-sprockets-rot.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 toml.workspace = true

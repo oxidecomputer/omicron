@@ -8,7 +8,6 @@ use crate::config::SimulatedSpsConfig;
 use crate::config::SpComponentConfig;
 use crate::helpers::rot_slot_id_from_u16;
 use crate::helpers::rot_slot_id_to_u16;
-use crate::rot::RotSprocketExt;
 use crate::serial_number_padded;
 use crate::server;
 use crate::server::SimSpHandler;
@@ -45,20 +44,15 @@ use gateway_messages::SpError;
 use gateway_messages::SpPort;
 use gateway_messages::SpStateV2;
 use gateway_messages::StartupOptions;
+use gateway_types::component::SpState;
 use slog::debug;
 use slog::info;
 use slog::warn;
 use slog::Logger;
-use sprockets_rot::common::msgs::RotRequestV1;
-use sprockets_rot::common::msgs::RotResponseV1;
-use sprockets_rot::common::Ed25519PublicKey;
-use sprockets_rot::RotSprocket;
-use sprockets_rot::RotSprocketError;
 use std::iter;
 use std::net::SocketAddrV6;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::Mutex;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -70,8 +64,6 @@ use tokio::task::JoinHandle;
 pub const SIM_SIDECAR_BOARD: &str = "SimSidecarSp";
 
 pub struct Sidecar {
-    rot: Mutex<RotSprocket>,
-    manufacturing_public_key: Ed25519PublicKey,
     local_addrs: Option<[SocketAddrV6; 2]>,
     handler: Option<Arc<TokioMutex<Handler>>>,
     commands: mpsc::UnboundedSender<Command>,
@@ -90,14 +82,10 @@ impl Drop for Sidecar {
 
 #[async_trait]
 impl SimulatedSp for Sidecar {
-    async fn state(&self) -> omicron_gateway::http_entrypoints::SpState {
-        omicron_gateway::http_entrypoints::SpState::from(
+    async fn state(&self) -> SpState {
+        SpState::from(
             self.handler.as_ref().unwrap().lock().await.sp_state_impl(),
         )
-    }
-
-    fn manufacturing_public_key(&self) -> Ed25519PublicKey {
-        self.manufacturing_public_key
     }
 
     fn local_addr(&self, port: SpPort) -> Option<SocketAddrV6> {
@@ -115,13 +103,6 @@ impl SimulatedSp for Sidecar {
             .map_err(|_| "sidecar task died unexpectedly")
             .unwrap();
         rx.await.unwrap();
-    }
-
-    fn rot_request(
-        &self,
-        request: RotRequestV1,
-    ) -> Result<RotResponseV1, RotSprocketError> {
-        self.rot.lock().unwrap().handle_deserialized(request)
     }
 
     async fn last_sp_update_data(&self) -> Option<Box<[u8]>> {
@@ -224,11 +205,7 @@ impl Sidecar {
                 (None, None, None, None)
             };
 
-        let (manufacturing_public_key, rot) =
-            RotSprocket::bootstrap_from_config(&sidecar.common);
         Ok(Self {
-            rot: Mutex::new(rot),
-            manufacturing_public_key,
             local_addrs,
             handler,
             commands,

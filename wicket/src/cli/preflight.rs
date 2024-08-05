@@ -17,12 +17,11 @@ use std::borrow::Cow;
 use std::fmt::Display;
 use std::net::SocketAddrV6;
 use std::time::Duration;
-use update_engine::events::StepEvent;
-use update_engine::events::StepEventKind;
-use update_engine::events::StepInfo;
-use update_engine::events::StepInfoWithMetadata;
-use update_engine::events::StepOutcome;
-use update_engine::StepSpec;
+use wicket_common::preflight_check::StepEvent;
+use wicket_common::preflight_check::StepEventKind;
+use wicket_common::preflight_check::StepInfo;
+use wicket_common::preflight_check::StepInfoWithMetadata;
+use wicket_common::preflight_check::StepOutcome;
 use wicketd_client::types::PreflightUplinkCheckOptions;
 use wicketd_client::Client;
 
@@ -141,12 +140,10 @@ async fn poll_uplink_status_until_complete(client: Client) -> Result<()> {
     }
 }
 
-fn print_completed_steps<
-    S: StepSpec<CompletionMetadata = serde_json::Value>,
->(
-    step_events: Vec<StepEvent<S>>,
+fn print_completed_steps(
+    step_events: Vec<StepEvent>,
     last_seen: &mut Option<usize>,
-    all_steps: &mut Option<Vec<StepInfo<S>>>,
+    all_steps: &mut Option<Vec<StepInfo>>,
     progress_bar: &mut Option<ProgressBar>,
     execution_failed: &mut bool,
 ) -> Result<()> {
@@ -228,9 +225,9 @@ fn print_completed_steps<
     Ok(())
 }
 
-fn print_completed_step<S: StepSpec<CompletionMetadata = serde_json::Value>>(
-    info: &StepInfoWithMetadata<S>,
-    outcome: &StepOutcome<S>,
+fn print_completed_step(
+    info: &StepInfoWithMetadata,
+    outcome: &StepOutcome,
     step_elapsed: Duration,
 ) {
     let icon = icon_for_outcome(outcome);
@@ -243,8 +240,8 @@ fn print_completed_step<S: StepSpec<CompletionMetadata = serde_json::Value>>(
     );
 }
 
-fn print_failed_step<S: StepSpec>(
-    info: &StepInfoWithMetadata<S>,
+fn print_failed_step(
+    info: &StepInfoWithMetadata,
     step_elapsed: Duration,
     message: String,
 ) {
@@ -252,27 +249,22 @@ fn print_failed_step<S: StepSpec>(
     print_step(icon, info, step_elapsed, None, Some(&Cow::from(message)));
 }
 
-fn print_step<S: StepSpec>(
+fn print_step(
     icon: impl Display,
-    info: &StepInfoWithMetadata<S>,
+    info: &StepInfoWithMetadata,
     step_elapsed: Duration,
-    outcome_metadata: Option<&serde_json::Value>,
+    outcome_metadata: Option<&Vec<String>>,
     message: Option<&Cow<'static, str>>,
 ) {
     println!("{icon} {} ({:?})", info.info.description, step_elapsed);
     if let Some(metadata) = outcome_metadata {
-        if let Some(array) = metadata.as_array() {
-            for element in array {
-                if let Some(s) = element.as_str() {
-                    println!("    {s}");
-                } else {
-                    println!("    unexpected metadata type: {element:?}");
-                }
-            }
-        } else {
-            println!("    unexpected metadata type: {metadata:?}");
+        for element in metadata {
+            println!("    {element}");
         }
+    } else {
+        println!("    missing metadata");
     }
+
     if let Some(message) = message {
         for line in message.split('\n') {
             println!("    {line}");
@@ -280,7 +272,7 @@ fn print_step<S: StepSpec>(
     }
 }
 
-fn icon_for_outcome<S: StepSpec>(outcome: &StepOutcome<S>) -> Box<dyn Display> {
+fn icon_for_outcome(outcome: &StepOutcome) -> Box<dyn Display> {
     match outcome {
         StepOutcome::Success { .. } => Box::new('✔'.green()),
         StepOutcome::Warning { .. } => Box::new('⚠'.red()),

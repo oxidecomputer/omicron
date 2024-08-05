@@ -92,11 +92,9 @@
 // backwards-compatible way (but obviously one wouldn't get the scaling benefits
 // while continuing to use the old API).
 
-use crate::dns_types::{DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord};
 use anyhow::{anyhow, Context};
 use camino::Utf8PathBuf;
-use hickory_client::rr::Name;
-use hickory_proto::rr::LowerName;
+use dns_server_api::{DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord};
 use serde::{Deserialize, Serialize};
 use sled::transaction::ConflictableTransactionError;
 use slog::{debug, error, info, o, warn};
@@ -777,15 +775,13 @@ impl<'a, 'b> Drop for UpdateGuard<'a, 'b> {
 #[cfg(test)]
 mod test {
     use super::{Config, Store, UpdateError};
-    use crate::dns_types::DnsConfigParams;
-    use crate::dns_types::DnsConfigZone;
-    use crate::dns_types::DnsRecord;
     use crate::storage::QueryError;
     use anyhow::Context;
     use camino::Utf8PathBuf;
     use camino_tempfile::Utf8TempDir;
-    use hickory_client::rr::Name;
-    use hickory_proto::rr::LowerName;
+    use dns_server_api::DnsConfigParams;
+    use dns_server_api::DnsConfigZone;
+    use dns_server_api::DnsRecord;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
     use std::collections::HashMap;

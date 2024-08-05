@@ -16,10 +16,10 @@ use crate::oxql::point::DataType;
 use crate::oxql::point::MetricType;
 use crate::oxql::point::Points;
 use crate::oxql::point::ValueArray;
-use crate::oxql::query::special_idents;
 use crate::oxql::Error;
 use crate::oxql::Table;
 use crate::oxql::Timeseries;
+use crate::shells::special_idents;
 use chrono::DateTime;
 use chrono::Utc;
 use oximeter::FieldType;
@@ -61,7 +61,7 @@ impl core::str::FromStr for Filter {
 const EXPR_COMPLEXITY_ITERATIVE_LIMIT: usize = 32;
 
 // A crude limit on expression complexity, governing how many times we
-// recurisvely apply a DNF simplification before bailing out.
+// recursively apply a DNF simplification before bailing out.
 const EXPR_COMPLEXITY_RECURSIVE_LIMIT: usize = 32;
 
 impl Filter {
@@ -518,8 +518,9 @@ fn implicit_field_names(
                 MetricType::Gauge,
                 DataType::IntegerDistribution | DataType::DoubleDistribution,
             ) => {
-                out.insert(special_idents::BINS);
-                out.insert(special_idents::COUNTS);
+                special_idents::DISTRIBUTION_IDENTS.iter().for_each(|ident| {
+                    out.insert(ident);
+                });
             }
             // Scalars, either delta or cumulatives.
             (
@@ -534,8 +535,9 @@ fn implicit_field_names(
                 MetricType::Delta | MetricType::Cumulative,
                 DataType::IntegerDistribution | DataType::DoubleDistribution,
             ) => {
-                out.insert(special_idents::BINS);
-                out.insert(special_idents::COUNTS);
+                special_idents::DISTRIBUTION_IDENTS.iter().for_each(|ident| {
+                    out.insert(ident);
+                });
                 out.insert(special_idents::START_TIME);
             }
             // Impossible combinations

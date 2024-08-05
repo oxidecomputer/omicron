@@ -4,12 +4,16 @@
 
 //! Utilities to manage running zones.
 
-use crate::addrobj::AddrObject;
+use crate::addrobj::{
+    AddrObject, DHCP_ADDROBJ_NAME, IPV4_STATIC_ADDROBJ_NAME,
+    IPV6_STATIC_ADDROBJ_NAME,
+};
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
-use crate::zone::{AddressRequest, IPADM, ZONE_PREFIX};
+use crate::zone::{AddressRequest, ZONE_PREFIX};
+use crate::zpool::{PathInPool, ZpoolName};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use ipnetwork::IpNetwork;
@@ -45,7 +49,7 @@ pub enum ServiceError {
 pub struct RunCommandError {
     zone: String,
     #[source]
-    err: crate::ExecutionError,
+    pub err: crate::ExecutionError,
 }
 
 /// Errors returned from [`RunningZone::boot`].
@@ -99,60 +103,6 @@ pub enum EnsureAddressError {
     // TODO-remove(#2931): See comment in `ensure_address_for_port`
     #[error(transparent)]
     OpteGatewayConfig(#[from] RunCommandError),
-}
-
-/// Errors returned from [`RunningZone::get`].
-#[derive(thiserror::Error, Debug)]
-pub enum GetZoneError {
-    #[error("While looking up zones with prefix '{prefix}', could not get zones: {err}")]
-    GetZones {
-        prefix: String,
-        #[source]
-        err: crate::zone::AdmError,
-    },
-
-    #[error("Invalid Utf8 path: {0}")]
-    FromPathBuf(#[from] camino::FromPathBufError),
-
-    #[error("Zone with prefix '{prefix}' not found")]
-    NotFound { prefix: String },
-
-    #[error("Cannot get zone '{name}': it is in the {state:?} state instead of running")]
-    NotRunning { name: String, state: zone::State },
-
-    #[error(
-        "Cannot get zone '{name}': Failed to acquire control interface {err}"
-    )]
-    ControlInterface {
-        name: String,
-        #[source]
-        err: crate::zone::GetControlInterfaceError,
-    },
-
-    #[error("Cannot get zone '{name}': Failed to create addrobj: {err}")]
-    AddrObject {
-        name: String,
-        #[source]
-        err: crate::addrobj::ParseError,
-    },
-
-    #[error(
-        "Cannot get zone '{name}': Failed to ensure address exists: {err}"
-    )]
-    EnsureAddress {
-        name: String,
-        #[source]
-        err: crate::zone::EnsureAddressError,
-    },
-
-    #[error(
-        "Cannot get zone '{name}': Incorrect bootstrap interface access {err}"
-    )]
-    BootstrapInterface {
-        name: String,
-        #[source]
-        err: crate::zone::GetBootstrapInterfaceError,
-    },
 }
 
 #[cfg(target_os = "illumos")]
@@ -407,8 +357,17 @@ impl RunningZone {
         self.inner.root()
     }
 
+    /// Returns the zpool on which the filesystem path has been placed.
+    pub fn root_zpool(&self) -> Option<&ZpoolName> {
+        self.inner.zonepath.pool.as_ref()
+    }
+
     pub fn control_interface(&self) -> AddrObject {
-        AddrObject::new(self.inner.get_control_vnic_name(), "omicron6").unwrap()
+        AddrObject::new(
+            self.inner.get_control_vnic_name(),
+            IPV6_STATIC_ADDROBJ_NAME,
+        )
+        .unwrap()
     }
 
     /// Runs a command within the Zone, return the output.
@@ -510,7 +469,7 @@ impl RunningZone {
     /// Note that the zone must already be configured to be booted.
     pub async fn boot(zone: InstalledZone) -> Result<Self, BootError> {
         // Boot the zone.
-        info!(zone.log, "Zone booting");
+        info!(zone.log, "Booting {} zone", zone.name);
 
         Zones::boot(&zone.name).await?;
 
@@ -528,61 +487,11 @@ impl RunningZone {
                 zone: zone.name.to_string(),
             })?;
 
-        // If the zone is self-assembling, then SMF service(s) inside the zone
-        // will be creating the listen address for the zone's service(s),
-        // setting the appropriate ifprop MTU, and so on. The idea behind
-        // self-assembling zones is that once they boot there should be *no*
-        // zlogin required.
-
-        // Use the zone ID in order to check if /var/svc/profile/site.xml
-        // exists.
         let id = Zones::id(&zone.name)
             .await?
             .ok_or_else(|| BootError::NoZoneId { zone: zone.name.clone() })?;
-        let site_profile_xml_exists =
-            std::path::Path::new(&zone.site_profile_xml_path()).exists();
 
         let running_zone = RunningZone { id: Some(id), inner: zone };
-
-        if !site_profile_xml_exists {
-            // If the zone is not self-assembling, make sure the control vnic
-            // has an IP MTU of 9000 inside the zone.
-            const CONTROL_VNIC_MTU: usize = 9000;
-            let vnic = running_zone.inner.control_vnic.name().to_string();
-
-            let commands = vec![
-                vec![
-                    IPADM.to_string(),
-                    "create-if".to_string(),
-                    "-t".to_string(),
-                    vnic.clone(),
-                ],
-                vec![
-                    IPADM.to_string(),
-                    "set-ifprop".to_string(),
-                    "-t".to_string(),
-                    "-p".to_string(),
-                    format!("mtu={}", CONTROL_VNIC_MTU),
-                    "-m".to_string(),
-                    "ipv4".to_string(),
-                    vnic.clone(),
-                ],
-                vec![
-                    IPADM.to_string(),
-                    "set-ifprop".to_string(),
-                    "-t".to_string(),
-                    "-p".to_string(),
-                    format!("mtu={}", CONTROL_VNIC_MTU),
-                    "-m".to_string(),
-                    "ipv6".to_string(),
-                    vnic,
-                ],
-            ];
-
-            for args in &commands {
-                running_zone.run_cmd(args)?;
-            }
-        }
 
         Ok(running_zone)
     }
@@ -592,10 +501,10 @@ impl RunningZone {
         addrtype: AddressRequest,
     ) -> Result<IpNetwork, EnsureAddressError> {
         let name = match addrtype {
-            AddressRequest::Dhcp => "omicron",
+            AddressRequest::Dhcp => DHCP_ADDROBJ_NAME,
             AddressRequest::Static(net) => match net.ip() {
-                std::net::IpAddr::V4(_) => "omicron4",
-                std::net::IpAddr::V6(_) => "omicron6",
+                std::net::IpAddr::V4(_) => IPV4_STATIC_ADDROBJ_NAME,
+                std::net::IpAddr::V6(_) => IPV6_STATIC_ADDROBJ_NAME,
             },
         };
         self.ensure_address_with_name(addrtype, name).await
@@ -623,7 +532,6 @@ impl RunningZone {
         &self,
         address: Ipv6Addr,
     ) -> Result<(), EnsureAddressError> {
-        info!(self.inner.log, "Adding bootstrap address");
         let vnic = self.inner.bootstrap_vnic.as_ref().ok_or_else(|| {
             EnsureAddressError::MissingBootstrapVnic {
                 address: address.to_string(),
@@ -657,15 +565,13 @@ impl RunningZone {
                 port_idx,
             }
         })?;
-        // TODO-remove(#2932): Switch to using port directly once vnic is no longer needed.
-        let addrobj =
-            AddrObject::new(port.vnic_name(), name).map_err(|err| {
-                EnsureAddressError::AddrObject {
-                    request: AddressRequest::Dhcp,
-                    zone: self.inner.name.clone(),
-                    err,
-                }
-            })?;
+        let addrobj = AddrObject::new(port.name(), name).map_err(|err| {
+            EnsureAddressError::AddrObject {
+                request: AddressRequest::Dhcp,
+                zone: self.inner.name.clone(),
+                err,
+            }
+        })?;
         let zone = Some(self.inner.name.as_ref());
         if let IpAddr::V4(gateway) = port.gateway().ip() {
             let addr =
@@ -684,7 +590,7 @@ impl RunningZone {
                 &private_ip.to_string(),
                 "-interface",
                 "-ifp",
-                port.vnic_name(),
+                port.name(),
             ])?;
             self.run_cmd(&[
                 "/usr/sbin/route",
@@ -785,7 +691,7 @@ impl RunningZone {
         gz_bootstrap_addr: Ipv6Addr,
         zone_vnic_name: &str,
     ) -> Result<(), RunCommandError> {
-        self.run_cmd([
+        let args = [
             "/usr/sbin/route",
             "add",
             "-inet6",
@@ -793,97 +699,9 @@ impl RunningZone {
             &gz_bootstrap_addr.to_string(),
             "-ifp",
             zone_vnic_name,
-        ])?;
+        ];
+        self.run_cmd(args)?;
         Ok(())
-    }
-
-    /// Looks up a running zone based on the `zone_prefix`, if one already exists.
-    ///
-    /// - If the zone was found, is running, and has a network interface, it is
-    /// returned.
-    /// - If the zone was not found `Error::NotFound` is returned.
-    /// - If the zone was found, but not running, `Error::NotRunning` is
-    /// returned.
-    /// - Other errors may be returned attempting to look up and accessing an
-    /// address on the zone.
-    pub async fn get(
-        log: &Logger,
-        vnic_allocator: &VnicAllocator<Etherstub>,
-        zone_prefix: &str,
-        addrtype: AddressRequest,
-    ) -> Result<Self, GetZoneError> {
-        let zone_info = Zones::get()
-            .await
-            .map_err(|err| GetZoneError::GetZones {
-                prefix: zone_prefix.to_string(),
-                err,
-            })?
-            .into_iter()
-            .find(|zone_info| zone_info.name().starts_with(&zone_prefix))
-            .ok_or_else(|| GetZoneError::NotFound {
-                prefix: zone_prefix.to_string(),
-            })?;
-
-        if zone_info.state() != zone::State::Running {
-            return Err(GetZoneError::NotRunning {
-                name: zone_info.name().to_string(),
-                state: zone_info.state(),
-            });
-        }
-
-        let zone_name = zone_info.name();
-        let vnic_name =
-            Zones::get_control_interface(zone_name).map_err(|err| {
-                GetZoneError::ControlInterface {
-                    name: zone_name.to_string(),
-                    err,
-                }
-            })?;
-        let addrobj = AddrObject::new_control(&vnic_name).map_err(|err| {
-            GetZoneError::AddrObject { name: zone_name.to_string(), err }
-        })?;
-        Zones::ensure_address(Some(zone_name), &addrobj, addrtype).map_err(
-            |err| GetZoneError::EnsureAddress {
-                name: zone_name.to_string(),
-                err,
-            },
-        )?;
-
-        let control_vnic = vnic_allocator
-            .wrap_existing(vnic_name)
-            .expect("Failed to wrap valid control VNIC");
-
-        // The bootstrap address for a running zone never changes,
-        // so there's no need to call `Zones::ensure_address`.
-        // Currently, only the switch zone has a bootstrap interface.
-        let bootstrap_vnic = Zones::get_bootstrap_interface(zone_name)
-            .map_err(|err| GetZoneError::BootstrapInterface {
-                name: zone_name.to_string(),
-                err,
-            })?
-            .map(|name| {
-                vnic_allocator
-                    .wrap_existing(name)
-                    .expect("Failed to wrap valid bootstrap VNIC")
-            });
-
-        Ok(Self {
-            id: zone_info.id().map(|x| {
-                x.try_into().expect("zoneid_t is expected to be an i32")
-            }),
-            inner: InstalledZone {
-                log: log.new(o!("zone" => zone_name.to_string())),
-                zonepath: zone_info.path().to_path_buf().try_into()?,
-                name: zone_name.to_string(),
-                control_vnic,
-                // TODO(https://github.com/oxidecomputer/omicron/issues/725)
-                //
-                // Re-initialize guest_vnic state by inspecting the zone.
-                opte_ports: vec![],
-                links: vec![],
-                bootstrap_vnic,
-            },
-        })
     }
 
     /// Return references to the OPTE ports for this zone.
@@ -914,7 +732,7 @@ impl RunningZone {
 
     /// Return a reference to the links for this zone.
     pub fn links(&self) -> &Vec<Link> {
-        &self.inner.links
+        &self.inner.links()
     }
 
     /// Return a mutable reference to the links for this zone.
@@ -1081,7 +899,7 @@ pub struct InstalledZone {
     log: Logger,
 
     // Filesystem path of the zone
-    zonepath: Utf8PathBuf,
+    zonepath: PathInPool,
 
     // Name of the Zone.
     name: String,
@@ -1131,7 +949,7 @@ impl InstalledZone {
 
     /// Returns the filesystem path to the zonepath
     pub fn zonepath(&self) -> &Utf8Path {
-        &self.zonepath
+        &self.zonepath.path
     }
 
     pub fn site_profile_xml_path(&self) -> Utf8PathBuf {
@@ -1147,7 +965,12 @@ impl InstalledZone {
 
     /// Returns the filesystem path to the zone's root in the GZ.
     pub fn root(&self) -> Utf8PathBuf {
-        self.zonepath.join(Self::ROOT_FS_PATH)
+        self.zonepath.path.join(Self::ROOT_FS_PATH)
+    }
+
+    /// Return a reference to the links for this zone.
+    pub fn links(&self) -> &Vec<Link> {
+        &self.links
     }
 }
 
@@ -1198,7 +1021,7 @@ pub struct ZoneBuilder<'a> {
     /// Allocates the NIC used for control plane communication.
     underlay_vnic_allocator: Option<&'a VnicAllocator<Etherstub>>,
     /// Filesystem path at which the installed zone will reside.
-    zone_root_path: Option<&'a Utf8Path>,
+    zone_root_path: Option<PathInPool>,
     /// The directories that will be searched for the image tarball for the
     /// provided zone type ([`Self::with_zone_type`]).
     zone_image_paths: Option<&'a [Utf8PathBuf]>,
@@ -1251,7 +1074,7 @@ impl<'a> ZoneBuilder<'a> {
     }
 
     /// Filesystem path at which the installed zone will reside.
-    pub fn with_zone_root_path(mut self, root_path: &'a Utf8Path) -> Self {
+    pub fn with_zone_root_path(mut self, root_path: PathInPool) -> Self {
         self.zone_root_path = Some(root_path);
         self
     }
@@ -1345,8 +1168,11 @@ impl<'a> ZoneBuilder<'a> {
                 self.zone_type?,
                 self.unique_name,
             );
-            let zonepath = temp_dir
-                .join(self.zone_root_path?.strip_prefix("/").unwrap())
+            let mut zonepath = self.zone_root_path?;
+            zonepath.path = temp_dir
+                .join(
+                    zonepath.path.strip_prefix("/").unwrap()
+                )
                 .join(&full_zone_name);
             let iz = InstalledZone {
                 log: self.log?,
@@ -1376,7 +1202,7 @@ impl<'a> ZoneBuilder<'a> {
         let Self {
             log: Some(log),
             underlay_vnic_allocator: Some(underlay_vnic_allocator),
-            zone_root_path: Some(zone_root_path),
+            zone_root_path: Some(mut zone_root_path),
             zone_image_paths: Some(zone_image_paths),
             zone_type: Some(zone_type),
             unique_name,
@@ -1427,7 +1253,7 @@ impl<'a> ZoneBuilder<'a> {
 
         let mut net_device_names: Vec<String> = opte_ports
             .iter()
-            .map(|(port, _)| port.vnic_name().to_string())
+            .map(|(port, _)| port.name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
             .chain(bootstrap_vnic.as_ref().map(|vnic| vnic.name().to_string()))
             .chain(links.iter().map(|nic| nic.name().to_string()))
@@ -1440,6 +1266,7 @@ impl<'a> ZoneBuilder<'a> {
         net_device_names.sort();
         net_device_names.dedup();
 
+        zone_root_path.path = zone_root_path.path.join(&full_zone_name);
         Zones::install_omicron_zone(
             &log,
             &zone_root_path,
@@ -1460,7 +1287,7 @@ impl<'a> ZoneBuilder<'a> {
 
         Ok(InstalledZone {
             log: log.new(o!("zone" => full_zone_name.clone())),
-            zonepath: zone_root_path.join(&full_zone_name),
+            zonepath: zone_root_path,
             name: full_zone_name,
             control_vnic,
             bootstrap_vnic,

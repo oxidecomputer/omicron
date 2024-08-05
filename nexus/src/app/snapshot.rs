@@ -48,7 +48,8 @@ impl super::Nexus {
                 snapshot: NameOrId::Id(_),
                 ..
             } => Err(Error::invalid_request(
-              "when providing snpashot as an ID, prject should not be specified"
+              "when providing snapshot as an ID, project should not \
+              be specified"
             )),
             _ => Err(Error::invalid_request(
               "snapshot should either be an ID or project should be specified"
@@ -125,7 +126,8 @@ impl super::Nexus {
         };
 
         let saga_outputs = self
-            .execute_saga::<sagas::snapshot_create::SagaSnapshotCreate>(
+            .sagas
+            .saga_execute::<sagas::snapshot_create::SagaSnapshotCreate>(
                 saga_params,
             )
             .await?;
@@ -165,10 +167,11 @@ impl super::Nexus {
             snapshot: db_snapshot,
         };
 
-        self.execute_saga::<sagas::snapshot_delete::SagaSnapshotDelete>(
-            saga_params,
-        )
-        .await?;
+        self.sagas
+            .saga_execute::<sagas::snapshot_delete::SagaSnapshotDelete>(
+                saga_params,
+            )
+            .await?;
 
         Ok(())
     }

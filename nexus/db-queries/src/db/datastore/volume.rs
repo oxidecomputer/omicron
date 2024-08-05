@@ -1164,12 +1164,14 @@ impl DataStore {
 
         let mut targets: Vec<SocketAddrV6> = vec![];
 
-        find_matching_rw_regions_in_volume(
-            &vcr,
-            dataset.address().ip(),
-            &mut targets,
-        )
-        .map_err(|e| Error::internal_error(&e.to_string()))?;
+        let Some(address) = dataset.address() else {
+            return Err(Error::internal_error(
+                "Crucible Dataset missing IP address",
+            ));
+        };
+
+        find_matching_rw_regions_in_volume(&vcr, address.ip(), &mut targets)
+            .map_err(|e| Error::internal_error(&e.to_string()))?;
 
         Ok(targets)
     }
@@ -1527,10 +1529,7 @@ where
     D: Deserializer<'de>,
     T: Deserialize<'de>,
 {
-    Ok(match Option::<Vec<T>>::deserialize(de)? {
-        Some(v) => v,
-        None => vec![],
-    })
+    Ok(Option::<Vec<T>>::deserialize(de)?.unwrap_or_default())
 }
 
 impl DataStore {
@@ -2346,6 +2345,8 @@ mod tests {
                     512_i64.try_into().unwrap(),
                     10,
                     10,
+                    10001,
+                    false,
                 );
 
                 region_and_volume_ids[i].0 = region.id();

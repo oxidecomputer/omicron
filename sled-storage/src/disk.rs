@@ -8,77 +8,16 @@ use anyhow::bail;
 use camino::{Utf8Path, Utf8PathBuf};
 use derive_more::From;
 use key_manager::StorageKeyRequester;
-use omicron_common::api::external::Generation;
-use omicron_common::disk::DiskIdentity;
-use omicron_common::ledger::Ledgerable;
+use omicron_common::disk::{DiskIdentity, DiskVariant};
 use omicron_common::zpool_name::{ZpoolKind, ZpoolName};
 use omicron_uuid_kinds::ZpoolUuid;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use sled_hardware::{
-    DiskVariant, Partition, PooledDisk, PooledDiskError, UnparsedDisk,
+    DiskFirmware, Partition, PooledDisk, PooledDiskError, UnparsedDisk,
 };
 use slog::{info, Logger};
-use uuid::Uuid;
 
 use crate::config::MountConfig;
 use crate::dataset;
-
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-)]
-pub struct OmicronPhysicalDiskConfig {
-    pub identity: DiskIdentity,
-    pub id: Uuid,
-    pub pool_id: ZpoolUuid,
-}
-
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-pub struct OmicronPhysicalDisksConfig {
-    /// generation number of this configuration
-    ///
-    /// This generation number is owned by the control plane (i.e., RSS or
-    /// Nexus, depending on whether RSS-to-Nexus handoff has happened).  It
-    /// should not be bumped within Sled Agent.
-    ///
-    /// Sled Agent rejects attempts to set the configuration to a generation
-    /// older than the one it's currently running.
-    pub generation: Generation,
-
-    pub disks: Vec<OmicronPhysicalDiskConfig>,
-}
-
-impl Default for OmicronPhysicalDisksConfig {
-    fn default() -> Self {
-        Self { generation: Generation::new(), disks: vec![] }
-    }
-}
-
-impl Ledgerable for OmicronPhysicalDisksConfig {
-    fn is_newer_than(&self, other: &OmicronPhysicalDisksConfig) -> bool {
-        self.generation > other.generation
-    }
-
-    // No need to do this, the generation number is provided externally.
-    fn generation_bump(&mut self) {}
-}
-
-impl OmicronPhysicalDisksConfig {
-    pub fn new() -> Self {
-        Self { generation: Generation::new(), disks: vec![] }
-    }
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum DiskError {
@@ -102,6 +41,11 @@ pub struct SyntheticDisk {
 // we'd still like to protect against it, since it could confuse the inventory
 // system.
 const SYNTHETIC_SLOT_OFFSET: i64 = 1024;
+
+// A generic name for the firmware in slot1 of an NVMe device.
+//
+// bhyve for example uses "1.0" and marks slot1 as read-only.
+const SYNTHETIC_FIRMWARE_SLOT1: &str = "synthetic 1.0";
 
 impl SyntheticDisk {
     // "Manages" a SyntheticDisk by ensuring that it has a Zpool and importing
@@ -151,6 +95,7 @@ pub struct RawSyntheticDisk {
     pub identity: DiskIdentity,
     pub variant: DiskVariant,
     pub slot: i64,
+    pub firmware: DiskFirmware,
 }
 
 impl RawSyntheticDisk {
@@ -195,11 +140,19 @@ impl RawSyntheticDisk {
             model: format!("synthetic-model-{variant:?}"),
         };
 
+        let firmware = DiskFirmware::new(
+            1,
+            None,
+            true,
+            vec![Some(SYNTHETIC_FIRMWARE_SLOT1.to_string())],
+        );
+
         Ok(Self {
             path: path.into(),
             identity,
             variant,
             slot: slot + SYNTHETIC_SLOT_OFFSET,
+            firmware,
         })
     }
 }
@@ -276,6 +229,13 @@ impl RawDisk {
         match self {
             Self::Real(disk) => disk.slot(),
             Self::Synthetic(disk) => disk.slot,
+        }
+    }
+
+    pub fn firmware(&self) -> &DiskFirmware {
+        match self {
+            RawDisk::Real(unparsed) => unparsed.firmware(),
+            RawDisk::Synthetic(synthetic) => &synthetic.firmware,
         }
     }
 }
@@ -413,6 +373,24 @@ impl Disk {
             Self::Synthetic(disk) => disk.raw.slot,
         }
     }
+
+    pub(crate) fn update_firmware_metadata(&mut self, raw_disk: &RawDisk) {
+        match self {
+            Disk::Real(pooled_disk) => {
+                pooled_disk.firmware = raw_disk.firmware().clone();
+            }
+            Disk::Synthetic(synthetic_disk) => {
+                synthetic_disk.raw.firmware = raw_disk.firmware().clone();
+            }
+        }
+    }
+
+    pub fn firmware(&self) -> &DiskFirmware {
+        match self {
+            Disk::Real(disk) => &disk.firmware,
+            Disk::Synthetic(disk) => &disk.raw.firmware,
+        }
+    }
 }
 
 impl From<Disk> for RawDisk {
@@ -425,6 +403,7 @@ impl From<Disk> for RawDisk {
                 pooled_disk.variant,
                 pooled_disk.identity,
                 pooled_disk.is_boot_disk,
+                pooled_disk.firmware,
             )),
             Disk::Synthetic(synthetic_disk) => {
                 RawDisk::Synthetic(synthetic_disk.raw)

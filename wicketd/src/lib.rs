@@ -9,15 +9,17 @@ mod context;
 mod helpers;
 mod http_entrypoints;
 mod installinator_progress;
-mod inventory;
 pub mod mgs;
 mod nexus_proxy;
 mod preflight_check;
 mod rss_config;
 mod update_tracker;
 
-use anyhow::{anyhow, Context, Result};
-use artifacts::{WicketdArtifactServer, WicketdArtifactStore};
+use anyhow::{anyhow, bail, Context, Result};
+use artifacts::{
+    WicketdArtifactStore, WicketdInstallinatorApiImpl,
+    WicketdInstallinatorContext,
+};
 use bootstrap_addrs::BootstrapPeers;
 pub use config::Config;
 pub(crate) use context::ServerContext;
@@ -25,7 +27,6 @@ use display_error_chain::DisplayErrorChain;
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer};
 pub use installinator_progress::{IprUpdateTracker, RunningUpdateState};
 use internal_dns::resolver::Resolver;
-pub use inventory::{RackV1Inventory, SpInventory};
 use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
 use nexus_proxy::NexusTcpProxy;
@@ -41,18 +42,6 @@ use std::{
     sync::Arc,
 };
 pub use update_tracker::{StartUpdateError, UpdateTracker};
-
-/// Run the OpenAPI generator for the API; which emits the OpenAPI spec
-/// to stdout.
-pub fn run_openapi() -> Result<(), String> {
-    http_entrypoints::api()
-        .openapi("Oxide Technician Port Control Service", "0.0.1")
-        .description("API for use by the technician port TUI: wicket")
-        .contact_url("https://oxide.computer")
-        .contact_email("api@oxide.computer")
-        .write(&mut std::io::stdout())
-        .map_err(|e| e.to_string())
-}
 
 /// Command line arguments for wicketd
 pub struct Args {
@@ -118,7 +107,7 @@ impl SmfConfigValues {
 
 pub struct Server {
     pub wicketd_server: HttpServer<ServerContext>,
-    pub artifact_server: HttpServer<installinator_artifactd::ServerContext>,
+    pub installinator_server: HttpServer<WicketdInstallinatorContext>,
     pub artifact_store: WicketdArtifactStore,
     pub update_tracker: Arc<UpdateTracker>,
     pub ipr_update_tracker: IprUpdateTracker,
@@ -127,14 +116,14 @@ pub struct Server {
 
 impl Server {
     /// Run an instance of the wicketd server
-    pub async fn start(log: slog::Logger, args: Args) -> Result<Self, String> {
+    pub async fn start(log: slog::Logger, args: Args) -> anyhow::Result<Self> {
         let (drain, registration) = slog_dtrace::with_drain(log);
 
         let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
         if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
             let msg = format!("failed to register DTrace probes: {}", e);
             error!(log, "{}", msg);
-            return Err(msg);
+            bail!(msg);
         } else {
             debug!(log, "registered DTrace probes");
         };
@@ -146,6 +135,7 @@ impl Server {
             // some endpoints.
             request_body_max_bytes: 4 << 30,
             default_handler_task_mode: HandlerTaskMode::Detached,
+            log_headers: vec![],
         };
 
         let mgs_manager = MgsManager::new(&log, args.mgs_address);
@@ -174,7 +164,8 @@ impl Server {
                     addr,
                 )
                 .map_err(|err| {
-                    format!("Could not create internal DNS resolver: {err}")
+                    anyhow!(err)
+                        .context("Could not create internal DNS resolver")
                 })
             })
             .transpose()?;
@@ -186,7 +177,9 @@ impl Server {
             &log,
         )
         .await
-        .map_err(|err| format!("failed to start Nexus TCP proxy: {err}"))?;
+        .map_err(|err| {
+            anyhow!(err).context("failed to start Nexus TCP proxy")
+        })?;
 
         let wicketd_server = {
             let ds_log = log.new(o!("component" => "dropshot (wicketd)"));
@@ -209,25 +202,39 @@ impl Server {
                 },
                 &ds_log,
             )
-            .map_err(|err| format!("initializing http server: {}", err))?
+            .map_err(|err| anyhow!(err).context("initializing http server"))?
             .start()
         };
 
-        let server =
-            WicketdArtifactServer::new(&log, store.clone(), ipr_artifact);
-        let artifact_server = installinator_artifactd::ArtifactServer::new(
-            server,
-            args.artifact_address,
-            &log,
-        )
-        .start()
-        .map_err(|error| {
-            format!("failed to start artifact server: {error:?}")
-        })?;
+        let installinator_server = {
+            let installinator_config = installinator_api::default_config(
+                SocketAddr::V6(args.artifact_address),
+            );
+            let api_description =
+                installinator_api::installinator_api::api_description::<
+                    WicketdInstallinatorApiImpl,
+                >()?;
+
+            dropshot::HttpServerStarter::new(
+                &installinator_config,
+                api_description,
+                WicketdInstallinatorContext::new(
+                    &log,
+                    store.clone(),
+                    ipr_artifact,
+                ),
+                &log,
+            )
+            .map_err(|err| {
+                anyhow!(err)
+                    .context("failed to create installinator artifact server")
+            })?
+            .start()
+        };
 
         Ok(Self {
             wicketd_server,
-            artifact_server,
+            installinator_server,
             artifact_store: store,
             update_tracker,
             ipr_update_tracker,
@@ -240,7 +247,7 @@ impl Server {
         self.wicketd_server.close().await.map_err(|error| {
             anyhow!("error closing wicketd server: {error}")
         })?;
-        self.artifact_server.close().await.map_err(|error| {
+        self.installinator_server.close().await.map_err(|error| {
             anyhow!("error closing artifact server: {error}")
         })?;
         self.nexus_tcp_proxy.shutdown();
@@ -257,7 +264,7 @@ impl Server {
                     Err(err) => Err(format!("running wicketd server: {err}")),
                 }
             }
-            res = self.artifact_server => {
+            res = self.installinator_server => {
                 match res {
                     Ok(()) => Err("artifact server exited unexpectedly".to_owned()),
                     // The artifact server returns an anyhow::Error, which has a

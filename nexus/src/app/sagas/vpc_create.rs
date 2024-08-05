@@ -8,7 +8,7 @@ use super::NexusSaga;
 use super::ACTION_GENERATE_ID;
 use crate::app::sagas::declare_saga_actions;
 use crate::external_api::params;
-use nexus_db_queries::db::queries::vpc_subnet::SubnetError;
+use nexus_db_queries::db::queries::vpc_subnet::InsertVpcSubnetError;
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults as defaults;
 use omicron_common::api::external;
@@ -17,6 +17,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRouteKind;
+use oxnet::IpNet;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -44,9 +45,13 @@ declare_saga_actions! {
         + svc_create_router
         - svc_create_router_undo
     }
-    VPC_CREATE_ROUTE -> "route" {
-        + svc_create_route
-        - svc_create_route_undo
+    VPC_CREATE_V4_ROUTE -> "route4" {
+        + svc_create_v4_route
+        - svc_create_v4_route_undo
+    }
+    VPC_CREATE_V6_ROUTE -> "route6" {
+        + svc_create_v6_route
+        - svc_create_v6_route_undo
     }
     VPC_CREATE_SUBNET -> "subnet" {
         + svc_create_subnet
@@ -79,8 +84,13 @@ pub fn create_dag(
         ACTION_GENERATE_ID.as_ref(),
     ));
     builder.append(Node::action(
-        "default_route_id",
-        "GenerateDefaultRouteId",
+        "default_v4_route_id",
+        "GenerateDefaultV4RouteId",
+        ACTION_GENERATE_ID.as_ref(),
+    ));
+    builder.append(Node::action(
+        "default_v6_route_id",
+        "GenerateDefaultV6RouteId",
         ACTION_GENERATE_ID.as_ref(),
     ));
     builder.append(Node::action(
@@ -90,7 +100,8 @@ pub fn create_dag(
     ));
     builder.append(vpc_create_vpc_action());
     builder.append(vpc_create_router_action());
-    builder.append(vpc_create_route_action());
+    builder.append(vpc_create_v4_route_action());
+    builder.append(vpc_create_v6_route_action());
     builder.append(vpc_create_subnet_action());
     builder.append(vpc_update_firewall_action());
     builder.append(vpc_notify_sleds_action());
@@ -217,8 +228,45 @@ async fn svc_create_router_undo(
     Ok(())
 }
 
+async fn svc_create_v4_route(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let default_route_id = sagactx.lookup::<Uuid>("default_v4_route_id")?;
+    let default_route =
+        "0.0.0.0/0".parse().expect("known-valid specifier for a default route");
+    svc_create_route(sagactx, default_route_id, default_route, "default-v4")
+        .await
+}
+
+async fn svc_create_v4_route_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let route_id = sagactx.lookup::<Uuid>("default_v4_route_id")?;
+    svc_create_route_undo(sagactx, route_id).await
+}
+
+async fn svc_create_v6_route(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let default_route_id = sagactx.lookup::<Uuid>("default_v6_route_id")?;
+    let default_route =
+        "::/0".parse().expect("known-valid specifier for a default route");
+    svc_create_route(sagactx, default_route_id, default_route, "default-v6")
+        .await
+}
+
+async fn svc_create_v6_route_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let route_id = sagactx.lookup::<Uuid>("default_v6_route_id")?;
+    svc_create_route_undo(sagactx, route_id).await
+}
+
 async fn svc_create_route(
     sagactx: NexusActionContext,
+    route_id: Uuid,
+    default_net: IpNet,
+    name: &str,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
@@ -226,23 +274,20 @@ async fn svc_create_route(
         &sagactx,
         &params.serialized_authn,
     );
-    let default_route_id = sagactx.lookup::<Uuid>("default_route_id")?;
     let system_router_id = sagactx.lookup::<Uuid>("system_router_id")?;
     let authz_router = sagactx.lookup::<authz::VpcRouter>("router")?;
 
     let route = db::model::RouterRoute::new(
-        default_route_id,
+        route_id,
         system_router_id,
         RouterRouteKind::Default,
         params::RouterRouteCreate {
             identity: IdentityMetadataCreateParams {
-                name: "default".parse().unwrap(),
+                name: name.parse().unwrap(),
                 description: "The default route of a vpc".to_string(),
             },
             target: RouteTarget::InternetGateway("outbound".parse().unwrap()),
-            destination: RouteDestination::Vpc(
-                params.vpc_create.identity.name.clone(),
-            ),
+            destination: RouteDestination::IpNet(default_net),
         },
     );
 
@@ -256,6 +301,7 @@ async fn svc_create_route(
 
 async fn svc_create_route_undo(
     sagactx: NexusActionContext,
+    route_id: Uuid,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
@@ -264,7 +310,6 @@ async fn svc_create_route_undo(
         &params.serialized_authn,
     );
     let authz_router = sagactx.lookup::<authz::VpcRouter>("router")?;
-    let route_id = sagactx.lookup::<Uuid>("default_route_id")?;
     let authz_route = authz::RouterRoute::new(
         authz_router,
         route_id,
@@ -323,7 +368,7 @@ async fn svc_create_subnet(
         .vpc_create_subnet(&opctx, &authz_vpc, subnet)
         .await
         .map_err(|err| match err {
-            SubnetError::OverlappingIpRange(ip) => {
+            InsertVpcSubnetError::OverlappingIpRange(ip) => {
                 let ipv4_block = &defaults::DEFAULT_VPC_SUBNET_IPV4_BLOCK;
                 let log = sagactx.user_data().log();
                 error!(
@@ -343,7 +388,7 @@ async fn svc_create_subnet(
                         found overlapping IP address ranges",
                 )
             }
-            SubnetError::External(e) => e,
+            InsertVpcSubnetError::External(e) => e,
         })
         .map_err(ActionError::action_failed)
 }
@@ -440,8 +485,8 @@ async fn svc_notify_sleds(
 #[cfg(test)]
 pub(crate) mod test {
     use crate::{
-        app::saga::create_saga_dag, app::sagas::vpc_create::Params,
-        app::sagas::vpc_create::SagaVpcCreate, external_api::params,
+        app::sagas::vpc_create::Params, app::sagas::vpc_create::SagaVpcCreate,
+        external_api::params,
     };
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{
@@ -538,12 +583,25 @@ pub(crate) mod test {
             .await
             .expect("Failed to delete default Subnet");
 
-        // Default route
+        // Default gateway routes
         let (.., authz_route, _route) = LookupPath::new(&opctx, &datastore)
             .project_id(project_id)
             .vpc_name(&default_name.clone().into())
             .vpc_router_name(&system_name.clone().into())
-            .router_route_name(&default_name.clone().into())
+            .router_route_name(&"default-v4".parse::<Name>().unwrap().into())
+            .fetch()
+            .await
+            .expect("Failed to fetch default route");
+        datastore
+            .router_delete_route(&opctx, &authz_route)
+            .await
+            .expect("Failed to delete default route");
+
+        let (.., authz_route, _route) = LookupPath::new(&opctx, &datastore)
+            .project_id(project_id)
+            .vpc_name(&default_name.clone().into())
+            .vpc_router_name(&system_name.clone().into())
+            .router_route_name(&"default-v6".parse::<Name>().unwrap().into())
             .fetch()
             .await
             .expect("Failed to fetch default route");
@@ -724,11 +782,7 @@ pub(crate) mod test {
         )
         .await;
         let params = new_test_params(&opctx, authz_project);
-        let dag = create_saga_dag::<SagaVpcCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-
-        // Actually run the saga
-        nexus.run_saga(runnable_saga).await.unwrap();
+        nexus.sagas.saga_execute::<SagaVpcCreate>(params).await.unwrap();
     }
 
     #[nexus_test(server = crate::Server)]

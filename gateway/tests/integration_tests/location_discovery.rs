@@ -7,8 +7,8 @@
 use dropshot::test_util;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup;
-use omicron_gateway::http_entrypoints::SpState;
-use omicron_gateway::http_entrypoints::SpType;
+use gateway_types::component::SpState;
+use gateway_types::component::SpType;
 use omicron_gateway::SpIdentifier;
 
 #[tokio::test]

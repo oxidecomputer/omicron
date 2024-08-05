@@ -439,7 +439,6 @@ service_name = "switch_zone_setup"
 source.type = "local"
 source.paths = [
   { from = "smf/switch_zone_setup/manifest.xml", to = "/var/svc/manifest/site/switch_zone_setup/manifest.xml" },
-  { from = "smf/switch_zone_setup/switch_zone_setup", to = "/opt/oxide/bin/switch_zone_setup" },
   { from = "smf/switch_zone_setup/support_authorized_keys", to = "/opt/oxide/support/authorized_keys" },
   { from = "/opt/ooce/pgsql-13/lib/amd64", to = "/opt/ooce/pgsql-13/lib/amd64" },
 ]
@@ -481,7 +480,6 @@ source.type = "composite"
 source.packages = [ "crucible.tar.gz", "zone-setup.tar.gz", "zone-network-install.tar.gz" ]
 output.type = "zone"
 
-
 [package.crucible-pantry-zone]
 service_name = "crucible_pantry"
 only_for_targets.image = "standard"
@@ -490,6 +488,22 @@ source.packages = [ "crucible-pantry.tar.gz", "zone-setup.tar.gz", "zone-network
 output.type = "zone"
 
 # Packages not built within Omicron, but which must be imported.
+
+[package.omicron-faux-mgs]
+# This package bundles a `faux-mgs` binary into `/usr/bin` in the switch zone,
+# allowing `pilot sp ...` to work without needing to manually scp a `faux-mgs`
+# binary in during support operations. (On rare occasions a support operator may
+# still need to do that to get a more recent faux-mgs.)
+service_name = "faux_mgs"
+only_for_targets.image = "standard"
+source.type = "prebuilt"
+source.repo = "management-gateway-service"
+# In general, this commit should match the pinned revision of `gateway-sp-comms`
+# in `Cargo.toml`.
+source.commit = "319e7b92db69792ab8efa4c68554ad0cf83adf93"
+source.sha256 = "f4cbc480c8cfc2605c13b319291e69cbf8c213bb9c625ff79d339f90a7124358"
+output.type = "zone"
+output.intermediate_only = true
 
 # Refer to
 #   https://github.com/oxidecomputer/crucible/blob/main/package/README.md
@@ -505,10 +519,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "8c6d485110ecfae5409575246b986a145c386dc4"
+source.commit = "e58ca3693cb9ce0438947beba10e97ee38a0966b"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "a974c976babbbbe4d126fe324e28093b4f69b689e1cf607ce38323befcfa494e"
+source.sha256 = "18dc942935af51ea03161498c44b56bb85b4a5d2499a5ff19ba87c0284e34742"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -517,12 +531,28 @@ service_name = "crucible_pantry_prebuilt"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "8c6d485110ecfae5409575246b986a145c386dc4"
+source.commit = "e58ca3693cb9ce0438947beba10e97ee38a0966b"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "34418c60ecccade796e604997a11b1fa7f01c364996fa4b57131466e910700a8"
+source.sha256 = "9067426bb77ce091116a034a19abb96ecd98cc8ac228a147bd3c3283e40d527d"
 output.type = "zone"
 output.intermediate_only = true
+
+[package.crucible-dtrace]
+# This package contains a select set of DTrace script that operate on DTrace
+# probes that exist for consumers of the crucible upstairs library.  These
+# scripts are extracted onto the global zone.  The source commit here should
+# match a version of Crucible that contain probes used by the upstairs.  In most
+# cases this means the version of Crucible that Propolis is using.
+service_name = "crucible_dtrace"
+only_for_targets.image = "standard"
+source.type = "prebuilt"
+source.repo = "crucible"
+source.commit = "e58ca3693cb9ce0438947beba10e97ee38a0966b"
+# The SHA256 digest is automatically posted to:
+# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-dtrace.sha256.txt
+source.sha256 = "660e04fdcbacda66e5012ba4ba6cf1022a4d80453da165b1507d97b7386f2691"
+output.type = "tarball"
 
 # Refer to
 #   https://github.com/oxidecomputer/propolis/blob/master/package/README.md
@@ -532,10 +562,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "6d7ed9a033babc054db9eff5b59dee978d2b0d76"
+source.commit = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "f8f41b47bc00811fefe2ba75e0f6f8ab77765776c04021e0b31f09c3b21108a9"
+source.sha256 = "e716c1fa5c4ee402f8e3a63f667bbcda744f378305f91ff333bebafe5c20d60b"
 output.type = "zone"
 
 [package.mg-ddm-gz]
@@ -548,10 +578,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "c67f6ab49e0e8a49bcf84542500fceb6b9417ca4"
+source.commit = "220dd026e83142b83bd93123f465a64dd4600201"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "33e3b09408551be860debac08de50a840909d4e6c6bed9aecaef63fe8bef2d69"
+source.sha256 = "58c8fcec6b932f7e602ac82cc28460aa557cabae1b66947ab3cb7334b87c35d4"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -564,10 +594,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "c67f6ab49e0e8a49bcf84542500fceb6b9417ca4"
+source.commit = "220dd026e83142b83bd93123f465a64dd4600201"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "81674afa17873f84bb49a800c8511938d1c2e871026cbb17e5eed2b645b1eb55"
+source.sha256 = "69fa43393a77f19713c7d76a320064e3eb58b3ea0b2953d2079a5c3edebc172e"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -579,10 +609,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "c67f6ab49e0e8a49bcf84542500fceb6b9417ca4"
+source.commit = "220dd026e83142b83bd93123f465a64dd4600201"
 # The SHA256 digest is automatically posted to:
-# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "5e8bdd6774ef6041189621306577d0e0d174d596d216e53740ce6f035316c5af"
+# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
+source.sha256 = "f1103de5dda4830eb653f4d555995d08c31253116448387399a77392c08dfb54"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -624,12 +654,14 @@ only_for_targets.image = "standard"
 # 1. Build the zone image manually
 #   1a. cd <dendrite tree>
 #   1b. cargo build --features=tofino_stub --release
-#   1c. cargo xtask dist -o -r --features tofino_stub
+#   1c. cargo xtask dist --format omicron --release --features tofino_stub
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out
+# 3. Change the below `source.type` key to `"manual"` and comment out or remove
+# the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "861c00bacbdf7a6e22471f0dabd8f926409b5292"
-source.sha256 = "1db849892c60b22f600fb081d4b0145d8ecd98acce9fad3094499a5d2159d001"
+source.commit = "9811438cc91c6ec4e8a8ca12479c920bb25fec81"
+source.sha256 = "4b09ea6d89af353fd4240a3cfde8655c555f6f42e05c6fc4a4e32724f86bb749"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -649,12 +681,14 @@ only_for_targets.image = "standard"
 # 1. Build the zone image manually
 #   1a. cd <dendrite tree>
 #   1b. cargo build --features=tofino_asic --release
-#   1c. cargo xtask dist -o -r --features tofino_asic
+#   1c. cargo xtask dist --format omicron --release --features tofino_asic
 # 2. Copy the output zone image from dendrite/out to omicron/out
+# 3. Change the below `source.type` key to `"manual"` and comment out or remove
+# the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "861c00bacbdf7a6e22471f0dabd8f926409b5292"
-source.sha256 = "00b2b9372145bc8974f3c75ba7a59d8f2a8178c67cc1869086d29c7f3a2deb36"
+source.commit = "9811438cc91c6ec4e8a8ca12479c920bb25fec81"
+source.sha256 = "224ff076a3031d5b913e40084a48fce7bdd08e8ef1abd1ab74df0058963bb3b2"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -667,12 +701,14 @@ only_for_targets.image = "standard"
 # 1. Build the zone image manually
 #   1a. cd <dendrite tree>
 #   1b. cargo build --features=softnpu --release
-#   1c. cargo xtask dist -o -r --features softnpu
+#   1c. cargo xtask dist --format omicron --release --features softnpu
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out/dendrite-softnpu.tar.gz
+# 3. Change the below `source.type` key to `"manual"` and comment out or remove
+# the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "861c00bacbdf7a6e22471f0dabd8f926409b5292"
-source.sha256 = "b0b62b22c0e781edb0790b8730b99bb6e635c95ad3e83c2afbb2b15956153d66"
+source.commit = "9811438cc91c6ec4e8a8ca12479c920bb25fec81"
+source.sha256 = "66b04128c41ad9cd26ca3746d51fff5d295ca65f48e7aabee616026934cc8d5e"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -708,6 +744,7 @@ only_for_targets.switch = "asic"
 only_for_targets.image = "standard"
 source.type = "composite"
 source.packages = [
+  "omicron-faux-mgs.tar.gz",
   "omicron-gateway-asic.tar.gz",
   "dendrite-asic.tar.gz",
   "lldp.tar.gz",
@@ -719,6 +756,8 @@ source.packages = [
   "switch_zone_setup.tar.gz",
   "xcvradm.tar.gz",
   "omicron-omdb.tar.gz",
+  "zone-setup.tar.gz",
+  "zone-network-install.tar.gz"
 ]
 output.type = "zone"
 
@@ -743,6 +782,8 @@ source.packages = [
   "switch_zone_setup.tar.gz",
   "sp-sim-stub.tar.gz",
   "omicron-omdb.tar.gz",
+  "zone-setup.tar.gz",
+  "zone-network-install.tar.gz"
 ]
 output.type = "zone"
 
@@ -767,6 +808,8 @@ source.packages = [
   "switch_zone_setup.tar.gz",
   "sp-sim-softnpu.tar.gz",
   "omicron-omdb.tar.gz",
+  "zone-setup.tar.gz",
+  "zone-network-install.tar.gz"
 ]
 output.type = "zone"
 

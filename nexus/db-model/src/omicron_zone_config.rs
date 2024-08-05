@@ -15,16 +15,19 @@ use crate::inventory::ZoneType;
 use crate::{ipv6, MacAddr, Name, SqlU16, SqlU32, SqlU8};
 use anyhow::{anyhow, bail, ensure, Context};
 use ipnetwork::IpNetwork;
-use nexus_types::deployment::BlueprintZoneDisposition;
-use nexus_types::deployment::BlueprintZoneType;
-use nexus_types::deployment::{
-    blueprint_zone_type, OmicronZoneExternalFloatingAddr,
-    OmicronZoneExternalFloatingIp, OmicronZoneExternalSnatIp,
+use nexus_sled_agent_shared::inventory::{
+    OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
 };
-use nexus_types::inventory::{NetworkInterface, OmicronZoneType};
+use nexus_types::deployment::{
+    blueprint_zone_type, BlueprintZoneDisposition, BlueprintZoneType,
+    OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
+    OmicronZoneExternalSnatIp,
+};
+use nexus_types::inventory::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{
-    ExternalIpUuid, GenericUuid, OmicronZoneUuid, SledUuid,
+    ExternalIpUuid, GenericUuid, OmicronZoneUuid, SledUuid, ZpoolUuid,
 };
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use uuid::Uuid;
@@ -34,6 +37,7 @@ pub(crate) struct OmicronZone {
     pub(crate) sled_id: SledUuid,
     pub(crate) id: Uuid,
     pub(crate) underlay_address: ipv6::Ipv6Addr,
+    pub(crate) filesystem_pool: Option<ZpoolUuid>,
     pub(crate) zone_type: ZoneType,
     pub(crate) primary_service_ip: ipv6::Ipv6Addr,
     pub(crate) primary_service_port: SqlU16,
@@ -60,7 +64,8 @@ impl OmicronZone {
         sled_id: SledUuid,
         zone_id: Uuid,
         zone_underlay_address: Ipv6Addr,
-        zone_type: &nexus_types::inventory::OmicronZoneType,
+        filesystem_pool: Option<ZpoolUuid>,
+        zone_type: &OmicronZoneType,
         external_ip_id: Option<ExternalIpUuid>,
     ) -> anyhow::Result<Self> {
         let id = zone_id;
@@ -79,8 +84,7 @@ impl OmicronZone {
         let mut second_service_ip = None;
         let mut second_service_port = None;
 
-        let (zone_type, primary_service_sockaddr_str, dataset) = match zone_type
-        {
+        let (zone_type, primary_service_sockaddr, dataset) = match zone_type {
             OmicronZoneType::BoundaryNtp {
                 address,
                 ntp_servers,
@@ -121,16 +125,8 @@ impl OmicronZone {
                 nic,
             } => {
                 nic_id = Some(nic.id);
-                let sockaddr = dns_address
-                    .parse::<std::net::SocketAddr>()
-                    .with_context(|| {
-                        format!(
-                            "parsing address for external DNS server {:?}",
-                            dns_address
-                        )
-                    })?;
-                second_service_ip = Some(sockaddr.ip());
-                second_service_port = Some(SqlU16::from(sockaddr.port()));
+                second_service_ip = Some(dns_address.ip());
+                second_service_port = Some(SqlU16::from(dns_address.port()));
                 (ZoneType::ExternalDns, http_address, Some(dataset))
             }
             OmicronZoneType::InternalDns {
@@ -142,16 +138,8 @@ impl OmicronZone {
             } => {
                 dns_gz_address = Some(ipv6::Ipv6Addr::from(gz_address));
                 dns_gz_address_index = Some(SqlU32::from(*gz_address_index));
-                let sockaddr = dns_address
-                    .parse::<std::net::SocketAddr>()
-                    .with_context(|| {
-                        format!(
-                            "parsing address for internal DNS server {:?}",
-                            dns_address
-                        )
-                    })?;
-                second_service_ip = Some(sockaddr.ip());
-                second_service_port = Some(SqlU16::from(sockaddr.port()));
+                second_service_ip = Some(IpAddr::V6(*dns_address.ip()));
+                second_service_port = Some(SqlU16::from(dns_address.port()));
                 (ZoneType::InternalDns, http_address, Some(dataset))
             }
             OmicronZoneType::InternalNtp {
@@ -184,14 +172,6 @@ impl OmicronZone {
         };
 
         let dataset_zpool_name = dataset.map(|d| d.pool_name.to_string());
-        let primary_service_sockaddr = primary_service_sockaddr_str
-            .parse::<std::net::SocketAddrV6>()
-            .with_context(|| {
-                format!(
-                    "parsing socket address for primary IP {:?}",
-                    primary_service_sockaddr_str
-                )
-            })?;
         let (primary_service_ip, primary_service_port) = (
             ipv6::Ipv6Addr::from(*primary_service_sockaddr.ip()),
             SqlU16::from(primary_service_sockaddr.port()),
@@ -201,6 +181,7 @@ impl OmicronZone {
             sled_id,
             id,
             underlay_address,
+            filesystem_pool,
             zone_type,
             primary_service_ip,
             primary_service_port,
@@ -306,12 +287,7 @@ impl OmicronZone {
             ZoneType::InternalDns => BlueprintZoneType::InternalDns(
                 blueprint_zone_type::InternalDns {
                     dataset: common.dataset?,
-                    dns_address: match common.dns_address? {
-                        SocketAddr::V4(addr) => {
-                            bail!("expected V6 address; got {addr}")
-                        }
-                        SocketAddr::V6(addr) => addr,
-                    },
+                    dns_address: to_internal_dns_address(common.dns_address?)?,
                     http_address: address,
                     gz_address: *common.dns_gz_address.ok_or_else(|| {
                         anyhow!("expected dns_gz_address, found none")
@@ -365,6 +341,9 @@ impl OmicronZone {
             disposition,
             id: OmicronZoneUuid::from_untyped_uuid(common.id),
             underlay_address: std::net::Ipv6Addr::from(common.underlay_address),
+            filesystem_pool: common
+                .filesystem_pool
+                .map(|id| ZpoolName::new_external(id)),
             zone_type,
         })
     }
@@ -372,9 +351,9 @@ impl OmicronZone {
     pub(crate) fn into_omicron_zone_config(
         self,
         nic_row: Option<OmicronZoneNic>,
-    ) -> anyhow::Result<nexus_types::inventory::OmicronZoneConfig> {
+    ) -> anyhow::Result<OmicronZoneConfig> {
         let common = self.into_zone_config_common(nic_row)?;
-        let address = common.primary_service_address.to_string();
+        let address = common.primary_service_address;
 
         let zone_type = match common.zone_type {
             ZoneType::BoundaryNtp => {
@@ -425,13 +404,13 @@ impl OmicronZone {
             }
             ZoneType::ExternalDns => OmicronZoneType::ExternalDns {
                 dataset: common.dataset?,
-                dns_address: common.dns_address?.to_string(),
+                dns_address: common.dns_address?,
                 http_address: address,
                 nic: common.nic?,
             },
             ZoneType::InternalDns => OmicronZoneType::InternalDns {
                 dataset: common.dataset?,
-                dns_address: common.dns_address?.to_string(),
+                dns_address: to_internal_dns_address(common.dns_address?)?,
                 http_address: address,
                 gz_address: *common.dns_gz_address.ok_or_else(|| {
                     anyhow!("expected dns_gz_address, found none")
@@ -465,9 +444,12 @@ impl OmicronZone {
             },
             ZoneType::Oximeter => OmicronZoneType::Oximeter { address },
         };
-        Ok(nexus_types::inventory::OmicronZoneConfig {
+        Ok(OmicronZoneConfig {
             id: common.id,
             underlay_address: std::net::Ipv6Addr::from(common.underlay_address),
+            filesystem_pool: common
+                .filesystem_pool
+                .map(|id| ZpoolName::new_external(id)),
             zone_type,
         })
     }
@@ -520,7 +502,7 @@ impl OmicronZone {
         let dataset = self
             .dataset_zpool_name
             .map(|zpool_name| -> Result<_, anyhow::Error> {
-                Ok(nexus_types::inventory::OmicronZoneDataset {
+                Ok(OmicronZoneDataset {
                     pool_name: zpool_name.parse().map_err(|e| {
                         anyhow!("parsing zpool name {:?}: {}", zpool_name, e)
                     })?,
@@ -558,6 +540,7 @@ impl OmicronZone {
         Ok(ZoneConfigCommon {
             id: self.id,
             underlay_address: self.underlay_address,
+            filesystem_pool: self.filesystem_pool,
             zone_type: self.zone_type,
             primary_service_address,
             snat_ip: self.snat_ip,
@@ -582,6 +565,7 @@ impl OmicronZone {
 struct ZoneConfigCommon {
     id: Uuid,
     underlay_address: ipv6::Ipv6Addr,
+    filesystem_pool: Option<ZpoolUuid>,
     zone_type: ZoneType,
     primary_service_address: SocketAddrV6,
     snat_ip: Option<IpNetwork>,
@@ -596,11 +580,30 @@ struct ZoneConfigCommon {
     // These properties may or may not be needed, depending on the zone type. We
     // store results here that can be unpacked once we determine our zone type.
     nic: anyhow::Result<NetworkInterface>,
-    dataset: anyhow::Result<nexus_types::inventory::OmicronZoneDataset>,
+    dataset: anyhow::Result<OmicronZoneDataset>,
+    // Note that external DNS is SocketAddr (also supports v4) while internal
+    // DNS is always v6.
     dns_address: anyhow::Result<SocketAddr>,
     ntp_dns_servers: anyhow::Result<Vec<IpAddr>>,
     ntp_ntp_servers: anyhow::Result<Vec<String>>,
     external_ip_id: anyhow::Result<ExternalIpUuid>,
+}
+
+// Ideally this would be a method on `ZoneConfigCommon`, but that's more
+// annoying to deal with because often, at the time this function is called,
+// part of `ZoneConfigCommon` has already been moved out.
+fn to_internal_dns_address(
+    external_address: SocketAddr,
+) -> anyhow::Result<SocketAddrV6> {
+    match external_address {
+        SocketAddr::V4(address) => {
+            bail!(
+                "expected internal DNS address to be v6, found v4: {:?}",
+                address
+            )
+        }
+        SocketAddr::V6(v6) => Ok(v6),
+    }
 }
 
 #[derive(Debug)]
@@ -659,6 +662,7 @@ impl OmicronZoneNic {
             vni: omicron_common::api::external::Vni::try_from(*self.vni)
                 .context("parsing VNI")?,
             subnet: self.subnet.into(),
+            transit_ips: vec![],
         })
     }
 }

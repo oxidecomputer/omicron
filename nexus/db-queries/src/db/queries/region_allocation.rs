@@ -67,6 +67,18 @@ type SelectableSql<T> = <
     <T as diesel::Selectable<Pg>>::SelectExpression as diesel::Expression
 >::SqlType;
 
+/// Parameters for the region(s) being allocated
+#[derive(Debug, Clone, Copy)]
+pub struct RegionParameters {
+    pub block_size: u64,
+    pub blocks_per_extent: u64,
+    pub extent_count: u64,
+
+    /// True if the region will be filled with a Clone operation and is meant to
+    /// be read-only.
+    pub read_only: bool,
+}
+
 /// For a given volume, idempotently allocate enough regions (according to some
 /// allocation strategy) to meet some redundancy level. This should only be used
 /// for the region set that is in the top level of the Volume (not the deeper
@@ -75,9 +87,7 @@ type SelectableSql<T> = <
 pub fn allocation_query(
     volume_id: uuid::Uuid,
     snapshot_id: Option<uuid::Uuid>,
-    block_size: u64,
-    blocks_per_extent: u64,
-    extent_count: u64,
+    params: RegionParameters,
     allocation_strategy: &RegionAllocationStrategy,
     redundancy: usize,
 ) -> TypedSqlQuery<(SelectableSql<Dataset>, SelectableSql<Region>)> {
@@ -104,7 +114,8 @@ pub fn allocation_query(
 
     let seed = seed.to_le_bytes().to_vec();
 
-    let size_delta = block_size * blocks_per_extent * extent_count;
+    let size_delta =
+        params.block_size * params.blocks_per_extent * params.extent_count;
     let redundancy: i64 = i64::try_from(redundancy).unwrap();
 
     let builder = QueryBuilder::new().sql(
@@ -242,7 +253,9 @@ pub fn allocation_query(
       ").param().sql(" AS volume_id,
       ").param().sql(" AS block_size,
       ").param().sql(" AS blocks_per_extent,
-      ").param().sql(" AS extent_count
+      ").param().sql(" AS extent_count,
+      NULL AS port,
+      ").param().sql(" AS read_only
     FROM shuffled_candidate_datasets")
   // Only select the *additional* number of candidate regions for the required
   // redundancy level
@@ -252,9 +265,10 @@ pub fn allocation_query(
     ))
   ),")
     .bind::<sql_types::Uuid, _>(volume_id)
-    .bind::<sql_types::BigInt, _>(block_size as i64)
-    .bind::<sql_types::BigInt, _>(blocks_per_extent as i64)
-    .bind::<sql_types::BigInt, _>(extent_count as i64)
+    .bind::<sql_types::BigInt, _>(params.block_size as i64)
+    .bind::<sql_types::BigInt, _>(params.blocks_per_extent as i64)
+    .bind::<sql_types::BigInt, _>(params.extent_count as i64)
+    .bind::<sql_types::Bool, _>(params.read_only)
     .bind::<sql_types::BigInt, _>(redundancy)
 
     // A subquery which summarizes the changes we intend to make, showing:
@@ -354,7 +368,7 @@ pub fn allocation_query(
     .sql("
   inserted_regions AS (
     INSERT INTO region
-      (id, time_created, time_modified, dataset_id, volume_id, block_size, blocks_per_extent, extent_count)
+      (id, time_created, time_modified, dataset_id, volume_id, block_size, blocks_per_extent, extent_count, port, read_only)
     SELECT ").sql(AllColumnsOfRegion::with_prefix("candidate_regions")).sql("
     FROM candidate_regions
     WHERE
@@ -404,9 +418,12 @@ mod test {
     #[tokio::test]
     async fn expectorate_query() {
         let volume_id = Uuid::nil();
-        let block_size = 512;
-        let blocks_per_extent = 4;
-        let extent_count = 8;
+        let params = RegionParameters {
+            block_size: 512,
+            blocks_per_extent: 4,
+            extent_count: 8,
+            read_only: false,
+        };
 
         // Start with snapshot_id = None
 
@@ -417,14 +434,13 @@ mod test {
         let region_allocate = allocation_query(
             volume_id,
             snapshot_id,
-            block_size,
-            blocks_per_extent,
-            extent_count,
+            params,
             &RegionAllocationStrategy::RandomWithDistinctSleds {
                 seed: Some(1),
             },
             REGION_REDUNDANCY_THRESHOLD,
         );
+
         expectorate_query_contents(
             &region_allocate,
             "tests/output/region_allocate_distinct_sleds.sql",
@@ -436,9 +452,7 @@ mod test {
         let region_allocate = allocation_query(
             volume_id,
             snapshot_id,
-            block_size,
-            blocks_per_extent,
-            extent_count,
+            params,
             &RegionAllocationStrategy::Random { seed: Some(1) },
             REGION_REDUNDANCY_THRESHOLD,
         );
@@ -457,9 +471,7 @@ mod test {
         let region_allocate = allocation_query(
             volume_id,
             snapshot_id,
-            block_size,
-            blocks_per_extent,
-            extent_count,
+            params,
             &RegionAllocationStrategy::RandomWithDistinctSleds {
                 seed: Some(1),
             },
@@ -476,9 +488,7 @@ mod test {
         let region_allocate = allocation_query(
             volume_id,
             snapshot_id,
-            block_size,
-            blocks_per_extent,
-            extent_count,
+            params,
             &RegionAllocationStrategy::Random { seed: Some(1) },
             REGION_REDUNDANCY_THRESHOLD,
         );
@@ -501,18 +511,19 @@ mod test {
         let conn = pool.pool().get().await.unwrap();
 
         let volume_id = Uuid::new_v4();
-        let block_size = 512;
-        let blocks_per_extent = 4;
-        let extent_count = 8;
+        let params = RegionParameters {
+            block_size: 512,
+            blocks_per_extent: 4,
+            extent_count: 8,
+            read_only: false,
+        };
 
         // First structure: Explain the query with "RandomWithDistinctSleds"
 
         let region_allocate = allocation_query(
             volume_id,
             None,
-            block_size,
-            blocks_per_extent,
-            extent_count,
+            params,
             &RegionAllocationStrategy::RandomWithDistinctSleds { seed: None },
             REGION_REDUNDANCY_THRESHOLD,
         );
@@ -526,9 +537,7 @@ mod test {
         let region_allocate = allocation_query(
             volume_id,
             None,
-            block_size,
-            blocks_per_extent,
-            extent_count,
+            params,
             &RegionAllocationStrategy::Random { seed: None },
             REGION_REDUNDANCY_THRESHOLD,
         );

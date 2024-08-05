@@ -10,7 +10,7 @@
 # (that we want to check) is conditionally-compiled on illumos only.
 #
 # Note that `cargo clippy` includes `cargo check, so this ends up checking all
-# of our code.
+# of our (default) code.
 
 set -o errexit
 set -o pipefail
@@ -30,4 +30,4 @@ ptime -m bash ./tools/install_builder_prerequisites.sh -y
 banner clippy
 export CARGO_INCREMENTAL=0
 ptime -m cargo xtask clippy
-ptime -m cargo doc
+RUSTDOCFLAGS="--document-private-items -D warnings" ptime -m cargo doc --workspace --no-deps

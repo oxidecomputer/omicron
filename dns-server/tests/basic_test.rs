@@ -420,6 +420,7 @@ fn test_config(
         bind_address: "[::1]:0".to_string().parse().unwrap(),
         request_body_max_bytes: 1024,
         default_handler_task_mode: HandlerTaskMode::Detached,
+        log_headers: vec![],
     };
 
     Ok((tmp_dir, config_storage, config_dropshot, logctx))

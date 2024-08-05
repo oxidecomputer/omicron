@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "20240502.0"
+    "version": "20240821.0"
   },
   "paths": {
     "/device/auth": {
@@ -6630,12 +6630,13 @@
           }
         }
       },
-      "post": {
+      "put": {
         "tags": [
           "system/networking"
         ],
-        "summary": "Create new BGP announce set",
-        "operationId": "networking_bgp_announce_set_create",
+        "summary": "Update BGP announce set",
+        "description": "If the announce set exists, this endpoint replaces the existing announce set with the one specified.",
+        "operationId": "networking_bgp_announce_set_update",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8296,6 +8297,7 @@
           "vpcs"
         ],
         "summary": "Replace firewall rules",
+        "description": "The maximum number of rules per VPC is 1024.\n\nTargets are used to specify the set of instances to which a firewall rule applies. You can target instances directly by name, or specify a VPC, VPC subnet, IP, or IP subnet, which will apply the rule to traffic going to all matching instances. Targets are additive: the rule applies to instances matching ANY target. The maximum number of targets is 256.\n\nFilters reduce the scope of a firewall rule. Without filters, the rule applies to all packets to the targets (or from the targets, if it's an outbound rule). With multiple filters, the rule applies only to packets matching ALL filters. The maximum number of each type of filter is 256.",
         "operationId": "vpc_firewall_rules_update",
         "parameters": [
           {
@@ -8336,6 +8338,632 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/vpc-router-routes": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "List routes",
+        "description": "List the routes associated with a router in a particular VPC.",
+        "operationId": "vpc_router_route_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "router",
+            "description": "Name or ID of the router",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC, only required if `router` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterRouteResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "router"
+          ]
+        }
+      },
+      "post": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Create route",
+        "operationId": "vpc_router_route_create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "router",
+            "description": "Name or ID of the router",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC, only required if `router` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouterRouteCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterRoute"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/vpc-router-routes/{route}": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Fetch route",
+        "operationId": "vpc_router_route_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "route",
+            "description": "Name or ID of the route",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "router",
+            "description": "Name or ID of the router",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC, only required if `router` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterRoute"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Update route",
+        "operationId": "vpc_router_route_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "route",
+            "description": "Name or ID of the route",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "router",
+            "description": "Name or ID of the router",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC, only required if `router` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouterRouteUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterRoute"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Delete route",
+        "operationId": "vpc_router_route_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "route",
+            "description": "Name or ID of the route",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "router",
+            "description": "Name or ID of the router",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC, only required if `router` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/vpc-routers": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "List routers",
+        "operationId": "vpc_router_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcRouterResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "vpc"
+          ]
+        }
+      },
+      "post": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Create VPC router",
+        "operationId": "vpc_router_create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VpcRouterCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcRouter"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/vpc-routers/{router}": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Fetch router",
+        "operationId": "vpc_router_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "router",
+            "description": "Name or ID of the router",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcRouter"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Update router",
+        "operationId": "vpc_router_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "router",
+            "description": "Name or ID of the router",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VpcRouterUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VpcRouter"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Delete router",
+        "operationId": "vpc_router_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "router",
+            "description": "Name or ID of the router",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -9344,6 +9972,39 @@
           }
         ]
       },
+      "AuthzScope": {
+        "description": "Authorization scope for a timeseries.\n\nThis describes the level at which a user must be authorized to read data from a timeseries. For example, fleet-scoping means the data is only visible to an operator or fleet reader. Project-scoped, on the other hand, indicates that a user will see data limited to the projects on which they have read permissions.",
+        "oneOf": [
+          {
+            "description": "Timeseries data is limited to fleet readers.",
+            "type": "string",
+            "enum": [
+              "fleet"
+            ]
+          },
+          {
+            "description": "Timeseries data is limited to the authorized silo for a user.",
+            "type": "string",
+            "enum": [
+              "silo"
+            ]
+          },
+          {
+            "description": "Timeseries data is limited to the authorized projects for a user.",
+            "type": "string",
+            "enum": [
+              "project"
+            ]
+          },
+          {
+            "description": "The timeseries is viewable to all without limitation.",
+            "type": "string",
+            "enum": [
+              "viewable_to_all"
+            ]
+          }
+        ]
+      },
       "Baseboard": {
         "description": "Properties that uniquely identify an Oxide hardware component",
         "type": "object",
@@ -9353,7 +10014,8 @@
           },
           "revision": {
             "type": "integer",
-            "format": "int64"
+            "format": "uint32",
+            "minimum": 0
           },
           "serial": {
             "type": "string"
@@ -11021,6 +11683,10 @@
         "description": "View of a Certificate",
         "type": "object",
         "properties": {
+          "cert": {
+            "description": "PEM-formatted string containing public certificate chain",
+            "type": "string"
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
@@ -11039,7 +11705,12 @@
             ]
           },
           "service": {
-            "$ref": "#/components/schemas/ServiceUsingCertificate"
+            "description": "The service using this certificate",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ServiceUsingCertificate"
+              }
+            ]
           },
           "time_created": {
             "description": "timestamp when this resource was created",
@@ -11053,6 +11724,7 @@
           }
         },
         "required": [
+          "cert",
           "description",
           "id",
           "name",
@@ -12299,7 +12971,7 @@
         ]
       },
       "Distributiondouble": {
-        "description": "A distribution is a sequence of bins and counts in those bins.",
+        "description": "A distribution is a sequence of bins and counts in those bins, and some statistical information tracked to compute the mean, standard deviation, and quantile estimates.\n\nMin, max, and the p-* quantiles are treated as optional due to the possibility of distribution operations, like subtraction.",
         "type": "object",
         "properties": {
           "bins": {
@@ -12316,15 +12988,59 @@
               "format": "uint64",
               "minimum": 0
             }
+          },
+          "max": {
+            "nullable": true,
+            "type": "number",
+            "format": "double"
+          },
+          "min": {
+            "nullable": true,
+            "type": "number",
+            "format": "double"
+          },
+          "p50": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "type": "number",
+            "format": "double"
+          },
+          "sum_of_samples": {
+            "type": "number",
+            "format": "double"
           }
         },
         "required": [
           "bins",
-          "counts"
+          "counts",
+          "squared_mean",
+          "sum_of_samples"
         ]
       },
       "Distributionint64": {
-        "description": "A distribution is a sequence of bins and counts in those bins.",
+        "description": "A distribution is a sequence of bins and counts in those bins, and some statistical information tracked to compute the mean, standard deviation, and quantile estimates.\n\nMin, max, and the p-* quantiles are treated as optional due to the possibility of distribution operations, like subtraction.",
         "type": "object",
         "properties": {
           "bins": {
@@ -12341,11 +13057,55 @@
               "format": "uint64",
               "minimum": 0
             }
+          },
+          "max": {
+            "nullable": true,
+            "type": "integer",
+            "format": "int64"
+          },
+          "min": {
+            "nullable": true,
+            "type": "integer",
+            "format": "int64"
+          },
+          "p50": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "type": "number",
+            "format": "double"
+          },
+          "sum_of_samples": {
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
-          "counts"
+          "counts",
+          "squared_mean",
+          "sum_of_samples"
         ]
       },
       "EphemeralIpCreate": {
@@ -12548,6 +13308,9 @@
         "description": "The name and type information for a field of a timeseries schema.",
         "type": "object",
         "properties": {
+          "description": {
+            "type": "string"
+          },
           "field_type": {
             "$ref": "#/components/schemas/FieldType"
           },
@@ -12559,6 +13322,7 @@
           }
         },
         "required": [
+          "description",
           "field_type",
           "name",
           "source"
@@ -13102,25 +13866,79 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Bindouble"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "number",
+            "format": "double"
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "number",
+            "format": "double"
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "number",
+            "format": "double"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "squared_mean",
+          "start_time",
+          "sum_of_samples"
         ]
       },
       "Histogramfloat": {
@@ -13128,25 +13946,79 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binfloat"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "number",
+            "format": "float"
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "number",
+            "format": "float"
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "number",
+            "format": "double"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "squared_mean",
+          "start_time",
+          "sum_of_samples"
         ]
       },
       "Histogramint16": {
@@ -13154,25 +14026,79 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binint16"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int16"
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int16"
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "squared_mean",
+          "start_time",
+          "sum_of_samples"
         ]
       },
       "Histogramint32": {
@@ -13180,25 +14106,79 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binint32"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int32"
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "squared_mean",
+          "start_time",
+          "sum_of_samples"
         ]
       },
       "Histogramint64": {
@@ -13206,25 +14186,79 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binint64"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "squared_mean",
+          "start_time",
+          "sum_of_samples"
         ]
       },
       "Histogramint8": {
@@ -13232,25 +14266,79 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binint8"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int8"
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "int8"
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "squared_mean",
+          "start_time",
+          "sum_of_samples"
         ]
       },
       "Histogramuint16": {
@@ -13258,25 +14346,81 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binuint16"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "squared_mean",
+          "start_time",
+          "sum_of_samples"
         ]
       },
       "Histogramuint32": {
@@ -13284,25 +14428,81 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binuint32"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "squared_mean",
+          "start_time",
+          "sum_of_samples"
         ]
       },
       "Histogramuint64": {
@@ -13310,25 +14510,81 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binuint64"
             }
           },
-          "n_samples": {
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "n_samples": {
+            "description": "The total number of samples in the histogram.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "squared_mean",
+          "start_time",
+          "sum_of_samples"
         ]
       },
       "Histogramuint8": {
@@ -13336,25 +14592,81 @@
         "type": "object",
         "properties": {
           "bins": {
+            "description": "The bins of the histogram.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Binuint8"
             }
           },
+          "max": {
+            "description": "The maximum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "min": {
+            "description": "The minimum value of all samples in the histogram.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
           "n_samples": {
+            "description": "The total number of samples in the histogram.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
+          "p50": {
+            "description": "p50 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p90": {
+            "description": "p95 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "p99": {
+            "description": "p99 Quantile",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Quantile"
+              }
+            ]
+          },
+          "squared_mean": {
+            "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
+            "type": "number",
+            "format": "double"
+          },
           "start_time": {
+            "description": "The start time of the histogram.",
             "type": "string",
             "format": "date-time"
+          },
+          "sum_of_samples": {
+            "description": "The sum of all samples in the histogram.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "bins",
+          "max",
+          "min",
           "n_samples",
-          "start_time"
+          "p50",
+          "p90",
+          "p99",
+          "squared_mean",
+          "start_time",
+          "sum_of_samples"
         ]
       },
       "Hostname": {
@@ -14030,6 +15342,14 @@
             "type": "string",
             "format": "date-time"
           },
+          "transit_ips": {
+            "description": "A set of additional networks that this interface may send and receive traffic on.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNet"
+            }
+          },
           "vpc_id": {
             "description": "The VPC to which the interface belongs.",
             "type": "string",
@@ -14188,6 +15508,14 @@
             "description": "Make a secondary interface the instance's primary interface.\n\nIf applied to a secondary interface, that interface will become the primary on the next reboot of the instance. Note that this may have implications for routing between instances, as the new primary interface will be on a distinct subnet from the previous primary interface.\n\nNote that this can only be used to select a new primary interface for an instance. Requests to change the primary interface into a secondary will return an error.",
             "default": false,
             "type": "boolean"
+          },
+          "transit_ips": {
+            "description": "A set of additional networks that this interface may send and receive traffic on.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNet"
+            }
           }
         }
       },
@@ -14310,14 +15638,6 @@
               "destroyed"
             ]
           }
-        ]
-      },
-      "IpKind": {
-        "type": "string",
-        "enum": [
-          "snat",
-          "floating",
-          "ephemeral"
         ]
       },
       "IpNet": {
@@ -14707,7 +16027,7 @@
       "L4PortRange": {
         "example": "22",
         "title": "A range of IP ports",
-        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port",
+        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port.",
         "type": "string",
         "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
         "minLength": 1,
@@ -15103,7 +16423,7 @@
       },
       "Name": {
         "title": "A name unique within the parent collection",
-        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
+        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
         "type": "string",
         "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,
@@ -15161,6 +16481,13 @@
           },
           "subnet": {
             "$ref": "#/components/schemas/IpNet"
+          },
+          "transit_ips": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNet"
+            }
           },
           "vni": {
             "$ref": "#/components/schemas/Vni"
@@ -15538,7 +16865,7 @@
             "format": "ip"
           },
           "kind": {
-            "$ref": "#/components/schemas/IpKind"
+            "$ref": "#/components/schemas/ProbeExternalIpKind"
           },
           "last_port": {
             "type": "integer",
@@ -15551,6 +16878,14 @@
           "ip",
           "kind",
           "last_port"
+        ]
+      },
+      "ProbeExternalIpKind": {
+        "type": "string",
+        "enum": [
+          "snat",
+          "floating",
+          "ephemeral"
         ]
       },
       "ProbeInfo": {
@@ -15746,6 +17081,54 @@
           }
         }
       },
+      "Quantile": {
+        "description": "Structure for estimating the p-quantile of a population.\n\nThis is based on the P² algorithm for estimating quantiles using constant space.\n\nThe algorithm consists of maintaining five markers: the minimum, the p/2-, p-, and (1 + p)/2 quantiles, and the maximum.",
+        "type": "object",
+        "properties": {
+          "desired_marker_positions": {
+            "description": "The desired marker positions.",
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "minItems": 5,
+            "maxItems": 5
+          },
+          "marker_heights": {
+            "description": "The heights of the markers.",
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "minItems": 5,
+            "maxItems": 5
+          },
+          "marker_positions": {
+            "description": "The positions of the markers.\n\nWe track sample size in the 5th position, as useful observations won't start until we've filled the heights at the 6th sample anyway This does deviate from the paper, but it's a more useful representation that works according to the paper's algorithm.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "minItems": 5,
+            "maxItems": 5
+          },
+          "p": {
+            "description": "The p value for the quantile.",
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "required": [
+          "desired_marker_positions",
+          "marker_heights",
+          "marker_positions",
+          "p"
+        ]
+      },
       "Rack": {
         "description": "View of an Rack",
         "type": "object",
@@ -15883,6 +17266,403 @@
           "routes"
         ]
       },
+      "RouteDestination": {
+        "description": "A `RouteDestination` is used to match traffic with a routing rule, on the destination of that traffic.\n\nWhen traffic is to be sent to a destination that is within a given `RouteDestination`, the corresponding `RouterRoute` applies, and traffic will be forward to the `RouteTarget` for that rule.",
+        "oneOf": [
+          {
+            "description": "Route applies to traffic destined for a specific IP address",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ip"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "ip"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Route applies to traffic destined for a specific IP subnet",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ip_net"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Route applies to traffic destined for the given VPC.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vpc"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Name"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Route applies to traffic",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "subnet"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Name"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
+      "RouteTarget": {
+        "description": "A `RouteTarget` describes the possible locations that traffic matching a route destination can be sent.",
+        "oneOf": [
+          {
+            "description": "Forward traffic to a particular IP address.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ip"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "ip"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Forward traffic to a VPC",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vpc"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Name"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Forward traffic to a VPC Subnet",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "subnet"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Name"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Forward traffic to a specific instance",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Name"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Forward traffic to an internet gateway",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internet_gateway"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/Name"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Drop matching traffic",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "drop"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "RouterRoute": {
+        "description": "A route defines a rule that governs where traffic should be sent based on its destination.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "destination": {
+            "description": "Selects which traffic this routing rule will apply to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouteDestination"
+              }
+            ]
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "description": "Describes the kind of router. Set at creation. `read-only`",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterRouteKind"
+              }
+            ]
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "target": {
+            "description": "The location that matched packets should be forwarded to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouteTarget"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "vpc_router_id": {
+            "description": "The ID of the VPC Router to which the route belongs",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "description",
+          "destination",
+          "id",
+          "kind",
+          "name",
+          "target",
+          "time_created",
+          "time_modified",
+          "vpc_router_id"
+        ]
+      },
+      "RouterRouteCreate": {
+        "description": "Create-time parameters for a `RouterRoute`",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "destination": {
+            "description": "Selects which traffic this routing rule will apply to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouteDestination"
+              }
+            ]
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "target": {
+            "description": "The location that matched packets should be forwarded to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouteTarget"
+              }
+            ]
+          }
+        },
+        "required": [
+          "description",
+          "destination",
+          "name",
+          "target"
+        ]
+      },
+      "RouterRouteKind": {
+        "description": "The kind of a `RouterRoute`\n\nThe kind determines certain attributes such as if the route is modifiable and describes how or where the route was created.",
+        "oneOf": [
+          {
+            "description": "Determines the default destination of traffic, such as whether it goes to the internet or not.\n\n`Destination: An Internet Gateway` `Modifiable: true`",
+            "type": "string",
+            "enum": [
+              "default"
+            ]
+          },
+          {
+            "description": "Automatically added for each VPC Subnet in the VPC\n\n`Destination: A VPC Subnet` `Modifiable: false`",
+            "type": "string",
+            "enum": [
+              "vpc_subnet"
+            ]
+          },
+          {
+            "description": "Automatically added when VPC peering is established\n\n`Destination: A different VPC` `Modifiable: false`",
+            "type": "string",
+            "enum": [
+              "vpc_peering"
+            ]
+          },
+          {
+            "description": "Created by a user; see `RouteTarget`\n\n`Destination: User defined` `Modifiable: true`",
+            "type": "string",
+            "enum": [
+              "custom"
+            ]
+          }
+        ]
+      },
+      "RouterRouteResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouterRoute"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "RouterRouteUpdate": {
+        "description": "Updateable properties of a `RouterRoute`",
+        "type": "object",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "destination": {
+            "description": "Selects which traffic this routing rule will apply to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouteDestination"
+              }
+            ]
+          },
+          "name": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "target": {
+            "description": "The location that matched packets should be forwarded to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouteTarget"
+              }
+            ]
+          }
+        },
+        "required": [
+          "destination",
+          "target"
+        ]
+      },
       "SamlIdentityProvider": {
         "description": "Identity-related metadata that's included in nearly all public API objects",
         "type": "object",
@@ -15992,6 +17772,7 @@
           "signing_keypair": {
             "nullable": true,
             "description": "request signing key pair",
+            "default": null,
             "allOf": [
               {
                 "$ref": "#/components/schemas/DerEncodedKeyPair"
@@ -17852,6 +19633,22 @@
           "points"
         ]
       },
+      "TimeseriesDescription": {
+        "description": "Text descriptions for the target and metric of a timeseries.",
+        "type": "object",
+        "properties": {
+          "metric": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "metric",
+          "target"
+        ]
+      },
       "TimeseriesName": {
         "title": "The name of a timeseries",
         "description": "Names are constructed by concatenating the target and metric names with ':'. Target and metric names must be lowercase alphanumeric characters with '_' separating words.",
@@ -17875,12 +19672,18 @@
         "description": "The schema for a timeseries.\n\nThis includes the name of the timeseries, as well as the datum type of its metric and the schema for each field.",
         "type": "object",
         "properties": {
+          "authz_scope": {
+            "$ref": "#/components/schemas/AuthzScope"
+          },
           "created": {
             "type": "string",
             "format": "date-time"
           },
           "datum_type": {
             "$ref": "#/components/schemas/DatumType"
+          },
+          "description": {
+            "$ref": "#/components/schemas/TimeseriesDescription"
           },
           "field_schema": {
             "type": "array",
@@ -17891,13 +19694,25 @@
           },
           "timeseries_name": {
             "$ref": "#/components/schemas/TimeseriesName"
+          },
+          "units": {
+            "$ref": "#/components/schemas/Units"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 1
           }
         },
         "required": [
+          "authz_scope",
           "created",
           "datum_type",
+          "description",
           "field_schema",
-          "timeseries_name"
+          "timeseries_name",
+          "units",
+          "version"
         ]
       },
       "TimeseriesSchemaResultsPage": {
@@ -17981,6 +19796,27 @@
           "items"
         ]
       },
+      "Units": {
+        "description": "Measurement units for timeseries samples.",
+        "oneOf": [
+          {
+            "type": "string",
+            "enum": [
+              "count",
+              "bytes",
+              "seconds",
+              "nanoseconds"
+            ]
+          },
+          {
+            "description": "No meaningful units, e.g. a dimensionless quanity.",
+            "type": "string",
+            "enum": [
+              "none"
+            ]
+          }
+        ]
+      },
       "User": {
         "description": "View of a User",
         "type": "object",
@@ -18006,7 +19842,7 @@
         ]
       },
       "UserBuiltin": {
-        "description": "View of a Built-in User\n\nA Built-in User is explicitly created as opposed to being derived from an Identify Provider.",
+        "description": "View of a Built-in User\n\nBuilt-in users are identities internal to the system, used when the control plane performs actions autonomously",
         "type": "object",
         "properties": {
           "description": {
@@ -18093,8 +19929,8 @@
         ]
       },
       "UserId": {
-        "title": "A name unique within the parent collection",
-        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
+        "title": "A username for a local-only user",
+        "description": "Usernames must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Usernames cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
         "type": "string",
         "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,
@@ -18507,7 +20343,7 @@
         "type": "object",
         "properties": {
           "action": {
-            "description": "whether traffic matching the rule should be allowed or dropped",
+            "description": "Whether traffic matching the rule should be allowed or dropped",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleAction"
@@ -18519,7 +20355,7 @@
             "type": "string"
           },
           "direction": {
-            "description": "whether this rule is for incoming or outgoing traffic",
+            "description": "Whether this rule is for incoming or outgoing traffic",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleDirection"
@@ -18527,7 +20363,7 @@
             ]
           },
           "filters": {
-            "description": "reductions on the scope of the rule",
+            "description": "Reductions on the scope of the rule",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleFilter"
@@ -18548,13 +20384,13 @@
             ]
           },
           "priority": {
-            "description": "the relative priority of this rule",
+            "description": "The relative priority of this rule",
             "type": "integer",
             "format": "uint16",
             "minimum": 0
           },
           "status": {
-            "description": "whether this rule is in effect",
+            "description": "Whether this rule is in effect",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleStatus"
@@ -18562,7 +20398,7 @@
             ]
           },
           "targets": {
-            "description": "list of sets of instances that the rule applies to",
+            "description": "Determine the set of instances that the rule applies to",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRuleTarget"
@@ -18579,7 +20415,7 @@
             "format": "date-time"
           },
           "vpc_id": {
-            "description": "the VPC to which this rule belongs",
+            "description": "The VPC to which this rule belongs",
             "type": "string",
             "format": "uuid"
           }
@@ -18614,24 +20450,26 @@
         ]
       },
       "VpcFirewallRuleFilter": {
-        "description": "Filter for a firewall rule. A given packet must match every field that is present for the rule to apply to it. A packet matches a field if any entry in that field matches the packet.",
+        "description": "Filters reduce the scope of a firewall rule. Without filters, the rule applies to all packets to the targets (or from the targets, if it's an outbound rule). With multiple filters, the rule applies only to packets matching ALL filters. The maximum number of each type of filter is 256.",
         "type": "object",
         "properties": {
           "hosts": {
             "nullable": true,
-            "description": "If present, the sources (if incoming) or destinations (if outgoing) this rule applies to.",
+            "description": "If present, host filters match the \"other end\" of traffic from the target’s perspective: for an inbound rule, they match the source of traffic. For an outbound rule, they match the destination.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRuleHostFilter"
-            }
+            },
+            "maxItems": 256
           },
           "ports": {
             "nullable": true,
-            "description": "If present, the destination ports this rule applies to.",
+            "description": "If present, the destination ports or port ranges this rule applies to.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/L4PortRange"
-            }
+            },
+            "maxItems": 256
           },
           "protocols": {
             "nullable": true,
@@ -18639,7 +20477,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRuleProtocol"
-            }
+            },
+            "maxItems": 256
           }
         }
       },
@@ -18761,7 +20600,7 @@
         ]
       },
       "VpcFirewallRuleTarget": {
-        "description": "A `VpcFirewallRuleTarget` is used to specify the set of `Instance`s to which a firewall rule applies.",
+        "description": "A `VpcFirewallRuleTarget` is used to specify the set of instances to which a firewall rule applies. You can target instances directly by name, or specify a VPC, VPC subnet, IP, or IP subnet, which will apply the rule to traffic going to all matching instances. Targets are additive: the rule applies to instances matching ANY target.",
         "oneOf": [
           {
             "description": "The rule applies to all instances in the VPC",
@@ -18866,7 +20705,7 @@
         "type": "object",
         "properties": {
           "action": {
-            "description": "whether traffic matching the rule should be allowed or dropped",
+            "description": "Whether traffic matching the rule should be allowed or dropped",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleAction"
@@ -18874,11 +20713,11 @@
             ]
           },
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "direction": {
-            "description": "whether this rule is for incoming or outgoing traffic",
+            "description": "Whether this rule is for incoming or outgoing traffic",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleDirection"
@@ -18886,7 +20725,7 @@
             ]
           },
           "filters": {
-            "description": "reductions on the scope of the rule",
+            "description": "Reductions on the scope of the rule",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleFilter"
@@ -18894,7 +20733,7 @@
             ]
           },
           "name": {
-            "description": "name of the rule, unique to this VPC",
+            "description": "Name of the rule, unique to this VPC",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -18902,13 +20741,13 @@
             ]
           },
           "priority": {
-            "description": "the relative priority of this rule",
+            "description": "The relative priority of this rule",
             "type": "integer",
             "format": "uint16",
             "minimum": 0
           },
           "status": {
-            "description": "whether this rule is in effect",
+            "description": "Whether this rule is in effect",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleStatus"
@@ -18916,11 +20755,12 @@
             ]
           },
           "targets": {
-            "description": "list of sets of instances that the rule applies to",
+            "description": "Determine the set of instances that the rule applies to",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRuleTarget"
-            }
+            },
+            "maxItems": 256
           }
         },
         "required": [
@@ -18935,14 +20775,15 @@
         ]
       },
       "VpcFirewallRuleUpdateParams": {
-        "description": "Updateable properties of a `Vpc`'s firewall Note that VpcFirewallRules are implicitly created along with a Vpc, so there is no explicit creation.",
+        "description": "Updated list of firewall rules. Will replace all existing rules.",
         "type": "object",
         "properties": {
           "rules": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRuleUpdate"
-            }
+            },
+            "maxItems": 1024
           }
         },
         "required": [
@@ -18985,10 +20826,128 @@
           "items"
         ]
       },
-      "VpcSubnet": {
-        "description": "A VPC subnet represents a logical grouping for instances that allows network traffic between them, within a IPv4 subnetwork or optionall an IPv6 subnetwork.",
+      "VpcRouter": {
+        "description": "A VPC router defines a series of rules that indicate where traffic should be sent depending on its destination.",
         "type": "object",
         "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/VpcRouterKind"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "vpc_id": {
+            "description": "The VPC to which the router belongs.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "kind",
+          "name",
+          "time_created",
+          "time_modified",
+          "vpc_id"
+        ]
+      },
+      "VpcRouterCreate": {
+        "description": "Create-time parameters for a `VpcRouter`",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
+      },
+      "VpcRouterKind": {
+        "type": "string",
+        "enum": [
+          "system",
+          "custom"
+        ]
+      },
+      "VpcRouterResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcRouter"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "VpcRouterUpdate": {
+        "description": "Updateable properties of a `VpcRouter`",
+        "type": "object",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        }
+      },
+      "VpcSubnet": {
+        "description": "A VPC subnet represents a logical grouping for instances that allows network traffic between them, within a IPv4 subnetwork or optionally an IPv6 subnetwork.",
+        "type": "object",
+        "properties": {
+          "custom_router_id": {
+            "nullable": true,
+            "description": "ID for an attached custom router.",
+            "type": "string",
+            "format": "uuid"
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
@@ -19053,6 +21012,15 @@
         "description": "Create-time parameters for a `VpcSubnet`",
         "type": "object",
         "properties": {
+          "custom_router": {
+            "nullable": true,
+            "description": "An optional router, used to direct packets sent from hosts in this subnet to any destination address.\n\nCustom routers apply in addition to the VPC-wide *system* router, and have higher priority than the system router for an otherwise equal-prefix-length match.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
           "description": {
             "type": "string"
           },
@@ -19108,6 +21076,15 @@
         "description": "Updateable properties of a `VpcSubnet`",
         "type": "object",
         "properties": {
+          "custom_router": {
+            "nullable": true,
+            "description": "An optional router, used to direct packets sent from hosts in this subnet to any destination address.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
           "description": {
             "nullable": true,
             "type": "string"

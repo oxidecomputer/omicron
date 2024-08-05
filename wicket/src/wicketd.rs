@@ -9,12 +9,14 @@ use std::convert::From;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc::{self, Sender, UnboundedSender};
 use tokio::time::{interval, Duration, MissedTickBehavior};
-use wicket_common::rack_update::{SpIdentifier, SpType};
+use wicket_common::inventory::{SpIdentifier, SpType};
+use wicket_common::rack_update::{
+    AbortUpdateOptions, ClearUpdateStateOptions, StartUpdateOptions,
+};
 use wicket_common::WICKETD_TIMEOUT;
 use wicketd_client::types::{
-    AbortUpdateOptions, ClearUpdateStateOptions, ClearUpdateStateParams,
-    GetInventoryParams, GetInventoryResponse, GetLocationResponse,
-    IgnitionCommand, StartUpdateOptions, StartUpdateParams,
+    ClearUpdateStateParams, GetInventoryParams, GetInventoryResponse,
+    GetLocationResponse, IgnitionCommand, StartUpdateParams,
 };
 
 use crate::events::EventReportMap;

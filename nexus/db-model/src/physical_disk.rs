@@ -85,3 +85,75 @@ impl DatastoreCollectionConfig<super::Zpool> for PhysicalDisk {
     type CollectionTimeDeletedColumn = physical_disk::dsl::time_deleted;
     type CollectionIdColumn = zpool::dsl::sled_id;
 }
+
+mod diesel_util {
+    use diesel::{
+        helper_types::{And, EqAny},
+        prelude::*,
+        query_dsl::methods::FilterDsl,
+    };
+    use nexus_types::{
+        deployment::DiskFilter,
+        external_api::views::{PhysicalDiskPolicy, PhysicalDiskState},
+    };
+
+    /// An extension trait to apply a [`DiskFilter`] to a Diesel expression.
+    ///
+    /// This is applicable to any Diesel expression which includes the `physical_disk`
+    /// table.
+    ///
+    /// This needs to live here, rather than in `nexus-db-queries`, because it
+    /// names the `DbPhysicalDiskPolicy` type which is private to this crate.
+    pub trait ApplyPhysicalDiskFilterExt {
+        type Output;
+
+        /// Applies a [`DiskFilter`] to a Diesel expression.
+        fn physical_disk_filter(self, filter: DiskFilter) -> Self::Output;
+    }
+
+    impl<E> ApplyPhysicalDiskFilterExt for E
+    where
+        E: FilterDsl<PhysicalDiskFilterQuery>,
+    {
+        type Output = E::Output;
+
+        fn physical_disk_filter(self, filter: DiskFilter) -> Self::Output {
+            use crate::schema::physical_disk::dsl as physical_disk_dsl;
+
+            // These are only boxed for ease of reference above.
+            let all_matching_policies: BoxedIterator<
+                crate::PhysicalDiskPolicy,
+            > = Box::new(
+                PhysicalDiskPolicy::all_matching(filter).map(Into::into),
+            );
+            let all_matching_states: BoxedIterator<crate::PhysicalDiskState> =
+                Box::new(
+                    PhysicalDiskState::all_matching(filter).map(Into::into),
+                );
+
+            FilterDsl::filter(
+                self,
+                physical_disk_dsl::disk_policy
+                    .eq_any(all_matching_policies)
+                    .and(
+                        physical_disk_dsl::disk_state
+                            .eq_any(all_matching_states),
+                    ),
+            )
+        }
+    }
+
+    type BoxedIterator<T> = Box<dyn Iterator<Item = T>>;
+    type PhysicalDiskFilterQuery = And<
+        EqAny<
+            crate::schema::physical_disk::disk_policy,
+            BoxedIterator<crate::PhysicalDiskPolicy>,
+        >,
+        EqAny<
+            crate::schema::physical_disk::disk_state,
+            BoxedIterator<crate::PhysicalDiskState>,
+        >,
+    >;
+}
+
+pub use diesel_util::ApplyPhysicalDiskFilterExt;

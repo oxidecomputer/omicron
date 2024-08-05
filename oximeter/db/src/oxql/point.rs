@@ -11,12 +11,15 @@ use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;
 use num::ToPrimitive;
+use oximeter::traits::HistogramSupport;
 use oximeter::DatumType;
 use oximeter::Measurement;
+use oximeter::Quantile;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
+use std::ops::Sub;
 
 /// The type of each individual data point's value in a timeseries.
 #[derive(
@@ -1428,7 +1431,7 @@ impl ValueArray {
                         CumulativeDatum::DoubleDistribution(last),
                         oximeter::Datum::HistogramF32(new),
                     ) => {
-                        let new = Distribution::from(new);
+                        let new = Distribution::<f64>::from(new);
                         self.as_double_distribution_mut()?
                             .push(Some(new.checked_sub(&last)?));
                     }
@@ -1436,7 +1439,7 @@ impl ValueArray {
                         CumulativeDatum::DoubleDistribution(last),
                         oximeter::Datum::HistogramF64(new),
                     ) => {
-                        let new = Distribution::from(new);
+                        let new = Distribution::<f64>::from(new);
                         self.as_double_distribution_mut()?
                             .push(Some(new.checked_sub(&last)?));
                     }
@@ -1517,15 +1520,30 @@ pub trait DistributionSupport:
 impl DistributionSupport for i64 {}
 impl DistributionSupport for f64 {}
 
-/// A distribution is a sequence of bins and counts in those bins.
+/// A distribution is a sequence of bins and counts in those bins, and some
+/// statistical information tracked to compute the mean, standard deviation, and
+/// quantile estimates.
+///
+/// Min, max, and the p-* quantiles are treated as optional due to the
+/// possibility of distribution operations, like subtraction.
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[schemars(rename = "Distribution{T}")]
 pub struct Distribution<T: DistributionSupport> {
     bins: Vec<T>,
     counts: Vec<u64>,
+    min: Option<T>,
+    max: Option<T>,
+    sum_of_samples: T,
+    squared_mean: f64,
+    p50: Option<Quantile>,
+    p90: Option<Quantile>,
+    p99: Option<Quantile>,
 }
 
-impl<T: DistributionSupport> fmt::Display for Distribution<T> {
+impl<T> fmt::Display for Distribution<T>
+where
+    T: DistributionSupport + HistogramSupport + Sub<Output = T>,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let elems = self
             .bins
@@ -1534,12 +1552,52 @@ impl<T: DistributionSupport> fmt::Display for Distribution<T> {
             .map(|(bin, count)| format!("{bin}: {count}"))
             .collect::<Vec<_>>()
             .join(", ");
-        write!(f, "{}", elems)
+
+        let unwrap_estimate = |opt: Option<Quantile>| {
+            opt.map_or("None".to_string(), |v| match v.estimate() {
+                Ok(v) => v.to_string(),
+                Err(err) => err.to_string(),
+            })
+        };
+
+        let p50_estimate = unwrap_estimate(self.p50);
+        let p90_estimate = unwrap_estimate(self.p90);
+        let p99_estimate = unwrap_estimate(self.p99);
+
+        write!(
+            f,
+            "{}, min: {}, max: {}, mean: {}, std_dev: {}, p50: {}, p90: {}, p99: {}",
+            elems,
+            self.min.map_or("none".to_string(), |m| m.to_string()),
+            self.max.unwrap_or_default(),
+            self.mean(),
+            self.std_dev().unwrap_or_default(),
+            p50_estimate,
+            p90_estimate,
+            p99_estimate
+        )
     }
 }
 
-impl<T: DistributionSupport> Distribution<T> {
-    // Subtract two distributions, checking that they have the same bins.
+impl<T> Distribution<T>
+where
+    T: DistributionSupport + HistogramSupport + Sub<Output = T>,
+{
+    /// Subtract two distributions, checking that they have the same bins.
+    ///
+    /// Min and max values are returned as None, as they lose meaning
+    /// when subtracting distributions. The same is true for p50, p90, and p99
+    /// quantiles.
+    ///
+    /// TODO: It's not really clear how to compute the "difference" of two
+    /// histograms for items like min, max, p*'s. It's certainly not linear, and
+    /// although we might be able to make some estimates in the case of min and
+    /// max, we'll defer it for now. Instead, we'll store None for all these
+    /// values when computing the diff. They will be very useful later, when we
+    /// start generating distributions in OxQL itself, from a sequence of
+    /// scalars (similar to a DTrace aggregation). We'll wait to put that in
+    /// place until we have more data that we want to start aggregating that
+    /// way.
     fn checked_sub(
         &self,
         rhs: &Distribution<T>,
@@ -1548,14 +1606,34 @@ impl<T: DistributionSupport> Distribution<T> {
             self.bins == rhs.bins,
             "Cannot subtract distributions with different bins",
         );
-        let counts = self
+        let counts: Vec<_> = self
             .counts
             .iter()
-            .zip(rhs.counts.iter().copied())
-            .map(|(x, y)| x.checked_sub(y))
+            .zip(rhs.counts.iter())
+            .map(|(x, y)| x.checked_sub(*y))
             .collect::<Option<_>>()
             .context("Underflow subtracting distributions values")?;
-        Ok(Self { bins: self.bins.clone(), counts })
+
+        // Subtract sum_of_samples.
+        // This can be negative as T is either i64 or f64.
+        let sum_of_samples = self.sum_of_samples - rhs.sum_of_samples;
+
+        // Squared means are not linear, so we subtract the means and then
+        // square that number.
+        let sub_means = self.mean() - rhs.mean();
+        let squared_mean = sub_means.powi(2);
+
+        Ok(Self {
+            bins: self.bins.clone(),
+            counts,
+            min: None,
+            max: None,
+            sum_of_samples,
+            squared_mean,
+            p50: None,
+            p90: None,
+            p99: None,
+        })
     }
 
     /// Return the slice of bins.
@@ -1568,6 +1646,85 @@ impl<T: DistributionSupport> Distribution<T> {
         &self.counts
     }
 
+    /// Return the number of samples in the distribution.
+    pub fn n_samples(&self) -> u64 {
+        self.counts.iter().sum()
+    }
+
+    /// Return the minimum value in the distribution.
+    pub fn min(&self) -> Option<T> {
+        self.min
+    }
+
+    /// Return the maximum value in the distribution.
+    pub fn max(&self) -> Option<T> {
+        self.max
+    }
+
+    /// Return the mean of the distribution.
+    pub fn mean(&self) -> f64 {
+        if self.n_samples() > 0 {
+            // We can unwrap here because we know n_samples() > 0,
+            // so the sum_of_samples should convert to f64 without issue.
+            self.sum_of_samples
+                .to_f64()
+                .map(|sum| sum / (self.n_samples() as f64))
+                .unwrap()
+        } else {
+            0.
+        }
+    }
+
+    /// Return the variance for inputs to the histogram based on the Welford's
+    /// algorithm, using the squared mean (M2).
+    ///
+    /// Returns `None` if there are fewer than two samples.
+    pub fn variance(&self) -> Option<f64> {
+        (self.n_samples() > 1)
+            .then(|| self.squared_mean / (self.n_samples() as f64))
+    }
+
+    /// Return the sample variance for inputs to the histogram based on the
+    /// Welford's algorithm, using the squared mean (M2).
+    ///
+    /// Returns `None` if there are fewer than two samples.
+    pub fn sample_variance(&self) -> Option<f64> {
+        (self.n_samples() > 1)
+            .then(|| self.squared_mean / ((self.n_samples() - 1) as f64))
+    }
+
+    /// Return the standard deviation for inputs to the histogram.
+    ///
+    /// This is a biased (as a consequence of Jensen’s inequality), estimate of
+    /// the population deviation that returns the standard deviation of the
+    /// samples seen by the histogram.
+    ///
+    /// Returns `None` if the variance is `None`, i.e., if there are fewer than
+    /// two samples.
+    pub fn std_dev(&self) -> Option<f64> {
+        match self.variance() {
+            Some(variance) => Some(variance.sqrt()),
+            None => None,
+        }
+    }
+
+    /// Return the "corrected" sample standard deviation for inputs to the
+    /// histogram.
+    ///
+    /// This is an unbiased estimate of the population deviation, applying
+    /// Bessel's correction, which corrects the bias in the estimation of the
+    /// population variance, and some, but not all of the bias in the estimation
+    /// of the population standard deviation.
+    ///
+    /// Returns `None` if the variance is `None`, i.e., if there are fewer than
+    /// two samples.
+    pub fn sample_std_dev(&self) -> Option<f64> {
+        match self.sample_variance() {
+            Some(variance) => Some(variance.sqrt()),
+            None => None,
+        }
+    }
+
     /// Return an iterator over each bin and count.
     pub fn iter(&self) -> impl ExactSizeIterator<Item = (&T, &u64)> + '_ {
         self.bins.iter().zip(self.counts.iter())
@@ -1578,8 +1735,18 @@ macro_rules! i64_dist_from {
     ($t:ty) => {
         impl From<&oximeter::histogram::Histogram<$t>> for Distribution<i64> {
             fn from(hist: &oximeter::histogram::Histogram<$t>) -> Self {
-                let (bins, counts) = hist.to_arrays();
-                Self { bins: bins.into_iter().map(i64::from).collect(), counts }
+                let (bins, counts) = hist.bins_and_counts();
+                Self {
+                    bins: bins.into_iter().map(i64::from).collect(),
+                    counts,
+                    min: Some(i64::from(hist.min())),
+                    max: Some(i64::from(hist.max())),
+                    sum_of_samples: hist.sum_of_samples(),
+                    squared_mean: hist.squared_mean(),
+                    p50: Some(hist.p50q()),
+                    p90: Some(hist.p90q()),
+                    p99: Some(hist.p99q()),
+                }
             }
         }
 
@@ -1604,13 +1771,23 @@ impl TryFrom<&oximeter::histogram::Histogram<u64>> for Distribution<i64> {
     fn try_from(
         hist: &oximeter::histogram::Histogram<u64>,
     ) -> Result<Self, Self::Error> {
-        let (bins, counts) = hist.to_arrays();
+        let (bins, counts) = hist.bins_and_counts();
         let bins = bins
             .into_iter()
             .map(i64::try_from)
             .collect::<Result<_, _>>()
             .context("Overflow converting u64 to i64")?;
-        Ok(Self { bins, counts })
+        Ok(Self {
+            bins,
+            counts,
+            min: Some(hist.min() as i64),
+            max: Some(hist.max() as i64),
+            sum_of_samples: hist.sum_of_samples(),
+            squared_mean: hist.squared_mean(),
+            p50: Some(hist.p50q()),
+            p90: Some(hist.p90q()),
+            p99: Some(hist.p99q()),
+        })
     }
 }
 
@@ -1627,8 +1804,18 @@ macro_rules! f64_dist_from {
     ($t:ty) => {
         impl From<&oximeter::histogram::Histogram<$t>> for Distribution<f64> {
             fn from(hist: &oximeter::histogram::Histogram<$t>) -> Self {
-                let (bins, counts) = hist.to_arrays();
-                Self { bins: bins.into_iter().map(f64::from).collect(), counts }
+                let (bins, counts) = hist.bins_and_counts();
+                Self {
+                    bins: bins.into_iter().map(f64::from).collect(),
+                    counts,
+                    min: Some(f64::from(hist.min())),
+                    max: Some(f64::from(hist.max())),
+                    sum_of_samples: hist.sum_of_samples() as f64,
+                    squared_mean: hist.squared_mean(),
+                    p50: Some(hist.p50q()),
+                    p90: Some(hist.p90q()),
+                    p99: Some(hist.p99q()),
+                }
             }
         }
 
@@ -1645,12 +1832,12 @@ f64_dist_from!(f64);
 
 #[cfg(test)]
 mod tests {
-    use crate::oxql::point::{DataType, ValueArray};
-
     use super::{Distribution, MetricType, Points, Values};
+    use crate::oxql::point::{DataType, ValueArray};
     use chrono::{DateTime, Utc};
-    use oximeter::types::Cumulative;
-    use oximeter::Measurement;
+    use oximeter::{
+        histogram::Record, types::Cumulative, Measurement, Quantile,
+    };
     use std::time::Duration;
 
     #[test]
@@ -1745,6 +1932,38 @@ mod tests {
             meas2.start_time().unwrap(),
             meas2.timestamp(),
         );
+    }
+
+    #[test]
+    fn test_sub_between_histogram_distributions() {
+        let now = Utc::now();
+        let current1 = now + Duration::from_secs(1);
+        let mut hist1 =
+            oximeter::histogram::Histogram::new(&[0i64, 10, 20]).unwrap();
+        hist1.sample(1).unwrap();
+        hist1.set_start_time(current1);
+        let current2 = now + Duration::from_secs(2);
+        let mut hist2 =
+            oximeter::histogram::Histogram::new(&[0i64, 10, 20]).unwrap();
+        hist2.sample(5).unwrap();
+        hist2.sample(10).unwrap();
+        hist2.sample(15).unwrap();
+        hist2.set_start_time(current2);
+        let dist1 = Distribution::from(&hist1);
+        let dist2 = Distribution::from(&hist2);
+
+        let diff = dist2.checked_sub(&dist1).unwrap();
+        assert_eq!(diff.bins(), &[i64::MIN, 0, 10, 20]);
+        assert_eq!(diff.counts(), &[0, 0, 2, 0]);
+        assert_eq!(diff.n_samples(), 2);
+        assert!(diff.min().is_none());
+        assert!(diff.max().is_none());
+        assert_eq!(diff.mean(), 14.5);
+        assert_eq!(diff.std_dev(), Some(6.363961030678928));
+        assert_eq!(diff.sample_std_dev(), Some(9.0));
+        assert!(diff.p50.is_none());
+        assert!(diff.p90.is_none());
+        assert!(diff.p99.is_none());
     }
 
     fn timestamps(n: usize) -> Vec<DateTime<Utc>> {
@@ -1972,7 +2191,17 @@ mod tests {
             timestamps: timestamps(1),
             values: vec![Values {
                 values: ValueArray::IntegerDistribution(vec![Some(
-                    Distribution { bins: vec![0, 1, 2], counts: vec![0; 3] },
+                    Distribution {
+                        bins: vec![0, 1, 2],
+                        counts: vec![0; 3],
+                        min: Some(0),
+                        max: Some(2),
+                        sum_of_samples: 0,
+                        squared_mean: 0.0,
+                        p50: Some(Quantile::p50()),
+                        p90: Some(Quantile::p90()),
+                        p99: Some(Quantile::p99()),
+                    },
                 )]),
                 metric_type: MetricType::Gauge,
             }],
@@ -2012,6 +2241,13 @@ mod tests {
                     Distribution {
                         bins: vec![0.0, 1.0, 2.0],
                         counts: vec![0; 3],
+                        min: Some(0.0),
+                        max: Some(2.0),
+                        sum_of_samples: 0.0,
+                        squared_mean: 0.0,
+                        p50: Some(Quantile::p50()),
+                        p90: Some(Quantile::p90()),
+                        p99: Some(Quantile::p99()),
                     },
                 )]),
                 metric_type: MetricType::Gauge,

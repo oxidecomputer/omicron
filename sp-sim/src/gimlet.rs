@@ -6,7 +6,6 @@ use crate::config::GimletConfig;
 use crate::config::SpComponentConfig;
 use crate::helpers::rot_slot_id_from_u16;
 use crate::helpers::rot_slot_id_to_u16;
-use crate::rot::RotSprocketExt;
 use crate::serial_number_padded;
 use crate::server;
 use crate::server::SimSpHandler;
@@ -37,10 +36,8 @@ use gateway_messages::SpStateV2;
 use gateway_messages::{version, MessageKind};
 use gateway_messages::{ComponentDetails, Message, MgsError, StartupOptions};
 use gateway_messages::{DiscoverResponse, IgnitionState, PowerState};
+use gateway_types::component::SpState;
 use slog::{debug, error, info, warn, Logger};
-use sprockets_rot::common::msgs::{RotRequestV1, RotResponseV1};
-use sprockets_rot::common::Ed25519PublicKey;
-use sprockets_rot::{RotSprocket, RotSprocketError};
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::iter;
@@ -88,8 +85,6 @@ pub enum SimSpHandledRequest {
 }
 
 pub struct Gimlet {
-    rot: Mutex<RotSprocket>,
-    manufacturing_public_key: Ed25519PublicKey,
     local_addrs: Option<[SocketAddrV6; 2]>,
     handler: Option<Arc<TokioMutex<Handler>>>,
     serial_console_addrs: HashMap<String, SocketAddrV6>,
@@ -110,14 +105,10 @@ impl Drop for Gimlet {
 
 #[async_trait]
 impl SimulatedSp for Gimlet {
-    async fn state(&self) -> omicron_gateway::http_entrypoints::SpState {
-        omicron_gateway::http_entrypoints::SpState::from(
+    async fn state(&self) -> SpState {
+        SpState::from(
             self.handler.as_ref().unwrap().lock().await.sp_state_impl(),
         )
-    }
-
-    fn manufacturing_public_key(&self) -> Ed25519PublicKey {
-        self.manufacturing_public_key
     }
 
     fn local_addr(&self, port: SpPort) -> Option<SocketAddrV6> {
@@ -133,13 +124,6 @@ impl SimulatedSp for Gimlet {
         if let Ok(()) = self.commands.send(Command::SetResponsiveness(r, tx)) {
             rx.await.unwrap();
         }
-    }
-
-    fn rot_request(
-        &self,
-        request: RotRequestV1,
-    ) -> Result<RotResponseV1, RotSprocketError> {
-        self.rot.lock().unwrap().handle_deserialized(request)
     }
 
     async fn last_sp_update_data(&self) -> Option<Box<[u8]>> {
@@ -201,16 +185,11 @@ impl Gimlet {
         let (commands, commands_rx) = mpsc::unbounded_channel();
         let last_request_handled = Arc::default();
 
-        let (manufacturing_public_key, rot) =
-            RotSprocket::bootstrap_from_config(&gimlet.common);
-
         // Weird case - if we don't have any bind addresses, we're only being
         // created to simulate an RoT, so go ahead and return without actually
         // starting a simulated SP.
         let Some(bind_addrs) = gimlet.common.bind_addrs else {
             return Ok(Self {
-                rot: Mutex::new(rot),
-                manufacturing_public_key,
                 local_addrs: None,
                 handler: None,
                 serial_console_addrs,
@@ -299,8 +278,6 @@ impl Gimlet {
             .push(task::spawn(async move { inner.run().await.unwrap() }));
 
         Ok(Self {
-            rot: Mutex::new(rot),
-            manufacturing_public_key,
             local_addrs: Some(local_addrs),
             handler: Some(handler),
             serial_console_addrs,
@@ -1275,12 +1252,13 @@ impl SpHandler for Handler {
             "port" => ?port,
             "component" => ?component,
         );
-        if component == SpComponent::ROT {
-            Ok(rot_slot_id_to_u16(self.rot_active_slot))
-        } else {
+        match component {
+            SpComponent::ROT => Ok(rot_slot_id_to_u16(self.rot_active_slot)),
+            // The only active component is stage0
+            SpComponent::STAGE0 => Ok(0),
             // The real SP returns `RequestUnsupportedForComponent` for anything
             // other than the RoT, including SP_ITSELF.
-            Err(SpError::RequestUnsupportedForComponent)
+            _ => Err(SpError::RequestUnsupportedForComponent),
         }
     }
 
@@ -1300,16 +1278,27 @@ impl SpHandler for Handler {
             "slot" => slot,
             "persist" => persist,
         );
-        if component == SpComponent::ROT {
-            self.rot_active_slot = rot_slot_id_from_u16(slot)?;
-            Ok(())
-        } else if component == SpComponent::HOST_CPU_BOOT_FLASH {
-            self.update_state.set_active_host_slot(slot);
-            Ok(())
-        } else {
-            // The real SP returns `RequestUnsupportedForComponent` for anything
-            // other than the RoT and host boot flash, including SP_ITSELF.
-            Err(SpError::RequestUnsupportedForComponent)
+        match component {
+            SpComponent::ROT => {
+                self.rot_active_slot = rot_slot_id_from_u16(slot)?;
+                Ok(())
+            }
+            SpComponent::STAGE0 => {
+                if slot == 1 {
+                    return Ok(());
+                } else {
+                    Err(SpError::RequestUnsupportedForComponent)
+                }
+            }
+            SpComponent::HOST_CPU_BOOT_FLASH => {
+                self.update_state.set_active_host_slot(slot);
+                Ok(())
+            }
+            _ => {
+                // The real SP returns `RequestUnsupportedForComponent` for anything
+                // other than the RoT and host boot flash, including SP_ITSELF.
+                Err(SpError::RequestUnsupportedForComponent)
+            }
         }
     }
 
@@ -1447,34 +1436,6 @@ impl SpHandler for Handler {
             (SpComponent::STAGE0, b"NAME", _, false) => STAGE0_NAME,
             (SpComponent::STAGE0, b"VERS", 0, false) => STAGE0_VERS0,
             (SpComponent::STAGE0, b"VERS", 1, false) => STAGE0_VERS1,
-            _ => return Err(SpError::NoSuchCabooseKey(key)),
-        };
-
-        buf[..val.len()].copy_from_slice(val);
-        Ok(val.len())
-    }
-
-    #[cfg(any(feature = "no-caboose", feature = "old-state"))]
-    fn get_component_caboose_value(
-        &mut self,
-        component: SpComponent,
-        slot: u16,
-        key: [u8; 4],
-        buf: &mut [u8],
-    ) -> std::result::Result<usize, SpError> {
-        let val = match (component, &key, slot) {
-            (SpComponent::SP_ITSELF, b"GITC", 0) => SP_GITC0,
-            (SpComponent::SP_ITSELF, b"GITC", 1) => SP_GITC1,
-            (SpComponent::SP_ITSELF, b"BORD", _) => SP_BORD,
-            (SpComponent::SP_ITSELF, b"NAME", _) => SP_NAME,
-            (SpComponent::SP_ITSELF, b"VERS", 0) => SP_VERS0,
-            (SpComponent::SP_ITSELF, b"VERS", 1) => SP_VERS1,
-            (SpComponent::ROT, b"GITC", 0) => ROT_GITC0,
-            (SpComponent::ROT, b"GITC", 1) => ROT_GITC1,
-            (SpComponent::ROT, b"BORD", _) => ROT_BORD,
-            (SpComponent::ROT, b"NAME", _) => ROT_NAME,
-            (SpComponent::ROT, b"VERS", 0) => ROT_VERS0,
-            (SpComponent::ROT, b"VERS", 1) => ROT_VERS1,
             _ => return Err(SpError::NoSuchCabooseKey(key)),
         };
 

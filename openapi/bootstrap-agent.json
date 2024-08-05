@@ -1,8 +1,8 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Oxide Bootstrap Agent API",
-    "description": "API for interacting with individual sleds",
+    "title": "Bootstrap Agent API",
+    "description": "Per-sled API for setup and teardown",
     "contact": {
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
@@ -36,7 +36,7 @@
     },
     "/components": {
       "get": {
-        "summary": "Provides a list of components known to the bootstrap agent.",
+        "summary": "Provide a list of components known to the bootstrap agent.",
         "description": "This API is intended to allow early boot services (such as Wicket) to query the underlying component versions installed on a sled.",
         "operationId": "components_get",
         "responses": {
@@ -87,7 +87,7 @@
         }
       },
       "post": {
-        "summary": "Initializes the rack with the provided configuration.",
+        "summary": "Initialize the rack with the provided configuration.",
         "operationId": "rack_initialize",
         "requestBody": {
           "content": {
@@ -105,7 +105,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RackInitId"
+                  "$ref": "#/components/schemas/TypedUuidForRackInitKind"
                 }
               }
             }
@@ -119,7 +119,7 @@
         }
       },
       "delete": {
-        "summary": "Resets the rack to an unconfigured state.",
+        "summary": "Reset the rack to an unconfigured state.",
         "operationId": "rack_reset",
         "responses": {
           "200": {
@@ -127,7 +127,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RackResetId"
+                  "$ref": "#/components/schemas/TypedUuidForRackResetKind"
                 }
               }
             }
@@ -143,7 +143,7 @@
     },
     "/sled-initialize": {
       "delete": {
-        "summary": "Resets this particular sled to an unconfigured state.",
+        "summary": "Reset this particular sled to an unconfigured state.",
         "operationId": "sled_reset",
         "responses": {
           "204": {
@@ -217,7 +217,8 @@
               },
               "revision": {
                 "type": "integer",
-                "format": "int64"
+                "format": "uint32",
+                "minimum": 0
               },
               "type": {
                 "type": "string",
@@ -328,6 +329,7 @@
           "checker": {
             "nullable": true,
             "description": "Checker to apply to incoming messages.",
+            "default": null,
             "type": "string"
           },
           "originate": {
@@ -340,6 +342,7 @@
           "shaper": {
             "nullable": true,
             "description": "Shaper to apply to outgoing messages.",
+            "default": null,
             "type": "string"
           }
         },
@@ -437,6 +440,7 @@
           "local_pref": {
             "nullable": true,
             "description": "Apply a local preference to routes received from this peer.",
+            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -444,11 +448,13 @@
           "md5_auth_key": {
             "nullable": true,
             "description": "Use the given key for TCP-MD5 authentication with the peer.",
+            "default": null,
             "type": "string"
           },
           "min_ttl": {
             "nullable": true,
             "description": "Require messages from a peer have a minimum IP time to live field.",
+            "default": null,
             "type": "integer",
             "format": "uint8",
             "minimum": 0
@@ -456,6 +462,7 @@
           "multi_exit_discriminator": {
             "nullable": true,
             "description": "Apply the provided multi-exit discriminator (MED) updates sent to the peer.",
+            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -467,6 +474,7 @@
           "remote_asn": {
             "nullable": true,
             "description": "Require that a peer has a specified ASN.",
+            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -474,6 +482,7 @@
           "vlan_id": {
             "nullable": true,
             "description": "Associate a VLAN ID with a BGP peer session.",
+            "default": null,
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -529,7 +538,6 @@
         ]
       },
       "Certificate": {
-        "description": "Certificate\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"cert\", \"key\" ], \"properties\": { \"cert\": { \"type\": \"string\" }, \"key\": { \"type\": \"string\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "cert": {
@@ -726,7 +734,7 @@
       },
       "Name": {
         "title": "A name unique within the parent collection",
-        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
+        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
         "type": "string",
         "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,
@@ -828,10 +836,6 @@
           "speed200_g",
           "speed400_g"
         ]
-      },
-      "RackInitId": {
-        "type": "string",
-        "format": "uuid"
       },
       "RackInitializeRequest": {
         "description": "Configuration for the \"rack setup service\".\n\nThe Rack Setup Service should be responsible for one-time setup actions, such as CockroachDB placement and initialization.  Without operator intervention, however, these actions need a way to be automated in our deployment.",
@@ -989,7 +993,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackInitId"
+                "$ref": "#/components/schemas/TypedUuidForRackInitKind"
               },
               "status": {
                 "type": "string",
@@ -1011,7 +1015,7 @@
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/RackInitId"
+                    "$ref": "#/components/schemas/TypedUuidForRackInitKind"
                   }
                 ]
               },
@@ -1030,7 +1034,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackInitId"
+                "$ref": "#/components/schemas/TypedUuidForRackInitKind"
               },
               "message": {
                 "type": "string"
@@ -1052,7 +1056,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackInitId"
+                "$ref": "#/components/schemas/TypedUuidForRackInitKind"
               },
               "status": {
                 "type": "string",
@@ -1070,7 +1074,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackResetId"
+                "$ref": "#/components/schemas/TypedUuidForRackResetKind"
               },
               "status": {
                 "type": "string",
@@ -1092,7 +1096,7 @@
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/RackResetId"
+                    "$ref": "#/components/schemas/TypedUuidForRackResetKind"
                   }
                 ]
               },
@@ -1111,7 +1115,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackResetId"
+                "$ref": "#/components/schemas/TypedUuidForRackResetKind"
               },
               "message": {
                 "type": "string"
@@ -1133,7 +1137,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackResetId"
+                "$ref": "#/components/schemas/TypedUuidForRackResetKind"
               },
               "status": {
                 "type": "string",
@@ -1149,12 +1153,7 @@
           }
         ]
       },
-      "RackResetId": {
-        "type": "string",
-        "format": "uuid"
-      },
       "RecoverySiloConfig": {
-        "description": "RecoverySiloConfig\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"silo_name\", \"user_name\", \"user_password_hash\" ], \"properties\": { \"silo_name\": { \"$ref\": \"#/components/schemas/Name\" }, \"user_name\": { \"$ref\": \"#/components/schemas/UserId\" }, \"user_password_hash\": { \"$ref\": \"#/components/schemas/NewPasswordHash\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "silo_name": {
@@ -1192,6 +1191,7 @@
           "vlan_id": {
             "nullable": true,
             "description": "The VLAN id associated with this route.",
+            "default": null,
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -1225,6 +1225,14 @@
           }
         ]
       },
+      "TypedUuidForRackInitKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForRackResetKind": {
+        "type": "string",
+        "format": "uuid"
+      },
       "UplinkAddressConfig": {
         "type": "object",
         "properties": {
@@ -1234,6 +1242,7 @@
           "vlan_id": {
             "nullable": true,
             "description": "The VLAN id (if any) associated with this address.",
+            "default": null,
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -1244,8 +1253,12 @@
         ]
       },
       "UserId": {
-        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.\n\n<details><summary>JSON schema</summary>\n\n```json { \"title\": \"A name unique within the parent collection\", \"description\": \"Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.\", \"type\": \"string\", \"maxLength\": 63, \"minLength\": 1, \"pattern\": \"^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$\" } ``` </details>",
-        "type": "string"
+        "title": "A username for a local-only user",
+        "description": "Usernames must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Usernames cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
+        "type": "string",
+        "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
+        "minLength": 1,
+        "maxLength": 63
       }
     },
     "responses": {

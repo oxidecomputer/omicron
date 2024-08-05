@@ -7,6 +7,7 @@
 use std::net::IpAddr;
 
 use omicron_common::api::external::Name;
+use omicron_common::api::internal::shared::NetworkInterface;
 use parse_display::FromStr;
 use schemars::JsonSchema;
 use serde::de::Error as _;
@@ -266,7 +267,7 @@ pub enum UpdateableComponentType {
 pub struct Baseboard {
     pub serial: String,
     pub part: String,
-    pub revision: i64,
+    pub revision: u32,
 }
 
 /// A sled that has not been added to an initialized rack yet
@@ -411,4 +412,29 @@ mod test {
             "invalid length 65, expected a list of at most 64 role assignments"
         );
     }
+}
+
+#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
+pub struct ProbeInfo {
+    pub id: Uuid,
+    pub name: Name,
+    pub sled: Uuid,
+    pub external_ips: Vec<ProbeExternalIp>,
+    pub interface: NetworkInterface,
+}
+
+#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
+pub struct ProbeExternalIp {
+    pub ip: IpAddr,
+    pub first_port: u16,
+    pub last_port: u16,
+    pub kind: ProbeExternalIpKind,
+}
+
+#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProbeExternalIpKind {
+    Snat,
+    Floating,
+    Ephemeral,
 }

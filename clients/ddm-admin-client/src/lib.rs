@@ -12,7 +12,7 @@
 pub use ddm_admin_client::types;
 pub use ddm_admin_client::Error;
 
-use ddm_admin_client::types::{Ipv6Prefix, TunnelOrigin};
+use ddm_admin_client::types::TunnelOrigin;
 use ddm_admin_client::Client as InnerClient;
 use either::Either;
 use omicron_common::address::Ipv6Subnet;
@@ -81,8 +81,7 @@ impl Client {
     pub fn advertise_prefix(&self, address: Ipv6Subnet<SLED_PREFIX>) {
         let me = self.clone();
         tokio::spawn(async move {
-            let prefix =
-                Ipv6Prefix { addr: address.net().prefix(), len: SLED_PREFIX };
+            let prefix = address.net();
             retry_notify(retry_policy_internal_service_aggressive(), || async {
                 info!(
                     me.log, "Sending prefix to ddmd for advertisement";
@@ -97,7 +96,7 @@ impl Client {
             }, |err, duration| {
                 info!(
                     me.log,
-                    "Failed to notify ddmd of our address (will retry after {duration:?}";
+                    "Failed to notify ddmd of our address (will retry after {duration:?})";
                     "err" => %err,
                 );
             }).await.unwrap();
@@ -113,7 +112,7 @@ impl Client {
             }, |err, duration| {
                 info!(
                     me.log,
-                    "Failed to notify ddmd of tunnel endpoint (retry in {duration:?}";
+                    "Failed to notify ddmd of tunnel endpoint (retry in {duration:?})";
                     "err" => %err,
                 );
             }).await.unwrap();
@@ -130,8 +129,8 @@ impl Client {
         let prefixes = self.inner.get_prefixes().await?.into_inner();
         Ok(prefixes.into_iter().flat_map(|(_, prefixes)| {
             prefixes.into_iter().flat_map(|prefix| {
-                let mut segments = prefix.destination.addr.segments();
-                if prefix.destination.len == BOOTSTRAP_MASK
+                let mut segments = prefix.destination.addr().segments();
+                if prefix.destination.width() == BOOTSTRAP_MASK
                     && segments[0] == BOOTSTRAP_PREFIX
                 {
                     Either::Left(interfaces.iter().map(move |interface| {
@@ -177,7 +176,7 @@ impl Client {
             }, |err, duration| {
                 info!(
                     me.log,
-                    "Failed enable ddm stats (will retry after {duration:?}";
+                    "Failed enable ddm stats (will retry after {duration:?})";
                     "err" => %err,
                 );
             }).await.unwrap();

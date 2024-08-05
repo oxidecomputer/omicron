@@ -427,10 +427,11 @@ pub(crate) mod test {
 
         for use_float in [false, true] {
             let params = new_test_params(&opctx, datastore, use_float).await;
-
-            let dag = create_saga_dag::<SagaInstanceIpAttach>(params).unwrap();
-            let saga = nexus.create_runnable_saga(dag).await.unwrap();
-            nexus.run_saga(saga).await.expect("Attach saga should succeed");
+            nexus
+                .sagas
+                .saga_execute::<SagaInstanceIpAttach>(params)
+                .await
+                .expect("Attach saga should succeed");
         }
 
         // Sled agent has a record of the new external IPs.

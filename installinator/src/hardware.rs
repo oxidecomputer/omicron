@@ -6,7 +6,7 @@ use anyhow::anyhow;
 use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
-use sled_hardware::DiskVariant;
+use omicron_common::disk::DiskVariant;
 use sled_hardware::HardwareManager;
 use sled_hardware::SledMode;
 use sled_storage::config::MountConfig;
@@ -31,7 +31,7 @@ impl Hardware {
             })?;
 
         let disks: Vec<RawDisk> =
-            hardware.disks().into_iter().map(|disk| disk.into()).collect();
+            hardware.disks().into_values().map(|disk| disk.into()).collect();
 
         info!(
             log, "found gimlet hardware";

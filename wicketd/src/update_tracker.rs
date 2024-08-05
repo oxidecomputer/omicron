@@ -6,10 +6,6 @@
 
 use crate::artifacts::WicketdArtifactStore;
 use crate::helpers::sps_to_string;
-use crate::http_entrypoints::ClearUpdateStateResponse;
-use crate::http_entrypoints::GetArtifactsAndEventReportsResponse;
-use crate::http_entrypoints::StartUpdateOptions;
-use crate::http_entrypoints::UpdateSimulatedResult;
 use crate::installinator_progress::IprStartReceiver;
 use crate::installinator_progress::IprUpdateTracker;
 use crate::mgs::make_mgs_client;
@@ -23,15 +19,16 @@ use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
 use futures::Stream;
 use futures::TryFutureExt;
+use gateway_client::types::GetRotBootInfoParams;
 use gateway_client::types::HostPhase2Progress;
 use gateway_client::types::HostPhase2RecoveryImageId;
 use gateway_client::types::HostStartupOptions;
 use gateway_client::types::InstallinatorImageId;
 use gateway_client::types::PowerState;
 use gateway_client::types::RotCfpaSlot;
+use gateway_client::types::RotImageError;
+use gateway_client::types::RotState;
 use gateway_client::types::SpComponentFirmwareSlot;
-use gateway_client::types::SpIdentifier;
-use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_messages::SpComponent;
 use gateway_messages::ROT_PAGE_SIZE;
@@ -71,6 +68,11 @@ use update_engine::events::ProgressUnits;
 use update_engine::AbortHandle;
 use update_engine::StepSpec;
 use uuid::Uuid;
+use wicket_common::inventory::SpIdentifier;
+use wicket_common::inventory::SpType;
+use wicket_common::rack_update::ClearUpdateStateResponse;
+use wicket_common::rack_update::StartUpdateOptions;
+use wicket_common::rack_update::UpdateSimulatedResult;
 use wicket_common::update_events::ComponentRegistrar;
 use wicket_common::update_events::EventBuffer;
 use wicket_common::update_events::EventReport;
@@ -93,6 +95,7 @@ use wicket_common::update_events::UpdateComponent;
 use wicket_common::update_events::UpdateEngine;
 use wicket_common::update_events::UpdateStepId;
 use wicket_common::update_events::UpdateTerminalError;
+use wicketd_api::GetArtifactsAndEventReportsResponse;
 
 #[derive(Debug)]
 struct SpUpdateData {
@@ -862,18 +865,44 @@ impl UpdateDriver {
             define_test_steps(&engine, secs);
         }
 
-        let (rot_a, rot_b, sp_artifacts) = match update_cx.sp.type_ {
-            SpType::Sled => {
-                (&plan.gimlet_rot_a, &plan.gimlet_rot_b, &plan.gimlet_sp)
-            }
-            SpType::Power => (&plan.psc_rot_a, &plan.psc_rot_b, &plan.psc_sp),
-            SpType::Switch => {
-                (&plan.sidecar_rot_a, &plan.sidecar_rot_b, &plan.sidecar_sp)
-            }
-        };
+        let (rot_a, rot_b, sp_artifacts, rot_bootloader) =
+            match update_cx.sp.type_ {
+                SpType::Sled => (
+                    &plan.gimlet_rot_a,
+                    &plan.gimlet_rot_b,
+                    &plan.gimlet_sp,
+                    &plan.gimlet_rot_bootloader,
+                ),
+                SpType::Power => (
+                    &plan.psc_rot_a,
+                    &plan.psc_rot_b,
+                    &plan.psc_sp,
+                    &plan.psc_rot_bootloader,
+                ),
+                SpType::Switch => (
+                    &plan.sidecar_rot_a,
+                    &plan.sidecar_rot_b,
+                    &plan.sidecar_sp,
+                    &plan.sidecar_rot_bootloader,
+                ),
+            };
 
+        let rot_bootloader_registrar =
+            engine.for_component(UpdateComponent::RotBootloader);
         let rot_registrar = engine.for_component(UpdateComponent::Rot);
         let sp_registrar = engine.for_component(UpdateComponent::Sp);
+
+        // There are some extra checks and verifications needed to
+        // before we can update the RoT bootloader
+        let rot_bootloader_interrogation = rot_bootloader_registrar
+            .new_step(
+                UpdateStepId::InterrogateRot,
+                "Checking current RoT bootloader version",
+                move |_cx| async move {
+                    update_cx.interrogate_rot_bootloader(rot_bootloader).await
+                },
+            )
+            .register();
 
         // To update the RoT, we have to know which slot (A or B) it is
         // currently executing; we must update the _other_ slot. We also want to
@@ -946,6 +975,94 @@ impl UpdateDriver {
                 },
             )
             .register();
+
+        // Send the bootloader update to the RoT.
+        let inner_cx = SpComponentUpdateContext::new(
+            update_cx,
+            UpdateComponent::RotBootloader,
+        );
+        rot_bootloader_registrar
+            .new_step(
+                UpdateStepId::SpComponentUpdate,
+                "Updating RoT bootloader",
+                move |cx| async move {
+                    if let Some(result) = opts.test_simulate_rot_bootloader_result {
+                        return simulate_result(result);
+                    }
+
+                    let rot_bootloader_interrogation =
+                        match rot_bootloader_interrogation.into_value(cx.token()).await {
+                        Some(v) => v,
+                        None => return StepSkipped::new(
+                            (),
+                            "Skipping bootloader update, check interrogation step",
+                        ).into(),
+                    };
+
+                    let bootloader_has_this_version = rot_bootloader_interrogation
+                        .active_version_matches_artifact_to_apply();
+
+                    let sp_can_update = rot_bootloader_interrogation.sp_can_update_bootloader(&update_cx.mgs_client).await;
+
+                    if !sp_can_update {
+                        return StepSkipped::new(
+                            (),
+                                "SP version needs to be upgraded before RoT bootloader can be updated",
+                        )
+                        .into();
+
+                    }
+
+                    // If this RoT already has this version, skip the rest of
+                    // this step, UNLESS we've been told to skip this version
+                    // check.
+                    if bootloader_has_this_version && !opts.skip_rot_bootloader_version_check {
+                        return StepSkipped::new(
+                            (),
+                            format!(
+                                "RoT bootloader already at version {}",
+                                rot_bootloader_interrogation.available_artifacts_version,
+                            ),
+                        )
+                        .into();
+                    }
+
+                    let artifact_to_apply = rot_bootloader_interrogation
+                        .choose_artifact_to_apply(
+                            &update_cx.mgs_client,
+                            &update_cx.log,
+                        )
+                        .await?;
+
+                    cx.with_nested_engine(|engine| {
+                        inner_cx.register_steps(
+                            engine,
+                            rot_bootloader_interrogation.slot_to_update,
+                            artifact_to_apply,
+                        );
+                        Ok(())
+                    })
+                    .await?;
+
+                    // If we updated despite the RoT already having the version
+                    // we updated to, make this step return a warning with that
+                    // message; otherwise, this is a normal success.
+                    if bootloader_has_this_version {
+                        StepWarning::new(
+                            (),
+                            format!(
+                                "RoT bootloader updated despite already having version {}",
+                                rot_bootloader_interrogation.available_artifacts_version
+                            ),
+                        )
+                        .into()
+                    } else {
+                        StepSuccess::new(()).into()
+                    }
+                },
+            )
+            .register();
+
         // Send the update to the RoT.
         let inner_cx =
             SpComponentUpdateContext::new(update_cx, UpdateComponent::Rot);
@@ -1588,6 +1705,43 @@ struct RotInterrogation {
 }
 
 impl RotInterrogation {
+    async fn sp_can_update_bootloader(
+        &self,
+        client: &gateway_client::Client,
+    ) -> bool {
+        let sp_caboose = client
+            .sp_component_caboose_get(
+                self.sp.type_,
+                self.sp.slot,
+                SpComponent::SP_ITSELF.const_as_str(),
+                0,
+            )
+            .await
+            .ok()
+            .map(|v| v.into_inner());
+
+        // Older versions of the SP have a bug that prevents setting
+        // the active slot for the RoT bootloader. Check for these
+        // and skip the update until the SP gets updated
+        const MIN_GIMLET_VERSION: SemverVersion = SemverVersion::new(1, 0, 21);
+        const MIN_SWITCH_VERSION: SemverVersion = SemverVersion::new(1, 0, 21);
+        const MIN_PSC_VERSION: SemverVersion = SemverVersion::new(1, 0, 20);
+
+        match sp_caboose {
+            // If we can't get the SP caboose for whatever reason don't risk
+            // trying an update
+            None => false,
+            Some(caboose) => match caboose.version.parse::<SemverVersion>() {
+                Ok(vers) => match self.sp.type_ {
+                    SpType::Sled => vers >= MIN_GIMLET_VERSION,
+                    SpType::Switch => vers >= MIN_SWITCH_VERSION,
+                    SpType::Power => vers >= MIN_PSC_VERSION,
+                },
+                Err(_) => false,
+            },
+        }
+    }
+
     fn active_version_matches_artifact_to_apply(&self) -> bool {
         Some(&self.available_artifacts_version) == self.active_version.as_ref()
     }
@@ -1599,6 +1753,9 @@ impl RotInterrogation {
     /// their CMPA/CFPA pages, if we fail to fetch them _and_
     /// `available_artifacts` has exactly one item, we will return that one
     /// item.
+    ///
+    /// This is also applicable to the RoT bootloader which follows the
+    /// same vaildation method
     async fn choose_artifact_to_apply(
         &self,
         client: &gateway_client::Client,
@@ -1844,6 +2001,151 @@ impl UpdateContext {
         })
     }
 
+    async fn interrogate_rot_bootloader(
+        &self,
+        rot_bootloader: &[ArtifactIdData],
+    ) -> Result<StepResult<Option<RotInterrogation>>, UpdateTerminalError> {
+        // We have a known set of bootloader FWID that don't have cabooses.
+        static KNOWN_MISSING_CABOOSE: [&str; 18] = [
+            "1122095f4a3797db8a7d6279ae889ddde0316631f1f3bc204bdc39c2d75707af",
+            "1525832a663024f6421c13c0f7c7d9e9b32ebf433898565a2ad8112e7d237ead",
+            "29fc0d31e1739865c7f3d4bb5f5b86779db92a65a2decbd59e42f6e95dd84698",
+            "37aa40d0ea12e1290477a84014cd03dbc6fa9817223d1546a10847510d75c383",
+            "53cb91f4a3fbb69efa733a9eb326bd9f71c849782b0eea4306ebc66620158d44",
+            "60effb7fd6c4780138887e0d65c9e9b9c8447ce4ea3ea71e08194aec2847b185",
+            "77b8fc4308221dfe123d93431c21b57fa896db65c015ca82e22a337c7aa7cd77",
+            "77c2b94e3a83fc6b3c8924d38b0d23ac7c1e7a15defa910ee3f850b41af9ca4c",
+            "8c58b2272fe2da219ab0757ff27398b8d4a459eb4e75c32c782f98d684269352",
+            "9dd79a4e7609bd4af8e39a03f77b997b35f5050409a2ecd19de1e7d16184b1f3",
+            "b123a0f683f4e7b60238840139c9f3dbfe2b2c61597d9cdd4e92c718f7f98bb7",
+            "ba08df44e7282a1daeae2d9346b99ca741bfc2649c12aa8292f413a1c84d80b7",
+            "bfa9adfc127886aeaa1ac58d30c07c76e89592c29fc83dfa88062e7f3a48335e",
+            "c23a53858e94932a95945f28730e41ae4a2d1a8db4776283245eda143b6b2994",
+            "e7ec5dae7ac462cc7f7561a91ef244a2ece0894ff212995fcccb1e86438cb665",
+            "ee688a237a480e9fd111a7f70cc4c6f9ac837dcac65a01e7cfa29f7c28545d07",
+            "f31442015da37523a13ffaa173b4dfe0b069c6d890cf1c9748a898001fe4110e",
+            "fa73f26fb73b27b5db8f425320e206df5ebf3e137475d40be76b540ea8bd2af9",
+        ];
+
+        // We already validated at repo-upload time there is at least one RoT
+        // artifact available and that all available RoT artifacts are the same
+        // version, so we can unwrap the first artifact here and assume its
+        // version matches any subsequent artifacts.
+        // TODO this needs to be fixed for multi version to work!
+        let available_artifacts_version = rot_bootloader
+            .get(0)
+            .expect("no RoT artifacts available")
+            .id
+            .version
+            .clone();
+
+        let stage0_fwid = match self
+            .mgs_client
+            .sp_rot_boot_info(
+                self.sp.type_,
+                self.sp.slot,
+                SpComponent::ROT.const_as_str(),
+                &GetRotBootInfoParams {
+                    version:
+                        gateway_messages::RotBootInfo::HIGHEST_KNOWN_VERSION,
+                },
+            )
+            .await
+        {
+            Ok(v) => match v.into_inner() {
+                // the minimum we will ever return is 3
+                RotState::V2 { .. } => unreachable!(),
+                RotState::V3 { stage0_fwid, .. } => stage0_fwid,
+                // ugh
+                RotState::CommunicationFailed { message } => {
+                    return StepWarning::new(
+                        None,
+                        format!(
+                            "Failed to communicate with the RoT: {message}. Will not proceed with update."
+                        ),
+                    )
+                    .into();
+                }
+            },
+            // If we can't run `rot_boot_info` there's a chance we can't do
+            // antything else with stage0 either
+            Err(e) => return StepWarning::new(
+                None,
+                format!("Failed to run `rot_boot_info`: {e:?}. Will not proceed with update."),
+            )
+            .into(),
+        };
+
+        // Read the caboose of the currently running version (always 0)
+        // When updating from older stage0 we may not have a caboose so an error here
+        // need not be fatal
+        // TODO make this fatal at some point
+        let caboose = self
+            .mgs_client
+            .sp_component_caboose_get(
+                self.sp.type_,
+                self.sp.slot,
+                SpComponent::STAGE0.const_as_str(),
+                0,
+            )
+            .await
+            .map(|v| v.into_inner())
+            .ok();
+
+        let available_artifacts = rot_bootloader.to_vec();
+        let make_result = |active_version| {
+            Some(RotInterrogation {
+                // We always update slot 1
+                slot_to_update: 1,
+                available_artifacts,
+                available_artifacts_version,
+                sp: self.sp,
+                active_version,
+            })
+        };
+
+        match caboose {
+            Some(c) => {
+                let message = format!(
+                    "RoT bootloader version {} (git commit {})",
+                    c.version, c.git_commit
+                );
+
+                match c.version.parse::<SemverVersion>() {
+                    Ok(version) => StepSuccess::new(make_result(Some(version)))
+                        .with_message(message)
+                        .into(),
+                    Err(err) => StepWarning::new(
+                        make_result(None),
+                        format!(
+                            "{message} (failed to parse RoT bootloader version: {err})"
+                        ),
+                    )
+                    .into(),
+                }
+            }
+            None => {
+                if KNOWN_MISSING_CABOOSE.contains(&stage0_fwid.as_str()) {
+                    StepWarning::new(
+                        make_result(None),
+                        format!(
+                            "fwid {stage0_fwid} is known to be missing a caboose."
+                        ),
+                    )
+                    .into()
+                } else {
+                    StepWarning::new(
+                        None,
+                        format!(
+                            "fwid {stage0_fwid} is _not_ supposed to be missing a caboose. Will not proceed with update"
+                        ),
+                    )
+                    .into()
+                }
+            }
+        }
+    }
+
     async fn interrogate_rot(
         &self,
         rot_a: &[ArtifactIdData],
@@ -1923,6 +2225,52 @@ impl UpdateContext {
         }
     }
 
+    /// Poll the RoT asking for its boot information. This is used to check
+    /// state after RoT bootloader updates
+    async fn wait_for_rot_boot_info(
+        &self,
+        timeout: Duration,
+    ) -> anyhow::Result<(Option<RotImageError>, Option<RotImageError>)> {
+        let mut ticker = tokio::time::interval(Duration::from_secs(1));
+
+        let start = Instant::now();
+        loop {
+            ticker.tick().await;
+            match self.get_rot_boot_info().await {
+                Ok(state) => match state {
+                    // the minimum we will ever return is 3
+                    RotState::V2 { .. } => unreachable!(),
+                    RotState::V3 { stage0_error, stage0next_error, .. } => {
+                        return Ok((stage0_error, stage0next_error))
+                    }
+                    // ugh
+                    RotState::CommunicationFailed { message } => {
+                        if start.elapsed() < timeout {
+                            warn!(
+                                self.log,
+                                "failed getting RoT boot info (will retry)";
+                                "error" => %message,
+                            );
+                        } else {
+                            return Err(anyhow!(message));
+                        }
+                    }
+                },
+                Err(error) => {
+                    if start.elapsed() < timeout {
+                        warn!(
+                            self.log,
+                            "failed getting RoT boot info (will retry)";
+                            "error" => %error,
+                        );
+                    } else {
+                        return Err(error);
+                    }
+                }
+            }
+        }
+    }
+
     /// Poll the RoT asking for its currently active slot, allowing failures up
     /// to a fixed timeout to give time for it to boot.
     ///
@@ -1930,16 +2278,14 @@ impl UpdateContext {
     async fn wait_for_rot_reboot(
         &self,
         timeout: Duration,
+        component: &str,
     ) -> anyhow::Result<u16> {
         let mut ticker = tokio::time::interval(Duration::from_secs(1));
 
         let start = Instant::now();
         loop {
             ticker.tick().await;
-            match self
-                .get_component_active_slot(SpComponent::ROT.const_as_str())
-                .await
-            {
+            match self.get_component_active_slot(component).await {
                 Ok(slot) => return Ok(slot),
                 Err(error) => {
                     if start.elapsed() < timeout {
@@ -2081,6 +2427,22 @@ impl UpdateContext {
                 error,
             })?;
         StepSuccess::new(()).into()
+    }
+
+    async fn get_rot_boot_info(&self) -> anyhow::Result<RotState> {
+        self.mgs_client
+            .sp_rot_boot_info(
+                self.sp.type_,
+                self.sp.slot,
+                SpComponent::ROT.const_as_str(),
+                &GetRotBootInfoParams {
+                    version:
+                        gateway_messages::RotBootInfo::HIGHEST_KNOWN_VERSION,
+                },
+            )
+            .await
+            .context("failed to get RoT boot info")
+            .map(|res| res.into_inner())
     }
 
     async fn get_component_active_slot(
@@ -2325,6 +2687,9 @@ impl<'a> SpComponentUpdateContext<'a> {
         let update_cx = self.update_cx;
 
         let component_name = match self.component {
+            UpdateComponent::RotBootloader => {
+                SpComponent::STAGE0.const_as_str()
+            }
             UpdateComponent::Rot => SpComponent::ROT.const_as_str(),
             UpdateComponent::Sp => SpComponent::SP_ITSELF.const_as_str(),
             UpdateComponent::Host => {
@@ -2434,13 +2799,130 @@ impl<'a> SpComponentUpdateContext<'a> {
         // to stage updates for example, but for wicketd-driven recovery it's
         // fine to do this immediately.)
         match component {
+            UpdateComponent::RotBootloader => {
+                const WAIT_FOR_BOOT_TIMEOUT: Duration = Duration::from_secs(30);
+
+                // We need to reset the RoT in order to check the signature on what we just
+                // updated
+                registrar
+                    .new_step(
+                        SpComponentUpdateStepId::Resetting,
+                        "Resetting the RoT to check the bootloader signature",
+                        move |_cx| async move {
+                            update_cx
+                                .reset_sp_component(SpComponent::ROT.const_as_str())
+                                .await
+                                .map_err(|error| {
+                                    SpComponentUpdateTerminalError::RotResetFailed {
+                                        error,
+                                    }
+                                })?;
+                            StepSuccess::new(()).into()
+                        },
+                    )
+                    .register();
+
+                registrar
+                    .new_step(
+                        SpComponentUpdateStepId::Resetting,
+                        "Waiting for RoT to boot".to_string(),
+                        move |_cx| async move {
+                            let (_, stage0next_error) = update_cx
+                                .wait_for_rot_boot_info(WAIT_FOR_BOOT_TIMEOUT)
+                                .await
+                                .map_err(|error| {
+                                    SpComponentUpdateTerminalError::GetRotBootInfoFailed { error }
+                                })?;
+
+                            // check that stage0next is valid before we try to set the component
+                            if let Some(error) = stage0next_error {
+                                return Err(SpComponentUpdateTerminalError::RotBootloaderError {
+                                    error: anyhow!(format!("{error:?}"))
+                                });
+                            }
+                            StepSuccess::new(()).into()
+                        },
+                    )
+                    .register();
+
+                // Actually set stage0 to use the new firmware
+                registrar
+                    .new_step(
+                        SpComponentUpdateStepId::SettingActiveBootSlot,
+                        format!("Setting {component_name} active slot to {firmware_slot}"),
+                        move |_cx| async move {
+                            update_cx
+                                .set_component_active_slot(
+                                    component_name,
+                                    firmware_slot,
+                                    true,
+                                )
+                                .await
+                                .map_err(|error| {
+                                    SpComponentUpdateTerminalError::SetRotBootloaderActiveSlotFailed {
+                                        error,
+                                    }
+                                })?;
+                            StepSuccess::new(()).into()
+                        },
+                    )
+                    .register();
+
+                // Now reset (again) to boot into the new stage0
+                registrar
+                    .new_step(
+                        SpComponentUpdateStepId::Resetting,
+                        "Resetting the RoT to boot into the new bootloader",
+                        move |_cx| async move {
+                            update_cx
+                                .reset_sp_component(SpComponent::ROT.const_as_str())
+                                .await
+                                .map_err(|error| {
+                                    SpComponentUpdateTerminalError::RotResetFailed {
+                                        error,
+                                    }
+                                })?;
+                            StepSuccess::new(()).into()
+                        },
+                    )
+                    .register();
+
+                registrar
+                    .new_step(
+                        SpComponentUpdateStepId::Resetting,
+                        "Checking the new RoT bootloader".to_string(),
+                        move |_cx| async move {
+                            let (stage0_error, stage0next_error) = update_cx
+                                .wait_for_rot_boot_info(WAIT_FOR_BOOT_TIMEOUT)
+                                .await
+                                .map_err(|error| {
+                                    SpComponentUpdateTerminalError::GetRotActiveSlotFailed { error }
+                                })?;
+
+                            // Both the active and pending slots should be valid after this spot
+                            if let Some(error) = stage0_error {
+                                return Err(SpComponentUpdateTerminalError::RotBootloaderError {
+                                    error: anyhow!(format!("{error:?}")) 
+                                });
+                            }
+                            if let Some(error) = stage0next_error {
+                                return Err(SpComponentUpdateTerminalError::RotBootloaderError {
+                                    error: anyhow!(format!("{error:?}"))
+                                });
+                            }
+
+                            StepSuccess::new(()).into()
+                        },
+                    )
+                    .register();
+            }
             UpdateComponent::Rot => {
                 // Prior to rebooting the RoT, we have to tell it to boot into
                 // the firmware slot we just updated.
                 registrar
                     .new_step(
                         SpComponentUpdateStepId::SettingActiveBootSlot,
-                        format!("Setting RoT active slot to {firmware_slot}"),
+                        format!("Setting {component_name} active slot to {firmware_slot}"),
                         move |_cx| async move {
                             update_cx
                                 .set_component_active_slot(
@@ -2463,7 +2945,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                 registrar
                     .new_step(
                         SpComponentUpdateStepId::Resetting,
-                        "Resetting RoT",
+                        format!("Resetting {component_name}"),
                         move |_cx| async move {
                             update_cx
                                 .reset_sp_component(component_name)
@@ -2502,7 +2984,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                             const WAIT_FOR_BOOT_TIMEOUT: Duration =
                                 Duration::from_secs(30);
                             let active_slot = update_cx
-                                .wait_for_rot_reboot(WAIT_FOR_BOOT_TIMEOUT)
+                                .wait_for_rot_reboot(WAIT_FOR_BOOT_TIMEOUT, component_name)
                                 .await
                                 .map_err(|error| {
                                     SpComponentUpdateTerminalError::GetRotActiveSlotFailed { error }
@@ -2518,6 +3000,7 @@ impl<'a> SpComponentUpdateContext<'a> {
             }
             UpdateComponent::Sp => {
                 // Nothing special to do on the SP - just reset it.
+                // TODO fixup the SP to also set the active slot
                 registrar
                     .new_step(
                         SpComponentUpdateStepId::Resetting,

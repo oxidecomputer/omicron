@@ -9,7 +9,6 @@
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::ConfigDropshot;
-use dropshot::ConfigLogging;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpServer;
@@ -41,6 +40,13 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use thiserror::Error;
 use uuid::Uuid;
+
+// Our public interface depends directly or indirectly on these types; we
+// export them so that consumers need not depend on dropshot themselves and
+// to simplify how we stage incompatible upgrades.
+pub use dropshot::ConfigLogging;
+pub use dropshot::ConfigLoggingIfExists;
+pub use dropshot::ConfigLoggingLevel;
 
 #[derive(Debug, Clone, Error)]
 pub enum Error {
@@ -216,6 +222,7 @@ impl Server {
             bind_address: server_info.address,
             request_body_max_bytes,
             default_handler_task_mode: dropshot::HandlerTaskMode::Detached,
+            log_headers: vec![],
         };
         let server = Self::build_dropshot_server(&log, &registry, &dropshot)?;
 

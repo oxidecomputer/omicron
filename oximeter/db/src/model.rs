@@ -4,7 +4,7 @@
 
 //! Models for timeseries data in ClickHouse
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
 use crate::DbFieldSource;
 use crate::FieldSchema;
@@ -16,6 +16,7 @@ use crate::TimeseriesSchema;
 use bytes::Bytes;
 use chrono::DateTime;
 use chrono::Utc;
+use num::traits::Zero;
 use oximeter::histogram::Histogram;
 use oximeter::traits;
 use oximeter::types::Cumulative;
@@ -27,6 +28,7 @@ use oximeter::types::FieldValue;
 use oximeter::types::Measurement;
 use oximeter::types::MissingDatum;
 use oximeter::types::Sample;
+use oximeter::Quantile;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -43,7 +45,7 @@ use uuid::Uuid;
 /// - [`crate::Client::initialize_db_with_version`]
 /// - [`crate::Client::ensure_schema`]
 /// - The `clickhouse-schema-updater` binary in this crate
-pub const OXIMETER_VERSION: u64 = 4;
+pub const OXIMETER_VERSION: u64 = 7;
 
 // Wrapper type to represent a boolean in the database.
 //
@@ -107,6 +109,10 @@ pub(crate) struct DbFieldList {
     pub types: Vec<DbFieldType>,
     #[serde(rename = "fields.source")]
     pub sources: Vec<DbFieldSource>,
+    // TODO-completeness: Populate the description from the database here. See
+    // https://github.com/oxidecomputer/omicron/issues/5942 for more details.
+    //#[serde(rename = "fields.description")]
+    //pub descriptions: Vec<String>,
 }
 
 impl From<DbFieldList> for BTreeSet<FieldSchema> {
@@ -119,6 +125,7 @@ impl From<DbFieldList> for BTreeSet<FieldSchema> {
                 name,
                 field_type: ty.into(),
                 source: source.into(),
+                description: String::new(),
             })
             .collect()
     }
@@ -147,6 +154,9 @@ pub(crate) struct DbTimeseriesSchema {
     pub datum_type: DbDatumType,
     #[serde(with = "serde_timestamp")]
     pub created: DateTime<Utc>,
+    // TODO-completeness: Add the authorization scope, version, and units once
+    // they are tracked in the database. See
+    // https://github.com/oxidecomputer/omicron/issues/5942 for more details.
 }
 
 impl From<TimeseriesSchema> for DbTimeseriesSchema {
@@ -446,15 +456,83 @@ declare_cumulative_measurement_row! { CumulativeU64MeasurementRow, u64, "cumulat
 declare_cumulative_measurement_row! { CumulativeF32MeasurementRow, f32, "cumulativef32" }
 declare_cumulative_measurement_row! { CumulativeF64MeasurementRow, f64, "cumulativef64" }
 
+/// A representation of all quantiles for a histogram.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
+struct AllQuantiles {
+    p50_marker_heights: [f64; 5],
+    p50_marker_positions: [u64; 5],
+    p50_desired_marker_positions: [f64; 5],
+
+    p90_marker_heights: [f64; 5],
+    p90_marker_positions: [u64; 5],
+    p90_desired_marker_positions: [f64; 5],
+
+    p99_marker_heights: [f64; 5],
+    p99_marker_positions: [u64; 5],
+    p99_desired_marker_positions: [f64; 5],
+}
+
+impl AllQuantiles {
+    /// Create a flat `AllQuantiles` struct from the given quantiles.
+    fn flatten(q50: Quantile, q90: Quantile, q99: Quantile) -> Self {
+        Self {
+            p50_marker_heights: q50.marker_heights(),
+            p50_marker_positions: q50.marker_positions(),
+            p50_desired_marker_positions: q50.desired_marker_positions(),
+
+            p90_marker_heights: q90.marker_heights(),
+            p90_marker_positions: q90.marker_positions(),
+            p90_desired_marker_positions: q90.desired_marker_positions(),
+
+            p99_marker_heights: q99.marker_heights(),
+            p99_marker_positions: q99.marker_positions(),
+            p99_desired_marker_positions: q99.desired_marker_positions(),
+        }
+    }
+
+    /// Split the quantiles into separate `Quantile` structs in order of P.
+    fn split(&self) -> (Quantile, Quantile, Quantile) {
+        (
+            Quantile::from_parts(
+                0.5,
+                self.p50_marker_heights,
+                self.p50_marker_positions,
+                self.p50_desired_marker_positions,
+            ),
+            Quantile::from_parts(
+                0.9,
+                self.p90_marker_heights,
+                self.p90_marker_positions,
+                self.p90_desired_marker_positions,
+            ),
+            Quantile::from_parts(
+                0.99,
+                self.p99_marker_heights,
+                self.p99_marker_positions,
+                self.p99_desired_marker_positions,
+            ),
+        )
+    }
+}
+
 // Representation of a histogram in ClickHouse.
 //
-// The tables storing measurements of a histogram metric use a pair of arrays to represent them,
-// for the bins and counts, respectively. This handles conversion between the type used to
-// represent histograms in Rust, [`Histogram`], and this in-database representation.
+// The tables storing measurements of a histogram metric use a set of arrays to
+// represent them.  This handles conversion between the type used to represent
+// histograms in Rust, [`Histogram`], and this in-database representation.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-struct DbHistogram<T> {
+struct DbHistogram<T>
+where
+    T: traits::HistogramSupport,
+{
     pub bins: Vec<T>,
     pub counts: Vec<u64>,
+    pub min: T,
+    pub max: T,
+    pub sum_of_samples: T::Width,
+    pub squared_mean: f64,
+    #[serde(flatten)]
+    pub quantiles: AllQuantiles,
 }
 
 // We use an empty histogram to indicate a missing sample.
@@ -467,9 +545,24 @@ struct DbHistogram<T> {
 //
 // That means we can currently use an empty array from the database as a
 // sentinel for a missing sample.
-impl<T> DbHistogram<T> {
+impl<T> DbHistogram<T>
+where
+    T: traits::HistogramSupport,
+{
     fn null() -> Self {
-        Self { bins: vec![], counts: vec![] }
+        let p50 = Quantile::p50();
+        let p90 = Quantile::p90();
+        let p99 = Quantile::p99();
+
+        Self {
+            bins: vec![],
+            counts: vec![],
+            min: T::zero(),
+            max: T::zero(),
+            sum_of_samples: T::Width::zero(),
+            squared_mean: 0.0,
+            quantiles: AllQuantiles::flatten(p50, p90, p99),
+        }
     }
 }
 
@@ -478,8 +571,20 @@ where
     T: traits::HistogramSupport,
 {
     fn from(hist: &Histogram<T>) -> Self {
-        let (bins, counts) = hist.to_arrays();
-        Self { bins, counts }
+        let (bins, counts) = hist.bins_and_counts();
+        Self {
+            bins,
+            counts,
+            min: hist.min(),
+            max: hist.max(),
+            sum_of_samples: hist.sum_of_samples(),
+            squared_mean: hist.squared_mean(),
+            quantiles: AllQuantiles::flatten(
+                hist.p50q(),
+                hist.p90q(),
+                hist.p99q(),
+            ),
+        }
     }
 }
 
@@ -516,7 +621,7 @@ declare_histogram_measurement_row! { HistogramF64MeasurementRow, DbHistogram<f64
 fn unroll_from_source(sample: &Sample) -> BTreeMap<String, Vec<String>> {
     let mut out = BTreeMap::new();
     for field in sample.fields() {
-        let timeseries_name = sample.timeseries_name.clone();
+        let timeseries_name = sample.timeseries_name.to_string();
         let timeseries_key = crate::timeseries_key(sample);
         let field_name = field.name.clone();
         let (table_name, row_string) = match &field.value {
@@ -664,7 +769,11 @@ pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
     let timeseries_name = sample.timeseries_name.clone();
     let timeseries_key = crate::timeseries_key(sample);
     let measurement = &sample.measurement;
-    unroll_measurement_row_impl(timeseries_name, timeseries_key, measurement)
+    unroll_measurement_row_impl(
+        timeseries_name.to_string(),
+        timeseries_key,
+        measurement,
+    )
 }
 
 /// Given a sample's measurement, return a table name and row to insert.
@@ -1255,7 +1364,10 @@ struct DbTimeseriesScalarCumulativeSample<T> {
 
 // A histogram timestamped sample from a timeseries, as extracted from a query to the database.
 #[derive(Debug, Clone, Deserialize)]
-struct DbTimeseriesHistogramSample<T> {
+struct DbTimeseriesHistogramSample<T>
+where
+    T: traits::HistogramSupport,
+{
     timeseries_key: TimeseriesKey,
     #[serde(with = "serde_timestamp")]
     start_time: DateTime<Utc>,
@@ -1263,6 +1375,12 @@ struct DbTimeseriesHistogramSample<T> {
     timestamp: DateTime<Utc>,
     bins: Vec<T>,
     counts: Vec<u64>,
+    min: T,
+    max: T,
+    sum_of_samples: T::Width,
+    squared_mean: f64,
+    #[serde(flatten)]
+    quantiles: AllQuantiles,
 }
 
 impl<T> From<DbTimeseriesScalarGaugeSample<T>> for Measurement
@@ -1314,14 +1432,30 @@ where
                     .unwrap(),
             )
         } else {
-            Datum::from(
-                Histogram::from_arrays(
-                    sample.start_time,
-                    sample.bins,
-                    sample.counts,
-                )
-                .unwrap(),
+            if sample.bins.len() != sample.counts.len() {
+                panic!(
+                    "Array size mismatch: bins: {}, counts: {}",
+                    sample.bins.len(),
+                    sample.counts.len()
+                );
+            }
+
+            let (p50, p90, p99) = sample.quantiles.split();
+            let hist = Histogram::from_parts(
+                sample.start_time,
+                sample.bins,
+                sample.counts,
+                sample.min,
+                sample.max,
+                sample.sum_of_samples,
+                sample.squared_mean,
+                p50,
+                p90,
+                p99,
             )
+            .unwrap();
+
+            Datum::from(hist)
         };
         Measurement::new(sample.timestamp, datum)
     }
@@ -1475,12 +1609,16 @@ where
     (sample.timeseries_key, sample.into())
 }
 
-fn parse_timeseries_histogram_measurement<T>(
-    line: &str,
+fn parse_timeseries_histogram_measurement<'a, T>(
+    line: &'a str,
 ) -> (TimeseriesKey, Measurement)
 where
-    T: Into<Datum> + traits::HistogramSupport + FromDbHistogram,
+    T: Into<Datum>
+        + traits::HistogramSupport
+        + FromDbHistogram
+        + Deserialize<'a>,
     Datum: From<Histogram<T>>,
+    <T as traits::HistogramSupport>::Width: Deserialize<'a>,
 {
     let sample =
         serde_json::from_str::<DbTimeseriesHistogramSample<T>>(line).unwrap();
@@ -1741,6 +1879,7 @@ pub(crate) fn parse_field_select_row(
 mod tests {
     use super::*;
     use chrono::Timelike;
+    use oximeter::histogram::Record;
     use oximeter::test_util;
     use oximeter::Datum;
 
@@ -1803,11 +1942,13 @@ mod tests {
                 name: String::from("field0"),
                 field_type: FieldType::I64,
                 source: FieldSource::Target,
+                description: String::new(),
             },
             FieldSchema {
                 name: String::from("field1"),
                 field_type: FieldType::IpAddr,
                 source: FieldSource::Metric,
+                description: String::new(),
             },
         ]
         .into_iter()
@@ -1826,9 +1967,18 @@ mod tests {
         hist.sample(1).unwrap();
         hist.sample(10).unwrap();
         let dbhist = DbHistogram::from(&hist);
-        let (bins, counts) = hist.to_arrays();
+        let (bins, counts) = hist.bins_and_counts();
         assert_eq!(dbhist.bins, bins);
         assert_eq!(dbhist.counts, counts);
+        assert_eq!(dbhist.min, hist.min());
+        assert_eq!(dbhist.max, hist.max());
+        assert_eq!(dbhist.sum_of_samples, hist.sum_of_samples());
+        assert_eq!(dbhist.squared_mean, hist.squared_mean());
+
+        let (p50, p90, p99) = dbhist.quantiles.split();
+        assert_eq!(p50, hist.p50q());
+        assert_eq!(p90, hist.p90q());
+        assert_eq!(p99, hist.p99q());
     }
 
     #[test]
@@ -1839,7 +1989,7 @@ mod tests {
         assert_eq!(out["oximeter.fields_i64"].len(), 1);
         let unpacked: StringFieldRow =
             serde_json::from_str(&out["oximeter.fields_string"][0]).unwrap();
-        assert_eq!(unpacked.timeseries_name, sample.timeseries_name);
+        assert_eq!(sample.timeseries_name, unpacked.timeseries_name);
         let field = sample.target_fields().next().unwrap();
         assert_eq!(unpacked.field_name, field.name);
         if let FieldValue::String(v) = &field.value {
@@ -1877,10 +2027,20 @@ mod tests {
         assert_eq!(table_name, "oximeter.measurements_histogramf64");
         let unpacked: HistogramF64MeasurementRow =
             serde_json::from_str(&row).unwrap();
-        let unpacked_hist = Histogram::from_arrays(
+        let (unpacked_p50, unpacked_p90, unpacked_p99) =
+            unpacked.datum.quantiles.split();
+
+        let unpacked_hist = Histogram::from_parts(
             unpacked.start_time,
             unpacked.datum.bins,
             unpacked.datum.counts,
+            unpacked.datum.min,
+            unpacked.datum.max,
+            unpacked.datum.sum_of_samples,
+            unpacked.datum.squared_mean,
+            unpacked_p50,
+            unpacked_p90,
+            unpacked_p99,
         )
         .unwrap();
         let measurement = &sample.measurement;
@@ -1986,7 +2146,27 @@ mod tests {
             .with_nanosecond(123_456_789)
             .unwrap();
 
-        let line = r#"{"timeseries_key": 12, "start_time": "2021-01-01 00:00:00.123456789", "timestamp": "2021-01-01 01:00:00.123456789", "bins": [0, 1], "counts": [1, 1] }"#;
+        let line = r#"
+        {
+            "timeseries_key": 12,
+            "start_time": "2021-01-01 00:00:00.123456789",
+            "timestamp": "2021-01-01 01:00:00.123456789",
+            "bins": [0, 1],
+            "counts": [1, 1],
+            "min": 0,
+            "max": 1,
+            "sum_of_samples": 2,
+            "squared_mean": 2.0,
+            "p50_marker_heights": [0.0, 0.0, 0.0, 0.0, 1.0],
+            "p50_marker_positions": [1, 2, 3, 4, 2],
+            "p50_desired_marker_positions": [1.0, 3.0, 5.0, 5.0, 5.0],
+            "p90_marker_heights": [0.0, 0.0, 0.0, 0.0, 1.0],
+            "p90_marker_positions": [1, 2, 3, 4, 2],
+            "p90_desired_marker_positions": [1.0, 3.0, 5.0, 5.0, 5.0],
+            "p99_marker_heights": [0.0, 0.0, 0.0, 0.0, 1.0],
+            "p99_marker_positions": [1, 2, 3, 4, 2],
+            "p99_desired_marker_positions": [1.0, 3.0, 5.0, 5.0, 5.0]
+        }"#;
         let (key, measurement) =
             parse_measurement_from_row(line, DatumType::HistogramI64);
         assert_eq!(key, 12);
@@ -1997,6 +2177,38 @@ mod tests {
         };
         assert_eq!(hist.n_bins(), 3);
         assert_eq!(hist.n_samples(), 2);
+        assert_eq!(hist.min(), 0);
+        assert_eq!(hist.max(), 1);
+        assert_eq!(hist.sum_of_samples(), 2);
+        assert_eq!(hist.squared_mean(), 2.);
+        assert_eq!(
+            hist.p50q(),
+            Quantile::from_parts(
+                0.5,
+                [0.0, 0.0, 0.0, 0.0, 1.0],
+                [1, 2, 3, 4, 2],
+                [1.0, 3.0, 5.0, 5.0, 5.0],
+            )
+        );
+        assert_eq!(
+            hist.p90q(),
+            Quantile::from_parts(
+                0.9,
+                [0.0, 0.0, 0.0, 0.0, 1.0],
+                [1, 2, 3, 4, 2],
+                [1.0, 3.0, 5.0, 5.0, 5.0],
+            )
+        );
+
+        assert_eq!(
+            hist.p99q(),
+            Quantile::from_parts(
+                0.99,
+                [0.0, 0.0, 0.0, 0.0, 1.0],
+                [1, 2, 3, 4, 2],
+                [1.0, 3.0, 5.0, 5.0, 5.0],
+            )
+        );
     }
 
     #[test]
@@ -2007,32 +2219,6 @@ mod tests {
         assert_eq!(measurement.datum(), &Datum::from("/some/path"));
     }
 
-    #[test]
-    fn test_histogram_to_arrays() {
-        let mut hist = Histogram::new(&[0, 10, 20]).unwrap();
-        hist.sample(1).unwrap();
-        hist.sample(11).unwrap();
-
-        let (bins, counts) = hist.to_arrays();
-        assert_eq!(
-            bins.len(),
-            counts.len(),
-            "Bins and counts should have the same size"
-        );
-        assert_eq!(
-            bins.len(),
-            hist.n_bins(),
-            "Paired-array bins should be of the same length as the histogram"
-        );
-        assert_eq!(counts, &[0, 1, 1, 0], "Paired-array counts are incorrect");
-
-        let rebuilt =
-            Histogram::from_arrays(hist.start_time(), bins, counts).unwrap();
-        assert_eq!(
-            hist, rebuilt,
-            "Histogram reconstructed from paired arrays is not correct"
-        );
-    }
     #[test]
     fn test_parse_bytes_measurement() {
         let s = r#"{"timeseries_key": 101, "timestamp": "2023-11-21 18:25:21.963714255", "datum": "\u0001\u0002\u0003"}"#;

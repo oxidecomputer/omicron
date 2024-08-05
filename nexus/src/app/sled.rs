@@ -6,14 +6,17 @@
 
 use crate::external_api::params;
 use crate::internal_api::params::{
-    PhysicalDiskPutRequest, SledAgentInfo, SledRole, ZpoolPutRequest,
+    PhysicalDiskPutRequest, SledAgentInfo, ZpoolPutRequest,
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::model::DatasetKind;
+use nexus_sled_agent_shared::inventory::SledRole;
+use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
+use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_common::api::external::DataPageParams;
@@ -186,7 +189,7 @@ impl super::Nexus {
 
     // Physical disks
 
-    pub async fn physical_disk_lookup<'a>(
+    pub fn physical_disk_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         disk_selector: &params::PhysicalDiskPath,
@@ -211,7 +214,9 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::PhysicalDisk> {
-        self.db_datastore.physical_disk_list(&opctx, pagparams).await
+        self.db_datastore
+            .physical_disk_list(&opctx, pagparams, DiskFilter::InService)
+            .await
     }
 
     /// Upserts a physical disk into the database, updating it if it already exists.
@@ -238,6 +243,27 @@ impl super::Nexus {
         );
         self.db_datastore.physical_disk_insert(&opctx, disk).await?;
         Ok(())
+    }
+
+    /// Mark a physical disk as expunged
+    ///
+    /// This is an irreversible process! It should only be called after
+    /// sufficient warning to the operator.
+    pub(crate) async fn physical_disk_expunge(
+        &self,
+        opctx: &OpContext,
+        disk: params::PhysicalDiskPath,
+    ) -> Result<(), Error> {
+        let physical_disk_lookup = self.physical_disk_lookup(opctx, &disk)?;
+        let (authz_disk,) =
+            physical_disk_lookup.lookup_for(authz::Action::Modify).await?;
+        self.db_datastore
+            .physical_disk_update_policy(
+                opctx,
+                authz_disk.id(),
+                PhysicalDiskPolicy::Expunged.into(),
+            )
+            .await
     }
 
     // Zpools (contained within sleds)
@@ -281,7 +307,8 @@ impl super::Nexus {
             "dataset_id" => id.to_string(),
             "address" => address.to_string()
         );
-        let dataset = db::model::Dataset::new(id, zpool_id, address, kind);
+        let dataset =
+            db::model::Dataset::new(id, zpool_id, Some(address), kind);
         self.db_datastore.dataset_upsert(dataset).await?;
         Ok(())
     }

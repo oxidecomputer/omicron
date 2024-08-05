@@ -411,9 +411,17 @@ async fn ssc_regions_ensure(
                     .map(|(dataset, region)| {
                         dataset
                             .address_with_port(region.port_number)
-                            .to_string()
+                            .ok_or_else(|| {
+                                ActionError::action_failed(
+                                    Error::internal_error(&format!(
+                                        "missing IP address for dataset {}",
+                                        dataset.id(),
+                                    )),
+                                )
+                            })
+                            .map(|addr| addr.to_string())
                     })
-                    .collect(),
+                    .collect::<Result<Vec<_>, ActionError>>()?,
 
                 lossy: false,
                 flush_timeout: None,
@@ -1232,8 +1240,14 @@ async fn ssc_start_running_snapshot(
     let mut map: BTreeMap<String, String> = BTreeMap::new();
 
     for (dataset, region) in datasets_and_regions {
+        let Some(dataset_addr) = dataset.address() else {
+            return Err(ActionError::action_failed(Error::internal_error(
+                &format!("Missing IP address for dataset {}", dataset.id(),),
+            )));
+        };
+
         // Create a Crucible agent client
-        let url = format!("http://{}", dataset.address());
+        let url = format!("http://{}", dataset_addr);
         let client = CrucibleAgentClient::new(&url);
 
         info!(
@@ -1299,11 +1313,21 @@ async fn ssc_start_running_snapshot(
         // Map from the region to the snapshot
         let region_addr = format!(
             "{}",
-            dataset.address_with_port(crucible_region.port_number)
+            SocketAddrV6::new(
+                *dataset_addr.ip(),
+                crucible_region.port_number,
+                0,
+                0
+            )
         );
         let snapshot_addr = format!(
             "{}",
-            dataset.address_with_port(crucible_running_snapshot.port_number)
+            SocketAddrV6::new(
+                *dataset_addr.ip(),
+                crucible_running_snapshot.port_number,
+                0,
+                0
+            )
         );
         info!(log, "map {} to {}", region_addr, snapshot_addr);
         map.insert(region_addr, snapshot_addr.clone());
@@ -1617,7 +1641,6 @@ mod test {
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::delete_disk;
     use nexus_test_utils::resource_helpers::object_create;
-    use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::params::InstanceDiskAttachment;
     use omicron_common::api::external::ByteCount;
@@ -1629,6 +1652,9 @@ mod test {
     use sled_agent_client::types::CrucibleOpts;
     use sled_agent_client::TestInterfaces as SledAgentTestInterfaces;
     use std::str::FromStr;
+
+    type DiskTest<'a> =
+        nexus_test_utils::resource_helpers::DiskTest<'a, crate::Server>;
 
     #[test]
     fn test_create_snapshot_from_disk_modify_request() {
@@ -1908,11 +1934,12 @@ mod test {
             None, // not attached to an instance
             true, // use the pantry
         );
-        let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-
         // Actually run the saga
-        let output = nexus.run_saga(runnable_saga).await.unwrap();
+        let output = nexus
+            .sagas
+            .saga_execute::<SagaSnapshotCreate>(params)
+            .await
+            .unwrap();
 
         let snapshot = output
             .lookup_node_output::<nexus_db_queries::db::model::Snapshot>(
@@ -1955,7 +1982,7 @@ mod test {
 
     async fn verify_clean_slate(
         cptestctx: &ControlPlaneTestContext,
-        test: &DiskTest,
+        test: &DiskTest<'_>,
     ) {
         // Verifies:
         // - No disk records exist
@@ -2237,7 +2264,7 @@ mod test {
         );
 
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+        let runnable_saga = nexus.sagas.saga_prepare(dag).await.unwrap();
 
         // Before running the saga, attach the disk to an instance!
         let _instance_and_vmm = setup_test_instance(
@@ -2252,7 +2279,11 @@ mod test {
         .await;
 
         // Actually run the saga
-        let output = nexus.run_saga(runnable_saga).await;
+        let output = runnable_saga
+            .run_to_completion()
+            .await
+            .unwrap()
+            .into_omicron_result();
 
         // Expect to see 409
         match output {
@@ -2295,9 +2326,8 @@ mod test {
             true, // use the pantry
         );
 
-        let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-        let output = nexus.run_saga(runnable_saga).await;
+        let output =
+            nexus.sagas.saga_execute::<SagaSnapshotCreate>(params).await;
 
         // Expect 200
         assert!(output.is_ok());
@@ -2349,7 +2379,7 @@ mod test {
         );
 
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+        let runnable_saga = nexus.sagas.saga_prepare(dag).await.unwrap();
 
         // Before running the saga, detach the disk!
         let (.., authz_disk, db_disk) =
@@ -2370,7 +2400,11 @@ mod test {
             .expect("failed to detach disk"));
 
         // Actually run the saga. This should fail.
-        let output = nexus.run_saga(runnable_saga).await;
+        let output = runnable_saga
+            .run_to_completion()
+            .await
+            .unwrap()
+            .into_omicron_result();
 
         assert!(output.is_err());
 
@@ -2397,9 +2431,8 @@ mod test {
             false, // use the pantry
         );
 
-        let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-        let output = nexus.run_saga(runnable_saga).await;
+        let output =
+            nexus.sagas.saga_execute::<SagaSnapshotCreate>(params).await;
 
         // Expect 200
         assert!(output.is_ok());

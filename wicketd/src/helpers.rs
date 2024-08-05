@@ -6,8 +6,8 @@
 
 use std::fmt;
 
-use gateway_client::types::{SpIdentifier, SpType};
 use itertools::Itertools;
+use wicket_common::inventory::{SpIdentifier, SpType};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub(crate) struct SpIdentifierDisplay(pub(crate) SpIdentifier);

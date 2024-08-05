@@ -26,7 +26,8 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
-use nexus_types::deployment::SledFilter;
+use nexus_db_model::ApplyPhysicalDiskFilterExt;
+use nexus_types::deployment::{DiskFilter, SledFilter};
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -36,6 +37,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use uuid::Uuid;
 
 impl DataStore {
@@ -247,11 +249,13 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
+        disk_filter: DiskFilter,
     ) -> ListResultVec<PhysicalDisk> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use db::schema::physical_disk::dsl;
         paginated(dsl::physical_disk, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
+            .physical_disk_filter(disk_filter)
             .select(PhysicalDisk::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -275,23 +279,36 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Decommissions all expunged disks.
+    pub async fn physical_disk_decommission_all_expunged(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        use db::schema::physical_disk::dsl;
+
+        let conn = &*self.pool_connection_authorized(&opctx).await?;
+        diesel::update(dsl::physical_disk)
+            .filter(dsl::time_deleted.is_null())
+            .physical_disk_filter(DiskFilter::ExpungedButActive)
+            .set(dsl::disk_state.eq(PhysicalDiskState::Decommissioned))
+            .execute_async(conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(())
+    }
+
     /// Deletes a disk from the database.
     pub async fn physical_disk_delete(
         &self,
         opctx: &OpContext,
-        vendor: String,
-        serial: String,
-        model: String,
-        sled_id: Uuid,
+        id: PhysicalDiskUuid,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let now = Utc::now();
         use db::schema::physical_disk::dsl;
         diesel::update(dsl::physical_disk)
-            .filter(dsl::vendor.eq(vendor))
-            .filter(dsl::serial.eq(serial))
-            .filter(dsl::model.eq(model))
-            .filter(dsl::sled_id.eq(sled_id))
+            .filter(dsl::id.eq(id.into_untyped_uuid()))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(now))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
@@ -312,13 +329,14 @@ mod test {
     use crate::db::model::{PhysicalDiskKind, Sled, SledUpdate};
     use dropshot::PaginationOrder;
     use nexus_db_model::Generation;
+    use nexus_sled_agent_shared::inventory::{
+        Baseboard, Inventory, InventoryDisk, SledRole,
+    };
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Asset;
     use omicron_common::api::external::ByteCount;
-    use omicron_common::disk::DiskIdentity;
+    use omicron_common::disk::{DiskIdentity, DiskVariant};
     use omicron_test_utils::dev;
-    use sled_agent_client::types::DiskVariant;
-    use sled_agent_client::types::InventoryDisk;
     use std::net::{Ipv6Addr, SocketAddrV6};
     use std::num::NonZeroU32;
 
@@ -448,8 +466,9 @@ mod test {
         let sled = create_test_sled(&datastore).await;
 
         // Insert a disk
+        let disk_id = PhysicalDiskUuid::new_v4();
         let disk = PhysicalDisk::new(
-            Uuid::new_v4(),
+            disk_id.into_untyped_uuid(),
             String::from("Oxide"),
             String::from("123"),
             String::from("FakeDisk"),
@@ -469,13 +488,7 @@ mod test {
 
         // Delete the inserted disk
         datastore
-            .physical_disk_delete(
-                &opctx,
-                disk.vendor.clone(),
-                disk.serial.clone(),
-                disk.model.clone(),
-                disk.sled_id,
-            )
+            .physical_disk_delete(&opctx, disk_id)
             .await
             .expect("Failed to delete disk");
         let disks = datastore
@@ -486,13 +499,7 @@ mod test {
 
         // Deleting again should not throw an error
         datastore
-            .physical_disk_delete(
-                &opctx,
-                disk.vendor,
-                disk.serial,
-                disk.model,
-                disk.sled_id,
-            )
+            .physical_disk_delete(&opctx, disk_id)
             .await
             .expect("Failed to delete disk");
 
@@ -517,8 +524,9 @@ mod test {
         let sled_b = create_test_sled(&datastore).await;
 
         // Insert a disk
+        let disk_id = PhysicalDiskUuid::new_v4();
         let disk = PhysicalDisk::new(
-            Uuid::new_v4(),
+            disk_id.into_untyped_uuid(),
             String::from("Oxide"),
             String::from("123"),
             String::from("FakeDisk"),
@@ -543,13 +551,7 @@ mod test {
 
         // Delete the inserted disk
         datastore
-            .physical_disk_delete(
-                &opctx,
-                disk.vendor,
-                disk.serial,
-                disk.model,
-                disk.sled_id,
-            )
+            .physical_disk_delete(&opctx, disk_id)
             .await
             .expect("Failed to delete disk");
         let disks = datastore
@@ -564,8 +566,9 @@ mod test {
         assert!(disks.is_empty());
 
         // Attach the disk to the second sled
+        let disk_id = PhysicalDiskUuid::new_v4();
         let disk = PhysicalDisk::new(
-            Uuid::new_v4(),
+            disk_id.into_untyped_uuid(),
             String::from("Oxide"),
             String::from("123"),
             String::from("FakeDisk"),
@@ -610,8 +613,9 @@ mod test {
         let sled_b = create_test_sled(&datastore).await;
 
         // Insert a disk
+        let disk_id = PhysicalDiskUuid::new_v4();
         let disk = PhysicalDisk::new(
-            Uuid::new_v4(),
+            disk_id.into_untyped_uuid(),
             String::from("Oxide"),
             String::from("123"),
             String::from("FakeDisk"),
@@ -636,13 +640,7 @@ mod test {
 
         // Remove the disk from the first sled
         datastore
-            .physical_disk_delete(
-                &opctx,
-                disk.vendor.clone(),
-                disk.serial.clone(),
-                disk.model.clone(),
-                disk.sled_id,
-            )
+            .physical_disk_delete(&opctx, disk_id)
             .await
             .expect("Failed to delete disk");
 
@@ -680,19 +678,19 @@ mod test {
     fn add_sled_to_inventory(
         builder: &mut nexus_inventory::CollectionBuilder,
         sled: &Sled,
-        disks: Vec<sled_agent_client::types::InventoryDisk>,
+        disks: Vec<InventoryDisk>,
     ) {
         builder
             .found_sled_inventory(
                 "fake sled agent",
-                sled_agent_client::types::Inventory {
-                    baseboard: sled_agent_client::types::Baseboard::Gimlet {
+                Inventory {
+                    baseboard: Baseboard::Gimlet {
                         identifier: sled.serial_number().to_string(),
                         model: sled.part_number().to_string(),
                         revision: 0,
                     },
                     reservoir_size: ByteCount::from(1024),
-                    sled_role: sled_agent_client::types::SledRole::Gimlet,
+                    sled_role: SledRole::Gimlet,
                     sled_agent_address: "[::1]:56792".parse().unwrap(),
                     sled_id: sled.id(),
                     usable_hardware_threads: 10,

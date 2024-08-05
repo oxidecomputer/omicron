@@ -43,7 +43,6 @@
 //!    the persistent DNS data
 
 pub mod dns_server;
-pub mod dns_types;
 pub mod http_server;
 pub mod storage;
 
@@ -139,6 +138,7 @@ impl TransientServer {
                 bind_address: "[::1]:0".parse().unwrap(),
                 request_body_max_bytes: 4 * 1024 * 1024,
                 default_handler_task_mode: dropshot::HandlerTaskMode::Detached,
+                log_headers: vec![],
             },
         )
         .await?;

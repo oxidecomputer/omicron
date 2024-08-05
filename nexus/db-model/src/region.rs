@@ -4,6 +4,7 @@
 
 use super::ByteCount;
 use crate::schema::region;
+use crate::SqlU16;
 use db_macros::Asset;
 use omicron_common::api::external;
 use serde::{Deserialize, Serialize};
@@ -38,6 +39,13 @@ pub struct Region {
     // never expect them to be negative.
     blocks_per_extent: i64,
     extent_count: i64,
+
+    // The port that was returned when the region was created. This field didn't
+    // originally exist, so records may not have it filled in.
+    port: Option<SqlU16>,
+
+    // A region may be read-only
+    read_only: bool,
 }
 
 impl Region {
@@ -47,6 +55,8 @@ impl Region {
         block_size: ByteCount,
         blocks_per_extent: u64,
         extent_count: u64,
+        port: u16,
+        read_only: bool,
     ) -> Self {
         Self {
             identity: RegionIdentity::new(Uuid::new_v4()),
@@ -55,6 +65,8 @@ impl Region {
             block_size,
             blocks_per_extent: blocks_per_extent as i64,
             extent_count: extent_count as i64,
+            port: Some(port.into()),
+            read_only,
         }
     }
 
@@ -80,5 +92,11 @@ impl Region {
         // Per RFD 29, data is always encrypted at rest, and support for
         // external, customer-supplied keys is a non-requirement.
         true
+    }
+    pub fn port(&self) -> Option<u16> {
+        self.port.map(|port| port.into())
+    }
+    pub fn read_only(&self) -> bool {
+        self.read_only
     }
 }

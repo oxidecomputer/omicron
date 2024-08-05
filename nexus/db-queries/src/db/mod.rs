@@ -27,9 +27,7 @@ mod pool_connection;
 // sagas.
 pub mod queries;
 mod raw_query_builder;
-mod saga_recovery;
 mod sec_store;
-pub mod subquery;
 pub(crate) mod true_or_cast_error;
 mod update_and_check;
 
@@ -38,8 +36,7 @@ mod update_and_check;
 // full table scans the same way pooled connections do.
 pub use pool_connection::DISALLOW_FULL_TABLE_SCAN_SQL;
 
-#[cfg(test)]
-mod test_utils;
+pub mod test_utils;
 
 pub use nexus_db_fixed_data as fixed_data;
 pub use nexus_db_model as model;
@@ -51,7 +48,6 @@ pub use config::Config;
 pub use datastore::DataStore;
 pub use on_conflict_ext::IncompleteOnConflictExt;
 pub use pool::{DbConnection, Pool};
-pub use saga_recovery::{recover, CompletionTask, RecoveryTask};
 pub use saga_types::SecId;
 pub use sec_store::CockroachDbSecStore;
 

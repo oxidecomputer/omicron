@@ -10,6 +10,7 @@ use crate::sled::shared::Baseboard;
 use crate::sled_policy::DbSledPolicy;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
+use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::{
     external_api::{shared, views},
     identity::Asset,
@@ -26,7 +27,7 @@ use uuid::Uuid;
 pub struct SledBaseboard {
     pub serial_number: String,
     pub part_number: String,
-    pub revision: i64,
+    pub revision: u32,
 }
 
 /// Hardware information about the sled.
@@ -44,7 +45,7 @@ pub struct SledSystemHardware {
 #[diesel(table_name = sled)]
 pub struct Sled {
     #[diesel(embed)]
-    identity: SledIdentity,
+    pub identity: SledIdentity,
     time_deleted: Option<DateTime<Utc>>,
     pub rcgen: Generation,
 
@@ -53,7 +54,7 @@ pub struct Sled {
     is_scrimlet: bool,
     serial_number: String,
     part_number: String,
-    revision: i64,
+    revision: SqlU32,
 
     pub usable_hardware_threads: SqlU32,
     pub usable_physical_ram: ByteCount,
@@ -128,7 +129,7 @@ impl From<Sled> for views::Sled {
             baseboard: shared::Baseboard {
                 serial: sled.serial_number,
                 part: sled.part_number,
-                revision: sled.revision,
+                revision: *sled.revision,
             },
             policy: sled.policy.into(),
             state: sled.state.into(),
@@ -141,9 +142,9 @@ impl From<Sled> for views::Sled {
 impl From<Sled> for params::SledAgentInfo {
     fn from(sled: Sled) -> Self {
         let role = if sled.is_scrimlet {
-            params::SledRole::Scrimlet
+            SledRole::Scrimlet
         } else {
-            params::SledRole::Gimlet
+            SledRole::Gimlet
         };
         let decommissioned = match sled.state {
             SledState::Active => false,
@@ -155,7 +156,7 @@ impl From<Sled> for params::SledAgentInfo {
             baseboard: Baseboard {
                 serial: sled.serial_number.clone(),
                 part: sled.part_number.clone(),
-                revision: sled.revision,
+                revision: *sled.revision,
             },
             usable_hardware_threads: sled.usable_hardware_threads.into(),
             usable_physical_ram: sled.usable_physical_ram.into(),
@@ -192,7 +193,7 @@ pub struct SledUpdate {
     is_scrimlet: bool,
     serial_number: String,
     part_number: String,
-    revision: i64,
+    revision: SqlU32,
 
     pub usable_hardware_threads: SqlU32,
     pub usable_physical_ram: ByteCount,
@@ -221,7 +222,7 @@ impl SledUpdate {
             is_scrimlet: hardware.is_scrimlet,
             serial_number: baseboard.serial_number,
             part_number: baseboard.part_number,
-            revision: baseboard.revision,
+            revision: SqlU32(baseboard.revision),
             usable_hardware_threads: SqlU32::new(
                 hardware.usable_hardware_threads,
             ),
