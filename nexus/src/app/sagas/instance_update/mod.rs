@@ -86,8 +86,10 @@
 //! ## Theory of Operation
 //!
 //! In order to ensure that changes to the state of an instance are handled
-//! reliably, we require that all mutations of an instance` record are performed
-//! by a saga. The following sagas currently touch the `instance` record:
+//! reliably, we require that all multi-stage operations on an instance ---
+//! i.e., operations which cannot be done atomically in a single database query
+//! --- on an instance are performed  by a saga. The following sagas currently
+//! touch the `instance` record:
 //!
 //! - [`instance_start`]
 //! - [`instance_migrate`]
@@ -120,9 +122,9 @@
 //! multiple sagas mutate the same fields in the instance record, because the
 //! states from which a particular transition may start limited. However, this
 //! is not the case for the `instance-update` saga, which may need to run any
-//! time a sled-agent publishes a new instance state. Therefore, this saga has
-//! the dubious honor of using the only distributed lock in Nexus (at the time
-//! of writing), the "instance updater lock".
+//! time a sled-agent publishes a new instance state. Therefore, this saga
+//! ensures mutual exclusion using one of the only distributed locking schemes
+//! in Omicron: the "instance updater lock".
 //!
 //! ### The Instance-Updater Lock, or, "Distributed RAII"
 //!
@@ -244,7 +246,7 @@
 //! action they performed. This is because, unlike `instance-start`,
 //! `instance-migrate``, or `instance-delete`, the instance-update saga is
 //! **not** attempting to perform a state change for the instance that was
-//! requested by an operator. Instead, it is attempting to update the
+//! requested by a user. Instead, it is attempting to update the
 //! database and networking configuration *to match a state change that has
 //! already occurred.*
 //!
