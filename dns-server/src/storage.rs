@@ -95,6 +95,8 @@
 use anyhow::{anyhow, Context};
 use camino::Utf8PathBuf;
 use dns_server_api::{DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord};
+use hickory_proto::rr::LowerName;
+use hickory_resolver::Name;
 use serde::{Deserialize, Serialize};
 use sled::transaction::ConflictableTransactionError;
 use slog::{debug, error, info, o, warn};
@@ -782,6 +784,8 @@ mod test {
     use dns_server_api::DnsConfigParams;
     use dns_server_api::DnsConfigZone;
     use dns_server_api::DnsRecord;
+    use hickory_proto::rr::LowerName;
+    use hickory_resolver::Name;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
