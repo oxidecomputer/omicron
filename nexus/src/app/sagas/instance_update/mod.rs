@@ -244,7 +244,7 @@
 //! changes made by the forward action. The `instance-update` saga, however, is
 //! a bit different: most of its nodes don't have reverse actions that undo the
 //! action they performed. This is because, unlike `instance-start`,
-//! `instance-migrate``, or `instance-delete`, the instance-update saga is
+//! `instance-migrate`, or `instance-delete`, the instance-update saga is
 //! **not** attempting to perform a state change for the instance that was
 //! requested by a user. Instead, it is attempting to update the
 //! database and networking configuration *to match a state change that has
