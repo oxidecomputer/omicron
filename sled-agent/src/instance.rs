@@ -1515,7 +1515,14 @@ impl InstanceRunner {
         info!(self.log, "Propolis SMF service is online");
 
         // Notify the metrics task about the instance zone's datalinks.
-        self.metrics_queue.track_zone_links(&running_zone).await;
+        if !self.metrics_queue.track_zone_links(&running_zone).await {
+            error!(
+                self.log,
+                "Failed to track one or more datalinks in the zone, \
+                some metrics will not be produced";
+                "zone_name" => running_zone.name(),
+            );
+        }
 
         // We use a custom client builder here because the default progenitor
         // one has a timeout of 15s but we want to be able to wait indefinitely.

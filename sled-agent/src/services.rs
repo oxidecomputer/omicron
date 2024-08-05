@@ -933,7 +933,14 @@ impl ServiceManager {
         if let SwitchZoneState::Running { zone, .. } =
             &*self.inner.switch_zone.lock().await
         {
-            metrics_queue.track_zone_links(zone).await;
+            if !metrics_queue.track_zone_links(zone).await {
+                error!(
+                    self.inner.log,
+                    "Failed to track one or more data links in \
+                    the switch zone, some metrics will not \
+                    be produced."
+                );
+            }
         }
 
         Ok(())
@@ -2981,7 +2988,14 @@ impl ServiceManager {
         if let Some(queue) =
             self.inner.sled_info.get().map(|sa| &sa.metrics_queue)
         {
-            queue.track_zone_links(&running_zone).await;
+            if !queue.track_zone_links(&running_zone).await {
+                error!(
+                    self.inner.log,
+                    "Failed to track one or more links in the zone, \
+                    some metrics will not be produced";
+                    "zone_name" => running_zone.name(),
+                );
+            }
         }
         Ok(running_zone)
     }
@@ -4670,13 +4684,10 @@ mod test {
 
         // Also send a message to the metrics task that the VNIC has been
         // deleted.
-        mgr.inner
-            .sled_info
-            .get()
-            .unwrap()
-            .metrics_queue
-            .untrack_vnic("oxControlService0")
-            .await;
+        let queue = &mgr.inner.sled_info.get().unwrap().metrics_queue;
+        for zone in mgr.inner.zones.lock().await.values() {
+            queue.untrack_zone_links(&zone.runtime).await;
+        }
 
         // Explicitly drop the service manager
         drop(mgr);

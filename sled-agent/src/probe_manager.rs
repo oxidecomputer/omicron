@@ -351,7 +351,14 @@ impl ProbeManagerInner {
 
         // Notify the sled-agent's metrics task to start tracking the VNIC and
         // any OPTE ports in the zone.
-        self.metrics_queue.track_zone_links(&rz).await;
+        if !self.metrics_queue.track_zone_links(&rz).await {
+            error!(
+                self.log,
+                "Failed to track one or more datalinks in the zone, \
+                some metrics will not be produced";
+                "zone_name" => rz.name(),
+            );
+        }
 
         self.running_probes.lock().await.zones.insert(probe.id, rz);
 

@@ -16,8 +16,8 @@ use oximeter_instruments::kstat::TargetId;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use slog::Logger;
-use std::collections::btree_map::Entry;
-use std::collections::BTreeMap;
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -108,7 +108,7 @@ async fn metrics_task(
     log: Logger,
     mut rx: mpsc::Receiver<Message>,
 ) {
-    let mut tracked_links: BTreeMap<String, TargetId> = BTreeMap::new();
+    let mut tracked_links: HashMap<String, TargetId> = HashMap::new();
 
     // Main polling loop, waiting for messages from other pieces of the code to
     // track various statistics.
@@ -176,7 +176,7 @@ async fn metrics_task(
 /// Stop tracking a link by name.
 async fn remove_datalink(
     log: &Logger,
-    tracked_links: &mut BTreeMap<String, TargetId>,
+    tracked_links: &mut HashMap<String, TargetId>,
     kstat_sampler: &KstatSampler,
     name: String,
 ) {
@@ -213,7 +213,7 @@ async fn remove_datalink(
 /// Start tracking a new link of the specified kind.
 async fn add_datalink(
     log: &Logger,
-    tracked_links: &mut BTreeMap<String, TargetId>,
+    tracked_links: &mut HashMap<String, TargetId>,
     kstat_sampler: &KstatSampler,
     link: SledDataLink,
 ) {
@@ -331,59 +331,71 @@ impl MetricsRequestQueue {
     }
 
     /// Ask the task to start tracking the named physical datalink.
+    ///
+    /// Return `true` if the request was successfully sent, and false otherwise.
     pub async fn track_physical(
         &self,
         zone_name: impl Into<String>,
         name: impl Into<String>,
-    ) {
-        let _ = self
-            .0
+    ) -> bool {
+        self.0
             .send(Message::TrackPhysical {
                 zone_name: zone_name.into(),
                 name: name.into(),
             })
-            .await;
+            .await
+            .is_ok()
     }
 
     /// Ask the task to start tracking the named VNIC.
+    ///
+    /// Return `true` if the request was successfully sent, and false otherwise.
     pub async fn track_vnic(
         &self,
         zone_name: impl Into<String>,
         name: impl Into<String>,
-    ) {
-        let _ = self
-            .0
+    ) -> bool {
+        self.0
             .send(Message::TrackVnic {
                 zone_name: zone_name.into(),
                 name: name.into(),
             })
-            .await;
+            .await
+            .is_ok()
     }
 
     /// Ask the task to stop tracking the named VNIC.
-    pub async fn untrack_vnic(&self, name: impl Into<String>) {
-        let _ = self.0.send(Message::UntrackVnic { name: name.into() }).await;
+    ///
+    /// Return `true` if the request was successfully sent, and false otherwise.
+    pub async fn untrack_vnic(&self, name: impl Into<String>) -> bool {
+        self.0.send(Message::UntrackVnic { name: name.into() }).await.is_ok()
     }
 
     /// Ask the task to start tracking the named OPTE port.
+    ///
+    /// Return `true` if the request was successfully sent, and false otherwise.
     pub async fn track_opte_port(
         &self,
         zone_name: impl Into<String>,
         name: impl Into<String>,
-    ) {
-        let _ = self
-            .0
+    ) -> bool {
+        self.0
             .send(Message::TrackOptePort {
                 zone_name: zone_name.into(),
                 name: name.into(),
             })
-            .await;
+            .await
+            .is_ok()
     }
 
     /// Ask the task to stop tracking the named OPTE port.
-    pub async fn untrack_opte_port(&self, name: impl Into<String>) {
-        let _ =
-            self.0.send(Message::UntrackOptePort { name: name.into() }).await;
+    ///
+    /// Return `true` if the request was successfully sent, and false otherwise.
+    pub async fn untrack_opte_port(&self, name: impl Into<String>) -> bool {
+        self.0
+            .send(Message::UntrackOptePort { name: name.into() })
+            .await
+            .is_ok()
     }
 
     /// Track all datalinks in a zone.
@@ -393,26 +405,38 @@ impl MetricsRequestQueue {
     /// - The bootstrap VNIC, if it exists.
     /// - The underlay control VNIC, which always exists.
     /// - Any OPTE ports, which only exist for those with external connectivity.
-    pub async fn track_zone_links(&self, running_zone: &RunningZone) {
+    ///
+    /// Return `true` if the requests were successfully sent, and false
+    /// otherwise. This will attempt to send all requests, even if earlier
+    /// messages fail.
+    pub async fn track_zone_links(&self, running_zone: &RunningZone) -> bool {
         let zone_name = running_zone.name();
-        self.track_vnic(zone_name, running_zone.control_vnic_name()).await;
+        let mut success =
+            self.track_vnic(zone_name, running_zone.control_vnic_name()).await;
         if let Some(bootstrap_vnic) = running_zone.bootstrap_vnic_name() {
-            self.track_vnic(zone_name, bootstrap_vnic).await;
+            success &= self.track_vnic(zone_name, bootstrap_vnic).await;
         }
         for port in running_zone.opte_port_names() {
-            self.track_opte_port(zone_name, port).await;
+            success &= self.track_opte_port(zone_name, port).await;
         }
+        success
     }
 
     /// Stop tracking all datalinks in a zone.
-    pub async fn untrack_zone_links(&self, running_zone: &RunningZone) {
-        self.untrack_vnic(running_zone.control_vnic_name()).await;
+    ///
+    /// Return `true` if the requests were successfully sent, and false
+    /// otherwise. This will attempt to send all requests, even if earlier
+    /// messages fail.
+    pub async fn untrack_zone_links(&self, running_zone: &RunningZone) -> bool {
+        let mut success =
+            self.untrack_vnic(running_zone.control_vnic_name()).await;
         if let Some(bootstrap_vnic) = running_zone.bootstrap_vnic_name() {
-            self.untrack_vnic(bootstrap_vnic).await;
+            success &= self.untrack_vnic(bootstrap_vnic).await;
         }
         for port in running_zone.opte_port_names() {
-            self.untrack_opte_port(port).await;
+            success &= self.untrack_opte_port(port).await;
         }
+        success
     }
 }
 
