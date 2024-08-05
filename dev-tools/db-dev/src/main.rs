@@ -18,14 +18,16 @@ async fn main() -> anyhow::Result<()> {
     args.exec().await
 }
 
+/// Tools for working with a CockroachDB database.
 #[derive(Clone, Debug, Parser)]
-pub struct DbDevApp {
+#[clap(version)]
+struct DbDevApp {
     #[clap(subcommand)]
     command: DbDevCmd,
 }
 
 impl DbDevApp {
-    pub async fn exec(&self) -> Result<()> {
+    async fn exec(&self) -> Result<()> {
         match &self.command {
             DbDevCmd::Run(args) => args.exec().await,
             DbDevCmd::Populate(args) => args.exec().await,
@@ -35,7 +37,7 @@ impl DbDevApp {
 }
 
 #[derive(Clone, Debug, Subcommand)]
-pub(crate) enum DbDevCmd {
+enum DbDevCmd {
     /// Run a CockroachDB server
     Run(DbRunArgs),
     /// Populate a database with schema
@@ -45,7 +47,7 @@ pub(crate) enum DbDevCmd {
 }
 
 #[derive(Clone, Debug, Args)]
-pub(crate) struct DbRunArgs {
+struct DbRunArgs {
     /// Path to store database data (default: temp dir cleaned up on exit)
     #[clap(long, action)]
     store_dir: Option<Utf8PathBuf>,
@@ -66,7 +68,7 @@ pub(crate) struct DbRunArgs {
 }
 
 impl DbRunArgs {
-    pub(crate) async fn exec(&self) -> Result<()> {
+    async fn exec(&self) -> Result<()> {
         // Set ourselves up to wait for SIGINT.  It's important to do this early,
         // before we've created resources that we want to have cleaned up on SIGINT
         // (e.g., the temporary directory created by the database starter).
@@ -166,7 +168,7 @@ impl DbRunArgs {
 }
 
 #[derive(Clone, Debug, Args)]
-pub(crate) struct DbPopulateArgs {
+struct DbPopulateArgs {
     /// URL for connecting to the database (postgresql:///...)
     #[clap(long, action)]
     database_url: String,
@@ -177,7 +179,7 @@ pub(crate) struct DbPopulateArgs {
 }
 
 impl DbPopulateArgs {
-    pub(crate) async fn exec(&self) -> Result<()> {
+    async fn exec(&self) -> Result<()> {
         let config =
             self.database_url.parse::<tokio_postgres::Config>().with_context(
                 || format!("parsing database URL {:?}", self.database_url),
@@ -202,14 +204,14 @@ impl DbPopulateArgs {
 }
 
 #[derive(Clone, Debug, Args)]
-pub(crate) struct DbWipeArgs {
+struct DbWipeArgs {
     /// URL for connecting to the database (postgresql:///...)
     #[clap(long, action)]
     database_url: String,
 }
 
 impl DbWipeArgs {
-    pub(crate) async fn exec(&self) -> Result<()> {
+    async fn exec(&self) -> Result<()> {
         let config =
             self.database_url.parse::<tokio_postgres::Config>().with_context(
                 || format!("parsing database URL {:?}", self.database_url),

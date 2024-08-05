@@ -16,13 +16,13 @@ async fn main() -> anyhow::Result<()> {
 }
 
 #[derive(Clone, Debug, Parser)]
-pub struct MgsDevApp {
+struct MgsDevApp {
     #[clap(subcommand)]
     command: MgsDevCmd,
 }
 
 impl MgsDevApp {
-    pub async fn exec(&self) -> Result<(), anyhow::Error> {
+    async fn exec(&self) -> Result<(), anyhow::Error> {
         match &self.command {
             MgsDevCmd::Run(args) => args.exec().await,
         }
@@ -30,15 +30,16 @@ impl MgsDevApp {
 }
 
 #[derive(Clone, Debug, Subcommand)]
-pub(crate) enum MgsDevCmd {
+enum MgsDevCmd {
+    /// Run a simulated Management Gateway Service for development.
     Run(MgsRunArgs),
 }
 
 #[derive(Clone, Debug, Args)]
-pub(crate) struct MgsRunArgs {}
+struct MgsRunArgs {}
 
 impl MgsRunArgs {
-    pub(crate) async fn exec(&self) -> Result<(), anyhow::Error> {
+    async fn exec(&self) -> Result<(), anyhow::Error> {
         // Start a stream listening for SIGINT
         let signals =
             Signals::new(&[SIGINT]).expect("failed to wait for SIGINT");

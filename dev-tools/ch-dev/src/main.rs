@@ -18,14 +18,16 @@ async fn main() -> anyhow::Result<()> {
     args.exec().await
 }
 
+/// Tools for working with a ClickHouse database.
 #[derive(Clone, Debug, Parser)]
-pub struct ChDevApp {
+#[clap(version)]
+struct ChDevApp {
     #[clap(subcommand)]
     command: ChDevCmd,
 }
 
 impl ChDevApp {
-    pub async fn exec(&self) -> Result<(), anyhow::Error> {
+    async fn exec(&self) -> Result<(), anyhow::Error> {
         match &self.command {
             ChDevCmd::Run(args) => args.exec().await,
         }
@@ -33,13 +35,13 @@ impl ChDevApp {
 }
 
 #[derive(Clone, Debug, Subcommand)]
-pub(crate) enum ChDevCmd {
+enum ChDevCmd {
     /// Run a ClickHouse server
     Run(ChRunArgs),
 }
 
 #[derive(Clone, Debug, Args)]
-pub(crate) struct ChRunArgs {
+struct ChRunArgs {
     /// The HTTP port on which the server will listen
     #[clap(short, long, default_value = "8123", action)]
     port: u16,
@@ -49,7 +51,7 @@ pub(crate) struct ChRunArgs {
 }
 
 impl ChRunArgs {
-    pub(crate) async fn exec(&self) -> Result<(), anyhow::Error> {
+    async fn exec(&self) -> Result<(), anyhow::Error> {
         let logctx = LogContext::new(
             "ch-dev",
             &dropshot::ConfigLogging::StderrTerminal {

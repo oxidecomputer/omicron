@@ -16,14 +16,16 @@ async fn main() -> anyhow::Result<()> {
     args.exec().await
 }
 
+/// Tools for working with a local Omicron deployment.
 #[derive(Clone, Debug, Parser)]
-pub struct OmicronDevApp {
+#[clap(version)]
+struct OmicronDevApp {
     #[clap(subcommand)]
     command: OmicronDevCmd,
 }
 
 impl OmicronDevApp {
-    pub async fn exec(&self) -> Result<(), anyhow::Error> {
+    async fn exec(&self) -> Result<(), anyhow::Error> {
         match &self.command {
             OmicronDevCmd::RunAll(args) => args.exec().await,
         }
@@ -31,20 +33,20 @@ impl OmicronDevApp {
 }
 
 #[derive(Clone, Debug, Subcommand)]
-pub(crate) enum OmicronDevCmd {
+enum OmicronDevCmd {
     /// Run a full simulated control plane
     RunAll(RunAllArgs),
 }
 
 #[derive(Clone, Debug, Args)]
-pub(crate) struct RunAllArgs {
+struct RunAllArgs {
     /// Nexus external API listen port.  Use `0` to request any available port.
     #[clap(long, action)]
     nexus_listen_port: Option<u16>,
 }
 
 impl RunAllArgs {
-    pub(crate) async fn exec(&self) -> Result<(), anyhow::Error> {
+    async fn exec(&self) -> Result<(), anyhow::Error> {
         // Start a stream listening for SIGINT
         let signals =
             Signals::new(&[SIGINT]).expect("failed to wait for SIGINT");

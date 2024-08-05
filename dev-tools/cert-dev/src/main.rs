@@ -14,7 +14,7 @@ async fn main() -> anyhow::Result<()> {
     args.exec().await
 }
 
-/// Utilities for working with certificates.
+/// Tools for working with certificates.
 #[derive(Parser)]
 struct CertDevApp {
     #[clap(subcommand)]
@@ -31,7 +31,7 @@ impl CertDevApp {
 
 #[derive(Subcommand)]
 enum CertDevCmd {
-    /// Create a self-signed certificate for use with Omicron
+    /// Create a self-signed certificate for use with Omicron.
     Create(CertCreateArgs),
 }
 

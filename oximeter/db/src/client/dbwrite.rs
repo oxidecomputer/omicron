@@ -9,6 +9,7 @@
 use crate::client::Client;
 use crate::model;
 use crate::Error;
+use camino::Utf8PathBuf;
 use oximeter::Sample;
 use oximeter::TimeseriesName;
 use slog::debug;
@@ -59,11 +60,20 @@ impl DbWrite for Client {
     }
 
     /// Initialize the replicated telemetry database, creating tables as needed.
+    ///
+    /// We run both db-init files since we want all tables in production.
+    /// These files are intentionally disjoint so that we don't have to
+    /// duplicate any setup.
     async fn init_replicated_db(&self) -> Result<(), Error> {
         debug!(self.log, "initializing ClickHouse database");
         self.run_many_sql_statements(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/schema/replicated/db-init.sql"
+            "/schema/replicated/db-init-1.sql"
+        )))
+        .await?;
+        self.run_many_sql_statements(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/schema/replicated/db-init-2.sql"
         )))
         .await
     }
@@ -96,6 +106,58 @@ impl DbWrite for Client {
             "/schema/single-node/db-wipe.sql"
         )))
         .await
+    }
+}
+
+/// Allow initializing a minimal subset of db tables for replicated cluster
+/// testing
+#[async_trait::async_trait]
+pub trait TestDbWrite {
+    /// Initialize the replicated telemetry database, creating a subset of tables as described
+    /// in `db-init-1.sql`.
+    async fn init_test_minimal_replicated_db(&self) -> Result<(), Error>;
+
+    /// Initialize the replicated telemetry database with the given file id.
+    async fn init_replicated_db_from_file(
+        &self,
+        id: usize,
+    ) -> Result<(), Error>;
+}
+
+#[async_trait::async_trait]
+impl TestDbWrite for Client {
+    /// Initialize the replicated telemetry database, creating tables as needed.
+    /// We run only the first db-init file, since it contains a minimum number
+    /// of tables required for replication/cluster tests.
+    async fn init_test_minimal_replicated_db(&self) -> Result<(), Error> {
+        debug!(self.log, "initializing ClickHouse database");
+        self.run_many_sql_statements(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/schema/replicated/db-init-1.sql"
+        )))
+        .await
+    }
+
+    async fn init_replicated_db_from_file(
+        &self,
+        id: usize,
+    ) -> Result<(), Error> {
+        let file = format!("db-init-{id}.sql");
+        debug!(self.log, "initializing ClickHouse database via {file}");
+        let path: Utf8PathBuf =
+            [env!("CARGO_MANIFEST_DIR"), "schema/replicated/", &file]
+                .into_iter()
+                .collect();
+        let sql = tokio::fs::read_to_string(&path).await.map_err(|err| {
+            Error::ReadSqlFile {
+                context: format!(
+                    "Reading SQL file '{}' for test initialization",
+                    path,
+                ),
+                err,
+            }
+        })?;
+        self.run_many_sql_statements(sql).await
     }
 }
 
