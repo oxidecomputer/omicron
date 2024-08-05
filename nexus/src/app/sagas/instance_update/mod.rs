@@ -2101,6 +2101,68 @@ mod test {
         .await;
     }
 
+    // === migration completed, but then the target was destroyed ===
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_completed_but_target_destroyed_succeeds(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+
+        MigrationOutcome::default()
+            .target(MigrationState::Completed, VmmState::Destroyed)
+            .source(MigrationState::Completed, VmmState::Stopping)
+            .setup_test(cptestctx, &other_sleds)
+            .await
+            .run_saga_basic_usage_succeeds_test(cptestctx)
+            .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_completed_but_target_destroyed_actions_succeed_idempotently(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+
+        MigrationOutcome::default()
+            .target(MigrationState::Completed, VmmState::Destroyed)
+            .source(MigrationState::Completed, VmmState::Stopping)
+            .setup_test(cptestctx, &other_sleds)
+            .await
+            .run_actions_succeed_idempotently_test(cptestctx)
+            .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_migration_completed_but_target_destroyed_can_unwind(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+
+        let outcome = MigrationOutcome::default()
+            .target(MigrationState::Completed, VmmState::Destroyed)
+            .source(MigrationState::Completed, VmmState::Stopping);
+
+        test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
+            nexus,
+            || {
+                Box::pin(async {
+                    outcome
+                        .setup_test(cptestctx, &other_sleds)
+                        .await
+                        .saga_params()
+                })
+            },
+            || Box::pin(after_unwinding(cptestctx)),
+            &cptestctx.logctx.log,
+        )
+        .await;
+    }
+
     #[derive(Clone, Copy, Default)]
     struct MigrationOutcome {
         source: Option<(MigrationState, VmmState)>,
@@ -2397,9 +2459,9 @@ mod test {
             info!(
                 cptestctx.logctx.log,
                 "checking update saga results after migration";
-                "source_outcome" => ?self.outcome.source.as_ref(),
-                "target_outcome" => ?self.outcome.target.as_ref(),
-                "migration_failed" => self.outcome.failed,
+                "source_outcome" => ?dbg!(self.outcome.source.as_ref()),
+                "target_outcome" => ?dbg!(self.outcome.target.as_ref()),
+                "migration_failed" => dbg!(self.outcome.failed),
             );
 
             use test_helpers::*;
@@ -2413,6 +2475,13 @@ mod test {
             assert_instance_unlocked(instance);
             assert_instance_record_is_consistent(instance);
 
+            let target_destroyed = self
+                .outcome
+                .target
+                .as_ref()
+                .map(|(_, state)| state == &VmmState::Destroyed)
+                .unwrap_or(false);
+
             if self.outcome.failed {
                 assert_eq!(
                     instance_runtime.migration_id, None,
@@ -2423,12 +2492,29 @@ mod test {
                     "target VMM ID must be unset when a migration has failed"
                 );
             } else {
-                assert_eq!(
-                    active_vmm_id,
-                    Some(self.target_vmm_id()),
-                    "target VMM must be in the active VMM position after migration success",
-                );
-                assert_eq!(instance_runtime.nexus_state, InstanceState::Vmm);
+                if dbg!(target_destroyed) {
+                    assert_eq!(
+                        active_vmm_id, None,
+                        "if the target VMM was destroyed, it should be unset, \
+                         even if a migration succeeded",
+                    );
+                    assert_eq!(
+                        instance_runtime.nexus_state,
+                        InstanceState::NoVmm
+                    );
+                } else {
+                    assert_eq!(
+                        active_vmm_id,
+                        Some(self.target_vmm_id()),
+                        "target VMM must be in the active VMM position after \
+                         migration success",
+                    );
+
+                    assert_eq!(
+                        instance_runtime.nexus_state,
+                        InstanceState::Vmm
+                    );
+                }
                 if self
                     .outcome
                     .target
@@ -2470,13 +2556,6 @@ mod test {
                 "source VMM should exist if and only if the source hasn't been destroyed",
             );
 
-            let target_destroyed = self
-                .outcome
-                .target
-                .as_ref()
-                .map(|(_, state)| state == &VmmState::Destroyed)
-                .unwrap_or(false);
-
             assert_eq!(
                 self.target_resource_records_exist(cptestctx).await,
                 !target_destroyed,
@@ -2492,8 +2571,9 @@ mod test {
                 !src_destroyed
             } else {
                 // Otherwise, if the migration succeeded, the instance should be
-                // on the target VMM.
-                true
+                // on the target VMM, and virtual provisioning records should
+                // exist as long as the
+                !target_destroyed
             };
 
             assert_eq!(
