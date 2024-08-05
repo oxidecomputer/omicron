@@ -893,9 +893,7 @@ impl SledAgent {
         })
     }
 
-    pub async fn datasets_list(
-        &self,
-    ) -> Result<DatasetsConfig, HttpError> {
+    pub async fn datasets_list(&self) -> Result<DatasetsConfig, HttpError> {
         todo!();
     }
 

@@ -161,6 +161,13 @@ where
     )
     .await?;
 
+    datasets::deploy_datasets(
+        &opctx,
+        &sleds_by_id,
+        &blueprint.blueprint_datasets,
+    )
+    .await?;
+
     omicron_zones::deploy_zones(
         &opctx,
         &sleds_by_id,

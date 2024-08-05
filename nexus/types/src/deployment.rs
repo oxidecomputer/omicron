@@ -26,6 +26,9 @@ use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::DatasetKind;
+use omicron_common::disk::DatasetConfig;
+use omicron_common::disk::DatasetName;
+use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_uuid_kinds::CollectionUuid;
@@ -935,6 +938,15 @@ pub struct BlueprintDatasetsConfig {
     pub datasets: Vec<BlueprintDatasetConfig>,
 }
 
+impl From<BlueprintDatasetsConfig> for DatasetsConfig {
+    fn from(config: BlueprintDatasetsConfig) -> Self {
+        Self {
+            generation: config.generation,
+            datasets: config.datasets.into_iter().map(From::from).collect(),
+        }
+    }
+}
+
 /// Information about a dataset as recorded in a blueprint
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub struct BlueprintDatasetConfig {
@@ -944,6 +956,18 @@ pub struct BlueprintDatasetConfig {
     pub quota: Option<ByteCount>,
     pub reservation: Option<ByteCount>,
     pub compression: Option<String>,
+}
+
+impl From<BlueprintDatasetConfig> for DatasetConfig {
+    fn from(config: BlueprintDatasetConfig) -> Self {
+        Self {
+            id: config.id,
+            name: DatasetName::new(config.pool, config.kind),
+            quota: config.quota.map(|q| q.to_bytes()),
+            reservation: config.reservation.map(|r| r.to_bytes()),
+            compression: config.compression,
+        }
+    }
 }
 
 /// Describe high-level metadata about a blueprint

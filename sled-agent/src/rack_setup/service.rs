@@ -92,8 +92,9 @@ use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
 use nexus_types::deployment::{
-    Blueprint, BlueprintDatasetConfig, BlueprintDatasetsConfig, BlueprintPhysicalDisksConfig,
-    BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZonesConfig,
+    Blueprint, BlueprintDatasetConfig, BlueprintDatasetsConfig,
+    BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
+    BlueprintZoneDisposition, BlueprintZonesConfig,
     CockroachDbPreserveDowngrade, InvalidOmicronZoneType,
 };
 use nexus_types::external_api::views::SledState;
@@ -1429,7 +1430,9 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
                         kind: d.name.dataset().clone(),
                         compression: d.compression.clone(),
                         quota: d.quota.map(|q| ByteCount::try_from(q).unwrap()),
-                        reservation: d.reservation.map(|r| ByteCount::try_from(r).unwrap()),
+                        reservation: d
+                            .reservation
+                            .map(|r| ByteCount::try_from(r).unwrap()),
                     })
                     .collect(),
             },

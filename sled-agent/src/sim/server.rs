@@ -525,7 +525,7 @@ pub async fn run_standalone_server(
         SledConfig {
             disks: server.sled_agent.omicron_physical_disks_list().await?,
             datasets: server.sled_agent.datasets_list().await?,
-            zones
+            zones,
         },
     );
 

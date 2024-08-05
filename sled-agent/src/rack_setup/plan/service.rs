@@ -28,7 +28,7 @@ use omicron_common::backoff::{
     retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::disk::{
-    DatasetsConfig, DatasetKind, DatasetName, DiskVariant,
+    DatasetKind, DatasetName, DatasetsConfig, DiskVariant,
     OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};

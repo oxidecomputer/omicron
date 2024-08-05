@@ -669,8 +669,8 @@ impl<'a> BlueprintBuilder<'a> {
     /// From this process, we should be able to construct "all datasets that
     /// should exist in the new blueprint".
     ///
-    /// - If new datasets are proposed, they are added
-    /// - If datasets are changed, they are updated
+    /// - If new datasets are proposed, they are added to the blueprint.
+    /// - If datasets are changed, they are updated in the blueprint.
     /// - If datasets are not proposed, but they exist in the parent blueprint,
     /// they are removed.
     pub fn sled_ensure_datasets(
@@ -788,9 +788,8 @@ impl<'a> BlueprintBuilder<'a> {
         // Add all new datasets afterwards
         datasets.append(&mut additions);
 
-        // Ensure that regardless of our implementation, the output dataset
-        // order is idempotent.
-        datasets.sort_by(|a, b| a.id.cmp(&b.id));
+        // We sort in the call to "BlueprintDatasetsBuilder::into_datasets_map",
+        // so we don't need to sort "datasets" now.
 
         Ok(EnsureMultiple::Changed { added, updated, removed })
     }

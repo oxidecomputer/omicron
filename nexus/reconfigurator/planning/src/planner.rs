@@ -250,15 +250,6 @@ impl<'a> Planner<'a> {
                 // we send this request first.
             }
 
-            // TODO: Ensure the "baseline" datasets exist (zone root, debug)
-            // TODO: Ensure all durable datasets exist (with zone allocation)
-            // TODO: Ensure all transient datasets exist (with zone allocation)
-            //
-            // NOTE: Make sure this works even if the zone was already
-            // provisioned?
-            //
-            // TODO: Ensure that all these datasets get deleted eventually?
-
             // Check for an NTP zone.  Every sled should have one.  If it's not
             // there, all we can do is provision that one zone.  We have to wait
             // for that to succeed and synchronize the clock before we can
@@ -368,7 +359,10 @@ impl<'a> Planner<'a> {
                 info!(
                     &self.log,
                     "altered datasets";
-                    "sled_id" => %sled_id
+                    "sled_id" => %sled_id,
+                    "added" => added,
+                    "updated" => updated,
+                    "removed" => removed,
                 );
                 self.blueprint.record_operation(Operation::UpdateDatasets {
                     sled_id,
