@@ -576,6 +576,7 @@ impl UpdatesRequired {
                     new_runtime.propolis_id =
                         Some(migration.target_propolis_id);
                     network_config = Some(NetworkConfigUpdate::to_vmm(new_vmm));
+                    update_required = true;
                 }
 
                 // Welp, the migration has succeeded, but the target Propolis
@@ -593,6 +594,7 @@ impl UpdatesRequired {
                         "target_propolis_id" => %migration.target_propolis_id,
                     );
                     new_runtime.propolis_id = None;
+                    update_required = true;
                 }
 
                 // If the target reports that the migration has completed,
@@ -612,9 +614,8 @@ impl UpdatesRequired {
                     );
                     new_runtime.migration_id = None;
                     new_runtime.dst_propolis_id = None;
+                    update_required = true;
                 }
-
-                update_required = true;
             }
         }
 
@@ -625,7 +626,11 @@ impl UpdatesRequired {
         // instance is no longer incarnated on a sled, and we must update the
         // state of the world to reflect that.
         let deprovision = if new_runtime.propolis_id.is_none() {
-            update_required = true;
+            // N.B. that this does *not* set `update_required`, because
+            // `new_runtime.propolis_id` might be `None` just because there was,
+            // already, no VMM there. `update_required` gets set above if there
+            // was any actual state change.
+
             // We no longer have a VMM.
             new_runtime.nexus_state = InstanceState::NoVmm;
             // If the active VMM was destroyed and the instance has not migrated
