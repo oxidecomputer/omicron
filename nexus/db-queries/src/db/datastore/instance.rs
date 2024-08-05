@@ -47,6 +47,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
+use omicron_common::api::external::MessagePair;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
@@ -701,12 +702,15 @@ impl DataStore {
                 &*self.pool_connection_authorized(opctx).await?,
             )
             .await
-            .map_err(|error| {
-                Error::conflict(format!(
-                    "cannot set migration ID {migration_id} for instance \
-                     {instance_id} (perhaps a previous migration is already \
-                     set): {error:#}"
-                ))
+            .map_err(|error| Error::Conflict {
+                message: MessagePair::new_full(
+                    "another migration is already in progress".to_string(),
+                    format!(
+                        "cannot set migration ID {migration_id} for instance \
+                         {instance_id} (perhaps another migration ID is \
+                         already present): {error:#}"
+                    ),
+                ),
             })
     }
 
@@ -1309,7 +1313,7 @@ impl DataStore {
                             "attempted to release a lock held by another saga! this is a bug!",
                         ))
                     },
-                    Some(_) =>  Err(Error::conflict(
+                    Some(_) => Err(Error::conflict(
                         "attempted to commit an instance update, but the state generation has advanced!"
                     )),
                     None => Err(Error::internal_error(

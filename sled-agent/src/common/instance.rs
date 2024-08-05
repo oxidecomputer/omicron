@@ -565,6 +565,14 @@ mod test {
             .expect("instance must have a migration state");
         assert_eq!(migration.state, MigrationState::Completed);
         assert_eq!(migration.gen, prev_migration.gen);
+
+        state.terminate_rudely(false);
+        let migration = state
+            .migration_out
+            .clone()
+            .expect("instance must have a migration state");
+        assert_eq!(migration.state, MigrationState::Completed);
+        assert_eq!(migration.gen, prev_migration.gen);
     }
 
     #[test]
