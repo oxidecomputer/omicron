@@ -144,7 +144,7 @@ async fn siu_fetch_state_and_start_real_saga(
         sagactx.saga_params::<Params>()?;
     let osagactx = sagactx.user_data();
     let lock_id = sagactx.lookup::<Uuid>(INSTANCE_LOCK_ID)?;
-
+    let instance_id = authz_instance.id();
     let log = osagactx.log();
 
     // Did we get the lock? If so, we can start the next saga, otherwise, just
@@ -155,7 +155,7 @@ async fn siu_fetch_state_and_start_real_saga(
         info!(
             log,
             "instance update: instance is already locked! doing nothing...";
-            "instance_id" => %authz_instance.id(),
+            "instance_id" => %instance_id,
             "saga_id" => %lock_id,
         );
         return Ok(());
@@ -178,7 +178,7 @@ async fn siu_fetch_state_and_start_real_saga(
         info!(
             log,
             "instance update: starting real update saga...";
-            "instance_id" => %authz_instance.id(),
+            "instance_id" => %instance_id,
             "current.runtime_state" => ?state.instance.runtime(),
             "current.migration" => ?state.migration,
             "current.active_vmm" => ?state.active_vmm,
@@ -189,7 +189,7 @@ async fn siu_fetch_state_and_start_real_saga(
             "update.destroy_target_vmm" => ?update.destroy_target_vmm,
             "update.deprovision" => update.deprovision.is_some(),
         );
-        osagactx
+        if let Err(error) = osagactx
             .nexus()
             .sagas
             .saga_execute::<SagaDoActualInstanceUpdate>(RealParams {
@@ -199,7 +199,21 @@ async fn siu_fetch_state_and_start_real_saga(
                 orig_lock,
             })
             .await
-            .map_err(ActionError::action_failed)?;
+        {
+            warn!(
+                log,
+                "instance update: real update saga failed (which *could* \
+                 mean nothing...)";
+                "instance_id" => %instance_id,
+                "error" => %error,
+            );
+            // If the real saga failed, kick the background task. If the real
+            // saga failed because this action was executed twice and the second
+            // child saga couldn't lock the instance, that's fine, because the
+            // background task will only start new sagas for instances whose DB
+            // state actually *needs* an update.
+            osagactx.nexus().background_tasks.task_instance_updater.activate();
+        }
     } else {
         info!(
             log,
