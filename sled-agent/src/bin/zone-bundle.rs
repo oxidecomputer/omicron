@@ -31,6 +31,8 @@ use slog::Logger;
 use slog_term::FullFormat;
 use slog_term::TermDecorator;
 use std::collections::BTreeSet;
+#[cfg(target_os = "illumos")]
+use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::time::SystemTime;
 use tar::Builder;
@@ -252,14 +254,15 @@ async fn fetch_underlay_address() -> anyhow::Result<Ipv6Addr> {
         match Ipadm::addrobj_addr(EXPECTED_ADDR_OBJ) {
             // If we failed because there was no such interface, then fall back
             // to localhost.
-            Ok(None) => return Ok(Ipv6Addr::LOCALHOST),
-            Ok(Some(addr)) => addr
-                .trim()
-                .split_once('/')
-                .context("expected a /64 subnet")?
-                .0
-                .parse()
-                .context("invalid IPv6 address"),
+            Ok(None) => Ok(Ipv6Addr::LOCALHOST),
+            Ok(Some(addr)) => match addr.addr() {
+                IpAddr::V6(ipv6) => Ok(ipv6),
+                IpAddr::V4(ipv4) => bail!(
+                    "Unexpectedly got IPv4 address for {}: {}",
+                    EXPECTED_ADDR_OBJ,
+                    ipv4
+                ),
+            },
             Err(e) => bail!(
                 "failed to get address for addrobj {EXPECTED_ADDR_OBJ}: {e}",
             ),
