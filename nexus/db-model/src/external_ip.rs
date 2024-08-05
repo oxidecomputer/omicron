@@ -17,6 +17,7 @@ use db_macros::Resource;
 use diesel::Queryable;
 use diesel::Selectable;
 use ipnetwork::IpNetwork;
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
@@ -36,7 +37,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::InstanceExternalIpBody;
-use sled_agent_client::ZoneKind;
 use slog_error_chain::SlogInlineError;
 use std::convert::TryFrom;
 use std::net::IpAddr;
@@ -406,7 +406,7 @@ impl IncompleteExternalIp {
                     IpKind::Floating,
                     None,
                     Some(name),
-                    Some(zone_kind.to_string()),
+                    Some(zone_kind.report_str().to_string()),
                     state,
                 )
             }

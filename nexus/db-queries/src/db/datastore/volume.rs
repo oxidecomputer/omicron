@@ -1529,10 +1529,7 @@ where
     D: Deserializer<'de>,
     T: Deserialize<'de>,
 {
-    Ok(match Option::<Vec<T>>::deserialize(de)? {
-        Some(v) => v,
-        None => vec![],
-    })
+    Ok(Option::<Vec<T>>::deserialize(de)?.unwrap_or_default())
 }
 
 impl DataStore {
@@ -2349,6 +2346,7 @@ mod tests {
                     10,
                     10,
                     10001,
+                    false,
                 );
 
                 region_and_volume_ids[i].0 = region.id();

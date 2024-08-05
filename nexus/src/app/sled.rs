@@ -6,13 +6,14 @@
 
 use crate::external_api::params;
 use crate::internal_api::params::{
-    PhysicalDiskPutRequest, SledAgentInfo, SledRole, ZpoolPutRequest,
+    PhysicalDiskPutRequest, SledAgentInfo, ZpoolPutRequest,
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::model::DatasetKind;
+use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::PhysicalDiskPolicy;

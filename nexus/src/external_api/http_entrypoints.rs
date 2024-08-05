@@ -1613,11 +1613,6 @@ async fn ip_pool_list(
         .await
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct IpPoolPathParam {
-    pub pool_name: Name,
-}
-
 /// Create IP pool
 #[endpoint {
     method = POST,
@@ -5378,7 +5373,6 @@ async fn vpc_subnet_list_network_interfaces(
 
 // VPC Firewalls
 
-// TODO Is the number of firewall rules bounded?
 /// List firewall rules
 #[endpoint {
     method = GET,
@@ -5410,7 +5404,23 @@ async fn vpc_firewall_rules_view(
         .await
 }
 
+// Note: the limits in the below comment come from the firewall rules model
+// file, nexus/db-model/src/vpc_firewall_rule.rs.
+
 /// Replace firewall rules
+///
+/// The maximum number of rules per VPC is 1024.
+///
+/// Targets are used to specify the set of instances to which a firewall rule
+/// applies. You can target instances directly by name, or specify a VPC, VPC
+/// subnet, IP, or IP subnet, which will apply the rule to traffic going to
+/// all matching instances. Targets are additive: the rule applies to instances
+/// matching ANY target. The maximum number of targets is 256.
+///
+/// Filters reduce the scope of a firewall rule. Without filters, the rule
+/// applies to all packets to the targets (or from the targets, if it's an
+/// outbound rule). With multiple filters, the rule applies only to packets
+/// matching ALL filters. The maximum number of each type of filter is 256.
 #[endpoint {
     method = PUT,
     path = "/v1/vpc-firewall-rules",
@@ -6260,19 +6270,6 @@ async fn sled_physical_disk_list(
 }
 
 // Metrics
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct SystemMetricParams {
-    /// A silo ID. If unspecified, get aggregate metrics across all silos.
-    pub silo_id: Option<Uuid>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct SiloMetricParams {
-    /// A project ID. If unspecified, get aggregate metrics across all projects
-    /// in current silo.
-    pub project_id: Option<Uuid>,
-}
 
 #[derive(Display, Deserialize, JsonSchema)]
 #[display(style = "snake_case")]

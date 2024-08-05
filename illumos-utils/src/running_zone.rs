@@ -4,12 +4,15 @@
 
 //! Utilities to manage running zones.
 
-use crate::addrobj::AddrObject;
+use crate::addrobj::{
+    AddrObject, DHCP_ADDROBJ_NAME, IPV4_STATIC_ADDROBJ_NAME,
+    IPV6_STATIC_ADDROBJ_NAME,
+};
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
-use crate::zone::{AddressRequest, IPADM, ZONE_PREFIX};
+use crate::zone::{AddressRequest, ZONE_PREFIX};
 use crate::zpool::{PathInPool, ZpoolName};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
@@ -360,7 +363,11 @@ impl RunningZone {
     }
 
     pub fn control_interface(&self) -> AddrObject {
-        AddrObject::new(self.inner.get_control_vnic_name(), "omicron6").unwrap()
+        AddrObject::new(
+            self.inner.get_control_vnic_name(),
+            IPV6_STATIC_ADDROBJ_NAME,
+        )
+        .unwrap()
     }
 
     /// Runs a command within the Zone, return the output.
@@ -480,64 +487,11 @@ impl RunningZone {
                 zone: zone.name.to_string(),
             })?;
 
-        // TODO https://github.com/oxidecomputer/omicron/issues/1898:
-        // Remove all non-self assembling code
-
-        // If the zone is self-assembling, then SMF service(s) inside the zone
-        // will be creating the listen address for the zone's service(s),
-        // setting the appropriate ifprop MTU, and so on. The idea behind
-        // self-assembling zones is that once they boot there should be *no*
-        // zlogin required.
-
-        // Use the zone ID in order to check if /var/svc/profile/site.xml
-        // exists.
         let id = Zones::id(&zone.name)
             .await?
             .ok_or_else(|| BootError::NoZoneId { zone: zone.name.clone() })?;
-        let site_profile_xml_exists =
-            std::path::Path::new(&zone.site_profile_xml_path()).exists();
 
         let running_zone = RunningZone { id: Some(id), inner: zone };
-
-        if !site_profile_xml_exists {
-            // If the zone is not self-assembling, make sure the control vnic
-            // has an IP MTU of 9000 inside the zone.
-            const CONTROL_VNIC_MTU: usize = 9000;
-            let vnic = running_zone.inner.control_vnic.name().to_string();
-
-            let commands = vec![
-                vec![
-                    IPADM.to_string(),
-                    "create-if".to_string(),
-                    "-t".to_string(),
-                    vnic.clone(),
-                ],
-                vec![
-                    IPADM.to_string(),
-                    "set-ifprop".to_string(),
-                    "-t".to_string(),
-                    "-p".to_string(),
-                    format!("mtu={}", CONTROL_VNIC_MTU),
-                    "-m".to_string(),
-                    "ipv4".to_string(),
-                    vnic.clone(),
-                ],
-                vec![
-                    IPADM.to_string(),
-                    "set-ifprop".to_string(),
-                    "-t".to_string(),
-                    "-p".to_string(),
-                    format!("mtu={}", CONTROL_VNIC_MTU),
-                    "-m".to_string(),
-                    "ipv6".to_string(),
-                    vnic,
-                ],
-            ];
-
-            for args in &commands {
-                running_zone.run_cmd(args)?;
-            }
-        }
 
         Ok(running_zone)
     }
@@ -547,10 +501,10 @@ impl RunningZone {
         addrtype: AddressRequest,
     ) -> Result<IpNetwork, EnsureAddressError> {
         let name = match addrtype {
-            AddressRequest::Dhcp => "omicron",
+            AddressRequest::Dhcp => DHCP_ADDROBJ_NAME,
             AddressRequest::Static(net) => match net.ip() {
-                std::net::IpAddr::V4(_) => "omicron4",
-                std::net::IpAddr::V6(_) => "omicron6",
+                std::net::IpAddr::V4(_) => IPV4_STATIC_ADDROBJ_NAME,
+                std::net::IpAddr::V6(_) => IPV6_STATIC_ADDROBJ_NAME,
             },
         };
         self.ensure_address_with_name(addrtype, name).await

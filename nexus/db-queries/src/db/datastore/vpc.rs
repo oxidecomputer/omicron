@@ -221,20 +221,24 @@ impl DataStore {
             .map(|rule| (rule.name().clone(), rule))
             .collect::<BTreeMap<_, _>>();
 
-        fw_rules.entry(DNS_VPC_FW_RULE.name.clone()).or_insert_with(|| {
-            VpcFirewallRule::new(
+        // these have to be done this way because the contructor returns a result
+        if !fw_rules.contains_key(&DNS_VPC_FW_RULE.name) {
+            let rule = VpcFirewallRule::new(
                 Uuid::new_v4(),
                 *SERVICES_VPC_ID,
                 &DNS_VPC_FW_RULE,
-            )
-        });
-        fw_rules.entry(NEXUS_VPC_FW_RULE.name.clone()).or_insert_with(|| {
-            VpcFirewallRule::new(
+            )?;
+            fw_rules.insert(DNS_VPC_FW_RULE.name.clone(), rule);
+        }
+
+        if !fw_rules.contains_key(&NEXUS_VPC_FW_RULE.name) {
+            let rule = VpcFirewallRule::new(
                 Uuid::new_v4(),
                 *SERVICES_VPC_ID,
                 &NEXUS_VPC_FW_RULE,
-            )
-        });
+            )?;
+            fw_rules.insert(NEXUS_VPC_FW_RULE.name.clone(), rule);
+        }
 
         let rules = fw_rules
             .into_values()
@@ -353,9 +357,14 @@ impl DataStore {
         for (i, vni) in vnis.enumerate() {
             vpc.vni = Vni(vni);
             let id = usdt::UniqueId::new();
-            crate::probes::vni__search__range__start!(|| {
-                (&id, u32::from(vni), VniSearchIter::STEP_SIZE)
-            });
+            // TODO: silence this cast in usdt:
+            // https://github.com/oxidecomputer/usdt/issues/270
+            #[allow(clippy::cast_lossless)]
+            {
+                crate::probes::vni__search__range__start!(|| {
+                    (&id, u32::from(vni), VniSearchIter::STEP_SIZE)
+                });
+            }
             match self
                 .project_create_vpc_raw(
                     opctx,
@@ -365,9 +374,14 @@ impl DataStore {
                 .await
             {
                 Ok(Some((authz_vpc, vpc))) => {
-                    crate::probes::vni__search__range__found!(|| {
-                        (&id, u32::from(vpc.vni.0))
-                    });
+                    // TODO: silence this cast in usdt:
+                    // https://github.com/oxidecomputer/usdt/issues/270
+                    #[allow(clippy::cast_lossless)]
+                    {
+                        crate::probes::vni__search__range__found!(|| {
+                            (&id, u32::from(vpc.vni.0))
+                        });
+                    }
                     return Ok((authz_vpc, vpc));
                 }
                 Err(e) => return Err(e),

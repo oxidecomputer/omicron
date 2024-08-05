@@ -183,6 +183,8 @@ pub struct TimeseriesDescription {
 // TODO-completeness: Decide whether and how to handle dimensional analysis
 // during queries, if needed.
 pub enum Units {
+    /// No meaningful units, e.g. a dimensionless quanity.
+    None,
     Count,
     Bytes,
     Seconds,

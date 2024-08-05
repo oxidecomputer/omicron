@@ -310,6 +310,8 @@ enum DbCommands {
     Snapshots(SnapshotArgs),
     /// Validate the contents of the database
     Validate(ValidateArgs),
+    /// Print information about volumes
+    Volumes(VolumeArgs),
 }
 
 #[derive(Debug, Args)]
@@ -579,6 +581,26 @@ enum ValidateCommands {
     ValidateRegionSnapshots,
 }
 
+#[derive(Debug, Args)]
+struct VolumeArgs {
+    #[command(subcommand)]
+    command: VolumeCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum VolumeCommands {
+    /// Get info for a specific volume
+    Info(VolumeInfoArgs),
+    /// Summarize current volumes
+    List,
+}
+
+#[derive(Debug, Args)]
+struct VolumeInfoArgs {
+    /// The UUID of the volume
+    uuid: Uuid,
+}
+
 impl DbArgs {
     /// Run a `omdb db` subcommand.
     pub(crate) async fn run_cmd(
@@ -720,6 +742,12 @@ impl DbArgs {
             DbCommands::Validate(ValidateArgs {
                 command: ValidateCommands::ValidateRegionSnapshots,
             }) => cmd_db_validate_region_snapshots(&datastore).await,
+            DbCommands::Volumes(VolumeArgs {
+                command: VolumeCommands::Info(uuid),
+            }) => cmd_db_volume_info(&datastore, uuid).await,
+            DbCommands::Volumes(VolumeArgs {
+                command: VolumeCommands::List,
+            }) => cmd_db_volume_list(&datastore, &self.fetch_opts).await,
         }
     }
 }
@@ -1165,6 +1193,38 @@ async fn cmd_db_disk_info(
 
     println!("{}", table);
 
+    get_and_display_vcr(disk.volume_id, datastore).await?;
+    Ok(())
+}
+
+// Given a UUID, search the database for a volume with that ID
+// If found, attempt to parse the .data field into a VolumeConstructionRequest
+// and display it if successful.
+async fn get_and_display_vcr(
+    volume_id: Uuid,
+    datastore: &DataStore,
+) -> Result<(), anyhow::Error> {
+    // Get the VCR from the volume and display selected parts.
+    use db::schema::volume::dsl as volume_dsl;
+    let volumes = volume_dsl::volume
+        .filter(volume_dsl::id.eq(volume_id))
+        .limit(1)
+        .select(Volume::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("loading requested volume")?;
+
+    for v in volumes {
+        match serde_json::from_str(&v.data()) {
+            Ok(vcr) => {
+                println!("\nVCR from volume ID {volume_id}");
+                print_vcr(vcr, 0);
+            }
+            Err(e) => {
+                println!("Volume had invalid VCR in data field: {e}");
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1569,8 +1629,10 @@ async fn cmd_db_snapshot_info(
         .context("loading requested snapshot")?;
 
     let mut dest_volume_ids = Vec::new();
+    let mut source_volume_ids = Vec::new();
     let rows = snapshots.into_iter().map(|snapshot| {
         dest_volume_ids.push(snapshot.destination_volume_id);
+        source_volume_ids.push(snapshot.volume_id);
         SnapshotRow::from(snapshot)
     });
     if rows.len() == 0 {
@@ -1584,6 +1646,10 @@ async fn cmd_db_snapshot_info(
 
     println!("{}", table);
 
+    println!("SOURCE VOLUME VCR:");
+    for vol in source_volume_ids {
+        get_and_display_vcr(vol, datastore).await?;
+    }
     for vol_id in dest_volume_ids {
         // Get the dataset backing this volume.
         let regions = datastore.get_allocated_regions(vol_id).await?;
@@ -1618,10 +1684,223 @@ async fn cmd_db_snapshot_info(
             .with(tabled::settings::Padding::new(0, 1, 0, 0))
             .to_string();
 
+        println!("DESTINATION REGION INFO:");
         println!("{}", table);
+        println!("DESTINATION VOLUME VCR:");
+        get_and_display_vcr(vol_id, datastore).await?;
     }
 
     Ok(())
+}
+
+// Volumes
+/// Run `omdb db volume list`.
+async fn cmd_db_volume_list(
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct VolumeRow {
+        id: String,
+        created: String,
+        modified: String,
+        deleted: String,
+    }
+
+    let ctx = || "listing volumes".to_string();
+
+    use db::schema::volume::dsl;
+    let mut query = dsl::volume.into_boxed();
+    if !fetch_opts.include_deleted {
+        query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    let volumes = query
+        .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
+        .select(Volume::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("loading volumes")?;
+
+    check_limit(&volumes, fetch_opts.fetch_limit, ctx);
+
+    let rows = volumes.into_iter().map(|volume| VolumeRow {
+        id: volume.id().to_string(),
+        created: volume.time_created().to_string(),
+        modified: volume.time_modified().to_string(),
+        deleted: match volume.time_deleted {
+            Some(time) => time.to_string(),
+            None => "NULL".to_string(),
+        },
+    });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+/// Run `omdb db volume info <UUID>`.
+async fn cmd_db_volume_info(
+    datastore: &DataStore,
+    args: &VolumeInfoArgs,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct VolumeRow {
+        id: String,
+        created: String,
+        modified: String,
+        deleted: String,
+    }
+
+    use db::schema::volume::dsl as volume_dsl;
+
+    let volumes = volume_dsl::volume
+        .filter(volume_dsl::id.eq(args.uuid))
+        .limit(1)
+        .select(Volume::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("loading requested volume")?;
+
+    let mut vcrs = Vec::new();
+    let rows = volumes.into_iter().map(|volume| {
+        match serde_json::from_str(&volume.data()) {
+            Ok(vcr) => {
+                vcrs.push(vcr);
+            }
+            Err(e) => {
+                println!("Volume had invalid VCR in data field: {e}");
+            }
+        }
+
+        VolumeRow {
+            id: volume.id().to_string(),
+            created: volume.time_created().to_string(),
+            modified: volume.time_modified().to_string(),
+            deleted: match volume.time_deleted {
+                Some(time) => time.to_string(),
+                None => "NULL".to_string(),
+            },
+        }
+    });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    for vcr in vcrs {
+        print_vcr(vcr, 0);
+    }
+    Ok(())
+}
+
+// Print the fields that I want to see of a VolumeConstructionRequests
+// This will call itself on all sub_volumes and read_only_parents it finds.
+// We use the pad variable to indicate how much indent we want to display
+// information at.  Each time we recurse into another VCR layer, we increase
+// the amount of indention.
+fn print_vcr(vcr: VolumeConstructionRequest, pad: usize) {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct VCRVolume {
+        id: String,
+        bs: String,
+        sub_volumes: usize,
+        read_only_parent: bool,
+    }
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct VCRRegion {
+        id: String,
+        bs: String,
+        bpe: u64,
+        ec: u32,
+        gen: u64,
+        read_only: bool,
+    }
+
+    let indent = " ".repeat(pad);
+    match vcr {
+        VolumeConstructionRequest::Volume {
+            id,
+            block_size,
+            sub_volumes,
+            read_only_parent,
+        } => {
+            let row = VCRVolume {
+                id: id.to_string(),
+                bs: block_size.to_string(),
+                sub_volumes: sub_volumes.len(),
+                read_only_parent: read_only_parent.is_some(),
+            };
+            let table = tabled::Table::new(&[row])
+                .with(tabled::settings::Style::empty())
+                .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                .to_string();
+
+            // Shift the entire table over our indent amount.
+            let indented_table: String = table
+                .lines()
+                .map(|line| format!("{}{}", indent, line))
+                .collect::<Vec<String>>()
+                .join("\n");
+            println!("{}\n", indented_table);
+
+            for (index, sv) in sub_volumes.iter().enumerate() {
+                println!("{indent}SUB VOLUME {index}");
+                print_vcr(sv.clone(), pad + 4);
+                println!("");
+            }
+
+            if let Some(rop) = read_only_parent {
+                println!("{indent}READ ONLY PARENT:");
+                print_vcr(*rop, pad + 4);
+            }
+        }
+        VolumeConstructionRequest::Region {
+            block_size,
+            blocks_per_extent,
+            extent_count,
+            gen,
+            opts,
+        } => {
+            let row = VCRRegion {
+                id: opts.id.to_string(),
+                bs: block_size.to_string(),
+                bpe: blocks_per_extent,
+                ec: extent_count,
+                gen,
+                read_only: opts.read_only,
+            };
+            let table = tabled::Table::new(&[row])
+                .with(tabled::settings::Style::empty())
+                .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                .to_string();
+
+            // Shift the entire table over our indent amount.
+            let indented_table: String = table
+                .lines()
+                .map(|line| format!("{}{}", indent, line))
+                .collect::<Vec<String>>()
+                .join("\n");
+            println!("{}", indented_table);
+            for target in opts.target {
+                println!("{indent}{target}");
+            }
+        }
+        _ => {
+            println!("{indent}Unsupported volume type");
+        }
+    }
 }
 
 /// List all regions still missing ports
@@ -3737,7 +4016,11 @@ fn inv_collection_print_sleds(collection: &Collection) {
 
             println!("    ZONES FOUND");
             for z in &zones.zones.zones {
-                println!("      zone {} (type {})", z.id, z.zone_type.kind());
+                println!(
+                    "      zone {} (type {})",
+                    z.id,
+                    z.zone_type.kind().report_str()
+                );
             }
         } else {
             println!("  warning: no zone information found");

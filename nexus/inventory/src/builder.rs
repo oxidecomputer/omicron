@@ -14,6 +14,9 @@ use chrono::Utc;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
+use nexus_sled_agent_shared::inventory::Baseboard;
+use nexus_sled_agent_shared::inventory::Inventory;
+use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseFound;
@@ -469,12 +472,10 @@ impl CollectionBuilder {
     pub fn found_sled_inventory(
         &mut self,
         source: &str,
-        inventory: sled_agent_client::types::Inventory,
+        inventory: Inventory,
     ) -> Result<(), anyhow::Error> {
         let sled_id = SledUuid::from_untyped_uuid(inventory.sled_id);
 
-        // Normalize the baseboard id, if any.
-        use sled_agent_client::types::Baseboard;
         let baseboard_id = match inventory.baseboard {
             Baseboard::Pc { .. } => None,
             Baseboard::Gimlet { identifier, model, revision: _ } => {
@@ -498,21 +499,10 @@ impl CollectionBuilder {
         // means they don't get validated when everything else does.  This
         // error is an operational error in collecting the data, not a collector
         // bug.
-        let sled_agent_address = match inventory.sled_agent_address.parse() {
-            Ok(addr) => addr,
-            Err(error) => {
-                self.found_error(InventoryError::from(anyhow!(
-                    "sled {sled_id}: bad sled agent address: {:?}: {:#}",
-                    inventory.sled_agent_address,
-                    error,
-                )));
-                return Ok(());
-            }
-        };
         let time_collected = now_db_precision();
         let sled = SledAgent {
             source: source.to_string(),
-            sled_agent_address,
+            sled_agent_address: inventory.sled_agent_address,
             sled_role: inventory.sled_role,
             baseboard_id,
             usable_hardware_threads: inventory.usable_hardware_threads,
@@ -544,7 +534,7 @@ impl CollectionBuilder {
         &mut self,
         source: &str,
         sled_id: SledUuid,
-        zones: sled_agent_client::types::OmicronZonesConfig,
+        zones: OmicronZonesConfig,
     ) -> Result<(), anyhow::Error> {
         if let Some(previous) = self.omicron_zones.get(&sled_id) {
             Err(anyhow!(
@@ -594,12 +584,12 @@ mod test {
     use gateway_client::types::SpComponentCaboose;
     use gateway_client::types::SpState;
     use gateway_client::types::SpType;
+    use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::Caboose;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPage;
     use nexus_types::inventory::RotPageWhich;
-    use nexus_types::inventory::SledRole;
     use omicron_common::api::external::ByteCount;
 
     // Verify the contents of an empty collection.

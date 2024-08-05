@@ -9,14 +9,14 @@
 //! that is not needed by sled-agent.
 
 use super::OmicronZoneExternalIp;
-use crate::internal_api::params::DatasetKind;
+use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+use nexus_sled_agent_shared::inventory::OmicronZoneType;
+use nexus_sled_agent_shared::inventory::ZoneKind;
+use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::NetworkInterface;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::OmicronZoneDataset;
-use sled_agent_client::types::OmicronZoneType;
-use sled_agent_client::ZoneKind;
 use std::net::SocketAddrV6;
 
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
@@ -168,7 +168,7 @@ impl From<BlueprintZoneType> for OmicronZoneType {
     fn from(zone_type: BlueprintZoneType) -> Self {
         match zone_type {
             BlueprintZoneType::BoundaryNtp(zone) => Self::BoundaryNtp {
-                address: zone.address.to_string(),
+                address: zone.address,
                 ntp_servers: zone.ntp_servers,
                 dns_servers: zone.dns_servers,
                 domain: zone.domain,
@@ -176,54 +176,53 @@ impl From<BlueprintZoneType> for OmicronZoneType {
                 snat_cfg: zone.external_ip.snat_cfg,
             },
             BlueprintZoneType::Clickhouse(zone) => Self::Clickhouse {
-                address: zone.address.to_string(),
+                address: zone.address,
                 dataset: zone.dataset,
             },
             BlueprintZoneType::ClickhouseKeeper(zone) => {
                 Self::ClickhouseKeeper {
-                    address: zone.address.to_string(),
+                    address: zone.address,
                     dataset: zone.dataset,
                 }
             }
             BlueprintZoneType::CockroachDb(zone) => Self::CockroachDb {
-                address: zone.address.to_string(),
+                address: zone.address,
                 dataset: zone.dataset,
             },
-            BlueprintZoneType::Crucible(zone) => Self::Crucible {
-                address: zone.address.to_string(),
-                dataset: zone.dataset,
-            },
+            BlueprintZoneType::Crucible(zone) => {
+                Self::Crucible { address: zone.address, dataset: zone.dataset }
+            }
             BlueprintZoneType::CruciblePantry(zone) => {
-                Self::CruciblePantry { address: zone.address.to_string() }
+                Self::CruciblePantry { address: zone.address }
             }
             BlueprintZoneType::ExternalDns(zone) => Self::ExternalDns {
                 dataset: zone.dataset,
-                http_address: zone.http_address.to_string(),
-                dns_address: zone.dns_address.addr.to_string(),
+                http_address: zone.http_address,
+                dns_address: zone.dns_address.addr,
                 nic: zone.nic,
             },
             BlueprintZoneType::InternalDns(zone) => Self::InternalDns {
                 dataset: zone.dataset,
-                http_address: zone.http_address.to_string(),
-                dns_address: zone.dns_address.to_string(),
+                http_address: zone.http_address,
+                dns_address: zone.dns_address,
                 gz_address: zone.gz_address,
                 gz_address_index: zone.gz_address_index,
             },
             BlueprintZoneType::InternalNtp(zone) => Self::InternalNtp {
-                address: zone.address.to_string(),
+                address: zone.address,
                 ntp_servers: zone.ntp_servers,
                 dns_servers: zone.dns_servers,
                 domain: zone.domain,
             },
             BlueprintZoneType::Nexus(zone) => Self::Nexus {
-                internal_address: zone.internal_address.to_string(),
+                internal_address: zone.internal_address,
                 external_ip: zone.external_ip.ip,
                 nic: zone.nic,
                 external_tls: zone.external_tls,
                 external_dns_servers: zone.external_dns_servers,
             },
             BlueprintZoneType::Oximeter(zone) => {
-                Self::Oximeter { address: zone.address.to_string() }
+                Self::Oximeter { address: zone.address }
             }
         }
     }
@@ -252,7 +251,7 @@ pub mod blueprint_zone_type {
     use crate::deployment::OmicronZoneExternalFloatingAddr;
     use crate::deployment::OmicronZoneExternalFloatingIp;
     use crate::deployment::OmicronZoneExternalSnatIp;
-    use crate::inventory::OmicronZoneDataset;
+    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use omicron_common::api::internal::shared::NetworkInterface;
     use schemars::JsonSchema;
     use serde::Deserialize;

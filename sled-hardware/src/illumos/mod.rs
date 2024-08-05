@@ -3,14 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::DiskFirmware;
-use crate::{
-    DendriteAsic, DiskVariant, HardwareUpdate, SledMode, UnparsedDisk,
-};
+use crate::{DendriteAsic, HardwareUpdate, SledMode, UnparsedDisk};
 use camino::Utf8PathBuf;
 use gethostname::gethostname;
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
 use libnvme::{controller::Controller, Nvme};
-use omicron_common::disk::DiskIdentity;
+use omicron_common::disk::{DiskIdentity, DiskVariant};
 use sled_hardware_types::Baseboard;
 use slog::debug;
 use slog::error;

@@ -14,6 +14,7 @@ pub(crate) mod query_summary;
 mod sql;
 
 pub use self::dbwrite::DbWrite;
+pub use self::dbwrite::TestDbWrite;
 use crate::client::query_summary::QuerySummary;
 use crate::model;
 use crate::query;
@@ -50,11 +51,13 @@ use std::ops::Bound;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use std::time::Duration;
 use std::time::Instant;
 use tokio::fs;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const CLICKHOUSE_DB_MISSING: &'static str = "Database oximeter does not exist";
 const CLICKHOUSE_DB_VERSION_MISSING: &'static str =
     "Table oximeter.version does not exist";
@@ -76,11 +79,22 @@ pub struct Client {
     url: String,
     client: reqwest::Client,
     schema: Mutex<BTreeMap<TimeseriesName, TimeseriesSchema>>,
+    request_timeout: Duration,
 }
 
 impl Client {
     /// Construct a new ClickHouse client of the database at `address`.
     pub fn new(address: SocketAddr, log: &Logger) -> Self {
+        Self::new_with_request_timeout(address, log, DEFAULT_REQUEST_TIMEOUT)
+    }
+
+    /// Construct a new ClickHouse client of the database at `address`, and a
+    /// custom request timeout.
+    pub fn new_with_request_timeout(
+        address: SocketAddr,
+        log: &Logger,
+        request_timeout: Duration,
+    ) -> Self {
         let id = Uuid::new_v4();
         let log = log.new(slog::o!(
             "component" => "clickhouse-client",
@@ -89,7 +103,12 @@ impl Client {
         let client = reqwest::Client::new();
         let url = format!("http://{}", address);
         let schema = Mutex::new(BTreeMap::new());
-        Self { _id: id, log, url, client, schema }
+        Self { _id: id, log, url, client, schema, request_timeout }
+    }
+
+    /// Return the url the client is trying to connect to
+    pub fn url(&self) -> &str {
+        &self.url
     }
 
     /// Ping the ClickHouse server to verify connectivitiy.
@@ -859,7 +878,7 @@ impl Client {
     // TODO-robustness This currently does no validation of the statement.
     async fn execute<S>(&self, sql: S) -> Result<(), Error>
     where
-        S: AsRef<str>,
+        S: Into<String>,
     {
         self.execute_with_body(sql).await?;
         Ok(())
@@ -873,9 +892,9 @@ impl Client {
         sql: S,
     ) -> Result<(QuerySummary, String), Error>
     where
-        S: AsRef<str>,
+        S: Into<String>,
     {
-        let sql = sql.as_ref().to_string();
+        let sql = sql.into();
         trace!(
             self.log,
             "executing SQL query";
@@ -895,6 +914,7 @@ impl Client {
         let response = self
             .client
             .post(&self.url)
+            .timeout(self.request_timeout)
             .query(&[
                 ("output_format_json_quote_64bit_integers", "0"),
                 // TODO-performance: This is needed to get the correct counts of
@@ -1062,6 +1082,15 @@ impl Client {
             Err(e) if e.kind() == ErrorKind::NotFound => Ok(vec![]),
             Err(err) => Err(Error::ReadTimeseriesToDeleteFile { err }),
         }
+    }
+
+    /// Useful for testing and introspection
+    pub async fn list_replicated_tables(&self) -> Result<Vec<String>, Error> {
+        self.list_oximeter_database_tables(ListDetails {
+            include_version: true,
+            replicated: true,
+        })
+        .await
     }
 
     /// List tables in the oximeter database.

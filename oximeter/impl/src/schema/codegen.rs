@@ -515,6 +515,7 @@ fn quote_creation_time(created: DateTime<Utc>) -> TokenStream {
 impl quote::ToTokens for Units {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let toks = match self {
+            Units::None => quote! { ::oximeter::schema::Units::None },
             Units::Count => quote! { ::oximeter::schema::Units::Count },
             Units::Bytes => quote! { ::oximeter::schema::Units::Bytes },
             Units::Seconds => quote! { ::oximeter::schema::Units::Seconds },

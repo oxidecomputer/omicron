@@ -19,9 +19,8 @@ use crate::nexus::{
 use crate::params::{
     DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
     InstanceMetadata, InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse, Inventory,
-    OmicronPhysicalDisksConfig, OmicronZonesConfig, SledRole, TimeSync,
-    VpcFirewallRule, ZoneBundleMetadata, Zpool,
+    InstanceStateRequested, InstanceUnregisterResponse, OmicronZoneTypeExt,
+    TimeSync, VpcFirewallRule, ZoneBundleMetadata, Zpool,
 };
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
@@ -40,6 +39,9 @@ use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zone::ZONE_PREFIX;
+use nexus_sled_agent_shared::inventory::{
+    Inventory, InventoryDisk, InventoryZpool, OmicronZonesConfig, SledRole,
+};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
@@ -58,6 +60,7 @@ use omicron_common::api::{
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
+use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
 use oximeter::types::ProducerRegistry;
@@ -176,6 +179,7 @@ impl From<Error> for omicron_common::api::external::Error {
 // Provide a more specific HTTP error for some sled agent errors.
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
+        const NO_SUCH_INSTANCE: &str = "NO_SUCH_INSTANCE";
         match err {
             Error::Instance(crate::instance_manager::Error::Instance(
                 instance_error,
@@ -208,13 +212,20 @@ impl From<Error> for dropshot::HttpError {
                         // Progenitor client error it gets back.
                         HttpError::from(omicron_error)
                     }
+                    crate::instance::Error::Terminating => {
+                        HttpError::for_client_error(
+                            Some(NO_SUCH_INSTANCE.to_string()),
+                            http::StatusCode::GONE,
+                            instance_error.to_string(),
+                        )
+                    }
                     e => HttpError::for_internal_error(e.to_string()),
                 }
             }
             Error::Instance(
                 e @ crate::instance_manager::Error::NoSuchInstance(_),
             ) => HttpError::for_not_found(
-                Some("NO_SUCH_INSTANCE".to_string()),
+                Some(NO_SUCH_INSTANCE.to_string()),
                 e.to_string(),
             ),
             Error::ZoneBundle(ref inner) => match inner {
@@ -227,6 +238,13 @@ impl From<Error> for dropshot::HttpError {
                 BundleError::InvalidStorageLimit
                 | BundleError::InvalidCleanupPeriod => {
                     HttpError::for_bad_request(None, inner.to_string())
+                }
+                BundleError::InstanceTerminating => {
+                    HttpError::for_client_error(
+                        Some(NO_SUCH_INSTANCE.to_string()),
+                        http::StatusCode::GONE,
+                        inner.to_string(),
+                    )
                 }
                 _ => HttpError::for_internal_error(err.to_string()),
             },
@@ -967,6 +985,7 @@ impl SledAgent {
                 instance_runtime,
                 vmm_runtime,
                 propolis_addr,
+                self.sled_identifiers(),
                 metadata,
             )
             .await
@@ -1196,7 +1215,7 @@ impl SledAgent {
     /// interested in the switch identifiers, MGS is the current best way to do
     /// that, by asking for the local switch's slot, and then that switch's SP
     /// state.
-    pub(crate) async fn sled_identifiers(&self) -> SledIdentifiers {
+    pub(crate) fn sled_identifiers(&self) -> SledIdentifiers {
         let baseboard = self.inner.hardware.baseboard();
         SledIdentifiers {
             rack_id: self.inner.start_request.body.rack_id,
@@ -1221,17 +1240,14 @@ impl SledAgent {
         let usable_physical_ram =
             self.inner.hardware.usable_physical_ram_bytes();
         let reservoir_size = self.inner.instances.reservoir_size();
-        let sled_role = if is_scrimlet {
-            crate::params::SledRole::Scrimlet
-        } else {
-            crate::params::SledRole::Gimlet
-        };
+        let sled_role =
+            if is_scrimlet { SledRole::Scrimlet } else { SledRole::Gimlet };
 
         let mut disks = vec![];
         let mut zpools = vec![];
         let all_disks = self.storage().get_latest_disks().await;
         for (identity, variant, slot, _firmware) in all_disks.iter_all() {
-            disks.push(crate::params::InventoryDisk {
+            disks.push(InventoryDisk {
                 identity: identity.clone(),
                 variant,
                 slot,
@@ -1253,7 +1269,7 @@ impl SledAgent {
                     }
                 };
 
-            zpools.push(crate::params::InventoryZpool {
+            zpools.push(InventoryZpool {
                 id: zpool.id(),
                 total_size: ByteCount::try_from(info.size())?,
             });

@@ -57,8 +57,8 @@ pub enum Error {
     #[error("Secret not loaded for {epoch}")]
     SecretNotLoaded { epoch: u64 },
 
-    #[error("Failed to retreive secret: {0}")]
-    SecretRetreival(#[from] SecretRetrieverError),
+    #[error("Failed to retrieve secret: {0}")]
+    SecretRetrieval(#[from] SecretRetrieverError),
 }
 
 /// Derived Disk Encryption key

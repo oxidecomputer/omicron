@@ -197,7 +197,7 @@ impl From<BpOmicronPhysicalDisk> for BlueprintPhysicalDiskConfig {
     }
 }
 
-/// See [`nexus_types::deployment::OmicronZonesConfig`].
+/// See [`nexus_types::deployment::BlueprintZonesConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_sled_omicron_zones)]
 pub struct BpSledOmicronZones {
@@ -219,7 +219,7 @@ impl BpSledOmicronZones {
         }
     }
 }
-/// See [`nexus_types::deployment::OmicronZoneConfig`].
+/// See [`nexus_types::deployment::BlueprintZoneConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_omicron_zone)]
 pub struct BpOmicronZone {
