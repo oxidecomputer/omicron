@@ -22,6 +22,7 @@ use crate::db::model::Generation;
 use crate::db::model::Instance;
 use crate::db::model::InstanceRuntimeState;
 use crate::db::model::Migration;
+use crate::db::model::MigrationState;
 use crate::db::model::Name;
 use crate::db::model::Project;
 use crate::db::model::Sled;
@@ -635,6 +636,7 @@ impl DataStore {
         target_propolis_id: PropolisUuid,
     ) -> Result<Instance, Error> {
         use db::schema::instance::dsl;
+        use db::schema::migration::dsl as migration_dsl;
         use db::schema::vmm::dsl as vmm_dsl;
 
         // Only allow migrating out if the active VMM is running or rebooting.
@@ -664,29 +666,53 @@ impl DataStore {
             // ID to be clobbered.
             .filter(vmm_dsl::state.eq(VmmState::SagaUnwound))
             .select(vmm_dsl::instance_id);
+        // Subquery for checking if an already present migration ID points at a
+        // migration where both the source- and target-sides are marked as
+        // failed. If both are failed, *and* the target VMM is `SagaUnwound` as
+        // determined by the query above, then it's okay to clobber that
+        // migration, as it was left behind by a previous migrate saga unwinding.
+        let current_migration_failed = migration_dsl::migration
+            .filter(migration_dsl::id.nullable().eq(dsl::migration_id))
+            .filter(migration_dsl::target_state.eq(MigrationState::FAILED))
+            .filter(migration_dsl::source_state.eq(MigrationState::FAILED))
+            .select(migration_dsl::instance_id);
 
         diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(instance_id))
             .filter(
-                // To ensure that saga actions that set migration IDs are
-                // idempotent, we update the row if the migration and target
-                // VMM IDs are not present *or* if they are already equal to the
-                // desired values. This way, we can use a `RETURNING` clause to
-                // fetch the current state after the update, rather than
-                // `check_if_exists` which returns the prior state, and still
-                // fail to update the record if another migration/target VMM ID
-                // is already there.
-                (dsl::migration_id.is_null().and(
-                    dsl::target_propolis_id
-                        .is_null()
-                        // It's okay to clobber a previously-set target VMM ID
-                        // if (and only if!) it's in the saga-unwound state.
-                        .or(dsl::id.eq_any(target_vmm_unwound)),
-                ))
+                // Update the row if and only if one of the following is true:
+                //
+                // - The migration and target VMM IDs are not present
+                (dsl::migration_id
+                    .is_null()
+                    .and(dsl::target_propolis_id.is_null()))
+                // - The migration and target VMM IDs are set to the values
+                //   we are trying to set.
+                //
+                //   This way, we can use a `RETURNING` clause to fetch the
+                //   current state after the update, rather than
+                //   `check_if_exists` which returns the prior state, and still
+                //   fail to update the record if another migration/target VMM
+                //   ID is already there.
                 .or(dsl::migration_id
                     .eq(Some(migration_id))
-                    .and(dsl::target_propolis_id.eq(Some(target_propolis_id)))),
+                    .and(dsl::target_propolis_id.eq(Some(target_propolis_id))))
+                // - The migration and target VMM IDs are set to another
+                //   migration, but the target VMM state is `SagaUnwound` and
+                //   the migration is `Failed` on both sides.
+                //
+                //   This would indicate that the migration/VMM IDs are left
+                //   behind by another migrate saga failing, and are okay to get
+                //   rid of.
+                .or(
+                    // Note that both of these queries return the instance ID
+                    // from the VMM and migration records, so we check if one was
+                    // found  by comparing it to the actual instance ID.
+                    dsl::id
+                        .eq_any(target_vmm_unwound)
+                        .and(dsl::id.eq_any(current_migration_failed)),
+                ),
             )
             .filter(dsl::active_propolis_id.eq(src_propolis_id))
             .filter(dsl::id.eq_any(vmm_ok))
@@ -1995,7 +2021,6 @@ mod tests {
             instance.runtime().migration_id,
             instance2.runtime().migration_id
         );
-        let instance = instance2;
 
         // Trying to set a new migration should fail, as long as the prior stuff
         // is still in place.
@@ -2036,7 +2061,11 @@ mod tests {
                     PropolisUuid::from_untyped_uuid(vmm3.id),
                 )
                 .await
-        ).expect_err("trying to set migration IDs should fail when a previous migration and VMM are still there");
+        )
+        .expect_err(
+            "trying to set migration IDs should fail when a previous \
+             migration and VMM are still there",
+        );
 
         // Pretend the previous migration saga has unwound the VMM
         let updated = dbg!(
@@ -2054,7 +2083,7 @@ mod tests {
         .expect("updating VMM state should be fine");
         assert!(updated);
 
-        // It should still fail due to the presence of the migration ID.
+        // It should still fail, since the migration is still in progress.
         dbg!(
             datastore
                 .instance_set_migration_ids(
@@ -2065,27 +2094,23 @@ mod tests {
                     PropolisUuid::from_untyped_uuid(vmm3.id),
                 )
                 .await
-        ).expect_err("trying to set migration IDs should fail when a previous migration ID is still there");
+        )
+        .expect_err(
+            "trying to set migration IDs should fail when a previous \
+             migration ID is present and not marked as failed",
+        );
 
-        // Remove the migration ID.
+        // Now, mark the previous migration as Failed.
         let updated = dbg!(datastore
-            .instance_update_runtime(
-                &instance_id,
-                &InstanceRuntimeState {
-                    time_updated: Utc::now(),
-                    r#gen: Generation(instance.runtime_state.gen.0.next()),
-                    nexus_state: InstanceState::Vmm,
-                    propolis_id: Some(vmm1.id),
-                    migration_id: None,
-                    ..instance.runtime_state.clone()
-                },
-            )
+            .migration_mark_failed(&opctx, migration.id)
             .await
-            .expect("instance update should work"));
+            .expect(
+                "we should be able to mark the previous migration as failed"
+            ));
         assert!(updated);
 
-        // Now that the migration ID is gone, we should be able to clobber the
-        // SagaUnwound VMM ID.
+        // If the current migration is failed on both sides *and* the current
+        // VMM is SagaUnwound, we should be able to clobber them with new IDs.
         let instance = dbg!(
             datastore
                 .instance_set_migration_ids(
