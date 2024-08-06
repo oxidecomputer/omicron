@@ -9,7 +9,7 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::Subcommand;
 use owo_colors::OwoColorize;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sled_hardware_types::Baseboard;
 use slog::Logger;
 use std::net::Ipv6Addr;
@@ -83,7 +83,7 @@ impl InventoryArgs {
 
                 if json {
                     let json_str = serde_json::to_string(&sled_data)
-                        .context("serializing sled data")?;
+                        .context("serializing sled data failed")?;
                     println!("{}", json_str);
                 } else {
                     for sled in &sled_data {
