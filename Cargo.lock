@@ -4951,6 +4951,8 @@ dependencies = [
  "rand 0.8.5",
  "sled-agent-client",
  "slog",
+ "static_assertions",
+ "strum",
  "test-strategy",
  "thiserror",
  "typed-rng",
