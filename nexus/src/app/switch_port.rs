@@ -164,6 +164,22 @@ impl super::Nexus {
             .await
     }
 
+    pub(crate) async fn switch_port_configuration_link_create(
+        &self,
+        opctx: &OpContext,
+        name_or_id: NameOrId,
+        new_settings: params::NamedLinkConfigCreate,
+    ) -> CreateResult<SwitchPortLinkConfig> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_link_create(
+                opctx,
+                name_or_id,
+                new_settings,
+            )
+            .await
+    }
+
     pub(crate) async fn switch_port_configuration_link_view(
         &self,
         opctx: &OpContext,

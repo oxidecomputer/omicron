@@ -1558,6 +1558,28 @@ pub struct LinkConfigCreate {
     pub autoneg: bool,
 }
 
+/// Named switch link configuration.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct NamedLinkConfigCreate {
+    /// Name of link
+    pub name: Name,
+
+    /// Maximum transmission unit for the link.
+    pub mtu: u16,
+
+    /// The link-layer discovery protocol (LLDP) configuration for the link.
+    pub lldp: LldpServiceConfigCreate,
+
+    /// The forward error correction mode of the link.
+    pub fec: LinkFec,
+
+    /// The speed of the link.
+    pub speed: LinkSpeed,
+
+    /// Whether or not to set autonegotiation
+    pub autoneg: bool,
+}
+
 /// The LLDP configuration associated with a port. LLDP may be either enabled or
 /// disabled, if enabled, an LLDP configuration must be provided by name or id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

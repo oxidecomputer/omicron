@@ -4037,7 +4037,7 @@ async fn networking_switch_port_configuration_link_list(
 async fn networking_switch_port_configuration_link_create(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::SwitchPortSettingsInfoSelector>,
-    new_settings: TypedBody<params::LinkConfigCreate>,
+    new_settings: TypedBody<params::NamedLinkConfigCreate>,
 ) -> Result<HttpResponseCreated<SwitchPortLinkConfig>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -4045,8 +4045,14 @@ async fn networking_switch_port_configuration_link_create(
         let config = path_params.into_inner().configuration;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
-        let settings = nexus.switch_port_settings_get(&opctx, &config).await?;
-        todo!("create link")
+        let settings = nexus
+            .switch_port_configuration_link_create(
+                &opctx,
+                config,
+                new_settings.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseCreated(settings.into()))
     };
     apictx
         .context

@@ -25,8 +25,8 @@ use crate::db::pagination::paginated;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::{AsyncRunQueryDsl, Connection};
 use diesel::{
-    CombineDsl, ExpressionMethods, JoinOnDsl, NullableExpressionMethods,
-    PgConnection, QueryDsl, SelectableHelper,
+    CombineDsl, ExpressionMethods, Insertable, JoinOnDsl,
+    NullableExpressionMethods, PgConnection, QueryDsl, SelectableHelper,
 };
 use diesel_dtrace::DTraceConnection;
 use ipnetwork::IpNetwork;
@@ -742,6 +742,87 @@ impl DataStore {
         Ok(configs)
     }
 
+    pub async fn switch_port_configuration_link_create(
+        &self,
+        opctx: &OpContext,
+        name_or_id: NameOrId,
+        new_settings: params::NamedLinkConfigCreate,
+    ) -> CreateResult<SwitchPortLinkConfig> {
+        use db::schema::lldp_service_config::dsl as lldp_service_dsl;
+        use db::schema::switch_port_settings_link_config::dsl as link_dsl;
+
+        #[derive(Clone, Debug)]
+        enum Lldp {
+            Enabled { lldp_config: NameOrId },
+            Disabled,
+        }
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let lldp =
+            match (new_settings.lldp.enabled, new_settings.lldp.lldp_config) {
+                (true, Some(name_or_id)) => {
+                    Ok(Lldp::Enabled { lldp_config: name_or_id })
+                }
+                (true, None) => Err(Error::conflict(
+                    "cannot enable lldp without providing configuration id",
+                )),
+                (false, _) => Ok(Lldp::Disabled),
+            }?;
+
+        let config = self
+            .transaction_retry_wrapper("switch_port_configuration_link_create")
+            .transaction(&conn, |conn| {
+                let identity = name_or_id.clone();
+                let lldp = lldp.clone();
+
+                async move {
+                    // fetch id of parent record
+                    let parent_id =
+                        switch_port_configuration_id(&conn, identity).await?;
+
+                    let lldp_service_config = match lldp {
+                        Lldp::Enabled { lldp_config } => {
+                            let config_id =
+                                lldp_configuration_id(&conn, name_or_id)
+                                    .await?;
+                            Ok(LldpServiceConfig::new(true, Some(config_id)))
+                        }
+                        Lldp::Disabled => {
+                            Ok(LldpServiceConfig::new(false, None))
+                        }
+                    }?;
+
+                    diesel::insert_into(lldp_service_dsl::lldp_service_config)
+                        .values(lldp_service_config.clone())
+                        .execute_async(&conn)
+                        .await?;
+
+                    let link_config = SwitchPortLinkConfig {
+                        port_settings_id: parent_id,
+                        lldp_service_config_id: lldp_service_config.id,
+                        link_name: new_settings.name.to_string(),
+                        mtu: new_settings.mtu.into(),
+                        fec: new_settings.fec.into(),
+                        speed: new_settings.speed.into(),
+                        autoneg: new_settings.autoneg,
+                    };
+
+                    let link = diesel::insert_into(
+                        link_dsl::switch_port_settings_link_config,
+                    )
+                    .values(link_config.clone())
+                    .returning(SwitchPortLinkConfig::as_returning())
+                    .get_result_async(&conn)
+                    .await?;
+
+                    Ok(link)
+                }
+            })
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(config)
+    }
+
     pub async fn switch_port_configuration_link_view(
         &self,
         opctx: &OpContext,
@@ -791,30 +872,31 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        self.transaction_retry_wrapper(
-            "switch_port_configuration_geometry_set",
-        )
-        .transaction(&conn, |conn| {
-            let identity = name_or_id.clone();
-            let link_name = link.clone();
+        self.transaction_retry_wrapper("switch_port_configuration_link_delete")
+            .transaction(&conn, |conn| {
+                let identity = name_or_id.clone();
+                let link_name = link.clone();
 
-            async move {
-                // fetch id of parent record
-                let parent_id =
-                    switch_port_configuration_id(&conn, identity).await?;
+                async move {
+                    // fetch id of parent record
+                    let parent_id =
+                        switch_port_configuration_id(&conn, identity).await?;
 
-                // delete child record
-                diesel::delete(link_dsl::switch_port_settings_link_config)
-                    .filter(link_dsl::port_settings_id.eq(parent_id))
-                    .filter(link_dsl::link_name.eq(link_name.to_string()))
-                    .execute_async(&conn)
-                    .await?;
+                    // delete lldp service config
+                    todo!("delete lldp service config");
 
-                Ok(())
-            }
-        })
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+                    // delete child record
+                    diesel::delete(link_dsl::switch_port_settings_link_config)
+                        .filter(link_dsl::port_settings_id.eq(parent_id))
+                        .filter(link_dsl::link_name.eq(link_name.to_string()))
+                        .execute_async(&conn)
+                        .await?;
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         Ok(())
     }
 
@@ -1714,6 +1796,30 @@ async fn switch_port_configuration_id(
 
     // get settings id
     query.select(port_settings_dsl::id).limit(1).first_async(conn).await
+}
+
+async fn lldp_configuration_id(
+    conn: &async_bb8_diesel::Connection<DTraceConnection<diesel::PgConnection>>,
+    name_or_id: NameOrId,
+) -> diesel::result::QueryResult<Uuid> {
+    use db::schema::lldp_config;
+    use db::schema::lldp_config::dsl as lldp_config_dsl;
+
+    let dataset = lldp_config_dsl::lldp_config;
+
+    let query = match name_or_id {
+        NameOrId::Id(id) => {
+            // find port config using port settings id
+            dataset.filter(lldp_config::id.eq(id)).into_boxed()
+        }
+        NameOrId::Name(name) => {
+            // find port config using port settings name
+            dataset.filter(lldp_config::name.eq(name.to_string())).into_boxed()
+        }
+    };
+
+    // get settings id
+    query.select(lldp_config_dsl::id).limit(1).first_async(conn).await
 }
 
 #[cfg(test)]
