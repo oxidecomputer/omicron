@@ -16,7 +16,6 @@ use crate::db::model::RegionReplacementState;
 use crate::db::model::RegionReplacementStep;
 use crate::db::model::UpstairsRepairNotification;
 use crate::db::model::UpstairsRepairNotificationType;
-use crate::db::model::VolumeRepair;
 use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
 use crate::db::update_and_check::UpdateAndCheck;
@@ -57,13 +56,8 @@ impl DataStore {
             .await?
             .transaction_async(|conn| async move {
                 use db::schema::region_replacement::dsl;
-                use db::schema::volume_repair::dsl as volume_repair_dsl;
 
-                diesel::insert_into(volume_repair_dsl::volume_repair)
-                    .values(VolumeRepair {
-                        volume_id: request.volume_id,
-                        repair_id: request.id,
-                    })
+                Self::volume_repair_insert_query(request.volume_id, request.id)
                     .execute_async(&conn)
                     .await?;
 
@@ -667,7 +661,7 @@ impl DataStore {
     pub async fn set_region_replacement_complete(
         &self,
         opctx: &OpContext,
-        region_replacement_id: Uuid,
+        request: RegionReplacement,
         operating_saga_id: Uuid,
     ) -> Result<(), Error> {
         type TxnError = TransactionError<Error>;
@@ -675,19 +669,17 @@ impl DataStore {
         self.pool_connection_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
-                use db::schema::volume_repair::dsl as volume_repair_dsl;
-
-                diesel::delete(
-                    volume_repair_dsl::volume_repair
-                        .filter(volume_repair_dsl::repair_id.eq(region_replacement_id))
-                    )
-                    .execute_async(&conn)
-                    .await?;
+                Self::volume_repair_delete_query(
+                    request.volume_id,
+                    request.id,
+                )
+                .execute_async(&conn)
+                .await?;
 
                 use db::schema::region_replacement::dsl;
 
                 let result = diesel::update(dsl::region_replacement)
-                    .filter(dsl::id.eq(region_replacement_id))
+                    .filter(dsl::id.eq(request.id))
                     .filter(
                         dsl::replacement_state.eq(RegionReplacementState::Completing),
                     )
@@ -696,7 +688,7 @@ impl DataStore {
                         dsl::replacement_state.eq(RegionReplacementState::Complete),
                         dsl::operating_saga_id.eq(Option::<Uuid>::None),
                     ))
-                    .check_if_exists::<RegionReplacement>(region_replacement_id)
+                    .check_if_exists::<RegionReplacement>(request.id)
                     .execute_and_check(&conn)
                     .await?;
 
@@ -713,7 +705,7 @@ impl DataStore {
                         } else {
                             Err(TxnError::CustomError(Error::conflict(format!(
                                 "region replacement {} set to {:?} (operating saga id {:?})",
-                                region_replacement_id,
+                                request.id,
                                 record.replacement_state,
                                 record.operating_saga_id,
                             ))))
