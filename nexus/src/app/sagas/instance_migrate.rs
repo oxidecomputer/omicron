@@ -717,23 +717,43 @@ mod tests {
         let after_saga = || -> futures::future::BoxFuture<'_, ()> {
             Box::pin({
                 async {
-                    // Unwinding at any step should clear the migration IDs from
-                    // the instance record and leave the instance's location
-                    // otherwise untouched.
-                    let new_state =
-                        test_helpers::instance_fetch(cptestctx, instance_id)
-                            .await;
+                    let new_state = test_helpers::instance_fetch_all(
+                        cptestctx,
+                        instance_id,
+                    )
+                    .await;
 
-                    let new_instance = new_state.instance();
-                    let new_vmm =
-                        new_state.vmm().as_ref().expect("vmm should be active");
+                    let new_instance = new_state.instance;
+                    let new_vmm = new_state
+                        .active_vmm
+                        .as_ref()
+                        .expect("vmm should be active");
 
-                    assert!(new_instance.runtime().migration_id.is_none());
-                    assert!(new_instance.runtime().dst_propolis_id.is_none());
                     assert_eq!(
                         new_instance.runtime().propolis_id.unwrap(),
                         new_vmm.id
                     );
+
+                    // If the instance has had migration IDs set, then both
+                    // sides of the migration should be marked as failed.
+                    if let Some(migration) = new_state.migration {
+                        assert_eq!(
+                            migration.source_state,
+                            db::model::MigrationState::FAILED
+                        );
+                        assert_eq!(
+                            migration.target_state,
+                            db::model::MigrationState::FAILED
+                        );
+                    }
+                    // If the instance has a target VMM ID left behind by the
+                    // unwinding saga, that VMM must be in the `SagaUnwound` state.
+                    if let Some(target_vmm) = new_state.target_vmm {
+                        assert_eq!(
+                            target_vmm.runtime.state,
+                            db::model::VmmState::SagaUnwound
+                        );
+                    }
 
                     info!(
                         &log,
