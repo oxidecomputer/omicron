@@ -1562,8 +1562,10 @@ mod test {
             cptestctx,
             &test_helpers::test_opctx(cptestctx),
             params,
-        ).await;
-        let dag = create_saga_dag::<SagaDoActualInstanceUpdate>(real_params).unwrap();
+        )
+        .await;
+        let dag =
+            create_saga_dag::<SagaDoActualInstanceUpdate>(real_params).unwrap();
 
         crate::app::sagas::test_helpers::actions_succeed_idempotently(
             &cptestctx.server.server_context().nexus,
@@ -1581,13 +1583,22 @@ mod test {
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
         let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = test_helpers::test_opctx(cptestctx);
+
         test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
             nexus,
             || {
                 Box::pin(async {
-                    let (_, params) =
+                    let (_, start_saga_params) =
                         setup_active_vmm_destroyed_test(cptestctx).await;
-                    params
+
+                    // Since the unwinding test will test unwinding from each
+                    // individual saga node *in the saga DAG constructed by the
+                    // provided params*, we need to give it the "real saga"'s
+                    // params rather than the start saga's params. Otherwise,
+                    // we're just testing the unwinding behavior of the trivial
+                    // two-node start saga
+                    make_real_params(cptestctx, &opctx, start_saga_params).await
                 })
             },
             || Box::pin(after_unwinding(cptestctx)),
@@ -1737,27 +1748,10 @@ mod test {
     async fn test_migration_source_completed_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let nexus = &cptestctx.server.server_context().nexus;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
-        let _project_id = setup_test_project(&cptestctx.external_client).await;
-
-        let outcome = MigrationOutcome::default()
-            .source(MigrationState::Completed, VmmState::Stopping);
-
-        test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
-            nexus,
-            || {
-                Box::pin(async {
-                    outcome
-                        .setup_test(cptestctx, &other_sleds)
-                        .await
-                        .start_saga_params()
-                })
-            },
-            || Box::pin(after_unwinding(cptestctx)),
-            &cptestctx.logctx.log,
-        )
-        .await;
+        MigrationOutcome::default()
+            .source(MigrationState::Completed, VmmState::Stopping)
+            .run_unwinding_test(cptestctx)
+            .await;
     }
 
     // === migration target completed tests ===
@@ -1796,26 +1790,10 @@ mod test {
     async fn test_migration_target_completed_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let nexus = &cptestctx.server.server_context().nexus;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
-        let _project_id = setup_test_project(&cptestctx.external_client).await;
-        let outcome = MigrationOutcome::default()
-            .target(MigrationState::Completed, VmmState::Running);
-
-        test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
-            nexus,
-            || {
-                Box::pin(async {
-                    outcome
-                        .setup_test(cptestctx, &other_sleds)
-                        .await
-                        .start_saga_params()
-                })
-            },
-            || Box::pin(after_unwinding(cptestctx)),
-            &cptestctx.logctx.log,
-        )
-        .await;
+        MigrationOutcome::default()
+            .target(MigrationState::Completed, VmmState::Running)
+            .run_unwinding_test(cptestctx)
+            .await;
     }
 
     // === migration completed and source destroyed tests ===
@@ -1856,28 +1834,11 @@ mod test {
     async fn test_migration_completed_source_destroyed_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let nexus = &cptestctx.server.server_context().nexus;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
-        let _project_id = setup_test_project(&cptestctx.external_client).await;
-
-        let outcome = MigrationOutcome::default()
+        MigrationOutcome::default()
             .target(MigrationState::Completed, VmmState::Running)
-            .source(MigrationState::Completed, VmmState::Destroyed);
-
-        test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
-            nexus,
-            || {
-                Box::pin(async {
-                    outcome
-                        .setup_test(cptestctx, &other_sleds)
-                        .await
-                        .start_saga_params()
-                })
-            },
-            || Box::pin(after_unwinding(cptestctx)),
-            &cptestctx.logctx.log,
-        )
-        .await;
+            .source(MigrationState::Completed, VmmState::Destroyed)
+            .run_unwinding_test(cptestctx)
+            .await;
     }
 
     // === migration failed, target not destroyed ===
@@ -1918,28 +1879,11 @@ mod test {
     async fn test_migration_target_failed_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let nexus = &cptestctx.server.server_context().nexus;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
-        let _project_id = setup_test_project(&cptestctx.external_client).await;
-
-        let outcome = MigrationOutcome::default()
+        MigrationOutcome::default()
             .target(MigrationState::Failed, VmmState::Failed)
-            .source(MigrationState::Failed, VmmState::Running);
-
-        test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
-            nexus,
-            || {
-                Box::pin(async {
-                    outcome
-                        .setup_test(cptestctx, &other_sleds)
-                        .await
-                        .start_saga_params()
-                })
-            },
-            || Box::pin(after_unwinding(cptestctx)),
-            &cptestctx.logctx.log,
-        )
-        .await;
+            .source(MigrationState::Failed, VmmState::Running)
+            .run_unwinding_test(cptestctx)
+            .await;
     }
 
     // === migration failed, migration target destroyed tests ===
@@ -1980,28 +1924,11 @@ mod test {
     async fn test_migration_target_failed_destroyed_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let nexus = &cptestctx.server.server_context().nexus;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
-        let _project_id = setup_test_project(&cptestctx.external_client).await;
-
-        let outcome = MigrationOutcome::default()
+        MigrationOutcome::default()
             .target(MigrationState::Failed, VmmState::Destroyed)
-            .source(MigrationState::Failed, VmmState::Running);
-
-        test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
-            nexus,
-            || {
-                Box::pin(async {
-                    outcome
-                        .setup_test(cptestctx, &other_sleds)
-                        .await
-                        .start_saga_params()
-                })
-            },
-            || Box::pin(after_unwinding(cptestctx)),
-            &cptestctx.logctx.log,
-        )
-        .await;
+            .source(MigrationState::Failed, VmmState::Running)
+            .run_unwinding_test(cptestctx)
+            .await;
     }
 
     // === migration failed, migration source destroyed tests ===
@@ -2042,28 +1969,11 @@ mod test {
     async fn test_migration_source_failed_destroyed_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let nexus = &cptestctx.server.server_context().nexus;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
-        let _project_id = setup_test_project(&cptestctx.external_client).await;
-
-        let outcome = MigrationOutcome::default()
+        MigrationOutcome::default()
             .target(MigrationState::InProgress, VmmState::Running)
-            .source(MigrationState::Failed, VmmState::Destroyed);
-
-        test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
-            nexus,
-            || {
-                Box::pin(async {
-                    outcome
-                        .setup_test(cptestctx, &other_sleds)
-                        .await
-                        .start_saga_params()
-                })
-            },
-            || Box::pin(after_unwinding(cptestctx)),
-            &cptestctx.logctx.log,
-        )
-        .await;
+            .source(MigrationState::Failed, VmmState::Destroyed)
+            .run_unwinding_test(cptestctx)
+            .await;
     }
 
     // === migration failed, source and target both destroyed ===
@@ -2104,28 +2014,11 @@ mod test {
     async fn test_migration_failed_everyone_died_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let nexus = &cptestctx.server.server_context().nexus;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
-        let _project_id = setup_test_project(&cptestctx.external_client).await;
-
-        let outcome = MigrationOutcome::default()
+        MigrationOutcome::default()
             .target(MigrationState::Failed, VmmState::Destroyed)
-            .source(MigrationState::Failed, VmmState::Destroyed);
-
-        test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
-            nexus,
-            || {
-                Box::pin(async {
-                    outcome
-                        .setup_test(cptestctx, &other_sleds)
-                        .await
-                        .start_saga_params()
-                })
-            },
-            || Box::pin(after_unwinding(cptestctx)),
-            &cptestctx.logctx.log,
-        )
-        .await;
+            .source(MigrationState::Failed, VmmState::Destroyed)
+            .run_unwinding_test(cptestctx)
+            .await;
     }
 
     // === migration completed, but then the target was destroyed ===
@@ -2166,28 +2059,11 @@ mod test {
     async fn test_migration_completed_but_target_destroyed_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let nexus = &cptestctx.server.server_context().nexus;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
-        let _project_id = setup_test_project(&cptestctx.external_client).await;
-
-        let outcome = MigrationOutcome::default()
+        MigrationOutcome::default()
             .target(MigrationState::Completed, VmmState::Destroyed)
-            .source(MigrationState::Completed, VmmState::Stopping);
-
-        test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
-            nexus,
-            || {
-                Box::pin(async {
-                    outcome
-                        .setup_test(cptestctx, &other_sleds)
-                        .await
-                        .start_saga_params()
-                })
-            },
-            || Box::pin(after_unwinding(cptestctx)),
-            &cptestctx.logctx.log,
-        )
-        .await;
+            .source(MigrationState::Completed, VmmState::Stopping)
+            .run_unwinding_test(cptestctx)
+            .await;
     }
 
     #[derive(Clone, Copy, Default)]
@@ -2218,6 +2094,44 @@ mod test {
             other_sleds: &[(SledUuid, omicron_sled_agent::sim::Server)],
         ) -> MigrationTest {
             MigrationTest::setup(self, cptestctx, other_sleds).await
+        }
+
+        async fn run_unwinding_test(
+            &self,
+            cptestctx: &ControlPlaneTestContext,
+        ) {
+            let nexus = &cptestctx.server.server_context().nexus;
+            let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+            let _project_id =
+                setup_test_project(&cptestctx.external_client).await;
+            let opctx = test_helpers::test_opctx(&cptestctx);
+
+            test_helpers::action_failure_can_unwind::<
+                SagaDoActualInstanceUpdate,
+                _,
+                _,
+            >(
+                nexus,
+                || {
+                    Box::pin(async {
+                        // Since the unwinding test will test unwinding from each
+                        // individual saga node *in the saga DAG constructed by the
+                        // provided params*, we need to give it the "real saga"'s
+                        // params rather than the start saga's params. Otherwise,
+                        // we're just testing the unwinding behavior of the trivial
+                        // two-node start saga.
+                        let start_saga_params = self
+                            .setup_test(cptestctx, &other_sleds)
+                            .await
+                            .start_saga_params();
+                        make_real_params(cptestctx, &opctx, start_saga_params)
+                            .await
+                    })
+                },
+                || Box::pin(after_unwinding(cptestctx)),
+                &cptestctx.logctx.log,
+            )
+            .await;
         }
     }
 
@@ -2344,11 +2258,16 @@ mod test {
             &self,
             cptestctx: &ControlPlaneTestContext,
         ) {
-            let params = make_real_params(cptestctx, &self.opctx, self.start_saga_params()).await;
+            let params = make_real_params(
+                cptestctx,
+                &self.opctx,
+                self.start_saga_params(),
+            )
+            .await;
 
             // Build the saga DAG with the provided test parameters
-            let dag = create_saga_dag::<SagaDoActualInstanceUpdate>(params)
-                .unwrap();
+            let dag =
+                create_saga_dag::<SagaDoActualInstanceUpdate>(params).unwrap();
 
             // Run the actions-succeed-idempotently test
             test_helpers::actions_succeed_idempotently(
@@ -2684,11 +2603,6 @@ mod test {
             "update.network_config" => ?update.network_config,
         );
 
-        RealParams {
-            authz_instance,
-            serialized_authn,
-            update,
-            orig_lock,
-        }
+        RealParams { authz_instance, serialized_authn, update, orig_lock }
     }
 }
