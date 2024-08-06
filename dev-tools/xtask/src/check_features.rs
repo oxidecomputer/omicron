@@ -138,7 +138,7 @@ fn install_cargo_hack(cargo: &str, version: Option<String>) -> Result<()> {
         eprintln!(
             "installing cargo-hack at version {} to {}",
             version,
-            env!("CARGO_HOME")
+            option_env!("CARGO_HOME").unwrap_or("~/.cargo")
         );
         command.args(&["install", "cargo-hack", "--version", &version]);
         exec(command)

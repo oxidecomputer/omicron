@@ -412,6 +412,14 @@ macro_rules! impl_int_sample {
 
                     // For squared mean (M2) calculation, before we update the
                     // count.
+                    //
+                    // Some of these casts are lossless (i8, u8 etc) and some
+                    // are not (i64, u64). The point of the `cast_lossless`
+                    // lint is to ensure that if the type changes out from
+                    // underneath, this fails to compile. Since we explicitly
+                    // know which types we're casting from, that concern is
+                    // moot.
+                    #[allow(clippy::cast_lossless)]
                     let value_f = value as f64;
                     let current_mean = self.mean();
 
@@ -423,7 +431,13 @@ macro_rules! impl_int_sample {
                     self.n_samples += 1;
                     self.min = self.min.min(value);
                     self.max = self.max.max(value);
-                    self.sum_of_samples = self.sum_of_samples.saturating_add(value as i64);
+
+                    // Like in the comment above, some of these casts are
+                    // lossless and some are not.
+                    #[allow(clippy::cast_lossless)]
+                    {
+                        self.sum_of_samples = self.sum_of_samples.saturating_add(value as i64);
+                    }
 
                     let delta = value_f - current_mean;
                     let updated_mean = current_mean + delta / (self.n_samples as f64);
@@ -456,7 +470,7 @@ macro_rules! impl_float_sample {
 
                     // For squared mean (M2) calculation, before we update the
                     // count.
-                    let value_f = value as f64;
+                    let value_f: f64 = value.into();
                     let current_mean = self.mean();
 
                     let index = self
