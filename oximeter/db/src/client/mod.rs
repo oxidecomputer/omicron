@@ -1202,7 +1202,6 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
     use tempfile::TempDir;
-    use tokio::time::sleep;
     use uuid::Uuid;
 
     pub enum InstallationType {
