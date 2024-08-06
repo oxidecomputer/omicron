@@ -418,7 +418,7 @@ pub fn update_saga_needed(
 /// Depending on the current state of the instance and its VMM(s) and migration,
 /// an update saga may perform a variety of operations. Which operations need to
 /// be performed for the current state snapshot of the instance, VMM, and
-/// migration records is determined by the [`UpdatesRequired::for_snapshot`]
+/// migration records is determined by the [`UpdatesRequired::for_instance`]
 /// function.
 #[derive(Debug, Deserialize, Serialize)]
 struct UpdatesRequired {
