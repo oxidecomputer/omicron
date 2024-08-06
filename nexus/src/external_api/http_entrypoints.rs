@@ -4042,10 +4042,10 @@ async fn networking_switch_port_configuration_link_create(
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let query = path_params.into_inner().configuration;
+        let config = path_params.into_inner().configuration;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
-        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
+        let settings = nexus.switch_port_settings_get(&opctx, &config).await?;
         todo!("create link")
     };
     apictx
@@ -4068,11 +4068,14 @@ async fn networking_switch_port_configuration_link_view(
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let query = path_params.into_inner().configuration;
+        let params::SwitchPortSettingsLinkInfoSelector { configuration, link } =
+            path_params.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
-        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
-        todo!("view link")
+        let settings = nexus
+            .switch_port_configuration_link_view(&opctx, configuration, link)
+            .await?;
+        Ok(HttpResponseOk(settings.into()))
     };
     apictx
         .context
@@ -4094,11 +4097,14 @@ async fn networking_switch_port_configuration_link_delete(
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let query = path_params.into_inner().configuration;
+        let params::SwitchPortSettingsLinkInfoSelector { configuration, link } =
+            path_params.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
-        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
-        todo!("delete link")
+        nexus
+            .switch_port_configuration_link_delete(&opctx, configuration, link)
+            .await?;
+        Ok(HttpResponseDeleted {})
     };
     apictx
         .context

@@ -671,8 +671,6 @@ impl DataStore {
         name_or_id: NameOrId,
         new_geometry: SwitchPortGeometry,
     ) -> CreateResult<SwitchPortConfig> {
-        use db::schema::switch_port_settings as port_settings;
-        use db::schema::switch_port_settings::dsl as port_settings_dsl;
         use db::schema::switch_port_settings_port_config::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -684,36 +682,8 @@ impl DataStore {
                     // we query for the parent record instead of trusting that the
                     // uuid is valid, since we don't have true referential integrity between
                     // the tables
-                    let dataset =
-                        port_settings_dsl::switch_port_settings.inner_join(
-                            dsl::switch_port_settings_port_config
-                                .on(dsl::port_settings_id
-                                    .eq(port_settings_dsl::id)),
-                        );
-
-                    let query = match identity {
-                        NameOrId::Id(id) => {
-                            // find port config using port settings id
-                            dataset
-                                .filter(port_settings::id.eq(id))
-                                .into_boxed()
-                        }
-                        NameOrId::Name(name) => {
-                            // find port config using port settings name
-                            dataset
-                                .filter(
-                                    port_settings::name.eq(name.to_string()),
-                                )
-                                .into_boxed()
-                        }
-                    };
-
-                    // get settings id
-                    let port_settings_id: Uuid = query
-                        .select(port_settings_dsl::id)
-                        .limit(1)
-                        .first_async(&conn)
-                        .await?;
+                    let port_settings_id =
+                        switch_port_configuration_id(&conn, identity).await?;
 
                     let port_config = SwitchPortConfig {
                         port_settings_id,
@@ -770,6 +740,82 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(configs)
+    }
+
+    pub async fn switch_port_configuration_link_view(
+        &self,
+        opctx: &OpContext,
+        name_or_id: NameOrId,
+        link: Name,
+    ) -> LookupResult<SwitchPortLinkConfig> {
+        use db::schema::switch_port_settings as port_settings;
+        use db::schema::switch_port_settings::dsl as port_settings_dsl;
+        use db::schema::switch_port_settings_link_config::dsl as link_dsl;
+
+        let dataset = port_settings_dsl::switch_port_settings.inner_join(
+            link_dsl::switch_port_settings_link_config
+                .on(link_dsl::port_settings_id.eq(port_settings_dsl::id)),
+        );
+
+        let query = match name_or_id {
+            NameOrId::Id(id) => {
+                // find port config using port settings id
+                dataset.filter(port_settings::id.eq(id)).into_boxed()
+            }
+            NameOrId::Name(name) => {
+                // find port config using port settings name
+                dataset
+                    .filter(port_settings::name.eq(name.to_string()))
+                    .into_boxed()
+            }
+        };
+
+        let config: SwitchPortLinkConfig = query
+            .filter(link_dsl::link_name.eq(link.to_string()))
+            .select(SwitchPortLinkConfig::as_select())
+            .limit(1)
+            .first_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(config)
+    }
+
+    pub async fn switch_port_configuration_link_delete(
+        &self,
+        opctx: &OpContext,
+        name_or_id: NameOrId,
+        link: Name,
+    ) -> DeleteResult {
+        use db::schema::switch_port_settings_link_config::dsl as link_dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        self.transaction_retry_wrapper(
+            "switch_port_configuration_geometry_set",
+        )
+        .transaction(&conn, |conn| {
+            let identity = name_or_id.clone();
+            let link_name = link.clone();
+
+            async move {
+                // fetch id of parent record
+                let parent_id =
+                    switch_port_configuration_id(&conn, identity).await?;
+
+                // delete child record
+                diesel::delete(link_dsl::switch_port_settings_link_config)
+                    .filter(link_dsl::port_settings_id.eq(parent_id))
+                    .filter(link_dsl::link_name.eq(link_name.to_string()))
+                    .execute_async(&conn)
+                    .await?;
+
+                Ok(())
+            }
+        })
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(())
     }
 
     // switch ports
@@ -1642,6 +1688,32 @@ async fn do_switch_port_settings_delete(
     }
 
     Ok(())
+}
+
+async fn switch_port_configuration_id(
+    conn: &async_bb8_diesel::Connection<DTraceConnection<diesel::PgConnection>>,
+    name_or_id: NameOrId,
+) -> diesel::result::QueryResult<Uuid> {
+    use db::schema::switch_port_settings as port_settings;
+    use db::schema::switch_port_settings::dsl as port_settings_dsl;
+
+    let dataset = port_settings_dsl::switch_port_settings;
+
+    let query = match name_or_id {
+        NameOrId::Id(id) => {
+            // find port config using port settings id
+            dataset.filter(port_settings::id.eq(id)).into_boxed()
+        }
+        NameOrId::Name(name) => {
+            // find port config using port settings name
+            dataset
+                .filter(port_settings::name.eq(name.to_string()))
+                .into_boxed()
+        }
+    };
+
+    // get settings id
+    query.select(port_settings_dsl::id).limit(1).first_async(conn).await
 }
 
 #[cfg(test)]

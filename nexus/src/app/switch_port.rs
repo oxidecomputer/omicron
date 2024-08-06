@@ -164,6 +164,34 @@ impl super::Nexus {
             .await
     }
 
+    pub(crate) async fn switch_port_configuration_link_view(
+        &self,
+        opctx: &OpContext,
+        name_or_id: NameOrId,
+        link: Name,
+    ) -> LookupResult<SwitchPortLinkConfig> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_link_view(opctx, name_or_id, link.into())
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_link_delete(
+        &self,
+        opctx: &OpContext,
+        name_or_id: NameOrId,
+        link: Name,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_link_delete(
+                opctx,
+                name_or_id,
+                link.into(),
+            )
+            .await
+    }
+
     async fn switch_port_create(
         &self,
         opctx: &OpContext,
