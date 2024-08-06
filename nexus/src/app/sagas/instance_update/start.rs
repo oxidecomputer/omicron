@@ -176,7 +176,7 @@ async fn siu_fetch_state_and_start_real_saga(
     // state snapshot. If there are updates to perform, execute the "real"
     // update saga. Otherwise, if we don't need to do anything else, simply
     // release the lock and finish this saga.
-    if let Some(update) = UpdatesRequired::for_snapshot(log, &state) {
+    if let Some(update) = UpdatesRequired::for_instance(log, &state) {
         info!(
             log,
             "instance update: starting real update saga...";
