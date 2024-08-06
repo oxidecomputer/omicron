@@ -464,7 +464,7 @@ struct Deprovision {
 }
 
 impl UpdatesRequired {
-    fn for_snapshot(
+    fn for_instance(
         log: &slog::Logger,
         snapshot: &InstanceGestalt,
     ) -> Option<Self> {
@@ -1168,7 +1168,7 @@ async fn chain_update_saga(
         .await
         .context("failed to fetch latest snapshot for instance")?;
 
-    if let Some(update) = UpdatesRequired::for_snapshot(log, &new_state) {
+    if let Some(update) = UpdatesRequired::for_instance(log, &new_state) {
         debug!(
             log,
             "instance update: additional updates required, preparing a \
@@ -2705,7 +2705,7 @@ mod test {
             .instance_fetch_all(&opctx, &authz_instance)
             .await
             .expect("instance must exist");
-        let update = UpdatesRequired::for_snapshot(&log, &state)
+        let update = UpdatesRequired::for_instance(&log, &state)
             .expect("the test's precondition should require updates");
 
         info!(
