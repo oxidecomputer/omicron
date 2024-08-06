@@ -1443,34 +1443,6 @@ impl SpHandler for Handler {
         Ok(val.len())
     }
 
-    #[cfg(any(feature = "no-caboose", feature = "old-state"))]
-    fn get_component_caboose_value(
-        &mut self,
-        component: SpComponent,
-        slot: u16,
-        key: [u8; 4],
-        buf: &mut [u8],
-    ) -> std::result::Result<usize, SpError> {
-        let val = match (component, &key, slot) {
-            (SpComponent::SP_ITSELF, b"GITC", 0) => SP_GITC0,
-            (SpComponent::SP_ITSELF, b"GITC", 1) => SP_GITC1,
-            (SpComponent::SP_ITSELF, b"BORD", _) => SP_BORD,
-            (SpComponent::SP_ITSELF, b"NAME", _) => SP_NAME,
-            (SpComponent::SP_ITSELF, b"VERS", 0) => SP_VERS0,
-            (SpComponent::SP_ITSELF, b"VERS", 1) => SP_VERS1,
-            (SpComponent::ROT, b"GITC", 0) => ROT_GITC0,
-            (SpComponent::ROT, b"GITC", 1) => ROT_GITC1,
-            (SpComponent::ROT, b"BORD", _) => ROT_BORD,
-            (SpComponent::ROT, b"NAME", _) => ROT_NAME,
-            (SpComponent::ROT, b"VERS", 0) => ROT_VERS0,
-            (SpComponent::ROT, b"VERS", 1) => ROT_VERS1,
-            _ => return Err(SpError::NoSuchCabooseKey(key)),
-        };
-
-        buf[..val.len()].copy_from_slice(val);
-        Ok(val.len())
-    }
-
     fn read_sensor(
         &mut self,
         _request: gateway_messages::SensorRequest,

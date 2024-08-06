@@ -14,8 +14,12 @@ pub struct WicketdTestContext {
     pub wicketd_client: wicketd_client::Client,
     // This is not currently used but is kept here because it's easier to debug
     // this way.
+    #[allow(dead_code)]
     pub wicketd_raw_client: ClientTestContext,
     pub artifact_addr: SocketAddrV6,
+    // This is not currently used but is kept here because it's easier to debug
+    // this way.
+    #[allow(dead_code)]
     pub artifact_client: installinator_client::Client,
     pub server: wicketd::Server,
     pub gateway: GatewayTestContext,

@@ -104,6 +104,7 @@ mod v2p_mapping;
 mod virtual_provisioning_collection;
 mod vmm;
 mod volume;
+mod volume_repair;
 mod vpc;
 mod zpool;
 

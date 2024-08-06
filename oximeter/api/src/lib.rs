@@ -13,9 +13,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[dropshot::api_description {
-    module = "oximeter_api_mod",
-}]
+#[dropshot::api_description]
 pub trait OximeterApi {
     type Context;
 

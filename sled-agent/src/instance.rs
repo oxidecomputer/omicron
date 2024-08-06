@@ -31,12 +31,11 @@ use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::svc::wait_for_service;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
-use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, SledInstanceState, VmmRuntimeState,
 };
 use omicron_common::api::internal::shared::{
-    NetworkInterface, SourceNatConfig,
+    NetworkInterface, SledIdentifiers, SourceNatConfig,
 };
 use omicron_common::backoff;
 use omicron_common::zpool_name::ZpoolName;
@@ -48,7 +47,7 @@ use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::net::IpAddr;
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
@@ -977,7 +976,9 @@ impl Instance {
     ///   instance manager's tracking table.
     /// * `state`: The initial state of this instance.
     /// * `services`: A set of instance manager-provided services.
+    /// * `sled_identifiers`: Sled-related metadata used to track statistics.
     /// * `metadata`: Instance-related metadata used to track statistics.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         log: Logger,
         id: InstanceUuid,
@@ -985,6 +986,7 @@ impl Instance {
         ticket: InstanceTicket,
         state: InstanceInitialState,
         services: InstanceManagerServices,
+        sled_identifiers: SledIdentifiers,
         metadata: InstanceMetadata,
     ) -> Result<Self, Error> {
         info!(log, "initializing new Instance";
@@ -1043,6 +1045,15 @@ impl Instance {
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
         let (tx_monitor, rx_monitor) = mpsc::channel(1);
 
+        let metadata = propolis_client::types::InstanceMetadata {
+            project_id: metadata.project_id,
+            silo_id: metadata.silo_id,
+            sled_id: sled_identifiers.sled_id,
+            sled_model: sled_identifiers.model,
+            sled_revision: sled_identifiers.revision,
+            sled_serial: sled_identifiers.serial,
+        };
+
         let runner = InstanceRunner {
             log: log.new(o!("instance_id" => id.to_string())),
             should_terminate: false,
@@ -1062,7 +1073,7 @@ impl Instance {
                 // TODO: we should probably make propolis aligned with
                 // InstanceCpuCount here, to avoid any casting...
                 vcpus: hardware.properties.ncpus.0 as u8,
-                metadata: metadata.into(),
+                metadata,
             },
             propolis_id,
             propolis_addr,
@@ -1446,28 +1457,6 @@ impl InstanceRunner {
             .await?;
 
         let gateway = self.port_manager.underlay_ip();
-
-        // TODO: We should not be using the resolver here to lookup the Nexus IP
-        // address. It would be preferable for Propolis, and through Propolis,
-        // Oximeter, to access the Nexus internal interface using a progenitor
-        // resolver that relies on a DNS resolver.
-        //
-        // - With the current implementation: if Nexus' IP address changes, this
-        // breaks.
-        // - With a DNS resolver: the metric producer would be able to continue
-        // sending requests to new servers as they arise.
-        let metric_ip = self
-            .nexus_client
-            .resolver()
-            .lookup_ipv6(internal_dns::ServiceName::Nexus)
-            .await?;
-        let metric_addr = SocketAddr::V6(SocketAddrV6::new(
-            metric_ip,
-            NEXUS_INTERNAL_PORT,
-            0,
-            0,
-        ));
-
         let config = PropertyGroupBuilder::new("config")
             .add_property(
                 "datalink",
@@ -1485,7 +1474,9 @@ impl InstanceRunner {
                 "astring",
                 &self.propolis_addr.port().to_string(),
             )
-            .add_property("metric_addr", "astring", &metric_addr.to_string());
+            // Allow Propolis's `oximeter_producer::Server` to use DNS, based on
+            // the underlay IP address supplied in `listen_addr` above.
+            .add_property("metric_addr", "astring", "dns");
 
         let profile = ProfileBuilder::new("omicron").add_service(
             ServiceBuilder::new("system/illumos/propolis-server").add_instance(
@@ -1620,10 +1611,13 @@ mod tests {
         ByteCount, Generation, Hostname, InstanceCpuCount,
     };
     use omicron_common::api::internal::nexus::{InstanceProperties, VmmState};
+    use omicron_common::api::internal::shared::SledIdentifiers;
     use omicron_common::FileKv;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use std::net::Ipv6Addr;
+    use std::net::SocketAddrV6;
     use std::str::FromStr;
+    use std::time::Duration;
     use tokio::sync::watch::Receiver;
     use tokio::time::timeout;
 
@@ -1807,6 +1801,13 @@ mod tests {
             silo_id: Uuid::new_v4(),
             project_id: Uuid::new_v4(),
         };
+        let sled_identifiers = SledIdentifiers {
+            rack_id: Uuid::new_v4(),
+            sled_id: Uuid::new_v4(),
+            model: "fake-model".into(),
+            revision: 1,
+            serial: "fake-serial".into(),
+        };
 
         Instance::new(
             log.new(o!("component" => "Instance")),
@@ -1815,6 +1816,7 @@ mod tests {
             ticket,
             initial_state,
             services,
+            sled_identifiers,
             metadata,
         )
         .unwrap()
@@ -2042,7 +2044,7 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_instance_create_timeout_while_creating_zone() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_instance_create_timeout_while_creating_zone",
@@ -2052,12 +2054,39 @@ mod tests {
         // automock'd things used during this test
         let _mock_vnic_contexts = mock_vnic_contexts();
 
-        let rt_handle = tokio::runtime::Handle::current();
-
         // time out while booting zone, on purpose!
         let boot_ctx = MockZones::boot_context();
-        boot_ctx.expect().return_once(move |_| {
-            rt_handle.block_on(tokio::time::sleep(TIMEOUT_DURATION * 2));
+        const TIMEOUT: Duration = Duration::from_secs(1);
+        let (boot_continued_tx, boot_continued_rx) =
+            std::sync::mpsc::sync_channel(1);
+        let boot_log = log.clone();
+        boot_ctx.expect().times(1).return_once(move |_| {
+            // We need a way to slow down zone boot, but that doesn't block the
+            // entire Tokio runtime. Since this closure is synchronous, it also
+            // has no way to await anything, all waits are blocking. That means
+            // we cannot use a single-threaded runtime, which also means no
+            // manually advancing time. The test has to take the full "slow boot
+            // time".
+            //
+            // To do this, we use a multi-threaded runtime, and call
+            // block_in_place so that we can just literally sleep for a while.
+            // The sleep duration here is twice a timeout we set on the attempt
+            // to actually set the instance running below.
+            //
+            // This boot method also directly signals the main test code to
+            // continue when it's done sleeping to synchronize with it.
+            tokio::task::block_in_place(move || {
+                debug!(
+                    boot_log,
+                    "MockZones::boot() called, waiting for timeout"
+                );
+                std::thread::sleep(TIMEOUT * 2);
+                debug!(
+                    boot_log,
+                    "MockZones::boot() waited for timeout, continuing"
+                );
+                boot_continued_tx.send(()).unwrap();
+            });
             Ok(())
         });
         let wait_ctx = illumos_utils::svc::wait_for_service_context();
@@ -2092,8 +2121,6 @@ mod tests {
         .await
         .expect("timed out creating Instance struct");
 
-        tokio::time::pause();
-
         let (put_tx, put_rx) = oneshot::channel();
 
         // pretending we're InstanceManager::ensure_state, try in vain to start
@@ -2102,15 +2129,16 @@ mod tests {
             .await
             .expect("failed to send Instance::put_state");
 
-        let timeout_fut = timeout(TIMEOUT_DURATION, put_rx);
-
-        tokio::time::advance(TIMEOUT_DURATION * 2).await;
-
-        tokio::time::resume();
-
+        // Timeout our future waiting for the instance-state-change at 1s. This
+        // is much shorter than the actual `TIMEOUT_DURATION`, but the test
+        // structure requires that we actually wait this period, since we cannot
+        // advance time manually in a multi-threaded runtime.
+        let timeout_fut = timeout(TIMEOUT, put_rx);
+        debug!(log, "Awaiting zone-boot timeout");
         timeout_fut
             .await
             .expect_err("*should've* timed out waiting for Instance::put_state, but didn't?");
+        debug!(log, "Zone-boot timeout awaited");
 
         if let ReceivedInstanceState::InstancePut(SledInstanceState {
             vmm_state: VmmRuntimeState { state: VmmState::Running, .. },
@@ -2119,6 +2147,14 @@ mod tests {
         {
             panic!("Nexus's InstanceState should never have reached running if zone creation timed out");
         }
+
+        // Notify the "boot" closure that it can continue, and then wait to
+        // ensure it's actually called.
+        debug!(log, "Waiting for zone-boot to continue");
+        tokio::task::spawn_blocking(move || boot_continued_rx.recv().unwrap())
+            .await
+            .unwrap();
+        debug!(log, "Received continued message from MockZones::boot()");
 
         storage_harness.cleanup().await;
         logctx.cleanup_successful();
@@ -2195,6 +2231,13 @@ mod tests {
             silo_id: Uuid::new_v4(),
             project_id: Uuid::new_v4(),
         };
+        let sled_identifiers = SledIdentifiers {
+            rack_id: Uuid::new_v4(),
+            sled_id: Uuid::new_v4(),
+            model: "fake-model".into(),
+            revision: 1,
+            serial: "fake-serial".into(),
+        };
 
         mgr.ensure_registered(
             instance_id,
@@ -2203,6 +2246,7 @@ mod tests {
             instance_runtime,
             vmm_runtime,
             propolis_addr,
+            sled_identifiers,
             metadata,
         )
         .await

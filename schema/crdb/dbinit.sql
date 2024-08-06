@@ -4190,6 +4190,15 @@ CREATE INDEX IF NOT EXISTS lookup_migrations_by_instance_id ON omicron.public.mi
     instance_id
 );
 
+/* Migrations by time created.
+ *
+ * Currently, this is only used by OMDB for ordering the `omdb migration list`
+ * output, but it may be used by other UIs in the future...
+*/
+CREATE INDEX IF NOT EXISTS migrations_by_time_created ON omicron.public.migration (
+    time_created
+);
+
 /* Lookup region snapshot by snapshot id */
 CREATE INDEX IF NOT EXISTS lookup_region_snapshot_by_snapshot_id on omicron.public.region_snapshot (
     snapshot_id
@@ -4206,7 +4215,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '85.0.0', NULL)
+    (TRUE, NOW(), NOW(), '86.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
