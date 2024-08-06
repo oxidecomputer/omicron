@@ -234,7 +234,7 @@ pub struct InstanceGestalt {
 /// when the lock is released.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct UpdaterLock {
-    updater_id: Uuid,
+    pub updater_id: Uuid,
     locked_gen: Generation,
 }
 
