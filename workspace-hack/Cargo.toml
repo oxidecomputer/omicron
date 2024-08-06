@@ -40,7 +40,7 @@ crossbeam-utils = { version = "0.8.19" }
 crossterm = { version = "0.27.0", features = ["event-stream", "serde"] }
 crypto-common = { version = "0.1.6", default-features = false, features = ["getrandom", "std"] }
 der = { version = "0.7.9", default-features = false, features = ["derive", "flagset", "oid", "pem", "std"] }
-diesel = { version = "2.1.6", features = ["chrono", "i-implement-a-third-party-backend-and-opt-into-breaking-changes", "network-address", "postgres", "r2d2", "serde_json", "uuid"] }
+diesel = { version = "2.2.2", features = ["chrono", "i-implement-a-third-party-backend-and-opt-into-breaking-changes", "network-address", "postgres", "r2d2", "serde_json", "uuid"] }
 digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
 either = { version = "1.12.0" }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
@@ -145,7 +145,7 @@ crossbeam-utils = { version = "0.8.19" }
 crossterm = { version = "0.27.0", features = ["event-stream", "serde"] }
 crypto-common = { version = "0.1.6", default-features = false, features = ["getrandom", "std"] }
 der = { version = "0.7.9", default-features = false, features = ["derive", "flagset", "oid", "pem", "std"] }
-diesel = { version = "2.1.6", features = ["chrono", "i-implement-a-third-party-backend-and-opt-into-breaking-changes", "network-address", "postgres", "r2d2", "serde_json", "uuid"] }
+diesel = { version = "2.2.2", features = ["chrono", "i-implement-a-third-party-backend-and-opt-into-breaking-changes", "network-address", "postgres", "r2d2", "serde_json", "uuid"] }
 digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
 either = { version = "1.12.0" }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
