@@ -16,8 +16,6 @@ use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
 use futures::stream::StreamExt;
-#[cfg(target_os = "illumos")]
-use illumos_utils::ipadm::Ipadm;
 use omicron_common::address::SLED_AGENT_PORT;
 use sled_agent_client::types::CleanupContextUpdate;
 use sled_agent_client::types::Duration;
@@ -31,8 +29,6 @@ use slog::Logger;
 use slog_term::FullFormat;
 use slog_term::TermDecorator;
 use std::collections::BTreeSet;
-#[cfg(target_os = "illumos")]
-use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::time::SystemTime;
 use tar::Builder;
@@ -250,6 +246,8 @@ async fn fetch_underlay_address() -> anyhow::Result<Ipv6Addr> {
     return Ok(Ipv6Addr::LOCALHOST);
     #[cfg(target_os = "illumos")]
     {
+        use illumos_utils::ipadm::Ipadm;
+        use std::net::IpAddr;
         const EXPECTED_ADDR_OBJ: &str = "underlay0/sled6";
         match Ipadm::addrobj_addr(EXPECTED_ADDR_OBJ) {
             // If we failed because there was no such interface, then fall back

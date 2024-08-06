@@ -23,7 +23,7 @@ const ADDROBJ_NOT_FOUND_ERR2: &str = "Address object not found";
 /// Expected error message when an interface already exists.
 const INTERFACE_ALREADY_EXISTS: &str = "Interface already exists";
 
-/// Expected error message when an addrobj already eixsts.
+/// Expected error message when an addrobj already exists.
 const ADDROBJ_ALREADY_EXISTS: &str = "Address object already exists";
 
 pub enum AddrObjType {
@@ -51,9 +51,10 @@ impl Ipadm {
         }
     }
 
-    /// Ensure that a particular address object exists. Note that this checks
-    /// whether an address object with the provided name already exists but
-    /// does not validate its properties.
+    /// Create an address object with the provided parameters. If an object
+    /// with the requested name already exists, return success. Note that in
+    /// this case, the existing object is not checked to ensure it is
+    /// consistent with the provided parameters.
     pub fn ensure_ip_addrobj_exists(
         addrobj: &str,
         addrtype: AddrObjType,
