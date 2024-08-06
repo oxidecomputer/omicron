@@ -27,6 +27,8 @@ Broadly, the control plane must provide:
 
 == Fundamental properties
 
+NOTE: These are design goals.  They have not all been fully implemented yet.
+
 **Availability.**  Availability of the control plane refers to the property that requests to provision resources succeed when the underlying resources are available within the system and requests to reconfigure or monitor resources succeed as long as they are well-formed.  Unavailability refers to request failure due to hardware or software failure.
 
 IMPORTANT: Generally, the control plane is expected to remain **available** in the face of any two hardware or software failures, including transient failures of individual compute sleds, power rectifiers, switches, or the like.
@@ -35,7 +37,7 @@ IMPORTANT: Generally, the control plane is expected to remain **available** in t
 
 IMPORTANT: Resources created by users should generally survive permanent failure of any two hardware or software components.
 
-**Consistency.**  Generally, users can expect strong consistency for resources within some namespace.  The bounds of the namespace for a particular resource may vary as described in <<rfd24>>.  For example, if a user creates an instance, another user with appropriate permissions should immediately see that instance.  In terms of **CAP**, the system is generally CP, with an emphasis on avoiding partitions through reliable software and hardware.
+**Consistency.**  Generally, users can expect strong consistency for resources within some namespace.  The bounds of the namespace for a particular resource may vary as described in <<rfd24>>.  For example, if a user creates an instance, another user with appropriate permissions should immediately see that instance.  In terms of https://en.wikipedia.org/wiki/CAP_theorem[**CAP**], the system is generally CP, with an emphasis on avoiding partitions through reliable software and hardware.
 
 IMPORTANT: The API namespace is generally expected to provide strong consistency.
 
@@ -57,7 +59,7 @@ For our purposes, an Oxide rack comprises three types of boards (systems):
 * 1 or 2 **switches**, each attached via PCIe to one of the 32 compute sleds.  (The switches are _also_ connected to each of the 32 sleds for networking.  This PCIe connection we're talking about is for control of the switch itself, which is only done by one sled.)  The chassis that house the switches are sometimes called **Sidecars**, though "Sidecar" technically refers to a particular hardware generation.  Sleds that are attached to switches are often called **Scrimlets** (which is a little unfortunate since the name obviously comes from "Gimlet", but it might not be a Gimlet (since Gimlet refers to a specific hardware generation)).
 * 1-2 power shelves, each with a **Power Shelf Controller (PSC)** that provides basic monitoring and control for the rectifiers that make up the power shelf.
 
-Each type of system (Gimlet, Sidecar, and PSC) contain a **service processor** (SP) that's responsible basic monitoring and control, typically including power control and thermal management.
+Each type of system (Gimlet, Sidecar, and PSC) contains a **service processor** (SP) that's responsible for basic monitoring and control, typically including power control and thermal management.
 
 <<rfd210>> discusses service processors in more detail.
 
@@ -118,7 +120,7 @@ Most other components:
 
 They are:
 
-* **Nexus** provides primary control for the whole control plane.  Nexus hosts all user-facing APIs (both operator and customer), the web console, and internal APIs for other control plane components to report inventory, generate alerts, and so on.  Nexus is also responsible for background control plane activity, including utilization management, server failure detection and recovery, and the like.  Persistent state is stored elsewhere (in CockroachDB), which allows us to be scaled separately.
+* **Nexus** provides primary control for the whole control plane.  Nexus hosts all user-facing APIs (both operator and customer), the web console, and internal APIs for other control plane components to report inventory, generate alerts, and so on.  Nexus is also responsible for background control plane activity, including utilization management, server failure detection and recovery, and the like.  Persistent state is stored elsewhere (in CockroachDB), which allows Nexus to be scaled separately.
 * **CockroachDB** provides a replicated, strongly-consistent, horizontally scalable database that stores virtually all control plane data.  See <<rfd53>> and <<rfd110>> for details.
 * **Clickhouse** provides storage and querying services for metric data collected from all components in the rack.  See <<rfd125>> for more information.
 * **Oximeter** collects metric data from the other components and store it into Clickhouse.  See <<rfd162>> for more information.
@@ -197,7 +199,7 @@ There are a few basic contexts in Nexus:
 * **Distributed sagas** are a https://www.youtube.com/watch?v=0UTOLRTwOX0[design pattern] for carrying out multi-step operations in a distributed system.  Saga actions generally _do_ retry transient errors indefinitely.
 * **Background tasks** are periodic or event-triggered activities that manage everything else that has to happen in the system (e.g., change propagation, CockroachDB cluster management, fault tolerance, etc.).  Nexus has a framework for background tasks that's oriented around the "reconciler" pattern (see <<rfd373>>).  In this context, we also usually don't retry individual operations -- instead, the entire activity will be retried on a periodic basis.  Background tasks are structured to re-evaluate the state of the world each time they're run and then determine what to do, on the assumption that things may have changed since the last time they ran.
 
-It's essential that components provide visibility into what they're doing for debugging and support.  ("Software should be able to exonerate itself when things are broken.")
+It's essential that components provide visibility into what they're doing for debugging and support.  Software should be able to exonerate itself when things are broken.
 
 * API requests are short-lived.  The Nexus log is currently the only real way to see what these have done.
 * Sagas are potentially long-lived.  Without needing any per-saga work, the saga log provides detailed information about which steps have run, which steps are in-progress, and the results of each step that completed.
@@ -241,7 +243,7 @@ Unfortunately, most of these RFDs are not yet public.
 * [[[rfd30, RFD 30]]] https://rfd.shared.oxide.computer/rfd/30/[RFD 30 Oxide Console Prototype]
 * [[[rfd48, RFD 48]]] https://rfd.shared.oxide.computer/rfd/48/[RFD 48 Control Plane Requirements]
 * [[[rfd53, RFD 53]]] https://rfd.shared.oxide.computer/rfd/53/[RFD 53 Control plane data storage requirements]
-* [[[rfd61, RFD 61]]] https://rfd.shared.oxide.computer/rfd/61/[RFD 61 Control Plane Architecture]
+* [[[rfd61, RFD 61]]] https://rfd.shared.oxide.computer/rfd/61/[RFD 61 Control Plane Architecture and Design]
 * [[[rfd110, RFD 110]]] https://rfd.shared.oxide.computer/rfd/110/[RFD 110 CockroachDB for the control plane database]
 * [[[rfd125, RFD 125]]] https://rfd.shared.oxide.computer/rfd/125/[RFD 125 Telemetry requirements and building blocks]
 * [[[rfd162, RFD 162]]] https://rfd.shared.oxide.computer/rfd/162/[RFD 162 Metrics collection architecture and design]
