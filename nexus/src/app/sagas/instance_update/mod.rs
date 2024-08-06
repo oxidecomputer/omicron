@@ -1529,7 +1529,7 @@ mod test {
         .await;
     }
 
-    // === Active VMM destroyed tests ====
+    // === Active VMM destroyed tests ===
 
     #[nexus_test(server = crate::Server)]
     async fn test_active_vmm_destroyed_succeeds(
@@ -1585,7 +1585,11 @@ mod test {
         let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_helpers::test_opctx(cptestctx);
 
-        test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
+        test_helpers::action_failure_can_unwind::<
+            SagaDoActualInstanceUpdate,
+            _,
+            _,
+        >(
             nexus,
             || {
                 Box::pin(async {
@@ -1599,6 +1603,54 @@ mod test {
                     // we're just testing the unwinding behavior of the trivial
                     // two-node start saga
                     make_real_params(cptestctx, &opctx, start_saga_params).await
+                })
+            },
+            || Box::pin(after_unwinding(cptestctx)),
+            &cptestctx.logctx.log,
+        )
+        .await;
+    }
+
+    // === idempotency and unwinding tests for the start saga ===
+
+    // We only do these tests with an "active VMM destroyed" precondition, since
+    // the behavior of the `start-instance-update` saga does *not* depend on the
+    // specific update to perform, and it seems unnecessary to run the start
+    // saga's tests against every possible migration outcome combination tested
+    // below.
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_start_saga_actions_succeed_idempotently(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let (state, params) = setup_active_vmm_destroyed_test(cptestctx).await;
+        let dag = create_saga_dag::<SagaInstanceUpdate>(params).unwrap();
+
+        crate::app::sagas::test_helpers::actions_succeed_idempotently(
+            &cptestctx.server.server_context().nexus,
+            dag,
+        )
+        .await;
+
+        // Assert that the saga properly cleaned up the active VMM's resources.
+        verify_active_vmm_destroyed(cptestctx, state.instance().id()).await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_start_saga_action_failure_can_unwind(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let nexus = &cptestctx.server.server_context().nexus;
+
+        test_helpers::action_failure_can_unwind::<SagaInstanceUpdate, _, _>(
+            nexus,
+            || {
+                Box::pin(async {
+                    let (_, params) =
+                        setup_active_vmm_destroyed_test(cptestctx).await;
+                    params
                 })
             },
             || Box::pin(after_unwinding(cptestctx)),
