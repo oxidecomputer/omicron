@@ -1008,7 +1008,7 @@ mod test {
         // The first saga has finished and sets the record to Complete.
 
         datastore
-            .set_region_replacement_complete(&opctx, request.id, saga_id)
+            .set_region_replacement_complete(&opctx, request, saga_id)
             .await
             .unwrap();
 
