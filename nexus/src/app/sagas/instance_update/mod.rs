@@ -1358,6 +1358,8 @@ mod test {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PropolisUuid;
     use omicron_uuid_kinds::SledUuid;
+    use std::sync::Arc;
+    use std::sync::Mutex;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -1407,8 +1409,8 @@ mod test {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: format!("instance {:?}", INSTANCE_NAME),
                 },
-                ncpus: InstanceCpuCount(2),
-                memory: ByteCount::from_gibibytes_u32(2),
+                ncpus: InstanceCpuCount(1),
+                memory: ByteCount::from_gibibytes_u32(1),
                 hostname: INSTANCE_NAME.parse().unwrap(),
                 user_data: b"#cloud-config".to_vec(),
                 ssh_public_keys: Some(Vec::new()),
@@ -1468,7 +1470,10 @@ mod test {
         }
     }
 
-    async fn after_unwinding(cptestctx: &ControlPlaneTestContext) {
+    async fn after_unwinding(
+        parent_saga_id: Option<Uuid>,
+        cptestctx: &ControlPlaneTestContext,
+    ) {
         let state = test_helpers::instance_fetch_by_name(
             cptestctx,
             INSTANCE_NAME,
@@ -1480,11 +1485,24 @@ mod test {
         // Unlike most other sagas, we actually don't unwind the work performed
         // by an update saga, as we would prefer that at least some of it
         // succeeds. The only thing that *needs* to be rolled back when an
-        // instance-update saga fails is that the updater lock *MUST* be
-        // released so that a subsequent saga can run. See the section "on
-        // unwinding" in the documentation comment at the top of the
-        // instance-update module for details.
-        assert_instance_unlocked(instance);
+        // instance-update saga fails is that the updater lock *MUST* either
+        // remain locked by the parent start saga, or have been released so that
+        // a subsequent saga can run. See the section "on unwinding" in the
+        // documentation comment at the top of the instance-update module for
+        // details.
+        if let Some(parent_saga_id) = parent_saga_id {
+            if let Some(actual_lock_id) = instance.updater_id {
+                assert_eq!(
+                    actual_lock_id, parent_saga_id,
+                    "if the instance is locked after unwinding, it must be \
+                     locked by the `start-instance-update` saga, and not the \
+                     unwinding child saga!"
+                );
+            }
+        } else {
+            assert_instance_unlocked(instance);
+        }
+
         // Additionally, we assert that the instance record is in a
         // consistent state, ensuring that all changes to the instance record
         // are atomic. This is important *because* we won't roll back changes
@@ -1584,6 +1602,10 @@ mod test {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
         let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_helpers::test_opctx(cptestctx);
+        // Stupid side channel for passing the expected parent start saga's lock
+        // ID into the "after unwinding" method, so that it can check that the
+        // lock is either released or was never acquired.
+        let parent_saga_id = Arc::new(Mutex::new(None));
 
         test_helpers::action_failure_can_unwind::<
             SagaDoActualInstanceUpdate,
@@ -1592,7 +1614,9 @@ mod test {
         >(
             nexus,
             || {
-                Box::pin(async {
+                let parent_saga_id = parent_saga_id.clone();
+                let opctx = &opctx;
+                Box::pin(async move {
                     let (_, start_saga_params) =
                         setup_active_vmm_destroyed_test(cptestctx).await;
 
@@ -1602,10 +1626,25 @@ mod test {
                     // params rather than the start saga's params. Otherwise,
                     // we're just testing the unwinding behavior of the trivial
                     // two-node start saga
-                    make_real_params(cptestctx, &opctx, start_saga_params).await
+                    let real_params =
+                        make_real_params(cptestctx, opctx, start_saga_params)
+                            .await;
+                    *parent_saga_id.lock().unwrap() =
+                        Some(real_params.orig_lock.updater_id);
+                    real_params
                 })
             },
-            || Box::pin(after_unwinding(cptestctx)),
+            || {
+                let parent_saga_id = parent_saga_id.clone();
+                Box::pin(async move {
+                    let parent_saga_id =
+                        parent_saga_id.lock().unwrap().take().expect(
+                            "parent saga's lock ID must have been set by the \
+                             `before_saga` function; this is a test bug",
+                        );
+                    after_unwinding(Some(parent_saga_id), cptestctx).await
+                })
+            },
             &cptestctx.logctx.log,
         )
         .await;
@@ -1653,7 +1692,9 @@ mod test {
                     params
                 })
             },
-            || Box::pin(after_unwinding(cptestctx)),
+            // Don't pass a parent saga ID here because the saga MUST be
+            // unlocked if the whole start saga unwinds.
+            || Box::pin(after_unwinding(None, cptestctx)),
             &cptestctx.logctx.log,
         )
         .await;
@@ -2158,6 +2199,11 @@ mod test {
                 setup_test_project(&cptestctx.external_client).await;
             let opctx = test_helpers::test_opctx(&cptestctx);
 
+            // Stupid side channel for passing the expected parent start saga's lock
+            // ID into the "after unwinding" method, so that it can check that the
+            // lock is either released or was never acquired.
+            let parent_saga_id = Arc::new(Mutex::new(None));
+
             test_helpers::action_failure_can_unwind::<
                 SagaDoActualInstanceUpdate,
                 _,
@@ -2165,7 +2211,10 @@ mod test {
             >(
                 nexus,
                 || {
-                    Box::pin(async {
+                    let parent_saga_id = parent_saga_id.clone();
+                    let other_sleds = &other_sleds;
+                    let opctx = &opctx;
+                    Box::pin(async move {
                         // Since the unwinding test will test unwinding from each
                         // individual saga node *in the saga DAG constructed by the
                         // provided params*, we need to give it the "real saga"'s
@@ -2173,14 +2222,32 @@ mod test {
                         // we're just testing the unwinding behavior of the trivial
                         // two-node start saga.
                         let start_saga_params = self
-                            .setup_test(cptestctx, &other_sleds)
+                            .setup_test(cptestctx, other_sleds)
                             .await
                             .start_saga_params();
-                        make_real_params(cptestctx, &opctx, start_saga_params)
-                            .await
+                        let real_params = make_real_params(
+                            cptestctx,
+                            opctx,
+                            start_saga_params,
+                        )
+                        .await;
+                        *parent_saga_id.lock().unwrap() =
+                            Some(real_params.orig_lock.updater_id);
+                        real_params
                     })
                 },
-                || Box::pin(after_unwinding(cptestctx)),
+                || {
+                    let parent_saga_id = parent_saga_id.clone();
+                    Box::pin(async move {
+                        let parent_saga_id =
+                            parent_saga_id.lock().unwrap().take().expect(
+                                "parent saga's lock ID must have been set by \
+                                 the `before_saga` function; this is a test \
+                                 bug",
+                            );
+                        after_unwinding(Some(parent_saga_id), cptestctx).await
+                    })
+                },
                 &cptestctx.logctx.log,
             )
             .await;

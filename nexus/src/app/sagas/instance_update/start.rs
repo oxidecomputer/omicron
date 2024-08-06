@@ -9,11 +9,12 @@ use super::{
     SagaDoActualInstanceUpdate, SagaInitError, UpdatesRequired,
     ACTION_GENERATE_ID, INSTANCE_LOCK, INSTANCE_LOCK_ID,
 };
+use crate::app::saga;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::db::datastore::instance;
 use nexus_db_queries::{authn, authz};
 use serde::{Deserialize, Serialize};
-use steno::{ActionError, DagBuilder, Node};
+use steno::{ActionError, DagBuilder, Node, SagaResultErr};
 use uuid::Uuid;
 
 /// Parameters to the start instance update saga.
@@ -164,6 +165,7 @@ async fn siu_fetch_state_and_start_real_saga(
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, &serialized_authn);
     let datastore = osagactx.datastore();
+    let nexus = osagactx.nexus();
 
     let state = datastore
         .instance_fetch_all(&opctx, &authz_instance)
@@ -189,30 +191,102 @@ async fn siu_fetch_state_and_start_real_saga(
             "update.destroy_target_vmm" => ?update.destroy_target_vmm,
             "update.deprovision" => update.deprovision.is_some(),
         );
-        if let Err(error) = osagactx
-            .nexus()
-            .sagas
-            .saga_execute::<SagaDoActualInstanceUpdate>(RealParams {
+        // Prepare the child saga.
+        //
+        // /!\ WARNING /!\ This is really finicky: whether or not the start saga
+        // should unwind depends on *whether the child `instance-update` saga
+        // has advanced far enough to have inherited the lock or not. If the
+        // child has not inherited the lock, we *must* unwind to ensure the lock
+        // is dropped.
+        //
+        // Note that we *don't* use `SagaExecutor::saga_execute`, which prepares
+        // the child saga and waits for it to complete. That function wraps all
+        // the errors returned by this whole process in an external API error,
+        // which makes it difficult for us to figure out *why* the child saga
+        // failed, and whether we should unwind or not.
+
+        let dag =
+            saga::create_saga_dag::<SagaDoActualInstanceUpdate>(RealParams {
                 serialized_authn,
                 authz_instance,
                 update,
                 orig_lock,
             })
+            // If we can't build a DAG for the child saga, we should unwind, so
+            // that we release the lock.
+            .map_err(|e| {
+                nexus.background_tasks.task_instance_updater.activate();
+                ActionError::action_failed(e)
+            })?;
+        let child_result = nexus
+            .sagas
+            .saga_prepare(dag)
             .await
-        {
-            warn!(
-                log,
-                "instance update: real update saga failed (which *could* \
-                 mean nothing...)";
-                "instance_id" => %instance_id,
-                "error" => %error,
-            );
-            // If the real saga failed, kick the background task. If the real
-            // saga failed because this action was executed twice and the second
-            // child saga couldn't lock the instance, that's fine, because the
-            // background task will only start new sagas for instances whose DB
-            // state actually *needs* an update.
-            osagactx.nexus().background_tasks.task_instance_updater.activate();
+            // Similarly, if we can't prepare the child saga, we need to unwind
+            // and release the lock.
+            .map_err(|e| {
+                nexus.background_tasks.task_instance_updater.activate();
+                ActionError::action_failed(e)
+            })?
+            .start()
+            .await
+            // And, if we can't start it, we need to unwind.
+            .map_err(|e| {
+                nexus.background_tasks.task_instance_updater.activate();
+                ActionError::action_failed(e)
+            })?
+            .wait_until_stopped()
+            .await
+            .into_raw_result();
+        match child_result.kind {
+            Ok(_) => {
+                debug!(
+                    log,
+                    "instance update: child saga completed successfully";
+                    "instance_id" => %instance_id,
+                    "child_saga_id" => %child_result.saga_id,
+                )
+            }
+            // Check if the child saga failed to inherit the updater lock from
+            // this saga.
+            Err(SagaResultErr {
+                error_node_name,
+                error_source: ActionError::ActionFailed { source_error },
+                ..
+            }) if error_node_name.as_ref() == super::INSTANCE_LOCK => {
+                if let Ok(instance::UpdaterLockError::AlreadyLocked) =
+                    serde_json::from_value(source_error)
+                {
+                    // If inheriting the lock failed because the lock was held by another
+                    // saga. If this is the case, that's fine: this action must have
+                    // executed more than once, and created multiple child sagas. No big deal.
+                    return Ok(());
+                } else {
+                    // Otherwise, the child saga could not inherit the lock for
+                    // some other reason. That means we MUST unwind to ensure
+                    // the lock is released.
+                    return Err(ActionError::action_failed(
+                        "child saga failed to inherit lock".to_string(),
+                    ));
+                }
+            }
+            Err(error) => {
+                warn!(
+                    log,
+                    "instance update: child saga failed, unwinding...";
+                    "instance_id" => %instance_id,
+                    "child_saga_id" => %child_result.saga_id,
+                    "error" => ?error,
+                );
+
+                // If the real saga failed, kick the background task. If the real
+                // saga failed because this action was executed twice and the second
+                // child saga couldn't lock the instance, that's fine, because the
+                // background task will only start new sagas for instances whose DB
+                // state actually *needs* an update.
+                nexus.background_tasks.task_instance_updater.activate();
+                return Err(error.error_source);
+            }
         }
     } else {
         info!(
