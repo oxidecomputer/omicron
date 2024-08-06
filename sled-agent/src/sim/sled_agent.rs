@@ -51,6 +51,7 @@ use propolis_mock_server::Context as PropolisContext;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
 };
+use sled_storage::resources::DatasetsManagementResult;
 use sled_storage::resources::DisksManagementResult;
 use slog::Logger;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -893,8 +894,15 @@ impl SledAgent {
         })
     }
 
+    pub async fn datasets_ensure(
+        &self,
+        config: DatasetsConfig,
+    ) -> Result<DatasetsManagementResult, HttpError> {
+        self.storage.lock().await.datasets_ensure(config).await
+    }
+
     pub async fn datasets_list(&self) -> Result<DatasetsConfig, HttpError> {
-        todo!();
+        self.storage.lock().await.datasets_list().await
     }
 
     pub async fn omicron_physical_disks_list(

@@ -18,6 +18,7 @@ use crucible_agent_client::types::{
 use dropshot::HandlerTaskMode;
 use dropshot::HttpError;
 use futures::lock::Mutex;
+use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
@@ -26,6 +27,8 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::types::VolumeConstructionRequest;
+use sled_storage::resources::DatasetManagementStatus;
+use sled_storage::resources::DatasetsManagementResult;
 use sled_storage::resources::DiskManagementStatus;
 use sled_storage::resources::DisksManagementResult;
 use slog::Logger;
@@ -555,6 +558,7 @@ pub struct Storage {
     sled_id: Uuid,
     log: Logger,
     config: Option<OmicronPhysicalDisksConfig>,
+    dataset_config: Option<DatasetsConfig>,
     physical_disks: HashMap<Uuid, PhysicalDisk>,
     next_disk_slot: i64,
     zpools: HashMap<ZpoolUuid, Zpool>,
@@ -568,6 +572,7 @@ impl Storage {
             sled_id,
             log,
             config: None,
+            dataset_config: None,
             physical_disks: HashMap::new(),
             next_disk_slot: 0,
             zpools: HashMap::new(),
@@ -579,6 +584,43 @@ impl Storage {
     /// Returns an immutable reference to all (currently known) physical disks
     pub fn physical_disks(&self) -> &HashMap<Uuid, PhysicalDisk> {
         &self.physical_disks
+    }
+
+    pub async fn datasets_list(&self) -> Result<DatasetsConfig, HttpError> {
+        let Some(config) = self.dataset_config.as_ref() else {
+            return Err(HttpError::for_not_found(
+                None,
+                "No control plane datasets".into(),
+            ));
+        };
+        Ok(config.clone())
+    }
+
+    pub async fn datasets_ensure(
+        &mut self,
+        config: DatasetsConfig,
+    ) -> Result<DatasetsManagementResult, HttpError> {
+        if let Some(stored_config) = self.dataset_config.as_ref() {
+            if stored_config.generation < config.generation {
+                return Err(HttpError::for_client_error(
+                    None,
+                    http::StatusCode::BAD_REQUEST,
+                    "Generation number too old".to_string(),
+                ));
+            }
+        }
+        self.dataset_config.replace(config.clone());
+
+        Ok(DatasetsManagementResult {
+            status: config
+                .datasets
+                .into_iter()
+                .map(|config| DatasetManagementStatus {
+                    dataset_name: config.name.clone(),
+                    err: None,
+                })
+                .collect(),
+        })
     }
 
     pub async fn omicron_physical_disks_list(

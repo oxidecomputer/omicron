@@ -27,11 +27,13 @@ use omicron_common::api::internal::nexus::UpdateArtifactId;
 use omicron_common::api::internal::shared::{
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
 };
+use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::EarlyNetworkConfig;
+use sled_storage::resources::DatasetsManagementResult;
 use sled_storage::resources::DisksManagementResult;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -65,6 +67,8 @@ pub fn api() -> SledApiDescription {
         api.register(read_network_bootstore_config)?;
         api.register(write_network_bootstore_config)?;
         api.register(inventory)?;
+        api.register(datasets_get)?;
+        api.register(datasets_put)?;
         api.register(omicron_physical_disks_get)?;
         api.register(omicron_physical_disks_put)?;
         api.register(omicron_zones_get)?;
@@ -454,6 +458,31 @@ async fn inventory(
             .await
             .map_err(|e| HttpError::for_internal_error(format!("{:#}", e)))?,
     ))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/datasets",
+}]
+async fn datasets_put(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    body: TypedBody<DatasetsConfig>,
+) -> Result<HttpResponseOk<DatasetsManagementResult>, HttpError> {
+    let sa = rqctx.context();
+    let body_args = body.into_inner();
+    let result = sa.datasets_ensure(body_args).await?;
+    Ok(HttpResponseOk(result))
+}
+
+#[endpoint {
+    method = GET,
+    path = "/datasets",
+}]
+async fn datasets_get(
+    rqctx: RequestContext<Arc<SledAgent>>,
+) -> Result<HttpResponseOk<DatasetsConfig>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(sa.datasets_list().await?))
 }
 
 #[endpoint {

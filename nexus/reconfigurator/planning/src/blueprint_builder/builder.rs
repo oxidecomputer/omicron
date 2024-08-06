@@ -681,6 +681,7 @@ impl<'a> BlueprintBuilder<'a> {
     ) -> Result<EnsureMultiple, Error> {
         let (mut additions, mut updates, expunges, removals) = {
             let mut datasets_builder = BlueprintSledDatasetsBuilder::new(
+                self.log.clone(),
                 sled_id,
                 &self.datasets,
                 resources,
@@ -816,12 +817,16 @@ impl<'a> BlueprintBuilder<'a> {
 
         // Remove all datasets that we've finished expunging.
         datasets.retain(|d| {
-            debug_assert_eq!(
-                d.disposition,
-                BlueprintDatasetDisposition::Expunged,
-                "We should only be removing datasets that are already expunged"
-            );
-            !removals.contains(&d.id)
+            if removals.contains(&d.id) {
+                debug_assert_eq!(
+                    d.disposition,
+                    BlueprintDatasetDisposition::Expunged,
+                    "Should only remove datasets that are expunged, but dataset {} is {:?}",
+                    d.id, d.disposition,
+                );
+                return false;
+            };
+            true
         });
 
         // We sort in the call to "BlueprintDatasetsBuilder::into_datasets_map",
@@ -1574,19 +1579,27 @@ impl<'a> BlueprintDatasetsBuilder<'a> {
 
 /// Helper for working with sets of datasets on a single sled
 struct BlueprintSledDatasetsBuilder<'a> {
+    log: Logger,
     blueprint_datasets:
         BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, &'a BlueprintDatasetConfig>>,
     database_datasets:
         BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, &'a DatasetConfig>>,
 
+    // Datasets which are unchanged from the prior blueprint
+    unchanged_datasets:
+        BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, BlueprintDatasetConfig>>,
+    // Datasets which are new in this blueprint
     new_datasets:
         BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, BlueprintDatasetConfig>>,
+    // Datasets which existed in the old blueprint, but which are
+    // changing in this one
     updated_datasets:
         BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, BlueprintDatasetConfig>>,
 }
 
 impl<'a> BlueprintSledDatasetsBuilder<'a> {
     pub fn new(
+        log: Logger,
         sled_id: SledUuid,
         datasets: &'a BlueprintDatasetsBuilder<'_>,
         resources: &'a SledResources,
@@ -1617,8 +1630,10 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
         }
 
         Self {
+            log,
             blueprint_datasets,
             database_datasets,
+            unchanged_datasets: BTreeMap::new(),
             new_datasets: BTreeMap::new(),
             updated_datasets: BTreeMap::new(),
         }
@@ -1659,19 +1674,19 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
             let new_config = make_config(old_config.id);
 
             // If it needs updating, add it
-            if *old_config != new_config {
-                self.updated_datasets
-                    .entry(zpool_id)
-                    .and_modify(|values: &mut BTreeMap<_, _>| {
-                        values.insert(
-                            new_config.kind.clone(),
-                            new_config.clone(),
-                        );
-                    })
-                    .or_insert_with(|| {
-                        BTreeMap::from([(new_config.kind.clone(), new_config)])
-                    });
-            }
+            let target = if *old_config != new_config {
+                &mut self.updated_datasets
+            } else {
+                &mut self.unchanged_datasets
+            };
+            target
+                .entry(zpool_id)
+                .and_modify(|values: &mut BTreeMap<_, _>| {
+                    values.insert(new_config.kind.clone(), new_config.clone());
+                })
+                .or_insert_with(|| {
+                    BTreeMap::from([(new_config.kind.clone(), new_config)])
+                });
             return;
         }
 
@@ -1726,7 +1741,13 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
                         *zpool_id,
                         dataset_id,
                     )
+                    && !dataset_exists_in(
+                        &self.unchanged_datasets,
+                        *zpool_id,
+                        dataset_id,
+                    )
                 {
+                    info!(self.log, "dataset expungeable (not needed in blueprint)"; "id" => ?dataset_id);
                     removals.insert(dataset_id);
                 }
             }
@@ -1770,6 +1791,7 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
                     *zpool_id,
                     config.id,
                 ) {
+                    info!(self.log, "dataset removable (expunged, not in database)"; "id" => ?config.id);
                     removals.insert(config.id);
                 }
             }
@@ -1788,8 +1810,7 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
     ) -> Option<&'a BlueprintDatasetConfig> {
         self.blueprint_datasets
             .get(&zpool)
-            .map(|datasets| datasets.get(kind))
-            .flatten()
+            .and_then(|datasets| datasets.get(kind))
             .copied()
     }
 
@@ -1800,8 +1821,7 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
     ) -> Option<&'a DatasetConfig> {
         self.database_datasets
             .get(&zpool)
-            .map(|datasets| datasets.get(kind))
-            .flatten()
+            .and_then(|datasets| datasets.get(kind))
             .copied()
     }
 }
