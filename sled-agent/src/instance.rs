@@ -1644,7 +1644,7 @@ mod tests {
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
     use std::str::FromStr;
-    use tokio::sync::mpsc;
+    use std::time::Duration;
     use tokio::sync::watch::Receiver;
     use tokio::time::timeout;
 
@@ -2102,7 +2102,7 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_instance_create_timeout_while_creating_zone() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_instance_create_timeout_while_creating_zone",
@@ -2114,9 +2114,37 @@ mod tests {
 
         // time out while booting zone, on purpose!
         let boot_ctx = MockZones::boot_context();
+        const TIMEOUT: Duration = Duration::from_secs(1);
+        let (boot_continued_tx, boot_continued_rx) =
+            std::sync::mpsc::sync_channel(1);
+        let boot_log = log.clone();
         boot_ctx.expect().times(1).return_once(move |_| {
-            // See below, there's no way to have this take a long time, other
-            // than just taking a long time _and_ blocking the rest of the test.
+            // We need a way to slow down zone boot, but that doesn't block the
+            // entire Tokio runtime. Since this closure is synchronous, it also
+            // has no way to await anything, all waits are blocking. That means
+            // we cannot use a single-threaded runtime, which also means no
+            // manually advancing time. The test has to take the full "slow boot
+            // time".
+            //
+            // To do this, we use a multi-threaded runtime, and call
+            // block_in_place so that we can just literally sleep for a while.
+            // The sleep duration here is twice a timeout we set on the attempt
+            // to actually set the instance running below.
+            //
+            // This boot method also directly signals the main test code to
+            // continue when it's done sleeping to synchronize with it.
+            tokio::task::block_in_place(move || {
+                debug!(
+                    boot_log,
+                    "MockZones::boot() called, waiting for timeout"
+                );
+                std::thread::sleep(TIMEOUT * 2);
+                debug!(
+                    boot_log,
+                    "MockZones::boot() waited for timeout, continuing"
+                );
+                boot_continued_tx.send(()).unwrap();
+            });
             Ok(())
         });
         let wait_ctx = illumos_utils::svc::wait_for_service_context();
@@ -2151,8 +2179,6 @@ mod tests {
         .await
         .expect("timed out creating Instance struct");
 
-        tokio::time::pause();
-
         let (put_tx, put_rx) = oneshot::channel();
 
         // pretending we're InstanceManager::ensure_state, try in vain to start
@@ -2161,24 +2187,16 @@ mod tests {
             .await
             .expect("failed to send Instance::put_state");
 
-        // Timeout our future waiting for the instance-state-change at
-        // `TIMEOUT_DURATION`
-        let timeout_fut = timeout(TIMEOUT_DURATION, put_rx);
-
-        // We then step time by twice that in a single jump, in an attempt to
-        // cause `timeout_fut` to complete immediately, but without letting the
-        // zone actually boot. There's nothing really ensure things AFAIK, and
-        // no actual way to do that. The expectation above is synchronous, which
-        // means we cannot put an await point in it, and so have no way to cause
-        // that to wait for something we do here, at least without blocking the
-        // entire and only thread.
-        tokio::time::advance(TIMEOUT_DURATION * 2).await;
-
+        // Timeout our future waiting for the instance-state-change at 1s. This
+        // is much shorter than the actual `TIMEOUT_DURATION`, but the test
+        // structure requires that we actually wait this period, since we cannot
+        // advance time manually in a multi-threaded runtime.
+        let timeout_fut = timeout(TIMEOUT, put_rx);
+        debug!(log, "Awaiting zone-boot timeout");
         timeout_fut
             .await
             .expect_err("*should've* timed out waiting for Instance::put_state, but didn't?");
-
-        tokio::time::resume();
+        debug!(log, "Zone-boot timeout awaited");
 
         if let ReceivedInstanceState::InstancePut(SledInstanceState {
             vmm_state: VmmRuntimeState { state: VmmState::Running, .. },
@@ -2187,6 +2205,14 @@ mod tests {
         {
             panic!("Nexus's InstanceState should never have reached running if zone creation timed out");
         }
+
+        // Notify the "boot" closure that it can continue, and then wait to
+        // ensure it's actually called.
+        debug!(log, "Waiting for zone-boot to continue");
+        tokio::task::spawn_blocking(move || boot_continued_rx.recv().unwrap())
+            .await
+            .unwrap();
+        debug!(log, "Received continued message from MockZones::boot()");
 
         storage_harness.cleanup().await;
         logctx.cleanup_successful();

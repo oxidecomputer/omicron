@@ -272,16 +272,17 @@ bootstrap-agent-api = { path = "sled-agent/bootstrap-agent-api" }
 bootstrap-agent-client = { path = "clients/bootstrap-agent-client" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.5.0"
-bytes = "1.6.0"
+bytes = "1.7.1"
 camino = { version = "1.1", features = ["serde1"] }
 camino-tempfile = "1.1.1"
 cancel-safe-futures = "0.1.5"
 cargo_metadata = "0.18.1"
 chacha20poly1305 = "0.10.1"
-ciborium = "0.2.2"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
+ciborium = "0.2.2"
 clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
+clickward = { git = "https://github.com/oxidecomputer/clickward", rev = "ceec762e6a87d2a22bf56792a3025e145caa095e" }
 cockroach-admin-api = { path = "cockroach-admin/api" }
 cockroach-admin-client = { path = "clients/cockroach-admin-client" }
 cockroach-admin-types = { path = "cockroach-admin/types" }
@@ -315,7 +316,7 @@ either = "1.12.0"
 expectorate = "1.1.0"
 fatfs = "0.3.6"
 filetime = "0.2.23"
-flate2 = "1.0.30"
+flate2 = "1.0.31"
 float-ord = "0.3.2"
 flume = "0.11.0"
 foreign-types = "0.3.2"
@@ -335,7 +336,7 @@ gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-
 gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "319e7b92db69792ab8efa4c68554ad0cf83adf93" }
 gateway-test-utils = { path = "gateway-test-utils" }
 gateway-types = { path = "gateway-types" }
-gethostname = "0.4.3"
+gethostname = "0.5.0"
 glob = "0.3.1"
 guppy = "0.17.7"
 headers = "0.3.9"
@@ -353,7 +354,7 @@ hyper-rustls = "0.26.0"
 hyper-staticfile = "0.9.5"
 illumos-utils = { path = "illumos-utils" }
 indent_write = "2.2.0"
-indexmap = "2.2.6"
+indexmap = "2.3.0"
 indicatif = { version = "0.17.8", features = ["rayon"] }
 installinator = { path = "installinator" }
 installinator-api = { path = "installinator-api" }
@@ -447,8 +448,8 @@ percent-encoding = "2.3.1"
 peg = "0.8.4"
 pem = "3.0"
 petgraph = "0.6.5"
-postgres-protocol = "0.6.6"
-predicates = "3.1.0"
+postgres-protocol = "0.6.7"
+predicates = "3.1.2"
 pretty_assertions = "1.4.0"
 pretty-hex = "0.4.1"
 prettyplease = { version = "0.2.20", features = ["verbatim"] }
@@ -463,7 +464,7 @@ quote = "1.0"
 rand = "0.8.5"
 rand_core = "0.6.4"
 rand_distr = "0.4.3"
-rand_seeder = "0.2.3"
+rand_seeder = "0.3.0"
 ratatui = "0.27.0"
 rayon = "1.10"
 rcgen = "0.12.1"
@@ -477,7 +478,7 @@ rpassword = "7.3.1"
 rstest = "0.19.0"
 rustfmt-wrapper = "0.2"
 rustls = "0.22.2"
-rustls-pemfile = "2.1.2"
+rustls-pemfile = "2.1.3"
 rustyline = "14.0.0"
 samael = { version = "0.0.15", features = ["xmlsec"] }
 schemars = "0.8.21"
@@ -485,7 +486,7 @@ secrecy = "0.8.0"
 semver = { version = "1.0.23", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
 serde_human_bytes = { git = "https://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
-serde_json = "1.0.120"
+serde_json = "1.0.122"
 serde_path_to_error = "0.1.16"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
@@ -547,13 +548,13 @@ tokio-stream = "0.1.15"
 tokio-tungstenite = "0.20"
 tokio-util = { version = "0.7.11", features = ["io", "io-util"] }
 toml = "0.8.19"
-toml_edit = "0.22.16"
+toml_edit = "0.22.20"
 tough = { version = "0.17.1", features = [ "http" ] }
 trust-dns-client = "0.22"
 trust-dns-proto = "0.22"
 trust-dns-resolver = "0.22"
 trust-dns-server = "0.22"
-trybuild = "1.0.97"
+trybuild = "1.0.99"
 tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
 tui-tree-widget = "0.21.0"

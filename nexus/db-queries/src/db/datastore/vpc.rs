@@ -357,9 +357,14 @@ impl DataStore {
         for (i, vni) in vnis.enumerate() {
             vpc.vni = Vni(vni);
             let id = usdt::UniqueId::new();
-            crate::probes::vni__search__range__start!(|| {
-                (&id, u32::from(vni), VniSearchIter::STEP_SIZE)
-            });
+            // TODO: silence this cast in usdt:
+            // https://github.com/oxidecomputer/usdt/issues/270
+            #[allow(clippy::cast_lossless)]
+            {
+                crate::probes::vni__search__range__start!(|| {
+                    (&id, u32::from(vni), VniSearchIter::STEP_SIZE)
+                });
+            }
             match self
                 .project_create_vpc_raw(
                     opctx,
@@ -369,9 +374,14 @@ impl DataStore {
                 .await
             {
                 Ok(Some((authz_vpc, vpc))) => {
-                    crate::probes::vni__search__range__found!(|| {
-                        (&id, u32::from(vpc.vni.0))
-                    });
+                    // TODO: silence this cast in usdt:
+                    // https://github.com/oxidecomputer/usdt/issues/270
+                    #[allow(clippy::cast_lossless)]
+                    {
+                        crate::probes::vni__search__range__found!(|| {
+                            (&id, u32::from(vpc.vni.0))
+                        });
+                    }
                     return Ok((authz_vpc, vpc));
                 }
                 Err(e) => return Err(e),
