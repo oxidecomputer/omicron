@@ -622,9 +622,9 @@ impl UpdatesRequired {
         // If the *new* state no longer has a `propolis_id` field, that means
         // that the active VMM was destroyed without a successful migration out
         // (or, we migrated out to a target VMM that was immediately destroyed,
-        // which...seems weird but certainly could happen). In that case, the
-        // instance is no longer incarnated on a sled, and we must update the
-        // state of the world to reflect that.
+        // which could happen if a running VM shut down immediately after
+        // migrating). In that case, the instance is no longer incarnated on a
+        // sled, and we must update the state of the world to reflect that.
         let deprovision = if new_runtime.propolis_id.is_none() {
             // N.B. that this does *not* set `update_required`, because
             // `new_runtime.propolis_id` might be `None` just because there was,
