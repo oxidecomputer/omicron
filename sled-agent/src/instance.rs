@@ -2059,6 +2059,7 @@ mod tests {
         const TIMEOUT: Duration = Duration::from_secs(1);
         let (boot_continued_tx, boot_continued_rx) =
             std::sync::mpsc::sync_channel(1);
+        let boot_log = log.clone();
         boot_ctx.expect().times(1).return_once(move |_| {
             // We need a way to slow down zone boot, but that doesn't block the
             // entire Tokio runtime. Since this closure is synchronous, it also
@@ -2075,9 +2076,15 @@ mod tests {
             // This boot method also directly signals the main test code to
             // continue when it's done sleeping to synchronize with it.
             tokio::task::block_in_place(move || {
-                println!("MockZones::boot() called, waiting for timeout");
+                debug!(
+                    boot_log,
+                    "MockZones::boot() called, waiting for timeout"
+                );
                 std::thread::sleep(TIMEOUT * 2);
-                println!("MockZones::boot() waited for timeout, continuing");
+                debug!(
+                    boot_log,
+                    "MockZones::boot() waited for timeout, continuing"
+                );
                 boot_continued_tx.send(()).unwrap();
             });
             Ok(())
@@ -2127,11 +2134,11 @@ mod tests {
         // structure requires that we actually wait this period, since we cannot
         // advance time manually in a multi-threaded runtime.
         let timeout_fut = timeout(TIMEOUT, put_rx);
-        println!("Awaiting zone-boot timeout");
+        debug!(log, "Awaiting zone-boot timeout");
         timeout_fut
             .await
             .expect_err("*should've* timed out waiting for Instance::put_state, but didn't?");
-        println!("Zone-boot timeout awaited");
+        debug!(log, "Zone-boot timeout awaited");
 
         if let ReceivedInstanceState::InstancePut(SledInstanceState {
             vmm_state: VmmRuntimeState { state: VmmState::Running, .. },
@@ -2143,11 +2150,11 @@ mod tests {
 
         // Notify the "boot" closure that it can continue, and then wait to
         // ensure it's actually called.
-        println!("Waiting for zone-boot to continue");
+        debug!(log, "Waiting for zone-boot to continue");
         tokio::task::spawn_blocking(move || boot_continued_rx.recv().unwrap())
             .await
             .unwrap();
-        println!("Received continued message from MockZones::boot()");
+        debug!(log, "Received continued message from MockZones::boot()");
 
         storage_harness.cleanup().await;
         logctx.cleanup_successful();
