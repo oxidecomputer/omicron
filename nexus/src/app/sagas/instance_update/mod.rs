@@ -916,8 +916,8 @@ async fn siu_unbecome_updater(
 async fn siu_update_network_config(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    let Params { ref serialized_authn, ref authz_instance, .. } =
-        sagactx.saga_params()?;
+    let RealParams { ref serialized_authn, ref authz_instance, .. } =
+        sagactx.saga_params::<RealParams>()?;
 
     let update =
         sagactx.lookup::<NetworkConfigUpdate>(NETWORK_CONFIG_UPDATE)?;
@@ -1558,7 +1558,12 @@ mod test {
         let (state, params) = setup_active_vmm_destroyed_test(cptestctx).await;
 
         // Build the saga DAG with the provided test parameters
-        let dag = create_saga_dag::<SagaInstanceUpdate>(params).unwrap();
+        let real_params = make_real_params(
+            cptestctx,
+            &test_helpers::test_opctx(cptestctx),
+            params,
+        ).await;
+        let dag = create_saga_dag::<SagaDoActualInstanceUpdate>(real_params).unwrap();
 
         crate::app::sagas::test_helpers::actions_succeed_idempotently(
             &cptestctx.server.server_context().nexus,
@@ -1746,7 +1751,7 @@ mod test {
                     outcome
                         .setup_test(cptestctx, &other_sleds)
                         .await
-                        .saga_params()
+                        .start_saga_params()
                 })
             },
             || Box::pin(after_unwinding(cptestctx)),
@@ -1804,7 +1809,7 @@ mod test {
                     outcome
                         .setup_test(cptestctx, &other_sleds)
                         .await
-                        .saga_params()
+                        .start_saga_params()
                 })
             },
             || Box::pin(after_unwinding(cptestctx)),
@@ -1866,7 +1871,7 @@ mod test {
                     outcome
                         .setup_test(cptestctx, &other_sleds)
                         .await
-                        .saga_params()
+                        .start_saga_params()
                 })
             },
             || Box::pin(after_unwinding(cptestctx)),
@@ -1928,7 +1933,7 @@ mod test {
                     outcome
                         .setup_test(cptestctx, &other_sleds)
                         .await
-                        .saga_params()
+                        .start_saga_params()
                 })
             },
             || Box::pin(after_unwinding(cptestctx)),
@@ -1990,7 +1995,7 @@ mod test {
                     outcome
                         .setup_test(cptestctx, &other_sleds)
                         .await
-                        .saga_params()
+                        .start_saga_params()
                 })
             },
             || Box::pin(after_unwinding(cptestctx)),
@@ -2052,7 +2057,7 @@ mod test {
                     outcome
                         .setup_test(cptestctx, &other_sleds)
                         .await
-                        .saga_params()
+                        .start_saga_params()
                 })
             },
             || Box::pin(after_unwinding(cptestctx)),
@@ -2114,7 +2119,7 @@ mod test {
                     outcome
                         .setup_test(cptestctx, &other_sleds)
                         .await
-                        .saga_params()
+                        .start_saga_params()
                 })
             },
             || Box::pin(after_unwinding(cptestctx)),
@@ -2176,7 +2181,7 @@ mod test {
                     outcome
                         .setup_test(cptestctx, &other_sleds)
                         .await
-                        .saga_params()
+                        .start_saga_params()
                 })
             },
             || Box::pin(after_unwinding(cptestctx)),
@@ -2327,7 +2332,7 @@ mod test {
             let nexus = &cptestctx.server.server_context().nexus;
             nexus
                 .sagas
-                .saga_execute::<SagaInstanceUpdate>(self.saga_params())
+                .saga_execute::<SagaInstanceUpdate>(self.start_saga_params())
                 .await
                 .expect("update saga should succeed");
 
@@ -2339,12 +2344,14 @@ mod test {
             &self,
             cptestctx: &ControlPlaneTestContext,
         ) {
+            let params = make_real_params(cptestctx, &self.opctx, self.start_saga_params()).await;
+
             // Build the saga DAG with the provided test parameters
-            let dag = create_saga_dag::<SagaInstanceUpdate>(self.saga_params())
+            let dag = create_saga_dag::<SagaDoActualInstanceUpdate>(params)
                 .unwrap();
 
             // Run the actions-succeed-idempotently test
-            crate::app::sagas::test_helpers::actions_succeed_idempotently(
+            test_helpers::actions_succeed_idempotently(
                 &cptestctx.server.server_context().nexus,
                 dag,
             )
@@ -2468,7 +2475,7 @@ mod test {
                 .expect("updating migration target state should succeed");
         }
 
-        fn saga_params(&self) -> Params {
+        fn start_saga_params(&self) -> Params {
             Params {
                 authz_instance: self.authz_instance.clone(),
                 serialized_authn: authn::saga::Serialized::for_opctx(
@@ -2639,6 +2646,49 @@ mod test {
                 PropolisUuid::from_untyped_uuid(self.target_vmm_id()),
             )
             .await
+        }
+    }
+
+    async fn make_real_params(
+        cptestctx: &ControlPlaneTestContext,
+        opctx: &OpContext,
+        Params { authz_instance, serialized_authn }: Params,
+    ) -> RealParams {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let log = &cptestctx.logctx.log;
+
+        let lock_id = Uuid::new_v4();
+        let orig_lock = datastore
+            .instance_updater_lock(opctx, &authz_instance, lock_id)
+            .await
+            .expect("must lock instance");
+        let state = datastore
+            .instance_fetch_all(&opctx, &authz_instance)
+            .await
+            .expect("instance must exist");
+        let update = UpdatesRequired::for_snapshot(&log, &state)
+            .expect("the test's precondition should require updates");
+
+        info!(
+            log,
+            "made params for real saga";
+            "instance" => ?state.instance,
+            "active_vmm" => ?state.active_vmm,
+            "target_vmm" => ?state.target_vmm,
+            "migration" => ?state.migration,
+            "update.new_runtime" => ?update.new_runtime,
+            "update.destroy_active_vmm" => ?update.destroy_active_vmm,
+            "update.destroy_target_vmm" => ?update.destroy_target_vmm,
+            "update.deprovision" => ?update.deprovision,
+            "update.network_config" => ?update.network_config,
+        );
+
+        RealParams {
+            authz_instance,
+            serialized_authn,
+            update,
+            orig_lock,
         }
     }
 }
