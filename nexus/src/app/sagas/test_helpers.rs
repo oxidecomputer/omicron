@@ -20,7 +20,11 @@ use nexus_db_model::InstanceState;
 use nexus_db_queries::{
     authz,
     context::OpContext,
-    db::{datastore::InstanceAndActiveVmm, lookup::LookupPath, DataStore},
+    db::{
+        datastore::{InstanceAndActiveVmm, InstanceGestalt},
+        lookup::LookupPath,
+        DataStore,
+    },
 };
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::start_sled_agent;
@@ -214,6 +218,33 @@ pub async fn instance_fetch(
     db_state
 }
 
+pub async fn instance_fetch_all(
+    cptestctx: &ControlPlaneTestContext,
+    instance_id: InstanceUuid,
+) -> InstanceGestalt {
+    let datastore = cptestctx.server.server_context().nexus.datastore().clone();
+    let opctx = test_opctx(&cptestctx);
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id.into_untyped_uuid())
+        .lookup_for(authz::Action::Read)
+        .await
+        .expect("test instance should be present in datastore");
+
+    let db_state = datastore
+        .instance_fetch_all(&opctx, &authz_instance)
+        .await
+        .expect("test instance's info should be fetchable");
+
+    info!(&cptestctx.logctx.log, "refetched all instance info from db";
+        "instance_id" => %instance_id,
+        "instance" => ?db_state.instance,
+        "active_vmm" => ?db_state.active_vmm,
+        "target_vmm" => ?db_state.target_vmm,
+        "migration" => ?db_state.migration,
+    );
+
+    db_state
+}
 pub async fn instance_fetch_by_name(
     cptestctx: &ControlPlaneTestContext,
     name: &str,
