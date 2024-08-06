@@ -47,6 +47,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintTarget;
+use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::external_api::views::SledState;
@@ -60,6 +61,8 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
 use uuid::Uuid;
+
+mod external_networking;
 
 impl DataStore {
     /// List blueprints
@@ -871,7 +874,34 @@ impl DataStore {
                     }
                 }
 
-                // TODO actual work
+                // Deallocate external networking resources for
+                // non-externally-reachable zones before allocating resources
+                // for reachable zones. This will allow allocation to succeed if
+                // we are swapping an external IP between two zones (e.g.,
+                // moving a specific external IP from an old external DNS zone
+                // to a new one).
+                self.ensure_zone_external_networking_deallocated_on_connection(
+                    &conn,
+                    &opctx.log,
+                    blueprint
+                        .all_omicron_zones_not_in(
+                            BlueprintZoneFilter::ShouldBeExternallyReachable,
+                        )
+                        .map(|(_sled_id, zone)| zone),
+                )
+                .await
+                .map_err(|e| err.bail(e))?;
+                self.ensure_zone_external_networking_allocated_on_connection(
+                    &conn,
+                    opctx,
+                    blueprint
+                        .all_omicron_zones(
+                            BlueprintZoneFilter::ShouldBeExternallyReachable,
+                        )
+                        .map(|(_sled_id, zone)| zone),
+                )
+                .await
+                .map_err(|e| err.bail(e))?;
 
                 // See the comment on this method; this lets us wait until our
                 // test caller is ready for us to return.
@@ -2346,9 +2376,7 @@ mod tests {
         // Our task to set bp2 as the target should now also complete.
         tokio::time::timeout(Duration::from_secs(10), update_target_task)
             .await
-            .expect(
-                "time out waiting for `blueprint_target_set_current`",
-            )
+            .expect("time out waiting for `blueprint_target_set_current`")
             .expect("panic in `blueprint_target_set_current")
             .expect("updated target to blueprint 2");
 
