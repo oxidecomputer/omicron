@@ -35,6 +35,7 @@ use diesel::OptionalExtension;
 use diesel::QueryDsl;
 use diesel::RunQueryDsl;
 use nexus_db_model::Blueprint as DbBlueprint;
+use nexus_db_model::BpOmicronDataset;
 use nexus_db_model::BpOmicronPhysicalDisk;
 use nexus_db_model::BpOmicronZone;
 use nexus_db_model::BpOmicronZoneNic;
@@ -148,6 +149,28 @@ impl DataStore {
                 })
             })
             .collect::<Vec<_>>();
+
+        let sled_omicron_datasets = blueprint
+            .blueprint_datasets
+            .iter()
+            .map(|(sled_id, datasets_config)| {
+                BpSledOmicronDatasets::new(
+                    blueprint_id,
+                    *sled_id,
+                    datasets_config,
+                )
+            })
+            .collect::<Vec<_>>();
+        let omicron_datasets = blueprint
+            .blueprint_datasets
+            .iter()
+            .flat_map(|(sled_id, datasets_config)| {
+                datasets_config.datasets.iter().map(move |dataset| {
+                    BpOmicronDataset::new(blueprint_id, *sled_id, dataset)
+                })
+            })
+            .collect::<Vec<_>>();
+
         let sled_omicron_zones = blueprint
             .blueprint_zones
             .iter()
@@ -226,6 +249,24 @@ impl DataStore {
                 use db::schema::bp_omicron_physical_disk::dsl as omicron_disk;
                 let _ = diesel::insert_into(omicron_disk::bp_omicron_physical_disk)
                     .values(omicron_physical_disks)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert all datasets for this blueprint.
+
+            {
+                use db::schema::bp_sled_omicron_datasets::dsl as sled_datasets;
+                let _ = diesel::insert_into(sled_datasets::bp_sled_omicron_datasets)
+                    .values(sled_omicron_datasets)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            {
+                use db::schema::bp_omicron_dataset::dsl as omicron_dataset;
+                let _ = diesel::insert_into(omicron_dataset::bp_omicron_dataset)
+                    .values(omicron_datasets)
                     .execute_async(&conn)
                     .await?;
             }
@@ -707,6 +748,8 @@ impl DataStore {
             nsled_states,
             nsled_physical_disks,
             nphysical_disks,
+            nsled_datasets,
+            ndatasets,
             nsled_agent_zones,
             nzones,
             nnics,
@@ -775,6 +818,26 @@ impl DataStore {
                     .await?
                 };
 
+                // Remove rows associated with Omicron datasets
+                let nsled_datasets = {
+                    use db::schema::bp_sled_omicron_datasets::dsl;
+                    diesel::delete(
+                        dsl::bp_sled_omicron_datasets
+                            .filter(dsl::blueprint_id.eq(blueprint_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+                let ndatasets = {
+                    use db::schema::bp_omicron_dataset::dsl;
+                    diesel::delete(
+                        dsl::bp_omicron_dataset
+                            .filter(dsl::blueprint_id.eq(blueprint_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
                 // Remove rows associated with Omicron zones
                 let nsled_agent_zones = {
                     use db::schema::bp_sled_omicron_zones::dsl;
@@ -811,6 +874,8 @@ impl DataStore {
                     nsled_states,
                     nsled_physical_disks,
                     nphysical_disks,
+                    nsled_datasets,
+                    ndatasets,
                     nsled_agent_zones,
                     nzones,
                     nnics,
@@ -830,6 +895,8 @@ impl DataStore {
             "nsled_states" => nsled_states,
             "nsled_physical_disks" => nsled_physical_disks,
             "nphysical_disks" => nphysical_disks,
+            "nsled_datasets" => nsled_datasets,
+            "ndatasets" => ndatasets,
             "nsled_agent_zones" => nsled_agent_zones,
             "nzones" => nzones,
             "nnics" => nnics,

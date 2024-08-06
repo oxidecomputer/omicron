@@ -44,6 +44,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::net::Ipv6Addr;
+use std::net::SocketAddrV6;
 use strum::EnumIter;
 use strum::IntoEnumIterator;
 use thiserror::Error;
@@ -214,6 +215,13 @@ impl Blueprint {
                 .filter(move |z| z.disposition.matches(filter))
                 .map(|z| (*sled_id, z))
         })
+    }
+
+    /// Iterate over the [`BlueprintDatasetsConfig`] instances in the blueprint.
+    pub fn all_omicron_datasets(
+        &self,
+    ) -> impl Iterator<Item = &BlueprintDatasetConfig> {
+        self.blueprint_datasets.iter().flat_map(move |(_, d)| d.datasets.iter())
     }
 
     /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint
@@ -947,12 +955,41 @@ impl From<BlueprintDatasetsConfig> for DatasetsConfig {
     }
 }
 
+/// The desired state of an Omicron-managed dataset in a blueprint.
+///
+/// Part of [`BlueprintDatasetConfig`].
+#[derive(
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    JsonSchema,
+    Deserialize,
+    Serialize,
+    EnumIter,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum BlueprintDatasetDisposition {
+    /// The dataset is in-service.
+    InService,
+
+    /// The dataset is permanently gone.
+    Expunged,
+}
+
 /// Information about a dataset as recorded in a blueprint
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub struct BlueprintDatasetConfig {
+    pub disposition: BlueprintDatasetDisposition,
+
     pub id: DatasetUuid,
     pub pool: ZpoolName,
     pub kind: DatasetKind,
+    pub address: Option<SocketAddrV6>,
     pub quota: Option<ByteCount>,
     pub reservation: Option<ByteCount>,
     pub compression: Option<String>,

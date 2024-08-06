@@ -13,19 +13,19 @@ use futures::StreamExt;
 use nexus_db_model::Dataset;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_types::deployment::BlueprintDatasetConfig;
+use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintDatasetsConfig;
-use nexus_types::deployment::BlueprintZoneConfig;
-use nexus_types::deployment::DurableDataset;
 use nexus_types::identity::Asset;
+use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetsConfig;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::info;
 use slog::o;
 use slog::warn;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 
 /// Idempotently ensures that the specified datasets are deployed to the
 /// corresponding sleds
@@ -107,15 +107,15 @@ pub(crate) async fn deploy_datasets(
     }
 }
 
-/// For each zone in `all_omicron_zones` that has an associated durable dataset,
-/// ensure that a corresponding dataset record exists in `datastore`.
+/// For all datasets we expect to see in the blueprint, ensure that a corresponding
+/// database record exists in `datastore`.
 ///
-/// Does not modify any existing dataset records. Returns the number of
-/// datasets inserted.
+/// Updates all existing dataset records that don't match the blueprint.
+/// Returns the number of datasets inserted.
 pub(crate) async fn ensure_dataset_records_exist(
     opctx: &OpContext,
     datastore: &DataStore,
-    all_omicron_zones: impl Iterator<Item = &BlueprintZoneConfig>,
+    bp_datasets: impl Iterator<Item = &BlueprintDatasetConfig>,
 ) -> anyhow::Result<usize> {
     // Before attempting to insert any datasets, first query for any existing
     // dataset records so we can filter them out. This looks like a typical
@@ -131,61 +131,92 @@ pub(crate) async fn ensure_dataset_records_exist(
         .await
         .context("failed to list all datasets")?
         .into_iter()
-        .map(|dataset| OmicronZoneUuid::from_untyped_uuid(dataset.id()))
-        .collect::<BTreeSet<_>>();
+        .map(|dataset| (DatasetUuid::from_untyped_uuid(dataset.id()), dataset))
+        .collect::<BTreeMap<DatasetUuid, _>>();
 
     let mut num_inserted = 0;
-    let mut num_already_exist = 0;
+    let mut num_updated = 0;
+    let mut num_unchanged = 0;
+    let mut num_removed = 0;
 
-    for zone in all_omicron_zones {
-        let Some(DurableDataset { dataset, kind, address }) =
-            zone.zone_type.durable_dataset()
-        else {
-            continue;
+    let (wanted_datasets, unwanted_datasets): (Vec<_>, Vec<_>) = bp_datasets
+        .partition(|d| match d.disposition {
+            BlueprintDatasetDisposition::InService => true,
+            BlueprintDatasetDisposition::Expunged => false,
+        });
+
+    for bp_dataset in wanted_datasets {
+        let id = bp_dataset.id;
+        let kind = &bp_dataset.kind;
+
+        // If this dataset already exists, only update it if it appears different from what exists
+        // in the database already.
+        let action = if let Some(db_dataset) = existing_datasets.remove(&id) {
+            let db_dataset: DatasetConfig = db_dataset.try_into()?;
+
+            if db_dataset == bp_dataset.clone().into() {
+                num_unchanged += 1;
+                continue;
+            }
+            num_updated += 1;
+            "update"
+        } else {
+            "insert"
         };
 
-        let id = zone.id;
-
-        // If already present in the datastore, move on.
-        if existing_datasets.remove(&id) {
-            num_already_exist += 1;
-            continue;
-        }
-
-        let pool_id = dataset.pool_name.id();
+        let address = bp_dataset.address;
         let dataset = Dataset::new(
             id.into_untyped_uuid(),
-            pool_id.into_untyped_uuid(),
-            Some(address),
+            bp_dataset.pool.id().into_untyped_uuid(),
+            address,
             kind.clone().into(),
             kind.zone_name(),
         );
-        let maybe_inserted = datastore
-            .dataset_insert_if_not_exists(dataset)
-            .await
-            .with_context(|| {
-                format!("failed to insert dataset record for dataset {id}")
-            })?;
+        datastore.dataset_upsert(dataset).await.with_context(|| {
+            format!("failed to upsert dataset record for dataset {id}")
+        })?;
 
-        // If we succeeded in inserting, log it; if `maybe_dataset` is `None`,
-        // we must have lost the TOCTOU race described above, and another Nexus
-        // must have inserted this dataset before we could.
-        if maybe_inserted.is_some() {
-            info!(
-                opctx.log,
-                "inserted new dataset for Omicron zone";
-                "id" => %id,
-                "kind" => ?kind,
-            );
-            num_inserted += 1;
-        } else {
-            num_already_exist += 1;
+        info!(
+            opctx.log,
+            "ensuring dataset record in database";
+            "action" => action,
+            "id" => %id,
+            "kind" => ?kind,
+        );
+        num_inserted += 1;
+    }
+
+    // TODO: I know we don't want to actually expunge crucible zones, but unclear
+    // where that decision SHOULD be made?
+    //
+    // --> Actually, idk about this. We should clearly read the disposition to
+    // decide which datasets to delete, but I think we need some
+    // planner/executor coordination to punt on Crucible.
+
+    for bp_dataset in unwanted_datasets {
+        if existing_datasets.remove(&bp_dataset.id).is_some() {
+            if matches!(
+                bp_dataset.kind,
+                omicron_common::disk::DatasetKind::Crucible
+            ) {
+                // Region and snapshot replacement cannot happen without the
+                // database record, even if the dataset has been expunged.
+                //
+                // This record will still be deleted, but it will happen as a
+                // part of the "decommissioned_disk_cleaner" background task.
+                continue;
+            }
+
+            datastore.dataset_delete(&opctx, bp_dataset.id).await?;
+            num_removed += 1;
         }
     }
 
-    // We don't currently support removing datasets, so this would be
-    // surprising: the database contains dataset records that are no longer in
-    // our blueprint. We can't do anything about this, so just warn.
+    // We support removing expunged datasets - if we read a dataset that hasn't
+    // been explicitly expunged, log this as an oddity.
+    //
+    // This could be possible in rare conditions where multiple Nexuses are executing
+    // distinct blueprints.
     if !existing_datasets.is_empty() {
         warn!(
             opctx.log,
@@ -197,9 +228,11 @@ pub(crate) async fn ensure_dataset_records_exist(
 
     info!(
         opctx.log,
-        "ensured all Omicron zones have dataset records";
+        "ensured all Omicron datasets have database records";
         "num_inserted" => num_inserted,
-        "num_already_existed" => num_already_exist,
+        "num_updated" => num_updated,
+        "num_unchanged" => num_unchanged,
+        "num_removed" => num_removed,
     );
 
     Ok(num_inserted)

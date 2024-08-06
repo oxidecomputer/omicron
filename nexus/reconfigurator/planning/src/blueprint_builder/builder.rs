@@ -17,6 +17,7 @@ use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetConfig;
+use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
@@ -678,7 +679,7 @@ impl<'a> BlueprintBuilder<'a> {
         sled_id: SledUuid,
         resources: &SledResources,
     ) -> Result<EnsureMultiple, Error> {
-        let (mut additions, mut updates, removals) = {
+        let (mut additions, mut updates, expunges, removals) = {
             let mut datasets_builder = BlueprintSledDatasetsBuilder::new(
                 sled_id,
                 &self.datasets,
@@ -690,14 +691,17 @@ impl<'a> BlueprintBuilder<'a> {
                 datasets_builder.all_bp_zpools().collect::<Vec<ZpoolUuid>>();
             for zpool_id in bp_zpools {
                 let zpool = ZpoolName::new_external(zpool_id);
+                let address = None;
                 datasets_builder.ensure(
                     DatasetName::new(zpool.clone(), DatasetKind::Debug),
+                    address,
                     Some(ByteCount::from_gibibytes_u32(100)),
                     None,
                     None,
                 );
                 datasets_builder.ensure(
                     DatasetName::new(zpool, DatasetKind::ZoneRoot),
+                    address,
                     None,
                     None,
                     None,
@@ -720,11 +724,13 @@ impl<'a> BlueprintBuilder<'a> {
                         zone.zone_type.kind().zone_prefix(),
                         zone.id,
                     );
+                    let address = None;
                     datasets_builder.ensure(
                         DatasetName::new(
                             fs_zpool.clone(),
                             DatasetKind::Zone { name },
                         ),
+                        address,
                         None,
                         None,
                         None,
@@ -734,8 +740,15 @@ impl<'a> BlueprintBuilder<'a> {
                 // Dataset for durable dataset co-located with zone
                 if let Some(dataset) = zone.zone_type.durable_dataset() {
                     let zpool = &dataset.dataset.pool_name;
+                    let address = match zone.zone_type {
+                        BlueprintZoneType::Crucible(
+                            blueprint_zone_type::Crucible { address, .. },
+                        ) => Some(address),
+                        _ => None,
+                    };
                     datasets_builder.ensure(
                         DatasetName::new(zpool.clone(), dataset.kind),
+                        address,
                         None,
                         None,
                         None,
@@ -746,11 +759,8 @@ impl<'a> BlueprintBuilder<'a> {
             // TODO: Note that we also have datasets in "zone/" for propolis
             // zones, but these are not currently being tracked by blueprints.
 
-            // TODO: upsert dataset records during execution
-            // NOTE: we add dataset records for durable datasets during
-            // the execution phase? need a different addition/removal criteria
-
-            let removals = datasets_builder.get_unused_datasets();
+            let expunges = datasets_builder.get_expungeable_datasets();
+            let removals = datasets_builder.get_removable_datasets();
 
             let additions = datasets_builder
                 .new_datasets
@@ -764,29 +774,55 @@ impl<'a> BlueprintBuilder<'a> {
                     datasets.into_values().map(|dataset| (dataset.id, dataset))
                 })
                 .collect::<BTreeMap<DatasetUuid, _>>();
-            (additions, updates, removals)
+            (additions, updates, expunges, removals)
         };
 
-        if additions.is_empty() && updates.is_empty() && removals.is_empty() {
+        if additions.is_empty()
+            && updates.is_empty()
+            && expunges.is_empty()
+            && removals.is_empty()
+        {
             return Ok(EnsureMultiple::NotNeeded);
         }
         let added = additions.len();
         let updated = updates.len();
-        let removed = removals.len();
+        // This is a little overloaded, but:
+        // - When a dataset is expunged, for whatever reason, it is a part of
+        // "expunges". This leads to it getting removed from a sled.
+        // - When we know that we've safely destroyed all traces of the dataset,
+        // it becomes a part of "removals". This means we can remove it from the
+        // blueprint.
+        let removed = expunges.len() + removals.len();
 
         let datasets =
             &mut self.datasets.change_sled_datasets(sled_id).datasets;
 
-        // Apply updates & removals in the same iteration
-        datasets.retain_mut(|config| {
+        // Add all new datasets
+        datasets.append(&mut additions);
+
+        for config in &mut *datasets {
+            // Apply updates
             if let Some(new_config) = updates.remove(&config.id) {
                 *config = new_config;
             };
 
-            !removals.contains(&config.id)
+            // Mark unused datasets as expunged.
+            //
+            // This indicates that the dataset should be removed from the database.
+            if expunges.contains(&config.id) {
+                config.disposition = BlueprintDatasetDisposition::Expunged;
+            }
+        }
+
+        // Remove all datasets that we've finished expunging.
+        datasets.retain(|d| {
+            debug_assert_eq!(
+                d.disposition,
+                BlueprintDatasetDisposition::Expunged,
+                "We should only be removing datasets that are already expunged"
+            );
+            !removals.contains(&d.id)
         });
-        // Add all new datasets afterwards
-        datasets.append(&mut additions);
 
         // We sort in the call to "BlueprintDatasetsBuilder::into_datasets_map",
         // so we don't need to sort "datasets" now.
@@ -1598,6 +1634,7 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
     pub fn ensure(
         &mut self,
         dataset: DatasetName,
+        address: Option<SocketAddrV6>,
         quota: Option<ByteCount>,
         reservation: Option<ByteCount>,
         compression: Option<String>,
@@ -1607,9 +1644,11 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
         let kind = dataset.dataset();
 
         let make_config = |id: DatasetUuid| BlueprintDatasetConfig {
+            disposition: BlueprintDatasetDisposition::InService,
             id,
             pool: zpool.clone(),
             kind: kind.clone(),
+            address,
             quota,
             reservation,
             compression,
@@ -1656,7 +1695,7 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
 
     /// Returns all datasets in the old blueprint that are not planned to be
     /// part of the new blueprint.
-    pub fn get_unused_datasets(&self) -> BTreeSet<DatasetUuid> {
+    pub fn get_expungeable_datasets(&self) -> BTreeSet<DatasetUuid> {
         let dataset_exists_in =
             |group: &BTreeMap<
                 ZpoolUuid,
@@ -1693,6 +1732,48 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
             }
         }
 
+        removals
+    }
+
+    /// Returns all datasets that have been expunged in a prior blueprint,
+    /// and which are also deleted from the database.
+    ///
+    /// This is our sign that the work of expungement has completed.
+    pub fn get_removable_datasets(&self) -> BTreeSet<DatasetUuid> {
+        let dataset_exists_in =
+            |group: &BTreeMap<
+                ZpoolUuid,
+                BTreeMap<DatasetKind, &DatasetConfig>,
+            >,
+             zpool_id: ZpoolUuid,
+             dataset_id: DatasetUuid| {
+                let Some(datasets) = group.get(&zpool_id) else {
+                    return false;
+                };
+
+                for (_, dataset_config) in datasets {
+                    if dataset_config.id == dataset_id {
+                        return true;
+                    }
+                }
+                return false;
+            };
+
+        let mut removals = BTreeSet::new();
+        for (zpool_id, datasets) in &self.blueprint_datasets {
+            for (_kind, config) in datasets {
+                if matches!(
+                    config.disposition,
+                    BlueprintDatasetDisposition::Expunged
+                ) && !dataset_exists_in(
+                    &self.database_datasets,
+                    *zpool_id,
+                    config.id,
+                ) {
+                    removals.insert(config.id);
+                }
+            }
+        }
         removals
     }
 

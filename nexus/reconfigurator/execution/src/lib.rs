@@ -197,9 +197,7 @@ where
     datasets::ensure_dataset_records_exist(
         &opctx,
         datastore,
-        blueprint
-            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
-            .map(|(_sled_id, zone)| zone),
+        blueprint.all_omicron_datasets(),
     )
     .await
     .map_err(|err| vec![err])?;

@@ -1596,9 +1596,13 @@ table! {
         sled_id -> Uuid,
         id -> Uuid,
 
+        disposition -> crate::DbBpDatasetDispositionEnum,
+
         pool_id -> Uuid,
         kind -> crate::DatasetKindEnum,
         zone_name -> Nullable<Text>,
+        ip -> Nullable<Inet>,
+        port -> Nullable<Int4>,
 
         quota -> Nullable<Int8>,
         reservation -> Nullable<Int8>,

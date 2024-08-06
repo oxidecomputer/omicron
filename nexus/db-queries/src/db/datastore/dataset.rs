@@ -27,11 +27,14 @@ use diesel::upsert::excluded;
 use nexus_db_model::DatasetKind;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::GenericUuid;
 use uuid::Uuid;
 
 impl DataStore {
@@ -69,6 +72,10 @@ impl DataStore {
                     dsl::ip.eq(excluded(dsl::ip)),
                     dsl::port.eq(excluded(dsl::port)),
                     dsl::kind.eq(excluded(dsl::kind)),
+                    dsl::zone_name.eq(excluded(dsl::zone_name)),
+                    dsl::quota.eq(excluded(dsl::quota)),
+                    dsl::reservation.eq(excluded(dsl::reservation)),
+                    dsl::compression.eq(excluded(dsl::compression)),
                 )),
         )
         .insert_and_get_result_async(
@@ -181,6 +188,31 @@ impl DataStore {
         }
 
         Ok(all_datasets)
+    }
+
+    pub async fn dataset_delete(
+        &self,
+        opctx: &OpContext,
+        id: DatasetUuid,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        use db::schema::dataset::dsl as dataset_dsl;
+        let now = Utc::now();
+
+        let conn = &*self.pool_connection_authorized(&opctx).await?;
+
+        let id = *id.as_untyped_uuid();
+        diesel::update(dataset_dsl::dataset)
+            .filter(dataset_dsl::time_deleted.is_null())
+            .filter(dataset_dsl::id.eq(id))
+            .set(dataset_dsl::time_deleted.eq(now))
+            .execute_async(conn)
+            .await
+            .map(|_rows_modified| ())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
     }
 
     pub async fn dataset_physical_disk_in_service(
