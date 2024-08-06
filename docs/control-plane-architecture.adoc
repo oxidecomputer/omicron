@@ -20,7 +20,7 @@ In software systems the terms **data plane** and **control plane** are often use
 
 Broadly, the control plane must provide:
 
-* an externally-facing API endpoint described in <<rfd4>> through which users can provision elastic infrastructure backed by the system.  This includes APIs for compute Instances, storage, networking, as well as supporting resources like organizations, users, groups, ssh keys, tags, and so on.  This API may be used by developers directly as well as the developer console backend.  See <<rfd30>>.
+* an externally-facing API endpoint described in <<rfd4>> through which users can provision elastic infrastructure backed by the system.  This includes APIs for compute instances, storage, networking, as well as supporting resources like organizations, users, groups, ssh keys, tags, and so on.  This API may be used by developers directly as well as the developer console backend.  See <<rfd30>>.
 * an externally-facing API endpoint for all operator functions.  This is a long list, including configuration and management of hardware and software components and monitoring.
 * implementation of lifecycle activities, like initial system setup; adding, removing, or replacing servers or other components; and the like.
 * facilities for remote support by Oxide, including secure access to crash dumps, core files, log files, and system consoles.
@@ -31,11 +31,11 @@ Broadly, the control plane must provide:
 
 IMPORTANT: Generally, the control plane is expected to remain **available** in the face of any two hardware or software failures, including transient failures of individual compute sleds, power rectifiers, switches, or the like.
 
-**Durability.**  Along the same lines, resources created in the control plane are expected to be durable unless otherwise specified.  That is, if the whole system is powered off and on again ("cold start"), the system should converge to a point where all Instances, disks, and networking resources that were running before the power outage are available as they were from the user's perspective before the event.  Similarly, if a compute server is lost (either through graceful decommissioning or otherwise), it should be possible to resume service of resources that were running on that server (e.g., Instances, disks) on other servers in the system.  There may be additional constraints on how many servers can fail permanently before data is lost, but in no case should it be possible to permanently lose an Instance, disk, or other resource after the permanent failure of two compute sleds.
+**Durability.**  Along the same lines, resources created in the control plane are expected to be durable unless otherwise specified.  That is, if the whole system is powered off and on again ("cold start"), the system should converge to a point where all instances, disks, and networking resources that were running before the power outage are available as they were from the user's perspective before the event.  Similarly, if a compute server is lost (either through graceful decommissioning or otherwise), it should be possible to resume service of resources that were running on that server (e.g., instances, disks) on other servers in the system.  There may be additional constraints on how many servers can fail permanently before data is lost, but in no case should it be possible to permanently lose an instance, disk, or other resource after the permanent failure of two compute sleds.
 
 IMPORTANT: Resources created by users should generally survive permanent failure of any two hardware or software components.
 
-**Consistency.**  Generally, users can expect strong consistency for resources within some namespace.  The bounds of the namespace for a particular resource may vary as described in <<rfd24>>.  For example, if a user creates an Instance, another user with appropriate permissions should immediately see that Instance.  In terms of **CAP**, the system is generally CP, with an emphasis on avoiding partitions through reliable software and hardware.
+**Consistency.**  Generally, users can expect strong consistency for resources within some namespace.  The bounds of the namespace for a particular resource may vary as described in <<rfd24>>.  For example, if a user creates an instance, another user with appropriate permissions should immediately see that instance.  In terms of **CAP**, the system is generally CP, with an emphasis on avoiding partitions through reliable software and hardware.
 
 IMPORTANT: The API namespace is generally expected to provide strong consistency.
 
