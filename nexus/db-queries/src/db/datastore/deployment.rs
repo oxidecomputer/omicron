@@ -2339,8 +2339,24 @@ mod tests {
         .await
         .expect("`target_check_done` not set to true");
 
-        // Now spawn another task that attempts to update the current target to
-        // blueprint2.
+        // Spawn another task that tries to read the current target. This should
+        // block at the database level due to the `SELECT ... FOR UPDATE` inside
+        // `blueprint_ensure_external_networking_resources`.
+        let mut current_target_task = tokio::spawn({
+            let datastore = datastore.clone();
+            let opctx =
+                OpContext::for_tests(logctx.log.clone(), datastore.clone());
+            async move {
+                datastore
+                    .blueprint_target_get_current(&opctx)
+                    .await
+                    .expect("read current target")
+            }
+        });
+
+        // Spawn another task that tries to set the current target. This should
+        // block at the database level due to the `SELECT ... FOR UPDATE` inside
+        // `blueprint_ensure_external_networking_resources`.
         let mut update_target_task = tokio::spawn({
             let datastore = datastore.clone();
             let opctx =
@@ -2350,20 +2366,21 @@ mod tests {
             }
         });
 
-        // Neither of our spawned tasks should be able to make progress:
+        // None of our spawned tasks should be able to make progress:
         // `ensure_resources_task` is waiting for us to set
-        // `return_on_completion` to true, and `update_target_task` should be
+        // `return_on_completion` to true, and the other two should be
         // queued by Cockroach, because
         // `blueprint_ensure_external_networking_resources` should have
         // performed a `SELECT ... FOR UPDATE` on the current target, forcing
         // the query that wants to change it to wait until the transaction
         // completes.
         //
-        // We'll somewhat haphazardly test this by trying to wait for either
+        // We'll somewhat haphazardly test this by trying to wait for any
         // task to finish, and succeeding on a timeout of a few seconds. This
-        // will spuriously succeed if both are executing on a very overloaded
-        // system, but hopefully will fail often enough if we've gotten this
-        // wrong.
+        // could spuriously succeed if we're executing on a very overloaded
+        // system where we hit the timeout even though one of the tasks is
+        // actually making progress, but hopefully will fail often enough if
+        // we've gotten this wrong.
         tokio::select! {
             result = &mut ensure_resources_task => {
                 panic!(
@@ -2376,6 +2393,12 @@ mod tests {
                 panic!(
                     "unexpected completion of \
                      `blueprint_target_set_current`: {result:?}",
+                );
+            }
+            result = &mut current_target_task => {
+                panic!(
+                    "unexpected completion of \
+                     `blueprint_target_get_current`: {result:?}",
                 );
             }
             _ = tokio::time::sleep(Duration::from_secs(5)) => (),
@@ -2393,12 +2416,16 @@ mod tests {
             .expect("panic in `blueprint_ensure_external_networking_resources")
             .expect("ensured networking resources for empty blueprint 2");
 
-        // Our task to set bp2 as the target should now also complete.
+        // Our other tasks should now also complete.
         tokio::time::timeout(Duration::from_secs(10), update_target_task)
             .await
             .expect("time out waiting for `blueprint_target_set_current`")
             .expect("panic in `blueprint_target_set_current")
             .expect("updated target to blueprint 2");
+        tokio::time::timeout(Duration::from_secs(10), current_target_task)
+            .await
+            .expect("time out waiting for `blueprint_target_get_current`")
+            .expect("panic in `blueprint_target_get_current");
 
         // Clean up.
         db.cleanup().await.unwrap();
