@@ -11,6 +11,7 @@ use crate::common::instance::{
 use crate::instance_manager::{
     Error as ManagerError, InstanceManagerServices, InstanceTicket,
 };
+use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClientWithResolver;
 use crate::params::ZoneBundleMetadata;
 use crate::params::{InstanceExternalIpBody, ZoneBundleCause};
@@ -363,6 +364,9 @@ struct InstanceRunner {
 
     // Object used to collect zone bundles from this instance when terminated.
     zone_bundler: ZoneBundler,
+
+    // Queue to notify the sled agent's metrics task about our VNICs.
+    metrics_queue: MetricsRequestQueue,
 
     // Object representing membership in the "instance manager".
     instance_ticket: InstanceTicket,
@@ -806,6 +810,12 @@ impl InstanceRunner {
             return;
         };
 
+        // Ask the sled-agent's metrics task to stop tracking statistics for our
+        // control VNIC and any OPTE ports in the zone as well.
+        self.metrics_queue
+            .untrack_zone_links(&running_state.running_zone)
+            .await;
+
         // Take a zone bundle whenever this instance stops.
         if let Err(e) = self
             .zone_bundler
@@ -1008,6 +1018,7 @@ impl Instance {
             storage,
             zone_bundler,
             zone_builder_factory,
+            metrics_queue,
         } = services;
 
         let mut dhcp_config = DhcpCfg {
@@ -1097,6 +1108,7 @@ impl Instance {
             storage,
             zone_builder_factory,
             zone_bundler,
+            metrics_queue,
             instance_ticket: ticket,
         };
 
@@ -1395,8 +1407,11 @@ impl InstanceRunner {
     }
 
     async fn setup_propolis_inner(&mut self) -> Result<PropolisSetup, Error> {
-        // Create OPTE ports for the instance
+        // Create OPTE ports for the instance. We also store the names of all
+        // those ports to notify the metrics task to start collecting statistics
+        // for them.
         let mut opte_ports = Vec::with_capacity(self.requested_nics.len());
+        let mut opte_port_names = Vec::with_capacity(self.requested_nics.len());
         for nic in self.requested_nics.iter() {
             let (snat, ephemeral_ip, floating_ips) = if nic.primary {
                 (
@@ -1416,6 +1431,7 @@ impl InstanceRunner {
                 dhcp_config: self.dhcp_config.clone(),
                 is_service: false,
             })?;
+            opte_port_names.push(port.0.name().to_string());
             opte_ports.push(port);
         }
 
@@ -1497,6 +1513,16 @@ impl InstanceRunner {
             .await
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
         info!(self.log, "Propolis SMF service is online");
+
+        // Notify the metrics task about the instance zone's datalinks.
+        if !self.metrics_queue.track_zone_links(&running_zone).await {
+            error!(
+                self.log,
+                "Failed to track one or more datalinks in the zone, \
+                some metrics will not be produced";
+                "zone_name" => running_zone.name(),
+            );
+        }
 
         // We use a custom client builder here because the default progenitor
         // one has a timeout of 15s but we want to be able to wait indefinitely.
@@ -1593,6 +1619,7 @@ impl InstanceRunner {
 mod tests {
     use super::*;
     use crate::fakes::nexus::{FakeNexusServer, ServerContext};
+    use crate::metrics;
     use crate::vmm_reservoir::VmmReservoirManagerHandle;
     use crate::zone_bundle::CleanupContext;
     use camino_tempfile::Utf8TempDir;
@@ -1623,6 +1650,11 @@ mod tests {
 
     const TIMEOUT_DURATION: tokio::time::Duration =
         tokio::time::Duration::from_secs(30);
+
+    // Make the Propolis ID const, so we can refer to it in tests that check the
+    // zone name is included in requests to track the zone's links.
+    const PROPOLIS_ID: Uuid =
+        uuid::uuid!("e8e95a60-2aaf-4453-90e4-e0e58f126762");
 
     #[derive(Default, Clone)]
     enum ReceivedInstanceState {
@@ -1781,16 +1813,16 @@ mod tests {
         nexus_client_with_resolver: NexusClientWithResolver,
         storage_handle: StorageHandle,
         temp_dir: &String,
-    ) -> Instance {
+    ) -> (Instance, MetricsRx) {
         let id = InstanceUuid::new_v4();
-        let propolis_id = PropolisUuid::new_v4();
+        let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
 
         let ticket = InstanceTicket::new_without_manager_for_test(id);
 
         let initial_state =
             fake_instance_initial_state(propolis_id, propolis_addr);
 
-        let services = fake_instance_manager_services(
+        let (services, rx) = fake_instance_manager_services(
             log,
             storage_handle,
             nexus_client_with_resolver,
@@ -1809,7 +1841,7 @@ mod tests {
             serial: "fake-serial".into(),
         };
 
-        Instance::new(
+        let instance = Instance::new(
             log.new(o!("component" => "Instance")),
             id,
             propolis_id,
@@ -1819,7 +1851,8 @@ mod tests {
             sled_identifiers,
             metadata,
         )
-        .unwrap()
+        .unwrap();
+        (instance, rx)
     }
 
     fn fake_instance_initial_state(
@@ -1869,12 +1902,15 @@ mod tests {
         }
     }
 
+    // Helper alias for the receive-side of the metrics request queue.
+    type MetricsRx = mpsc::Receiver<metrics::Message>;
+
     fn fake_instance_manager_services(
         log: &Logger,
         storage_handle: StorageHandle,
         nexus_client_with_resolver: NexusClientWithResolver,
         temp_dir: &String,
-    ) -> InstanceManagerServices {
+    ) -> (InstanceManagerServices, MetricsRx) {
         let vnic_allocator =
             VnicAllocator::new("Foo", Etherstub("mystub".to_string()));
         let port_manager = PortManager::new(
@@ -1889,14 +1925,17 @@ mod tests {
             cleanup_context,
         );
 
-        InstanceManagerServices {
+        let (metrics_queue, rx) = MetricsRequestQueue::for_test();
+        let services = InstanceManagerServices {
             nexus_client: nexus_client_with_resolver,
             vnic_allocator,
             port_manager,
             storage: storage_handle,
             zone_bundler,
             zone_builder_factory: ZoneBuilderFactory::fake(Some(temp_dir)),
-        }
+            metrics_queue,
+        };
+        (services, rx)
     }
 
     #[tokio::test]
@@ -1926,7 +1965,7 @@ mod tests {
         let temp_guard = Utf8TempDir::new().unwrap();
         let temp_dir = temp_guard.path().to_string();
 
-        let inst = timeout(
+        let (inst, mut metrics_rx) = timeout(
             TIMEOUT_DURATION,
             instance_struct(
                 &log,
@@ -1969,6 +2008,25 @@ mod tests {
         .expect("timed out waiting for InstanceState::Running in FakeNexus")
         .expect("failed to receive FakeNexus' InstanceState");
 
+        // We should have received exactly one message on the metrics request
+        // queue, for the control VNIC. The instance has no OPTE ports.
+        let message =
+            metrics_rx.try_recv().expect("Should have received a message");
+        let zone_name =
+            propolis_zone_name(&PropolisUuid::from_untyped_uuid(PROPOLIS_ID));
+        assert_eq!(
+            message,
+            metrics::Message::TrackVnic {
+                zone_name,
+                name: "oxControlFoo0".into(),
+            },
+            "Expected instance zone to send a message on its metrics \
+            request queue, asking to track its control VNIC",
+        );
+        metrics_rx
+            .try_recv()
+            .expect_err("The metrics request queue should have one message");
+
         storage_harness.cleanup().await;
         logctx.cleanup_successful();
     }
@@ -1998,7 +2056,7 @@ mod tests {
         let temp_guard = Utf8TempDir::new().unwrap();
         let temp_dir = temp_guard.path().to_string();
 
-        let inst = timeout(
+        let (inst, _) = timeout(
             TIMEOUT_DURATION,
             instance_struct(
                 &log,
@@ -2107,7 +2165,7 @@ mod tests {
         let temp_guard = Utf8TempDir::new().unwrap();
         let temp_dir = temp_guard.path().to_string();
 
-        let inst = timeout(
+        let (inst, _) = timeout(
             TIMEOUT_DURATION,
             instance_struct(
                 &log,
@@ -2184,6 +2242,12 @@ mod tests {
         let temp_guard = Utf8TempDir::new().unwrap();
         let temp_dir = temp_guard.path().to_string();
 
+        let (services, mut metrics_rx) = fake_instance_manager_services(
+            &log,
+            storage_handle,
+            nexus_client,
+            &temp_dir,
+        );
         let InstanceManagerServices {
             nexus_client,
             vnic_allocator: _,
@@ -2191,12 +2255,8 @@ mod tests {
             storage,
             zone_bundler,
             zone_builder_factory,
-        } = fake_instance_manager_services(
-            &log,
-            storage_handle,
-            nexus_client,
-            &temp_dir,
-        );
+            metrics_queue,
+        } = services;
 
         let etherstub = Etherstub("mystub".to_string());
 
@@ -2211,6 +2271,7 @@ mod tests {
             zone_bundler,
             zone_builder_factory,
             vmm_reservoir_manager,
+            metrics_queue,
         )
         .unwrap();
 
@@ -2219,7 +2280,7 @@ mod tests {
         let propolis_addr = propolis_server.local_addr();
 
         let instance_id = InstanceUuid::new_v4();
-        let propolis_id = PropolisUuid::new_v4();
+        let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
         let InstanceInitialState {
             hardware,
             instance_runtime,
@@ -2268,6 +2329,24 @@ mod tests {
         .await
         .expect("timed out waiting for InstanceState::Running in FakeNexus")
         .expect("failed to receive FakeNexus' InstanceState");
+
+        // We should have received exactly one message on the metrics request
+        // queue, for the control VNIC. The instance has no OPTE ports.
+        let message =
+            metrics_rx.try_recv().expect("Should have received a message");
+        let zone_name = propolis_zone_name(&propolis_id);
+        assert_eq!(
+            message,
+            metrics::Message::TrackVnic {
+                zone_name,
+                name: "oxControlInstance0".into(),
+            },
+            "Expected instance zone to send a message on its metrics \
+            request queue, asking to track its control VNIC",
+        );
+        metrics_rx
+            .try_recv()
+            .expect_err("The metrics request queue should have one message");
 
         storage_harness.cleanup().await;
         logctx.cleanup_successful();
