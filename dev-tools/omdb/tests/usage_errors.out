@@ -116,6 +116,7 @@ Commands:
   sleds                Print information about sleds
   instances            Print information about customer instances
   network              Print information about the network
+  migrations           Print information about migrations
   snapshots            Print information about snapshots
   validate             Validate the contents of the database
   volumes              Print information about volumes
@@ -159,6 +160,7 @@ Commands:
   sleds                Print information about sleds
   instances            Print information about customer instances
   network              Print information about the network
+  migrations           Print information about migrations
   snapshots            Print information about snapshots
   validate             Validate the contents of the database
   volumes              Print information about volumes

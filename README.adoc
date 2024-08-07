@@ -288,7 +288,7 @@ The server also accepts command-line flags for overriding the values of the conf
 parameters.
 
 The packages downloaded by `cargo xtask download clickhouse` include a `config.xml` file with them.
-You should probably run ClickHouse via the `omicron-dev` tool, but if you decide to run it
+You should probably run ClickHouse via the `ch-dev` tool, but if you decide to run it
 manually, you can start the server with:
 
 [source,text]
