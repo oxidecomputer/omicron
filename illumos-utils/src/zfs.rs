@@ -403,9 +403,7 @@ impl Zfs {
                 err: err.err.into(),
             });
         }
-        if let Err(err) =
-            Self::set_value(name, "reservation", &reservation)
-        {
+        if let Err(err) = Self::set_value(name, "reservation", &reservation) {
             return Err(EnsureFilesystemError {
                 name: name.to_string(),
                 mountpoint: mountpoint.clone(),
