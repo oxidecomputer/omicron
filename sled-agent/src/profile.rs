@@ -4,8 +4,7 @@
 
 //! Utilities to build SMF profiles.
 
-use illumos_utils::running_zone::{InstalledZone, SWITCH_ZONE_INIT_STAGE};
-use illumos_utils::zone::SWITCH_ZONE_NAME;
+use illumos_utils::running_zone::InstalledZone;
 use slog::Logger;
 use std::{
     collections::BTreeMap,
@@ -32,13 +31,7 @@ impl ProfileBuilder {
         log: &Logger,
         installed_zone: &InstalledZone,
     ) -> Result<(), std::io::Error> {
-        let profile_info =
-            format!("Profile for {}:\n{}", installed_zone.name(), self);
-        if installed_zone.name() == SWITCH_ZONE_NAME {
-            info!(log, "{profile_info}"; "stage" => SWITCH_ZONE_INIT_STAGE);
-        } else {
-            info!(log, "{profile_info}");
-        }
+        info!(log, "Profile for {}:\n{}", installed_zone.name(), self);
         let profile_path = installed_zone.site_profile_xml_path();
 
         tokio::fs::write(&profile_path, format!("{self}").as_bytes()).await?;

@@ -372,9 +372,8 @@ impl<'a> EarlyNetworkSetup<'a> {
         );
         let mgs_client = MgsClient::new(
             &format!("http://[{}]:{}", switch_zone_underlay_ip, MGS_PORT),
-            self.log.new(o!(
+            log.new(o!(
                 "component" => "MgsClient",
-                "stage" => SWITCH_ZONE_INIT_STAGE,
             )),
         );
         let switch_slot = retry_notify(
@@ -419,16 +418,15 @@ impl<'a> EarlyNetworkSetup<'a> {
         info!(
             log,
             "Initializing {} Uplinks on {switch_location:?} at \
-             {switch_zone_underlay_ip}",
+             {switch_zone_underlay_ip} via Dendrite",
             our_ports.len(),
         );
         let dpd = DpdClient::new(
             &format!("http://[{}]:{}", switch_zone_underlay_ip, DENDRITE_PORT),
             dpd_client::ClientState {
                 tag: OMICRON_DPD_TAG.into(),
-                log: self.log.new(o!(
+                log: log.new(o!(
                     "component" => "DpdClient",
-                    "stage" => SWITCH_ZONE_INIT_STAGE,
                 )),
             },
         );
@@ -462,7 +460,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                             e.status()
                         {
                             warn!(
-                                self.log,
+                                log,
                                 "unable to apply uplink configuration, dendrite not available";
                                 "port_id" => ?port_id,
                                 "configuration" => ?dpd_port_settings,
@@ -596,6 +594,10 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         if !bgp_peer_configs.is_empty() {
             if let Some(config) = &config {
+                info!(
+                    log,
+                    "Applying BGP configuration via Maghemite daemon (MGD).";
+                    "configuration" => ?config);
                 mgd.bgp_apply(&ApplyRequest {
                     asn: config.asn,
                     peers: bgp_peer_configs,
@@ -643,6 +645,10 @@ impl<'a> EarlyNetworkSetup<'a> {
                 rq.routes.list.push(sr);
             }
         }
+        info!(
+            log,
+            "Adding static IPv4 routes via Maghemite daemon (MGD).";
+            "routes" => ?rq.routes.list);
         mgd.static_add_v4_route(&rq).await.map_err(|e| {
             EarlyNetworkSetupError::BgpConfigurationError(format!(
                 "static routing configuration failed: {e}",
@@ -668,6 +674,10 @@ impl<'a> EarlyNetworkSetup<'a> {
                 peer: spec.remote,
                 required_rx: spec.required_rx,
             };
+            info!(
+                log,
+                "Adding BFD peer config to Maghemite daemon (MGD).";
+                "static route request" => ?cfg);
             mgd.add_bfd_peer(&cfg).await.map_err(|e| {
                 EarlyNetworkSetupError::BfdConfigurationError(e.to_string())
             })?;
@@ -680,7 +690,8 @@ impl<'a> EarlyNetworkSetup<'a> {
         &self,
         port_config: &PortConfig,
     ) -> Result<(PortSettings, PortId), EarlyNetworkSetupError> {
-        info!(self.log, "Building Port Configuration");
+        let log = self.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
+        info!(log, "Building Dendrite Port Configuration");
         let mut dpd_port_settings = PortSettings { links: HashMap::new() };
         let link_id = LinkId(0);
 
@@ -717,12 +728,13 @@ impl<'a> EarlyNetworkSetup<'a> {
     }
 
     async fn wait_for_dendrite(&self, dpd: &DpdClient) {
+        let log = self.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
         loop {
-            info!(self.log, "Checking dendrite uptime");
+            info!(log, "Checking dendrite uptime");
             match dpd.dpd_uptime().await {
                 Ok(uptime) => {
                     info!(
-                        self.log,
+                        log,
                         "Dendrite online";
                         "uptime" => uptime.to_string()
                     );
@@ -730,13 +742,13 @@ impl<'a> EarlyNetworkSetup<'a> {
                 }
                 Err(e) => {
                     info!(
-                        self.log,
+                        log,
                         "Unable to check Dendrite uptime";
                         "reason" => #?e
                     );
                 }
             }
-            info!(self.log, "Waiting for dendrite to come online");
+            info!(log, "Waiting for dendrite to come online every 2 seconds");
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
     }

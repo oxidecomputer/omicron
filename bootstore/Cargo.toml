@@ -19,6 +19,7 @@ ciborium.workspace = true
 derive_more.workspace = true
 hex.workspace = true
 hkdf.workspace = true
+illumos-utils.workspace = true
 omicron-common.workspace = true
 rand = { workspace = true, features = ["getrandom"] }
 secrecy.workspace = true

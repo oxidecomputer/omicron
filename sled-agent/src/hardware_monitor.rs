@@ -173,7 +173,14 @@ impl HardwareMonitor {
     ) {
         match update {
             Ok(update) => match update {
-                HardwareUpdate::TofinoLoaded => self.activate_switch().await,
+                HardwareUpdate::TofinoLoaded => {
+                    info!(
+                        self.log,
+                        "Tofino ASIC is loaded. Activating switch zone on scrimlet";
+                        "stage" => SWITCH_ZONE_INIT_STAGE
+                    );
+                    self.activate_switch().await
+                }
                 HardwareUpdate::TofinoUnloaded => {
                     self.deactivate_switch().await
                 }
@@ -229,22 +236,24 @@ impl HardwareMonitor {
     }
 
     async fn activate_switch(&mut self) {
+        let log = self.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
         match &mut self.tofino_manager {
             TofinoManager::Ready(service_manager) => {
+                let underlay_info = self
+                    .sled_agent
+                    .as_ref()
+                    .map(|sa| sa.switch_zone_underlay_info());
+                info!(
+                    log,
+                    "Tofino ASIC is ready, activating switch";
+                    "underlay info" => ?underlay_info,
+                    "baseboard" => ?self.baseboard
+                );
                 if let Err(e) = service_manager
-                    .activate_switch(
-                        self.sled_agent
-                            .as_ref()
-                            .map(|sa| sa.switch_zone_underlay_info()),
-                        self.baseboard.clone(),
-                    )
+                    .activate_switch(underlay_info, self.baseboard.clone())
                     .await
                 {
-                    error!(
-                        self.log,
-                        "Failed to activate switch"; e,
-                        "stage" => SWITCH_ZONE_INIT_STAGE
-                    );
+                    error!(log,"Failed to activate switch"; e);
                 }
             }
             TofinoManager::NotReady { tofino_loaded } => {

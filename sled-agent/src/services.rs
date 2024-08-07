@@ -53,7 +53,7 @@ use illumos_utils::opte::{
 };
 use illumos_utils::running_zone::{
     EnsureAddressError, InstalledZone, RunCommandError, RunningZone,
-    SWITCH_ZONE_INIT_STAGE, ZoneBuilderFactory,
+    ZoneBuilderFactory, SWITCH_ZONE_INIT_STAGE,
 };
 use illumos_utils::smf_helper::SmfHelper;
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
@@ -2281,6 +2281,8 @@ impl ServiceManager {
                 zone: SwitchZoneConfig { id, services, addresses },
                 ..
             }) => {
+                let log =
+                    self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
                 let info = self.inner.sled_info.get();
 
                 let gw_addr = match info {
@@ -2366,7 +2368,7 @@ impl ServiceManager {
                 for service in services {
                     match service {
                         SwitchService::ManagementGatewayService => {
-                            info!(self.inner.log, "Setting up MGS service");
+                            info!(log, "Setting up MGS service");
                             let mut mgs_config =
                                 PropertyGroupBuilder::new("config")
                                     // Always tell MGS to listen on localhost so wicketd
@@ -2407,13 +2409,10 @@ impl ServiceManager {
                             );
                         }
                         SwitchService::SpSim => {
-                            info!(
-                                self.inner.log,
-                                "Setting up Simulated SP service"
-                            );
+                            info!(log, "Setting up Simulated SP service");
                         }
                         SwitchService::Wicketd { baseboard } => {
-                            info!(self.inner.log, "Setting up wicketd service");
+                            info!(log, "Setting up wicketd service");
                             // If we're launching the switch zone, we'll have a
                             // bootstrap_address based on our call to
                             // `self.bootstrap_address_needed` (which always
@@ -2496,10 +2495,7 @@ impl ServiceManager {
                                 );
                         }
                         SwitchService::Dendrite { asic } => {
-                            info!(
-                                self.inner.log,
-                                "Setting up dendrite service"
-                            );
+                            info!(log, "Setting up dendrite service");
                             let mut dendrite_config =
                                 PropertyGroupBuilder::new("config");
 
@@ -2639,7 +2635,7 @@ impl ServiceManager {
                             );
                         }
                         SwitchService::Tfport { pkt_source, asic } => {
-                            info!(self.inner.log, "Setting up tfport service");
+                            info!(log, "Setting up tfport service");
                             let mut tfport_config =
                                 PropertyGroupBuilder::new("config")
                                     .add_property(
@@ -2714,7 +2710,7 @@ impl ServiceManager {
                             );
                         }
                         SwitchService::Lldpd { baseboard } => {
-                            info!(self.inner.log, "Setting up lldpd service");
+                            info!(log, "Setting up lldpd service");
 
                             let mut lldpd_config =
                                 PropertyGroupBuilder::new("config")
@@ -2761,10 +2757,7 @@ impl ServiceManager {
                             // The pumpkin daemon is only needed when running on
                             // with real sidecar.
                             if asic == &DendriteAsic::TofinoAsic {
-                                info!(
-                                    self.inner.log,
-                                    "Setting up pumpkind service"
-                                );
+                                info!(log, "Setting up pumpkind service");
                                 let pumpkind_config =
                                     PropertyGroupBuilder::new("config")
                                         .add_property(
@@ -2795,7 +2788,7 @@ impl ServiceManager {
                             );
                         }
                         SwitchService::Mgd => {
-                            info!(self.inner.log, "Setting up mgd service");
+                            info!(log, "Setting up mgd service");
 
                             let mut mgd_config =
                                 PropertyGroupBuilder::new("config");
@@ -2837,7 +2830,7 @@ impl ServiceManager {
                             );
                         }
                         SwitchService::MgDdm { mode } => {
-                            info!(self.inner.log, "Setting up mg-ddm service");
+                            info!(log, "Setting up mg-ddm service");
 
                             let mut mg_ddm_config =
                                 PropertyGroupBuilder::new("config")
@@ -2968,12 +2961,9 @@ impl ServiceManager {
                     .add_service(mgd_service)
                     .add_service(mg_ddm_service)
                     .add_service(uplink_service);
-                profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
-                    .await
-                    .map_err(|err| {
-                        Error::io("Failed to setup Switch zone profile", err)
-                    })?;
+                profile.add_to_zone(&log, &installed_zone).await.map_err(
+                    |err| Error::io("Failed to setup Switch zone profile", err),
+                )?;
                 RunningZone::boot(installed_zone).await?
             }
         };
@@ -3726,8 +3716,7 @@ impl ServiceManager {
         underlay_info: Option<(Ipv6Addr, Option<&RackNetworkConfig>)>,
         baseboard: Baseboard,
     ) -> Result<(), Error> {
-        let log =
-            self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
+        let log = self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
         info!(
             log,
             "Enabling switch zone services on scrimlet";
@@ -3853,8 +3842,7 @@ impl ServiceManager {
         switch_zone_ip: Ipv6Addr,
         rack_network_config: &RackNetworkConfig,
     ) -> Result<(), Error> {
-        let log =
-            &self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
+        let log = &self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
 
         // Configure uplinks via DPD in our switch zone.
         let our_ports = EarlyNetworkSetup::new(log)
@@ -3871,8 +3859,7 @@ impl ServiceManager {
         &self,
         our_ports: Vec<HostPortConfig>,
     ) -> Result<(), Error> {
-        let log =
-            &self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
+        let log = &self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
 
         // We expect the switch zone to be running, as we're called immediately
         // after `ensure_zone()` above and we just successfully configured
@@ -3968,8 +3955,7 @@ impl ServiceManager {
         filesystems: Vec<zone::Fs>,
         data_links: Vec<String>,
     ) -> Result<(), Error> {
-        let log =
-            self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
+        let log = self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
 
         let mut sled_zone = self.inner.switch_zone.lock().await;
         let zone_typestr = "switch";
@@ -4338,8 +4324,7 @@ impl ServiceManager {
             return Ok(());
         };
 
-        let log =
-            self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
+        let log = self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
         // The switch zone must use the ramdisk in order to receive requests
         // from RSS to initialize the rack. This enables the initialization of
         // trust quorum to derive disk encryption keys for U.2 devices. If the
@@ -4365,15 +4350,15 @@ impl ServiceManager {
         &self,
         mut exit_rx: oneshot::Receiver<()>,
     ) {
+        let log = self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
         loop {
             {
                 let mut sled_zone = self.inner.switch_zone.lock().await;
                 match self.try_initialize_switch_zone(&mut sled_zone).await {
                     Ok(()) => return,
-                    Err(e) => warn!(
-                        self.inner.log,
-                        "Failed to initialize switch zone: {e}"
-                    ),
+                    Err(e) => {
+                        warn!(log, "Failed to initialize switch zone: {e}")
+                    }
                 }
             }
 
