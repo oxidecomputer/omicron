@@ -273,7 +273,7 @@ impl StorageHandle {
 
     /// Reads the last value written to storage by
     /// [Self::datasets_ensure].
-    pub async fn datasets_list(&self) -> Result<DatasetsConfig, Error> {
+    pub async fn datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(StorageRequest::DatasetsList { tx: tx.into() })
@@ -479,7 +479,7 @@ impl StorageManager {
                 let _ = tx.0.send(self.datasets_ensure(config).await);
             }
             StorageRequest::DatasetsList { tx } => {
-                let _ = tx.0.send(self.datasets_list().await);
+                let _ = tx.0.send(self.datasets_config_list().await);
             }
             StorageRequest::OmicronPhysicalDisksEnsure { config, tx } => {
                 let _ =
@@ -790,8 +790,9 @@ impl StorageManager {
         status
     }
 
-    async fn datasets_list(&mut self) -> Result<DatasetsConfig, Error> {
-        let log = self.log.new(o!("request" => "datasets_list"));
+    // Lists datasets that this sled is configured to use.
+    async fn datasets_config_list(&mut self) -> Result<DatasetsConfig, Error> {
+        let log = self.log.new(o!("request" => "datasets_config_list"));
 
         let ledger_paths = self.all_omicron_dataset_ledgers().await;
         let maybe_ledger =
@@ -1637,7 +1638,8 @@ mod tests {
         assert!(!status.has_error());
 
         // List datasets, expect to see what we just created
-        let observed_config = harness.handle().datasets_list().await.unwrap();
+        let observed_config =
+            harness.handle().datasets_config_list().await.unwrap();
         assert_eq!(config, observed_config);
 
         // Calling "datasets_ensure" with the same input should succeed.

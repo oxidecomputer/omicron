@@ -260,9 +260,27 @@ impl Zfs {
         Ok(())
     }
 
-    /// Creates a new ZFS filesystem named `name`, unless one already exists.
+    /// Creates a new ZFS filesystem unless one already exists.
     ///
-    /// Applies an optional quota, provided _in bytes_.
+    /// - `name`: the full path to the zfs dataset
+    /// - `mountpoint`: The expected mountpoint of this filesystem.
+    /// If the filesystem already exists, and is not mounted here, and error is
+    /// returned.
+    /// - `zoned`: identifies whether or not this filesystem should be
+    /// used in a zone. Only used when creating a new filesystem - ignored
+    /// if the filesystem already exists.
+    /// - `do_format`: if "false", prevents a new filesystem from being created,
+    /// and returns an error if it is not found.
+    /// - `encryption_details`: Ensures a filesystem as an encryption root.
+    /// For new filesystems, this supplies the key, and all datasets within this
+    /// root are implicitly encrypted. For existing filesystems, ensures that
+    /// they are mounted (and that keys are loaded), but does not verify the
+    /// input details.
+    /// - `size_details`: If supplied, sets size-related information. These
+    /// values are set on both new filesystem creation as well as when loading
+    /// existing filesystems.
+    /// - `additional_options`: Additional ZFS options, which are only set when
+    /// creating new filesystems.
     #[allow(clippy::too_many_arguments)]
     pub fn ensure_filesystem(
         name: &str,

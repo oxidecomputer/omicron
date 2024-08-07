@@ -810,8 +810,8 @@ impl SledAgent {
         self.inner.zone_bundler.cleanup().await.map_err(Error::from)
     }
 
-    pub async fn datasets_list(&self) -> Result<DatasetsConfig, Error> {
-        Ok(self.storage().datasets_list().await?)
+    pub async fn datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
+        Ok(self.storage().datasets_config_list().await?)
     }
 
     pub async fn datasets_ensure(
