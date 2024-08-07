@@ -667,8 +667,12 @@ impl DataStore {
             .transaction_async(|conn| async move {
                 // Ensure that blueprint we're about to delete is not the
                 // current target.
-                let current_target =
-                    self.blueprint_current_target_only(&conn, false).await?;
+                let current_target = self
+                    .blueprint_current_target_only(
+                        &conn,
+                        SelectFlavor::Standard,
+                    )
+                    .await?;
                 if current_target.target_id == blueprint_id {
                     return Err(TransactionError::CustomError(
                         Error::conflict(format!(
@@ -816,7 +820,7 @@ impl DataStore {
         .await
     }
 
-    // The third and fourth arguments to this test only exist when run under
+    // The third and fourth arguments to this function only exist when run under
     // test, and allows the calling test to control the general timing of the
     // transaction executed by this method:
     //
@@ -854,7 +858,10 @@ impl DataStore {
             async move {
                 // Bail out if `blueprint` isn't the current target.
                 let current_target = self
-                    .blueprint_current_target_only(&conn, true)
+                    .blueprint_current_target_only(
+                        &conn,
+                        SelectFlavor::ForUpdate,
+                    )
                     .await
                     .map_err(|e| err.bail(e))?;
                 if current_target.target_id != blueprint.id {
@@ -1072,7 +1079,9 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let target = self.blueprint_current_target_only(&conn, false).await?;
+        let target = self
+            .blueprint_current_target_only(&conn, SelectFlavor::Standard)
+            .await?;
 
         // The blueprint for the current target cannot be deleted while it is
         // the current target, but it's possible someone else (a) made a new
@@ -1093,7 +1102,7 @@ impl DataStore {
     ) -> Result<BlueprintTarget, Error> {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.blueprint_current_target_only(&conn, false).await
+        self.blueprint_current_target_only(&conn, SelectFlavor::Standard).await
     }
 
     // Helper to fetch the current blueprint target (without fetching the entire
@@ -1103,21 +1112,24 @@ impl DataStore {
     async fn blueprint_current_target_only(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        select_for_update: bool,
+        select_flavor: SelectFlavor,
     ) -> Result<BlueprintTarget, Error> {
         use db::schema::bp_target::dsl;
 
-        let query_result = if select_for_update {
-            dsl::bp_target
-                .order_by(dsl::version.desc())
-                .for_update()
-                .first_async::<BpTarget>(conn)
-                .await
-        } else {
-            dsl::bp_target
-                .order_by(dsl::version.desc())
-                .first_async::<BpTarget>(conn)
-                .await
+        let query_result = match select_flavor {
+            SelectFlavor::ForUpdate => {
+                dsl::bp_target
+                    .order_by(dsl::version.desc())
+                    .for_update()
+                    .first_async::<BpTarget>(conn)
+                    .await
+            }
+            SelectFlavor::Standard => {
+                dsl::bp_target
+                    .order_by(dsl::version.desc())
+                    .first_async::<BpTarget>(conn)
+                    .await
+            }
         };
         let current_target = query_result
             .optional()
@@ -1134,6 +1146,14 @@ impl DataStore {
 
         Ok(current_target.into())
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SelectFlavor {
+    /// A normal `SELECT`.
+    Standard,
+    /// Acquire a database-level write lock via `SELECT ... FOR UPDATE`.
+    ForUpdate,
 }
 
 // Helper to create an `authz::Blueprint` for a specific blueprint ID
