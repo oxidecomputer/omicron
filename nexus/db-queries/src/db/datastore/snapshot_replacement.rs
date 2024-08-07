@@ -508,7 +508,9 @@ impl DataStore {
 
     /// Transition a SnapshotReplacement record from Running to Complete. Also
     /// removes the `volume_repair` record that is taking a "lock" on the
-    /// Volume.
+    /// Volume. Note this doesn't occur from a saga context, and therefore 1)
+    /// doesn't accept an operating saga id parameter, and 2) checks that
+    /// operating_saga_id is null for the corresponding record.
     pub async fn set_snapshot_replacement_complete(
         &self,
         opctx: &OpContext,
