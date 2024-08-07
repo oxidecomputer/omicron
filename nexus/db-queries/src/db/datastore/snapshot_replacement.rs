@@ -898,33 +898,21 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         snapshot_replacement_id: Uuid,
-    ) -> Result<usize, Error> {
-        opctx.check_complex_operations_allowed()?;
+    ) -> Result<i64, Error> {
+        use db::schema::snapshot_replacement_step::dsl;
 
-        let mut records: usize = 0;
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        while let Some(p) = paginator.next() {
-            use db::schema::snapshot_replacement_step::dsl;
-
-            let batch = paginated(
-                dsl::snapshot_replacement_step,
-                dsl::id,
-                &p.current_pagparams(),
-            )
+        let records = dsl::snapshot_replacement_step
             .filter(dsl::request_id.eq(snapshot_replacement_id))
             .filter(
                 dsl::replacement_state
                     .ne(SnapshotReplacementStepState::VolumeDeleted),
             )
-            .get_results_async::<SnapshotReplacementStep>(&*conn)
+            .count()
+            .get_result_async::<i64>(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-            paginator = p.found_batch(&batch, &|r| r.id);
-            records += batch.len();
-        }
 
         Ok(records)
     }
@@ -1143,7 +1131,7 @@ mod test {
 
         assert_eq!(
             datastore
-                .in_progress_snapshot_replacement_steps(&opctx, request_id,)
+                .in_progress_snapshot_replacement_steps(&opctx, request_id)
                 .await
                 .unwrap(),
             1,
