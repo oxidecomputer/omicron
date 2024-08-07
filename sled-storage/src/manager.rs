@@ -674,12 +674,19 @@ impl StorageManager {
 
     async fn datasets_ensure(
         &mut self,
-        mut config: DatasetsConfig,
+        config: DatasetsConfig,
     ) -> Result<DatasetsManagementResult, Error> {
         let log = self.log.new(o!("request" => "datasets_ensure"));
 
-        // Ensure that the datasets arrive in a consistent order
-        config.datasets.sort_by(|a, b| a.id.partial_cmp(&b.id).unwrap());
+        // As a small input-check, confirm that the UUID of the map of inputs
+        // matches the DatasetConfig.
+        //
+        // The dataset configs are sorted by UUID so they always appear in the
+        // same order, but this check prevents adding an entry of:
+        // - (UUID: X, Config(UUID: Y)), for X != Y
+        if !config.datasets.iter().all(|(id, config)| *id == config.id) {
+            return Err(Error::ConfigUuidMismatch);
+        }
 
         // We rely on the schema being stable across reboots -- observe
         // "test_datasets_schema" below for that property guarantee.
@@ -764,7 +771,7 @@ impl StorageManager {
         config: &DatasetsConfig,
     ) -> DatasetsManagementResult {
         let mut status = vec![];
-        for dataset in &config.datasets {
+        for dataset in config.datasets.values() {
             status.push(self.dataset_ensure_internal(log, dataset).await);
         }
         DatasetsManagementResult { status }
@@ -1122,6 +1129,7 @@ mod tests {
     use omicron_common::ledger;
     use omicron_test_utils::dev::test_setup_log;
     use sled_hardware::DiskFirmware;
+    use std::collections::BTreeMap;
     use std::sync::atomic::Ordering;
     use uuid::Uuid;
 
@@ -1621,13 +1629,16 @@ mod tests {
         let id = DatasetUuid::new_v4();
         let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
         let name = DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
-        let datasets = vec![DatasetConfig {
+        let datasets = BTreeMap::from([(
             id,
-            name,
-            compression: None,
-            quota: None,
-            reservation: None,
-        }];
+            DatasetConfig {
+                id,
+                name,
+                compression: None,
+                quota: None,
+                reservation: None,
+            },
+        )]);
         // "Generation = 1" is reserved as "no requests seen yet", so we jump
         // past it.
         let generation = Generation::new().next();
@@ -1659,7 +1670,7 @@ mod tests {
         // However, calling it with a different input and the same generation
         // number should fail.
         config.generation = current_config_generation;
-        config.datasets[0].reservation = Some(1024);
+        config.datasets.values_mut().next().unwrap().reservation = Some(1024);
         let err =
             harness.handle().datasets_ensure(config.clone()).await.unwrap_err();
         assert!(matches!(err, Error::DatasetConfigurationChanged { .. }));

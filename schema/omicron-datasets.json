@@ -8,8 +8,8 @@
   ],
   "properties": {
     "datasets": {
-      "type": "array",
-      "items": {
+      "type": "object",
+      "additionalProperties": {
         "$ref": "#/definitions/DatasetConfig"
       }
     },
@@ -86,7 +86,7 @@
             "type": {
               "type": "string",
               "enum": [
-                "cockroach_db"
+                "cockroachdb"
               ]
             }
           }

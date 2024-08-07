@@ -2374,8 +2374,8 @@
         "type": "object",
         "properties": {
           "datasets": {
-            "type": "array",
-            "items": {
+            "type": "object",
+            "additionalProperties": {
               "$ref": "#/components/schemas/DatasetConfig"
             }
           },
