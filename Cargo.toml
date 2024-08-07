@@ -385,7 +385,7 @@ libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d32
 linear-map = "1.2.0"
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
-mockall = "0.12"
+mockall = "0.13"
 newtype_derive = "0.1.6"
 mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "220dd026e83142b83bd93123f465a64dd4600201" }
 ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "220dd026e83142b83bd93123f465a64dd4600201" }
