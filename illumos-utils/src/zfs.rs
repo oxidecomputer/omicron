@@ -376,6 +376,10 @@ impl Zfs {
         Ok(())
     }
 
+    /// Applies the following properties to the filesystem.
+    ///
+    /// If any of the options are not supplied, a default "none" or "off"
+    /// value is supplied.
     fn apply_properties(
         name: &str,
         mountpoint: &Mountpoint,
@@ -383,40 +387,39 @@ impl Zfs {
         reservation: Option<usize>,
         compression: Option<String>,
     ) -> Result<(), EnsureFilesystemError> {
-        if let Some(quota) = quota {
-            if let Err(err) =
-                Self::set_value(name, "quota", &format!("{quota}"))
-            {
-                return Err(EnsureFilesystemError {
-                    name: name.to_string(),
-                    mountpoint: mountpoint.clone(),
-                    // Take the execution error from the SetValueError
-                    err: err.err.into(),
-                });
-            }
+        let quota = quota
+            .map(|q| q.to_string())
+            .unwrap_or_else(|| String::from("none"));
+        let reservation = reservation
+            .map(|r| r.to_string())
+            .unwrap_or_else(|| String::from("none"));
+        let compression = compression.unwrap_or_else(|| String::from("off"));
+
+        if let Err(err) = Self::set_value(name, "quota", &format!("{quota}")) {
+            return Err(EnsureFilesystemError {
+                name: name.to_string(),
+                mountpoint: mountpoint.clone(),
+                // Take the execution error from the SetValueError
+                err: err.err.into(),
+            });
         }
-        if let Some(reservation) = reservation {
-            if let Err(err) =
-                Self::set_value(name, "reservation", &format!("{reservation}"))
-            {
-                return Err(EnsureFilesystemError {
-                    name: name.to_string(),
-                    mountpoint: mountpoint.clone(),
-                    // Take the execution error from the SetValueError
-                    err: err.err.into(),
-                });
-            }
+        if let Err(err) =
+            Self::set_value(name, "reservation", &format!("{reservation}"))
+        {
+            return Err(EnsureFilesystemError {
+                name: name.to_string(),
+                mountpoint: mountpoint.clone(),
+                // Take the execution error from the SetValueError
+                err: err.err.into(),
+            });
         }
-        if let Some(compression) = compression {
-            if let Err(err) = Self::set_value(name, "compression", &compression)
-            {
-                return Err(EnsureFilesystemError {
-                    name: name.to_string(),
-                    mountpoint: mountpoint.clone(),
-                    // Take the execution error from the SetValueError
-                    err: err.err.into(),
-                });
-            }
+        if let Err(err) = Self::set_value(name, "compression", &compression) {
+            return Err(EnsureFilesystemError {
+                name: name.to_string(),
+                mountpoint: mountpoint.clone(),
+                // Take the execution error from the SetValueError
+                err: err.err.into(),
+            });
         }
         Ok(())
     }
