@@ -14,6 +14,11 @@ use dpd_client::types::PortSpeed as DpdPortSpeed;
 use dpd_client::Client as DpdClient;
 use dpd_client::ClientState as DpdClientState;
 use either::Either;
+use hickory_resolver::config::NameServerConfigGroup;
+use hickory_resolver::config::ResolverConfig;
+use hickory_resolver::config::ResolverOpts;
+use hickory_resolver::error::ResolveErrorKind;
+use hickory_resolver::TokioAsyncResolver;
 use illumos_utils::zone::SVCCFG;
 use illumos_utils::PFEXEC;
 use omicron_common::address::DENDRITE_PORT;
@@ -35,12 +40,6 @@ use std::time::Duration;
 use std::time::Instant;
 use tokio::process::Command;
 use tokio::sync::mpsc;
-use trust_dns_resolver::config::NameServerConfigGroup;
-use trust_dns_resolver::config::ResolverConfig;
-use trust_dns_resolver::config::ResolverOpts;
-use trust_dns_resolver::error::ResolveError;
-use trust_dns_resolver::error::ResolveErrorKind;
-use trust_dns_resolver::TokioAsyncResolver;
 use wicket_common::preflight_check::EventBuffer;
 use wicket_common::preflight_check::StepContext;
 use wicket_common::preflight_check::StepProgress;
@@ -930,16 +929,7 @@ impl DnsLookupStep {
         };
 
         'dns_servers: for &dns_ip in dns_servers {
-            let resolver = match self.build_resolver(dns_ip) {
-                Ok(resolver) => resolver,
-                Err(err) => {
-                    self.warnings.push(format!(
-                        "failed to create resolver for {dns_ip}: {}",
-                        DisplayErrorChain::new(&err)
-                    ));
-                    continue;
-                }
-            };
+            let resolver = self.build_resolver(dns_ip);
 
             // Attempt to resolve any NTP servers that aren't IP addresses.
             for &ntp_name in &ntp_names_to_resolve {
@@ -1052,14 +1042,18 @@ impl DnsLookupStep {
                 (
                     "A",
                     resolver.ipv4_lookup(name).await.map(|records| {
-                        Either::Left(records.into_iter().map(IpAddr::V4))
+                        Either::Left(
+                            records.into_iter().map(|x| IpAddr::V4(x.into())),
+                        )
                     }),
                 )
             } else {
                 (
                     "AAAA",
                     resolver.ipv6_lookup(name).await.map(|records| {
-                        Either::Right(records.into_iter().map(IpAddr::V6))
+                        Either::Right(
+                            records.into_iter().map(|x| IpAddr::V6(x.into())),
+                        )
                     }),
                 )
             };
@@ -1175,11 +1169,11 @@ impl DnsLookupStep {
     ///
     /// If building it fails, we'll append to our internal `warnings` and return
     /// `None`.
-    fn build_resolver(
-        &mut self,
-        dns_ip: IpAddr,
-    ) -> Result<TokioAsyncResolver, ResolveError> {
+    fn build_resolver(&mut self, dns_ip: IpAddr) -> TokioAsyncResolver {
         let mut options = ResolverOpts::default();
+
+        // Enable edns for potentially larger records
+        options.edns0 = true;
 
         // We will retry ourselves; we don't want the resolver
         // retrying internally too.

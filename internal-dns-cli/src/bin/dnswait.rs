@@ -66,7 +66,7 @@ async fn main() -> Result<()> {
     let resolver = if opt.nameserver_addresses.is_empty() {
         info!(&log, "using system configuration");
         let async_resolver =
-            trust_dns_resolver::AsyncResolver::tokio_from_system_conf()
+            hickory_resolver::AsyncResolver::tokio_from_system_conf()
                 .context("initializing resolver from system configuration")?;
         Resolver::new_with_resolver(log.clone(), async_resolver)
     } else {
