@@ -104,7 +104,7 @@ WARNING: Zones exist without physical disks!
  METADATA:
     created by:::::::::::   test_blueprint2
     created at:::::::::::   1970-01-01T00:00:00.000Z
-    comment::::::::::::::   sled a1b477db-b629-48eb-911d-1ccdafca75b9: expunged 12 zones because: sled policy is expunged, sled d67ce8f0-a691-4010-b414-420d82e80527: added 22 datasets, updated: 0, removed 0 datasets, sled fefcf4cf-f7e7-46b3-b629-058526ce440e: added 23 datasets, updated: 0, removed 0 datasets
+    comment::::::::::::::   sled a1b477db-b629-48eb-911d-1ccdafca75b9: expunged 12 zones because: sled policy is expunged, sled d67ce8f0-a691-4010-b414-420d82e80527: added 20 datasets, updated: 0, removed 0 datasets, sled fefcf4cf-f7e7-46b3-b629-058526ce440e: added 21 datasets, updated: 0, removed 0 datasets
     internal DNS version:   1
     external DNS version:   1
 

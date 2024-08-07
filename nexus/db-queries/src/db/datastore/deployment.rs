@@ -700,6 +700,55 @@ impl DataStore {
             }
         }
 
+        // Load all the datasets for each sled
+        {
+            use db::schema::bp_omicron_dataset::dsl;
+
+            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            while let Some(p) = paginator.next() {
+                // `paginated` implicitly orders by our `id`, which is also
+                // handy for testing: the datasets are always consistently ordered
+                let batch = paginated(
+                    dsl::bp_omicron_dataset,
+                    dsl::id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(blueprint_id))
+                .select(BpOmicronDataset::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+                paginator = p.found_batch(&batch, &|d| d.id);
+
+                for d in batch {
+                    let sled_datasets = blueprint_datasets
+                        .get_mut(&d.sled_id.into())
+                        .ok_or_else(|| {
+                            // This error means that we found a row in
+                            // bp_omicron_dataset with no associated record in
+                            // bp_sled_omicron_datasets.  This should be
+                            // impossible and reflects either a bug or database
+                            // corruption.
+                            Error::internal_error(&format!(
+                                "dataset {}: unknown sled: {}",
+                                d.id, d.sled_id
+                            ))
+                        })?;
+
+                    let dataset_id = d.id;
+                    sled_datasets.datasets.push(d.try_into().map_err(|e| {
+                        Error::internal_error(&format!(
+                            "Cannot parse dataset {}: {e}",
+                            dataset_id
+                        ))
+                    })?);
+                }
+            }
+        }
+
         // Sort all disks to match what blueprint builders do.
         for (_, disks_config) in blueprint_disks.iter_mut() {
             disks_config.disks.sort_unstable_by_key(|d| d.id);
@@ -1517,6 +1566,12 @@ mod tests {
 
         for (table_name, result) in [
             query_count!(blueprint, id),
+            query_count!(bp_sled_state, blueprint_id),
+            query_count!(bp_sled_omicron_datasets, blueprint_id),
+            query_count!(bp_sled_omicron_physical_disks, blueprint_id),
+            query_count!(bp_sled_omicron_zones, blueprint_id),
+            query_count!(bp_omicron_dataset, blueprint_id),
+            query_count!(bp_omicron_physical_disk, blueprint_id),
             query_count!(bp_omicron_zone, blueprint_id),
             query_count!(bp_omicron_zone_nic, blueprint_id),
         ] {
