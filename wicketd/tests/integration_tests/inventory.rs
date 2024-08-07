@@ -9,9 +9,10 @@ use std::time::Duration;
 use super::setup::WicketdTestContext;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
-use serde::Deserialize;
-use std::net::Ipv6Addr;
+use sled_hardware_types::Baseboard;
 use wicket::OutputKind;
+use wicket_common::inventory::{SpIdentifier, SpType};
+use wicket_common::rack_setup::BootstrapSledDescription;
 use wicketd_client::types::{GetInventoryParams, GetInventoryResponse};
 
 #[tokio::test]
@@ -64,39 +65,48 @@ async fn test_inventory() {
             .expect("wicket inventory configured-bootstrap-sleds failed");
 
         // stdout should contain a JSON object.
-        let response: Vec<ConfiguredBootstrapSledData> =
+        let response: Vec<BootstrapSledDescription> =
             serde_json::from_slice(&stdout).expect("stdout is valid JSON");
 
         // This is the data we have today but I want it to be different from
         // this to test having an address and such
 
-        // I think this data comes from mgs?
+        // This only tests the case that we get sleds back with no current
+        // bootstrap IP. This does provide svalue: it check that the command
+        // exists, accesses data within wicket, and returns it in the schema we
+        // expect. But it does not test the case where a sled does have a
+        // bootstrap IP.
+        //
+        // Unfortunately, that's a difficult thing to test today. Wicket gets
+        // that information by enumerating the IPs on the bootstrap network and
+        // reaching out to the bootstrap_agent on them directly to ask them who
+        // they are. Our testing setup does not have a way to provide such an
+        // IP, or run a bootstrap_agent on an IP to respond. We should update
+        // this test when we do have that capabilitiy.
         assert_eq!(
             response,
             vec![
-                ConfiguredBootstrapSledData {
-                    slot: 0,
-                    identifier: "SimGimlet00".to_string(),
-                    address: None,
+                BootstrapSledDescription {
+                    id: SpIdentifier { type_: SpType::Sled, slot: 0 },
+                    baseboard: Baseboard::Gimlet {
+                        identifier: "SimGimlet00".to_string(),
+                        model: "i86pc".to_string(),
+                        revision: 0
+                    },
+                    bootstrap_ip: None
                 },
-                ConfiguredBootstrapSledData {
-                    slot: 1,
-                    identifier: "SimGimlet01".to_string(),
-                    address: None,
+                BootstrapSledDescription {
+                    id: SpIdentifier { type_: SpType::Sled, slot: 1 },
+                    baseboard: Baseboard::Gimlet {
+                        identifier: "SimGimlet01".to_string(),
+                        model: "i86pc".to_string(),
+                        revision: 0
+                    },
+                    bootstrap_ip: None
                 },
             ]
         );
     }
 
     wicketd_testctx.teardown().await;
-}
-
-// XXX this is code dupe from cli (but where I have it there now is a private
-// module.) We are using it here to verify the json output of the cli. so... do
-// we want the dupe? or... where would it live?
-#[derive(Debug, Deserialize, PartialEq, Eq)]
-struct ConfiguredBootstrapSledData {
-    slot: u32,
-    identifier: String,
-    address: Option<Ipv6Addr>,
 }

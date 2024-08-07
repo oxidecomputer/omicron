@@ -4,17 +4,17 @@
 
 //! Support for inventory checks via wicketd.
 
+use crate::cli::CommandOutput;
 use crate::wicketd::create_wicketd_client;
 use anyhow::Context;
 use anyhow::Result;
 use clap::Subcommand;
 use owo_colors::OwoColorize;
-use serde::{Deserialize, Serialize};
 use sled_hardware_types::Baseboard;
 use slog::Logger;
-use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::time::Duration;
+use wicket_common::rack_setup::BootstrapSledDescription;
 
 const WICKETD_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -33,6 +33,7 @@ impl InventoryArgs {
         self,
         log: Logger,
         wicketd_addr: SocketAddrV6,
+        mut output: CommandOutput<'_>,
     ) -> Result<()> {
         let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
 
@@ -40,7 +41,7 @@ impl InventoryArgs {
             InventoryArgs::ConfiguredBootstrapSleds { json } => {
                 // We don't use the /bootstrap-sleds endpoint, because that
                 // gets all sleds visible on the bootstrap network. We want
-                // something different here.
+                // something subtly different here.
                 // - We want the status of only sleds we've configured wicket
                 //   to use for setup. /bootstrap-sleds will give us sleds
                 //   we don't want
@@ -48,46 +49,22 @@ impl InventoryArgs {
                 //   bootstrap network yet.
                 //
                 // In other words, we want the sled information displayed at the
-                // bottom of the rack setup screen in the TUI.
+                // bottom of the rack setup screen in the TUI, and we get it the
+                // same way it does.
                 let conf = client
                     .get_rss_config()
                     .await
                     .context("failed to get rss config")?;
 
                 let bootstrap_sleds = &conf.insensitive.bootstrap_sleds;
-                let sled_data: Vec<ConfiguredBootstrapSledData> =
-                    bootstrap_sleds
-                        .iter()
-                        .map(|desc| {
-                            let slot = desc.id.slot;
-
-                            let identifier = match &desc.baseboard {
-                                Baseboard::Gimlet { identifier, .. } => {
-                                    identifier.clone()
-                                }
-                                Baseboard::Pc { identifier, .. } => {
-                                    identifier.clone()
-                                }
-                                Baseboard::Unknown => "unknown".to_string(),
-                            };
-
-                            let address = desc.bootstrap_ip;
-
-                            ConfiguredBootstrapSledData {
-                                slot,
-                                identifier,
-                                address,
-                            }
-                        })
-                        .collect();
-
                 if json {
-                    let json_str = serde_json::to_string(&sled_data)
+                    let json_str = serde_json::to_string(bootstrap_sleds)
                         .context("serializing sled data failed")?;
-                    println!("{}", json_str);
+                    writeln!(output.stdout, "{}", json_str)
+                        .expect("writing to stdout failed");
                 } else {
-                    for sled in &sled_data {
-                        print_bootstrap_sled_data(sled);
+                    for sled in bootstrap_sleds {
+                        print_bootstrap_sled_data(sled, &mut output);
                     }
                 }
 
@@ -97,17 +74,21 @@ impl InventoryArgs {
     }
 }
 
-#[derive(Serialize)]
-struct ConfiguredBootstrapSledData {
-    slot: u32,
-    identifier: String,
-    address: Option<Ipv6Addr>,
-}
+fn print_bootstrap_sled_data(
+    desc: &BootstrapSledDescription,
+    output: &mut CommandOutput<'_>,
+) {
+    let slot = desc.id.slot;
 
-fn print_bootstrap_sled_data(data: &ConfiguredBootstrapSledData) {
-    let ConfiguredBootstrapSledData { slot, identifier, address } = data;
+    let identifier = match &desc.baseboard {
+        Baseboard::Gimlet { identifier, .. } => identifier.clone(),
+        Baseboard::Pc { identifier, .. } => identifier.clone(),
+        Baseboard::Unknown => "unknown".to_string(),
+    };
 
-    // Print status indicator
+    let address = desc.bootstrap_ip;
+
+    // Create status indicators
     let status = match address {
         None => format!("{}", '⚠'.red()),
         Some(_) => format!("{}", '✔'.green()),
@@ -118,6 +99,12 @@ fn print_bootstrap_sled_data(data: &ConfiguredBootstrapSledData) {
         Some(addr) => format!("\t{}", addr),
     };
 
-    // The rest of the data
-    println!("{status} Cubby {:02}\t{identifier}{addr_fmt}", slot);
+    // Print out this entry. We say "Cubby" rather than "Slot" here purely
+    // because the TUI also says "Cubby".
+    writeln!(
+        output.stdout,
+        "{status} Cubby {:02}\t{identifier}{addr_fmt}",
+        slot
+    )
+    .expect("writing to stdout failed");
 }
