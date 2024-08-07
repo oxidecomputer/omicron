@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use crate::schema::snapshot_replacement;
+use crate::schema::region_snapshot_replacement;
 use crate::RegionSnapshot;
 use chrono::DateTime;
 use chrono::Utc;
@@ -12,12 +12,12 @@ use uuid::Uuid;
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "snapshot_replacement_state", schema = "public"))]
-    pub struct SnapshotReplacementStateEnum;
+    #[diesel(postgres_type(name = "region_snapshot_replacement_state", schema = "public"))]
+    pub struct RegionSnapshotReplacementStateEnum;
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = SnapshotReplacementStateEnum)]
-    pub enum SnapshotReplacementState;
+    #[diesel(sql_type = RegionSnapshotReplacementStateEnum)]
+    pub enum RegionSnapshotReplacementState;
 
     // Enum values
     Requested => b"requested"
@@ -29,35 +29,37 @@ impl_enum_type!(
 );
 
 // FromStr impl required for use with clap (aka omdb)
-impl std::str::FromStr for SnapshotReplacementState {
+impl std::str::FromStr for RegionSnapshotReplacementState {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "requested" => Ok(SnapshotReplacementState::Requested),
-            "allocating" => Ok(SnapshotReplacementState::Allocating),
-            "replacement_done" => Ok(SnapshotReplacementState::ReplacementDone),
-            "deleting_old_volume" => {
-                Ok(SnapshotReplacementState::DeletingOldVolume)
+            "requested" => Ok(RegionSnapshotReplacementState::Requested),
+            "allocating" => Ok(RegionSnapshotReplacementState::Allocating),
+            "replacement_done" => {
+                Ok(RegionSnapshotReplacementState::ReplacementDone)
             }
-            "running" => Ok(SnapshotReplacementState::Running),
-            "complete" => Ok(SnapshotReplacementState::Complete),
+            "deleting_old_volume" => {
+                Ok(RegionSnapshotReplacementState::DeletingOldVolume)
+            }
+            "running" => Ok(RegionSnapshotReplacementState::Running),
+            "complete" => Ok(RegionSnapshotReplacementState::Complete),
             _ => Err(format!("unrecognized value {} for enum", s)),
         }
     }
 }
 
-/// Database representation of a Snapshot replacement request.
+/// Database representation of a RegionSnapshot replacement request.
 ///
 /// This record stores the data related to the operations required for Nexus to
-/// orchestrate replacing a snapshot. It transitions through the following
-/// states:
+/// orchestrate replacing a region snapshot. It transitions through the
+/// following states:
 ///
 /// ```text
 ///      Requested   <--              ---
 ///                    |              |
 ///          |         |              |
-///          v         |              |  responsibility of snapshot
+///          v         |              |  responsibility of region snapshot
 ///                    |              |  replacement start saga
 ///      Allocating  --               |
 ///                                   |
@@ -67,7 +69,7 @@ impl std::str::FromStr for SnapshotReplacementState {
 ///    ReplacementDone  <--           |
 ///                       |           |
 ///          |            |           |
-///          v            |           | responsibility of snapshot
+///          v            |           | responsibility of region snapshot
 ///                       |           | replacement garbage collect saga
 ///  DeletingOldVolume  --            |
 ///                                   |
@@ -75,29 +77,30 @@ impl std::str::FromStr for SnapshotReplacementState {
 ///          v                        ---
 ///                                   ---
 ///       Running                     |
-///                                   | set in snapshot replacement
+///                                   | set in region snapshot replacement
 ///          |                        | finish background task
 ///          v                        |
 ///                                   |
 ///      Complete                     ---
 /// ```
 ///
-/// which are captured in the SnapshotReplacementState enum. Annotated on the
-/// right are which sagas are responsible for which state transitions. The state
-/// transitions themselves are performed by these sagas and all involve a query
-/// that:
+/// which are captured in the RegionSnapshotReplacementState enum. Annotated on
+/// the right are which sagas are responsible for which state transitions. The
+/// state transitions themselves are performed by these sagas and all involve a
+/// query that:
 ///
 ///  - checks that the starting state (and other values as required) make sense
 ///  - updates the state while setting a unique operating_saga_id id (and any
 ///    other fields as appropriate)
 ///
 /// As multiple background tasks will be waking up, checking to see what sagas
-/// need to be triggered, and requesting that these snapshot replacement sagas
-/// run, this is meant to block multiple sagas from running at the same time in
-/// an effort to cut down on interference - most will unwind at the first step
-/// of performing this state transition instead of somewhere in the middle.
+/// need to be triggered, and requesting that these region snapshot replacement
+/// sagas run, this is meant to block multiple sagas from running at the same
+/// time in an effort to cut down on interference - most will unwind at the
+/// first step of performing this state transition instead of somewhere in the
+/// middle.
 ///
-/// See also: SnapshotReplacementStep records
+/// See also: RegionSnapshotReplacementStep records
 #[derive(
     Queryable,
     Insertable,
@@ -108,8 +111,8 @@ impl std::str::FromStr for SnapshotReplacementState {
     Deserialize,
     PartialEq,
 )]
-#[diesel(table_name = snapshot_replacement)]
-pub struct SnapshotReplacement {
+#[diesel(table_name = region_snapshot_replacement)]
+pub struct RegionSnapshotReplacement {
     pub id: Uuid,
 
     pub request_time: DateTime<Utc>,
@@ -124,12 +127,12 @@ pub struct SnapshotReplacement {
 
     pub new_region_id: Option<Uuid>,
 
-    pub replacement_state: SnapshotReplacementState,
+    pub replacement_state: RegionSnapshotReplacementState,
 
     pub operating_saga_id: Option<Uuid>,
 }
 
-impl SnapshotReplacement {
+impl RegionSnapshotReplacement {
     pub fn for_region_snapshot(region_snapshot: &RegionSnapshot) -> Self {
         Self::new(
             region_snapshot.dataset_id,
@@ -151,7 +154,7 @@ impl SnapshotReplacement {
             old_snapshot_id,
             old_snapshot_volume_id: None,
             new_region_id: None,
-            replacement_state: SnapshotReplacementState::Requested,
+            replacement_state: RegionSnapshotReplacementState::Requested,
             operating_saga_id: None,
         }
     }

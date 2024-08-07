@@ -1756,7 +1756,7 @@ table! {
 }
 
 table! {
-    snapshot_replacement (id) {
+    region_snapshot_replacement (id) {
         id -> Uuid,
         request_time -> Timestamptz,
         old_dataset_id -> Uuid,
@@ -1764,7 +1764,7 @@ table! {
         old_snapshot_id -> Uuid,
         old_snapshot_volume_id -> Nullable<Uuid>,
         new_region_id -> Nullable<Uuid>,
-        replacement_state -> crate::SnapshotReplacementStateEnum,
+        replacement_state -> crate::RegionSnapshotReplacementStateEnum,
         operating_saga_id -> Nullable<Uuid>,
     }
 }
@@ -1772,20 +1772,20 @@ table! {
 allow_tables_to_appear_in_same_query!(zpool, region_snapshot);
 
 table! {
-    snapshot_replacement_step (id) {
+    region_snapshot_replacement_step (id) {
         id -> Uuid,
         request_id -> Uuid,
         request_time -> Timestamptz,
         volume_id -> Uuid,
         old_snapshot_volume_id -> Nullable<Uuid>,
-        replacement_state -> crate::SnapshotReplacementStepStateEnum,
+        replacement_state -> crate::RegionSnapshotReplacementStepStateEnum,
         operating_saga_id -> Nullable<Uuid>,
     }
 }
 
 allow_tables_to_appear_in_same_query!(
-    snapshot_replacement,
-    snapshot_replacement_step,
+    region_snapshot_replacement,
+    region_snapshot_replacement_step,
     volume
 );
 

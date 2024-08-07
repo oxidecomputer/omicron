@@ -4019,7 +4019,7 @@ CREATE INDEX IF NOT EXISTS lookup_any_disk_by_volume_id ON omicron.public.disk (
 
 CREATE INDEX IF NOT EXISTS lookup_snapshot_by_destination_volume_id ON omicron.public.snapshot ( destination_volume_id );
 
-CREATE TYPE IF NOT EXISTS omicron.public.snapshot_replacement_state AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.region_snapshot_replacement_state AS ENUM (
   'requested',
   'allocating',
   'replacement_done',
@@ -4028,8 +4028,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.snapshot_replacement_state AS ENUM (
   'complete'
 );
 
-CREATE TABLE IF NOT EXISTS omicron.public.snapshot_replacement (
-    /* unique ID for this snapshot replacement */
+CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot_replacement (
     id UUID PRIMARY KEY,
 
     request_time TIMESTAMPTZ NOT NULL,
@@ -4042,21 +4041,21 @@ CREATE TABLE IF NOT EXISTS omicron.public.snapshot_replacement (
 
     new_region_id UUID,
 
-    replacement_state omicron.public.snapshot_replacement_state NOT NULL,
+    replacement_state omicron.public.region_snapshot_replacement_state NOT NULL,
 
     operating_saga_id UUID
 );
 
-CREATE INDEX IF NOT EXISTS lookup_snapshot_replacement_by_state on omicron.public.snapshot_replacement (replacement_state);
+CREATE INDEX IF NOT EXISTS lookup_region_snapshot_replacement_by_state on omicron.public.region_snapshot_replacement (replacement_state);
 
-CREATE TYPE IF NOT EXISTS omicron.public.snapshot_replacement_step_state AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.region_snapshot_replacement_step_state AS ENUM (
   'requested',
   'running',
   'complete',
   'volume_deleted'
 );
 
-CREATE TABLE IF NOT EXISTS omicron.public.snapshot_replacement_step (
+CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot_replacement_step (
     id UUID PRIMARY KEY,
 
     request_id UUID NOT NULL,
@@ -4067,16 +4066,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.snapshot_replacement_step (
 
     old_snapshot_volume_id UUID,
 
-    replacement_state omicron.public.snapshot_replacement_step_state NOT NULL,
+    replacement_state omicron.public.region_snapshot_replacement_step_state NOT NULL,
 
     operating_saga_id UUID
 );
 
-CREATE INDEX IF NOT EXISTS lookup_snapshot_replacement_step_by_state
-    on omicron.public.snapshot_replacement_step (replacement_state);
+CREATE INDEX IF NOT EXISTS lookup_region_snapshot_replacement_step_by_state
+    on omicron.public.region_snapshot_replacement_step (replacement_state);
 
-CREATE INDEX IF NOT EXISTS lookup_snapshot_replacement_step_by_old_volume_id
-    on omicron.public.snapshot_replacement_step (old_snapshot_volume_id);
+CREATE INDEX IF NOT EXISTS lookup_region_snapshot_replacement_step_by_old_volume_id
+    on omicron.public.region_snapshot_replacement_step (old_snapshot_volume_id);
 
 /*
  * Metadata for the schema itself. This version number isn't great, as there's

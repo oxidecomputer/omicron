@@ -1,5 +1,4 @@
-CREATE TABLE IF NOT EXISTS omicron.public.snapshot_replacement (
-    /* unique ID for this snapshot replacement */
+CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot_replacement (
     id UUID PRIMARY KEY,
 
     request_time TIMESTAMPTZ NOT NULL,
@@ -12,7 +11,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.snapshot_replacement (
 
     new_region_id UUID,
 
-    replacement_state omicron.public.snapshot_replacement_state NOT NULL,
+    replacement_state omicron.public.region_snapshot_replacement_state NOT NULL,
 
     operating_saga_id UUID
 );
