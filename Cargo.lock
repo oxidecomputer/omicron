@@ -1807,9 +1807,9 @@ dependencies = [
 
 [[package]]
 name = "dhcproto"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "000717b4f6913807b6195419e0bacb008d449ba6023ca26abf349c4ff2f1866b"
+checksum = "f6794294f2c4665aae452e950c2803a1e487c5672dc8448f0bfa3f52ff67e270"
 dependencies = [
  "dhcproto-macros",
  "hex",
@@ -4966,6 +4966,8 @@ dependencies = [
  "rand 0.8.5",
  "sled-agent-client",
  "slog",
+ "static_assertions",
+ "strum",
  "test-strategy",
  "thiserror",
  "typed-rng",
@@ -7937,9 +7939,9 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.10.5"
+version = "1.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b91213439dad192326a0d7c6ee3955910425f441d7038e0d6933b0aec5c4517f"
+checksum = "4219d74c6b67a3654a9fbebc4b419e22126d13d2f3c4a07ee0cb61ff79a79619"
 dependencies = [
  "aho-corasick",
  "memchr",
