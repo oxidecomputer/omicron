@@ -1,44 +1,44 @@
 format_version = 1
 
 [target]
-name = "physical_data_link"
-description = "A physical network link on a compute sled"
+name = "sled_data_link"
+description = "A network data link on a compute sled"
 authz_scope = "fleet"
 versions = [
-    { version = 1, fields = [ "rack_id", "sled_id", "hostname", "serial", "link_name" ] },
-    # This is the intended next version, but actual schema updates are not yet
-    # supported. This is left here as an example and breadcrumb to implement
-    # that update in the future.
-    #{ version = 2, fields = [ "rack_id", "sled_id", "serial", "model", "revision", "link_name" ] },
+    { version = 1, fields = [ "kind", "link_name", "rack_id", "sled_id", "sled_model", "sled_revision", "sled_serial", "zone_name" ] },
 ]
 
-[fields.rack_id]
-type = "uuid"
-description = "UUID for the link's sled"
-
-[fields.sled_id]
-type = "uuid"
-description = "UUID for the link's sled"
-
-[fields.hostname]
+[fields.kind]
 type = "string"
-description = "Hostname of the link's sled"
-
-[fields.model]
-type = "string"
-description = "Model number of the link's sled"
-
-[fields.revision]
-type = "u32"
-description = "Revision number of the sled"
-
-[fields.serial]
-type = "string"
-description = "Serial number of the sled"
+description = "The kind or class of the data link"
 
 [fields.link_name]
 type = "string"
-description = "Name of the physical data link"
+description = "Name of the data link"
+
+[fields.rack_id]
+type = "uuid"
+description = "ID for the link's rack"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID for the link's sled"
+
+[fields.sled_model]
+type = "string"
+description = "Model number of the link's sled"
+
+[fields.sled_revision]
+type = "u32"
+description = "Revision number of the sled"
+
+[fields.sled_serial]
+type = "string"
+description = "Serial number of the sled"
+
+[fields.zone_name]
+type = "string"
+description = "Name of the zone owning the link"
 
 [[metrics]]
 name = "bytes_sent"
