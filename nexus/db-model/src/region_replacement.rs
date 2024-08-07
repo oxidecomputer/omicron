@@ -111,6 +111,10 @@ impl std::str::FromStr for RegionReplacementState {
 /// modification was committed to the database and will not change or be
 /// unwound.
 ///
+/// It's also possible to transition from Running to ReplacementDone if a
+/// "finish" notification is seen by the region replacement drive background
+/// task. This check is done before invoking the region replacement drive saga.
+///
 /// See also: RegionReplacementStep records
 #[derive(
     Queryable,

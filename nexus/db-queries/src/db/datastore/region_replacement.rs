@@ -16,7 +16,6 @@ use crate::db::model::RegionReplacementState;
 use crate::db::model::RegionReplacementStep;
 use crate::db::model::UpstairsRepairNotification;
 use crate::db::model::UpstairsRepairNotificationType;
-use crate::db::model::VolumeRepair;
 use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
 use crate::db::update_and_check::UpdateAndCheck;
@@ -57,13 +56,8 @@ impl DataStore {
             .await?
             .transaction_async(|conn| async move {
                 use db::schema::region_replacement::dsl;
-                use db::schema::volume_repair::dsl as volume_repair_dsl;
 
-                diesel::insert_into(volume_repair_dsl::volume_repair)
-                    .values(VolumeRepair {
-                        volume_id: request.volume_id,
-                        repair_id: request.id,
-                    })
+                Self::volume_repair_insert_query(request.volume_id, request.id)
                     .execute_async(&conn)
                     .await?;
 
@@ -667,7 +661,7 @@ impl DataStore {
     pub async fn set_region_replacement_complete(
         &self,
         opctx: &OpContext,
-        region_replacement_id: Uuid,
+        request: RegionReplacement,
         operating_saga_id: Uuid,
     ) -> Result<(), Error> {
         type TxnError = TransactionError<Error>;
@@ -675,19 +669,17 @@ impl DataStore {
         self.pool_connection_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
-                use db::schema::volume_repair::dsl as volume_repair_dsl;
-
-                diesel::delete(
-                    volume_repair_dsl::volume_repair
-                        .filter(volume_repair_dsl::repair_id.eq(region_replacement_id))
-                    )
-                    .execute_async(&conn)
-                    .await?;
+                Self::volume_repair_delete_query(
+                    request.volume_id,
+                    request.id,
+                )
+                .execute_async(&conn)
+                .await?;
 
                 use db::schema::region_replacement::dsl;
 
                 let result = diesel::update(dsl::region_replacement)
-                    .filter(dsl::id.eq(region_replacement_id))
+                    .filter(dsl::id.eq(request.id))
                     .filter(
                         dsl::replacement_state.eq(RegionReplacementState::Completing),
                     )
@@ -696,7 +688,7 @@ impl DataStore {
                         dsl::replacement_state.eq(RegionReplacementState::Complete),
                         dsl::operating_saga_id.eq(Option::<Uuid>::None),
                     ))
-                    .check_if_exists::<RegionReplacement>(region_replacement_id)
+                    .check_if_exists::<RegionReplacement>(request.id)
                     .execute_and_check(&conn)
                     .await?;
 
@@ -713,7 +705,7 @@ impl DataStore {
                         } else {
                             Err(TxnError::CustomError(Error::conflict(format!(
                                 "region replacement {} set to {:?} (operating saga id {:?})",
-                                region_replacement_id,
+                                request.id,
                                 record.replacement_state,
                                 record.operating_saga_id,
                             ))))
@@ -732,9 +724,18 @@ impl DataStore {
     }
 
     /// Nexus has been notified by an Upstairs (or has otherwised determined)
-    /// that a region replacement is done, so update the record. This may arrive
-    /// in the middle of a drive saga invocation, so do not filter on state or
-    /// operating saga id!
+    /// that a region replacement is done, so update the record. Filter on the
+    /// following:
+    ///
+    /// - operating saga id being None, as this happens outside of a saga and
+    ///   should only transition the record if there isn't currently a lock.
+    ///
+    /// - the record being in the state "Running": this function is called when
+    ///   a "finish" notification is seen, and that only happens after a region
+    ///   replacement drive saga has invoked either a reconcilation or live
+    ///   repair, and that has finished. The region replacement drive background
+    ///   task will scan for these notifications and call this function if one
+    ///   is seen.
     pub async fn mark_region_replacement_as_done(
         &self,
         opctx: &OpContext,
@@ -743,11 +744,12 @@ impl DataStore {
         use db::schema::region_replacement::dsl;
         let updated = diesel::update(dsl::region_replacement)
             .filter(dsl::id.eq(region_replacement_id))
-            .set((
+            .filter(dsl::operating_saga_id.is_null())
+            .filter(dsl::replacement_state.eq(RegionReplacementState::Running))
+            .set(
                 dsl::replacement_state
                     .eq(RegionReplacementState::ReplacementDone),
-                dsl::operating_saga_id.eq(Option::<Uuid>::None),
-            ))
+            )
             .check_if_exists::<RegionReplacement>(region_replacement_id)
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await;
@@ -858,7 +860,7 @@ mod test {
     async fn test_replacement_done_in_middle_of_drive_saga() {
         // If Nexus receives a notification that a repair has finished in the
         // middle of a drive saga, then make sure the replacement request state
-        // ends up as `ReplacementDone`.
+        // eventually ends up as `ReplacementDone`.
 
         let logctx = dev::test_setup_log(
             "test_replacement_done_in_middle_of_drive_saga",
@@ -880,7 +882,7 @@ mod test {
             .await
             .unwrap();
 
-        // Transition to Driving
+        // The drive saga will transition the record to Driving, locking it.
 
         let saga_id = Uuid::new_v4();
 
@@ -890,7 +892,39 @@ mod test {
             .unwrap();
 
         // Now, Nexus receives a notification that the repair has finished
-        // successfully
+        // successfully. A background task trying to mark as replacement done
+        // should fail as the record was locked by the saga.
+
+        datastore
+            .mark_region_replacement_as_done(&opctx, request.id)
+            .await
+            .unwrap_err();
+
+        // Ensure that the state is still Driving, and the operating saga id is
+        // set.
+
+        let actual_request = datastore
+            .get_region_replacement_request_by_id(&opctx, request.id)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            actual_request.replacement_state,
+            RegionReplacementState::Driving
+        );
+        assert_eq!(actual_request.operating_saga_id, Some(saga_id));
+
+        // The Drive saga will finish, but doesn't transition to replacement
+        // done because it didn't detect that one of the repair operations had
+        // finished ok.
+
+        datastore
+            .undo_set_region_replacement_driving(&opctx, request.id, saga_id)
+            .await
+            .unwrap();
+
+        // Now the region replacement drive background task wakes up again, and
+        // this time marks the record as replacement done successfully.
 
         datastore
             .mark_region_replacement_as_done(&opctx, request.id)
@@ -911,13 +945,72 @@ mod test {
         );
         assert_eq!(actual_request.operating_saga_id, None);
 
-        // The Drive saga will unwind when it tries to set the state back to
-        // Running.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_replacement_done_in_middle_of_finish_saga() {
+        // If multiple Nexus are racing, don't let one mark a record as
+        // "ReplacementDone" if it's in the middle of the finish saga.
+
+        let logctx = dev::test_setup_log(
+            "test_replacement_done_in_middle_of_finish_saga",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let region_id = Uuid::new_v4();
+        let volume_id = Uuid::new_v4();
+
+        let request = {
+            let mut request = RegionReplacement::new(region_id, volume_id);
+            request.replacement_state = RegionReplacementState::ReplacementDone;
+            request
+        };
 
         datastore
-            .undo_set_region_replacement_driving(&opctx, request.id, saga_id)
+            .insert_region_replacement_request(&opctx, request.clone())
+            .await
+            .unwrap();
+
+        // The finish saga will transition to Completing, setting operating saga
+        // id accordingly.
+
+        let saga_id = Uuid::new_v4();
+
+        datastore
+            .set_region_replacement_completing(&opctx, request.id, saga_id)
+            .await
+            .unwrap();
+
+        // Double check that another saga can't do this, because the first saga
+        // took the lock.
+
+        datastore
+            .set_region_replacement_completing(
+                &opctx,
+                request.id,
+                Uuid::new_v4(),
+            )
             .await
             .unwrap_err();
+
+        // mark_region_replacement_as_done is called due to a finish
+        // notification scan by the region replacement drive background task.
+        // This should fail as the saga took the lock on this record.
+
+        datastore
+            .mark_region_replacement_as_done(&opctx, request.id)
+            .await
+            .unwrap_err();
+
+        // The first saga has finished and sets the record to Complete.
+
+        datastore
+            .set_region_replacement_complete(&opctx, request, saga_id)
+            .await
+            .unwrap();
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

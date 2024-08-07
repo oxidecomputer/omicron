@@ -45,10 +45,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[dropshot::api_description {
-    // Named something different to let 'import nexus_internal_api::*;' work.
-    module = "nexus_internal_api_mod",
-}]
+#[dropshot::api_description]
 pub trait NexusInternalApi {
     type Context;
 
