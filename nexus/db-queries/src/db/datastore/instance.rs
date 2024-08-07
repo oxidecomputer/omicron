@@ -936,22 +936,27 @@ impl DataStore {
     }
 
     /// Attempts to lock an instance's record to apply state updates in an
-    /// instance-update saga, returning the state of the instance when the lock
-    /// was acquired.
+    /// instance-update saga, returning an [`UpdaterLock`] if the lock is
+    /// successfully acquired.
     ///
     /// # Notes
     ///
     /// This method MUST only be called from the context of a saga! The
     /// calling saga must ensure that the reverse action for the action that
     /// acquires the lock must call [`DataStore::instance_updater_unlock`] to
-    /// ensure that the lock is always released if the saga unwinds.
+    /// ensure that the lock is always released if the saga unwinds. If the saga
+    /// locking the instance completes successfully, it must release the lock
+    /// using [`DataStore::instance_updater_unlock`], or use
+    /// [`DataStore::instance_commit_update`] to release the lock and write back
+    /// a new [`InstanceRuntimeState`] in a single atomic query.
     ///
     /// This method is idempotent: if the instance is already locked by the same
     /// saga, it will succeed, as though the lock was acquired.
     ///
     /// # Arguments
     ///
-    /// - `authz_instance`: the instance to attempt to lock to lock
+    /// - `opctx`: the [`OpContext`] for this operation.
+    /// - `authz_instance`: the instance to attempt to lock.
     /// - `updater_id`: the UUID of the saga that's attempting to lock this
     ///   instance.
     ///
@@ -1076,15 +1081,59 @@ impl DataStore {
         }
     }
 
+    /// Attempts to "inherit" the lock acquired by
+    /// [`DataStore::instance_updater_lock`] by setting a new `child_lock_id` as
+    /// the current updater, if (and only if) the lock is held by the provided
+    /// `parent_lock`.
+    ///
+    /// This essentially performs the equivalent of a [compare-exchange]
+    /// operation on the instance record's lock ID field, which succeeds if the
+    /// current lock ID matches the parent. Using this method ensures that, if a
+    /// parent saga starts multiple child sagas, only one of them can
+    /// successfully acquire the lock.
+    ///
+    /// # Notes
+    ///
+    /// This method MUST only be called from the context of a saga! The
+    /// calling saga must ensure that the reverse action for the action that
+    /// acquires the lock must call [`DataStore::instance_updater_unlock`] to
+    /// ensure that the lock is always released if the saga unwinds. If the saga
+    /// locking the instance completes successfully, it must release the lock
+    /// using [`DataStore::instance_updater_unlock`], or use
+    /// [`DataStore::instance_commit_update`] to release the lock and write back
+    /// a new [`InstanceRuntimeState`] in a single atomic query.
+
+    ///
+    /// This method is idempotent: if the instance is already locked by the same
+    /// saga, it will succeed, as though the lock was acquired.
+    ///
+    /// # Arguments
+    ///
+    /// - `opctx`: the [`OpContext`] for this operation.
+    /// - `authz_instance`: the instance to attempt to inherit the lock on.
+    /// - `parent_lock`: the [`UpdaterLock`] to attempt to inherit the lock
+    ///   from. If the current updater UUID and generation matches this, the
+    ///   lock can be inherited by `child_id`.
+    /// - `child_lock_id`: the UUID of the saga that's attempting to lock this
+    ///   instance.
+    ///
+    /// # Returns
+    ///
+    /// - [`Ok`]`(`[`UpdaterLock`]`)` if the lock was successfully inherited.
+    /// - [`Err`]`([`UpdaterLockError::AlreadyLocked`])` if the instance was
+    ///   locked by a different saga, other than the provided `parent_lock`.
+    /// - [`Err`]`([`UpdaterLockError::Query`]`(...))` if the query to fetch
+    ///   the instance or lock it returned another error (such as if the
+    ///   instance no longer exists, or if the database connection failed).
     pub async fn instance_updater_inherit_lock(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        UpdaterLock { updater_id: parent_id, locked_gen }: UpdaterLock,
+        parent_lock: UpdaterLock,
         child_lock_id: Uuid,
     ) -> Result<UpdaterLock, UpdaterLockError> {
         use db::schema::instance::dsl;
-
+        let UpdaterLock { updater_id: parent_id, locked_gen } = parent_lock;
         let instance_id = authz_instance.id();
         let new_gen = Generation(locked_gen.0.next());
 
@@ -1111,10 +1160,11 @@ impl DataStore {
             })?;
 
         match result {
-            // If we updated the record, the lock has been released! Return
-            // `Ok(true)` to indicate that we released the lock successfully.
+            // If we updated the record, the lock has been successfully
+            // inherited! Return `Ok(true)` to indicate that we have acquired
+            // the lock successfully.
             UpdateAndQueryResult { status: UpdateStatus::Updated, .. } => {
-                slog::info!(
+                slog::debug!(
                     &opctx.log,
                     "inherited lock from {parent_id} to {child_lock_id}";
                     "instance_id" => %instance_id,
@@ -1135,16 +1185,38 @@ impl DataStore {
                 status: UpdateStatus::NotUpdatedButExists,
                 ref found,
             } if found.updater_id == Some(child_lock_id) => {
-                debug_assert_eq!(found.updater_gen, new_gen,);
+                slog::debug!(
+                    &opctx.log,
+                    "previously inherited lock from {parent_id} to \
+                     {child_lock_id}";
+                    "instance_id" => %instance_id,
+                    "updater_id" => %child_lock_id,
+                    "locked_gen" => ?found.updater_gen,
+                    "parent_id" => %parent_id,
+                    "parent_gen" => ?locked_gen,
+                );
+                debug_assert_eq!(found.updater_gen, new_gen);
                 Ok(UpdaterLock {
                     updater_id: child_lock_id,
                     locked_gen: new_gen,
                 })
             }
-            // The instance exists, but the lock ID doesn't match our lock ID.
-            // This means we were trying to release a lock we never held, whcih
-            // is almost certainly a programmer error.
-            UpdateAndQueryResult { .. } => Err(UpdaterLockError::AlreadyLocked),
+            // The instance exists, but it's locked by a different saga than the
+            // parent we were trying to inherit the lock from. We cannot acquire
+            // the lock at this time.
+            UpdateAndQueryResult { ref found, .. } => {
+                slog::debug!(
+                    &opctx.log,
+                    "cannot inherit instance-updater lock from {parent_id} to \
+                     {child_lock_id}: this instance is  not locked by the \
+                     expected parent saga";
+                    "instance_id" => %instance_id,
+                    "updater_id" => %child_lock_id,
+                    "parent_id" => %parent_id,
+                    "actual_lock_id" => ?found.updater_id,
+                );
+                Err(UpdaterLockError::AlreadyLocked)
+            }
         }
     }
 
@@ -1193,40 +1265,97 @@ impl DataStore {
             // If we updated the record, the lock has been released! Return
             // `Ok(true)` to indicate that we released the lock successfully.
             UpdateAndQueryResult { status: UpdateStatus::Updated, .. } => {
-                Ok(true)
+                return Ok(true);
             }
-            // The generation has advanced past the generation at which the
-            // lock was held. This means that we have already released the
-            // lock. Return `Ok(false)` here for idempotency.
-            UpdateAndQueryResult {
-                status: UpdateStatus::NotUpdatedButExists,
-                ref found,
-            } if found.updater_gen > locked_gen => Ok(false),
 
-            // The instance exists, but the lock ID doesn't match our lock ID.
-            // This means we were trying to release a lock we never held, whcih
-            // is almost certainly a programmer error.
-            UpdateAndQueryResult { ref found, .. } => {
-                match found.updater_id {
-                    Some(actual_id) if actual_id != updater_id => {
-                        slog::error!(
-                            &opctx.log,
-                            "attempted to release a lock held by another saga";
-                            "instance_id" => %instance_id,
-                            "updater_id" => %updater_id,
-                            "actual_id" => %actual_id,
-                            "found_gen" => ?found.updater_gen,
-                            "locked_gen" => ?locked_gen,
-                        );
-                        Err(Error::internal_error(
-                            "attempted to release a lock held by another saga! this is a bug!",
-                        ))
-                    },
-                    Some(_) =>  Ok(false),
-                    None => Err(Error::internal_error(
-                        "attempted to release a lock on an instance that is not locked! this is a bug!",
-                    )),
+            // The instance exists, but we didn't unlock it. In almost all
+            // cases, that's actually *fine*, since this suggests we didn't
+            // actually have the lock to release, so we don't need to worry
+            // about unlocking the instance. However, depending on the
+            // particular reason we didn't actually unlock the instance, this
+            // may be more or less likely to indicate a bug. Remember that saga
+            // actions --- even unwind actions --- must be idempotent, so we
+            // *may* just be trying to unlock an instance we already
+            // successfully unlocked, which is fine.
+            UpdateAndQueryResult { ref found, .. }
+                if found.time_deleted().is_some() =>
+            {
+                debug!(
+                    &opctx.log,
+                    "attempted to unlock an instance that has been deleted";
+                    "instance_id" => %instance_id,
+                    "updater_id" => %updater_id,
+                    "time_deleted" => ?found.time_deleted(),
+                );
+                return Ok(false);
+            }
+
+            // If the instance is no longer locked by this saga, that's probably fine.
+            // We don't need to unlock it.
+            UpdateAndQueryResult { ref found, .. }
+                if found.updater_id != Some(updater_id) =>
+            {
+                if found.updater_gen > locked_gen {
+                    // The generation has advanced past the generation where we
+                    // acquired the lock. That's totally fine: a previous
+                    // execution of the same saga action must have unlocked it,
+                    // and now it is either unlocked, or locked by a different
+                    // saga.
+                    debug!(
+                        &opctx.log,
+                        "attempted to unlock an instance that is no longer \
+                         locked by this saga";
+                        "instance_id" => %instance_id,
+                        "updater_id" => %updater_id,
+                        "actual_id" => ?found.updater_id.as_ref(),
+                        "found_gen" => ?found.updater_gen,
+                        "locked_gen" => ?locked_gen,
+                    );
+                } else {
+                    // On the other hand, if the generation is less than or
+                    // equal to the generation at which we locked the instance,
+                    // that eems kinda suspicious --- perhaps we believed we
+                    // held the lock, but didn't actually, which could be
+                    // programmer error.
+                    //
+                    // However, this *could* conceivably happen: the same saga
+                    // node could have executed previously and released the
+                    // lock, and then the generation counter advanced enough
+                    // times to wrap around, and then the same action tried to
+                    // release its lock again. 64-bit generation counters
+                    // overflowing in an instance's lifetime seems unlikely, but
+                    // nothing is impossible...
+                    warn!(
+                        &opctx.log,
+                        "attempted to release a lock held by another saga \
+                         at the same generation! this seems suspicious...";
+                        "instance_id" => %instance_id,
+                        "updater_id" => %updater_id,
+                        "actual_id" => ?found.updater_id.as_ref(),
+                        "found_gen" => ?found.updater_gen,
+                        "locked_gen" => ?locked_gen,
+                    );
                 }
+
+                Ok(false)
+            }
+
+            // If we *are* still holding the lock, we must be trying to
+            // release it at the wrong generation. That seems quite
+            // suspicious.
+            UpdateAndQueryResult { ref found, .. } => {
+                warn!(
+                    &opctx.log,
+                    "attempted to release a lock at the wrong generation";
+                    "instance_id" => %instance_id,
+                    "updater_id" => %updater_id,
+                    "found_gen" => ?found.updater_gen,
+                    "locked_gen" => ?locked_gen,
+                );
+                Err(Error::internal_error(
+                    "instance is locked by this saga, but at a different \
+                     generation",
+                ))
             }
         }
     }
@@ -1297,56 +1426,73 @@ impl DataStore {
 
             // The instance has been marked as deleted, so no updates were
             // committed!
-            UpdateAndQueryResult {
-                status: UpdateStatus::NotUpdatedButExists,
-                ref found,
-            } if found.time_deleted().is_some() => {
+            UpdateAndQueryResult { ref found, .. }
+                if found.time_deleted().is_some() =>
+            {
                 warn!(
                     &opctx.log,
-                    "cannot commit instance update, as the instance no longer exists";
+                    "cannot commit instance update, as the instance no longer \
+                     exists";
                     "instance_id" => %instance_id,
                     "updater_id" => %updater_id,
                     "time_deleted" => ?found.time_deleted()
                 );
 
-                Err(LookupType::ById(instance_id).into_not_found(ResourceType::Instance))
+                Err(LookupType::ById(instance_id)
+                    .into_not_found(ResourceType::Instance))
             }
 
-            // The generation has advanced past the generation at which the
-            // lock was held. This means that we have already released the
-            // lock. Return `Ok(false)` here for idempotency.
-            UpdateAndQueryResult {
-                status: UpdateStatus::NotUpdatedButExists,
-                ref found,
-            } if found.updater_gen > locked_gen => Ok(false),
+            // The instance exists, but we cannot update it because the state
+            // generation has advanced past ours. That's fine --- assume we
+            // already updated the instance.
+            UpdateAndQueryResult { ref found, .. }
+                if found.runtime().r#gen > new_runtime.r#gen =>
+            {
+                debug!(
+                    &opctx.log,
+                    "cannot commit instance updates, as the state generation \
+                     has advanced: they've probably already been committed.";
+                    "instance_id" => %instance_id,
+                    "updater_id" => %updater_id,
+                    "expected_gen" => ?new_runtime.r#gen,
+                    "actual_gen" => ?found.runtime().r#gen,
+                );
+                Ok(false)
+            }
 
-            // The instance exists, but the lock ID doesn't match our lock ID.
-            // This means we were trying to release a lock we never held, whcih
-            // is almost certainly a programmer error.
-            UpdateAndQueryResult { ref found, .. } => {
-                match found.updater_id {
-                    Some(actual_id) if actual_id != updater_id => {
-                        slog::error!(
-                            &opctx.log,
-                            "attempted to release a lock held by another saga";
-                            "instance_id" => %instance_id,
-                            "updater_id" => %updater_id,
-                            "actual_id" => %actual_id,
-                            "found_gen" => ?found.updater_gen,
-                            "locked_gen" => ?locked_gen,
-                        );
-                        Err(Error::internal_error(
-                            "attempted to release a lock held by another saga! this is a bug!",
-                        ))
-                    },
-                    Some(_) => Err(Error::conflict(
-                        "attempted to commit an instance update, but the state generation has advanced!"
-                    )),
-                    None => Err(Error::internal_error(
-                        "attempted to release a lock on an instance that is not locked! this is a bug!",
-                    )),
+            // The instance exists, but we could not update it because the lock
+            // did not match.
+            UpdateAndQueryResult { ref found, .. } => match found.updater_id {
+                Some(actual_id) => {
+                    const MSG: &'static str =
+                        "cannot commit instance updates: the instance is \
+                         locked by another saga!";
+                    error!(
+                        &opctx.log,
+                        "{MSG}";
+                        "instance_id" => %instance_id,
+                        "updater_id" => %updater_id,
+                        "actual_id" => %actual_id,
+                        "found_gen" => ?found.updater_gen,
+                        "locked_gen" => ?locked_gen,
+                    );
+                    Err(Error::internal_error(MSG))
                 }
-            }
+                None => {
+                    const MSG: &'static str =
+                        "cannot commit instance updates: the instance is \
+                         not locked";
+                    error!(
+                        &opctx.log,
+                        "{MSG}";
+                        "instance_id" => %instance_id,
+                        "updater_id" => %updater_id,
+                        "found_gen" => ?found.updater_gen,
+                        "locked_gen" => ?locked_gen,
+                    );
+                    Err(Error::internal_error(MSG))
+                }
+            },
         }
     }
 }

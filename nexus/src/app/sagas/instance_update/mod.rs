@@ -1302,7 +1302,7 @@ async fn unwind_instance_lock(
             } else if total_duration > WARN_DURATION {
                 warn!(
                     log,
-                    "instance update: server error while unlocking instance,
+                    "instance update: server error while unlocking instance, \
                      retrying";
                     "instance_id" => %instance_id,
                     "lock" => ?lock,
@@ -1313,7 +1313,8 @@ async fn unwind_instance_lock(
             } else {
                 info!(
                     log,
-                    "server error while recording saga event, retrying";
+                    "instance update: server error while unlocking instance, \
+                     retrying";
                     "instance_id" => %instance_id,
                     "lock" => ?lock,
                     "error" => &error,
@@ -1692,7 +1693,7 @@ mod test {
                     params
                 })
             },
-            // Don't pass a parent saga ID here because the saga MUST be
+            // Don't pass a parent saga ID here because the instance MUST be
             // unlocked if the whole start saga unwinds.
             || Box::pin(after_unwinding(None, cptestctx)),
             &cptestctx.logctx.log,
