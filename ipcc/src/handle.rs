@@ -126,4 +126,34 @@ impl IpccHandle {
 
         Ok(lenp)
     }
+
+    pub(crate) fn rot_request(
+        &self,
+        req: &[u8],
+        resp: &mut [u8],
+    ) -> Result<usize, IpccError> {
+        let mut ipcc_rot_resp: *mut libipcc_rot_resp_t = ptr::null_mut();
+        if !unsafe {
+            libipcc_rot_send(
+                self.0,
+                req.as_ptr(),
+                req.len(),
+                &mut ipcc_rot_resp,
+            )
+        } {
+            return Err(self.fatal("rot_send failed"));
+        }
+
+        let mut lenp = resp.len();
+
+        let data = unsafe { libipcc_rot_resp_get(ipcc_rot_resp, &mut lenp) };
+
+        let slice = unsafe { core::slice::from_raw_parts(data, lenp) };
+        resp[..lenp].copy_from_slice(&slice);
+
+        unsafe {
+            libipcc_rot_resp_free(ipcc_rot_resp);
+        }
+        Ok(lenp)
+    }
 }
