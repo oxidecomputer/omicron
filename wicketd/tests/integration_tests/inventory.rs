@@ -68,9 +68,6 @@ async fn test_inventory() {
         let response: Vec<BootstrapSledDescription> =
             serde_json::from_slice(&stdout).expect("stdout is valid JSON");
 
-        // This is the data we have today but I want it to be different from
-        // this to test having an address and such
-
         // This only tests the case that we get sleds back with no current
         // bootstrap IP. This does provide svalue: it check that the command
         // exists, accesses data within wicket, and returns it in the schema we
