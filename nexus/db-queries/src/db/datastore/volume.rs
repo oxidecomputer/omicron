@@ -2055,7 +2055,7 @@ impl DataStore {
             })
     }
 
-    /// Replace a read-only snapshot in a Volume with a new region
+    /// Replace a read-only target in a Volume with a new region
     ///
     /// In a single transaction:
     ///
@@ -2066,7 +2066,7 @@ impl DataStore {
     ///   construction request
     ///
     /// Note that this transaction does _not_ update a region snapshot's volume
-    /// references table! This is legal because the existing reference is
+    /// references table! This is legal because the existing target reference is
     /// written into the volume to delete's construction request.
     ///
     /// This function's effects can be undone by calling it with swapped
