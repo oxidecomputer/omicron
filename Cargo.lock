@@ -5401,7 +5401,7 @@ name = "omicron-certificates"
 version = "0.1.0"
 dependencies = [
  "display-error-chain",
- "foreign-types 0.3.2",
+ "foreign-types 0.5.0",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
