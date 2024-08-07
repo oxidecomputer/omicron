@@ -1446,7 +1446,7 @@ impl DataStore {
             // generation has advanced past ours. That's fine --- assume we
             // already updated the instance.
             UpdateAndQueryResult { ref found, .. }
-                if found.runtime().r#gen > new_runtime.r#gen =>
+                if found.runtime().r#gen >= new_runtime.r#gen =>
             {
                 debug!(
                     &opctx.log,
@@ -1836,6 +1836,96 @@ mod tests {
                 .await
         )
         .expect("instance should unlock");
+
+        // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_instance_commit_update_is_idempotent() {
+        // Setup
+        let logctx =
+            dev::test_setup_log("test_instance_commit_update_is_idempotent");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let authz_instance = create_test_instance(&datastore, &opctx).await;
+        let saga1 = Uuid::new_v4();
+
+        // lock the instance once.
+        let lock = dbg!(
+            datastore
+                .instance_updater_lock(&opctx, &authz_instance, saga1)
+                .await
+        )
+        .expect("instance should be locked");
+        let new_runtime = &InstanceRuntimeState {
+            time_updated: Utc::now(),
+            r#gen: Generation(external::Generation::from_u32(2)),
+            propolis_id: Some(Uuid::new_v4()),
+            dst_propolis_id: None,
+            migration_id: None,
+            nexus_state: InstanceState::Vmm,
+        };
+
+        let updated = dbg!(
+            datastore
+                .instance_commit_update(
+                    &opctx,
+                    &authz_instance,
+                    &lock,
+                    &new_runtime
+                )
+                .await
+        )
+        .expect("instance_commit_update should succeed");
+        assert!(updated, "it should be updated");
+
+        // okay, let's do it again at the same generation.
+        let updated = dbg!(
+            datastore
+                .instance_commit_update(
+                    &opctx,
+                    &authz_instance,
+                    &lock,
+                    &new_runtime
+                )
+                .await
+        )
+        .expect("instance_commit_update should succeed");
+        assert!(!updated, "it was already updated");
+        let instance =
+            dbg!(datastore.instance_refetch(&opctx, &authz_instance).await)
+                .expect("instance should exist");
+        assert_eq!(instance.runtime().propolis_id, new_runtime.propolis_id);
+        assert_eq!(instance.runtime().r#gen, new_runtime.r#gen);
+
+        // Doing it again at the same generation with a *different* state
+        // shouldn't change the instance at all.
+        let updated = dbg!(
+            datastore
+                .instance_commit_update(
+                    &opctx,
+                    &authz_instance,
+                    &lock,
+                    &InstanceRuntimeState {
+                        propolis_id: Some(Uuid::new_v4()),
+                        migration_id: Some(Uuid::new_v4()),
+                        dst_propolis_id: Some(Uuid::new_v4()),
+                        ..new_runtime.clone()
+                    }
+                )
+                .await
+        )
+        .expect("instance_commit_update should succeed");
+        assert!(!updated, "it was already updated");
+        let instance =
+            dbg!(datastore.instance_refetch(&opctx, &authz_instance).await)
+                .expect("instance should exist");
+        assert_eq!(instance.runtime().propolis_id, new_runtime.propolis_id);
+        assert_eq!(instance.runtime().dst_propolis_id, None);
+        assert_eq!(instance.runtime().migration_id, None);
+        assert_eq!(instance.runtime().r#gen, new_runtime.r#gen);
 
         // Clean up.
         db.cleanup().await.unwrap();
