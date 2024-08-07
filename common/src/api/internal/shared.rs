@@ -765,9 +765,9 @@ impl DatasetKind {
     /// Returns the zone name, if this is dataset for a zone filesystem.
     ///
     /// Otherwise, returns "None".
-    pub fn zone_name(&self) -> Option<String> {
+    pub fn zone_name(&self) -> Option<&str> {
         if let DatasetKind::Zone { name } = self {
-            Some(name.clone())
+            Some(name)
         } else {
             None
         }

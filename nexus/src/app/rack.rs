@@ -147,7 +147,7 @@ impl super::Nexus {
                     dataset.zpool_id,
                     Some(dataset.request.address),
                     dataset.request.kind.clone().into(),
-                    dataset.request.kind.zone_name(),
+                    dataset.request.kind.zone_name().map(String::from),
                 )
             })
             .collect();

@@ -68,7 +68,7 @@ pub(crate) async fn ensure_dataset_records_exist(
             pool_id.into_untyped_uuid(),
             Some(address),
             kind.clone().into(),
-            kind.zone_name(),
+            kind.zone_name().map(String::from),
         );
         let maybe_inserted = datastore
             .dataset_insert_if_not_exists(dataset)
