@@ -697,7 +697,9 @@ impl StorageManager {
                 if config.generation < ledger_data.generation {
                     warn!(
                         log,
-                        "Request looks out-of-date compared to prior request"
+                        "Request looks out-of-date compared to prior request";
+                        "requested_generation" => ?config.generation,
+                        "ledger_generation" => ?ledger_data.generation,
                     );
                     return Err(Error::DatasetConfigurationOutdated {
                         requested: config.generation,
@@ -720,7 +722,12 @@ impl StorageManager {
                         });
                     }
                 } else {
-                    info!(log, "Request looks newer than prior requests");
+                    info!(
+                        log,
+                        "Request looks newer than prior requests";
+                        "requested_generation" => ?config.generation,
+                        "ledger_generation" => ?ledger_data.generation,
+                    );
                 }
                 ledger
             }

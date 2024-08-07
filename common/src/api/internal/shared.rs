@@ -718,7 +718,6 @@ pub struct ResolvedVpcRouteSet {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DatasetKind {
     // Durable datasets for zones
-
     #[serde(rename = "cockroachdb")]
     Cockroach,
     Crucible,
