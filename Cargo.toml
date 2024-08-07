@@ -314,7 +314,8 @@ db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
 derive_more = "0.99.18"
 derive-where = "1.2.7"
-diesel = { version = "2.1.6", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+# Having the i-implement-... feature here makes diesel go away from the workspace-hack
+diesel = { version = "2.2.2", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", branch = "main" }
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
