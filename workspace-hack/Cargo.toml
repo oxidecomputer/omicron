@@ -90,6 +90,8 @@ regex-automata = { version = "0.4.6", default-features = false, features = ["dfa
 regex-syntax = { version = "0.8.3" }
 reqwest = { version = "0.11.27", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.8", features = ["std"] }
+rustls-pki-types = { version = "1.7.0", features = ["std"] }
+rustls-webpki = { version = "0.102.6", default-features = false, features = ["aws_lc_rs", "ring", "std"] }
 schemars = { version = "0.8.21", features = ["bytes", "chrono", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.23", features = ["serde"] }
@@ -134,6 +136,7 @@ bstr-6f8ce4dd05d13bba = { package = "bstr", version = "0.2.17" }
 bstr-dff4ba8e3ae991db = { package = "bstr", version = "1.9.1" }
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.7.1", features = ["serde"] }
+cc = { version = "1.0.97", default-features = false, features = ["parallel"] }
 chrono = { version = "0.4.38", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
 clap = { version = "4.5.13", features = ["cargo", "derive", "env", "wrap_help"] }
@@ -195,6 +198,8 @@ regex-automata = { version = "0.4.6", default-features = false, features = ["dfa
 regex-syntax = { version = "0.8.3" }
 reqwest = { version = "0.11.27", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.8", features = ["std"] }
+rustls-pki-types = { version = "1.7.0", features = ["std"] }
+rustls-webpki = { version = "0.102.6", default-features = false, features = ["aws_lc_rs", "ring", "std"] }
 schemars = { version = "0.8.21", features = ["bytes", "chrono", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.23", features = ["serde"] }
