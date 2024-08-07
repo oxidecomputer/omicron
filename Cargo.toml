@@ -373,7 +373,7 @@ installinator-common = { path = "installinator-common" }
 internal-dns = { path = "internal-dns" }
 ipcc = { path = "ipcc" }
 ipnet = "2.9"
-itertools = "0.12.1"
+itertools = "0.13.0"
 internet-checksum = "0.2"
 ipnetwork = { version = "0.20", features = ["schemars"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
