@@ -100,7 +100,7 @@ bgp = []
 # You can configure multiple uplinks by repeating the following stanza
 [[rack_network_config.ports]]
 # Routes associated with this port.
-routes = [{nexthop = "192.168.1.1", destination = "0.0.0.0/0"}]
+routes = [{nexthop = "192.168.1.199", destination = "0.0.0.0/0"}]
 # Addresses associated with this port.
 addresses = [{address = "192.168.1.30/24"}]
 # Name of the uplink port.  This should always be "qsfp0" when using softnpu.
