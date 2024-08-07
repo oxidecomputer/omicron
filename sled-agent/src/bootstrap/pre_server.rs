@@ -28,6 +28,7 @@ use futures::StreamExt;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm;
 use illumos_utils::dladm::Dladm;
+use illumos_utils::running_zone::SWITCH_ZONE_INIT_STAGE;
 use illumos_utils::zfs;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zone;
@@ -71,7 +72,7 @@ impl BootstrapAgentStartup {
 
         let log = base_log.new(o!(
             "component" => "BootstrapAgentStartup",
-            "stage" => "switch zone initialization",
+            "stage" => SWITCH_ZONE_INIT_STAGE,
         ));
 
         // Perform several blocking startup tasks first; we move `config` and

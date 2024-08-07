@@ -12,6 +12,7 @@ use dpd_client::Client as DpdClient;
 use futures::future;
 use gateway_client::Client as MgsClient;
 use http::StatusCode;
+use illumos_utils::running_zone::SWITCH_ZONE_INIT_STAGE;
 use internal_dns::resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
 use mg_admin_client::types::BfdPeerConfig as MgBfdPeerConfig;
@@ -362,7 +363,7 @@ impl<'a> EarlyNetworkSetup<'a> {
         rack_network_config: &RackNetworkConfig,
         switch_zone_underlay_ip: Ipv6Addr,
     ) -> Result<Vec<PortConfig>, EarlyNetworkSetupError> {
-        let log = self.log.new(o!("stage" => "switch zone initialization"));
+        let log = self.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
         // First, we have to know which switch we are: ask MGS.
         info!(
             log,
@@ -373,7 +374,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             &format!("http://[{}]:{}", switch_zone_underlay_ip, MGS_PORT),
             self.log.new(o!(
                 "component" => "MgsClient",
-                "stage" => "switch zone initialization",
+                "stage" => SWITCH_ZONE_INIT_STAGE,
             )),
         );
         let switch_slot = retry_notify(
@@ -427,7 +428,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                 tag: OMICRON_DPD_TAG.into(),
                 log: self.log.new(o!(
                     "component" => "DpdClient",
-                    "stage" => "switch zone initialization",
+                    "stage" => SWITCH_ZONE_INIT_STAGE,
                 )),
             },
         );

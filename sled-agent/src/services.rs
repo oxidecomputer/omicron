@@ -53,7 +53,7 @@ use illumos_utils::opte::{
 };
 use illumos_utils::running_zone::{
     EnsureAddressError, InstalledZone, RunCommandError, RunningZone,
-    ZoneBuilderFactory,
+    SWITCH_ZONE_INIT_STAGE, ZoneBuilderFactory,
 };
 use illumos_utils::smf_helper::SmfHelper;
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
@@ -3727,7 +3727,7 @@ impl ServiceManager {
         baseboard: Baseboard,
     ) -> Result<(), Error> {
         let log =
-            self.inner.log.new(o!("stage" => "switch zone initialization"));
+            self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
         info!(
             log,
             "Enabling switch zone services on scrimlet";
@@ -3854,7 +3854,7 @@ impl ServiceManager {
         rack_network_config: &RackNetworkConfig,
     ) -> Result<(), Error> {
         let log =
-            &self.inner.log.new(o!("stage" => "switch zone initialization"));
+            &self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
 
         // Configure uplinks via DPD in our switch zone.
         let our_ports = EarlyNetworkSetup::new(log)
@@ -3872,7 +3872,7 @@ impl ServiceManager {
         our_ports: Vec<HostPortConfig>,
     ) -> Result<(), Error> {
         let log =
-            &self.inner.log.new(o!("stage" => "switch zone initialization"));
+            &self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
 
         // We expect the switch zone to be running, as we're called immediately
         // after `ensure_zone()` above and we just successfully configured
@@ -3969,7 +3969,7 @@ impl ServiceManager {
         data_links: Vec<String>,
     ) -> Result<(), Error> {
         let log =
-            self.inner.log.new(o!("stage" => "switch zone initialization"));
+            self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
 
         let mut sled_zone = self.inner.switch_zone.lock().await;
         let zone_typestr = "switch";
@@ -4339,7 +4339,7 @@ impl ServiceManager {
         };
 
         let log =
-            self.inner.log.new(o!("stage" => "switch zone initialization"));
+            self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
         // The switch zone must use the ramdisk in order to receive requests
         // from RSS to initialize the rack. This enables the initialization of
         // trust quorum to derive disk encryption keys for U.2 devices. If the

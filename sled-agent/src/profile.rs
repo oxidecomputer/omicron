@@ -4,7 +4,7 @@
 
 //! Utilities to build SMF profiles.
 
-use illumos_utils::running_zone::InstalledZone;
+use illumos_utils::running_zone::{InstalledZone, SWITCH_ZONE_INIT_STAGE};
 use illumos_utils::zone::SWITCH_ZONE_NAME;
 use slog::Logger;
 use std::{
@@ -35,7 +35,7 @@ impl ProfileBuilder {
         let profile_info =
             format!("Profile for {}:\n{}", installed_zone.name(), self);
         if installed_zone.name() == SWITCH_ZONE_NAME {
-            info!(log, "{profile_info}"; "stage" => "switch zone initialization");
+            info!(log, "{profile_info}"; "stage" => SWITCH_ZONE_INIT_STAGE);
         } else {
             info!(log, "{profile_info}");
         }

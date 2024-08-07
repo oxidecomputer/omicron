@@ -8,6 +8,7 @@
 
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
+use illumos_utils::running_zone::SWITCH_ZONE_INIT_STAGE;
 use sled_hardware::{HardwareManager, HardwareUpdate};
 use sled_hardware_types::Baseboard;
 use sled_storage::disk::RawDisk;
@@ -148,7 +149,7 @@ impl HardwareMonitor {
                         info!(
                             self.log,
                             "Tofino ASIC is loaded. Activating switch zone on scrimlet";
-                            "stage" => "switch zone initialization"
+                            "stage" => SWITCH_ZONE_INIT_STAGE
                         );
                         self.activate_switch().await;
                     }
@@ -242,7 +243,7 @@ impl HardwareMonitor {
                     error!(
                         self.log,
                         "Failed to activate switch"; e,
-                        "stage" => "switch zone initialization"
+                        "stage" => SWITCH_ZONE_INIT_STAGE
                     );
                 }
             }

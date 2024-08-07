@@ -23,6 +23,7 @@ use crate::sled_agent::SledAgent;
 use crate::storage_monitor::{StorageMonitor, StorageMonitorHandle};
 use crate::zone_bundle::{CleanupContext, ZoneBundler};
 use bootstore::schemes::v0 as bootstore;
+use illumos_utils::running_zone::SWITCH_ZONE_INIT_STAGE;
 use key_manager::{KeyManager, StorageKeyRequester};
 use sled_hardware::{HardwareManager, SledMode, UnparsedDisk};
 use sled_storage::config::MountConfig;
@@ -184,7 +185,7 @@ fn spawn_hardware_monitor(
     hardware_manager: &HardwareManager,
     storage_handle: &StorageHandle,
 ) -> (oneshot::Sender<SledAgent>, oneshot::Sender<ServiceManager>) {
-    info!(log, "Starting HardwareMonitor"; "stage" => "switch zone initialization");
+    info!(log, "Starting HardwareMonitor"; "stage" => SWITCH_ZONE_INIT_STAGE);
     let (mut monitor, sled_agent_started_tx, service_manager_ready_tx) =
         HardwareMonitor::new(log, hardware_manager, storage_handle);
     tokio::spawn(async move {
@@ -207,7 +208,7 @@ async fn spawn_bootstore_tasks(
     )
     .unwrap();
 
-    // let log = log.new(o!("stage" => "switch zone initialization"));
+    let log = log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
     // TODO: Add some logging here?
     // Create and spawn the bootstore
     info!(log, "Starting Bootstore");
