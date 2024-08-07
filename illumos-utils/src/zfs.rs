@@ -395,7 +395,7 @@ impl Zfs {
             .unwrap_or_else(|| String::from("none"));
         let compression = compression.unwrap_or_else(|| String::from("off"));
 
-        if let Err(err) = Self::set_value(name, "quota", &format!("{quota}")) {
+        if let Err(err) = Self::set_value(name, "quota", &quota) {
             return Err(EnsureFilesystemError {
                 name: name.to_string(),
                 mountpoint: mountpoint.clone(),
@@ -404,7 +404,7 @@ impl Zfs {
             });
         }
         if let Err(err) =
-            Self::set_value(name, "reservation", &format!("{reservation}"))
+            Self::set_value(name, "reservation", &reservation)
         {
             return Err(EnsureFilesystemError {
                 name: name.to_string(),
