@@ -43,7 +43,7 @@ enum Cmds {
 
     /// Utilities for working with certificates.
     CertDev(external::External),
-    /// Utilities for working with Clickhouse.
+    /// Utilities for working with ClickHouse.
     #[clap(alias = "clickhouse-dev")]
     ChDev(external::External),
     /// Utilities for working with CockroachDB databases.
