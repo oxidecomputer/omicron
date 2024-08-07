@@ -1398,7 +1398,7 @@ impl DataStore {
             // - the provided updater generation matches the current updater
             //   generation.
             .filter(dsl::updater_gen.eq(locked_gen))
-            .filter(dsl::state_generation.lt(new_runtime.gen))
+            .filter(dsl::state_generation.lt(new_runtime.r#gen))
             .set((
                 dsl::updater_gen.eq(Generation(locked_gen.0.next())),
                 dsl::updater_id.eq(None::<Uuid>),
@@ -1417,6 +1417,9 @@ impl DataStore {
                 )
             })?;
 
+        // The expected state generation number of the instance record *before*
+        // applying the update.
+        let prev_state_gen = u64::from(new_runtime.r#gen.0).saturating_sub(1);
         match result {
             // If we updated the record, the lock has been released! Return
             // `Ok(true)` to indicate that we released the lock successfully.
@@ -1442,22 +1445,48 @@ impl DataStore {
                     .into_not_found(ResourceType::Instance))
             }
 
-            // The instance exists, but we cannot update it because the state
-            // generation has advanced past ours. That's fine --- assume we
-            // already updated the instance.
+            // The instance exists, but both the lock generation *and* the state
+            // generation no longer matches ours. That's fine --- presumably,
+            // another execution of the same saga action has already updated the
+            // instance record.
             UpdateAndQueryResult { ref found, .. }
-                if found.runtime().r#gen >= new_runtime.r#gen =>
+                if u64::from(found.runtime().r#gen.0) != prev_state_gen
+                    && found.updater_gen != locked_gen =>
             {
+                debug_assert_ne!(found.updater_id, Some(updater_id));
                 debug!(
                     &opctx.log,
                     "cannot commit instance updates, as the state generation \
-                     has advanced: they've probably already been committed.";
+                     and lock generation have advanced: the required updates \
+                     have probably already been committed.";
                     "instance_id" => %instance_id,
+                    "expected_state_gen" => ?new_runtime.r#gen,
+                    "actual_state_gen" => ?found.runtime().r#gen,
                     "updater_id" => %updater_id,
-                    "expected_gen" => ?new_runtime.r#gen,
-                    "actual_gen" => ?found.runtime().r#gen,
+                    "updater_gen" => ?locked_gen,
+                    "actual_updater_gen" => ?found.updater_gen,
                 );
                 Ok(false)
+            }
+
+            // The state generation has advanced, but the instance is *still*
+            // locked by this saga. That's bad --- this update saga may no
+            // longer update the instance, as its state has changed, potentially
+            // invalidating the updates. We need to unwind.
+            UpdateAndQueryResult { ref found, .. }
+                if u64::from(found.runtime().r#gen.0) != prev_state_gen
+                    && found.updater_gen == locked_gen
+                    && found.updater_id == Some(updater_id) =>
+            {
+                info!(
+                    &opctx.log,
+                    "cannot commit instance update, as the state generation \
+                     has advanced, potentially invalidating the update";
+                    "instance_id" => %instance_id,
+                    "expected_state_gen" => ?new_runtime.r#gen,
+                    "actual_state_gen" => ?found.runtime().r#gen,
+                );
+                Err(Error::conflict("instance state has changed"))
             }
 
             // The instance exists, but we could not update it because the lock
@@ -1926,6 +1955,87 @@ mod tests {
         assert_eq!(instance.runtime().dst_propolis_id, None);
         assert_eq!(instance.runtime().migration_id, None);
         assert_eq!(instance.runtime().r#gen, new_runtime.r#gen);
+
+        // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_instance_update_invalidated_while_locked() {
+        // Setup
+        let logctx = dev::test_setup_log(
+            "test_instance_update_invalidated_while_locked",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let authz_instance = create_test_instance(&datastore, &opctx).await;
+        let saga1 = Uuid::new_v4();
+
+        // Lock the instance
+        let lock = dbg!(
+            datastore
+                .instance_updater_lock(&opctx, &authz_instance, saga1)
+                .await
+        )
+        .expect("instance should be locked");
+
+        // Mutate the instance state, invalidating the state when the lock was
+        // acquired.
+        let new_runtime = &InstanceRuntimeState {
+            time_updated: Utc::now(),
+            r#gen: Generation(external::Generation::from_u32(2)),
+            propolis_id: Some(Uuid::new_v4()),
+            dst_propolis_id: Some(Uuid::new_v4()),
+            migration_id: Some(Uuid::new_v4()),
+            nexus_state: InstanceState::Vmm,
+        };
+        let updated = dbg!(
+            datastore
+                .instance_update_runtime(
+                    &InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                    &new_runtime
+                )
+                .await
+        )
+        .expect("instance_update_runtime should succeed");
+        assert!(updated, "it should be updated");
+
+        // Okay, now try to commit the result of an update saga. This must fail,
+        // because the state generation has changed while we had locked the
+        // instance.
+        let _err = dbg!(
+            datastore
+                .instance_commit_update(
+                    &opctx,
+                    &authz_instance,
+                    &lock,
+                    &InstanceRuntimeState {
+                        time_updated: Utc::now(),
+                        r#gen: Generation(external::Generation::from_u32(2)),
+                        propolis_id: None,
+                        dst_propolis_id: None,
+                        migration_id: None,
+                        nexus_state: InstanceState::NoVmm,
+                    },
+                )
+                .await
+        )
+        .expect_err(
+            "instance_commit_update should fail if the state generation is \
+             stale",
+        );
+
+        let instance =
+            dbg!(datastore.instance_refetch(&opctx, &authz_instance).await)
+                .expect("instance should exist");
+        assert_eq!(instance.runtime().propolis_id, new_runtime.propolis_id);
+        assert_eq!(
+            instance.runtime().dst_propolis_id,
+            new_runtime.dst_propolis_id
+        );
+        assert_eq!(instance.runtime().migration_id, new_runtime.migration_id);
+        assert_eq!(instance.runtime().nexus_state, new_runtime.nexus_state);
 
         // Clean up.
         db.cleanup().await.unwrap();
