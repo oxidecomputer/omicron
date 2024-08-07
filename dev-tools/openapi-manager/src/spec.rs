@@ -52,7 +52,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
             description: "API for the internal DNS server",
             boundary: ApiBoundary::Internal,
             api_description:
-                dns_server_api::dns_server_api::stub_api_description,
+                dns_server_api::dns_server_api_mod::stub_api_description,
             filename: "dns-server.json",
             extra_validation: None,
         },
@@ -63,7 +63,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
                 and report progress",
             boundary: ApiBoundary::Internal,
             api_description:
-                installinator_api::installinator_api::stub_api_description,
+                installinator_api::installinator_api_mod::stub_api_description,
             filename: "installinator.json",
             extra_validation: None,
         },

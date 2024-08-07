@@ -63,7 +63,6 @@ use omicron_common::backoff::{
 use omicron_common::disk::{DatasetsConfig, OmicronPhysicalDisksConfig};
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
-use oximeter::types::ProducerRegistry;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_hardware::{underlay, HardwareManager};
 use sled_hardware_types::underlay::BootstrapInterface;
@@ -337,7 +336,7 @@ struct SledAgentInner {
     bootstore: bootstore::NodeHandle,
 
     // Object handling production of metrics for oximeter.
-    metrics_manager: MetricsManager,
+    _metrics_manager: MetricsManager,
 
     // Handle to the traffic manager for writing OS updates to our boot disks.
     boot_disk_os_writer: BootDiskOsWriter,
@@ -435,38 +434,23 @@ impl SledAgent {
         illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)?;
 
         // Start collecting metric data.
-        //
-        // First, we're creating a shareable type for managing the metrics
-        // themselves early on, so that we can pass it to other components of
-        // the sled agent that need it.
-        //
-        // Then we'll start tracking physical links and register as a producer
-        // with Nexus in the background.
-        let metrics_manager = MetricsManager::new(
-            request.body.id,
-            request.body.rack_id,
-            long_running_task_handles.hardware_manager.baseboard(),
-            *sled_address.ip(),
-            log.new(o!("component" => "MetricsManager")),
-        )?;
+        let baseboard = long_running_task_handles.hardware_manager.baseboard();
+        let identifiers = SledIdentifiers {
+            rack_id: request.body.rack_id,
+            sled_id: request.body.id,
+            model: baseboard.model().to_string(),
+            revision: baseboard.revision(),
+            serial: baseboard.identifier().to_string(),
+        };
+        let metrics_manager =
+            MetricsManager::new(&log, identifiers, *sled_address.ip())?;
 
         // Start tracking the underlay physical links.
-        for nic in underlay::find_nics(&config.data_links)? {
-            let link_name = nic.interface();
-            if let Err(e) = metrics_manager
-                .track_physical_link(
-                    link_name,
-                    crate::metrics::LINK_SAMPLE_INTERVAL,
-                )
-                .await
-            {
-                error!(
-                    log,
-                    "failed to start tracking physical link metrics";
-                    "link_name" => link_name,
-                    "error" => ?e,
-                );
-            }
+        for link in underlay::find_chelsio_links(&config.data_links)? {
+            metrics_manager
+                .request_queue()
+                .track_physical("global", &link.0)
+                .await;
         }
 
         // Create the PortManager to manage all the OPTE ports on the sled.
@@ -497,6 +481,7 @@ impl SledAgent {
             long_running_task_handles.zone_bundler.clone(),
             ZoneBuilderFactory::default(),
             vmm_reservoir_manager.clone(),
+            metrics_manager.request_queue(),
         )?;
 
         let update_config = ConfigUpdates {
@@ -552,13 +537,16 @@ impl SledAgent {
              network config from bootstore",
             );
 
-        services.sled_agent_started(
-            svc_config,
-            port_manager.clone(),
-            *sled_address.ip(),
-            request.body.rack_id,
-            rack_network_config.clone(),
-        )?;
+        services
+            .sled_agent_started(
+                svc_config,
+                port_manager.clone(),
+                *sled_address.ip(),
+                request.body.rack_id,
+                rack_network_config.clone(),
+                metrics_manager.request_queue(),
+            )
+            .await?;
 
         // Spawn a background task for managing notifications to nexus
         // about this sled-agent.
@@ -582,6 +570,7 @@ impl SledAgent {
             etherstub.clone(),
             storage_manager.clone(),
             port_manager.clone(),
+            metrics_manager.request_queue(),
             log.new(o!("component" => "ProbeManager")),
         );
 
@@ -605,7 +594,7 @@ impl SledAgent {
                 rack_network_config,
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
-                metrics_manager,
+                _metrics_manager: metrics_manager,
                 boot_disk_os_writer: BootDiskOsWriter::new(&parent_log),
             }),
             log: log.clone(),
@@ -1215,11 +1204,6 @@ impl SledAgent {
         routes: Vec<ResolvedVpcRouteSet>,
     ) -> Result<(), Error> {
         self.inner.port_manager.vpc_routes_ensure(routes).map_err(Error::from)
-    }
-
-    /// Return the metric producer registry.
-    pub fn metrics_registry(&self) -> &ProducerRegistry {
-        self.inner.metrics_manager.registry()
     }
 
     pub(crate) fn storage(&self) -> &StorageHandle {

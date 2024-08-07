@@ -6,6 +6,7 @@
 
 use crate::instance::propolis_zone_name;
 use crate::instance::Instance;
+use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClientWithResolver;
 use crate::params::InstanceExternalIpBody;
 use crate::params::InstanceMetadata;
@@ -79,6 +80,7 @@ pub(crate) struct InstanceManagerServices {
     pub storage: StorageHandle,
     pub zone_bundler: ZoneBundler,
     pub zone_builder_factory: ZoneBuilderFactory,
+    pub metrics_queue: MetricsRequestQueue,
 }
 
 // Describes the internals of the "InstanceManager", though most of the
@@ -108,6 +110,7 @@ impl InstanceManager {
         zone_bundler: ZoneBundler,
         zone_builder_factory: ZoneBuilderFactory,
         vmm_reservoir_manager: VmmReservoirManagerHandle,
+        metrics_queue: MetricsRequestQueue,
     ) -> Result<InstanceManager, Error> {
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
         let (terminate_tx, terminate_rx) = mpsc::unbounded_channel();
@@ -126,6 +129,7 @@ impl InstanceManager {
             storage,
             zone_bundler,
             zone_builder_factory,
+            metrics_queue,
         };
 
         let runner_handle =
@@ -452,6 +456,7 @@ struct InstanceManagerRunner {
     storage: StorageHandle,
     zone_bundler: ZoneBundler,
     zone_builder_factory: ZoneBuilderFactory,
+    metrics_queue: MetricsRequestQueue,
 }
 
 impl InstanceManagerRunner {
@@ -637,6 +642,7 @@ impl InstanceManagerRunner {
                     storage: self.storage.clone(),
                     zone_bundler: self.zone_bundler.clone(),
                     zone_builder_factory: self.zone_builder_factory.clone(),
+                    metrics_queue: self.metrics_queue.clone(),
                 };
 
                 let state = crate::instance::InstanceInitialState {
