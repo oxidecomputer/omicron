@@ -931,6 +931,8 @@ impl Client {
                 Error::DatabaseUnavailable(err.to_string())
             })?;
 
+        trace!(self.log, "received database response");
+
         // Convert the HTTP response into a database response.
         let response = handle_db_response(response).await.map_err(|err| {
             probes::sql__query__done!(|| (&id));

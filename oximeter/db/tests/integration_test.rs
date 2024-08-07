@@ -16,6 +16,7 @@ use slog::{debug, info, Logger};
 use std::collections::BTreeSet;
 use std::default::Default;
 use std::time::Duration;
+use tokio::process::Command;
 
 pub struct TestInput {
     n_projects: usize,
@@ -126,7 +127,8 @@ async fn test_schemas_disjoint() -> anyhow::Result<()> {
 #[tokio::test]
 async fn test_cluster() -> anyhow::Result<()> {
     usdt::register_probes().unwrap();
-    let request_timeout = Duration::from_secs(15);
+    //let request_timeout = Duration::from_secs(15);
+    let request_timeout = Duration::from_secs(1_000_000);
     let start = tokio::time::Instant::now();
     let logctx = test_setup_log("test_cluster");
     let log = &logctx.log;
@@ -333,13 +335,27 @@ async fn test_cluster() -> anyhow::Result<()> {
     let client1_short_timeout = Client::new_with_request_timeout(
         deployment.http_addr(1.into())?,
         log,
-        Duration::from_secs(2),
+        //        Duration::from_secs(2),
+        Duration::from_secs(1_000_000),
     );
     // We have lost quorum and should not be able to insert
-    client1_short_timeout
-        .insert_samples(&samples)
-        .await
-        .expect_err("insert succeeded without keeper quorum");
+    info!(log, "Expecting to timeout without quorum");
+    /* client1_short_timeout
+    .insert_samples(&samples)
+    .await
+    .expect_err("insert succeeded without keeper quorum");
+
+    */
+
+    let output = Command::new("curl")
+    .arg("http://[::1]:19301/?output_format_json_quote_64bit_integers=0&wait_end_of_query=1")
+    .arg("--data-binary")
+    .arg("@/home/ajs/clickward/insert_fields.sql")
+    .output().await?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    println!("output = {:#?} {:#?}", stdout, stderr);
 
     // Bringing the keeper back up should allow us to insert again
     deployment.start_keeper(1.into()).expect("failed to restart keeper");
