@@ -1706,10 +1706,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_instance_updater_unlocking_someone_elses_instance_errors() {
+    async fn test_instance_updater_cant_unlock_someone_elses_instance_() {
         // Setup
         let logctx = dev::test_setup_log(
-            "test_instance_updater_unlocking_someone_elses_instance_errors",
+            "test_instance_updater_cant_unlock_someone_elses_instance_",
         );
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
@@ -1725,8 +1725,8 @@ mod tests {
         )
         .expect("instance should be locked");
 
-        // attempting to unlock with a different saga ID should be an error.
-        let err = dbg!(
+        // attempting to unlock with a different saga ID shouldn't do anything.
+        let unlocked = dbg!(
             datastore
                 .instance_updater_unlock(
                     &opctx,
@@ -1743,16 +1743,15 @@ mod tests {
                 )
                 .await
         )
-        .expect_err(
-            "unlocking the instance with someone else's ID should fail",
-        );
-        assert_eq!(
-            err,
-            Error::internal_error(
-                "attempted to release a lock held by another saga! \
-                this is a bug!",
-            ),
-        );
+        .unwrap();
+        assert!(!unlocked);
+
+        let instance =
+            dbg!(datastore.instance_refetch(&opctx, &authz_instance).await)
+                .expect("instance should exist");
+        assert_eq!(instance.updater_id, Some(saga1));
+        assert_eq!(instance.updater_gen, lock1.locked_gen);
+
         let next_gen = Generation(lock1.locked_gen.0.next());
 
         // unlocking with the correct ID should succeed.
@@ -1764,9 +1763,15 @@ mod tests {
         .expect("instance should unlock");
         assert!(unlocked, "instance should have unlocked");
 
+        let instance =
+            dbg!(datastore.instance_refetch(&opctx, &authz_instance).await)
+                .expect("instance should exist");
+        assert_eq!(instance.updater_id, None);
+        assert_eq!(instance.updater_gen, next_gen);
+
         // unlocking with the lock holder's ID *again* at a new generation
-        // (where the lock is no longer held) should fail.
-        let err = dbg!(
+        // (where the lock is no longer held) shouldn't do anything
+        let unlocked = dbg!(
             datastore
                 .instance_updater_unlock(
                     &opctx,
@@ -1778,16 +1783,8 @@ mod tests {
                 )
                 .await
         )
-        .expect_err(
-            "unlocking the instance with someone else's ID should fail",
-        );
-        assert_eq!(
-            err,
-            Error::internal_error(
-                "attempted to release a lock on an instance \
-                that is not locked! this is a bug!"
-            ),
-        );
+        .unwrap();
+        assert!(!unlocked);
 
         // Clean up.
         db.cleanup().await.unwrap();
