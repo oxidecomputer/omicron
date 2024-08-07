@@ -3,14 +3,8 @@ Tools for working with a local Omicron deployment
 Usage: omicron-dev <COMMAND>
 
 Commands:
-  db-run       Start a CockroachDB cluster for development
-  db-populate  Populate an existing CockroachDB cluster with the Omicron schema
-  db-wipe      Wipe the Omicron schema (and all data) from an existing CockroachDB cluster
-  ch-run       Run a ClickHouse database server for development
-  mgs-run      Run a simulated Management Gateway Service for development
-  run-all      Run a full simulated control plane
-  cert-create  Create a self-signed certificate for use with Omicron
-  help         Print this message or the help of the given subcommand(s)
+  run-all  Run a full simulated control plane
+  help     Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help     Print help
