@@ -3478,15 +3478,15 @@ dependencies = [
 
 [[package]]
 name = "hyper-staticfile"
-version = "0.9.5"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "318ca89e4827e7fe4ddd2824f52337239796ae8ecc761a663324407dc3d8d7e7"
+checksum = "bc4bce64c32578957926e75f832032f81ebb30bcee74f86c5848b13a69e547eb"
 dependencies = [
  "futures-util",
- "http 0.2.12",
+ "http 1.1.0",
  "http-range",
  "httpdate",
- "hyper 0.14.30",
+ "hyper 1.3.1",
  "mime_guess",
  "percent-encoding",
  "rand 0.8.5",
@@ -6159,6 +6159,7 @@ dependencies = [
  "hex",
  "hmac",
  "hyper 0.14.30",
+ "hyper 1.3.1",
  "indexmap 2.3.0",
  "inout",
  "ipnetwork",
