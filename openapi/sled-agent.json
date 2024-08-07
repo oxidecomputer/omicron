@@ -2211,7 +2211,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "cockroach_db"
+                  "cockroachdb"
                 ]
               }
             },

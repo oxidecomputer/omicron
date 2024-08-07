@@ -719,10 +719,7 @@ pub struct ResolvedVpcRouteSet {
 pub enum DatasetKind {
     // Durable datasets for zones
 
-    // This renaming exists for backwards compatibility -- this enum variant
-    // was serialized to "all-zones-request" as "cockroach_db" and should
-    // stay that way, unless we perform an explicit schema change.
-    #[serde(rename = "cockroach_db")]
+    #[serde(rename = "cockroachdb")]
     Cockroach,
     Crucible,
     Clickhouse,
