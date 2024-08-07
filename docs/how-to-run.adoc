@@ -244,7 +244,7 @@ You can skip this step.  In that case, the externally-facing services (API and c
 You can generate a self-signed TLS certificate chain with:
 
 ----
-$ cargo run --bin cert-dev create ./smf/sled-agent/$MACHINE/initial-tls- '*.sys.oxide.test'
+$ cargo xtask cert-dev create ./smf/sled-agent/$MACHINE/initial-tls- '*.sys.oxide.test'
 ----
 
 === Rack setup configuration

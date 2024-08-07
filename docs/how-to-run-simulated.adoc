@@ -68,7 +68,7 @@ You can run these by hand, but it's easier to use `omicron-dev run-all`.  See be
 +
 [source,text]
 ----
-$ cargo run --bin omicron-dev -- run-all
+$ cargo xtask omicron-dev run-all
 omicron-dev: setting up all services ...
 log file: /dangerzone/omicron_tmp/omicron-dev-omicron-dev.4647.0.log
 note: configured to log to "/dangerzone/omicron_tmp/omicron-dev-omicron-dev.4647.0.log"
@@ -102,7 +102,7 @@ CAUTION: This process does not currently work.  See https://github.com/oxidecomp
 +
 [source,text]
 ----
-$ cargo run --bin db-dev -- run
+$ cargo xtask db-dev -- run
     Finished dev [unoptimized + debuginfo] target(s) in 0.15s
      Running `target/debug/db-dev run`
 omicron-dev: using temporary directory for database store (cleaned up on clean exit)
@@ -157,7 +157,7 @@ Note that as the output indicates, this cluster will be available to anybody tha
 +
 [source,text]
 ----
-$ cargo run --bin ch-dev run
+$ cargo xtask ch-dev run
     Finished dev [unoptimized + debuginfo] target(s) in 0.47s
      Running `target/debug/omicron-dev ch-run`
 omicron-dev: running ClickHouse (PID: 2463), full command is "clickhouse server --log-file /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot/clickhouse-server.log --errorlog-file /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot/clickhouse-server.errlog -- --http_port 8123 --path /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot"
@@ -167,7 +167,7 @@ omicron-dev: using /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot f
 If you wish to start a ClickHouse replicated cluster instead of a single node, run the following instead:
 [source,text]
 ---
-$ cargo run --bin ch-dev run --replicated
+$ cargo xtask ch-dev run --replicated
     Finished dev [unoptimized + debuginfo] target(s) in 0.31s
      Running `target/debug/omicron-dev ch-run --replicated`
 omicron-dev: running ClickHouse cluster with configuration files:
@@ -221,7 +221,7 @@ To do this, first run `omicron-dev run-all`:
 
 [source,text]
 ----
-$ cargo run --bin omicron-dev run-all
+$ cargo xtask omicron-dev run-all
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.95s
      Running `target/debug/omicron-dev run-all`
 omicron-dev: setting up all services ... 
@@ -316,7 +316,7 @@ When you run the above, you will wind up with Nexus listening on HTTP (with no T
 +
 [source,text]
 ----
-$ cargo run --bin cert-dev create demo- '*.sys.oxide-dev.test'
+$ cargo xtask cert-dev create demo- '*.sys.oxide-dev.test'
 wrote certificate to demo-cert.pem
 wrote private key to demo-key.pem
 ----

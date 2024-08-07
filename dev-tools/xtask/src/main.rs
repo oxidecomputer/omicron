@@ -41,6 +41,14 @@ enum Cmds {
     /// Run Argon2 hash with specific parameters (quick performance check)
     Argon2(external::External),
 
+    /// Utilities for working with certificates.
+    CertDev(external::External),
+    /// Utilities for working with Clickhouse.
+    #[clap(alias = "clickhouse-dev")]
+    ChDev(external::External),
+    /// Utilities for working with CockroachDB databases.
+    DbDev(external::External),
+
     /// Check that all features are flagged correctly
     CheckFeatures(check_features::Args),
     /// Check that dependencies are not duplicated in any packages in the
@@ -50,6 +58,11 @@ enum Cmds {
     Clippy(clippy::ClippyArgs),
     /// Download binaries, OpenAPI specs, and other out-of-repo utilities.
     Download(external::External),
+
+    /// Utilities for working with MGS.
+    MgsDev(external::External),
+    /// Utilities for working with Omicron.
+    OmicronDev(external::External),
 
     /// Manage OpenAPI specifications.
     ///
@@ -94,9 +107,12 @@ fn main() -> Result<()> {
         Cmds::Argon2(external) => {
             external.cargo_args(["--release"]).exec_example("argon2")
         }
+        Cmds::CertDev(external) => external.exec_bin("cert-dev"),
+        Cmds::ChDev(external) => external.exec_bin("ch-dev"),
         Cmds::Clippy(args) => clippy::run_cmd(args),
         Cmds::CheckFeatures(args) => check_features::run_cmd(args),
         Cmds::CheckWorkspaceDeps => check_workspace_deps::run_cmd(),
+        Cmds::DbDev(external) => external.exec_bin("db-dev"),
         Cmds::Download(external) => {
             // Allow specialized environments (e.g., testbed/a4x2) that can't
             // `cargo run ...` to specify a path to `xtask-downloader` via an
@@ -111,6 +127,8 @@ fn main() -> Result<()> {
                 external.exec_bin("xtask-downloader")
             }
         }
+        Cmds::MgsDev(external) => external.exec_bin("mgs-dev"),
+        Cmds::OmicronDev(external) => external.exec_bin("omicron-dev"),
         Cmds::Openapi(external) => external.exec_bin("openapi-manager"),
         #[cfg(target_os = "illumos")]
         Cmds::Releng(external) => {
