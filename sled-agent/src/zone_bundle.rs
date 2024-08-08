@@ -2375,7 +2375,7 @@ mod illumos_tests {
     // i.e., the "ashift" value.  An empty dataset is unlikely to contain more
     // than one megabyte of overhead, so use that as a conservative test size to
     // avoid issues.
-    const TEST_QUOTA: usize = sled_storage::dataset::DEBUG_DATASET_QUOTA;
+    const TEST_QUOTA: u64 = sled_storage::dataset::DEBUG_DATASET_QUOTA;
 
     async fn run_test_with_zfs_dataset<T, Fut>(test: T)
     where
@@ -2424,17 +2424,14 @@ mod illumos_tests {
         // "setup_storage".
         assert!(
             TEST_QUOTA
-                < StorageManagerTestHarness::DEFAULT_VDEV_SIZE
-                    .try_into()
-                    .unwrap(),
+                < StorageManagerTestHarness::DEFAULT_VDEV_SIZE,
             "Quota larger than underlying device (quota: {}, device size: {})",
             TEST_QUOTA,
             StorageManagerTestHarness::DEFAULT_VDEV_SIZE,
         );
 
         anyhow::ensure!(
-            bundle_utilization.dataset_quota
-                == u64::try_from(TEST_QUOTA).unwrap(),
+            bundle_utilization.dataset_quota == TEST_QUOTA,
             "computed incorrect dataset quota"
         );
 

@@ -169,8 +169,7 @@ pub(crate) async fn ensure_dataset_records_exist(
             id.into_untyped_uuid(),
             bp_dataset.pool.id().into_untyped_uuid(),
             address,
-            kind.clone().into(),
-            kind.zone_name(),
+            kind.clone(),
         );
         datastore.dataset_upsert(dataset).await.with_context(|| {
             format!("failed to upsert dataset record for dataset {id}")

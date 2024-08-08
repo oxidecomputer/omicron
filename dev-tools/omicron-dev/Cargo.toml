@@ -12,40 +12,25 @@ omicron-rpaths.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-camino.workspace = true
 clap.workspace = true
 dropshot.workspace = true
 futures.workspace = true
-gateway-messages.workspace = true
-gateway-test-utils.workspace = true
 libc.workspace = true
 nexus-config.workspace = true
-nexus-test-utils = { workspace = true, features = ["omicron-dev"] }
 nexus-test-interface.workspace = true
-omicron-common.workspace = true
+nexus-test-utils = { workspace = true, features = ["omicron-dev"] }
 omicron-nexus.workspace = true
-omicron-test-utils.workspace = true
+omicron-workspace-hack.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
-rcgen.workspace = true
-signal-hook.workspace = true
 signal-hook-tokio.workspace = true
-tokio = { workspace = true, features = [ "full" ] }
-tokio-postgres.workspace = true
+tokio.workspace = true
 toml.workspace = true
-omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
-camino-tempfile.workspace = true
 expectorate.workspace = true
-libc.workspace = true
+omicron-dev-lib.workspace = true
 omicron-test-utils.workspace = true
-openssl.workspace = true
 oxide-client.workspace = true
 subprocess.workspace = true
-
-# Disable doc builds by default for our binaries to work around issue
-# rust-lang/cargo#8373.  These docs would not be very useful anyway.
-[[bin]]
-name = "omicron-dev"
-doc = false
+tokio-postgres.workspace = true

@@ -776,7 +776,6 @@ pub(crate) mod test {
     };
     use chrono::Utc;
     use nexus_db_model::Dataset;
-    use nexus_db_model::DatasetKind;
     use nexus_db_model::Region;
     use nexus_db_model::RegionReplacement;
     use nexus_db_model::RegionReplacementState;
@@ -787,6 +786,7 @@ pub(crate) mod test {
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Asset;
+    use omicron_common::api::internal::shared::DatasetKind;
     use sled_agent_client::types::VolumeConstructionRequest;
     use uuid::Uuid;
 
@@ -903,28 +903,24 @@ pub(crate) mod test {
                 Uuid::new_v4(),
                 Some("[fd00:1122:3344:101::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
-                None,
             ),
             Dataset::new(
                 Uuid::new_v4(),
                 Uuid::new_v4(),
                 Some("[fd00:1122:3344:102::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
-                None,
             ),
             Dataset::new(
                 Uuid::new_v4(),
                 Uuid::new_v4(),
                 Some("[fd00:1122:3344:103::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
-                None,
             ),
             Dataset::new(
                 Uuid::new_v4(),
                 Uuid::new_v4(),
                 Some("[fd00:1122:3344:104::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
-                None,
             ),
         ];
 

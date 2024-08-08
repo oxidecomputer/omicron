@@ -273,6 +273,7 @@ mod test {
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
     use nexus_test_utils::db::test_setup_database;
+    use omicron_common::api::internal::shared::DatasetKind as ApiDatasetKind;
     use omicron_test_utils::dev;
 
     #[tokio::test]
@@ -323,8 +324,7 @@ mod test {
                 Uuid::new_v4(),
                 zpool_id,
                 Some("[::1]:0".parse().unwrap()),
-                DatasetKind::Crucible,
-                None,
+                ApiDatasetKind::Crucible,
             ))
             .await
             .expect("failed to insert dataset")
@@ -357,8 +357,7 @@ mod test {
                 dataset1.id(),
                 zpool_id,
                 Some("[::1]:12345".parse().unwrap()),
-                DatasetKind::Cockroach,
-                None,
+                ApiDatasetKind::Cockroach,
             ))
             .await
             .expect("failed to do-nothing insert dataset");
@@ -374,8 +373,7 @@ mod test {
                 Uuid::new_v4(),
                 zpool_id,
                 Some("[::1]:0".parse().unwrap()),
-                DatasetKind::Cockroach,
-                None,
+                ApiDatasetKind::Cockroach,
             ))
             .await
             .expect("failed to upsert dataset");
@@ -407,8 +405,7 @@ mod test {
                 dataset1.id(),
                 zpool_id,
                 Some("[::1]:12345".parse().unwrap()),
-                DatasetKind::Cockroach,
-                None,
+                ApiDatasetKind::Cockroach,
             ))
             .await
             .expect("failed to do-nothing insert dataset");

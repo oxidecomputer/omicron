@@ -1765,6 +1765,13 @@
         "description": "Describes a complete set of software and configuration for the system",
         "type": "object",
         "properties": {
+          "blueprint_datasets": {
+            "description": "A map of sled id -> datasets in use on each sled",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BlueprintDatasetsConfig"
+            }
+          },
           "blueprint_disks": {
             "description": "A map of sled id -> disks in use on each sled.",
             "type": "object",
@@ -1840,6 +1847,7 @@
           }
         },
         "required": [
+          "blueprint_datasets",
           "blueprint_disks",
           "blueprint_zones",
           "cockroachdb_fingerprint",
@@ -1851,6 +1859,92 @@
           "internal_dns_version",
           "sled_state",
           "time_created"
+        ]
+      },
+      "BlueprintDatasetConfig": {
+        "description": "Information about a dataset as recorded in a blueprint",
+        "type": "object",
+        "properties": {
+          "address": {
+            "nullable": true,
+            "type": "string"
+          },
+          "compression": {
+            "nullable": true,
+            "type": "string"
+          },
+          "disposition": {
+            "$ref": "#/components/schemas/BlueprintDatasetDisposition"
+          },
+          "id": {
+            "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DatasetKind"
+          },
+          "pool": {
+            "$ref": "#/components/schemas/ZpoolName"
+          },
+          "quota": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "reservation": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          }
+        },
+        "required": [
+          "disposition",
+          "id",
+          "kind",
+          "pool"
+        ]
+      },
+      "BlueprintDatasetDisposition": {
+        "description": "The desired state of an Omicron-managed dataset in a blueprint.\n\nPart of [`BlueprintDatasetConfig`].",
+        "oneOf": [
+          {
+            "description": "The dataset is in-service.",
+            "type": "string",
+            "enum": [
+              "in_service"
+            ]
+          },
+          {
+            "description": "The dataset is permanently gone.",
+            "type": "string",
+            "enum": [
+              "expunged"
+            ]
+          }
+        ]
+      },
+      "BlueprintDatasetsConfig": {
+        "description": "Information about Omicron datasets as recorded in a blueprint.",
+        "type": "object",
+        "properties": {
+          "datasets": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BlueprintDatasetConfig"
+            }
+          },
+          "generation": {
+            "$ref": "#/components/schemas/Generation"
+          }
+        },
+        "required": [
+          "datasets",
+          "generation"
         ]
       },
       "BlueprintMetadata": {
@@ -2599,7 +2693,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "cockroach_db"
+                  "cockroachdb"
                 ]
               }
             },
@@ -5088,6 +5182,10 @@
       },
       "SwitchPutResponse": {
         "type": "object"
+      },
+      "TypedUuidForDatasetKind": {
+        "type": "string",
+        "format": "uuid"
       },
       "TypedUuidForDownstairsRegionKind": {
         "type": "string",

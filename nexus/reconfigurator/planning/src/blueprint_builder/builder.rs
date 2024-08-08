@@ -766,8 +766,8 @@ impl<'a> BlueprintBuilder<'a> {
             let additions = datasets_builder
                 .new_datasets
                 .into_values()
-                .flat_map(|datasets| datasets.into_values())
-                .collect::<Vec<_>>();
+                .flat_map(|datasets| datasets.into_values().map(|d| (d.id, d)))
+                .collect::<BTreeMap<_, _>>();
             let updates = datasets_builder
                 .updated_datasets
                 .into_values()
@@ -801,7 +801,7 @@ impl<'a> BlueprintBuilder<'a> {
         // Add all new datasets
         datasets.append(&mut additions);
 
-        for config in &mut *datasets {
+        for config in datasets.values_mut() {
             // Apply updates
             if let Some(new_config) = updates.remove(&config.id) {
                 *config = new_config;
@@ -816,7 +816,7 @@ impl<'a> BlueprintBuilder<'a> {
         }
 
         // Remove all datasets that we've finished expunging.
-        datasets.retain(|d| {
+        datasets.retain(|_id, d| {
             if removals.contains(&d.id) {
                 debug_assert_eq!(
                     d.disposition,
@@ -1524,7 +1524,7 @@ impl<'a> BlueprintDatasetsBuilder<'a> {
             } else {
                 BlueprintDatasetsConfig {
                     generation: Generation::new(),
-                    datasets: vec![],
+                    datasets: BTreeMap::new(),
                 }
             }
         })
@@ -1541,7 +1541,7 @@ impl<'a> BlueprintDatasetsBuilder<'a> {
             .get(&sled_id)
             .or_else(|| self.parent_datasets.get(&sled_id))
         {
-            Box::new(sled_datasets.datasets.iter())
+            Box::new(sled_datasets.datasets.values())
         } else {
             Box::new(std::iter::empty())
         }
@@ -1556,7 +1556,7 @@ impl<'a> BlueprintDatasetsBuilder<'a> {
             .map(|sled_id| {
                 // Start with self.changed_datasets, which contains entries for any
                 // sled whose datasets config is changing in this blueprint.
-                let mut datasets = self
+                let datasets = self
                     .changed_datasets
                     .remove(&sled_id)
                     // If it's not there, use the config from the parent
@@ -1567,9 +1567,8 @@ impl<'a> BlueprintDatasetsBuilder<'a> {
                     // standard initial config.
                     .unwrap_or_else(|| BlueprintDatasetsConfig {
                         generation: Generation::new(),
-                        datasets: vec![],
+                        datasets: BTreeMap::new(),
                     });
-                datasets.datasets.sort_unstable_by_key(|d| d.id);
 
                 (sled_id, datasets)
             })

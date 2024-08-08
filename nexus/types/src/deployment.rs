@@ -221,7 +221,9 @@ impl Blueprint {
     pub fn all_omicron_datasets(
         &self,
     ) -> impl Iterator<Item = &BlueprintDatasetConfig> {
-        self.blueprint_datasets.iter().flat_map(move |(_, d)| d.datasets.iter())
+        self.blueprint_datasets
+            .iter()
+            .flat_map(move |(_, datasets)| datasets.datasets.values())
     }
 
     /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint
@@ -943,14 +945,18 @@ pub type BlueprintPhysicalDiskConfig =
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub struct BlueprintDatasetsConfig {
     pub generation: Generation,
-    pub datasets: Vec<BlueprintDatasetConfig>,
+    pub datasets: BTreeMap<DatasetUuid, BlueprintDatasetConfig>,
 }
 
 impl From<BlueprintDatasetsConfig> for DatasetsConfig {
     fn from(config: BlueprintDatasetsConfig) -> Self {
         Self {
             generation: config.generation,
-            datasets: config.datasets.into_iter().map(From::from).collect(),
+            datasets: config
+                .datasets
+                .into_iter()
+                .map(|(id, d)| (id, d.into()))
+                .collect(),
         }
     }
 }

@@ -18,6 +18,230 @@
     }
   },
   "definitions": {
+    "DatasetConfig": {
+      "description": "Configuration information necessary to request a single dataset",
+      "type": "object",
+      "required": [
+        "id",
+        "name"
+      ],
+      "properties": {
+        "compression": {
+          "description": "The compression mode to be supplied, if any",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "The UUID of the dataset being requested",
+          "allOf": [
+            {
+              "$ref": "#/definitions/TypedUuidForDatasetKind"
+            }
+          ]
+        },
+        "name": {
+          "description": "The dataset's name",
+          "allOf": [
+            {
+              "$ref": "#/definitions/DatasetName"
+            }
+          ]
+        },
+        "quota": {
+          "description": "The upper bound on the amount of storage used by this dataset",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "reservation": {
+          "description": "The lower bound on the amount of storage usable by this dataset",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "DatasetKind": {
+      "description": "Describes the purpose of the dataset.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "cockroachdb"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "crucible"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "clickhouse"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "clickhouse_keeper"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "external_dns"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "internal_dns"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "zone_root"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "name",
+            "type"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "zone"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "debug"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "DatasetName": {
+      "type": "object",
+      "required": [
+        "kind",
+        "pool_name"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/DatasetKind"
+        },
+        "pool_name": {
+          "$ref": "#/definitions/ZpoolName"
+        }
+      }
+    },
+    "DatasetsConfig": {
+      "type": "object",
+      "required": [
+        "datasets",
+        "generation"
+      ],
+      "properties": {
+        "datasets": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/DatasetConfig"
+          }
+        },
+        "generation": {
+          "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.\n\nNote that \"Generation::new()\", AKA, the first generation number, is reserved for \"no datasets\". This is the default configuration for a sled before any requests have been made.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Generation"
+            }
+          ]
+        }
+      }
+    },
     "DiskIdentity": {
       "description": "Uniquely identifies a disk.",
       "type": "object",
@@ -785,10 +1009,19 @@
     "SledConfig": {
       "type": "object",
       "required": [
+        "datasets",
         "disks",
         "zones"
       ],
       "properties": {
+        "datasets": {
+          "description": "Datasets configured for this sled",
+          "allOf": [
+            {
+              "$ref": "#/definitions/DatasetsConfig"
+            }
+          ]
+        },
         "disks": {
           "description": "Control plane disks configured for this sled",
           "allOf": [
@@ -863,6 +1096,10 @@
           "minimum": 0.0
         }
       }
+    },
+    "TypedUuidForDatasetKind": {
+      "type": "string",
+      "format": "uuid"
     },
     "TypedUuidForZpoolKind": {
       "type": "string",

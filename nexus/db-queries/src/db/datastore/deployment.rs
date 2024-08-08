@@ -165,7 +165,7 @@ impl DataStore {
             .blueprint_datasets
             .iter()
             .flat_map(|(sled_id, datasets_config)| {
-                datasets_config.datasets.iter().map(move |dataset| {
+                datasets_config.datasets.values().map(move |dataset| {
                     BpOmicronDataset::new(blueprint_id, *sled_id, dataset)
                 })
             })
@@ -523,7 +523,7 @@ impl DataStore {
                         s.sled_id.into(),
                         BlueprintDatasetsConfig {
                             generation: *s.generation,
-                            datasets: Vec::new(),
+                            datasets: BTreeMap::new(),
                         },
                     );
                     bail_unless!(
@@ -739,12 +739,15 @@ impl DataStore {
                         })?;
 
                     let dataset_id = d.id;
-                    sled_datasets.datasets.push(d.try_into().map_err(|e| {
-                        Error::internal_error(&format!(
-                            "Cannot parse dataset {}: {e}",
-                            dataset_id
-                        ))
-                    })?);
+                    sled_datasets.datasets.insert(
+                        dataset_id.into(),
+                        d.try_into().map_err(|e| {
+                            Error::internal_error(&format!(
+                                "Cannot parse dataset {}: {e}",
+                                dataset_id
+                            ))
+                        })?,
+                    );
                 }
             }
         }
@@ -752,10 +755,6 @@ impl DataStore {
         // Sort all disks to match what blueprint builders do.
         for (_, disks_config) in blueprint_disks.iter_mut() {
             disks_config.disks.sort_unstable_by_key(|d| d.id);
-        }
-        // Sort all datasets to match what blueprint builders do.
-        for (_, datasets_config) in blueprint_datasets.iter_mut() {
-            datasets_config.datasets.sort_unstable_by_key(|d| d.id);
         }
 
         Ok(Blueprint {

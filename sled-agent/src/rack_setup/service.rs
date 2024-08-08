@@ -1416,8 +1416,8 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
 
     let mut blueprint_datasets = BTreeMap::new();
     for (sled_id, sled_config) in sled_configs_by_id {
-        let mut datasets = vec![];
-        for d in &sled_config.datasets.datasets {
+        let mut datasets = BTreeMap::new();
+        for d in sled_config.datasets.datasets.values() {
             // Only the "Crucible" dataset needs to know the address
             let address = sled_config.zones.iter().find_map(|z| {
                 if let OmicronZoneType::Crucible { address, dataset } =
@@ -1430,18 +1430,21 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
                 None
             });
 
-            datasets.push(BlueprintDatasetConfig {
-                disposition: BlueprintDatasetDisposition::InService,
-                id: d.id,
-                pool: d.name.pool().clone(),
-                kind: d.name.dataset().clone(),
-                address,
-                compression: d.compression.clone(),
-                quota: d.quota.map(|q| ByteCount::try_from(q).unwrap()),
-                reservation: d
-                    .reservation
-                    .map(|r| ByteCount::try_from(r).unwrap()),
-            });
+            datasets.insert(
+                d.id,
+                BlueprintDatasetConfig {
+                    disposition: BlueprintDatasetDisposition::InService,
+                    id: d.id,
+                    pool: d.name.pool().clone(),
+                    kind: d.name.dataset().clone(),
+                    address,
+                    compression: d.compression.clone(),
+                    quota: d.quota.map(|q| ByteCount::try_from(q).unwrap()),
+                    reservation: d
+                        .reservation
+                        .map(|r| ByteCount::try_from(r).unwrap()),
+                },
+            );
         }
 
         blueprint_datasets.insert(

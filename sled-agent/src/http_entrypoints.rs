@@ -352,6 +352,7 @@ async fn omicron_zones_get(
     Ok(HttpResponseOk(sa.omicron_zones_list().await?))
 }
 
+/// Configures datasets to be used on this sled
 #[endpoint {
     method = PUT,
     path = "/datasets",
@@ -366,6 +367,7 @@ async fn datasets_put(
     Ok(HttpResponseOk(result))
 }
 
+/// Lists the datasets that this sled is configured to use
 #[endpoint {
     method = GET,
     path = "/datasets",
@@ -374,7 +376,7 @@ async fn datasets_get(
     rqctx: RequestContext<SledAgent>,
 ) -> Result<HttpResponseOk<DatasetsConfig>, HttpError> {
     let sa = rqctx.context();
-    Ok(HttpResponseOk(sa.datasets_list().await?))
+    Ok(HttpResponseOk(sa.datasets_config_list().await?))
 }
 
 #[endpoint {

@@ -614,7 +614,7 @@ impl Storage {
         Ok(DatasetsManagementResult {
             status: config
                 .datasets
-                .into_iter()
+                .values()
                 .map(|config| DatasetManagementStatus {
                     dataset_name: config.name.clone(),
                     err: None,

@@ -36,5 +36,5 @@ socket2.workspace = true
 colored.workspace = true
 anstyle.workspace = true
 clap.workspace = true
-dhcproto = "0.11"
+dhcproto = "0.12"
 macaddr.workspace = true
