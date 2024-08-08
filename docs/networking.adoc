@@ -69,13 +69,13 @@ graph TD
     switch --- exthost2
 
     %% Labels are defined as needed at the end here to avoid changing the layout.
-    vnic1["net1\n(vnic over cxgbe0)"]
-    vnic2["net2\n(vnic over cxgbe0)"]
-    vnic3["net3\n(vnic over cxgbe0)"]
-    vswitch1["virtual switch"]
-    cxgbe0["cxgbe0\n(physical NIC)"]
+    vnic1["<font color="0">net1\n(vnic over cxgbe0)"]
+    vnic2["<font color="0">net2\n(vnic over cxgbe0)"]
+    vnic3["<font color="0">net3\n(vnic over cxgbe0)"]
+    vswitch1["<font color="0">virtual switch"]
+    cxgbe0["<font color="0">cxgbe0\n(physical NIC)"]
 
-    switch["physical switch"]
+    switch["<font color="0">physical switch"]
     exthost1["other host"]
     exthost2["other host"]
 
@@ -84,6 +84,7 @@ graph TD
     class switch switch
 
     classDef datalink fill:#6df
+    classDef datalink fontColor:#000
     class vnic1 datalink
     class vnic2 datalink
     class vnic3 datalink
@@ -111,15 +112,16 @@ graph TD
     switch --- exthost2
 
     %% Labels are defined as needed at the end here to avoid changing the layout.
-    vnic1["net1\n(vnic over cxgbe0)"]
-    vnic2["net2\n(vnic over cxgbe0)"]
-    vnic3["net3\n(vnic over cxgbe0)"]
-    vswitch1["virtual switch"]
-    if1["net1\n192.168.1.104"]
-    if2["net2\n192.168.1.105"]
-    if3["net3\n192.168.1.106"]
+    vnic1["<font color="0">net1\n(vnic over cxgbe0)"]
+    vnic2["<font color="0">net2\n(vnic over cxgbe0)"]
+    vnic3["<font color="0">net3\n(vnic over cxgbe0)"]
+    vswitch1["<font color="0">virtual switch"]
+    if1["<font color="0">net1\n192.168.1.104"]
+    if2["<font color="0">net2\n192.168.1.105"]
+    if3["<font color="0">net3\n192.168.1.106"]
 
-    switch["physical switch"]
+    switch["<font color="0">physical switch"]
+    cxgbe0["<font color="0">cxgbe0"]
     exthost1["other host\n192.168.1.102"]
     exthost2["other host\n192.168.1.103"]
 
@@ -154,11 +156,11 @@ graph TD
     end
 
     %% Labels are defined as needed at the end here to avoid changing the layout.
-    vnic1["net1\n(vnic over cxgbe0)"]
-    vnic2["net2\n(vnic over cxgbe0)"]
-    vnic3["net3\n(vnic over cxgbe0)"]
-    vswitch1["virtual switch"]
-    etherstub["etherstub\n"]
+    vnic1["<font color="0">net1\n(vnic over etherstub)"]
+    vnic2["<font color="0">net2\n(vnic over etherstub)"]
+    vnic3["<font color="0">net3\n(vnic over etherstub)"]
+    vswitch1["<font color="0">virtual switch"]
+    etherstub["<font color="0">etherstub\n"]
 
     classDef switch fill:#f96
     class vswitch1 switch
@@ -191,8 +193,8 @@ underlay0   vnic      9000   up       --         underlay_stub0
 We see now that we have:
 
 * the three physical devices mentioned earlier
-* an etherstub `underlay_stub0` with a VNIC `underlay0` over it
-* an etherstub `bootstrap_stub0` with a VNIC `boostrap0` over it
+* an etherstub `underlay_stub0` with a VNIC `underlay0` over it. Every underlayN VNIC can only connect to other underlayN VNICs on the same sled.
+* an etherstub `bootstrap_stub0` with a VNIC `boostrap0` over it. Every bootstrapN VNIC can only connect to other bootstrapN VNICs on the same sled.
 
 We'll discuss these in more detail later.  There are also many other kinds of links and commands to list specific types.  See the manual page for more details.
 
