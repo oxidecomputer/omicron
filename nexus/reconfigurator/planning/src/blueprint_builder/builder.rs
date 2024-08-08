@@ -16,6 +16,9 @@ use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintDatasetConfig;
+use nexus_types::deployment::BlueprintDatasetDisposition;
+use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
@@ -39,10 +42,15 @@ use omicron_common::address::get_switch_zone_address;
 use omicron_common::address::CP_SERVICES_RESERVED_ADDRESSES;
 use omicron_common::address::NTP_PORT;
 use omicron_common::address::SLED_RESERVED_ADDRESSES;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
+use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::disk::DatasetConfig;
+use omicron_common::disk::DatasetName;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalIpKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneKind;
@@ -119,7 +127,7 @@ pub enum Ensure {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum EnsureMultiple {
     /// action was taken, and multiple items were added
-    Changed { added: usize, removed: usize },
+    Changed { added: usize, updated: usize, removed: usize },
 
     /// no action was necessary
     NotNeeded,
@@ -132,9 +140,27 @@ pub enum EnsureMultiple {
 /// "comment", identifying which operations have occurred on the blueprint.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) enum Operation {
-    AddZone { sled_id: SledUuid, kind: ZoneKind },
-    UpdateDisks { sled_id: SledUuid, added: usize, removed: usize },
-    ZoneExpunged { sled_id: SledUuid, reason: ZoneExpungeReason, count: usize },
+    AddZone {
+        sled_id: SledUuid,
+        kind: ZoneKind,
+    },
+    UpdateDisks {
+        sled_id: SledUuid,
+        added: usize,
+        updated: usize,
+        removed: usize,
+    },
+    UpdateDatasets {
+        sled_id: SledUuid,
+        added: usize,
+        updated: usize,
+        removed: usize,
+    },
+    ZoneExpunged {
+        sled_id: SledUuid,
+        reason: ZoneExpungeReason,
+        count: usize,
+    },
 }
 
 impl fmt::Display for Operation {
@@ -143,8 +169,11 @@ impl fmt::Display for Operation {
             Self::AddZone { sled_id, kind } => {
                 write!(f, "sled {sled_id}: added zone: {}", kind.report_str())
             }
-            Self::UpdateDisks { sled_id, added, removed } => {
-                write!(f, "sled {sled_id}: added {added} disks, removed {removed} disks")
+            Self::UpdateDisks { sled_id, added, updated, removed } => {
+                write!(f, "sled {sled_id}: added {added} disks, updated {updated}, removed {removed} disks")
+            }
+            Self::UpdateDatasets { sled_id, added, updated, removed } => {
+                write!(f, "sled {sled_id}: added {added} datasets, updated: {updated}, removed {removed} datasets")
             }
             Self::ZoneExpunged { sled_id, reason, count } => {
                 let reason = match reason {
@@ -198,6 +227,7 @@ pub struct BlueprintBuilder<'a> {
     // corresponding fields in `Blueprint`.
     pub(super) zones: BlueprintZonesBuilder<'a>,
     disks: BlueprintDisksBuilder<'a>,
+    datasets: BlueprintDatasetsBuilder<'a>,
     sled_state: BTreeMap<SledUuid, SledState>,
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
 
@@ -259,6 +289,7 @@ impl<'a> BlueprintBuilder<'a> {
             id: rng.blueprint_rng.next(),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
+            blueprint_datasets: BTreeMap::new(),
             sled_state,
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
@@ -321,6 +352,7 @@ impl<'a> BlueprintBuilder<'a> {
             external_networking,
             zones: BlueprintZonesBuilder::new(parent_blueprint),
             disks: BlueprintDisksBuilder::new(parent_blueprint),
+            datasets: BlueprintDatasetsBuilder::new(parent_blueprint),
             sled_state,
             cockroachdb_setting_preserve_downgrade: parent_blueprint
                 .cockroachdb_setting_preserve_downgrade,
@@ -355,10 +387,14 @@ impl<'a> BlueprintBuilder<'a> {
         let blueprint_disks = self
             .disks
             .into_disks_map(self.input.all_sled_ids(SledFilter::InService));
+        let blueprint_datasets = self
+            .datasets
+            .into_datasets_map(self.input.all_sled_ids(SledFilter::InService));
         Blueprint {
             id: self.rng.blueprint_rng.next(),
             blueprint_zones,
             blueprint_disks,
+            blueprint_datasets,
             sled_state: self.sled_state,
             parent_blueprint_id: Some(self.parent_blueprint.id),
             internal_dns_version: self.input.internal_dns_version(),
@@ -610,7 +646,193 @@ impl<'a> BlueprintBuilder<'a> {
             !removals.contains(&PhysicalDiskUuid::from_untyped_uuid(config.id))
         });
 
-        Ok(EnsureMultiple::Changed { added, removed })
+        Ok(EnsureMultiple::Changed { added, updated: 0, removed })
+    }
+
+    /// Ensures that a sled in the blueprint has all the datasets it should.
+    ///
+    /// We perform the following process to decide what datasets should exist
+    /// in the blueprint during the planning phase:
+    ///
+    /// INPUT                    | OUTPUT
+    /// ----------------------------------------------------------------------
+    /// zpools in the blueprint  | blueprint datasets for debug, root filesystem
+    ///                          | (All zpools should have these datasets)
+    /// ----------------------------------------------------------------------
+    /// zones in the blueprint   | blueprint datasets for filesystems, durable data
+    ///                          | (These datasets are needed for zones)
+    /// ----------------------------------------------------------------------
+    /// discretionary datasets   | blueprint datasets for discretionary datasets
+    /// NOTE: These don't exist, |
+    /// at the moment            |
+    /// ----------------------------------------------------------------------
+    ///
+    /// From this process, we should be able to construct "all datasets that
+    /// should exist in the new blueprint".
+    ///
+    /// - If new datasets are proposed, they are added to the blueprint.
+    /// - If datasets are changed, they are updated in the blueprint.
+    /// - If datasets are not proposed, but they exist in the parent blueprint,
+    /// they are removed.
+    pub fn sled_ensure_datasets(
+        &mut self,
+        sled_id: SledUuid,
+        resources: &SledResources,
+    ) -> Result<EnsureMultiple, Error> {
+        let (mut additions, mut updates, expunges, removals) = {
+            let mut datasets_builder = BlueprintSledDatasetsBuilder::new(
+                self.log.clone(),
+                sled_id,
+                &self.datasets,
+                resources,
+            );
+
+            // Ensure each zpool has a "Debug" and "Zone Root" dataset.
+            let bp_zpools =
+                datasets_builder.all_bp_zpools().collect::<Vec<ZpoolUuid>>();
+            for zpool_id in bp_zpools {
+                let zpool = ZpoolName::new_external(zpool_id);
+                let address = None;
+                datasets_builder.ensure(
+                    DatasetName::new(zpool.clone(), DatasetKind::Debug),
+                    address,
+                    Some(ByteCount::from_gibibytes_u32(100)),
+                    None,
+                    None,
+                );
+                datasets_builder.ensure(
+                    DatasetName::new(zpool, DatasetKind::ZoneRoot),
+                    address,
+                    None,
+                    None,
+                    None,
+                );
+            }
+
+            // Ensure that datasets needed for zones exist.
+            for (zone, _zone_state) in self.zones.current_sled_zones(sled_id) {
+                if !zone
+                    .disposition
+                    .matches(BlueprintZoneFilter::ShouldBeRunning)
+                {
+                    continue;
+                }
+
+                // Dataset for transient zone filesystem
+                if let Some(fs_zpool) = &zone.filesystem_pool {
+                    let name = format!(
+                        "oxp_{}_{}",
+                        zone.zone_type.kind().zone_prefix(),
+                        zone.id,
+                    );
+                    let address = None;
+                    datasets_builder.ensure(
+                        DatasetName::new(
+                            fs_zpool.clone(),
+                            DatasetKind::Zone { name },
+                        ),
+                        address,
+                        None,
+                        None,
+                        None,
+                    );
+                }
+
+                // Dataset for durable dataset co-located with zone
+                if let Some(dataset) = zone.zone_type.durable_dataset() {
+                    let zpool = &dataset.dataset.pool_name;
+                    let address = match zone.zone_type {
+                        BlueprintZoneType::Crucible(
+                            blueprint_zone_type::Crucible { address, .. },
+                        ) => Some(address),
+                        _ => None,
+                    };
+                    datasets_builder.ensure(
+                        DatasetName::new(zpool.clone(), dataset.kind),
+                        address,
+                        None,
+                        None,
+                        None,
+                    );
+                }
+            }
+
+            // TODO: Note that we also have datasets in "zone/" for propolis
+            // zones, but these are not currently being tracked by blueprints.
+
+            let expunges = datasets_builder.get_expungeable_datasets();
+            let removals = datasets_builder.get_removable_datasets();
+
+            let additions = datasets_builder
+                .new_datasets
+                .into_values()
+                .flat_map(|datasets| datasets.into_values().map(|d| (d.id, d)))
+                .collect::<BTreeMap<_, _>>();
+            let updates = datasets_builder
+                .updated_datasets
+                .into_values()
+                .flat_map(|datasets| {
+                    datasets.into_values().map(|dataset| (dataset.id, dataset))
+                })
+                .collect::<BTreeMap<DatasetUuid, _>>();
+            (additions, updates, expunges, removals)
+        };
+
+        if additions.is_empty()
+            && updates.is_empty()
+            && expunges.is_empty()
+            && removals.is_empty()
+        {
+            return Ok(EnsureMultiple::NotNeeded);
+        }
+        let added = additions.len();
+        let updated = updates.len();
+        // This is a little overloaded, but:
+        // - When a dataset is expunged, for whatever reason, it is a part of
+        // "expunges". This leads to it getting removed from a sled.
+        // - When we know that we've safely destroyed all traces of the dataset,
+        // it becomes a part of "removals". This means we can remove it from the
+        // blueprint.
+        let removed = expunges.len() + removals.len();
+
+        let datasets =
+            &mut self.datasets.change_sled_datasets(sled_id).datasets;
+
+        // Add all new datasets
+        datasets.append(&mut additions);
+
+        for config in datasets.values_mut() {
+            // Apply updates
+            if let Some(new_config) = updates.remove(&config.id) {
+                *config = new_config;
+            };
+
+            // Mark unused datasets as expunged.
+            //
+            // This indicates that the dataset should be removed from the database.
+            if expunges.contains(&config.id) {
+                config.disposition = BlueprintDatasetDisposition::Expunged;
+            }
+        }
+
+        // Remove all datasets that we've finished expunging.
+        datasets.retain(|_id, d| {
+            if removals.contains(&d.id) {
+                debug_assert_eq!(
+                    d.disposition,
+                    BlueprintDatasetDisposition::Expunged,
+                    "Should only remove datasets that are expunged, but dataset {} is {:?}",
+                    d.id, d.disposition,
+                );
+                return false;
+            };
+            true
+        });
+
+        // We sort in the call to "BlueprintDatasetsBuilder::into_datasets_map",
+        // so we don't need to sort "datasets" now.
+
+        Ok(EnsureMultiple::Changed { added, updated, removed })
     }
 
     pub fn sled_ensure_zone_ntp(
@@ -861,7 +1083,11 @@ impl<'a> BlueprintBuilder<'a> {
             self.sled_add_zone(sled_id, zone)?;
         }
 
-        Ok(EnsureMultiple::Changed { added: num_nexus_to_add, removed: 0 })
+        Ok(EnsureMultiple::Changed {
+            added: num_nexus_to_add,
+            updated: 0,
+            removed: 0,
+        })
     }
 
     pub fn cockroachdb_preserve_downgrade(
@@ -917,7 +1143,11 @@ impl<'a> BlueprintBuilder<'a> {
             self.sled_add_zone(sled_id, zone)?;
         }
 
-        Ok(EnsureMultiple::Changed { added: num_crdb_to_add, removed: 0 })
+        Ok(EnsureMultiple::Changed {
+            added: num_crdb_to_add,
+            updated: 0,
+            removed: 0,
+        })
     }
 
     fn sled_add_zone(
@@ -1263,6 +1493,335 @@ impl<'a> BlueprintDisksBuilder<'a> {
                 (sled_id, disks)
             })
             .collect()
+    }
+}
+
+/// Helper for working with sets of datasets on each sled
+struct BlueprintDatasetsBuilder<'a> {
+    changed_datasets: BTreeMap<SledUuid, BlueprintDatasetsConfig>,
+    parent_datasets: &'a BTreeMap<SledUuid, BlueprintDatasetsConfig>,
+}
+
+impl<'a> BlueprintDatasetsBuilder<'a> {
+    pub fn new(parent_blueprint: &'a Blueprint) -> BlueprintDatasetsBuilder {
+        BlueprintDatasetsBuilder {
+            changed_datasets: BTreeMap::new(),
+            parent_datasets: &parent_blueprint.blueprint_datasets,
+        }
+    }
+
+    pub fn change_sled_datasets(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> &mut BlueprintDatasetsConfig {
+        self.changed_datasets.entry(sled_id).or_insert_with(|| {
+            if let Some(old_sled_datasets) = self.parent_datasets.get(&sled_id)
+            {
+                BlueprintDatasetsConfig {
+                    generation: old_sled_datasets.generation.next(),
+                    datasets: old_sled_datasets.datasets.clone(),
+                }
+            } else {
+                BlueprintDatasetsConfig {
+                    generation: Generation::new(),
+                    datasets: BTreeMap::new(),
+                }
+            }
+        })
+    }
+
+    /// Iterates over the list of Omicron datasets currently configured for this
+    /// sled in the blueprint that's being built
+    pub fn current_sled_datasets(
+        &self,
+        sled_id: SledUuid,
+    ) -> Box<dyn Iterator<Item = &BlueprintDatasetConfig> + '_> {
+        if let Some(sled_datasets) = self
+            .changed_datasets
+            .get(&sled_id)
+            .or_else(|| self.parent_datasets.get(&sled_id))
+        {
+            Box::new(sled_datasets.datasets.values())
+        } else {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    /// Produces an owned map of datasets for the requested sleds
+    pub fn into_datasets_map(
+        mut self,
+        sled_ids: impl Iterator<Item = SledUuid>,
+    ) -> BTreeMap<SledUuid, BlueprintDatasetsConfig> {
+        sled_ids
+            .map(|sled_id| {
+                // Start with self.changed_datasets, which contains entries for any
+                // sled whose datasets config is changing in this blueprint.
+                let datasets = self
+                    .changed_datasets
+                    .remove(&sled_id)
+                    // If it's not there, use the config from the parent
+                    // blueprint.
+                    .or_else(|| self.parent_datasets.get(&sled_id).cloned())
+                    // If it's not there either, then this must be a new sled
+                    // and we haven't added any datasets to it yet.  Use the
+                    // standard initial config.
+                    .unwrap_or_else(|| BlueprintDatasetsConfig {
+                        generation: Generation::new(),
+                        datasets: BTreeMap::new(),
+                    });
+
+                (sled_id, datasets)
+            })
+            .collect()
+    }
+}
+
+/// Helper for working with sets of datasets on a single sled
+struct BlueprintSledDatasetsBuilder<'a> {
+    log: Logger,
+    blueprint_datasets:
+        BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, &'a BlueprintDatasetConfig>>,
+    database_datasets:
+        BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, &'a DatasetConfig>>,
+
+    // Datasets which are unchanged from the prior blueprint
+    unchanged_datasets:
+        BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, BlueprintDatasetConfig>>,
+    // Datasets which are new in this blueprint
+    new_datasets:
+        BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, BlueprintDatasetConfig>>,
+    // Datasets which existed in the old blueprint, but which are
+    // changing in this one
+    updated_datasets:
+        BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, BlueprintDatasetConfig>>,
+}
+
+impl<'a> BlueprintSledDatasetsBuilder<'a> {
+    pub fn new(
+        log: Logger,
+        sled_id: SledUuid,
+        datasets: &'a BlueprintDatasetsBuilder<'_>,
+        resources: &'a SledResources,
+    ) -> Self {
+        // Gather all datasets known to the blueprint
+        let mut blueprint_datasets = BTreeMap::new();
+        for dataset in datasets.current_sled_datasets(sled_id) {
+            blueprint_datasets
+                .entry(dataset.pool.id())
+                .and_modify(|values: &mut BTreeMap<_, _>| {
+                    values.insert(dataset.kind.clone(), dataset);
+                })
+                .or_insert_with(|| {
+                    BTreeMap::from([(dataset.kind.clone(), dataset)])
+                });
+        }
+
+        // Gather all datasets known to the database
+        let mut database_datasets = BTreeMap::new();
+        for (zpool, datasets) in resources.all_datasets(ZpoolFilter::InService)
+        {
+            let datasets_by_kind = datasets
+                .into_iter()
+                .map(|dataset| (dataset.name.dataset().clone(), dataset))
+                .collect();
+
+            database_datasets.insert(*zpool, datasets_by_kind);
+        }
+
+        Self {
+            log,
+            blueprint_datasets,
+            database_datasets,
+            unchanged_datasets: BTreeMap::new(),
+            new_datasets: BTreeMap::new(),
+            updated_datasets: BTreeMap::new(),
+        }
+    }
+
+    /// Attempts to add a dataset to the builder.
+    ///
+    /// - If the dataset exists in the blueprint already, use it
+    /// - Otherwise, if the dataset exists in the database, re-use
+    /// the UUID, but add it to the blueprint
+    /// - Otherwse, create a new dataset in both the database
+    /// and the blueprint
+    pub fn ensure(
+        &mut self,
+        dataset: DatasetName,
+        address: Option<SocketAddrV6>,
+        quota: Option<ByteCount>,
+        reservation: Option<ByteCount>,
+        compression: Option<String>,
+    ) {
+        let zpool = dataset.pool();
+        let zpool_id = zpool.id();
+        let kind = dataset.dataset();
+
+        let make_config = |id: DatasetUuid| BlueprintDatasetConfig {
+            disposition: BlueprintDatasetDisposition::InService,
+            id,
+            pool: zpool.clone(),
+            kind: kind.clone(),
+            address,
+            quota,
+            reservation,
+            compression,
+        };
+
+        // This dataset already exists in the blueprint
+        if let Some(old_config) = self.get_from_bp(zpool_id, kind) {
+            let new_config = make_config(old_config.id);
+
+            // If it needs updating, add it
+            let target = if *old_config != new_config {
+                &mut self.updated_datasets
+            } else {
+                &mut self.unchanged_datasets
+            };
+            target
+                .entry(zpool_id)
+                .and_modify(|values: &mut BTreeMap<_, _>| {
+                    values.insert(new_config.kind.clone(), new_config.clone());
+                })
+                .or_insert_with(|| {
+                    BTreeMap::from([(new_config.kind.clone(), new_config)])
+                });
+            return;
+        }
+
+        // If the dataset exists in the datastore, re-use the UUID.
+        let id = if let Some(old_config) = self.get_from_db(zpool_id, kind) {
+            old_config.id
+        } else {
+            DatasetUuid::new_v4()
+        };
+
+        let new_config = make_config(id);
+        self.new_datasets
+            .entry(zpool_id)
+            .and_modify(|values: &mut BTreeMap<_, _>| {
+                values.insert(new_config.kind.clone(), new_config.clone());
+            })
+            .or_insert_with(|| {
+                BTreeMap::from([(new_config.kind.clone(), new_config)])
+            });
+    }
+
+    /// Returns all datasets in the old blueprint that are not planned to be
+    /// part of the new blueprint.
+    pub fn get_expungeable_datasets(&self) -> BTreeSet<DatasetUuid> {
+        let dataset_exists_in =
+            |group: &BTreeMap<
+                ZpoolUuid,
+                BTreeMap<DatasetKind, BlueprintDatasetConfig>,
+            >,
+             zpool_id: ZpoolUuid,
+             dataset_id: DatasetUuid| {
+                let Some(datasets) = group.get(&zpool_id) else {
+                    return false;
+                };
+
+                for (_, dataset_config) in datasets {
+                    if dataset_config.id == dataset_id {
+                        return true;
+                    }
+                }
+                return false;
+            };
+
+        let mut removals = BTreeSet::new();
+
+        for (zpool_id, datasets) in &self.blueprint_datasets {
+            for (_dataset_kind, dataset_config) in datasets {
+                let dataset_id = dataset_config.id;
+                if !dataset_exists_in(&self.new_datasets, *zpool_id, dataset_id)
+                    && !dataset_exists_in(
+                        &self.updated_datasets,
+                        *zpool_id,
+                        dataset_id,
+                    )
+                    && !dataset_exists_in(
+                        &self.unchanged_datasets,
+                        *zpool_id,
+                        dataset_id,
+                    )
+                {
+                    info!(self.log, "dataset expungeable (not needed in blueprint)"; "id" => ?dataset_id);
+                    removals.insert(dataset_id);
+                }
+            }
+        }
+
+        removals
+    }
+
+    /// Returns all datasets that have been expunged in a prior blueprint,
+    /// and which are also deleted from the database.
+    ///
+    /// This is our sign that the work of expungement has completed.
+    pub fn get_removable_datasets(&self) -> BTreeSet<DatasetUuid> {
+        let dataset_exists_in =
+            |group: &BTreeMap<
+                ZpoolUuid,
+                BTreeMap<DatasetKind, &DatasetConfig>,
+            >,
+             zpool_id: ZpoolUuid,
+             dataset_id: DatasetUuid| {
+                let Some(datasets) = group.get(&zpool_id) else {
+                    return false;
+                };
+
+                for (_, dataset_config) in datasets {
+                    if dataset_config.id == dataset_id {
+                        return true;
+                    }
+                }
+                return false;
+            };
+
+        let mut removals = BTreeSet::new();
+        for (zpool_id, datasets) in &self.blueprint_datasets {
+            for (_kind, config) in datasets {
+                if matches!(
+                    config.disposition,
+                    BlueprintDatasetDisposition::Expunged
+                ) && !dataset_exists_in(
+                    &self.database_datasets,
+                    *zpool_id,
+                    config.id,
+                ) {
+                    info!(self.log, "dataset removable (expunged, not in database)"; "id" => ?config.id);
+                    removals.insert(config.id);
+                }
+            }
+        }
+        removals
+    }
+
+    pub fn all_bp_zpools(&self) -> impl Iterator<Item = ZpoolUuid> + '_ {
+        self.blueprint_datasets.keys().map(|id| *id)
+    }
+
+    fn get_from_bp(
+        &self,
+        zpool: ZpoolUuid,
+        kind: &DatasetKind,
+    ) -> Option<&'a BlueprintDatasetConfig> {
+        self.blueprint_datasets
+            .get(&zpool)
+            .and_then(|datasets| datasets.get(kind))
+            .copied()
+    }
+
+    fn get_from_db(
+        &self,
+        zpool: ZpoolUuid,
+        kind: &DatasetKind,
+    ) -> Option<&'a DatasetConfig> {
+        self.database_datasets
+            .get(&zpool)
+            .and_then(|datasets| datasets.get(kind))
+            .copied()
     }
 }
 
@@ -1647,7 +2206,11 @@ pub mod test {
                     builder
                         .sled_ensure_disks(sled_id, &sled_resources)
                         .unwrap(),
-                    EnsureMultiple::Changed { added: 10, removed: 0 },
+                    EnsureMultiple::Changed {
+                        added: 10,
+                        updated: 0,
+                        removed: 0
+                    },
                 );
             }
 
@@ -1820,7 +2383,10 @@ pub mod test {
                 .sled_ensure_zone_multiple_nexus(sled_id, 1)
                 .expect("failed to ensure nexus zone");
 
-            assert_eq!(added, EnsureMultiple::Changed { added: 1, removed: 0 });
+            assert_eq!(
+                added,
+                EnsureMultiple::Changed { added: 1, updated: 0, removed: 0 }
+            );
         }
 
         {
@@ -1838,7 +2404,10 @@ pub mod test {
                 .sled_ensure_zone_multiple_nexus(sled_id, 3)
                 .expect("failed to ensure nexus zone");
 
-            assert_eq!(added, EnsureMultiple::Changed { added: 3, removed: 0 });
+            assert_eq!(
+                added,
+                EnsureMultiple::Changed { added: 3, updated: 0, removed: 0 }
+            );
         }
 
         {
@@ -2094,7 +2663,11 @@ pub mod test {
             .expect("ensured multiple CRDB zones");
         assert_eq!(
             ensure_result,
-            EnsureMultiple::Changed { added: num_sled_zpools, removed: 0 }
+            EnsureMultiple::Changed {
+                added: num_sled_zpools,
+                updated: 0,
+                removed: 0
+            }
         );
 
         let blueprint = builder.build();

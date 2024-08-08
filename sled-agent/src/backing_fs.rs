@@ -48,7 +48,7 @@ struct BackingFs<'a> {
     // Mountpoint
     mountpoint: &'static str,
     // Optional quota, in _bytes_
-    quota: Option<usize>,
+    quota: Option<u64>,
     // Optional compression mode
     compression: Option<&'static str>,
     // Linked service
@@ -74,7 +74,7 @@ impl<'a> BackingFs<'a> {
         self
     }
 
-    const fn quota(mut self, quota: usize) -> Self {
+    const fn quota(mut self, quota: u64) -> Self {
         self.quota = Some(quota);
         self
     }
@@ -99,7 +99,7 @@ const BACKING_FMD_DATASET: &'static str = "fmd";
 const BACKING_FMD_MOUNTPOINT: &'static str = "/var/fm/fmd";
 const BACKING_FMD_SUBDIRS: [&'static str; 3] = ["rsrc", "ckpt", "xprt"];
 const BACKING_FMD_SERVICE: &'static str = "svc:/system/fmd:default";
-const BACKING_FMD_QUOTA: usize = 500 * (1 << 20); // 500 MiB
+const BACKING_FMD_QUOTA: u64 = 500 * (1 << 20); // 500 MiB
 
 const BACKING_COMPRESSION: &'static str = "on";
 

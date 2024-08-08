@@ -4,28 +4,118 @@
 
 //! Ensures dataset records required by a given blueprint
 
+use crate::Sled;
+
+use anyhow::anyhow;
 use anyhow::Context;
+use futures::stream;
+use futures::StreamExt;
 use nexus_db_model::Dataset;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::BlueprintZoneConfig;
-use nexus_types::deployment::DurableDataset;
+use nexus_types::deployment::BlueprintDatasetConfig;
+use nexus_types::deployment::BlueprintDatasetDisposition;
+use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::identity::Asset;
+use omicron_common::disk::DatasetConfig;
+use omicron_common::disk::DatasetsConfig;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::SledUuid;
 use slog::info;
+use slog::o;
 use slog::warn;
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
-/// For each zone in `all_omicron_zones` that has an associated durable dataset,
-/// ensure that a corresponding dataset record exists in `datastore`.
+/// Idempotently ensures that the specified datasets are deployed to the
+/// corresponding sleds
+pub(crate) async fn deploy_datasets(
+    opctx: &OpContext,
+    sleds_by_id: &BTreeMap<SledUuid, Sled>,
+    sled_configs: &BTreeMap<SledUuid, BlueprintDatasetsConfig>,
+) -> Result<(), Vec<anyhow::Error>> {
+    let errors: Vec<_> = stream::iter(sled_configs)
+        .filter_map(|(sled_id, config)| async move {
+            let log = opctx.log.new(o!(
+                "sled_id" => sled_id.to_string(),
+                "generation" => config.generation.to_string(),
+            ));
+
+            let db_sled = match sleds_by_id.get(&sled_id) {
+                Some(sled) => sled,
+                None => {
+                    let err = anyhow!("sled not found in db list: {}", sled_id);
+                    warn!(log, "{err:#}");
+                    return Some(err);
+                }
+            };
+
+            let client = nexus_networking::sled_client_from_address(
+                sled_id.into_untyped_uuid(),
+                db_sled.sled_agent_address,
+                &log,
+            );
+            let config: DatasetsConfig = config.clone().into();
+            let result =
+                client.datasets_put(&config).await.with_context(
+                    || format!("Failed to put {config:#?} to sled {sled_id}"),
+                );
+            match result {
+                Err(error) => {
+                    warn!(log, "{error:#}");
+                    Some(error)
+                }
+                Ok(result) => {
+                    let (errs, successes): (Vec<_>, Vec<_>) = result
+                        .into_inner()
+                        .status
+                        .into_iter()
+                        .partition(|status| status.err.is_some());
+
+                    if !errs.is_empty() {
+                        warn!(
+                            log,
+                            "Failed to deploy datasets for sled agent";
+                            "successfully configured datasets" => successes.len(),
+                            "failed dataset configurations" => errs.len(),
+                        );
+                        for err in &errs {
+                            warn!(log, "{err:?}");
+                        }
+                        return Some(anyhow!(
+                            "failure deploying datasets: {:?}",
+                            errs
+                        ));
+                    }
+
+                    info!(
+                        log,
+                        "Successfully deployed datasets for sled agent";
+                        "successfully configured datasets" => successes.len(),
+                    );
+                    None
+                }
+            }
+        })
+        .collect()
+        .await;
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+
+/// For all datasets we expect to see in the blueprint, ensure that a corresponding
+/// database record exists in `datastore`.
 ///
-/// Does not modify any existing dataset records. Returns the number of
-/// datasets inserted.
+/// Updates all existing dataset records that don't match the blueprint.
+/// Returns the number of datasets inserted.
 pub(crate) async fn ensure_dataset_records_exist(
     opctx: &OpContext,
     datastore: &DataStore,
-    all_omicron_zones: impl Iterator<Item = &BlueprintZoneConfig>,
+    bp_datasets: impl Iterator<Item = &BlueprintDatasetConfig>,
 ) -> anyhow::Result<usize> {
     // Before attempting to insert any datasets, first query for any existing
     // dataset records so we can filter them out. This looks like a typical
@@ -41,60 +131,91 @@ pub(crate) async fn ensure_dataset_records_exist(
         .await
         .context("failed to list all datasets")?
         .into_iter()
-        .map(|dataset| OmicronZoneUuid::from_untyped_uuid(dataset.id()))
-        .collect::<BTreeSet<_>>();
+        .map(|dataset| (DatasetUuid::from_untyped_uuid(dataset.id()), dataset))
+        .collect::<BTreeMap<DatasetUuid, _>>();
 
     let mut num_inserted = 0;
-    let mut num_already_exist = 0;
+    let mut num_updated = 0;
+    let mut num_unchanged = 0;
+    let mut num_removed = 0;
 
-    for zone in all_omicron_zones {
-        let Some(DurableDataset { dataset, kind, address }) =
-            zone.zone_type.durable_dataset()
-        else {
-            continue;
+    let (wanted_datasets, unwanted_datasets): (Vec<_>, Vec<_>) = bp_datasets
+        .partition(|d| match d.disposition {
+            BlueprintDatasetDisposition::InService => true,
+            BlueprintDatasetDisposition::Expunged => false,
+        });
+
+    for bp_dataset in wanted_datasets {
+        let id = bp_dataset.id;
+        let kind = &bp_dataset.kind;
+
+        // If this dataset already exists, only update it if it appears different from what exists
+        // in the database already.
+        let action = if let Some(db_dataset) = existing_datasets.remove(&id) {
+            let db_dataset: DatasetConfig = db_dataset.try_into()?;
+
+            if db_dataset == bp_dataset.clone().into() {
+                num_unchanged += 1;
+                continue;
+            }
+            num_updated += 1;
+            "update"
+        } else {
+            "insert"
         };
 
-        let id = zone.id;
-
-        // If already present in the datastore, move on.
-        if existing_datasets.remove(&id) {
-            num_already_exist += 1;
-            continue;
-        }
-
-        let pool_id = dataset.pool_name.id();
+        let address = bp_dataset.address;
         let dataset = Dataset::new(
             id.into_untyped_uuid(),
-            pool_id.into_untyped_uuid(),
-            Some(address),
+            bp_dataset.pool.id().into_untyped_uuid(),
+            address,
             kind.clone(),
         );
-        let maybe_inserted = datastore
-            .dataset_insert_if_not_exists(dataset)
-            .await
-            .with_context(|| {
-                format!("failed to insert dataset record for dataset {id}")
-            })?;
+        datastore.dataset_upsert(dataset).await.with_context(|| {
+            format!("failed to upsert dataset record for dataset {id}")
+        })?;
 
-        // If we succeeded in inserting, log it; if `maybe_dataset` is `None`,
-        // we must have lost the TOCTOU race described above, and another Nexus
-        // must have inserted this dataset before we could.
-        if maybe_inserted.is_some() {
-            info!(
-                opctx.log,
-                "inserted new dataset for Omicron zone";
-                "id" => %id,
-                "kind" => ?kind,
-            );
-            num_inserted += 1;
-        } else {
-            num_already_exist += 1;
+        info!(
+            opctx.log,
+            "ensuring dataset record in database";
+            "action" => action,
+            "id" => %id,
+            "kind" => ?kind,
+        );
+        num_inserted += 1;
+    }
+
+    // TODO: I know we don't want to actually expunge crucible zones, but unclear
+    // where that decision SHOULD be made?
+    //
+    // --> Actually, idk about this. We should clearly read the disposition to
+    // decide which datasets to delete, but I think we need some
+    // planner/executor coordination to punt on Crucible.
+
+    for bp_dataset in unwanted_datasets {
+        if existing_datasets.remove(&bp_dataset.id).is_some() {
+            if matches!(
+                bp_dataset.kind,
+                omicron_common::disk::DatasetKind::Crucible
+            ) {
+                // Region and snapshot replacement cannot happen without the
+                // database record, even if the dataset has been expunged.
+                //
+                // This record will still be deleted, but it will happen as a
+                // part of the "decommissioned_disk_cleaner" background task.
+                continue;
+            }
+
+            datastore.dataset_delete(&opctx, bp_dataset.id).await?;
+            num_removed += 1;
         }
     }
 
-    // We don't currently support removing datasets, so this would be
-    // surprising: the database contains dataset records that are no longer in
-    // our blueprint. We can't do anything about this, so just warn.
+    // We support removing expunged datasets - if we read a dataset that hasn't
+    // been explicitly expunged, log this as an oddity.
+    //
+    // This could be possible in rare conditions where multiple Nexuses are executing
+    // distinct blueprints.
     if !existing_datasets.is_empty() {
         warn!(
             opctx.log,
@@ -106,9 +227,11 @@ pub(crate) async fn ensure_dataset_records_exist(
 
     info!(
         opctx.log,
-        "ensured all Omicron zones have dataset records";
+        "ensured all Omicron datasets have database records";
         "num_inserted" => num_inserted,
-        "num_already_existed" => num_already_exist,
+        "num_updated" => num_updated,
+        "num_unchanged" => num_unchanged,
+        "num_removed" => num_removed,
     );
 
     Ok(num_inserted)
@@ -119,12 +242,9 @@ mod tests {
     use super::*;
     use nexus_db_model::Zpool;
     use nexus_reconfigurator_planning::example::example;
-    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::deployment::blueprint_zone_type;
-    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
-    use nexus_types::deployment::BlueprintZoneType;
+    use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::ZpoolUuid;
@@ -168,25 +288,37 @@ mod tests {
             0
         );
 
-        // Collect all the blueprint zones.
-        let all_omicron_zones = blueprint
+        // Let's allocate datasets for all the zones with durable datasets.
+        //
+        // Finding these datasets is normally the responsibility of the planner,
+        // but we're kinda hand-rolling it.
+        let all_datasets = blueprint
             .all_omicron_zones(BlueprintZoneFilter::All)
-            .map(|(_, zone)| zone)
+            .filter_map(|(_, zone)| {
+                if let Some(dataset) = zone.zone_type.durable_dataset() {
+                    Some(BlueprintDatasetConfig {
+                        disposition: BlueprintDatasetDisposition::InService,
+                        id: DatasetUuid::new_v4(),
+                        pool: dataset.dataset.pool_name.clone(),
+                        kind: dataset.kind,
+                        address: Some(dataset.address),
+                        quota: None,
+                        reservation: None,
+                        compression: None,
+                    })
+                } else {
+                    None
+                }
+            })
             .collect::<Vec<_>>();
 
         // How many zones are there with durable datasets?
-        let nzones_with_durable_datasets = all_omicron_zones
-            .iter()
-            .filter(|z| z.zone_type.durable_dataset().is_some())
-            .count();
+        let nzones_with_durable_datasets = all_datasets.len();
 
-        let ndatasets_inserted = ensure_dataset_records_exist(
-            opctx,
-            datastore,
-            all_omicron_zones.iter().copied(),
-        )
-        .await
-        .expect("failed to ensure datasets");
+        let ndatasets_inserted =
+            ensure_dataset_records_exist(opctx, datastore, all_datasets.iter())
+                .await
+                .expect("failed to ensure datasets");
 
         // We should have inserted a dataset for each zone with a durable
         // dataset.
@@ -201,13 +333,10 @@ mod tests {
         );
 
         // Ensuring the same datasets again should insert no new records.
-        let ndatasets_inserted = ensure_dataset_records_exist(
-            opctx,
-            datastore,
-            all_omicron_zones.iter().copied(),
-        )
-        .await
-        .expect("failed to ensure datasets");
+        let ndatasets_inserted =
+            ensure_dataset_records_exist(opctx, datastore, all_datasets.iter())
+                .await
+                .expect("failed to ensure datasets");
         assert_eq!(0, ndatasets_inserted);
         assert_eq!(
             datastore
@@ -233,42 +362,36 @@ mod tests {
                 .expect("failed to upsert zpool");
         }
 
-        // Call `ensure_dataset_records_exist` again, adding new crucible and
-        // cockroach zones. It should insert only these new zones.
+        // Call `ensure_dataset_records_exist` again, adding new datasets.
+        //
+        // It should only insert these new zones.
         let new_zones = [
-            BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id: OmicronZoneUuid::new_v4(),
-                underlay_address: "::1".parse().unwrap(),
-                filesystem_pool: Some(ZpoolName::new_external(new_zpool_id)),
-                zone_type: BlueprintZoneType::Crucible(
-                    blueprint_zone_type::Crucible {
-                        address: "[::1]:0".parse().unwrap(),
-                        dataset: OmicronZoneDataset {
-                            pool_name: ZpoolName::new_external(new_zpool_id),
-                        },
-                    },
-                ),
+            BlueprintDatasetConfig {
+                disposition: BlueprintDatasetDisposition::InService,
+                id: DatasetUuid::new_v4(),
+                pool: ZpoolName::new_external(new_zpool_id),
+                kind: DatasetKind::Debug,
+                address: None,
+                quota: None,
+                reservation: None,
+                compression: None,
             },
-            BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id: OmicronZoneUuid::new_v4(),
-                underlay_address: "::1".parse().unwrap(),
-                filesystem_pool: Some(ZpoolName::new_external(new_zpool_id)),
-                zone_type: BlueprintZoneType::CockroachDb(
-                    blueprint_zone_type::CockroachDb {
-                        address: "[::1]:0".parse().unwrap(),
-                        dataset: OmicronZoneDataset {
-                            pool_name: ZpoolName::new_external(new_zpool_id),
-                        },
-                    },
-                ),
+            BlueprintDatasetConfig {
+                disposition: BlueprintDatasetDisposition::InService,
+                id: DatasetUuid::new_v4(),
+                pool: ZpoolName::new_external(new_zpool_id),
+                kind: DatasetKind::ZoneRoot,
+                address: None,
+                quota: None,
+                reservation: None,
+                compression: None,
             },
         ];
+
         let ndatasets_inserted = ensure_dataset_records_exist(
             opctx,
             datastore,
-            all_omicron_zones.iter().copied().chain(&new_zones),
+            all_datasets.iter().chain(&new_zones),
         )
         .await
         .expect("failed to ensure datasets");

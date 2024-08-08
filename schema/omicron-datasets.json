@@ -60,7 +60,7 @@
             "integer",
             "null"
           ],
-          "format": "uint",
+          "format": "uint64",
           "minimum": 0.0
         },
         "reservation": {
@@ -69,7 +69,7 @@
             "integer",
             "null"
           ],
-          "format": "uint",
+          "format": "uint64",
           "minimum": 0.0
         }
       }

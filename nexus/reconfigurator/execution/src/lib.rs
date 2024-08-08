@@ -161,6 +161,13 @@ where
     )
     .await?;
 
+    datasets::deploy_datasets(
+        &opctx,
+        &sleds_by_id,
+        &blueprint.blueprint_datasets,
+    )
+    .await?;
+
     omicron_zones::deploy_zones(
         &opctx,
         &sleds_by_id,
@@ -190,9 +197,7 @@ where
     datasets::ensure_dataset_records_exist(
         &opctx,
         datastore,
-        blueprint
-            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
-            .map(|(_sled_id, zone)| zone),
+        blueprint.all_omicron_datasets(),
     )
     .await
     .map_err(|err| vec![err])?;

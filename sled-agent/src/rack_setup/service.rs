@@ -92,12 +92,14 @@ use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
 use nexus_types::deployment::{
-    Blueprint, BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
+    Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
+    BlueprintDatasetsConfig, BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
     BlueprintZoneDisposition, BlueprintZonesConfig,
     CockroachDbPreserveDowngrade, InvalidOmicronZoneType,
 };
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_sled_address;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::backoff::{
@@ -1412,6 +1414,48 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         );
     }
 
+    let mut blueprint_datasets = BTreeMap::new();
+    for (sled_id, sled_config) in sled_configs_by_id {
+        let mut datasets = BTreeMap::new();
+        for d in sled_config.datasets.datasets.values() {
+            // Only the "Crucible" dataset needs to know the address
+            let address = sled_config.zones.iter().find_map(|z| {
+                if let OmicronZoneType::Crucible { address, dataset } =
+                    &z.zone_type
+                {
+                    if &dataset.pool_name == d.name.pool() {
+                        return Some(*address);
+                    }
+                };
+                None
+            });
+
+            datasets.insert(
+                d.id,
+                BlueprintDatasetConfig {
+                    disposition: BlueprintDatasetDisposition::InService,
+                    id: d.id,
+                    pool: d.name.pool().clone(),
+                    kind: d.name.dataset().clone(),
+                    address,
+                    compression: d.compression.clone(),
+                    quota: d.quota.map(|q| ByteCount::try_from(q).unwrap()),
+                    reservation: d
+                        .reservation
+                        .map(|r| ByteCount::try_from(r).unwrap()),
+                },
+            );
+        }
+
+        blueprint_datasets.insert(
+            *sled_id,
+            BlueprintDatasetsConfig {
+                generation: sled_config.datasets.generation,
+                datasets,
+            },
+        );
+    }
+
     let mut blueprint_zones = BTreeMap::new();
     let mut sled_state = BTreeMap::new();
     for (sled_id, sled_config) in sled_configs_by_id {
@@ -1442,6 +1486,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         id: Uuid::new_v4(),
         blueprint_zones,
         blueprint_disks,
+        blueprint_datasets,
         sled_state,
         parent_blueprint_id: None,
         internal_dns_version,

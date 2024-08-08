@@ -797,6 +797,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 //
                 // However, for now, this isn't necessary.
                 blueprint_disks: BTreeMap::new(),
+                blueprint_datasets: BTreeMap::new(),
                 sled_state,
                 parent_blueprint_id: None,
                 internal_dns_version: dns_config

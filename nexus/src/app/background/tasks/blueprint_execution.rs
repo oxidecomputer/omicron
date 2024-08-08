@@ -128,9 +128,10 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::{
-        blueprint_zone_type, Blueprint, BlueprintPhysicalDisksConfig,
-        BlueprintTarget, BlueprintZoneConfig, BlueprintZoneDisposition,
-        BlueprintZoneType, BlueprintZonesConfig, CockroachDbPreserveDowngrade,
+        blueprint_zone_type, Blueprint, BlueprintDatasetsConfig,
+        BlueprintPhysicalDisksConfig, BlueprintTarget, BlueprintZoneConfig,
+        BlueprintZoneDisposition, BlueprintZoneType, BlueprintZonesConfig,
+        CockroachDbPreserveDowngrade,
     };
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;
@@ -153,6 +154,7 @@ mod test {
     fn create_blueprint(
         blueprint_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
         blueprint_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
+        blueprint_datasets: BTreeMap<SledUuid, BlueprintDatasetsConfig>,
         dns_version: Generation,
     ) -> (BlueprintTarget, Blueprint) {
         let id = Uuid::new_v4();
@@ -172,6 +174,7 @@ mod test {
                 id,
                 blueprint_zones,
                 blueprint_disks,
+                blueprint_datasets,
                 sled_state,
                 cockroachdb_setting_preserve_downgrade:
                     CockroachDbPreserveDowngrade::DoNotModify,
@@ -256,6 +259,7 @@ mod test {
         let blueprint = Arc::new(create_blueprint(
             BTreeMap::new(),
             BTreeMap::new(),
+            BTreeMap::new(),
             generation,
         ));
         blueprint_tx.send(Some(blueprint)).unwrap();
@@ -304,6 +308,7 @@ mod test {
                 (sled_id1, make_zones(BlueprintZoneDisposition::InService)),
                 (sled_id2, make_zones(BlueprintZoneDisposition::Quiesced)),
             ]),
+            BTreeMap::new(),
             BTreeMap::new(),
             generation,
         );

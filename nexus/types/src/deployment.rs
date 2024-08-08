@@ -23,10 +23,16 @@ use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::ZoneKind;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
+use omicron_common::api::internal::shared::DatasetKind;
+use omicron_common::disk::DatasetConfig;
+use omicron_common::disk::DatasetName;
+use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -38,6 +44,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::net::Ipv6Addr;
+use std::net::SocketAddrV6;
 use strum::EnumIter;
 use strum::IntoEnumIterator;
 use thiserror::Error;
@@ -146,6 +153,9 @@ pub struct Blueprint {
     /// A map of sled id -> disks in use on each sled.
     pub blueprint_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
 
+    /// A map of sled id -> datasets in use on each sled
+    pub blueprint_datasets: BTreeMap<SledUuid, BlueprintDatasetsConfig>,
+
     /// which blueprint this blueprint is based on
     pub parent_blueprint_id: Option<Uuid>,
 
@@ -205,6 +215,15 @@ impl Blueprint {
                 .filter(move |z| z.disposition.matches(filter))
                 .map(|z| (*sled_id, z))
         })
+    }
+
+    /// Iterate over the [`BlueprintDatasetsConfig`] instances in the blueprint.
+    pub fn all_omicron_datasets(
+        &self,
+    ) -> impl Iterator<Item = &BlueprintDatasetConfig> {
+        self.blueprint_datasets
+            .iter()
+            .flat_map(move |(_, datasets)| datasets.datasets.values())
     }
 
     /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint
@@ -921,6 +940,78 @@ pub type BlueprintPhysicalDisksConfig =
 
 pub type BlueprintPhysicalDiskConfig =
     omicron_common::disk::OmicronPhysicalDiskConfig;
+
+/// Information about Omicron datasets as recorded in a blueprint.
+#[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+pub struct BlueprintDatasetsConfig {
+    pub generation: Generation,
+    pub datasets: BTreeMap<DatasetUuid, BlueprintDatasetConfig>,
+}
+
+impl From<BlueprintDatasetsConfig> for DatasetsConfig {
+    fn from(config: BlueprintDatasetsConfig) -> Self {
+        Self {
+            generation: config.generation,
+            datasets: config
+                .datasets
+                .into_iter()
+                .map(|(id, d)| (id, d.into()))
+                .collect(),
+        }
+    }
+}
+
+/// The desired state of an Omicron-managed dataset in a blueprint.
+///
+/// Part of [`BlueprintDatasetConfig`].
+#[derive(
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    JsonSchema,
+    Deserialize,
+    Serialize,
+    EnumIter,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum BlueprintDatasetDisposition {
+    /// The dataset is in-service.
+    InService,
+
+    /// The dataset is permanently gone.
+    Expunged,
+}
+
+/// Information about a dataset as recorded in a blueprint
+#[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+pub struct BlueprintDatasetConfig {
+    pub disposition: BlueprintDatasetDisposition,
+
+    pub id: DatasetUuid,
+    pub pool: ZpoolName,
+    pub kind: DatasetKind,
+    pub address: Option<SocketAddrV6>,
+    pub quota: Option<ByteCount>,
+    pub reservation: Option<ByteCount>,
+    pub compression: Option<String>,
+}
+
+impl From<BlueprintDatasetConfig> for DatasetConfig {
+    fn from(config: BlueprintDatasetConfig) -> Self {
+        Self {
+            id: config.id,
+            name: DatasetName::new(config.pool, config.kind),
+            quota: config.quota.map(|q| q.to_bytes()),
+            reservation: config.reservation.map(|r| r.to_bytes()),
+            compression: config.compression,
+        }
+    }
+}
 
 /// Describe high-level metadata about a blueprint
 // These fields are a subset of [`Blueprint`], and include only the data we can

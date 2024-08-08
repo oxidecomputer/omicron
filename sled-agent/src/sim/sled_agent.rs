@@ -40,7 +40,7 @@ use omicron_common::api::internal::shared::{
     ResolvedVpcRouteState, RouterId, RouterKind, RouterVersion,
 };
 use omicron_common::disk::{
-    DiskIdentity, DiskVariant, OmicronPhysicalDisksConfig,
+    DatasetsConfig, DiskIdentity, DiskVariant, OmicronPhysicalDisksConfig,
 };
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, ZpoolUuid};
 use oxnet::Ipv6Net;
@@ -51,6 +51,7 @@ use propolis_mock_server::Context as PropolisContext;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
 };
+use sled_storage::resources::DatasetsManagementResult;
 use sled_storage::resources::DisksManagementResult;
 use slog::Logger;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -891,6 +892,17 @@ impl SledAgent {
             // TODO: Make this more real?
             datasets: vec![],
         })
+    }
+
+    pub async fn datasets_ensure(
+        &self,
+        config: DatasetsConfig,
+    ) -> Result<DatasetsManagementResult, HttpError> {
+        self.storage.lock().await.datasets_ensure(config).await
+    }
+
+    pub async fn datasets_list(&self) -> Result<DatasetsConfig, HttpError> {
+        self.storage.lock().await.datasets_list().await
     }
 
     pub async fn omicron_physical_disks_list(

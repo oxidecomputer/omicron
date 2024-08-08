@@ -85,6 +85,7 @@ impl ExampleSystem {
                     .sled_ensure_zone_crucible(sled_id, *pool_name)
                     .unwrap();
             }
+            builder.sled_ensure_datasets(sled_id, &sled_resources).unwrap();
         }
 
         let blueprint = builder.build();

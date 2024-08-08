@@ -8,17 +8,21 @@
 use crate::inventory::ZoneType;
 use crate::omicron_zone_config::{OmicronZone, OmicronZoneNic};
 use crate::schema::{
-    blueprint, bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
+    blueprint, bp_omicron_dataset, bp_omicron_physical_disk, bp_omicron_zone,
+    bp_omicron_zone_nic, bp_sled_omicron_datasets,
     bp_sled_omicron_physical_disks, bp_sled_omicron_zones, bp_sled_state,
     bp_target,
 };
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
-    impl_enum_type, ipv6, Generation, MacAddr, Name, SledState, SqlU16, SqlU32,
-    SqlU8,
+    impl_enum_type, ipv6, ByteCount, Generation, MacAddr, Name, SledState,
+    SqlU16, SqlU32, SqlU8,
 };
 use chrono::{DateTime, Utc};
 use ipnetwork::IpNetwork;
+use nexus_types::deployment::BlueprintDatasetConfig;
+use nexus_types::deployment::BlueprintDatasetDisposition;
+use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintTarget;
@@ -31,7 +35,8 @@ use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use omicron_uuid_kinds::{ExternalIpKind, SledKind, ZpoolKind};
+use omicron_uuid_kinds::{DatasetKind, ExternalIpKind, SledKind, ZpoolKind};
+use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 /// See [`nexus_types::deployment::Blueprint`].
@@ -194,6 +199,154 @@ impl From<BpOmicronPhysicalDisk> for BlueprintPhysicalDiskConfig {
             id: disk.id,
             pool_id: ZpoolUuid::from_untyped_uuid(disk.pool_id),
         }
+    }
+}
+
+impl_enum_type!(
+    #[derive(Clone, SqlType, Debug, QueryId)]
+    #[diesel(postgres_type(name = "bp_dataset_disposition", schema = "public"))]
+    pub struct DbBpDatasetDispositionEnum;
+
+    /// This type is not actually public, because [`BlueprintDatasetDisposition`]
+    /// interacts with external logic.
+    ///
+    /// However, it must be marked `pub` to avoid errors like `crate-private
+    /// type `BpDatasetDispositionEnum` in public interface`. Marking this type `pub`,
+    /// without actually making it public, tricks rustc in a desirable way.
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
+    #[diesel(sql_type = DbBpDatasetDispositionEnum)]
+    pub enum DbBpDatasetDisposition;
+
+    // Enum values
+    InService => b"in_service"
+    Expunged => b"expunged"
+);
+
+/// Converts a [`BlueprintDatasetDisposition`] to a version that can be inserted
+/// into a database.
+pub fn to_db_bp_dataset_disposition(
+    disposition: BlueprintDatasetDisposition,
+) -> DbBpDatasetDisposition {
+    match disposition {
+        BlueprintDatasetDisposition::InService => {
+            DbBpDatasetDisposition::InService
+        }
+        BlueprintDatasetDisposition::Expunged => {
+            DbBpDatasetDisposition::Expunged
+        }
+    }
+}
+
+impl From<DbBpDatasetDisposition> for BlueprintDatasetDisposition {
+    fn from(disposition: DbBpDatasetDisposition) -> Self {
+        match disposition {
+            DbBpDatasetDisposition::InService => {
+                BlueprintDatasetDisposition::InService
+            }
+            DbBpDatasetDisposition::Expunged => {
+                BlueprintDatasetDisposition::Expunged
+            }
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_sled_omicron_datasets)]
+pub struct BpSledOmicronDatasets {
+    pub blueprint_id: Uuid,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub generation: Generation,
+}
+
+impl BpSledOmicronDatasets {
+    pub fn new(
+        blueprint_id: Uuid,
+        sled_id: SledUuid,
+        datasets_config: &BlueprintDatasetsConfig,
+    ) -> Self {
+        Self {
+            blueprint_id,
+            sled_id: sled_id.into(),
+            generation: Generation(datasets_config.generation),
+        }
+    }
+}
+
+/// DB representation of [BlueprintDatasetConfig]
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_omicron_dataset)]
+pub struct BpOmicronDataset {
+    pub blueprint_id: Uuid,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub id: DbTypedUuid<DatasetKind>,
+
+    pub disposition: DbBpDatasetDisposition,
+
+    pub pool_id: DbTypedUuid<ZpoolKind>,
+    pub kind: crate::DatasetKind,
+    zone_name: Option<String>,
+    pub ip: Option<ipv6::Ipv6Addr>,
+    pub port: Option<SqlU16>,
+
+    pub quota: Option<ByteCount>,
+    pub reservation: Option<ByteCount>,
+    pub compression: Option<String>,
+}
+
+impl BpOmicronDataset {
+    pub fn new(
+        blueprint_id: Uuid,
+        sled_id: SledUuid,
+        dataset_config: &BlueprintDatasetConfig,
+    ) -> Self {
+        Self {
+            blueprint_id,
+            sled_id: sled_id.into(),
+            id: dataset_config.id.into(),
+            disposition: to_db_bp_dataset_disposition(
+                dataset_config.disposition,
+            ),
+            pool_id: dataset_config.pool.id().into(),
+            kind: (&dataset_config.kind).into(),
+            zone_name: dataset_config.kind.zone_name().map(String::from),
+            ip: dataset_config.address.map(|addr| addr.ip().into()),
+            port: dataset_config.address.map(|addr| addr.port().into()),
+            quota: dataset_config.quota.map(|q| q.into()),
+            reservation: dataset_config.reservation.map(|r| r.into()),
+            compression: dataset_config.compression.clone(),
+        }
+    }
+}
+
+impl TryFrom<BpOmicronDataset> for BlueprintDatasetConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(dataset: BpOmicronDataset) -> Result<Self, Self::Error> {
+        let address = match (dataset.ip, dataset.port) {
+            (Some(ip), Some(port)) => {
+                Some(SocketAddrV6::new(ip.into(), port.into(), 0, 0))
+            }
+            (None, None) => None,
+            (_, _) => anyhow::bail!(
+                "Either both 'ip' and 'port' should be set, or neither"
+            ),
+        };
+
+        Ok(Self {
+            disposition: dataset.disposition.into(),
+            id: dataset.id.into(),
+            pool: omicron_common::zpool_name::ZpoolName::new_external(
+                dataset.pool_id.into(),
+            ),
+            kind: crate::DatasetKind::try_into_api(
+                dataset.kind,
+                dataset.zone_name,
+            )?,
+            address,
+            quota: dataset.quota.map(|b| b.into()),
+            reservation: dataset.reservation.map(|b| b.into()),
+            compression: dataset.compression,
+        })
     }
 }
 
