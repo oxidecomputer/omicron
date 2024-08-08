@@ -5091,6 +5091,7 @@ dependencies = [
 name = "nexus-sled-agent-shared"
 version = "0.1.0"
 dependencies = [
+ "illumos-utils",
  "omicron-common",
  "omicron-passwords",
  "omicron-uuid-kinds",
