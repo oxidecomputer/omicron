@@ -615,6 +615,11 @@ mod test {
             b.service_backend_zone(ServiceName::Oximeter, &zone2, 125).unwrap();
             b.service_backend_zone(ServiceName::Oximeter, &zone3, 126).unwrap();
 
+            // Add a boundary NTP service to one of the zones; this will also
+            // populate the special `BOUNDARY_NTP_DNS_NAME`.
+            b.service_backend_zone(ServiceName::BoundaryNtp, &zone2, 127)
+                .unwrap();
+
             // A sharded service
             b.service_backend_sled(
                 ServiceName::SledAgent(sled1_uuid),
