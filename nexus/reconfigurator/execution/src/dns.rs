@@ -499,6 +499,7 @@ mod test {
     use omicron_common::address::get_switch_zone_address;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
+    use omicron_common::address::BOUNDARY_NTP_REDUNDANCY;
     use omicron_common::address::COCKROACHDB_REDUNDANCY;
     use omicron_common::address::NEXUS_REDUNDANCY;
     use omicron_common::address::RACK_PREFIX;
@@ -1313,6 +1314,7 @@ mod test {
                 cockroachdb_settings: &CockroachDbSettings::empty(),
                 external_ip_rows: &[],
                 service_nic_rows: &[],
+                target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
                 target_nexus_zone_count: NEXUS_REDUNDANCY,
                 target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
                 target_cockroachdb_cluster_version:
@@ -1340,7 +1342,8 @@ mod test {
         .unwrap();
         let sled_id =
             blueprint.sleds().next().expect("expected at least one sled");
-        let nalready = builder.sled_num_zones_of_kind(sled_id, ZoneKind::Nexus);
+        let nalready =
+            builder.sled_num_running_zones_of_kind(sled_id, ZoneKind::Nexus);
         let rv = builder
             .sled_ensure_zone_multiple_nexus(sled_id, nalready + 1)
             .unwrap();

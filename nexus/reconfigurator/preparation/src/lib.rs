@@ -33,6 +33,7 @@ use nexus_types::identity::Resource;
 use nexus_types::inventory::Collection;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::address::COCKROACHDB_REDUNDANCY;
 use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::address::SLED_PREFIX;
@@ -60,6 +61,7 @@ pub struct PlanningInputFromDb<'a> {
     pub ip_pool_range_rows: &'a [nexus_db_model::IpPoolRange],
     pub external_ip_rows: &'a [nexus_db_model::ExternalIp],
     pub service_nic_rows: &'a [nexus_db_model::ServiceNetworkInterface],
+    pub target_boundary_ntp_zone_count: usize,
     pub target_nexus_zone_count: usize,
     pub target_cockroachdb_zone_count: usize,
     pub target_cockroachdb_cluster_version: CockroachDbClusterVersion,
@@ -75,6 +77,7 @@ impl PlanningInputFromDb<'_> {
             self.ip_pool_range_rows.iter().map(IpRange::from).collect();
         let policy = Policy {
             service_ip_pool_ranges,
+            target_boundary_ntp_zone_count: self.target_boundary_ntp_zone_count,
             target_nexus_zone_count: self.target_nexus_zone_count,
             target_cockroachdb_zone_count: self.target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version: self
@@ -236,6 +239,7 @@ pub async fn reconfigurator_state_load(
         sled_rows: &sled_rows,
         zpool_rows: &zpool_rows,
         ip_pool_range_rows: &ip_pool_range_rows,
+        target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
         target_nexus_zone_count: NEXUS_REDUNDANCY,
         target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
         target_cockroachdb_cluster_version: CockroachDbClusterVersion::POLICY,
