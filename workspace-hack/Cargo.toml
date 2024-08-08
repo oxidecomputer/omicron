@@ -30,6 +30,7 @@ bstr-6f8ce4dd05d13bba = { package = "bstr", version = "0.2.17" }
 bstr-dff4ba8e3ae991db = { package = "bstr", version = "1.9.1" }
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.7.1", features = ["serde"] }
+castaway = { version = "0.2.3" }
 chrono = { version = "0.4.38", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
 clap = { version = "4.5.13", features = ["cargo", "derive", "env", "wrap_help"] }
@@ -134,6 +135,7 @@ bstr-6f8ce4dd05d13bba = { package = "bstr", version = "0.2.17" }
 bstr-dff4ba8e3ae991db = { package = "bstr", version = "1.9.1" }
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.7.1", features = ["serde"] }
+castaway = { version = "0.2.3" }
 chrono = { version = "0.4.38", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
 clap = { version = "4.5.13", features = ["cargo", "derive", "env", "wrap_help"] }
@@ -232,40 +234,47 @@ dof = { version = "0.3.0", default-features = false, features = ["des"] }
 linux-raw-sys = { version = "0.4.13", default-features = false, features = ["elf", "errno", "general", "ioctl", "no_std", "std", "system"] }
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
+signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
 linux-raw-sys = { version = "0.4.13", default-features = false, features = ["elf", "errno", "general", "ioctl", "no_std", "std", "system"] }
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
+signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 
 [target.x86_64-apple-darwin.dependencies]
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
+signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 
 [target.x86_64-apple-darwin.build-dependencies]
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
+signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 
 [target.aarch64-apple-darwin.dependencies]
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
+signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 
 [target.aarch64-apple-darwin.build-dependencies]
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
+signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 
 [target.x86_64-unknown-illumos.dependencies]
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
+signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 toml_datetime = { version = "0.6.8", default-features = false, features = ["serde"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 
@@ -273,7 +282,8 @@ toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", featu
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
+signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 toml_datetime = { version = "0.6.8", default-features = false, features = ["serde"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 
