@@ -1461,11 +1461,27 @@ checksum = "f476fe445d41c9e991fd07515a6f463074b782242ccf4a5b7b1d1012e70824df"
 dependencies = [
  "bitflags 2.6.0",
  "crossterm_winapi",
- "futures-core",
  "libc",
- "mio",
+ "mio 0.8.11",
  "parking_lot 0.12.2",
  "serde",
+ "signal-hook",
+ "signal-hook-mio",
+ "winapi",
+]
+
+[[package]]
+name = "crossterm"
+version = "0.28.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "829d955a0bb380ef178a640b91779e3987da38c9aea133b20614cfed8cdea9c6"
+dependencies = [
+ "bitflags 2.6.0",
+ "crossterm_winapi",
+ "futures-core",
+ "mio 1.0.1",
+ "parking_lot 0.12.2",
+ "rustix",
  "signal-hook",
  "signal-hook-mio",
  "winapi",
@@ -4519,6 +4535,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mio"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4569e456d394deccd22ce1c1913e6ea0e54519f577285001215d33557431afe4"
+dependencies = [
+ "hermit-abi 0.3.9",
+ "libc",
+ "log",
+ "wasi 0.11.0+wasi-snapshot-preview1",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
 name = "mockall"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5832,7 +5861,7 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "clap",
- "crossterm",
+ "crossterm 0.28.1",
  "crucible-agent-client",
  "csv",
  "diesel",
@@ -6147,7 +6176,7 @@ dependencies = [
  "const-oid",
  "crossbeam-epoch",
  "crossbeam-utils",
- "crossterm",
+ "crossterm 0.27.0",
  "crypto-common",
  "der",
  "digest",
@@ -6183,7 +6212,7 @@ dependencies = [
  "log",
  "managed",
  "memchr",
- "mio",
+ "mio 0.8.11",
  "nom",
  "num-bigint",
  "num-integer",
@@ -6209,6 +6238,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "signal-hook-mio",
  "similar",
  "slog",
  "smallvec 1.13.2",
@@ -6603,7 +6633,7 @@ dependencies = [
  "chrono",
  "clap",
  "clickward",
- "crossterm",
+ "crossterm 0.28.1",
  "dropshot",
  "expectorate",
  "futures",
@@ -7844,7 +7874,7 @@ dependencies = [
  "bitflags 2.6.0",
  "cassowary",
  "compact_str",
- "crossterm",
+ "crossterm 0.27.0",
  "itertools 0.13.0",
  "lru",
  "paste",
@@ -7975,7 +8005,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65ebc241ed0ccea0bbbd775a55a76f0dd9971ef084589dea938751a03ffedc14"
 dependencies = [
  "chrono",
- "crossterm",
+ "crossterm 0.27.0",
  "fd-lock",
  "itertools 0.12.1",
  "nu-ansi-term",
@@ -8994,12 +9024,13 @@ dependencies = [
 
 [[package]]
 name = "signal-hook-mio"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29ad2e15f37ec9a6cc544097b78a1ec90001e9f71b81338ca39f430adaca99af"
+checksum = "34db1a06d485c9142248b7a054f034b349b212551f3dfd19c94d45a754a217cd"
 dependencies = [
  "libc",
- "mio",
+ "mio 0.8.11",
+ "mio 1.0.1",
  "signal-hook",
 ]
 
@@ -10138,7 +10169,7 @@ dependencies = [
  "backtrace",
  "bytes",
  "libc",
- "mio",
+ "mio 0.8.11",
  "num_cpus",
  "parking_lot 0.12.2",
  "pin-project-lite",
@@ -11264,7 +11295,7 @@ dependencies = [
  "camino",
  "ciborium",
  "clap",
- "crossterm",
+ "crossterm 0.28.1",
  "expectorate",
  "futures",
  "humantime",
@@ -11338,7 +11369,7 @@ dependencies = [
  "camino",
  "ciborium",
  "clap",
- "crossterm",
+ "crossterm 0.28.1",
  "omicron-workspace-hack",
  "reedline",
  "serde",
