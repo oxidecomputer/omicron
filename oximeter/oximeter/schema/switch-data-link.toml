@@ -183,7 +183,7 @@ versions = [
 ]
 
 [[metrics]]
-name = "fec_aligned"
+name = "fec_sync_aligned"
 description = "All lanes synchronized and aligned"
 units = "none"
 datum_type = "bool"
