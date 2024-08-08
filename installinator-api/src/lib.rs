@@ -157,7 +157,7 @@ pub fn make_server_starter<T: InstallinatorApi>(
         log_headers: vec![],
     };
 
-    let api = crate::installinator_api::api_description::<T>()?;
+    let api = crate::installinator_api_mod::api_description::<T>()?;
     let server =
         dropshot::HttpServerStarter::new(&dropshot_config, api, context, &log)
             .map_err(|error| {
