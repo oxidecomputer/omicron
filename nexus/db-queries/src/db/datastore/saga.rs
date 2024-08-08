@@ -17,10 +17,12 @@ use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use nexus_auth::authz;
 use nexus_auth::context::OpContext;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use std::ops::Add;
 
 impl DataStore {
     pub async fn saga_create(
@@ -206,6 +208,43 @@ impl DataStore {
         }
 
         Ok(events)
+    }
+
+    // XXX-dap TODO-doc
+    pub async fn sagas_reassign_sec(
+        &self,
+        opctx: &OpContext,
+        nexus_zone_ids: &[db::saga_types::SecId],
+        new_sec_id: db::saga_types::SecId,
+    ) -> Result<usize, Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        let now = chrono::Utc::now();
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // It would be more robust to do this in batches.  However, Diesel does
+        // not appear to support the UPDATE ... LIMIT syntax using the normal
+        // builder.  In practice, it's extremely unlikely we'd have so many
+        // in-progress sagas that this would be a problem.
+        use db::schema::saga::dsl;
+        diesel::update(
+            dsl::saga
+                .filter(dsl::current_sec.is_not_null())
+                .filter(dsl::current_sec.eq_any(
+                    nexus_zone_ids.into_iter().cloned().collect::<Vec<_>>(),
+                ))
+                .filter(dsl::saga_state.ne(db::saga_types::SagaCachedState(
+                    steno::SagaCachedState::Done,
+                ))),
+        )
+        .set((
+            dsl::current_sec.eq(Some(new_sec_id)),
+            dsl::adopt_generation.eq(dsl::adopt_generation.add(1)),
+            dsl::adopt_time.eq(now),
+        ))
+        .execute_async(&*conn)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
 
@@ -510,3 +549,13 @@ mod test {
         }
     }
 }
+
+// XXX-dap TODO-coverage want test that inserts:
+// - some sagas assigned to this SEC that are done
+// - more than BATCH_SIZE sagas assigned to this SEC that are unwinding
+// - more than BATCH_SIZE sagas assigned to this SEC that are running
+// - some sagas assigned to another SEC that are running
+//
+// then two tests:
+// 1. run the one-batch thing and make sure we only got at most the batch size
+// 2. run the whole thing and make sure that we got exactly the right ones
