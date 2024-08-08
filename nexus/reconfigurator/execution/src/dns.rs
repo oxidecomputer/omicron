@@ -457,6 +457,9 @@ mod test {
     use crate::overridables::Overridables;
     use crate::Sled;
     use dns_service_client::DnsDiff;
+    use internal_dns::config::Host;
+    use internal_dns::config::Zone;
+    use internal_dns::names::BOUNDARY_NTP_DNS_NAME;
     use internal_dns::resolver::Resolver;
     use internal_dns::ServiceName;
     use internal_dns::DNS_ZONE;
@@ -662,7 +665,7 @@ mod test {
             })
             .collect();
 
-        let blueprint_dns_zone = blueprint_internal_dns_config(
+        let mut blueprint_dns_zone = blueprint_internal_dns_config(
             &blueprint,
             &sleds_by_id,
             &Default::default(),
@@ -685,6 +688,10 @@ mod test {
         //
         // 4. Our out-of-service zone does *not* appear in the DNS config,
         //    neither with an AAAA record nor in an SRV record.
+        //
+        // 5. The boundary NTP zones' IP addresses are mapped to AAAA records in
+        //    the special boundary DNS name (in addition to having their normal
+        //    zone DNS name -> AAAA record from 1).
         //
         // Together, this tells us that we have SRV records for all services,
         // that those SRV records all point to at least one of the Omicron zones
@@ -719,6 +726,33 @@ mod test {
                 }
             })
             .collect();
+
+        // Prune the special boundary NTP DNS name out, collecting their IP
+        // addresses, and build a list of expected SRV targets to ensure these
+        // IPs show up both in the special boundary NTP DNS name and as their
+        // normal SRV records.
+        let boundary_ntp_ips = blueprint_dns_zone
+            .records
+            .remove(BOUNDARY_NTP_DNS_NAME)
+            .expect("missing boundary NTP DNS name")
+            .into_iter()
+            .map(|record| match record {
+                DnsRecord::Aaaa(ip) => ip,
+                _ => panic!("expected AAAA record; got {record:?}"),
+            });
+        let mut expected_boundary_ntp_srv_targets = boundary_ntp_ips
+            .map(|ip| {
+                let Some(zone_id) = omicron_zones_by_ip.get(&ip) else {
+                    panic!("did not find zone ID for boundary NTP IP {ip}");
+                };
+                let name = Host::Zone(Zone::Other(*zone_id)).fqdn();
+                println!(
+                    "Boundary NTP IP {ip} maps to expected \
+                     SRV record target {name}"
+                );
+                name
+            })
+            .collect::<BTreeSet<_>>();
 
         // Now go through all the DNS names that have AAAA records and remove
         // any corresponding Omicron zone.  While doing this, construct a set of
@@ -814,6 +848,16 @@ mod test {
         ]);
 
         for (name, records) in &blueprint_dns_zone.records {
+            let mut this_kind = None;
+            let kinds_left: Vec<_> =
+                srv_kinds_expected.iter().copied().collect();
+            for kind in kinds_left {
+                if kind.dns_name() == *name {
+                    srv_kinds_expected.remove(&kind);
+                    this_kind = Some(kind);
+                }
+            }
+
             let srvs: Vec<_> = records
                 .iter()
                 .filter_map(|dns_record| match dns_record {
@@ -828,19 +872,27 @@ mod test {
                     correspond to a name that points to any Omicron zone",
                     srv.target
                 );
-            }
-
-            let kinds_left: Vec<_> =
-                srv_kinds_expected.iter().copied().collect();
-            for kind in kinds_left {
-                if kind.dns_name() == *name {
-                    srv_kinds_expected.remove(&kind);
+                if this_kind == Some(ServiceName::BoundaryNtp) {
+                    assert!(
+                        expected_boundary_ntp_srv_targets.contains(&srv.target),
+                        "found boundary NTP SRV record with target {:?} \
+                        that does not correspond to an expected boundary \
+                        NTP zone",
+                        srv.target,
+                    );
+                    expected_boundary_ntp_srv_targets.remove(&srv.target);
                 }
             }
         }
 
         println!("SRV kinds with no records found: {:?}", srv_kinds_expected);
         assert!(srv_kinds_expected.is_empty());
+
+        println!(
+            "Boundary NTP SRV targets not found: {:?}",
+            expected_boundary_ntp_srv_targets
+        );
+        assert!(expected_boundary_ntp_srv_targets.is_empty());
     }
 
     #[tokio::test]

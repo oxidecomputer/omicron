@@ -60,6 +60,8 @@ use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zpool::{PathInPool, ZpoolName};
 use illumos_utils::{execute, PFEXEC};
+use internal_dns::names::BOUNDARY_NTP_DNS_NAME;
+use internal_dns::names::DNS_ZONE;
 use internal_dns::resolver::Resolver;
 use itertools::Itertools;
 use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
@@ -1994,15 +1996,17 @@ impl ServiceManager {
                     .add_property(
                         "boundary",
                         "boolean",
-                        &is_boundary.to_string(),
+                        is_boundary.to_string(),
+                    )
+                    .add_property(
+                        "boundary_pool",
+                        "astring",
+                        format!("{BOUNDARY_NTP_DNS_NAME}.{DNS_ZONE}"),
                     );
 
                 for s in ntp_servers {
-                    chrony_config = chrony_config.add_property(
-                        "server",
-                        "astring",
-                        &s.to_string(),
-                    );
+                    chrony_config =
+                        chrony_config.add_property("server", "astring", s);
                 }
 
                 let dns_client_service;
