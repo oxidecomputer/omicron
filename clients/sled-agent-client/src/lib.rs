@@ -38,6 +38,7 @@ progenitor::generate_api!(
     replace = {
         Baseboard = nexus_sled_agent_shared::inventory::Baseboard,
         ByteCount = omicron_common::api::external::ByteCount,
+        DatasetKind = omicron_common::api::internal::shared::DatasetKind,
         DiskIdentity = omicron_common::disk::DiskIdentity,
         DiskVariant = omicron_common::disk::DiskVariant,
         Generation = omicron_common::api::external::Generation,
