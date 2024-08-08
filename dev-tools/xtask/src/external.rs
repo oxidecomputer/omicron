@@ -52,6 +52,10 @@ impl External {
         self
     }
 
+    pub fn trailing_args(&self) -> &[OsString] {
+        &self.args
+    }
+
     pub fn exec_example(self, example_target: impl AsRef<OsStr>) -> Result<()> {
         self.exec_common("--example", example_target.as_ref())
     }

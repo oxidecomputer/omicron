@@ -653,7 +653,7 @@ impl Drop for CockroachInstance {
                     "WARN: temporary directory leaked: {path:?}\n\
                      \tIf you would like to access the database for debugging, run the following:\n\n\
                      \t# Run the database\n\
-                     \tcargo run --bin omicron-dev db-run --no-populate --store-dir {data_path:?}\n\
+                     \tcargo xtask db-dev run --no-populate --store-dir {data_path:?}\n\
                      \t# Access the database. Note the port may change if you run multiple databases.\n\
                      \tcockroach sql --host=localhost:32221 --insecure",
                      data_path = path.join("data"),

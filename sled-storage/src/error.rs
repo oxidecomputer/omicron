@@ -84,6 +84,9 @@ pub enum Error {
         current: Generation,
     },
 
+    #[error("Invalid configuration (UUID mismatch in arguments)")]
+    ConfigUuidMismatch,
+
     #[error("Dataset configuration out-of-date (asked for {requested}, but latest is {current})")]
     DatasetConfigurationOutdated { requested: Generation, current: Generation },
 

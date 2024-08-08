@@ -103,6 +103,7 @@ mod v2p_mapping;
 mod virtual_provisioning_collection;
 mod vmm;
 mod volume;
+mod volume_repair;
 mod vpc;
 mod zpool;
 
@@ -391,10 +392,10 @@ mod test {
     use crate::db::identity::Asset;
     use crate::db::lookup::LookupPath;
     use crate::db::model::{
-        BlockSize, ConsoleSession, Dataset, DatasetKind, ExternalIp,
-        PhysicalDisk, PhysicalDiskKind, PhysicalDiskPolicy, PhysicalDiskState,
-        Project, Rack, Region, SiloUser, SledBaseboard, SledSystemHardware,
-        SledUpdate, SshKey, Zpool,
+        BlockSize, ConsoleSession, Dataset, ExternalIp, PhysicalDisk,
+        PhysicalDiskKind, PhysicalDiskPolicy, PhysicalDiskState, Project, Rack,
+        Region, SiloUser, SledBaseboard, SledSystemHardware, SledUpdate,
+        SshKey, Zpool,
     };
     use crate::db::queries::vpc_subnet::InsertVpcSubnetQuery;
     use chrono::{Duration, Utc};
@@ -410,6 +411,7 @@ mod test {
     use omicron_common::api::external::{
         ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
+    use omicron_common::api::internal::shared::DatasetKind;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::GenericUuid;
@@ -907,7 +909,6 @@ mod test {
                             zpool.pool_id,
                             bogus_addr,
                             DatasetKind::Crucible,
-                            None,
                         );
 
                         let datastore = datastore.clone();
@@ -1280,7 +1281,6 @@ mod test {
                     zpool_id,
                     bogus_addr,
                     DatasetKind::Crucible,
-                    None,
                 );
                 let datastore = datastore.clone();
                 async move {
@@ -1381,7 +1381,6 @@ mod test {
                     zpool_id,
                     bogus_addr,
                     DatasetKind::Crucible,
-                    None,
                 );
                 let datastore = datastore.clone();
                 async move {
@@ -1457,7 +1456,6 @@ mod test {
                 zpool_id,
                 bogus_addr,
                 DatasetKind::Crucible,
-                None,
             );
             datastore.dataset_upsert(dataset).await.unwrap();
             physical_disk_ids.push(physical_disk_id);

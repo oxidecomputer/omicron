@@ -2,7 +2,7 @@
 //!
 //! Initial populating of the CockroachDB database happens in two different ways:
 //!
-//! 1. During "rack setup" (or during `omicron-dev db-run` or test suite
+//! 1. During "rack setup" (or during `db-dev run` or test suite
 //!    initialization), we create the omicron database, schema, and the *bare
 //!    minimum* data that needs to be there.
 //! 2. Every time Nexus starts up, we attempts to insert a bunch of built-in

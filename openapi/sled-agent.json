@@ -179,6 +179,7 @@
     },
     "/datasets": {
       "get": {
+        "summary": "Lists the datasets that this sled is configured to use",
         "operationId": "datasets_get",
         "responses": {
           "200": {
@@ -200,6 +201,7 @@
         }
       },
       "put": {
+        "summary": "Configures datasets to be used on this sled",
         "operationId": "datasets_put",
         "requestBody": {
           "content": {
@@ -2211,7 +2213,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "cockroach_db"
+                  "cockroachdb"
                 ]
               }
             },
@@ -2372,8 +2374,8 @@
         "type": "object",
         "properties": {
           "datasets": {
-            "type": "array",
-            "items": {
+            "type": "object",
+            "additionalProperties": {
               "$ref": "#/components/schemas/DatasetConfig"
             }
           },

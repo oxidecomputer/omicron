@@ -12,7 +12,6 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
-use nexus_db_queries::db::model::DatasetKind;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
@@ -23,6 +22,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::internal::shared::DatasetKind;
 use omicron_uuid_kinds::{GenericUuid, SledUuid};
 use sled_agent_client::Client as SledAgentClient;
 use std::net::SocketAddrV6;
@@ -308,7 +308,7 @@ impl super::Nexus {
         );
         let kind = DatasetKind::Crucible;
         let dataset =
-            db::model::Dataset::new(id, zpool_id, Some(address), kind, None);
+            db::model::Dataset::new(id, zpool_id, Some(address), kind);
         self.db_datastore.dataset_upsert(dataset).await?;
         Ok(())
     }

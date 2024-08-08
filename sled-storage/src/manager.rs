@@ -273,7 +273,7 @@ impl StorageHandle {
 
     /// Reads the last value written to storage by
     /// [Self::datasets_ensure].
-    pub async fn datasets_list(&self) -> Result<DatasetsConfig, Error> {
+    pub async fn datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(StorageRequest::DatasetsList { tx: tx.into() })
@@ -479,7 +479,7 @@ impl StorageManager {
                 let _ = tx.0.send(self.datasets_ensure(config).await);
             }
             StorageRequest::DatasetsList { tx } => {
-                let _ = tx.0.send(self.datasets_list().await);
+                let _ = tx.0.send(self.datasets_config_list().await);
             }
             StorageRequest::OmicronPhysicalDisksEnsure { config, tx } => {
                 let _ =
@@ -674,12 +674,19 @@ impl StorageManager {
 
     async fn datasets_ensure(
         &mut self,
-        mut config: DatasetsConfig,
+        config: DatasetsConfig,
     ) -> Result<DatasetsManagementResult, Error> {
         let log = self.log.new(o!("request" => "datasets_ensure"));
 
-        // Ensure that the datasets arrive in a consistent order
-        config.datasets.sort_by(|a, b| a.id.partial_cmp(&b.id).unwrap());
+        // As a small input-check, confirm that the UUID of the map of inputs
+        // matches the DatasetConfig.
+        //
+        // The dataset configs are sorted by UUID so they always appear in the
+        // same order, but this check prevents adding an entry of:
+        // - (UUID: X, Config(UUID: Y)), for X != Y
+        if !config.datasets.iter().all(|(id, config)| *id == config.id) {
+            return Err(Error::ConfigUuidMismatch);
+        }
 
         // We rely on the schema being stable across reboots -- observe
         // "test_datasets_schema" below for that property guarantee.
@@ -697,7 +704,9 @@ impl StorageManager {
                 if config.generation < ledger_data.generation {
                     warn!(
                         log,
-                        "Request looks out-of-date compared to prior request"
+                        "Request looks out-of-date compared to prior request";
+                        "requested_generation" => ?config.generation,
+                        "ledger_generation" => ?ledger_data.generation,
                     );
                     return Err(Error::DatasetConfigurationOutdated {
                         requested: config.generation,
@@ -720,7 +729,12 @@ impl StorageManager {
                         });
                     }
                 } else {
-                    info!(log, "Request looks newer than prior requests");
+                    info!(
+                        log,
+                        "Request looks newer than prior requests";
+                        "requested_generation" => ?config.generation,
+                        "ledger_generation" => ?ledger_data.generation,
+                    );
                 }
                 ledger
             }
@@ -757,7 +771,7 @@ impl StorageManager {
         config: &DatasetsConfig,
     ) -> DatasetsManagementResult {
         let mut status = vec![];
-        for dataset in &config.datasets {
+        for dataset in config.datasets.values() {
             status.push(self.dataset_ensure_internal(log, dataset).await);
         }
         DatasetsManagementResult { status }
@@ -783,8 +797,9 @@ impl StorageManager {
         status
     }
 
-    async fn datasets_list(&mut self) -> Result<DatasetsConfig, Error> {
-        let log = self.log.new(o!("request" => "datasets_list"));
+    // Lists datasets that this sled is configured to use.
+    async fn datasets_config_list(&mut self) -> Result<DatasetsConfig, Error> {
+        let log = self.log.new(o!("request" => "datasets_config_list"));
 
         let ledger_paths = self.all_omicron_dataset_ledgers().await;
         let maybe_ledger =
@@ -1114,6 +1129,7 @@ mod tests {
     use omicron_common::ledger;
     use omicron_test_utils::dev::test_setup_log;
     use sled_hardware::DiskFirmware;
+    use std::collections::BTreeMap;
     use std::sync::atomic::Ordering;
     use uuid::Uuid;
 
@@ -1613,13 +1629,16 @@ mod tests {
         let id = DatasetUuid::new_v4();
         let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
         let name = DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
-        let datasets = vec![DatasetConfig {
+        let datasets = BTreeMap::from([(
             id,
-            name,
-            compression: None,
-            quota: None,
-            reservation: None,
-        }];
+            DatasetConfig {
+                id,
+                name,
+                compression: None,
+                quota: None,
+                reservation: None,
+            },
+        )]);
         // "Generation = 1" is reserved as "no requests seen yet", so we jump
         // past it.
         let generation = Generation::new().next();
@@ -1630,7 +1649,8 @@ mod tests {
         assert!(!status.has_error());
 
         // List datasets, expect to see what we just created
-        let observed_config = harness.handle().datasets_list().await.unwrap();
+        let observed_config =
+            harness.handle().datasets_config_list().await.unwrap();
         assert_eq!(config, observed_config);
 
         // Calling "datasets_ensure" with the same input should succeed.
@@ -1650,7 +1670,7 @@ mod tests {
         // However, calling it with a different input and the same generation
         // number should fail.
         config.generation = current_config_generation;
-        config.datasets[0].reservation = Some(1024);
+        config.datasets.values_mut().next().unwrap().reservation = Some(1024);
         let err =
             harness.handle().datasets_ensure(config.clone()).await.unwrap_err();
         assert!(matches!(err, Error::DatasetConfigurationChanged { .. }));

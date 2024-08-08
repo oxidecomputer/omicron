@@ -179,13 +179,13 @@ mod tests {
     use diesel::ExpressionMethods;
     use diesel::QueryDsl;
     use nexus_db_model::Dataset;
-    use nexus_db_model::DatasetKind;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::PhysicalDiskPolicy;
     use nexus_db_model::Region;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
+    use omicron_common::api::internal::shared::DatasetKind;
     use omicron_uuid_kinds::{
         DatasetUuid, PhysicalDiskUuid, RegionUuid, SledUuid,
     };
@@ -246,7 +246,6 @@ mod tests {
                     0,
                 )),
                 DatasetKind::Crucible,
-                None,
             ))
             .await
             .unwrap();

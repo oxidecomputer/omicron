@@ -8,6 +8,7 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 use crate::{
@@ -180,12 +181,12 @@ pub struct DatasetsConfig {
     /// for a sled before any requests have been made.
     pub generation: Generation,
 
-    pub datasets: Vec<DatasetConfig>,
+    pub datasets: BTreeMap<DatasetUuid, DatasetConfig>,
 }
 
 impl Default for DatasetsConfig {
     fn default() -> Self {
-        Self { generation: Generation::new(), datasets: vec![] }
+        Self { generation: Generation::new(), datasets: BTreeMap::new() }
     }
 }
 

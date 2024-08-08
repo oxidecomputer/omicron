@@ -8,9 +8,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[dropshot::api_description {
-    module = "cockroach_admin_api_mod",
-}]
+#[dropshot::api_description]
 pub trait CockroachAdminApi {
     type Context;
 

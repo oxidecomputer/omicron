@@ -10,13 +10,14 @@ use crate::{
 };
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
 };
+use strum::EnumCount;
 use uuid::Uuid;
 
 /// The type of network interface
@@ -704,25 +705,12 @@ pub struct ResolvedVpcRouteSet {
 
 /// Describes the purpose of the dataset.
 #[derive(
-    Debug,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    Clone,
-    PartialEq,
-    Eq,
-    Ord,
-    PartialOrd,
-    Hash,
+    Debug, JsonSchema, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, EnumCount,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DatasetKind {
     // Durable datasets for zones
-
-    // This renaming exists for backwards compatibility -- this enum variant
-    // was serialized to "all-zones-request" as "cockroach_db" and should
-    // stay that way, unless we perform an explicit schema change.
-    #[serde(rename = "cockroach_db")]
+    #[serde(rename = "cockroachdb")]
     Cockroach,
     Crucible,
     Clickhouse,
@@ -738,6 +726,25 @@ pub enum DatasetKind {
 
     // Other datasets
     Debug,
+}
+
+impl Serialize for DatasetKind {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for DatasetKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(de::Error::custom)
+    }
 }
 
 impl DatasetKind {
@@ -762,12 +769,12 @@ impl DatasetKind {
         }
     }
 
-    /// Returns the zone name, if this is dataset for a zone filesystem.
+    /// Returns the zone name, if this is a dataset for a zone filesystem.
     ///
     /// Otherwise, returns "None".
-    pub fn zone_name(&self) -> Option<String> {
+    pub fn zone_name(&self) -> Option<&str> {
         if let DatasetKind::Zone { name } = self {
-            Some(name.clone())
+            Some(name)
         } else {
             None
         }
@@ -812,16 +819,22 @@ impl FromStr for DatasetKind {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use DatasetKind::*;
         let kind = match s {
+            "cockroachdb" => Cockroach,
             "crucible" => Crucible,
-            "cockroachdb" | "cockroach_db" => Cockroach,
             "clickhouse" => Clickhouse,
             "clickhouse_keeper" => ClickhouseKeeper,
             "external_dns" => ExternalDns,
             "internal_dns" => InternalDns,
-            _ => {
-                return Err(DatasetKindParseError::UnknownDataset(
-                    s.to_string(),
-                ))
+            "zone" => ZoneRoot,
+            "debug" => Debug,
+            other => {
+                if let Some(name) = other.strip_prefix("zone/") {
+                    Zone { name: name.to_string() }
+                } else {
+                    return Err(DatasetKindParseError::UnknownDataset(
+                        s.to_string(),
+                    ));
+                }
             }
         };
         Ok(kind)
@@ -850,6 +863,7 @@ pub struct SledIdentifiers {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::api::internal::shared::AllowedSourceIps;
     use oxnet::{IpNet, Ipv4Net, Ipv6Net};
     use std::net::{Ipv4Addr, Ipv6Addr};
@@ -893,5 +907,49 @@ mod tests {
             AllowedSourceIps::Any,
             serde_json::from_str(r#"{"allow":"any"}"#).unwrap(),
         );
+    }
+
+    #[test]
+    fn test_dataset_kind_serialization() {
+        let kinds = [
+            DatasetKind::Crucible,
+            DatasetKind::Cockroach,
+            DatasetKind::Clickhouse,
+            DatasetKind::ClickhouseKeeper,
+            DatasetKind::ExternalDns,
+            DatasetKind::InternalDns,
+            DatasetKind::ZoneRoot,
+            DatasetKind::Zone { name: String::from("myzone") },
+            DatasetKind::Debug,
+        ];
+
+        assert_eq!(kinds.len(), DatasetKind::COUNT);
+
+        for kind in &kinds {
+            // To string, from string
+            let as_str = kind.to_string();
+            let from_str =
+                DatasetKind::from_str(&as_str).unwrap_or_else(|_| {
+                    panic!("Failed to convert {kind} to and from string")
+                });
+            assert_eq!(
+                *kind, from_str,
+                "{kind} failed to convert to/from a string"
+            );
+
+            // Serialize, deserialize
+            let ser = serde_json::to_string(&kind)
+                .unwrap_or_else(|_| panic!("Failed to serialize {kind}"));
+            let de: DatasetKind = serde_json::from_str(&ser)
+                .unwrap_or_else(|_| panic!("Failed to deserialize {kind}"));
+            assert_eq!(*kind, de, "{kind} failed serialization");
+
+            // Test that serialization is equivalent to stringifying.
+            assert_eq!(
+                format!("\"{as_str}\""),
+                ser,
+                "{kind} does not match stringification/serialization"
+            );
+        }
     }
 }
