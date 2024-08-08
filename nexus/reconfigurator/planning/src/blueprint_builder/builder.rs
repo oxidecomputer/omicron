@@ -969,9 +969,6 @@ impl<'a> BlueprintBuilder<'a> {
         let sled_zones = self.zones.change_sled_zones(sled_id);
 
         // Find the internal NTP zone and expunge it.
-        //
-        // TODO-cleanup Is there ever a case where we might want to do some kind
-        // of graceful shutdown of an internal NTP zone? Seems unlikely...
         let mut internal_ntp_zone_id_iter = sled_zones
             .iter_zones(BlueprintZoneFilter::ShouldBeRunning)
             .filter_map(|config| {

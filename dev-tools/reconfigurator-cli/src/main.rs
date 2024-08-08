@@ -783,13 +783,14 @@ fn cmd_blueprint_edit(
 
     let mut new_blueprint = builder.build();
 
-    // We want to preserve the CockroachDB cluster settings from the parent
-    // blueprint.
+    // Normally `builder.build()` would construct the cockroach fingerprint
+    // based on what we read from CRDB and put into the planning input, but
+    // since we don't have a CRDB we had to make something up for our planning
+    // input's CRDB fingerprint. In the absense of a better alternative, we'll
+    // just copy our parent's CRDB fingerprint and carry it forward.
     new_blueprint
         .cockroachdb_fingerprint
         .clone_from(&blueprint.cockroachdb_fingerprint);
-    new_blueprint.cockroachdb_setting_preserve_downgrade =
-        blueprint.cockroachdb_setting_preserve_downgrade;
 
     let rv = format!(
         "blueprint {} created from blueprint {}: {}",
