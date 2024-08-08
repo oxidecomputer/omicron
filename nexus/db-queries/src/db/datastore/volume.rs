@@ -1791,6 +1791,21 @@ pub struct VolumeReplacementParams {
     pub region_addr: SocketAddrV6,
 }
 
+// types for volume_replace_snapshot and replace_read_only_target_in_vcr
+// parameters
+
+#[derive(Debug, Clone, Copy)]
+pub struct VolumeWithTarget(Uuid);
+
+#[derive(Debug, Clone, Copy)]
+pub struct ExistingTarget(SocketAddrV6);
+
+#[derive(Debug, Clone, Copy)]
+pub struct ReplacementTarget(SocketAddrV6);
+
+#[derive(Debug, Clone, Copy)]
+pub struct VolumeToDelete(Uuid);
+
 impl DataStore {
     /// Replace a read-write region in a Volume with a new region.
     pub async fn volume_replace_region(
@@ -2091,10 +2106,10 @@ impl DataStore {
     /// `existing` and `replacement` parameters.
     pub async fn volume_replace_snapshot(
         &self,
-        volume_id: Uuid,
-        existing: SocketAddrV6,
-        replacement: SocketAddrV6,
-        volume_to_delete_id: Uuid,
+        volume_id: VolumeWithTarget,
+        existing: ExistingTarget,
+        replacement: ReplacementTarget,
+        volume_to_delete_id: VolumeToDelete,
     ) -> Result<(), Error> {
         #[derive(Debug, thiserror::Error)]
         enum VolumeReplaceSnapshotError {
@@ -2128,7 +2143,7 @@ impl DataStore {
                     // Grab the old volume first
                     let maybe_old_volume = {
                         volume_dsl::volume
-                            .filter(volume_dsl::id.eq(volume_id))
+                            .filter(volume_dsl::id.eq(volume_id.0))
                             .select(Volume::as_select())
                             .first_async::<Volume>(&conn)
                             .await
@@ -2166,7 +2181,7 @@ impl DataStore {
                         };
 
                     // Does it look like this replacement already happened?
-                    let old_target_in_vcr = match read_only_target_in_vcr(&old_vcr, &existing) {
+                    let old_target_in_vcr = match read_only_target_in_vcr(&old_vcr, &existing.0) {
                         Ok(v) => v,
                         Err(e) => {
                             return Err(err.bail(
@@ -2175,7 +2190,7 @@ impl DataStore {
                         },
                     };
 
-                    let new_target_in_vcr = match read_only_target_in_vcr(&old_vcr, &replacement) {
+                    let new_target_in_vcr = match read_only_target_in_vcr(&old_vcr, &replacement.0) {
                         Ok(v) => v,
                         Err(e) => {
                             return Err(err.bail(
@@ -2229,7 +2244,7 @@ impl DataStore {
 
                     // Update the existing volume's data
                     diesel::update(volume_dsl::volume)
-                        .filter(volume_dsl::id.eq(volume_id))
+                        .filter(volume_dsl::id.eq(volume_id.0))
                         .set(volume_dsl::data.eq(new_volume_data))
                         .execute_async(&conn)
                         .await
@@ -2248,7 +2263,7 @@ impl DataStore {
                     // values here don't matter, just that it gets fed into the
                     // volume_delete machinery later.
                     let vcr = VolumeConstructionRequest::Volume {
-                        id: volume_to_delete_id,
+                        id: volume_to_delete_id.0,
                         block_size: 512,
                         sub_volumes: vec![
                             VolumeConstructionRequest::Region {
@@ -2257,9 +2272,9 @@ impl DataStore {
                                 extent_count: 1,
                                 gen: 1,
                                 opts: sled_agent_client::types::CrucibleOpts {
-                                    id: volume_to_delete_id,
+                                    id: volume_to_delete_id.0,
                                     target: vec![
-                                        existing.to_string(),
+                                        existing.0.to_string(),
                                     ],
                                     lossy: false,
                                     flush_timeout: None,
@@ -2283,7 +2298,7 @@ impl DataStore {
                     // Update the volume to delete data
                     let num_updated =
                         diesel::update(volume_dsl::volume)
-                            .filter(volume_dsl::id.eq(volume_to_delete_id))
+                            .filter(volume_dsl::id.eq(volume_to_delete_id.0))
                             .filter(volume_dsl::time_deleted.is_null())
                             .set(volume_dsl::data.eq(volume_data))
                             .execute_async(&conn)
@@ -2493,8 +2508,8 @@ fn replace_region_in_vcr(
 /// Note that the generation number _is not_ bumped in this step.
 fn replace_read_only_target_in_vcr(
     vcr: &VolumeConstructionRequest,
-    old_target: SocketAddrV6,
-    new_target: SocketAddrV6,
+    old_target: ExistingTarget,
+    new_target: ReplacementTarget,
 ) -> anyhow::Result<(VolumeConstructionRequest, usize)> {
     struct Work<'a> {
         vcr_part: &'a mut VolumeConstructionRequest,
@@ -2545,8 +2560,8 @@ fn replace_read_only_target_in_vcr(
 
                 for target in &mut opts.target {
                     let parsed_target: SocketAddrV6 = target.parse()?;
-                    if parsed_target == old_target && opts.read_only {
-                        *target = new_target.to_string();
+                    if parsed_target == old_target.0 && opts.read_only {
+                        *target = new_target.0.to_string();
                         replacements += 1;
                     }
                 }
@@ -2559,7 +2574,7 @@ fn replace_read_only_target_in_vcr(
     }
 
     if replacements == 0 {
-        bail!("target {old_target} not found!");
+        bail!("target {old_target:?} not found!");
     }
 
     Ok((new_vcr, replacements))
@@ -3061,10 +3076,12 @@ mod tests {
 
         db_datastore
             .volume_replace_snapshot(
-                volume_id,
-                "[fd00:1122:3344:104::1]:400".parse().unwrap(),
-                "[fd55:1122:3344:101::1]:111".parse().unwrap(),
-                volume_to_delete_id,
+                VolumeWithTarget(volume_id),
+                ExistingTarget("[fd00:1122:3344:104::1]:400".parse().unwrap()),
+                ReplacementTarget(
+                    "[fd55:1122:3344:101::1]:111".parse().unwrap(),
+                ),
+                VolumeToDelete(volume_to_delete_id),
             )
             .await
             .unwrap();
@@ -3175,10 +3192,12 @@ mod tests {
 
         db_datastore
             .volume_replace_snapshot(
-                volume_id,
-                "[fd55:1122:3344:101::1]:111".parse().unwrap(),
-                "[fd00:1122:3344:104::1]:400".parse().unwrap(),
-                volume_to_delete_id,
+                VolumeWithTarget(volume_id),
+                ExistingTarget("[fd55:1122:3344:101::1]:111".parse().unwrap()),
+                ReplacementTarget(
+                    "[fd00:1122:3344:104::1]:400".parse().unwrap(),
+                ),
+                VolumeToDelete(volume_to_delete_id),
             )
             .await
             .unwrap();
@@ -3517,8 +3536,10 @@ mod tests {
             )),
         };
 
-        let old_target = "[fd00:1122:3344:105::1]:401".parse().unwrap();
-        let new_target = "[fd99:1122:3344:105::1]:12345".parse().unwrap();
+        let old_target =
+            ExistingTarget("[fd00:1122:3344:105::1]:401".parse().unwrap());
+        let new_target =
+            ReplacementTarget("[fd99:1122:3344:105::1]:12345".parse().unwrap());
 
         let (new_vcr, replacements) =
             replace_read_only_target_in_vcr(&vcr, old_target, new_target)
@@ -3541,7 +3562,7 @@ mod tests {
                             id: volume_id,
                             target: vec![
                                 String::from("[fd00:1122:3344:104::1]:400"),
-                                new_target.to_string(),
+                                new_target.0.to_string(),
                                 String::from("[fd00:1122:3344:106::1]:402"),
                             ],
                             lossy: false,
@@ -3640,8 +3661,10 @@ mod tests {
             )),
         };
 
-        let old_target = "[fd33:1122:3344:306::1]:2002".parse().unwrap();
-        let new_target = "[fd99:1122:3344:105::1]:12345".parse().unwrap();
+        let old_target =
+            ExistingTarget("[fd33:1122:3344:306::1]:2002".parse().unwrap());
+        let new_target =
+            ReplacementTarget("[fd99:1122:3344:105::1]:12345".parse().unwrap());
 
         let (new_vcr, replacements) =
             replace_read_only_target_in_vcr(&vcr, old_target, new_target)
@@ -3693,7 +3716,7 @@ mod tests {
                                     String::from(
                                         "[fd33:1122:3344:305::1]:2001"
                                     ),
-                                    new_target.to_string(),
+                                    new_target.0.to_string(),
                                 ],
                                 lossy: false,
                                 flush_timeout: None,
@@ -3794,8 +3817,10 @@ mod tests {
             read_only_parent: Some(Box::new(rop)),
         };
 
-        let old_target = "[fd33:1122:3344:304::1]:2000".parse().unwrap();
-        let new_target = "[fd99:1122:3344:105::1]:12345".parse().unwrap();
+        let old_target =
+            ExistingTarget("[fd33:1122:3344:304::1]:2000".parse().unwrap());
+        let new_target =
+            ReplacementTarget("[fd99:1122:3344:105::1]:12345".parse().unwrap());
 
         let (new_vcr, replacements) =
             replace_read_only_target_in_vcr(&vcr, old_target, new_target)
@@ -3811,7 +3836,7 @@ mod tests {
             opts: CrucibleOpts {
                 id: volume_id,
                 target: vec![
-                    new_target.to_string(),
+                    new_target.0.to_string(),
                     String::from("[fd33:1122:3344:305::1]:2001"),
                     String::from("[fd33:1122:3344:306::1]:2002"),
                 ],
