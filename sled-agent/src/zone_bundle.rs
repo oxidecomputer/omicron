@@ -2423,8 +2423,7 @@ mod illumos_tests {
         // If this needs to change, go modify the "add_vdevs" call in
         // "setup_storage".
         assert!(
-            TEST_QUOTA
-                < StorageManagerTestHarness::DEFAULT_VDEV_SIZE,
+            TEST_QUOTA < StorageManagerTestHarness::DEFAULT_VDEV_SIZE,
             "Quota larger than underlying device (quota: {}, device size: {})",
             TEST_QUOTA,
             StorageManagerTestHarness::DEFAULT_VDEV_SIZE,
