@@ -110,7 +110,8 @@
 //! - Only the `instance_start` saga can set the instance's *active* Propolis
 //!   ID, and it can only do this if there is currently no active Propolis.
 //! - Only the `instance_migrate` saga can set the instance's *target* Propolis
-//!   ID and migration ID, and it can only do that if these fields are unset.
+//!   ID and migration ID, and it can only do that if these fields are unset, or
+//!   were left behind by a failed `instance_migrate` saga unwinding.
 //! - Only the `instance_update` saga can unset a migration ID and target
 //!   Propolis ID, which it will do when handling an update from sled-agent that
 //!   indicates that a migration has succeeded or failed.
@@ -175,6 +176,45 @@
 //! saga fail, it will release the inherited lock. And, if the unwinding update
 //! saga unwinds into the start saga, that's fine, because a double-unlock is
 //! prevented by the saga ID having changed in the "inherit lock" operation.
+//!
+//! ### Interaction With Other Sagas
+//!
+//! The instance-updater lock only provides mutual exclusion with regards to
+//! *other `instance-update` sagas*. It does *not* prevent modifications to the
+//! instance record by other sagas, such as `instance-start`,
+//! `instance-migrate`, and `instance-delete`. Instead, mutual exclusion between
+//! the `instance-update` saga and `instance-start` and `instance-delete` sagas
+//! is ensured by the actual state of the instance record, as discussed above:
+//! start and delete sagas can be started only when the instance has no active
+//! VMM, and the `instance-update` saga will only run when an instance *does*
+//! have an active VMM that has transitioned to a state where it must be
+//! unlinked from the instance. The update saga unlinks the VMM from the
+//! instance record as its last action, which allows the instance to be a valid
+//! target for a start or delete saga.
+//!
+//! On the other hand, an `instance-migrate` saga can, potentially, mutate the
+//! instance record while an update saga is running, if it attempts to start a
+//! migration while an update is still being processed. If the migrate saga
+//! starts during an update and completes before the update saga, the update
+//! saga writing back an updated instance state to the instance record could
+//! result in an [ABA problem]-like issue, where the changes made by the migrate
+//! saga are clobbered by the update saga. These issues are instead guarded
+//! against by the instance record's state generation number: the update saga
+//! determines the generation for the updated instance record by incrementing
+//! the generation number observed when the initial state for the update is
+//! read. The query that writes back the instance's runtime state fails if the
+//! generation number has changed since the state was read at the beginning of
+//! the saga, which causes the saga to unwind. An unwinding saga activates the
+//! `instance-updater` background task, which may in turn start a new saga if
+//! the instance's current state still requires an update.
+//!
+//! To avoid unnecessarily changing an instance's state generation and
+//! invalidating in-progress update sagas, unwinding `instance-start` and
+//! `instance-migrate` sagas don't remove the VMMs and migrations they create
+//! from the instance's `propolis_id`, `target_propolis_id`, and `migration_id`
+//! fields. Instead, they transition the `vmm` records to
+//! [`VmmState::SagaUnwound`], which is treated as equivalent to having no VMM
+//! in that position by other instances of those sagas.
 //!
 //! ### Avoiding Missed Updates, or, "The `InstanceRuntimeState` Will Always Get Through"
 //!
@@ -290,6 +330,7 @@
 //!
 //! [dist-locking]:
 //!     https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html
+//! [ABA problem]: https://en.wikipedia.org/wiki/ABA_problem
 //!
 //! [^1]: And, if a process *can* die, well...we can assume it *will*.
 //! [^2]: Barring human intervention.
@@ -739,6 +780,15 @@ declare_saga_actions! {
     // and re-fetch the VMM and migration states. If they have changed in a way
     // that requires an additional update saga, attempt to execute an additional
     // update saga immediately.
+    //
+    // Writing back the updated instance runtime state is conditional on both
+    // the instance updater lock *and* the instance record's state generation
+    // number. If the state generation has advanced since this update saga
+    // began, writing the new runtime state will fail, as the update was
+    // performed based on an initial state that is no longer current. In that
+    // case, this action will fail, causing the saga to unwind, release the
+    // updater lock, and activate the `instance-updater` background task to
+    // schedule  new update saga if one is still required.
     COMMIT_INSTANCE_UPDATES -> "commit_instance_updates" {
         + siu_commit_instance_updates
     }
