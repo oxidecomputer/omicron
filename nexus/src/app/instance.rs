@@ -18,7 +18,6 @@ use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
-use nexus_db_model::Instance as DbInstance;
 use nexus_db_model::InstanceState as DbInstanceState;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
@@ -727,8 +726,7 @@ impl super::Nexus {
             .instance_fetch_with_vmm(opctx, &authz_instance)
             .await?;
 
-        match instance_start_allowed(&self.log, state.instance(), state.vmm())?
-        {
+        match instance_start_allowed(&self.log, &state)? {
             InstanceStartDisposition::AlreadyStarted => Ok(state),
             InstanceStartDisposition::Start => {
                 let saga_params = sagas::instance_start::Params {
@@ -2170,9 +2168,10 @@ pub(crate) async fn notify_instance_updated(
 /// (and its current VMM's state, if it has one) in the database.
 fn instance_start_allowed(
     log: &slog::Logger,
-    instance: &DbInstance,
-    vmm: &Option<DbVmm>,
+    state: &InstanceAndActiveVmm,
 ) -> Result<InstanceStartDisposition, Error> {
+    let (instance, vmm) = (state.instance(), state.vmm());
+
     // If the instance has an active VMM, there's nothing to start, but this
     // disposition of this call (succeed for idempotency vs. fail with an
     // error describing the conflict) depends on the state that VMM is in.
@@ -2196,8 +2195,11 @@ fn instance_start_allowed(
             // SagaUnwound state, allow a new start saga to try to overwrite
             // it.
             DbVmmState::SagaUnwound => {
-                debug!(log, "instance's last VMM's start saga unwound";
-                           "instance_id" => %instance.id());
+                debug!(
+                    log,
+                    "instance's last VMM's start saga unwound, OK to start";
+                    "instance_id" => %instance.id()
+                );
 
                 Ok(InstanceStartDisposition::Start)
             }
@@ -2263,7 +2265,7 @@ mod tests {
     use super::*;
     use core::time::Duration;
     use futures::{SinkExt, StreamExt};
-    use nexus_db_model::VmmInitialState;
+    use nexus_db_model::{Instance as DbInstance, VmmInitialState};
     use omicron_common::api::external::{
         Hostname, IdentityMetadataCreateParams, InstanceCpuCount, Name,
     };
@@ -2411,7 +2413,8 @@ mod tests {
         let logctx = test_setup_log("test_instance_start_allowed_when_no_vmm");
         let (mut instance, _vmm) = make_instance_and_vmm();
         instance.runtime_state.nexus_state = DbInstanceState::NoVmm;
-        assert!(instance_start_allowed(&logctx.log, &instance, &None).is_ok());
+        let state = InstanceAndActiveVmm::from((instance, None));
+        assert!(instance_start_allowed(&logctx.log, &state).is_ok());
     }
 
     #[test]
@@ -2423,9 +2426,8 @@ mod tests {
         instance.runtime_state.nexus_state = DbInstanceState::Vmm;
         instance.runtime_state.propolis_id = Some(vmm.id);
         vmm.runtime.state = DbVmmState::SagaUnwound;
-        assert!(
-            instance_start_allowed(&logctx.log, &instance, &Some(vmm)).is_ok()
-        );
+        let state = InstanceAndActiveVmm::from((instance, Some(vmm)));
+        assert!(instance_start_allowed(&logctx.log, &state).is_ok());
     }
 
     #[test]
@@ -2434,23 +2436,33 @@ mod tests {
             test_setup_log("test_instance_start_forbidden_while_creating");
         let (mut instance, _vmm) = make_instance_and_vmm();
         instance.runtime_state.nexus_state = DbInstanceState::Creating;
-        assert!(instance_start_allowed(&logctx.log, &instance, &None).is_err());
+        let state = InstanceAndActiveVmm::from((instance, None));
+        assert!(instance_start_allowed(&logctx.log, &state).is_err());
     }
 
     #[test]
     fn test_instance_start_idempotent_if_active() {
         let logctx = test_setup_log("test_instance_start_idempotent_if_active");
-        let (mut instance, vmm) = make_instance_and_vmm();
+        let (mut instance, mut vmm) = make_instance_and_vmm();
         instance.runtime_state.nexus_state = DbInstanceState::Vmm;
         instance.runtime_state.propolis_id = Some(vmm.id);
-        let mut vmm = Some(vmm);
-        vmm.as_mut().unwrap().runtime.state = DbVmmState::Starting;
-        assert!(instance_start_allowed(&logctx.log, &instance, &vmm).is_ok());
-        vmm.as_mut().unwrap().runtime.state = DbVmmState::Running;
-        assert!(instance_start_allowed(&logctx.log, &instance, &vmm).is_ok());
-        vmm.as_mut().unwrap().runtime.state = DbVmmState::Rebooting;
-        assert!(instance_start_allowed(&logctx.log, &instance, &vmm).is_ok());
-        vmm.as_mut().unwrap().runtime.state = DbVmmState::Migrating;
-        assert!(instance_start_allowed(&logctx.log, &instance, &vmm).is_ok());
+        vmm.runtime.state = DbVmmState::Starting;
+        let state =
+            InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));
+        assert!(instance_start_allowed(&logctx.log, &state).is_ok());
+
+        vmm.runtime.state = DbVmmState::Running;
+        let state =
+            InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));
+        assert!(instance_start_allowed(&logctx.log, &state).is_ok());
+
+        vmm.runtime.state = DbVmmState::Rebooting;
+        let state =
+            InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));
+        assert!(instance_start_allowed(&logctx.log, &state).is_ok());
+
+        vmm.runtime.state = DbVmmState::Migrating;
+        let state = InstanceAndActiveVmm::from((instance, Some(vmm)));
+        assert!(instance_start_allowed(&logctx.log, &state).is_ok());
     }
 }
