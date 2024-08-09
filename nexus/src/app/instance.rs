@@ -2415,6 +2415,7 @@ mod tests {
         instance.runtime_state.nexus_state = DbInstanceState::NoVmm;
         let state = InstanceAndActiveVmm::from((instance, None));
         assert!(instance_start_allowed(&logctx.log, &state).is_ok());
+        logctx.cleanup_successful();
     }
 
     #[test]
@@ -2428,6 +2429,7 @@ mod tests {
         vmm.runtime.state = DbVmmState::SagaUnwound;
         let state = InstanceAndActiveVmm::from((instance, Some(vmm)));
         assert!(instance_start_allowed(&logctx.log, &state).is_ok());
+        logctx.cleanup_successful();
     }
 
     #[test]
@@ -2438,6 +2440,7 @@ mod tests {
         instance.runtime_state.nexus_state = DbInstanceState::Creating;
         let state = InstanceAndActiveVmm::from((instance, None));
         assert!(instance_start_allowed(&logctx.log, &state).is_err());
+        logctx.cleanup_successful();
     }
 
     #[test]
@@ -2464,5 +2467,6 @@ mod tests {
         vmm.runtime.state = DbVmmState::Migrating;
         let state = InstanceAndActiveVmm::from((instance, Some(vmm)));
         assert!(instance_start_allowed(&logctx.log, &state).is_ok());
+        logctx.cleanup_successful();
     }
 }
