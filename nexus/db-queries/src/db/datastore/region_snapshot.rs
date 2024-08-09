@@ -5,9 +5,11 @@
 //! [`DataStore`] methods on [`RegionSnapshot`]s.
 
 use super::DataStore;
+use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::RegionSnapshot;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
@@ -69,6 +71,40 @@ impl DataStore {
             .execute_async(&*self.pool_connection_unauthorized().await?)
             .await
             .map(|_rows_deleted| ())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Find region snapshots on expunged disks
+    pub async fn find_region_snapshots_on_expunged_physical_disks(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<Vec<RegionSnapshot>> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::physical_disk::dsl as physical_disk_dsl;
+        use db::schema::region_snapshot::dsl as region_snapshot_dsl;
+        use db::schema::zpool::dsl as zpool_dsl;
+
+        region_snapshot_dsl::region_snapshot
+            .filter(region_snapshot_dsl::dataset_id.eq_any(
+                dataset_dsl::dataset
+                    .filter(dataset_dsl::time_deleted.is_null())
+                    .filter(dataset_dsl::pool_id.eq_any(
+                        zpool_dsl::zpool
+                            .filter(zpool_dsl::time_deleted.is_null())
+                            .filter(zpool_dsl::physical_disk_id.eq_any(
+                                physical_disk_dsl::physical_disk
+                                    .filter(physical_disk_dsl::disk_policy.eq(PhysicalDiskPolicy::Expunged))
+                                    .select(physical_disk_dsl::id)
+                            ))
+                            .select(zpool_dsl::id)
+                    ))
+                    .select(dataset_dsl::id)
+            ))
+            .select(RegionSnapshot::as_select())
+            .load_async(&*conn)
+            .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

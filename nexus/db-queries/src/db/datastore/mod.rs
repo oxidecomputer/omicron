@@ -83,6 +83,7 @@ mod rack;
 mod region;
 mod region_replacement;
 mod region_snapshot;
+mod region_snapshot_replacement;
 mod role;
 mod saga;
 mod silo;

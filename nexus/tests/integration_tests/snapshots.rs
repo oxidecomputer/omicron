@@ -25,6 +25,7 @@ use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
+use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
@@ -1649,4 +1650,65 @@ async fn test_region_allocation_for_snapshot(
         datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
 
     assert_eq!(allocated_regions.len(), 2);
+}
+
+#[nexus_test]
+async fn test_snapshot_expunge(cptestctx: &ControlPlaneTestContext) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Create three 10 GiB zpools, each with one dataset.
+    let _disk_test = DiskTest::new(&cptestctx).await;
+
+    // Assert default is still 10 GiB
+    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+
+    // Create a disk, then a snapshot of that disk
+    let client = &cptestctx.external_client;
+    let _project_id = create_project_and_pool(client).await;
+
+    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+
+    let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
+
+    let snapshot: views::Snapshot = object_create(
+        client,
+        &snapshots_url,
+        &params::SnapshotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "snapshot".parse().unwrap(),
+                description: String::from("a snapshot"),
+            },
+            disk: disk.identity.name.into(),
+        },
+    )
+    .await;
+
+    // Expunge the sled
+    let int_client = &cptestctx.internal_client;
+    int_client
+        .make_request(
+            Method::POST,
+            "/sleds/expunge",
+            Some(params::SledSelector {
+                sled: SLED_AGENT_UUID.parse().unwrap(),
+            }),
+            StatusCode::OK,
+        )
+        .await
+        .unwrap();
+
+    // All three region snapshots should be returned
+    let expunged_region_snapshots = datastore
+        .find_region_snapshots_on_expunged_physical_disks(&opctx)
+        .await
+        .unwrap();
+
+    assert_eq!(expunged_region_snapshots.len(), 3);
+
+    for expunged_region_snapshot in expunged_region_snapshots {
+        assert_eq!(expunged_region_snapshot.snapshot_id, snapshot.identity.id);
+    }
 }

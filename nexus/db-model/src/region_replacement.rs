@@ -29,6 +29,7 @@ impl_enum_type!(
     Complete => b"complete"
 );
 
+// FromStr impl required for use with clap (aka omdb)
 impl std::str::FromStr for RegionReplacementState {
     type Err = String;
 

@@ -40,3 +40,22 @@ pub struct RegionSnapshot {
     #[serde(default)]
     pub deleting: bool,
 }
+
+impl RegionSnapshot {
+    pub fn new(
+        dataset_id: Uuid,
+        region_id: Uuid,
+        snapshot_id: Uuid,
+        snapshot_addr: String,
+    ) -> Self {
+        RegionSnapshot {
+            dataset_id,
+            region_id,
+            snapshot_id,
+            snapshot_addr,
+
+            volume_references: 0,
+            deleting: false,
+        }
+    }
+}
