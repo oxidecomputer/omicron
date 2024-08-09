@@ -578,49 +578,43 @@ impl super::Nexus {
             .db_datastore
             .instance_fetch_with_vmm(opctx, &authz_instance)
             .await?;
-        let (instance, vmm) = (state.instance(), state.vmm());
 
-        if let Some(vmm) = vmm {
-            match vmm.runtime.state {
-                DbVmmState::Starting
-                | DbVmmState::Running
-                | DbVmmState::Rebooting => {
-                    debug!(self.log, "asked to start an active instance";
-                           "instance_id" => %authz_instance.id());
+        match state.effective_state() {
+            s @ InstanceState::Starting
+            | s @ InstanceState::Running
+            | s @ InstanceState::Rebooting
+            | s @ InstanceState::Migrating => {
+                debug!(self.log, "asked to start an active instance";
+                       "instance_id" => %authz_instance.id(),
+                       "state" => ?s);
 
-                    return Ok(state);
-                }
-                // If there's a previous VMM left behind by an unwinding start
-                // saga, no big deal. We can still start the instance, and the
-                // start saga will remove the dead VMM, allowing it to be reaped.
-                DbVmmState::SagaUnwound => {}
-                DbVmmState::Stopped => {
-                    let propolis_id = instance
-                        .runtime()
-                        .propolis_id
-                        .expect("needed a VMM ID to fetch a VMM record");
-                    error!(self.log,
-                           "instance is stopped but still has an active VMM";
-                           "instance_id" => %authz_instance.id(),
-                           "propolis_id" => %propolis_id);
-
-                    return Err(Error::internal_error(
-                        "instance is stopped but still has an active VMM",
-                    ));
-                }
-                _ => {
-                    return Err(Error::conflict(&format!(
-                        "instance is in state {} but must be {} to be started",
-                        vmm.runtime.state,
-                        InstanceState::Stopped
-                    )));
-                }
+                return Ok(state);
             }
-        }
+            InstanceState::Stopping => {
+                let (propolis_id, propolis_state) = match state.vmm() {
+                    Some(vmm) => (Some(vmm.id), Some(vmm.runtime.state)),
+                    None => (None, None),
+                };
+                debug!(self.log, "instance's VMM is still in the process of stopping";
+                       "instance_id" => %authz_instance.id(),
+                       "propolis_id" => ?propolis_id,
+                       "propolis_state" => ?propolis_state);
+                return Err(Error::conflict(
+                    "instance must finish stopping before it can be started",
+                ));
+            }
+            InstanceState::Stopped => {}
+            s => {
+                return Err(Error::conflict(&format!(
+                    "instance is in state {s} but it must be {} to be started",
+                    InstanceState::Stopped
+                )))
+            }
+        };
 
         let saga_params = sagas::instance_start::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            db_instance: instance.clone(),
+            db_instance: state.instance.clone(),
         };
 
         self.sagas
