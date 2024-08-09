@@ -1065,7 +1065,7 @@ pub mod test {
         app::sagas::instance_create::SagaInstanceCreate,
         app::sagas::test_helpers, external_api::params,
     };
-    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
+    use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
     };
@@ -1201,39 +1201,6 @@ pub mod test {
             .is_none()
     }
 
-    async fn no_sled_resource_instance_records_exist(
-        datastore: &DataStore,
-    ) -> bool {
-        use nexus_db_queries::db::model::SledResource;
-        use nexus_db_queries::db::schema::sled_resource::dsl;
-
-        let conn = datastore.pool_connection_for_tests().await.unwrap();
-
-        datastore
-            .transaction_retry_wrapper(
-                "no_sled_resource_instance_records_exist",
-            )
-            .transaction(&conn, |conn| async move {
-                conn.batch_execute_async(
-                    nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
-                )
-                .await
-                .unwrap();
-
-                Ok(dsl::sled_resource
-                    .filter(dsl::kind.eq(
-                        nexus_db_queries::db::model::SledResourceKind::Instance,
-                    ))
-                    .select(SledResource::as_select())
-                    .get_results_async::<SledResource>(&conn)
-                    .await
-                    .unwrap()
-                    .is_empty())
-            })
-            .await
-            .unwrap()
-    }
-
     async fn disk_is_detached(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::Disk;
         use nexus_db_queries::db::schema::disk::dsl;
@@ -1267,7 +1234,10 @@ pub mod test {
         assert!(no_instance_records_exist(datastore).await);
         assert!(no_network_interface_records_exist(datastore).await);
         assert!(no_external_ip_records_exist(datastore).await);
-        assert!(no_sled_resource_instance_records_exist(datastore).await);
+        assert!(
+            test_helpers::no_sled_resource_instance_records_exist(cptestctx)
+                .await
+        );
         assert!(
             test_helpers::no_virtual_provisioning_resource_records_exist(
                 cptestctx

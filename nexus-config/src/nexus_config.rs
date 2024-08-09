@@ -379,6 +379,8 @@ pub struct BackgroundTaskConfig {
     pub region_replacement_driver: RegionReplacementDriverConfig,
     /// configuration for instance watcher task
     pub instance_watcher: InstanceWatcherConfig,
+    /// configuration for instance updater task
+    pub instance_updater: InstanceUpdaterConfig,
     /// configuration for service VPC firewall propagation task
     pub service_firewall_propagation: ServiceFirewallPropagationConfig,
     /// configuration for v2p mapping propagation task
@@ -558,6 +560,23 @@ pub struct InstanceWatcherConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct InstanceUpdaterConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// disable background checks for instances in need of updates.
+    ///
+    /// This config is intended for use in testing, and should generally not be
+    /// enabled in real life.
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub disable: bool,
 }
 
 #[serde_as]
@@ -848,6 +867,8 @@ mod test {
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
             instance_watcher.period_secs = 30
+            instance_updater.period_secs = 30
+            instance_updater.disable = false
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60
@@ -995,6 +1016,10 @@ mod test {
                         instance_watcher: InstanceWatcherConfig {
                             period_secs: Duration::from_secs(30),
                         },
+                        instance_updater: InstanceUpdaterConfig {
+                            period_secs: Duration::from_secs(30),
+                            disable: false,
+                        },
                         service_firewall_propagation:
                             ServiceFirewallPropagationConfig {
                                 period_secs: Duration::from_secs(300),
@@ -1081,6 +1106,7 @@ mod test {
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
             instance_watcher.period_secs = 30
+            instance_updater.period_secs = 30
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60
