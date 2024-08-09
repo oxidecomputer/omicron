@@ -7370,7 +7370,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/LinkConfigCreate"
+                "$ref": "#/components/schemas/NamedLinkConfigCreate"
               }
             }
           },
@@ -17583,6 +17583,62 @@
               }
             ]
           }
+        ]
+      },
+      "NamedLinkConfigCreate": {
+        "description": "Named switch link configuration.",
+        "type": "object",
+        "properties": {
+          "autoneg": {
+            "description": "Whether or not to set autonegotiation",
+            "type": "boolean"
+          },
+          "fec": {
+            "description": "The forward error correction mode of the link.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkFec"
+              }
+            ]
+          },
+          "lldp_config": {
+            "nullable": true,
+            "description": "The optional link-layer discovery protocol (LLDP) configuration for the link.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
+          "mtu": {
+            "description": "Maximum transmission unit for the link.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "name": {
+            "description": "Name of link",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "speed": {
+            "description": "The speed of the link.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkSpeed"
+              }
+            ]
+          }
+        },
+        "required": [
+          "autoneg",
+          "fec",
+          "mtu",
+          "name",
+          "speed"
         ]
       },
       "NetworkInterface": {

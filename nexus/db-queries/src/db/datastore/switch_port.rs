@@ -751,45 +751,29 @@ impl DataStore {
         use db::schema::lldp_service_config::dsl as lldp_service_dsl;
         use db::schema::switch_port_settings_link_config::dsl as link_dsl;
 
-        #[derive(Clone, Debug)]
-        enum Lldp {
-            Enabled { lldp_config: NameOrId },
-            Disabled,
-        }
-
         let conn = self.pool_connection_authorized(opctx).await?;
-        let lldp =
-            match (new_settings.lldp.enabled, new_settings.lldp.lldp_config) {
-                (true, Some(name_or_id)) => {
-                    Ok(Lldp::Enabled { lldp_config: name_or_id })
-                }
-                (true, None) => Err(Error::conflict(
-                    "cannot enable lldp without providing configuration id",
-                )),
-                (false, _) => Ok(Lldp::Disabled),
-            }?;
 
         let config = self
             .transaction_retry_wrapper("switch_port_configuration_link_create")
             .transaction(&conn, |conn| {
                 let identity = name_or_id.clone();
-                let lldp = lldp.clone();
+                let new_settings = new_settings.clone();
 
                 async move {
                     // fetch id of parent record
                     let parent_id =
                         switch_port_configuration_id(&conn, identity).await?;
 
-                    let lldp_service_config = match lldp {
-                        Lldp::Enabled { lldp_config } => {
+                    let lldp_service_config = match new_settings.lldp_config {
+                        Some(name_or_id) => {
                             let config_id =
                                 lldp_configuration_id(&conn, name_or_id)
                                     .await?;
-                            Ok(LldpServiceConfig::new(true, Some(config_id)))
+                            Ok::<LldpServiceConfig, diesel::result::Error>(
+                                LldpServiceConfig::new(true, Some(config_id)),
+                            )
                         }
-                        Lldp::Disabled => {
-                            Ok(LldpServiceConfig::new(false, None))
-                        }
+                        None => Ok(LldpServiceConfig::new(false, None)),
                     }?;
 
                     diesel::insert_into(lldp_service_dsl::lldp_service_config)
@@ -868,6 +852,7 @@ impl DataStore {
         name_or_id: NameOrId,
         link: Name,
     ) -> DeleteResult {
+        use db::schema::lldp_service_config::dsl as lldp_service_dsl;
         use db::schema::switch_port_settings_link_config::dsl as link_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -882,13 +867,22 @@ impl DataStore {
                     let parent_id =
                         switch_port_configuration_id(&conn, identity).await?;
 
-                    // delete lldp service config
-                    todo!("delete lldp service config");
-
                     // delete child record
-                    diesel::delete(link_dsl::switch_port_settings_link_config)
-                        .filter(link_dsl::port_settings_id.eq(parent_id))
-                        .filter(link_dsl::link_name.eq(link_name.to_string()))
+                    let config = diesel::delete(
+                        link_dsl::switch_port_settings_link_config,
+                    )
+                    .filter(link_dsl::port_settings_id.eq(parent_id))
+                    .filter(link_dsl::link_name.eq(link_name.to_string()))
+                    .returning(SwitchPortLinkConfig::as_returning())
+                    .get_result_async(&conn)
+                    .await?;
+
+                    // delete lldp service configuration
+                    diesel::delete(lldp_service_dsl::lldp_service_config)
+                        .filter(
+                            lldp_service_dsl::id
+                                .eq(config.lldp_service_config_id),
+                        )
                         .execute_async(&conn)
                         .await?;
 

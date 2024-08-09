@@ -1567,8 +1567,8 @@ pub struct NamedLinkConfigCreate {
     /// Maximum transmission unit for the link.
     pub mtu: u16,
 
-    /// The link-layer discovery protocol (LLDP) configuration for the link.
-    pub lldp: LldpServiceConfigCreate,
+    /// The optional link-layer discovery protocol (LLDP) configuration for the link.
+    pub lldp_config: Option<NameOrId>,
 
     /// The forward error correction mode of the link.
     pub fec: LinkFec,
