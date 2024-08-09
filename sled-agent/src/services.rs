@@ -1497,6 +1497,13 @@ impl ServiceManager {
             ZoneArgs::Switch(_) => "switch",
         };
 
+        let log = match &request {
+            ZoneArgs::Omicron(_) => self.inner.log.clone(),
+            ZoneArgs::Switch(_) => {
+                self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE))
+            }
+        };
+
         // We use the fake initialiser for testing
         let mut zone_builder = match fake_install_dir {
             None => ZoneBuilderFactory::default().builder(),
@@ -1509,7 +1516,7 @@ impl ServiceManager {
             zone_builder = zone_builder.with_bootstrap_vnic(vnic);
         }
         let installed_zone = zone_builder
-            .with_log(self.inner.log.clone())
+            .with_log(log.clone())
             .with_underlay_vnic_allocator(&self.inner.underlay_vnic_allocator)
             .with_zone_root_path(request.root())
             .with_zone_image_paths(zone_image_paths.as_slice())
@@ -1581,7 +1588,7 @@ impl ServiceManager {
                     .add_service(dns_service)
                     .add_service(enabled_dns_client_service);
                 profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .add_to_zone(&log, &installed_zone)
                     .await
                     .map_err(|err| {
                         Error::io("Failed to setup clickhouse profile", err)
@@ -1634,7 +1641,7 @@ impl ServiceManager {
                     .add_service(dns_service)
                     .add_service(enabled_dns_client_service);
                 profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .add_to_zone(&log, &installed_zone)
                     .await
                     .map_err(|err| {
                         Error::io(
@@ -1711,7 +1718,7 @@ impl ServiceManager {
                     .add_service(dns_service)
                     .add_service(enabled_dns_client_service);
                 profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .add_to_zone(&log, &installed_zone)
                     .await
                     .map_err(|err| {
                         Error::io("Failed to setup CRDB profile", err)
@@ -1769,7 +1776,7 @@ impl ServiceManager {
                             ),
                     );
                 profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .add_to_zone(&log, &installed_zone)
                     .await
                     .map_err(|err| {
                         Error::io("Failed to setup crucible profile", err)
@@ -1819,7 +1826,7 @@ impl ServiceManager {
                             ),
                     );
                 profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .add_to_zone(&log, &installed_zone)
                     .await
                     .map_err(|err| Error::io("crucible pantry profile", err))?;
                 RunningZone::boot(installed_zone).await?
@@ -1865,7 +1872,7 @@ impl ServiceManager {
                     .add_service(oximeter_service)
                     .add_service(disabled_dns_client_service);
                 profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .add_to_zone(&log, &installed_zone)
                     .await
                     .map_err(|err| {
                         Error::io("Failed to setup Oximeter profile", err)
@@ -1931,7 +1938,7 @@ impl ServiceManager {
                     .add_service(external_dns_service)
                     .add_service(disabled_dns_client_service);
                 profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .add_to_zone(&log, &installed_zone)
                     .await
                     .map_err(|err| {
                         Error::io("Failed to setup External DNS profile", err)
@@ -2041,7 +2048,7 @@ impl ServiceManager {
                 }
 
                 profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .add_to_zone(&log, &installed_zone)
                     .await
                     .map_err(|err| {
                         Error::io("Failed to set up NTP profile", err)
@@ -2122,7 +2129,7 @@ impl ServiceManager {
                     .add_service(internal_dns_service)
                     .add_service(disabled_dns_client_service);
                 profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .add_to_zone(&log, &installed_zone)
                     .await
                     .map_err(|err| {
                         Error::io("Failed to setup Internal DNS profile", err)
@@ -2270,7 +2277,7 @@ impl ServiceManager {
                     .add_service(nexus_service)
                     .add_service(disabled_dns_client_service);
                 profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .add_to_zone(&log, &installed_zone)
                     .await
                     .map_err(|err| {
                         Error::io("Failed to setup Nexus profile", err)
