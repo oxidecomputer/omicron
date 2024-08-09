@@ -11,6 +11,7 @@
 //! support for that.
 
 mod command;
+mod inventory;
 mod preflight;
 mod rack_setup;
 mod rack_update;
