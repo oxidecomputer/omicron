@@ -452,7 +452,7 @@ oximeter-macro-impl = { path = "oximeter/oximeter-macro-impl" }
 oximeter-producer = { path = "oximeter/producer" }
 oximeter-timeseries-macro = { path = "oximeter/timeseries-macro" }
 p256 = "0.13"
-parse-display = "0.9.1"
+parse-display = "0.10.0"
 partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }
 parse-size = "1.0.0"
 paste = "1.0.15"
