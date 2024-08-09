@@ -135,77 +135,46 @@ pub(super) static ACTION_GENERATE_ID: Lazy<NexusAction> = Lazy::new(|| {
 pub(crate) static ACTION_REGISTRY: Lazy<Arc<ActionRegistry>> =
     Lazy::new(|| Arc::new(make_action_registry()));
 
+macro_rules! register_actions {
+    ( $registry:ident, $( $saga: ty ),* ) => {
+        $(
+            <$saga as NexusSaga>::register_actions(&mut $registry);
+        )*
+    };
+}
+
 fn make_action_registry() -> ActionRegistry {
     let mut registry = steno::ActionRegistry::new();
     registry.register(Arc::clone(&*ACTION_GENERATE_ID));
 
-    <demo::SagaDemo as NexusSaga>::register_actions(&mut registry);
-    <disk_create::SagaDiskCreate as NexusSaga>::register_actions(&mut registry);
-    <disk_delete::SagaDiskDelete as NexusSaga>::register_actions(&mut registry);
-    <finalize_disk::SagaFinalizeDisk as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <instance_create::SagaInstanceCreate as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <instance_delete::SagaInstanceDelete as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <instance_ip_attach::SagaInstanceIpAttach as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <instance_ip_detach::SagaInstanceIpDetach as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <instance_migrate::SagaInstanceMigrate as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <instance_start::SagaInstanceStart as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <instance_update::SagaInstanceUpdate as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <project_create::SagaProjectCreate as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <snapshot_create::SagaSnapshotCreate as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <snapshot_delete::SagaSnapshotDelete as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <volume_delete::SagaVolumeDelete as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <volume_remove_rop::SagaVolumeRemoveROP as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <vpc_create::SagaVpcCreate as NexusSaga>::register_actions(&mut registry);
-    <image_delete::SagaImageDelete as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <region_replacement_start::SagaRegionReplacementStart as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <region_replacement_drive::SagaRegionReplacementDrive as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <region_replacement_finish::SagaRegionReplacementFinish as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <region_snapshot_replacement_start::SagaRegionSnapshotReplacementStart as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <region_snapshot_replacement_garbage_collect::SagaRegionSnapshotReplacementGarbageCollect as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <region_snapshot_replacement_step::SagaRegionSnapshotReplacementStep as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <region_snapshot_replacement_step_garbage_collect::SagaRegionSnapshotReplacementStepGarbageCollect as NexusSaga>::register_actions(
-        &mut registry,
-    );
+    register_actions! [
+        registry,
+        demo::SagaDemo,
+        disk_create::SagaDiskCreate,
+        disk_delete::SagaDiskDelete,
+        finalize_disk::SagaFinalizeDisk,
+        instance_create::SagaInstanceCreate,
+        instance_delete::SagaInstanceDelete,
+        instance_ip_attach::SagaInstanceIpAttach,
+        instance_ip_detach::SagaInstanceIpDetach,
+        instance_migrate::SagaInstanceMigrate,
+        instance_start::SagaInstanceStart,
+        instance_update::SagaInstanceUpdate,
+        project_create::SagaProjectCreate,
+        snapshot_create::SagaSnapshotCreate,
+        snapshot_delete::SagaSnapshotDelete,
+        volume_delete::SagaVolumeDelete,
+        volume_remove_rop::SagaVolumeRemoveROP,
+        vpc_create::SagaVpcCreate,
+        image_delete::SagaImageDelete,
+        region_replacement_start::SagaRegionReplacementStart,
+        region_replacement_drive::SagaRegionReplacementDrive,
+        region_replacement_finish::SagaRegionReplacementFinish,
+        region_snapshot_replacement_start::SagaRegionSnapshotReplacementStart,
+        region_snapshot_replacement_garbage_collect::SagaRegionSnapshotReplacementGarbageCollect,
+        region_snapshot_replacement_step::SagaRegionSnapshotReplacementStep,
+        region_snapshot_replacement_step_garbage_collect::SagaRegionSnapshotReplacementStepGarbageCollect
+    ];
 
     #[cfg(test)]
     <test_saga::SagaTest as NexusSaga>::register_actions(&mut registry);
