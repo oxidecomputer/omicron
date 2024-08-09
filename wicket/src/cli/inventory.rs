@@ -12,6 +12,7 @@ use clap::{Subcommand, ValueEnum};
 use owo_colors::OwoColorize;
 use sled_hardware_types::Baseboard;
 use slog::Logger;
+use std::fmt;
 use std::net::SocketAddrV6;
 use std::time::Duration;
 use wicket_common::rack_setup::BootstrapSledDescription;
@@ -23,19 +24,27 @@ pub(crate) enum InventoryArgs {
     /// List state of all bootstrap sleds, as configured with rack-setup
     ConfiguredBootstrapSleds {
         /// Select output format
-        #[clap(long)]
+        #[clap(long, default_value_t = OutputFormat::Table)]
         format: OutputFormat,
     },
 }
 
-#[derive(Debug, ValueEnum, Default, Clone)]
+#[derive(Debug, ValueEnum, Clone)]
 pub enum OutputFormat {
     /// Print output as operator-readable table
-    #[default]
     Table,
 
     /// Print output as json
     Json,
+}
+
+impl fmt::Display for OutputFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            OutputFormat::Table => write!(f, "table"),
+            OutputFormat::Json => write!(f, "json"),
+        }
+    }
 }
 
 impl InventoryArgs {
