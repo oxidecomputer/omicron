@@ -676,6 +676,7 @@ dependencies = [
  "derive_more",
  "hex",
  "hkdf",
+ "illumos-utils",
  "omicron-common",
  "omicron-rpaths",
  "omicron-test-utils",

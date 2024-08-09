@@ -53,7 +53,7 @@ use illumos_utils::opte::{
 };
 use illumos_utils::running_zone::{
     EnsureAddressError, InstalledZone, RunCommandError, RunningZone,
-    ZoneBuilderFactory,
+    ZoneBuilderFactory, SWITCH_ZONE_INIT_STAGE,
 };
 use illumos_utils::smf_helper::SmfHelper;
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
@@ -642,6 +642,10 @@ struct OmicronZone {
 impl OmicronZone {
     fn name(&self) -> &str {
         self.runtime.name()
+    }
+
+    fn zone_type(&self) -> &str {
+        self.config.zone.zone_type.kind().zone_prefix()
     }
 }
 
@@ -1495,6 +1499,13 @@ impl ServiceManager {
             ZoneArgs::Switch(_) => "switch",
         };
 
+        let log = match &request {
+            ZoneArgs::Omicron(_) => self.inner.log.clone(),
+            ZoneArgs::Switch(_) => {
+                self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE))
+            }
+        };
+
         // We use the fake initialiser for testing
         let mut zone_builder = match fake_install_dir {
             None => ZoneBuilderFactory::default().builder(),
@@ -1507,7 +1518,7 @@ impl ServiceManager {
             zone_builder = zone_builder.with_bootstrap_vnic(vnic);
         }
         let installed_zone = zone_builder
-            .with_log(self.inner.log.clone())
+            .with_log(log.clone())
             .with_underlay_vnic_allocator(&self.inner.underlay_vnic_allocator)
             .with_zone_root_path(request.root())
             .with_zone_image_paths(zone_image_paths.as_slice())
@@ -1578,12 +1589,9 @@ impl ServiceManager {
                     .add_service(clickhouse_service)
                     .add_service(dns_service)
                     .add_service(enabled_dns_client_service);
-                profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
-                    .await
-                    .map_err(|err| {
-                        Error::io("Failed to setup clickhouse profile", err)
-                    })?;
+                profile.add_to_zone(&log, &installed_zone).await.map_err(
+                    |err| Error::io("Failed to setup clickhouse profile", err),
+                )?;
                 RunningZone::boot(installed_zone).await?
             }
 
@@ -1631,15 +1639,14 @@ impl ServiceManager {
                     .add_service(clickhouse_keeper_service)
                     .add_service(dns_service)
                     .add_service(enabled_dns_client_service);
-                profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
-                    .await
-                    .map_err(|err| {
+                profile.add_to_zone(&log, &installed_zone).await.map_err(
+                    |err| {
                         Error::io(
                             "Failed to setup clickhouse keeper profile",
                             err,
                         )
-                    })?;
+                    },
+                )?;
                 RunningZone::boot(installed_zone).await?
             }
 
@@ -1708,12 +1715,9 @@ impl ServiceManager {
                     .add_service(cockroach_admin_service)
                     .add_service(dns_service)
                     .add_service(enabled_dns_client_service);
-                profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
-                    .await
-                    .map_err(|err| {
-                        Error::io("Failed to setup CRDB profile", err)
-                    })?;
+                profile.add_to_zone(&log, &installed_zone).await.map_err(
+                    |err| Error::io("Failed to setup CRDB profile", err),
+                )?;
                 RunningZone::boot(installed_zone).await?
             }
 
@@ -1766,12 +1770,9 @@ impl ServiceManager {
                                     .add_property_group(config),
                             ),
                     );
-                profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
-                    .await
-                    .map_err(|err| {
-                        Error::io("Failed to setup crucible profile", err)
-                    })?;
+                profile.add_to_zone(&log, &installed_zone).await.map_err(
+                    |err| Error::io("Failed to setup crucible profile", err),
+                )?;
                 RunningZone::boot(installed_zone).await?
             }
 
@@ -1817,7 +1818,7 @@ impl ServiceManager {
                             ),
                     );
                 profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .add_to_zone(&log, &installed_zone)
                     .await
                     .map_err(|err| Error::io("crucible pantry profile", err))?;
                 RunningZone::boot(installed_zone).await?
@@ -1862,12 +1863,9 @@ impl ServiceManager {
                     .add_service(disabled_ssh_service)
                     .add_service(oximeter_service)
                     .add_service(disabled_dns_client_service);
-                profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
-                    .await
-                    .map_err(|err| {
-                        Error::io("Failed to setup Oximeter profile", err)
-                    })?;
+                profile.add_to_zone(&log, &installed_zone).await.map_err(
+                    |err| Error::io("Failed to setup Oximeter profile", err),
+                )?;
                 RunningZone::boot(installed_zone).await?
             }
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
@@ -1928,12 +1926,11 @@ impl ServiceManager {
                     .add_service(disabled_ssh_service)
                     .add_service(external_dns_service)
                     .add_service(disabled_dns_client_service);
-                profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
-                    .await
-                    .map_err(|err| {
+                profile.add_to_zone(&log, &installed_zone).await.map_err(
+                    |err| {
                         Error::io("Failed to setup External DNS profile", err)
-                    })?;
+                    },
+                )?;
                 RunningZone::boot(installed_zone).await?
             }
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
@@ -2040,12 +2037,9 @@ impl ServiceManager {
                     profile = profile.add_service(opte_interface_setup)
                 }
 
-                profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
-                    .await
-                    .map_err(|err| {
-                        Error::io("Failed to set up NTP profile", err)
-                    })?;
+                profile.add_to_zone(&log, &installed_zone).await.map_err(
+                    |err| Error::io("Failed to set up NTP profile", err),
+                )?;
 
                 RunningZone::boot(installed_zone).await?
             }
@@ -2121,12 +2115,11 @@ impl ServiceManager {
                     .add_service(disabled_ssh_service)
                     .add_service(internal_dns_service)
                     .add_service(disabled_dns_client_service);
-                profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
-                    .await
-                    .map_err(|err| {
+                profile.add_to_zone(&log, &installed_zone).await.map_err(
+                    |err| {
                         Error::io("Failed to setup Internal DNS profile", err)
-                    })?;
+                    },
+                )?;
                 RunningZone::boot(installed_zone).await?
             }
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
@@ -2269,12 +2262,9 @@ impl ServiceManager {
                     .add_service(disabled_ssh_service)
                     .add_service(nexus_service)
                     .add_service(disabled_dns_client_service);
-                profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
-                    .await
-                    .map_err(|err| {
-                        Error::io("Failed to setup Nexus profile", err)
-                    })?;
+                profile.add_to_zone(&log, &installed_zone).await.map_err(
+                    |err| Error::io("Failed to setup Nexus profile", err),
+                )?;
                 RunningZone::boot(installed_zone).await?
             }
             ZoneArgs::Switch(SwitchZoneConfigLocal {
@@ -2366,7 +2356,7 @@ impl ServiceManager {
                 for service in services {
                     match service {
                         SwitchService::ManagementGatewayService => {
-                            info!(self.inner.log, "Setting up MGS service");
+                            info!(log, "Setting up MGS service");
                             let mut mgs_config =
                                 PropertyGroupBuilder::new("config")
                                     // Always tell MGS to listen on localhost so wicketd
@@ -2407,13 +2397,10 @@ impl ServiceManager {
                             );
                         }
                         SwitchService::SpSim => {
-                            info!(
-                                self.inner.log,
-                                "Setting up Simulated SP service"
-                            );
+                            info!(log, "Setting up Simulated SP service");
                         }
                         SwitchService::Wicketd { baseboard } => {
-                            info!(self.inner.log, "Setting up wicketd service");
+                            info!(log, "Setting up wicketd service");
                             // If we're launching the switch zone, we'll have a
                             // bootstrap_address based on our call to
                             // `self.bootstrap_address_needed` (which always
@@ -2496,10 +2483,7 @@ impl ServiceManager {
                                 );
                         }
                         SwitchService::Dendrite { asic } => {
-                            info!(
-                                self.inner.log,
-                                "Setting up dendrite service"
-                            );
+                            info!(log, "Setting up dendrite service");
                             let mut dendrite_config =
                                 PropertyGroupBuilder::new("config");
 
@@ -2639,7 +2623,7 @@ impl ServiceManager {
                             );
                         }
                         SwitchService::Tfport { pkt_source, asic } => {
-                            info!(self.inner.log, "Setting up tfport service");
+                            info!(log, "Setting up tfport service");
                             let mut tfport_config =
                                 PropertyGroupBuilder::new("config")
                                     .add_property(
@@ -2714,7 +2698,7 @@ impl ServiceManager {
                             );
                         }
                         SwitchService::Lldpd { baseboard } => {
-                            info!(self.inner.log, "Setting up lldpd service");
+                            info!(log, "Setting up lldpd service");
 
                             let mut lldpd_config =
                                 PropertyGroupBuilder::new("config")
@@ -2761,10 +2745,7 @@ impl ServiceManager {
                             // The pumpkin daemon is only needed when running on
                             // with real sidecar.
                             if asic == &DendriteAsic::TofinoAsic {
-                                info!(
-                                    self.inner.log,
-                                    "Setting up pumpkind service"
-                                );
+                                info!(log, "Setting up pumpkind service");
                                 let pumpkind_config =
                                     PropertyGroupBuilder::new("config")
                                         .add_property(
@@ -2795,7 +2776,7 @@ impl ServiceManager {
                             );
                         }
                         SwitchService::Mgd => {
-                            info!(self.inner.log, "Setting up mgd service");
+                            info!(log, "Setting up mgd service");
 
                             let mut mgd_config =
                                 PropertyGroupBuilder::new("config");
@@ -2837,7 +2818,7 @@ impl ServiceManager {
                             );
                         }
                         SwitchService::MgDdm { mode } => {
-                            info!(self.inner.log, "Setting up mg-ddm service");
+                            info!(log, "Setting up mg-ddm service");
 
                             let mut mg_ddm_config =
                                 PropertyGroupBuilder::new("config")
@@ -2968,12 +2949,9 @@ impl ServiceManager {
                     .add_service(mgd_service)
                     .add_service(mg_ddm_service)
                     .add_service(uplink_service);
-                profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
-                    .await
-                    .map_err(|err| {
-                        Error::io("Failed to setup Switch zone profile", err)
-                    })?;
+                profile.add_to_zone(&log, &installed_zone).await.map_err(
+                    |err| Error::io("Failed to setup Switch zone profile", err),
+                )?;
                 RunningZone::boot(installed_zone).await?
             }
         };
@@ -3107,7 +3085,10 @@ impl ServiceManager {
         for result in results {
             match result {
                 Ok(zone) => {
-                    info!(self.inner.log, "Zone started"; "zone" => zone.name());
+                    info!(
+                        self.inner.log, "Omicron zone (type {}) started", zone.zone_type();
+                        "zone" => zone.name()
+                    );
                     new_zones.push(zone);
                 }
                 Err((name, error)) => {
@@ -3723,7 +3704,13 @@ impl ServiceManager {
         underlay_info: Option<(Ipv6Addr, Option<&RackNetworkConfig>)>,
         baseboard: Baseboard,
     ) -> Result<(), Error> {
-        info!(self.inner.log, "Ensuring scrimlet services (enabling services)");
+        let log = self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
+        info!(
+            log,
+            "Enabling switch zone services on scrimlet";
+            "underlay info" => ?underlay_info,
+            "baseboard" => ?baseboard
+        );
         let mut filesystems: Vec<zone::Fs> = vec![];
         let mut data_links: Vec<String> = vec![];
 
@@ -3843,7 +3830,7 @@ impl ServiceManager {
         switch_zone_ip: Ipv6Addr,
         rack_network_config: &RackNetworkConfig,
     ) -> Result<(), Error> {
-        let log = &self.inner.log;
+        let log = &self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
 
         // Configure uplinks via DPD in our switch zone.
         let our_ports = EarlyNetworkSetup::new(log)
@@ -3860,6 +3847,8 @@ impl ServiceManager {
         &self,
         our_ports: Vec<HostPortConfig>,
     ) -> Result<(), Error> {
+        let log = &self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
+
         // We expect the switch zone to be running, as we're called immediately
         // after `ensure_zone()` above and we just successfully configured
         // uplinks via DPD running in our switch zone. If somehow we're in any
@@ -3882,7 +3871,7 @@ impl ServiceManager {
             }
         };
 
-        info!(self.inner.log, "Setting up uplinkd service");
+        info!(log, "Setting up uplinkd service");
         let smfh = SmfHelper::new(&zone, &SwitchService::Uplink);
 
         // We want to delete all the properties in the `uplinks` group, but we
@@ -3893,9 +3882,15 @@ impl ServiceManager {
 
         for port_config in &our_ports {
             for addr in &port_config.addrs {
-                info!(self.inner.log, "configuring port: {port_config:?}");
+                let prop_name = format!("uplinks/{}_0", port_config.port);
+                info!(
+                    log,
+                    "Adding new property to uplinkd service";
+                    "name" => ?prop_name,
+                    "value" => ?addr.to_string(),
+                );
                 smfh.addpropvalue_type(
-                    &format!("uplinks/{}_0", port_config.port,),
+                    &prop_name,
                     &addr.to_string(),
                     "astring",
                 )?;
@@ -3950,7 +3945,7 @@ impl ServiceManager {
         filesystems: Vec<zone::Fs>,
         data_links: Vec<String>,
     ) -> Result<(), Error> {
-        let log = &self.inner.log;
+        let log = self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
 
         let mut sled_zone = self.inner.switch_zone.lock().await;
         let zone_typestr = "switch";
@@ -3997,16 +3992,12 @@ impl ServiceManager {
                     if *addr == Ipv6Addr::LOCALHOST {
                         continue;
                     }
-                    info!(
-                        self.inner.log,
-                        "Ensuring address {} exists",
-                        addr.to_string()
-                    );
+                    info!(log, "Ensuring address {} exists", addr.to_string());
                     let addr_request =
                         AddressRequest::new_static(IpAddr::V6(*addr), None);
                     zone.ensure_address(addr_request).await?;
                     info!(
-                        self.inner.log,
+                        log,
                         "Ensuring address {} exists - OK",
                         addr.to_string()
                     );
@@ -4016,7 +4007,7 @@ impl ServiceManager {
                 // available now as well.
                 if let Some(info) = self.inner.sled_info.get() {
                     info!(
-                        self.inner.log,
+                        log,
                         "Ensuring there is a default route";
                         "gateway" => ?info.underlay_address,
                     );
@@ -4030,7 +4021,7 @@ impl ServiceManager {
                         Err(e) => {
                             if e.to_string().contains("entry exists") {
                                 info!(
-                                    self.inner.log,
+                                    log,
                                     "Default route already exists";
                                     "gateway" => ?info.underlay_address,
                                 )
@@ -4046,7 +4037,7 @@ impl ServiceManager {
 
                     match service {
                         SwitchService::ManagementGatewayService => {
-                            info!(self.inner.log, "configuring MGS service");
+                            info!(log, "configuring MGS service");
                             // Remove any existing `config/address` values
                             // without deleting the property itself.
                             smfh.delpropvalue_default_instance(
@@ -4079,7 +4070,7 @@ impl ServiceManager {
                                 )?;
                             } else {
                                 error!(
-                                    self.inner.log,
+                                    log,
                                     concat!(
                                         "rack_id not present,",
                                         " even though underlay address exists"
@@ -4089,15 +4080,12 @@ impl ServiceManager {
 
                             smfh.refresh()?;
                             info!(
-                                self.inner.log,
+                                log,
                                 "refreshed MGS service with new configuration"
                             )
                         }
                         SwitchService::Dendrite { .. } => {
-                            info!(
-                                self.inner.log,
-                                "configuring dendrite service"
-                            );
+                            info!(log, "configuring dendrite service");
                             if let Some(info) = self.inner.sled_info.get() {
                                 smfh.setprop_default_instance(
                                     "config/rack_id",
@@ -4108,10 +4096,7 @@ impl ServiceManager {
                                     info.config.sled_id,
                                 )?;
                             } else {
-                                info!(
-                                    self.inner.log,
-                                    "no rack_id/sled_id available yet"
-                                );
+                                info!(log, "no rack_id/sled_id available yet");
                             }
                             smfh.delpropvalue_default_instance(
                                 "config/address",
@@ -4142,7 +4127,7 @@ impl ServiceManager {
                                 }
                             }
                             smfh.refresh()?;
-                            info!(self.inner.log, "refreshed dendrite service with new configuration")
+                            info!(log, "refreshed dendrite service with new configuration")
                         }
                         SwitchService::Wicketd { .. } => {
                             if let Some(&address) = first_address {
@@ -4150,7 +4135,7 @@ impl ServiceManager {
                                     Ipv6Subnet::<AZ_PREFIX>::new(address);
 
                                 info!(
-                                    self.inner.log, "configuring wicketd";
+                                    log, "configuring wicketd";
                                     "rack_subnet" => %rack_subnet.net().addr(),
                                 );
 
@@ -4160,16 +4145,16 @@ impl ServiceManager {
                                 )?;
 
                                 smfh.refresh()?;
-                                info!(self.inner.log, "refreshed wicketd service with new configuration")
+                                info!(log, "refreshed wicketd service with new configuration")
                             } else {
                                 error!(
-                                    self.inner.log,
+                                    log,
                                     "underlay address unexpectedly missing",
                                 );
                             }
                         }
                         SwitchService::Lldpd { .. } => {
-                            info!(self.inner.log, "configuring lldp service");
+                            info!(log, "configuring lldp service");
                             smfh.delpropvalue_default_instance(
                                 "config/address",
                                 "*",
@@ -4182,7 +4167,7 @@ impl ServiceManager {
                                 )?;
                             }
                             smfh.refresh()?;
-                            info!(self.inner.log, "refreshed lldpd service with new configuration")
+                            info!(log, "refreshed lldpd service with new configuration")
                         }
                         SwitchService::Tfport { .. } => {
                             // Since tfport and dpd communicate using localhost,
@@ -4202,7 +4187,7 @@ impl ServiceManager {
                             // nothing to configure
                         }
                         SwitchService::Mgd => {
-                            info!(self.inner.log, "configuring mgd service");
+                            info!(log, "configuring mgd service");
                             smfh.delpropvalue_default_instance(
                                 "config/dns_servers",
                                 "*",
@@ -4235,12 +4220,12 @@ impl ServiceManager {
                             }
                             smfh.refresh()?;
                             info!(
-                                self.inner.log,
+                                log,
                                 "refreshed mgd service with new configuration"
                             )
                         }
                         SwitchService::MgDdm { mode } => {
-                            info!(self.inner.log, "configuring mg-ddm service");
+                            info!(log, "configuring mg-ddm service");
                             smfh.delpropvalue_default_instance(
                                 "config/mode",
                                 "*",
@@ -4281,7 +4266,7 @@ impl ServiceManager {
                                 }
                             }
                             smfh.refresh()?;
-                            info!(self.inner.log, "refreshed mg-ddm service with new configuration")
+                            info!(log, "refreshed mg-ddm service with new configuration")
                         }
                     }
                 }
@@ -4329,6 +4314,7 @@ impl ServiceManager {
             return Ok(());
         };
 
+        let log = self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
         // The switch zone must use the ramdisk in order to receive requests
         // from RSS to initialize the rack. This enables the initialization of
         // trust quorum to derive disk encryption keys for U.2 devices. If the
@@ -4339,7 +4325,7 @@ impl ServiceManager {
         let zone_request =
             SwitchZoneConfigLocal { root, zone: request.clone() };
         let zone_args = ZoneArgs::Switch(&zone_request);
-        info!(self.inner.log, "Starting switch zone",);
+        info!(log, "Starting switch zone",);
         let zone = self
             .initialize_zone(zone_args, filesystems, data_links, None)
             .await?;
@@ -4354,15 +4340,15 @@ impl ServiceManager {
         &self,
         mut exit_rx: oneshot::Receiver<()>,
     ) {
+        let log = self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
         loop {
             {
                 let mut sled_zone = self.inner.switch_zone.lock().await;
                 match self.try_initialize_switch_zone(&mut sled_zone).await {
                     Ok(()) => return,
-                    Err(e) => warn!(
-                        self.inner.log,
-                        "Failed to initialize switch zone: {e}"
-                    ),
+                    Err(e) => {
+                        warn!(log, "Failed to initialize switch zone: {e}")
+                    }
                 }
             }
 

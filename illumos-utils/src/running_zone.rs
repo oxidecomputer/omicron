@@ -33,6 +33,13 @@ use crate::zone::MockZones as Zones;
 #[cfg(not(any(test, feature = "testing")))]
 use crate::zone::Zones;
 
+// TODO: We may want to make this switch zone stage constant
+// into an enum if we decide to log more stages.
+
+/// Used for logs to determine whether a logged action is part of the
+/// switch zone initilization process.
+pub const SWITCH_ZONE_INIT_STAGE: &str = "switch-zone-init";
+
 /// Errors returned from methods for fetching SMF services and log files
 #[derive(thiserror::Error, Debug)]
 pub enum ServiceError {

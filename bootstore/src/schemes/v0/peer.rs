@@ -14,6 +14,7 @@ use super::{ApiError, ApiOutput, Fsm, FsmConfig, RackUuid};
 use crate::trust_quorum::RackSecret;
 use camino::Utf8PathBuf;
 use derive_more::From;
+use illumos_utils::running_zone::SWITCH_ZONE_INIT_STAGE;
 use sled_hardware_types::Baseboard;
 use slog::{error, info, o, warn, Logger};
 use std::collections::{BTreeMap, BTreeSet};
@@ -412,16 +413,17 @@ impl Node {
         &mut self,
         res: Result<(TcpStream, SocketAddr), std::io::Error>,
     ) {
+        let log = self.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
         match res {
             Ok((sock, addr)) => {
                 let SocketAddr::V6(addr) = addr else {
-                    warn!(self.log, "Got connection from IPv4 address {addr}");
+                    warn!(log, "Got connection from IPv4 address {addr}");
                     return;
                 };
                 // Remove any existing connection
                 if let Some(handle) = self.accepted_connections.remove(&addr) {
                     info!(
-                        self.log,
+                        log,
                         concat!(
                             "Removing acccepted connection from {}: ",
                             "new connection accepted from same address"
@@ -432,7 +434,7 @@ impl Node {
                     // The connection has not yet completed its handshake
                     let _ = handle.tx.send(MainToConnMsg::Close).await;
                 }
-                info!(self.log, "Accepted connection from {addr}");
+                info!(log, "Accepted connection from {addr}");
                 self.handle_unique_id_counter += 1;
                 let handle = spawn_accepted_connection_management_task(
                     self.handle_unique_id_counter,
@@ -441,13 +443,13 @@ impl Node {
                     addr,
                     sock,
                     self.conn_tx.clone(),
-                    &self.log,
+                    &log,
                 )
                 .await;
                 self.accepted_connections.insert(addr, handle);
             }
             Err(err) => {
-                error!(self.log, "Failed to accept a connection: {err:?}");
+                error!(log, "Failed to accept a connection: {err:?}");
             }
         }
     }

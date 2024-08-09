@@ -500,7 +500,15 @@ pub async fn spawn_accepted_connection_management_task(
         )
         .await
         {
-            Ok(val) => val,
+            Ok(val) => {
+                info!(
+                    log,
+                    "Handshake successful";
+                    "client addr" => client_addr.to_string(),
+                    "local addr" => my_addr.to_string(),
+                );
+                val
+            }
             Err(e) => {
                 warn!(log, "Handshake error: {:?}", e; "addr" => client_addr.to_string());
                 // This is a server so we bail and wait for a new connection.

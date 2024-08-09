@@ -28,6 +28,7 @@ pub const ROUTE: &str = "/usr/sbin/route";
 // TODO: These could become enums
 pub const ZONE_PREFIX: &str = "oxz_";
 pub const PROPOLIS_ZONE_PREFIX: &str = "oxz_propolis-server_";
+pub const SWITCH_ZONE_NAME: &str = "oxz_switch";
 
 #[derive(thiserror::Error, Debug)]
 enum Error {
@@ -477,9 +478,9 @@ impl Zones {
                 }
             });
 
-        if zone == "oxz_switch" && vnic.is_none() {
+        if zone == SWITCH_ZONE_NAME && vnic.is_none() {
             Err(GetBootstrapInterfaceError::NotFound { zone: zone.to_string() })
-        } else if zone != "oxz_switch" && vnic.is_some() {
+        } else if zone != SWITCH_ZONE_NAME && vnic.is_some() {
             Err(GetBootstrapInterfaceError::Unexpected {
                 zone: zone.to_string(),
             })
