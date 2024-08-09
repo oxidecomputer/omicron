@@ -2288,8 +2288,6 @@ impl ServiceManager {
                 zone: SwitchZoneConfig { id, services, addresses },
                 ..
             }) => {
-                let log =
-                    self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
                 let info = self.inner.sled_info.get();
 
                 let gw_addr = match info {
