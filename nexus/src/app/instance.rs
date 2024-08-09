@@ -19,7 +19,6 @@ use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
-use nexus_db_model::InstanceState as DbInstanceState;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_model::Vmm as DbVmm;
@@ -1899,83 +1898,69 @@ fn instance_start_allowed(
     //
     // If the instance doesn't have an active VMM, see if the instance state
     // permits it to start.
-    if let Some(vmm) = vmm {
-        match vmm.runtime.state {
-            // If the VMM is already starting or is in another "active"
-            // state, succeed to make successful start attempts idempotent.
-            DbVmmState::Starting
-            | DbVmmState::Running
-            | DbVmmState::Rebooting
-            | DbVmmState::Migrating => {
-                debug!(log, "asked to start an active instance";
-                           "instance_id" => %instance.id());
+    match state.effective_state() {
+        // If the VMM is already starting or is in another "active"
+        // state, succeed to make successful start attempts idempotent.
+        s @ InstanceState::Starting
+        | s @ InstanceState::Running
+        | s @ InstanceState::Rebooting
+        | s @ InstanceState::Migrating => {
+            debug!(log, "asked to start an active instance";
+                   "instance_id" => %instance.id(),
+                   "state" => ?s);
 
-                Ok(InstanceStartDisposition::AlreadyStarted)
-            }
-            // If a previous start saga failed and left behind a VMM in the
-            // SagaUnwound state, allow a new start saga to try to overwrite
-            // it.
-            DbVmmState::SagaUnwound => {
-                debug!(
-                    log,
-                    "instance's last VMM's start saga unwound, OK to start";
-                    "instance_id" => %instance.id()
-                );
-
-                Ok(InstanceStartDisposition::Start)
-            }
-            // When sled agent publishes a Stopped state, Nexus should clean
-            // up the instance/VMM pointer.
-            DbVmmState::Stopped => {
-                let propolis_id = instance
-                    .runtime()
-                    .propolis_id
-                    .expect("needed a VMM ID to fetch a VMM record");
-                error!(log,
-                           "instance is stopped but still has an active VMM";
-                           "instance_id" => %instance.id(),
-                           "propolis_id" => %propolis_id);
-
-                Err(Error::internal_error(
-                    "instance is stopped but still has an active VMM",
-                ))
-            }
-            _ => Err(Error::conflict(&format!(
-                "instance is in state {} but must be {} to be started",
-                vmm.runtime.state,
-                InstanceState::Stopped
-            ))),
+            Ok(InstanceStartDisposition::AlreadyStarted)
         }
-    } else {
-        match instance.runtime_state.nexus_state {
-            // If the instance is in a known-good no-VMM state, it can
-            // start.
-            DbInstanceState::NoVmm => {
-                debug!(log, "instance has no VMM, OK to start";
-                           "instance_id" => %instance.id());
+        InstanceState::Stopped => {
+            match vmm.as_ref() {
+                // If a previous start saga failed and left behind a VMM in the
+                // SagaUnwound state, allow a new start saga to try to overwrite
+                // it.
+                Some(vmm) if vmm.runtime.state == DbVmmState::SagaUnwound => {
+                    debug!(
+                        log,
+                        "instance's last VMM's start saga unwound, OK to start";
+                        "instance_id" => %instance.id()
+                    );
 
-                Ok(InstanceStartDisposition::Start)
+                    Ok(InstanceStartDisposition::Start)
+                }
+                // This shouldn't happen: `InstanceAndVmm::effective_state` should
+                // only return `Stopped` if there is no active VMM or if the VMM is
+                // `SagaUnwound`.
+                Some(vmm) => {
+                    error!(log,
+                            "instance is stopped but still has an active VMM";
+                            "instance_id" => %instance.id(),
+                            "propolis_id" => %vmm.id,
+                            "propolis_state" => ?vmm.runtime.state);
+
+                    Err(Error::internal_error(
+                        "instance is stopped but still has an active VMM",
+                    ))
+                }
+                // Ah, it's actually stopped. We can restart it.
+                None => Ok(InstanceStartDisposition::Start),
             }
-            // If the instance isn't ready yet or has been destroyed, it
-            // can't start.
-            //
-            // TODO(#2825): If the "Failed" state could be interpreted to
-            // mean "stopped abnormally" and not just "Nexus doesn't know
-            // what state the instance is in," it would be fine to start the
-            // instance here. See RFD 486.
-            DbInstanceState::Creating
-            | DbInstanceState::Failed
-            | DbInstanceState::Destroyed => Err(Error::conflict(&format!(
-                "instance is in state {} but must be {} to be started",
-                instance.runtime_state.nexus_state,
+        }
+        InstanceState::Stopping => {
+            let (propolis_id, propolis_state) = match vmm.as_ref() {
+                Some(vmm) => (Some(vmm.id), Some(vmm.runtime.state)),
+                None => (None, None),
+            };
+            debug!(log, "instance's VMM is still in the process of stopping";
+                   "instance_id" => %instance.id(),
+                   "propolis_id" => ?propolis_id,
+                   "propolis_state" => ?propolis_state);
+            Err(Error::conflict(
+                "instance must finish stopping before it can be started",
+            ))
+        }
+        s => {
+            return Err(Error::conflict(&format!(
+                "instance is in state {s} but it must be {} to be started",
                 InstanceState::Stopped
-            ))),
-            // If the instance is in the Vmm state, there should have been
-            // an active Propolis ID and a VMM record to read, so this
-            // branch shouldn't have been reached.
-            DbInstanceState::Vmm => Err(Error::internal_error(
-                "instance is in state Vmm but has no active VMM",
-            )),
+            )))
         }
     }
 }
@@ -1986,7 +1971,10 @@ mod tests {
     use super::*;
     use core::time::Duration;
     use futures::{SinkExt, StreamExt};
-    use nexus_db_model::{Instance as DbInstance, VmmInitialState};
+    use nexus_db_model::{
+        Instance as DbInstance, InstanceState as DbInstanceState,
+        VmmInitialState, VmmState as DbVmmState,
+    };
     use omicron_common::api::external::{
         Hostname, IdentityMetadataCreateParams, InstanceCpuCount, Name,
     };
