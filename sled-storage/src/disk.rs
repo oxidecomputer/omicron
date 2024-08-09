@@ -44,8 +44,8 @@ const SYNTHETIC_SLOT_OFFSET: i64 = 1024;
 
 // A generic name for the firmware in slot1 of an NVMe device.
 //
-// bhyve for example uses "1.0" and marks slot1 as read-only.
-const SYNTHETIC_FIRMWARE_SLOT1: &str = "synthetic 1.0";
+// bhyve for example uses "1.0" and marks slot1 as read-only (must be within 8chars).
+const SYNTHETIC_FIRMWARE_SLOT1: &str = "SYNTH1";
 
 impl SyntheticDisk {
     // "Manages" a SyntheticDisk by ensuring that it has a Zpool and importing
@@ -144,6 +144,7 @@ impl RawSyntheticDisk {
             1,
             None,
             true,
+            1,
             vec![Some(SYNTHETIC_FIRMWARE_SLOT1.to_string())],
         );
 

@@ -38,6 +38,7 @@ use nexus_db_model::HwRotSlotEnum;
 use nexus_db_model::InvCaboose;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvCollectionError;
+use nexus_db_model::InvNvmeDiskFirmware;
 use nexus_db_model::InvOmicronZone;
 use nexus_db_model::InvOmicronZoneNic;
 use nexus_db_model::InvPhysicalDisk;
@@ -134,6 +135,23 @@ impl DataStore {
                 ))
             })
             .collect::<Result<Vec<_>, Error>>()?;
+
+        // Pull disk firmware out of sled agents
+        let disk_firmware: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|(sled_id, sled_agent)| {
+                sled_agent.disks.iter().map(|disk| {
+                    InvNvmeDiskFirmware::try_from_physical_disk(
+                        collection_id,
+                        *sled_id,
+                        disk.clone(),
+                    )
+                })
+            })
+            .flatten()
+            .collect();
+
         // Pull disks out of all sled agents
         let disks: Vec<_> = collection
             .sled_agents
@@ -721,6 +739,27 @@ impl DataStore {
                     }
                     let _ = diesel::insert_into(dsl::inv_physical_disk)
                         .values(some_disks)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert rows for all the physical disk firmware we found.
+            {
+                use db::schema::inv_nvme_disk_firmware::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut disk_firmware = disk_firmware.into_iter();
+                loop {
+                    let some_disk_firmware = disk_firmware
+                        .by_ref()
+                        .take(batch_size)
+                        .collect::<Vec<_>>();
+                    if some_disk_firmware.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_nvme_disk_firmware)
+                        .values(some_disk_firmware)
                         .execute_async(&conn)
                         .await?;
                 }
@@ -1533,6 +1572,60 @@ impl DataStore {
             rows
         };
 
+        // Mapping of "Sled ID" -> "Mapping of physical slot -> disk firmware"
+        let disk_firmware: BTreeMap<
+            Uuid,
+            BTreeMap<i64, nexus_types::inventory::PhysicalDiskFirmware>,
+        > = {
+            use db::schema::inv_nvme_disk_firmware::dsl;
+
+            let mut disk_firmware = BTreeMap::<
+                Uuid,
+                BTreeMap<i64, nexus_types::inventory::PhysicalDiskFirmware>,
+            >::new();
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_nvme_disk_firmware,
+                    (dsl::sled_id, dsl::slot),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvNvmeDiskFirmware::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator =
+                    p.found_batch(&batch, &|row| (row.sled_id, row.slot));
+                for firmware in batch {
+                    disk_firmware
+                        .entry(firmware.sled_id.into_untyped_uuid())
+                        .or_default()
+                        .insert(
+                            firmware.slot,
+                            nexus_types::inventory::PhysicalDiskFirmware::Nvme(
+                                nexus_types::inventory::NvmeFirmware {
+                                    active_slot: firmware.active_slot.into(),
+                                    next_active_slot: firmware
+                                        .next_active_slot
+                                        .map(|nas| nas.into()),
+                                    number_of_slots: firmware
+                                        .number_of_slots
+                                        .into(),
+                                    slot1_is_read_only: firmware
+                                        .slot1_is_read_only,
+                                    slot_firmware_versions: firmware
+                                        .slot_firmware_versions,
+                                },
+                            ),
+                        );
+                }
+            }
+            disk_firmware
+        };
+
         // Mapping of "Sled ID" -> "All disks reported by that sled"
         let physical_disks: BTreeMap<
             Uuid,
@@ -1561,10 +1654,24 @@ impl DataStore {
                 paginator =
                     p.found_batch(&batch, &|row| (row.sled_id, row.slot));
                 for disk in batch {
-                    disks
-                        .entry(disk.sled_id.into_untyped_uuid())
-                        .or_default()
-                        .push(disk.into());
+                    let sled_id = disk.sled_id.into_untyped_uuid();
+                    let firmware = disk_firmware
+                        .get(&sled_id)
+                        .and_then(|lookup| lookup.get(&disk.slot))
+                        .unwrap_or(&nexus_types::inventory::PhysicalDiskFirmware::Unknown);
+
+                    disks.entry(sled_id).or_default().push(
+                        nexus_types::inventory::PhysicalDisk {
+                            identity: omicron_common::disk::DiskIdentity {
+                                vendor: disk.vendor,
+                                model: disk.model,
+                                serial: disk.serial,
+                            },
+                            variant: disk.variant.into(),
+                            slot: disk.slot,
+                            firmware: firmware.clone(),
+                        },
+                    );
                 }
             }
             disks

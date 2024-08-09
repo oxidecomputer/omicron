@@ -556,6 +556,13 @@ impl Sled {
                         identity: d.disk_identity.clone(),
                         variant: DiskVariant::U2,
                         slot: i64::try_from(i).unwrap(),
+                        active_firmware_slot: 1,
+                        next_active_firmware_slot: None,
+                        number_of_firmware_slots: 1,
+                        slot1_is_read_only: true,
+                        slot_firmware_versions: vec![Some(
+                            "SIMUL1".to_string(),
+                        )],
                     })
                     .collect(),
                 // Zpools won't necessarily show up until our first request
