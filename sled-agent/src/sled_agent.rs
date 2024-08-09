@@ -60,7 +60,7 @@ use omicron_common::api::{
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
-use omicron_common::disk::OmicronPhysicalDisksConfig;
+use omicron_common::disk::{DatasetsConfig, OmicronPhysicalDisksConfig};
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
 use sled_agent_types::early_networking::EarlyNetworkConfig;
@@ -68,6 +68,7 @@ use sled_hardware::{underlay, HardwareManager};
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_hardware_types::Baseboard;
 use sled_storage::manager::StorageHandle;
+use sled_storage::resources::DatasetsManagementResult;
 use sled_storage::resources::DisksManagementResult;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -809,6 +810,29 @@ impl SledAgent {
         self.inner.zone_bundler.cleanup().await.map_err(Error::from)
     }
 
+    pub async fn datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
+        Ok(self.storage().datasets_config_list().await?)
+    }
+
+    pub async fn datasets_ensure(
+        &self,
+        config: DatasetsConfig,
+    ) -> Result<DatasetsManagementResult, Error> {
+        info!(self.log, "datasets ensure");
+        let datasets_result = self.storage().datasets_ensure(config).await?;
+        info!(self.log, "datasets ensure: Updated storage");
+
+        // TODO(https://github.com/oxidecomputer/omicron/issues/6177):
+        // At the moment, we don't actually remove any datasets -- this function
+        // just adds new datasets.
+        //
+        // Once we start removing old datasets, we should probably ensure that
+        // they are not longer in-use before returning (similar to
+        // omicron_physical_disks_ensure).
+
+        Ok(datasets_result)
+    }
+
     /// Requests the set of physical disks currently managed by the Sled Agent.
     ///
     /// This should be contrasted by the set of disks in the inventory, which
@@ -897,7 +921,7 @@ impl SledAgent {
         &self,
         requested_zones: OmicronZonesConfig,
     ) -> Result<(), Error> {
-        // TODO:
+        // TODO(https://github.com/oxidecomputer/omicron/issues/6043):
         // - If these are the set of filesystems, we should also consider
         // removing the ones which are not listed here.
         // - It's probably worth sending a bulk request to the storage system,

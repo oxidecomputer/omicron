@@ -35,11 +35,14 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::shared::{
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SledIdentifiers, SwitchPorts,
 };
-use omicron_common::disk::{DiskVariant, OmicronPhysicalDisksConfig};
+use omicron_common::disk::{
+    DatasetsConfig, DiskVariant, OmicronPhysicalDisksConfig,
+};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::EarlyNetworkConfig;
+use sled_storage::resources::DatasetsManagementResult;
 use sled_storage::resources::DisksManagementResult;
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -64,6 +67,8 @@ pub fn api() -> SledApiDescription {
         api.register(omicron_zones_get)?;
         api.register(omicron_zones_put)?;
         api.register(zones_list)?;
+        api.register(datasets_get)?;
+        api.register(datasets_put)?;
         api.register(omicron_physical_disks_get)?;
         api.register(omicron_physical_disks_put)?;
         api.register(zone_bundle_list)?;
@@ -345,6 +350,33 @@ async fn omicron_zones_get(
 ) -> Result<HttpResponseOk<OmicronZonesConfig>, HttpError> {
     let sa = rqctx.context();
     Ok(HttpResponseOk(sa.omicron_zones_list().await?))
+}
+
+/// Configures datasets to be used on this sled
+#[endpoint {
+    method = PUT,
+    path = "/datasets",
+}]
+async fn datasets_put(
+    rqctx: RequestContext<SledAgent>,
+    body: TypedBody<DatasetsConfig>,
+) -> Result<HttpResponseOk<DatasetsManagementResult>, HttpError> {
+    let sa = rqctx.context();
+    let body_args = body.into_inner();
+    let result = sa.datasets_ensure(body_args).await?;
+    Ok(HttpResponseOk(result))
+}
+
+/// Lists the datasets that this sled is configured to use
+#[endpoint {
+    method = GET,
+    path = "/datasets",
+}]
+async fn datasets_get(
+    rqctx: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<DatasetsConfig>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(sa.datasets_config_list().await?))
 }
 
 #[endpoint {

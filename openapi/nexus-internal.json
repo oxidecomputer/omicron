@@ -2591,16 +2591,8 @@
         ]
       },
       "DatasetKind": {
-        "description": "Describes the purpose of the dataset.",
-        "type": "string",
-        "enum": [
-          "crucible",
-          "cockroach",
-          "clickhouse",
-          "clickhouse_keeper",
-          "external_dns",
-          "internal_dns"
-        ]
+        "description": "The kind of dataset. See the `DatasetKind` enum in omicron-common for possible values.",
+        "type": "string"
       },
       "DatasetPutRequest": {
         "description": "Describes a dataset within a pool.",

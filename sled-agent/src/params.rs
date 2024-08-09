@@ -17,15 +17,13 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::shared::{
     NetworkInterface, SourceNatConfig,
 };
-use omicron_common::disk::DiskVariant;
+use omicron_common::disk::{DatasetKind, DatasetName, DiskVariant};
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 pub use sled_hardware::DendriteAsic;
 use sled_hardware_types::Baseboard;
-use sled_storage::dataset::DatasetName;
-use sled_storage::dataset::DatasetType;
 use std::collections::BTreeSet;
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
 use std::net::{IpAddr, SocketAddr, SocketAddrV6};
@@ -289,22 +287,22 @@ pub(crate) trait OmicronZoneTypeExt {
             | OmicronZoneType::Oximeter { .. }
             | OmicronZoneType::CruciblePantry { .. } => None,
             OmicronZoneType::Clickhouse { dataset, address, .. } => {
-                Some((dataset, DatasetType::Clickhouse, address))
+                Some((dataset, DatasetKind::Clickhouse, address))
             }
             OmicronZoneType::ClickhouseKeeper { dataset, address, .. } => {
-                Some((dataset, DatasetType::ClickhouseKeeper, address))
+                Some((dataset, DatasetKind::ClickhouseKeeper, address))
             }
             OmicronZoneType::CockroachDb { dataset, address, .. } => {
-                Some((dataset, DatasetType::CockroachDb, address))
+                Some((dataset, DatasetKind::Cockroach, address))
             }
             OmicronZoneType::Crucible { dataset, address, .. } => {
-                Some((dataset, DatasetType::Crucible, address))
+                Some((dataset, DatasetKind::Crucible, address))
             }
             OmicronZoneType::ExternalDns { dataset, http_address, .. } => {
-                Some((dataset, DatasetType::ExternalDns, http_address))
+                Some((dataset, DatasetKind::ExternalDns, http_address))
             }
             OmicronZoneType::InternalDns { dataset, http_address, .. } => {
-                Some((dataset, DatasetType::InternalDns, http_address))
+                Some((dataset, DatasetKind::InternalDns, http_address))
             }
         }?;
 

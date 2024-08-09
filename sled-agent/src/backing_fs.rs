@@ -137,7 +137,8 @@ pub(crate) fn ensure_backing_fs(
 
         let size_details = Some(SizeDetails {
             quota: bfs.quota,
-            compression: bfs.compression,
+            reservation: None,
+            compression: bfs.compression.map(|s| s.to_string()),
         });
 
         Zfs::ensure_filesystem(

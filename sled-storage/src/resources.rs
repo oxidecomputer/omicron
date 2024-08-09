@@ -14,7 +14,7 @@ use illumos_utils::zpool::{PathInPool, ZpoolName};
 use key_manager::StorageKeyRequester;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::{
-    DiskIdentity, DiskVariant, OmicronPhysicalDiskConfig,
+    DatasetName, DiskIdentity, DiskVariant, OmicronPhysicalDiskConfig,
     OmicronPhysicalDisksConfig,
 };
 use omicron_uuid_kinds::ZpoolUuid;
@@ -54,6 +54,34 @@ impl DiskManagementError {
             DiskManagementError::KeyManager(_) => true,
             _ => false,
         }
+    }
+}
+
+/// Identifies how a single dataset management operation may have succeeded or
+/// failed.
+#[derive(Debug, JsonSchema, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DatasetManagementStatus {
+    pub dataset_name: DatasetName,
+    pub err: Option<String>,
+}
+
+/// The result from attempting to manage datasets.
+#[derive(Default, Debug, JsonSchema, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[must_use = "this `DatasetManagementResult` may contain errors, which should be handled"]
+pub struct DatasetsManagementResult {
+    pub status: Vec<DatasetManagementStatus>,
+}
+
+impl DatasetsManagementResult {
+    pub fn has_error(&self) -> bool {
+        for status in &self.status {
+            if status.err.is_some() {
+                return true;
+            }
+        }
+        false
     }
 }
 

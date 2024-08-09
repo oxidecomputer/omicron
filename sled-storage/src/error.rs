@@ -4,11 +4,12 @@
 
 //! Storage related errors
 
-use crate::dataset::{DatasetError, DatasetName};
+use crate::dataset::DatasetError;
 use crate::disk::DiskError;
 use camino::Utf8PathBuf;
 use omicron_common::api::external::ByteCountRangeError;
 use omicron_common::api::external::Generation;
+use omicron_common::disk::DatasetName;
 use uuid::Uuid;
 
 #[derive(thiserror::Error, Debug)]
@@ -82,6 +83,15 @@ pub enum Error {
         requested: Generation,
         current: Generation,
     },
+
+    #[error("Invalid configuration (UUID mismatch in arguments)")]
+    ConfigUuidMismatch,
+
+    #[error("Dataset configuration out-of-date (asked for {requested}, but latest is {current})")]
+    DatasetConfigurationOutdated { requested: Generation, current: Generation },
+
+    #[error("Dataset configuration changed for the same generation number: {generation}")]
+    DatasetConfigurationChanged { generation: Generation },
 
     #[error("Failed to update ledger in internal storage")]
     Ledger(#[from] omicron_common::ledger::Error),

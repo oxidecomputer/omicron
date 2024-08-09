@@ -384,12 +384,7 @@ impl nexus_test_interface::NexusServer for Server {
         self.apictx
             .context
             .nexus
-            .upsert_dataset(
-                dataset_id,
-                zpool_id,
-                address,
-                nexus_db_queries::db::model::DatasetKind::Crucible,
-            )
+            .upsert_crucible_dataset(dataset_id, zpool_id, address)
             .await
             .unwrap();
     }
