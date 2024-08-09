@@ -13,6 +13,7 @@ use crate::db::error::ErrorHandler;
 use crate::db::model::VolumeRepair;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use omicron_common::api::external::Error;
 use uuid::Uuid;
@@ -39,15 +40,19 @@ impl DataStore {
             .execute_async(&*conn)
             .await
             .map(|_| ())
-            .map_err(|e| {
-                if e.to_string().contains(
-                    "duplicate key value violates \
-                    unique constraint \"volume_repair_pkey\"",
-                ) {
-                    Error::conflict("volume repair lock")
-                } else {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                }
+            .map_err(|e| match e {
+                DieselError::DatabaseError(
+                    DatabaseErrorKind::UniqueViolation,
+                    ref error_information,
+                ) => match error_information.constraint_name() {
+                    Some("volume_repair_pkey") => {
+                        Error::conflict("volume repair lock")
+                    }
+
+                    _ => public_error_from_diesel(e, ErrorHandler::Server),
+                },
+
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
             })
     }
 
