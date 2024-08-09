@@ -740,7 +740,10 @@ impl<'a> EarlyNetworkSetup<'a> {
                     );
                 }
             }
-            info!(self.log, "Waiting for dendrite to come online every 2 seconds");
+            info!(
+                self.log,
+                "Waiting for dendrite to come online every 2 seconds"
+            );
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
     }
