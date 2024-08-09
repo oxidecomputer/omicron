@@ -18,9 +18,11 @@ use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
+use nexus_db_model::Instance as DbInstance;
+use nexus_db_model::InstanceState as DbInstanceState;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
-use nexus_db_model::Vmm;
+use nexus_db_model::Vmm as DbVmm;
 use nexus_db_model::VmmState as DbVmmState;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
@@ -187,6 +189,11 @@ enum InstanceStateChangeRequestAction {
 pub(crate) enum InstanceRegisterReason {
     Start { vmm_id: PropolisUuid },
     Migrate { vmm_id: PropolisUuid, target_vmm_id: PropolisUuid },
+}
+
+enum InstanceStartDisposition {
+    Start,
+    AlreadyStarted,
 }
 
 impl super::Nexus {
@@ -719,57 +726,29 @@ impl super::Nexus {
             .db_datastore
             .instance_fetch_with_vmm(opctx, &authz_instance)
             .await?;
-        let (instance, vmm) = (state.instance(), state.vmm());
 
-        if let Some(vmm) = vmm {
-            match vmm.runtime.state {
-                DbVmmState::Starting
-                | DbVmmState::Running
-                | DbVmmState::Rebooting => {
-                    debug!(self.log, "asked to start an active instance";
-                           "instance_id" => %authz_instance.id());
+        match instance_start_allowed(&self.log, state.instance(), state.vmm())? {
+            InstanceStartDisposition::AlreadyStarted => Ok(state),
+            InstanceStartDisposition::Start => {
+                let saga_params = sagas::instance_start::Params {
+                    serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+                    db_instance: state.instance().clone(),
+                };
 
-                    return Ok(state);
-                }
-                DbVmmState::Stopped => {
-                    let propolis_id = instance
-                        .runtime()
-                        .propolis_id
-                        .expect("needed a VMM ID to fetch a VMM record");
-                    error!(self.log,
-                           "instance is stopped but still has an active VMM";
-                           "instance_id" => %authz_instance.id(),
-                           "propolis_id" => %propolis_id);
+                self.sagas
+                    .saga_execute::<sagas::instance_start::SagaInstanceStart>(
+                        saga_params,
+                    )
+                    .await?;
 
-                    return Err(Error::internal_error(
-                        "instance is stopped but still has an active VMM",
-                    ));
-                }
-                _ => {
-                    return Err(Error::conflict(&format!(
-                        "instance is in state {} but must be {} to be started",
-                        vmm.runtime.state,
-                        InstanceState::Stopped
-                    )));
-                }
+                self.db_datastore
+                    .instance_fetch_with_vmm(opctx, &authz_instance)
+                    .await
             }
         }
-
-        let saga_params = sagas::instance_start::Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            db_instance: instance.clone(),
-        };
-
-        self.sagas
-            .saga_execute::<sagas::instance_start::SagaInstanceStart>(
-                saga_params,
-            )
-            .await?;
-
-        self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
     }
 
-    /// Make sure the given Instance is stopped.
+        /// Make sure the given Instance is stopped.
     pub(crate) async fn instance_stop(
         &self,
         opctx: &OpContext,
@@ -1670,7 +1649,7 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         action: authz::Action,
-    ) -> Result<(Vmm, SocketAddr), Error> {
+    ) -> Result<(DbVmm, SocketAddr), Error> {
         let (.., authz_instance) = instance_lookup.lookup_for(action).await?;
 
         let state = self
@@ -1717,7 +1696,7 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         action: authz::Action,
-    ) -> Result<(Vmm, propolis_client::Client), Error> {
+    ) -> Result<(DbVmm, propolis_client::Client), Error> {
         let (vmm, client_addr) = self
             .propolis_addr_for_instance(opctx, instance_lookup, action)
             .await?;
@@ -2186,18 +2165,114 @@ pub(crate) async fn notify_instance_updated(
     }
 }
 
+/// Determines the disposition of a request to start an instance given its state
+/// (and its current VMM's state, if it has one) in the database.
+fn instance_start_allowed(
+    log: &slog::Logger,
+        instance: &DbInstance,
+        vmm: &Option<DbVmm>,
+    ) -> Result<InstanceStartDisposition, Error> {
+        // If the instance has an active VMM, there's nothing to start, but this
+        // disposition of this call (succeed for idempotency vs. fail with an
+        // error describing the conflict) depends on the state that VMM is in.
+        //
+        // If the instance doesn't have an active VMM, see if the instance state
+        // permits it to start.
+        if let Some(vmm) = vmm {
+            match vmm.runtime.state {
+                // If the VMM is already starting or is in another "active"
+                // state, succeed to make successful start attempts idempotent.
+                DbVmmState::Starting
+                | DbVmmState::Running
+                | DbVmmState::Rebooting
+                | DbVmmState::Migrating => {
+                    debug!(log, "asked to start an active instance";
+                           "instance_id" => %instance.id());
+
+                    Ok(InstanceStartDisposition::AlreadyStarted)
+                }
+                // If a previous start saga failed and left behind a VMM in the
+                // SagaUnwound state, allow a new start saga to try to overwrite
+                // it.
+                DbVmmState::SagaUnwound => {
+                    debug!(log, "instance's last VMM's start saga unwound";
+                           "instance_id" => %instance.id());
+
+                    Ok(InstanceStartDisposition::Start)
+                }
+                // When sled agent publishes a Stopped state, Nexus should clean
+                // up the instance/VMM pointer.
+                DbVmmState::Stopped => {
+                    let propolis_id = instance
+                        .runtime()
+                        .propolis_id
+                        .expect("needed a VMM ID to fetch a VMM record");
+                    error!(log,
+                           "instance is stopped but still has an active VMM";
+                           "instance_id" => %instance.id(),
+                           "propolis_id" => %propolis_id);
+
+                    Err(Error::internal_error(
+                        "instance is stopped but still has an active VMM",
+                    ))
+                }
+                _ => Err(Error::conflict(&format!(
+                    "instance is in state {} but must be {} to be started",
+                    vmm.runtime.state,
+                    InstanceState::Stopped
+                ))),
+            }
+        } else {
+            match instance.runtime_state.nexus_state {
+                // If the instance is in a known-good no-VMM state, it can
+                // start.
+                DbInstanceState::NoVmm => {
+                    debug!(log, "instance has no VMM, OK to start";
+                           "instance_id" => %instance.id());
+
+                    Ok(InstanceStartDisposition::Start)
+                }
+                // If the instance isn't ready yet or has been destroyed, it
+                // can't start.
+                //
+                // TODO(#2825): If the "Failed" state could be interpreted to
+                // mean "stopped abnormally" and not just "Nexus doesn't know
+                // what state the instance is in," it would be fine to start the
+                // instance here. See RFD 486.
+                DbInstanceState::Creating
+                | DbInstanceState::Failed
+                | DbInstanceState::Destroyed => Err(Error::conflict(&format!(
+                    "instance is in state {} but must be {} to be started",
+                    instance.runtime_state.nexus_state,
+                    InstanceState::Stopped
+                ))),
+                // If the instance is in the Vmm state, there should have been
+                // an active Propolis ID and a VMM record to read, so this
+                // branch shouldn't have been reached.
+                DbInstanceState::Vmm => Err(Error::internal_error(
+                    "instance is in state Vmm but has no active VMM",
+                )),
+            }
+        }
+    }
+
+
+
 #[cfg(test)]
 mod tests {
     use super::super::Nexus;
-    use super::{CloseCode, CloseFrame, WebSocketMessage, WebSocketStream};
+    use super::*;
     use core::time::Duration;
     use futures::{SinkExt, StreamExt};
+    use nexus_db_model::VmmInitialState;
+    use omicron_common::api::external::{Hostname, IdentityMetadataCreateParams, InstanceCpuCount, Name};
     use omicron_test_utils::dev::test_setup_log;
+    use params::InstanceNetworkInterfaceAttachment;
     use propolis_client::support::tungstenite::protocol::Role;
     use propolis_client::support::{
         InstanceSerialConsoleHelper, WSClientOffset,
     };
-    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 
     #[tokio::test]
     async fn test_serial_console_stream_proxying() {
@@ -2289,5 +2364,90 @@ mod tests {
             .expect("task successfully completed")
             .expect("proxy task exited successfully");
         logctx.cleanup_successful();
+    }
+
+    /// Creates an instance record and a VMM record that points back to it. Note
+    /// that the VMM is *not* installed in the instance's `active_propolis_id`
+    /// field.
+    fn make_instance_and_vmm() -> (DbInstance, DbVmm) {
+        let params = params::InstanceCreate {
+            identity: IdentityMetadataCreateParams { 
+                name: Name::try_from("elysium".to_owned()).unwrap(),
+                description: "this instance is disco".to_owned(),
+            },
+            ncpus: InstanceCpuCount(1),
+            memory: ByteCount::from_gibibytes_u32(1),
+            hostname: Hostname::try_from("elysium").unwrap(),
+            user_data: vec![],
+            network_interfaces: InstanceNetworkInterfaceAttachment::None,
+            external_ips: vec![],
+            disks: vec![],
+            ssh_public_keys: None,
+            start: false,
+        };
+
+        let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
+        let project_id = Uuid::new_v4();
+        let instance = DbInstance::new(
+            instance_id,
+            project_id,
+            &params,
+        );
+
+        let propolis_id = PropolisUuid::from_untyped_uuid(Uuid::new_v4());
+        let sled_id = SledUuid::from_untyped_uuid(Uuid::new_v4());
+        let vmm = DbVmm::new(
+            propolis_id,
+            instance_id,
+            sled_id,
+            ipnetwork::IpNetwork::new(IpAddr::V4(Ipv4Addr::new(0,0,0,0)), 0).unwrap(), 
+            0,
+            VmmInitialState::Starting
+        );
+
+        (instance, vmm)
+    }
+
+    #[test]
+    fn test_instance_start_allowed_when_no_vmm() {
+        let logctx = test_setup_log("test_instance_start_allowed_when_no_vmm");
+        let (mut instance, _vmm) = make_instance_and_vmm();
+        instance.runtime_state.nexus_state = DbInstanceState::NoVmm;
+        assert!(instance_start_allowed(&logctx.log, &instance, &None).is_ok());
+    }
+
+    #[test]
+    fn test_instance_start_allowed_when_vmm_in_saga_unwound() {
+        let logctx = test_setup_log("test_instance_start_allowed_when_vmm_in_saga_unwound");
+        let (mut instance, mut vmm) = make_instance_and_vmm();
+        instance.runtime_state.nexus_state = DbInstanceState::Vmm;
+        instance.runtime_state.propolis_id = Some(vmm.id);
+        vmm.runtime.state = DbVmmState::SagaUnwound;
+        assert!(instance_start_allowed(&logctx.log, &instance, &Some(vmm)).is_ok());
+    }
+
+    #[test]
+    fn test_instance_start_forbidden_while_creating() {
+        let logctx = test_setup_log("test_instance_start_forbidden_while_creating");
+        let (mut instance, _vmm) = make_instance_and_vmm();
+        instance.runtime_state.nexus_state = DbInstanceState::Creating;
+        assert!(instance_start_allowed(&logctx.log, &instance, &None).is_err());
+    }
+
+    #[test]
+    fn test_instance_start_idempotent_if_active() {
+        let logctx = test_setup_log("test_instance_start_idempotent_if_active");
+        let (mut instance, vmm) = make_instance_and_vmm();
+        instance.runtime_state.nexus_state = DbInstanceState::Vmm;
+        instance.runtime_state.propolis_id = Some(vmm.id);
+        let mut vmm = Some(vmm);
+        vmm.as_mut().unwrap().runtime.state = DbVmmState::Starting;
+        assert!(instance_start_allowed(&logctx.log, &instance, &vmm).is_ok());
+        vmm.as_mut().unwrap().runtime.state = DbVmmState::Running;
+        assert!(instance_start_allowed(&logctx.log, &instance, &vmm).is_ok());
+        vmm.as_mut().unwrap().runtime.state = DbVmmState::Rebooting;
+        assert!(instance_start_allowed(&logctx.log, &instance, &vmm).is_ok());
+        vmm.as_mut().unwrap().runtime.state = DbVmmState::Migrating;
+        assert!(instance_start_allowed(&logctx.log, &instance, &vmm).is_ok());
     }
 }
