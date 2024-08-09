@@ -442,6 +442,7 @@ Usage: omdb nexus [OPTIONS] <COMMAND>
 Commands:
   background-tasks  print information about background tasks
   blueprints        interact with blueprints
+  sagas             view sagas, create and complete demo sagas
   sleds             interact with sleds
   help              Print this message or the help of the given subcommand(s)
 
@@ -505,6 +506,34 @@ Commands:
   regenerate  Generate a new blueprint
   import      Import a blueprint
   help        Print this message or the help of the given subcommand(s)
+
+Options:
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+  -h, --help                   Print help
+
+Connection Options:
+      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
+                                                 OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "sagas"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+view sagas, create and complete demo sagas
+
+Usage: omdb nexus sagas [OPTIONS] <COMMAND>
+
+Commands:
+  list           List sagas run by this Nexus
+  demo-create    Create a "demo" saga
+  demo-complete  Complete a demo saga started with "demo-create"
+  help           Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]

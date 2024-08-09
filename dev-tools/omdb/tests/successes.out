@@ -609,6 +609,41 @@ warning: unknown background task: "vpc_route_manager" (don't know how to interpr
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
+EXECUTING COMMAND: omdb ["nexus", "sagas", "list"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+SAGA_ID STATE 
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+NOTE: This command only reads in-memory state from the targeted Nexus instance.
+Sagas may be missing if they were run by a different Nexus instance or if they
+finished before this Nexus instance last started up.
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "sagas", "demo-create"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+saga id:      ..........<REDACTED_UUID>...........
+demo saga id: ..........<REDACTED_UUID>........... (use this with `demo-complete`)
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "sagas", "list"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+SAGA_ID                              STATE   
+..........<REDACTED_UUID>........... running 
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+NOTE: This command only reads in-memory state from the targeted Nexus instance.
+Sagas may be missing if they were run by a different Nexus instance or if they
+finished before this Nexus instance last started up.
+=============================================
 EXECUTING COMMAND: omdb ["--destructive", "nexus", "background-tasks", "activate", "inventory_collection"]
 termination: Exited(0)
 ---------------------------------------------
