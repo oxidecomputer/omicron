@@ -8,7 +8,7 @@ use serde::Serialize;
 use std::fmt;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug)]
+    #[derive(SqlType, Debug, Clone)]
     #[diesel(postgres_type(name = "vmm_state", schema = "public"))]
     pub struct VmmStateEnum;
 
@@ -41,6 +41,11 @@ impl VmmState {
             VmmState::SagaUnwound => "saga_unwound",
         }
     }
+
+    /// States in which it is safe to deallocate a VMM's sled resources and mark
+    /// it as deleted.
+    pub const DESTROYABLE_STATES: &'static [Self] =
+        &[Self::Destroyed, Self::SagaUnwound];
 }
 
 impl fmt::Display for VmmState {
@@ -118,4 +123,9 @@ impl From<VmmState> for omicron_common::api::external::InstanceState {
             VmmState::Destroyed => Output::Destroyed,
         }
     }
+}
+
+impl diesel::query_builder::QueryId for VmmStateEnum {
+    type QueryId = ();
+    const HAS_STATIC_QUERY_ID: bool = false;
 }

@@ -280,10 +280,7 @@ impl DataStore {
     }
 
     /// Transitively removes the CPU and memory charges for an instance from the
-    /// instance's project, silo, and fleet, provided that the instance's state
-    /// generation is less than `max_instance_gen`. This allows a caller who is
-    /// about to apply generation G to an instance to avoid deleting resources
-    /// if its update was superseded.
+    /// instance's project, silo, and fleet.
     pub async fn virtual_provisioning_collection_delete_instance(
         &self,
         opctx: &OpContext,
@@ -291,12 +288,10 @@ impl DataStore {
         project_id: Uuid,
         cpus_diff: i64,
         ram_diff: ByteCount,
-        max_instance_gen: i64,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         let provisions =
             VirtualProvisioningCollectionUpdate::new_delete_instance(
                 id,
-                max_instance_gen,
                 cpus_diff,
                 ram_diff,
                 project_id,
@@ -518,8 +513,6 @@ mod test {
 
         // Delete the instance
 
-        // Make this value outrageously high, so that as a "max" it is ignored.
-        let max_instance_gen: i64 = 1000;
         datastore
             .virtual_provisioning_collection_delete_instance(
                 &opctx,
@@ -527,7 +520,6 @@ mod test {
                 project_id,
                 cpus,
                 ram,
-                max_instance_gen,
             )
             .await
             .unwrap();
@@ -614,10 +606,6 @@ mod test {
 
         // Delete the instance
 
-        // If the "instance gen" is too low, the delete operation should be
-        // dropped. This mimics circumstances where an instance update arrives
-        // late to the query.
-        let max_instance_gen = 0;
         datastore
             .virtual_provisioning_collection_delete_instance(
                 &opctx,
@@ -625,25 +613,6 @@ mod test {
                 project_id,
                 cpus,
                 ram,
-                max_instance_gen,
-            )
-            .await
-            .unwrap();
-        for id in ids {
-            verify_collection_usage(&datastore, &opctx, id, 12, 1 << 30, 0)
-                .await;
-        }
-
-        // Make this value outrageously high, so that as a "max" it is ignored.
-        let max_instance_gen = 1000;
-        datastore
-            .virtual_provisioning_collection_delete_instance(
-                &opctx,
-                instance_id,
-                project_id,
-                cpus,
-                ram,
-                max_instance_gen,
             )
             .await
             .unwrap();
@@ -664,7 +633,6 @@ mod test {
                 project_id,
                 cpus,
                 ram,
-                max_instance_gen,
             )
             .await
             .unwrap();

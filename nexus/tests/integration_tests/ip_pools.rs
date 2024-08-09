@@ -6,6 +6,7 @@
 
 use std::net::Ipv4Addr;
 
+use crate::integration_tests::instances::instance_wait_for_state;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::ResultsPage;
@@ -54,6 +55,7 @@ use nexus_types::external_api::views::SiloIpPool;
 use nexus_types::identity::Resource;
 use omicron_common::address::Ipv6Range;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
+use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::SimpleIdentity;
@@ -1348,6 +1350,7 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
         .unwrap()
         .expect("running instance should be on a sled");
     sa.instance_finish_transition(instance.identity.id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     // Delete the instance
     NexusRequest::object_delete(client, &instance_url)

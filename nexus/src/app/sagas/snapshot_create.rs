@@ -2308,6 +2308,20 @@ mod test {
                             PROJECT_NAME,
                         )
                         .await;
+                        // Wait until the instance has advanced to the `NoVmm`
+                        // state before deleting it. This may not happen
+                        // immediately, as the `Nexus::cpapi_instances_put` API
+                        // endpoint simply writes the new VMM state to the
+                        // database and *starts* an `instance-update` saga, and
+                        // the instance record isn't updated until that saga
+                        // completes.
+                        test_helpers::instance_wait_for_state_by_name(
+                            cptestctx,
+                            INSTANCE_NAME,
+                            PROJECT_NAME,
+                            nexus_db_model::InstanceState::NoVmm,
+                        )
+                        .await;
                         test_helpers::instance_delete_by_name(
                             cptestctx,
                             INSTANCE_NAME,

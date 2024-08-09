@@ -235,21 +235,38 @@ async fn sis_move_to_starting(
 
     // For idempotency, refetch the instance to see if this step already applied
     // its desired update.
-    let (.., db_instance) = LookupPath::new(&opctx, &datastore)
+    let (_, _, authz_instance, ..) = LookupPath::new(&opctx, &datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .fetch_for(authz::Action::Modify)
         .await
         .map_err(ActionError::action_failed)?;
+    let state = datastore
+        .instance_fetch_with_vmm(&opctx, &authz_instance)
+        .await
+        .map_err(ActionError::action_failed)?;
 
-    match db_instance.runtime().propolis_id {
+    let db_instance = state.instance();
+
+    // If `true`, we have unlinked a Propolis ID left behind by a previous
+    // unwinding start saga, and we should activate the activate the abandoned
+    // VMM reaper background task once we've written back the instance record.
+    let mut abandoned_unwound_vmm = false;
+    match state.vmm() {
         // If this saga's Propolis ID is already written to the record, then
         // this step must have completed already and is being retried, so
         // proceed.
-        Some(db_id) if db_id == propolis_id.into_untyped_uuid() => {
+        Some(vmm) if vmm.id == propolis_id.into_untyped_uuid() => {
             info!(osagactx.log(), "start saga: Propolis ID already set";
                   "instance_id" => %instance_id);
 
-            Ok(db_instance)
+            return Ok(db_instance.clone());
+        }
+
+        // If the instance has a Propolis ID, but the Propolis was left behind
+        // by a previous start saga unwinding, that's fine, we can just clear it
+        // out and proceed as though there was no Propolis ID here.
+        Some(vmm) if vmm.runtime.state == db::model::VmmState::SagaUnwound => {
+            abandoned_unwound_vmm = true;
         }
 
         // If the instance has a different Propolis ID, a competing start saga
@@ -266,33 +283,38 @@ async fn sis_move_to_starting(
         // this point causes the VMM's state, which is Starting, to supersede
         // the instance's state, so this won't cause the instance to appear to
         // be running before Propolis thinks it has started.)
-        None => {
-            let new_runtime = db::model::InstanceRuntimeState {
-                nexus_state: db::model::InstanceState::Vmm,
-                propolis_id: Some(propolis_id.into_untyped_uuid()),
-                time_updated: Utc::now(),
-                gen: db_instance.runtime().gen.next().into(),
-                ..db_instance.runtime_state
-            };
-
-            // Bail if another actor managed to update the instance's state in
-            // the meantime.
-            if !osagactx
-                .datastore()
-                .instance_update_runtime(&instance_id, &new_runtime)
-                .await
-                .map_err(ActionError::action_failed)?
-            {
-                return Err(ActionError::action_failed(Error::conflict(
-                    "instance changed state before it could be started",
-                )));
-            }
-
-            let mut new_record = db_instance.clone();
-            new_record.runtime_state = new_runtime;
-            Ok(new_record)
-        }
+        None => {}
     }
+
+    let new_runtime = db::model::InstanceRuntimeState {
+        nexus_state: db::model::InstanceState::Vmm,
+        propolis_id: Some(propolis_id.into_untyped_uuid()),
+        time_updated: Utc::now(),
+        gen: db_instance.runtime().gen.next().into(),
+        ..db_instance.runtime_state
+    };
+
+    // Bail if another actor managed to update the instance's state in
+    // the meantime.
+    if !osagactx
+        .datastore()
+        .instance_update_runtime(&instance_id, &new_runtime)
+        .await
+        .map_err(ActionError::action_failed)?
+    {
+        return Err(ActionError::action_failed(Error::conflict(
+            "instance changed state before it could be started",
+        )));
+    }
+
+    // Don't fear the reaper!
+    if abandoned_unwound_vmm {
+        osagactx.nexus().background_tasks.task_abandoned_vmm_reaper.activate();
+    }
+
+    let mut new_record = db_instance.clone();
+    new_record.runtime_state = new_runtime;
+    Ok(new_record)
 }
 
 async fn sis_move_to_starting_undo(
@@ -363,9 +385,6 @@ async fn sis_account_virtual_resources_undo(
         &params.serialized_authn,
     );
 
-    let started_record =
-        sagactx.lookup::<db::model::Instance>("started_record")?;
-
     osagactx
         .datastore()
         .virtual_provisioning_collection_delete_instance(
@@ -374,11 +393,6 @@ async fn sis_account_virtual_resources_undo(
             params.db_instance.project_id,
             i64::from(params.db_instance.ncpus.0 .0),
             nexus_db_model::ByteCount(*params.db_instance.memory),
-            // Use the next instance generation number as the generation limit
-            // to ensure the provisioning counters are released. (The "mark as
-            // starting" undo step will "publish" this new state generation when
-            // it moves the instance back to Stopped.)
-            (&started_record.runtime().gen.next()).into(),
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -810,28 +824,23 @@ mod test {
                 })
             },
             || {
-                Box::pin({
-                    async {
-                        let new_db_instance = test_helpers::instance_fetch(
-                            cptestctx,
-                            instance_id,
-                        )
-                        .await.instance().clone();
+                Box::pin(async {
+                    let new_db_state = test_helpers::instance_wait_for_state(
+                        cptestctx,
+                        instance_id,
+                        nexus_db_model::InstanceState::NoVmm,
+                    ).await;
+                    let new_db_instance = new_db_state.instance();
 
-                        info!(log,
-                              "fetched instance runtime state after saga execution";
-                              "instance_id" => %instance.identity.id,
-                              "instance_runtime" => ?new_db_instance.runtime());
+                    info!(log,
+                        "fetched instance runtime state after saga execution";
+                        "instance_id" => %instance.identity.id,
+                        "instance_runtime" => ?new_db_instance.runtime());
 
-                        assert!(new_db_instance.runtime().propolis_id.is_none());
-                        assert_eq!(
-                            new_db_instance.runtime().nexus_state,
-                            nexus_db_model::InstanceState::NoVmm
-                        );
+                    assert!(new_db_instance.runtime().propolis_id.is_none());
 
-                        assert!(test_helpers::no_virtual_provisioning_resource_records_exist(cptestctx).await);
-                        assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx).await);
-                    }
+                    assert!(test_helpers::no_virtual_provisioning_resource_records_exist(cptestctx).await);
+                    assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx).await);
                 })
             },
             log,

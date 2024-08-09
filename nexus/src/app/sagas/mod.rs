@@ -33,6 +33,7 @@ pub mod instance_ip_attach;
 pub mod instance_ip_detach;
 pub mod instance_migrate;
 pub mod instance_start;
+pub mod instance_update;
 pub mod project_create;
 pub mod region_replacement_drive;
 pub mod region_replacement_finish;
@@ -154,6 +155,9 @@ fn make_action_registry() -> ActionRegistry {
         &mut registry,
     );
     <instance_start::SagaInstanceStart as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <instance_update::SagaInstanceUpdate as NexusSaga>::register_actions(
         &mut registry,
     );
     <project_create::SagaProjectCreate as NexusSaga>::register_actions(

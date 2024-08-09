@@ -421,8 +421,9 @@ async fn test_instances_create_reboot_halt(
 
     let instance = instance_next;
     instance_simulate(nexus, &instance_id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, InstanceState::Stopped);
+    let instance_next =
+        instance_wait_for_state(client, instance_id, InstanceState::Stopped)
+            .await;
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -516,8 +517,9 @@ async fn test_instances_create_reboot_halt(
     // assert_eq!(error.message, "cannot reboot instance in state \"stopping\"");
     let instance = instance_next;
     instance_simulate(nexus, &instance_id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, InstanceState::Stopped);
+    let instance_next =
+        instance_wait_for_state(client, instance_id, InstanceState::Stopped)
+            .await;
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -629,8 +631,7 @@ async fn test_instance_start_creates_networking_state(
     instance_simulate(nexus, &instance_id).await;
     instance_post(&client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance_id).await;
-    let instance = instance_get(&client, &instance_url).await;
-    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     // Forcibly clear the instance's V2P mappings to simulate what happens when
     // the control plane comes up when an instance is stopped.
@@ -837,18 +838,56 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(migration.target_state, MigrationState::Pending.into());
     assert_eq!(migration.source_state, MigrationState::Pending.into());
 
-    // Explicitly simulate the migration action on the target. Simulated
-    // migrations always succeed. The state transition on the target is
-    // sufficient to move the instance back into a Running state (strictly
-    // speaking no further updates from the source are required if the target
-    // successfully takes over).
-    instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
-    // Ensure that both sled agents report that the migration has completed.
+    // Simulate the migration. We will use `instance_single_step_on_sled` to
+    // single-step both sled-agents through the migration state machine and
+    // ensure that the migration state looks nice at each step.
+    instance_simulate_migration_source(
+        cptestctx,
+        nexus,
+        original_sled,
+        instance_id,
+        migration_id,
+    )
+    .await;
+
+    // Move source to "migrating".
+    instance_single_step_on_sled(cptestctx, nexus, original_sled, instance_id)
+        .await;
+    instance_single_step_on_sled(cptestctx, nexus, original_sled, instance_id)
+        .await;
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::InProgress.into());
+    assert_eq!(migration.target_state, MigrationState::Pending.into());
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
+
+    // Move target to "migrating".
+    instance_single_step_on_sled(cptestctx, nexus, dst_sled_id, instance_id)
+        .await;
+    instance_single_step_on_sled(cptestctx, nexus, dst_sled_id, instance_id)
+        .await;
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::InProgress.into());
+    assert_eq!(migration.target_state, MigrationState::InProgress.into());
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
+
+    // Move the source to "completed"
     instance_simulate_on_sled(cptestctx, nexus, original_sled, instance_id)
         .await;
 
-    let instance = instance_get(&client, &instance_url).await;
-    assert_eq!(instance.runtime.run_state, InstanceState::Running);
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::Completed.into());
+    assert_eq!(migration.target_state, MigrationState::InProgress.into());
+    let instance = dbg!(instance_get(&client, &instance_url).await);
+    assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
+
+    // Move the target to "completed".
+    instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
+
+    instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
 
     let current_sled = nexus
         .instance_sled_id(&instance_id)
@@ -973,9 +1012,40 @@ async fn test_instance_migrate_v2p_and_routes(
     .parsed_body::<Instance>()
     .unwrap();
 
+    let migration_id = {
+        let datastore = apictx.nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            datastore.clone(),
+        );
+        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+            .instance_id(instance.identity.id)
+            .lookup_for(nexus_db_queries::authz::Action::Read)
+            .await
+            .unwrap();
+        datastore
+            .instance_refetch(&opctx, &authz_instance)
+            .await
+            .unwrap()
+            .runtime_state
+            .migration_id
+            .expect("since we've started a migration, the instance record must have a migration id!")
+    };
+
+    // Tell both sled-agents to pretend to do the migration.
+    instance_simulate_migration_source(
+        cptestctx,
+        nexus,
+        original_sled_id,
+        instance_id,
+        migration_id,
+    )
+    .await;
+    instance_simulate_on_sled(cptestctx, nexus, original_sled_id, instance_id)
+        .await;
     instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
-    let instance = instance_get(&client, &instance_url).await;
-    assert_eq!(instance.runtime.run_state, InstanceState::Running);
+    instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
+
     let current_sled = nexus
         .instance_sled_id(&instance_id)
         .await
@@ -1186,9 +1256,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
         instance_post(&client, instance_name, InstanceOp::Stop).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     instance_simulate(nexus, &instance_id).await;
-    let instance =
-        instance_get(&client, &get_instance_url(&instance_name)).await;
-    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     let virtual_provisioning_collection = datastore
         .virtual_provisioning_collection_get(&opctx, project_id)
@@ -1328,14 +1396,54 @@ async fn test_instance_metrics_with_migration(
     .parsed_body::<Instance>()
     .unwrap();
 
+    let migration_id = {
+        let datastore = apictx.nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            datastore.clone(),
+        );
+        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+            .instance_id(instance.identity.id)
+            .lookup_for(nexus_db_queries::authz::Action::Read)
+            .await
+            .unwrap();
+        datastore
+            .instance_refetch(&opctx, &authz_instance)
+            .await
+            .unwrap()
+            .runtime_state
+            .migration_id
+            .expect("since we've started a migration, the instance record must have a migration id!")
+    };
+
+    // Wait for the instance to be in the `Migrating` state. Otherwise, the
+    // subsequent `instance_wait_for_state(..., Running)` may see the `Running`
+    // state from the *old* VMM, rather than waiting for the migration to
+    // complete.
+    instance_simulate_migration_source(
+        cptestctx,
+        nexus,
+        original_sled,
+        instance_id,
+        migration_id,
+    )
+    .await;
+    instance_single_step_on_sled(cptestctx, nexus, original_sled, instance_id)
+        .await;
+    instance_single_step_on_sled(cptestctx, nexus, dst_sled_id, instance_id)
+        .await;
+    instance_wait_for_state(&client, instance_id, InstanceState::Migrating)
+        .await;
+
     check_provisioning_state(4, 1).await;
 
     // Complete migration on the target. Simulated migrations always succeed.
     // After this the instance should be running and should continue to appear
     // to be provisioned.
+    instance_simulate_on_sled(cptestctx, nexus, original_sled, instance_id)
+        .await;
     instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
-    let instance = instance_get(&client, &instance_url).await;
-    assert_eq!(instance.runtime.run_state, InstanceState::Running);
+    instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
 
     check_provisioning_state(4, 1).await;
 
@@ -1347,9 +1455,7 @@ async fn test_instance_metrics_with_migration(
     // logical states of instances ignoring migration).
     instance_post(&client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance_id).await;
-    let instance =
-        instance_get(&client, &get_instance_url(&instance_name)).await;
-    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+    instance_wait_for_state(&client, instance_id, InstanceState::Stopped).await;
 
     check_provisioning_state(0, 0).await;
 }
@@ -1449,8 +1555,7 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
     // Stop the instance
     instance_post(&client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance_id).await;
-    let instance = instance_get(&client, &instance_url).await;
-    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+    instance_wait_for_state(&client, instance_id, InstanceState::Stopped).await;
 
     // Now deletion should succeed.
     NexusRequest::object_delete(&client, &instance_url)
@@ -2051,6 +2156,7 @@ async fn test_instance_create_delete_network_interface(
     let instance = instance_post(client, instance_name, InstanceOp::Stop).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     // Verify we can now make the requests again
     let mut interfaces = Vec::with_capacity(2);
@@ -2120,6 +2226,7 @@ async fn test_instance_create_delete_network_interface(
     // Stop the instance and verify we can delete the interface
     instance_post(client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     // We should not be able to delete the primary interface, while the
     // secondary still exists
@@ -2258,6 +2365,7 @@ async fn test_instance_update_network_interfaces(
     let instance = instance_post(client, instance_name, InstanceOp::Stop).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     // Create the first interface on the instance.
     let primary_iface = NexusRequest::objects_post(
@@ -2318,6 +2426,8 @@ async fn test_instance_update_network_interfaces(
     // Stop the instance again, and now verify that the update works.
     instance_post(client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
     let updated_primary_iface = NexusRequest::object_put(
         client,
         &format!("/v1/network-interfaces/{}", primary_iface.identity.id),
@@ -2451,6 +2561,7 @@ async fn test_instance_update_network_interfaces(
     // Stop the instance again.
     instance_post(client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     // Verify that we can set the secondary as the new primary, and that nothing
     // else changes about the NICs.
@@ -3231,8 +3342,7 @@ async fn test_disks_detached_when_instance_destroyed(
     instance_post(&client, instance_name, InstanceOp::Stop).await;
 
     instance_simulate(nexus, &instance_id).await;
-    let instance = instance_get(&client, &instance_url).await;
-    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+    instance_wait_for_state(&client, instance_id, InstanceState::Stopped).await;
 
     NexusRequest::object_delete(&client, &instance_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -3750,6 +3860,8 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
     instance_simulate(nexus, &instance_id).await;
     instances[1] = instance_post(client, configs[1].0, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
     expect_instance_start_ok(client, configs[2].0).await;
 }
 
@@ -3857,6 +3969,8 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
     instance_simulate(nexus, &instance_id).await;
     instances[1] = instance_post(client, configs[1].0, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
     expect_instance_start_ok(client, configs[2].0).await;
 }
 
@@ -3979,8 +4093,9 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
 
     let instance = instance_next;
     instance_simulate(nexus, &instance_id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, InstanceState::Stopped);
+    let instance_next =
+        instance_wait_for_state(&client, instance_id, InstanceState::Stopped)
+            .await;
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -4146,12 +4261,10 @@ async fn stop_and_delete_instance(
     let client = &cptestctx.external_client;
     let instance =
         instance_post(&client, instance_name, InstanceOp::Stop).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     let nexus = &cptestctx.server.server_context().nexus;
-    instance_simulate(
-        nexus,
-        &InstanceUuid::from_untyped_uuid(instance.identity.id),
-    )
-    .await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
     let url =
         format!("/v1/instances/{}?project={}", instance_name, PROJECT_NAME);
     object_delete(client, &url).await;
@@ -4577,6 +4690,13 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
     .expect("Failed to stop the instance");
 
     instance_simulate_with_opctx(nexus, &instance_id, &opctx).await;
+    instance_wait_for_state_as(
+        client,
+        AuthnMode::SiloUser(user_id),
+        instance_id,
+        InstanceState::Stopped,
+    )
+    .await;
 
     // Delete the instance
     NexusRequest::object_delete(client, &instance_url)
@@ -4664,6 +4784,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     instance_simulate(nexus, &instance_id).await;
     instance_post(&client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     let instance_url = get_instance_url(instance_name);
     NexusRequest::object_delete(client, &instance_url)
@@ -4728,6 +4849,73 @@ pub enum InstanceOp {
     Start,
     Stop,
     Reboot,
+}
+
+pub async fn instance_wait_for_state(
+    client: &ClientTestContext,
+    instance_id: InstanceUuid,
+    state: omicron_common::api::external::InstanceState,
+) -> Instance {
+    instance_wait_for_state_as(
+        client,
+        AuthnMode::PrivilegedUser,
+        instance_id,
+        state,
+    )
+    .await
+}
+
+/// Line [`instance_wait_for_state`], but with an [`AuthnMode`] parameter for
+/// the instance lookup requests.
+pub async fn instance_wait_for_state_as(
+    client: &ClientTestContext,
+    authn_as: AuthnMode,
+    instance_id: InstanceUuid,
+    state: omicron_common::api::external::InstanceState,
+) -> Instance {
+    const MAX_WAIT: Duration = Duration::from_secs(120);
+
+    slog::info!(
+        &client.client_log,
+        "waiting for instance {instance_id} to transition to {state}...";
+    );
+    let url = format!("/v1/instances/{instance_id}");
+    let result = wait_for_condition(
+        || async {
+            let instance: Instance = NexusRequest::object_get(client, &url)
+                .authn_as(authn_as.clone())
+                .execute()
+                .await?
+                .parsed_body()?;
+            if instance.runtime.run_state == state {
+                Ok(instance)
+            } else {
+                slog::info!(
+                    &client.client_log,
+                    "instance {instance_id} has not transitioned to {state}";
+                    "instance_id" => %instance.identity.id,
+                    "instance_runtime_state" => ?instance.runtime,
+                );
+                Err(CondCheckError::<anyhow::Error>::NotYet)
+            }
+        },
+        &Duration::from_secs(1),
+        &MAX_WAIT,
+    )
+    .await;
+    match result {
+        Ok(instance) => {
+            slog::info!(
+                &client.client_log,
+                "instance {instance_id} has transitioned to {state}"
+            );
+            instance
+        }
+        Err(e) => panic!(
+            "instance {instance_id} did not transition to {state:?} \
+             after {MAX_WAIT:?}: {e}"
+        ),
+    }
 }
 
 pub async fn instance_post(
@@ -4896,6 +5084,22 @@ pub async fn instance_simulate(nexus: &Arc<Nexus>, id: &InstanceUuid) {
     sa.instance_finish_transition(id.into_untyped_uuid()).await;
 }
 
+/// Simulate one step of an ongoing instance state transition.  To do this, we
+/// have to look up the instance, then get the sled agent associated with that
+/// instance, and then tell it to finish simulating whatever async transition is
+/// going on.
+async fn instance_single_step_on_sled(
+    cptestctx: &ControlPlaneTestContext,
+    nexus: &Arc<Nexus>,
+    sled_id: SledUuid,
+    instance_id: InstanceUuid,
+) {
+    info!(&cptestctx.logctx.log, "Single-stepping simulated instance on sled";
+          "instance_id" => %instance_id, "sled_id" => %sled_id);
+    let sa = nexus.sled_client(&sled_id).await.unwrap();
+    sa.instance_single_step(instance_id.into_untyped_uuid()).await;
+}
+
 pub async fn instance_simulate_with_opctx(
     nexus: &Arc<Nexus>,
     id: &InstanceUuid,
@@ -4922,4 +5126,31 @@ async fn instance_simulate_on_sled(
           "instance_id" => %instance_id, "sled_id" => %sled_id);
     let sa = nexus.sled_client(&sled_id).await.unwrap();
     sa.instance_finish_transition(instance_id.into_untyped_uuid()).await;
+}
+
+/// Simulates a migration source for the provided instance ID, sled ID, and
+/// migration ID.
+async fn instance_simulate_migration_source(
+    cptestctx: &ControlPlaneTestContext,
+    nexus: &Arc<Nexus>,
+    sled_id: SledUuid,
+    instance_id: InstanceUuid,
+    migration_id: Uuid,
+) {
+    info!(
+        &cptestctx.logctx.log,
+        "Simulating migration source sled";
+        "instance_id" => %instance_id,
+        "sled_id" => %sled_id,
+        "migration_id" => %migration_id,
+    );
+    let sa = nexus.sled_client(&sled_id).await.unwrap();
+    sa.instance_simulate_migration_source(
+        instance_id.into_untyped_uuid(),
+        sled_agent_client::SimulateMigrationSource {
+            migration_id,
+            result: sled_agent_client::SimulatedMigrationResult::Success,
+        },
+    )
+    .await;
 }

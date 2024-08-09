@@ -4,11 +4,11 @@
 
 //! HTTP entrypoint functions for the sled agent's exposed API
 
+use super::collection::PokeMode;
 use crate::bootstrap::params::AddSledRequest;
 use crate::params::{
     DiskEnsureBody, InstanceEnsureBody, InstanceExternalIpBody,
-    InstancePutMigrationIdsBody, InstancePutStateBody,
-    InstancePutStateResponse, InstanceUnregisterResponse,
+    InstancePutStateBody, InstancePutStateResponse, InstanceUnregisterResponse,
     VpcFirewallRulesEnsureBody,
 };
 use dropshot::ApiDescription;
@@ -45,7 +45,6 @@ pub fn api() -> SledApiDescription {
     fn register_endpoints(
         api: &mut SledApiDescription,
     ) -> Result<(), ApiDescriptionRegisterError> {
-        api.register(instance_put_migration_ids)?;
         api.register(instance_put_state)?;
         api.register(instance_get_state)?;
         api.register(instance_register)?;
@@ -53,6 +52,8 @@ pub fn api() -> SledApiDescription {
         api.register(instance_put_external_ip)?;
         api.register(instance_delete_external_ip)?;
         api.register(instance_poke_post)?;
+        api.register(instance_poke_single_step_post)?;
+        api.register(instance_post_sim_migration_source)?;
         api.register(disk_put)?;
         api.register(disk_poke_post)?;
         api.register(update_artifact)?;
@@ -159,28 +160,6 @@ async fn instance_get_state(
 
 #[endpoint {
     method = PUT,
-    path = "/instances/{instance_id}/migration-ids",
-}]
-async fn instance_put_migration_ids(
-    rqctx: RequestContext<Arc<SledAgent>>,
-    path_params: Path<InstancePathParam>,
-    body: TypedBody<InstancePutMigrationIdsBody>,
-) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
-    let sa = rqctx.context();
-    let instance_id = path_params.into_inner().instance_id;
-    let body_args = body.into_inner();
-    Ok(HttpResponseOk(
-        sa.instance_put_migration_ids(
-            instance_id,
-            &body_args.old_runtime,
-            &body_args.migration_params,
-        )
-        .await?,
-    ))
-}
-
-#[endpoint {
-    method = PUT,
     path = "/instances/{instance_id}/external-ip",
 }]
 async fn instance_put_external_ip(
@@ -221,7 +200,37 @@ async fn instance_poke_post(
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
     let instance_id = path_params.into_inner().instance_id;
-    sa.instance_poke(instance_id).await;
+    sa.instance_poke(instance_id, PokeMode::Drain).await;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = POST,
+    path = "/instances/{instance_id}/poke-single-step",
+}]
+async fn instance_poke_single_step_post(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    sa.instance_poke(instance_id, PokeMode::SingleStep).await;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = POST,
+    path = "/instances/{instance_id}/sim-migration-source",
+}]
+async fn instance_post_sim_migration_source(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    path_params: Path<InstancePathParam>,
+    body: TypedBody<super::instance::SimulateMigrationSource>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    sa.instance_simulate_migration_source(instance_id, body.into_inner())
+        .await?;
     Ok(HttpResponseUpdatedNoContent())
 }
 
