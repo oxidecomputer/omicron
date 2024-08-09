@@ -12,7 +12,6 @@ use dpd_client::Client as DpdClient;
 use futures::future;
 use gateway_client::Client as MgsClient;
 use http::StatusCode;
-use illumos_utils::running_zone::SWITCH_ZONE_INIT_STAGE;
 use internal_dns::resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
 use mg_admin_client::types::BfdPeerConfig as MgBfdPeerConfig;
@@ -363,16 +362,15 @@ impl<'a> EarlyNetworkSetup<'a> {
         rack_network_config: &RackNetworkConfig,
         switch_zone_underlay_ip: Ipv6Addr,
     ) -> Result<Vec<PortConfig>, EarlyNetworkSetupError> {
-        let log = self.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
         // First, we have to know which switch we are: ask MGS.
         info!(
-            log,
+            self.log,
             "Determining physical location of our switch zone at \
              {switch_zone_underlay_ip}",
         );
         let mgs_client = MgsClient::new(
             &format!("http://[{}]:{}", switch_zone_underlay_ip, MGS_PORT),
-            log.new(o!("component" => "MgsClient")),
+            self.log.new(o!("component" => "MgsClient")),
         );
         let switch_slot = retry_notify(
             retry_policy_local(),
@@ -385,7 +383,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             },
             |error, delay| {
                 warn!(
-                    log,
+                    self.log,
                     "Failed to get switch ID from MGS (retrying in {delay:?})";
                     "error" => ?error,
                 );
@@ -414,7 +412,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             .collect::<Vec<_>>();
 
         info!(
-            log,
+            self.log,
             "Initializing {} Uplinks on {switch_location:?} at \
              {switch_zone_underlay_ip} via Dendrite",
             our_ports.len(),
@@ -423,9 +421,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             &format!("http://[{}]:{}", switch_zone_underlay_ip, DENDRITE_PORT),
             dpd_client::ClientState {
                 tag: OMICRON_DPD_TAG.into(),
-                log: log.new(o!(
-                    "component" => "DpdClient",
-                )),
+                log: self.log.new(o!("component" => "DpdClient")),
             },
         );
 
@@ -438,7 +434,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             self.wait_for_dendrite(&dpd).await;
 
             info!(
-                log,
+                self.log,
                 "Configuring default uplink on switch";
                 "config" => ?dpd_port_settings
             );
@@ -458,7 +454,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                             e.status()
                         {
                             warn!(
-                                log,
+                                self.log,
                                 "unable to apply uplink configuration, dendrite not available";
                                 "port_id" => ?port_id,
                                 "configuration" => ?dpd_port_settings,
@@ -482,7 +478,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                 "http://{}",
                 &SocketAddrV6::new(switch_zone_underlay_ip, MGD_PORT, 0, 0)
             ),
-            log.clone(),
+            self.log.clone(),
         );
 
         let mut config: Option<BgpConfig> = None;
@@ -593,7 +589,7 @@ impl<'a> EarlyNetworkSetup<'a> {
         if !bgp_peer_configs.is_empty() {
             if let Some(config) = &config {
                 info!(
-                    log,
+                    self.log,
                     "Applying BGP configuration via Maghemite daemon (MGD).";
                     "configuration" => ?config);
                 mgd.bgp_apply(&ApplyRequest {
@@ -644,7 +640,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             }
         }
         info!(
-            log,
+            self.log,
             "Adding static IPv4 routes via Maghemite daemon (MGD).";
             "routes" => ?rq.routes.list);
         mgd.static_add_v4_route(&rq).await.map_err(|e| {
@@ -673,7 +669,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                 required_rx: spec.required_rx,
             };
             info!(
-                log,
+                self.log,
                 "Adding BFD peer config to Maghemite daemon (MGD).";
                 "static route request" => ?cfg);
             mgd.add_bfd_peer(&cfg).await.map_err(|e| {
@@ -688,8 +684,7 @@ impl<'a> EarlyNetworkSetup<'a> {
         &self,
         port_config: &PortConfig,
     ) -> Result<(PortSettings, PortId), EarlyNetworkSetupError> {
-        let log = self.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
-        info!(log, "Building Dendrite Port Configuration");
+        info!(self.log, "Building Dendrite Port Configuration");
         let mut dpd_port_settings = PortSettings { links: HashMap::new() };
         let link_id = LinkId(0);
 
@@ -726,13 +721,12 @@ impl<'a> EarlyNetworkSetup<'a> {
     }
 
     async fn wait_for_dendrite(&self, dpd: &DpdClient) {
-        let log = self.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
         loop {
-            info!(log, "Checking dendrite uptime");
+            info!(self.log, "Checking dendrite uptime");
             match dpd.dpd_uptime().await {
                 Ok(uptime) => {
                     info!(
-                        log,
+                        self.log,
                         "Dendrite online";
                         "uptime" => uptime.to_string()
                     );
@@ -740,13 +734,13 @@ impl<'a> EarlyNetworkSetup<'a> {
                 }
                 Err(e) => {
                     info!(
-                        log,
+                        self.log,
                         "Unable to check Dendrite uptime";
                         "reason" => #?e
                     );
                 }
             }
-            info!(log, "Waiting for dendrite to come online every 2 seconds");
+            info!(self.log, "Waiting for dendrite to come online every 2 seconds");
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
     }
