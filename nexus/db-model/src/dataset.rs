@@ -8,6 +8,7 @@ use crate::ipv6;
 use crate::schema::{dataset, region};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
+use nexus_types::deployment::BlueprintDatasetConfig;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::DatasetKind as ApiDatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
@@ -89,6 +90,32 @@ impl Dataset {
 
     pub fn address_with_port(&self, port: u16) -> Option<SocketAddrV6> {
         Some(SocketAddrV6::new(Ipv6Addr::from(self.ip?), port, 0, 0))
+    }
+}
+
+impl From<BlueprintDatasetConfig> for Dataset {
+    fn from(bp: BlueprintDatasetConfig) -> Self {
+        let kind = DatasetKind::from(&bp.kind);
+        let (size_used, zone_name) = match bp.kind {
+            ApiDatasetKind::Crucible => (Some(0), None),
+            ApiDatasetKind::Zone { name } => (None, Some(name)),
+            _ => (None, None),
+        };
+        let addr = bp.address;
+        Self {
+            identity: DatasetIdentity::new(bp.id.into_untyped_uuid()),
+            time_deleted: None,
+            rcgen: Generation::new(),
+            pool_id: bp.pool.id().into_untyped_uuid(),
+            kind,
+            ip: addr.map(|addr| addr.ip().into()),
+            port: addr.map(|addr| addr.port().into()),
+            size_used,
+            zone_name,
+            quota: bp.quota.map(ByteCount::from),
+            reservation: bp.reservation.map(ByteCount::from),
+            compression: bp.compression,
+        }
     }
 }
 

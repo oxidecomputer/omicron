@@ -107,6 +107,13 @@ pub(crate) async fn deploy_datasets(
     }
 }
 
+#[allow(dead_code)]
+pub(crate) struct EnsureDatasetsResult {
+    pub(crate) inserted: usize,
+    pub(crate) updated: usize,
+    pub(crate) removed: usize,
+}
+
 /// For all datasets we expect to see in the blueprint, ensure that a corresponding
 /// database record exists in `datastore`.
 ///
@@ -116,14 +123,14 @@ pub(crate) async fn ensure_dataset_records_exist(
     opctx: &OpContext,
     datastore: &DataStore,
     bp_datasets: impl Iterator<Item = &BlueprintDatasetConfig>,
-) -> anyhow::Result<usize> {
+) -> anyhow::Result<EnsureDatasetsResult> {
     // Before attempting to insert any datasets, first query for any existing
     // dataset records so we can filter them out. This looks like a typical
     // TOCTOU issue, but it is purely a performance optimization. We expect
     // almost all executions of this function to do nothing: new datasets are
     // created very rarely relative to how frequently blueprint realization
     // happens. We could remove this check and filter and instead run the below
-    // "insert if not exists" query on every zone, and the behavior would still
+    // "insert if not exists" query on every dataset, and the behavior would still
     // be correct. However, that would issue far more queries than necessary in
     // the very common case of "we don't need to do anything at all".
     let mut existing_datasets = datastore
@@ -152,25 +159,21 @@ pub(crate) async fn ensure_dataset_records_exist(
         // If this dataset already exists, only update it if it appears different from what exists
         // in the database already.
         let action = if let Some(db_dataset) = existing_datasets.remove(&id) {
-            let db_dataset: DatasetConfig = db_dataset.try_into()?;
+            let db_config: DatasetConfig = db_dataset.try_into()?;
+            let bp_config: DatasetConfig = bp_dataset.clone().into();
 
-            if db_dataset == bp_dataset.clone().into() {
+            if db_config == bp_config {
                 num_unchanged += 1;
                 continue;
             }
             num_updated += 1;
             "update"
         } else {
+            num_inserted += 1;
             "insert"
         };
 
-        let address = bp_dataset.address;
-        let dataset = Dataset::new(
-            id.into_untyped_uuid(),
-            bp_dataset.pool.id().into_untyped_uuid(),
-            address,
-            kind.clone(),
-        );
+        let dataset = Dataset::from(bp_dataset.clone());
         datastore.dataset_upsert(dataset).await.with_context(|| {
             format!("failed to upsert dataset record for dataset {id}")
         })?;
@@ -182,15 +185,7 @@ pub(crate) async fn ensure_dataset_records_exist(
             "id" => %id,
             "kind" => ?kind,
         );
-        num_inserted += 1;
     }
-
-    // TODO: I know we don't want to actually expunge crucible zones, but unclear
-    // where that decision SHOULD be made?
-    //
-    // --> Actually, idk about this. We should clearly read the disposition to
-    // decide which datasets to delete, but I think we need some
-    // planner/executor coordination to punt on Crucible.
 
     for bp_dataset in unwanted_datasets {
         if existing_datasets.remove(&bp_dataset.id).is_some() {
@@ -214,7 +209,7 @@ pub(crate) async fn ensure_dataset_records_exist(
     // We support removing expunged datasets - if we read a dataset that hasn't
     // been explicitly expunged, log this as an oddity.
     //
-    // This could be possible in rare conditions where multiple Nexuses are executing
+    // This could be possible in conditions where multiple Nexuses are executing
     // distinct blueprints.
     if !existing_datasets.is_empty() {
         warn!(
@@ -234,7 +229,11 @@ pub(crate) async fn ensure_dataset_records_exist(
         "num_removed" => num_removed,
     );
 
-    Ok(num_inserted)
+    Ok(EnsureDatasetsResult {
+        inserted: num_inserted,
+        updated: num_updated,
+        removed: num_removed,
+    })
 }
 
 #[cfg(test)]
@@ -243,7 +242,9 @@ mod tests {
     use nexus_db_model::Zpool;
     use nexus_reconfigurator_planning::example::example;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintZoneFilter;
+    use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::GenericUuid;
@@ -253,11 +254,33 @@ mod tests {
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
+    fn get_all_datasets_from_zones(
+        blueprint: &Blueprint,
+    ) -> Vec<BlueprintDatasetConfig> {
+        blueprint
+            .all_omicron_zones(BlueprintZoneFilter::All)
+            .filter_map(|(_, zone)| {
+                if let Some(dataset) = zone.zone_type.durable_dataset() {
+                    Some(BlueprintDatasetConfig {
+                        disposition: BlueprintDatasetDisposition::InService,
+                        id: DatasetUuid::new_v4(),
+                        pool: dataset.dataset.pool_name.clone(),
+                        kind: dataset.kind,
+                        address: Some(dataset.address),
+                        quota: None,
+                        reservation: None,
+                        compression: None,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+    }
+
     #[nexus_test]
-    async fn test_ensure_dataset_records_exist(
-        cptestctx: &ControlPlaneTestContext,
-    ) {
-        const TEST_NAME: &str = "test_ensure_dataset_records_exist";
+    async fn test_dataset_record_create(cptestctx: &ControlPlaneTestContext) {
+        const TEST_NAME: &str = "test_dataset_record_create";
 
         // Set up.
         let nexus = &cptestctx.server.server_context().nexus;
@@ -292,37 +315,22 @@ mod tests {
         //
         // Finding these datasets is normally the responsibility of the planner,
         // but we're kinda hand-rolling it.
-        let all_datasets = blueprint
-            .all_omicron_zones(BlueprintZoneFilter::All)
-            .filter_map(|(_, zone)| {
-                if let Some(dataset) = zone.zone_type.durable_dataset() {
-                    Some(BlueprintDatasetConfig {
-                        disposition: BlueprintDatasetDisposition::InService,
-                        id: DatasetUuid::new_v4(),
-                        pool: dataset.dataset.pool_name.clone(),
-                        kind: dataset.kind,
-                        address: Some(dataset.address),
-                        quota: None,
-                        reservation: None,
-                        compression: None,
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
+        let all_datasets = get_all_datasets_from_zones(&blueprint);
 
         // How many zones are there with durable datasets?
         let nzones_with_durable_datasets = all_datasets.len();
+        assert!(nzones_with_durable_datasets > 0);
 
-        let ndatasets_inserted =
+        let EnsureDatasetsResult { inserted, updated, removed } =
             ensure_dataset_records_exist(opctx, datastore, all_datasets.iter())
                 .await
                 .expect("failed to ensure datasets");
 
         // We should have inserted a dataset for each zone with a durable
         // dataset.
-        assert_eq!(nzones_with_durable_datasets, ndatasets_inserted);
+        assert_eq!(inserted, nzones_with_durable_datasets);
+        assert_eq!(updated, 0);
+        assert_eq!(removed, 0);
         assert_eq!(
             datastore
                 .dataset_list_all_batched(opctx, None)
@@ -333,11 +341,13 @@ mod tests {
         );
 
         // Ensuring the same datasets again should insert no new records.
-        let ndatasets_inserted =
+        let EnsureDatasetsResult { inserted, updated, removed } =
             ensure_dataset_records_exist(opctx, datastore, all_datasets.iter())
                 .await
                 .expect("failed to ensure datasets");
-        assert_eq!(0, ndatasets_inserted);
+        assert_eq!(inserted, 0);
+        assert_eq!(updated, 0);
+        assert_eq!(removed, 0);
         assert_eq!(
             datastore
                 .dataset_list_all_batched(opctx, None)
@@ -388,14 +398,17 @@ mod tests {
             },
         ];
 
-        let ndatasets_inserted = ensure_dataset_records_exist(
-            opctx,
-            datastore,
-            all_datasets.iter().chain(&new_zones),
-        )
-        .await
-        .expect("failed to ensure datasets");
-        assert_eq!(ndatasets_inserted, 2);
+        let EnsureDatasetsResult { inserted, updated, removed } =
+            ensure_dataset_records_exist(
+                opctx,
+                datastore,
+                all_datasets.iter().chain(&new_zones),
+            )
+            .await
+            .expect("failed to ensure datasets");
+        assert_eq!(inserted, 2);
+        assert_eq!(updated, 0);
+        assert_eq!(removed, 0);
         assert_eq!(
             datastore
                 .dataset_list_all_batched(opctx, None)
@@ -404,5 +417,254 @@ mod tests {
                 .len(),
             nzones_with_durable_datasets + 2,
         );
+    }
+
+    #[nexus_test]
+    async fn test_dataset_records_update(cptestctx: &ControlPlaneTestContext) {
+        const TEST_NAME: &str = "test_dataset_records_update";
+
+        // Set up.
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+        let opctx = &opctx;
+
+        // Use the standard example system.
+        let (_, _, blueprint) = example(&opctx.log, TEST_NAME, 5);
+
+        // Record the sleds and zpools.
+        crate::tests::insert_sled_records(datastore, &blueprint).await;
+        crate::tests::create_disks_for_zones_using_datasets(
+            datastore, opctx, &blueprint,
+        )
+        .await;
+
+        let mut all_datasets = get_all_datasets_from_zones(&blueprint);
+        let EnsureDatasetsResult { inserted, updated, removed } =
+            ensure_dataset_records_exist(opctx, datastore, all_datasets.iter())
+                .await
+                .expect("failed to ensure datasets");
+        assert_eq!(inserted, all_datasets.len());
+        assert_eq!(updated, 0);
+        assert_eq!(removed, 0);
+
+        // These values don't *really* matter, we just want to make sure we can
+        // change them and see the update.
+        let first_dataset = &mut all_datasets[0];
+        assert_eq!(first_dataset.quota, None);
+        assert_eq!(first_dataset.reservation, None);
+        assert_eq!(first_dataset.compression, None);
+
+        first_dataset.quota = Some(ByteCount::from_kibibytes_u32(1));
+        first_dataset.reservation = Some(ByteCount::from_kibibytes_u32(2));
+        first_dataset.compression = Some(String::from("pied_piper"));
+        let _ = first_dataset;
+
+        // Update the datastore
+        let EnsureDatasetsResult { inserted, updated, removed } =
+            ensure_dataset_records_exist(opctx, datastore, all_datasets.iter())
+                .await
+                .expect("failed to ensure datasets");
+        assert_eq!(inserted, 0);
+        assert_eq!(updated, 1);
+        assert_eq!(removed, 0);
+
+        // Observe that the update stuck
+        let observed_datasets =
+            datastore.dataset_list_all_batched(opctx, None).await.unwrap();
+        let first_dataset = &mut all_datasets[0];
+        let observed_dataset = observed_datasets
+            .into_iter()
+            .find(|dataset| {
+                dataset.id() == first_dataset.id.into_untyped_uuid()
+            })
+            .expect("Couldn't find dataset we tried to update?");
+        let observed_dataset: DatasetConfig =
+            observed_dataset.try_into().unwrap();
+        assert_eq!(
+            observed_dataset.quota,
+            first_dataset.quota.map(|q| q.to_bytes())
+        );
+        assert_eq!(
+            observed_dataset.reservation,
+            first_dataset.reservation.map(|r| r.to_bytes())
+        );
+        assert_eq!(observed_dataset.compression, first_dataset.compression);
+    }
+
+    #[nexus_test]
+    async fn test_dataset_records_delete(cptestctx: &ControlPlaneTestContext) {
+        const TEST_NAME: &str = "test_dataset_records_delete";
+
+        // Set up.
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+        let opctx = &opctx;
+
+        // Use the standard example system.
+        let (_, _, blueprint) = example(&opctx.log, TEST_NAME, 5);
+
+        // Record the sleds and zpools.
+        crate::tests::insert_sled_records(datastore, &blueprint).await;
+        crate::tests::create_disks_for_zones_using_datasets(
+            datastore, opctx, &blueprint,
+        )
+        .await;
+
+        let mut all_datasets = get_all_datasets_from_zones(&blueprint);
+
+        // Ensure that a non-crucible dataset exists
+        all_datasets.push(BlueprintDatasetConfig {
+            disposition: BlueprintDatasetDisposition::InService,
+            id: DatasetUuid::new_v4(),
+            pool: all_datasets[0].pool.clone(),
+            kind: DatasetKind::Debug,
+            address: None,
+            quota: None,
+            reservation: None,
+            compression: None,
+        });
+        let EnsureDatasetsResult { inserted, updated, removed } =
+            ensure_dataset_records_exist(opctx, datastore, all_datasets.iter())
+                .await
+                .expect("failed to ensure datasets");
+        assert_eq!(inserted, all_datasets.len());
+        assert_eq!(updated, 0);
+        assert_eq!(removed, 0);
+
+        // Expunge two datasets -- one for Crucible, and one for any other
+        // service.
+
+        let crucible_dataset = all_datasets
+            .iter_mut()
+            .find(|dataset| matches!(dataset.kind, DatasetKind::Crucible))
+            .expect("No crucible dataset found");
+        assert_eq!(
+            crucible_dataset.disposition,
+            BlueprintDatasetDisposition::InService
+        );
+        crucible_dataset.disposition = BlueprintDatasetDisposition::Expunged;
+        let crucible_dataset_id = crucible_dataset.id;
+        let _ = crucible_dataset;
+
+        let non_crucible_dataset = all_datasets
+            .iter_mut()
+            .find(|dataset| !matches!(dataset.kind, DatasetKind::Crucible))
+            .expect("No non-crucible dataset found");
+        assert_eq!(
+            non_crucible_dataset.disposition,
+            BlueprintDatasetDisposition::InService
+        );
+        non_crucible_dataset.disposition =
+            BlueprintDatasetDisposition::Expunged;
+        let non_crucible_dataset_id = non_crucible_dataset.id;
+        let _ = non_crucible_dataset;
+
+        // Observe that we only remove one dataset.
+        //
+        // This is a property of "special-case handling" of the Crucible
+        // dataset, where we punt the deletion to a background task.
+
+        let EnsureDatasetsResult { inserted, updated, removed } =
+            ensure_dataset_records_exist(opctx, datastore, all_datasets.iter())
+                .await
+                .expect("failed to ensure datasets");
+        assert_eq!(inserted, 0);
+        assert_eq!(updated, 0);
+        assert_eq!(removed, 1);
+
+        // Make sure the Crucible dataset still exists, even if the other
+        // dataset got deleted.
+
+        let observed_datasets =
+            datastore.dataset_list_all_batched(opctx, None).await.unwrap();
+        assert!(observed_datasets
+            .iter()
+            .any(|d| d.id() == crucible_dataset_id.into_untyped_uuid()));
+        assert!(!observed_datasets
+            .iter()
+            .any(|d| d.id() == non_crucible_dataset_id.into_untyped_uuid()));
+    }
+
+    #[nexus_test]
+    async fn test_dataset_record_blueprint_removal_without_expunging(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        const TEST_NAME: &str =
+            "test_dataset_record_blueprint_removal_without_expunging";
+
+        // Set up.
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+        let opctx = &opctx;
+
+        // Use the standard example system.
+        let (_, _, blueprint) = example(&opctx.log, TEST_NAME, 5);
+
+        // Record the sleds and zpools.
+        crate::tests::insert_sled_records(datastore, &blueprint).await;
+        crate::tests::create_disks_for_zones_using_datasets(
+            datastore, opctx, &blueprint,
+        )
+        .await;
+
+        let mut all_datasets = get_all_datasets_from_zones(&blueprint);
+
+        // Ensure that a deletable dataset exists
+        let dataset_id = DatasetUuid::new_v4();
+        all_datasets.push(BlueprintDatasetConfig {
+            disposition: BlueprintDatasetDisposition::InService,
+            id: dataset_id,
+            pool: all_datasets[0].pool.clone(),
+            kind: DatasetKind::Debug,
+            address: None,
+            quota: None,
+            reservation: None,
+            compression: None,
+        });
+
+        let EnsureDatasetsResult { inserted, updated, removed } =
+            ensure_dataset_records_exist(opctx, datastore, all_datasets.iter())
+                .await
+                .expect("failed to ensure datasets");
+        assert_eq!(inserted, all_datasets.len());
+        assert_eq!(updated, 0);
+        assert_eq!(removed, 0);
+
+        // Rather than expunging a dataset, which is the normal way to "delete"
+        // a dataset, we'll just remove it from the "blueprint".
+        //
+        // This situation mimics a scenario where we are an "old Nexus,
+        // executing and old blueprint" - more datasets might be created
+        // concurrently with our execution, and we should leave them alone.
+        assert_eq!(dataset_id, all_datasets.pop().unwrap().id);
+
+        // Observe that no datasets are removed.
+        let EnsureDatasetsResult { inserted, updated, removed } =
+            ensure_dataset_records_exist(opctx, datastore, all_datasets.iter())
+                .await
+                .expect("failed to ensure datasets");
+        assert_eq!(inserted, 0);
+        assert_eq!(updated, 0);
+        assert_eq!(removed, 0);
+
+        // Make sure the dataset still exists, even if it isn't tracked by our
+        // "blueprint".
+        let observed_datasets =
+            datastore.dataset_list_all_batched(opctx, None).await.unwrap();
+        assert!(observed_datasets
+            .iter()
+            .any(|d| d.id() == dataset_id.into_untyped_uuid()));
     }
 }
