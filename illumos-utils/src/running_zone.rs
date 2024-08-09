@@ -38,7 +38,7 @@ use crate::zone::Zones;
 
 /// Used for logs to determine whether a logged action is part of the
 /// switch zone initilization process.
-pub const SWITCH_ZONE_INIT_STAGE: &str = "switch zone initialization";
+pub const SWITCH_ZONE_INIT_STAGE: &str = "switch-zone-init";
 
 /// Errors returned from methods for fetching SMF services and log files
 #[derive(thiserror::Error, Debug)]

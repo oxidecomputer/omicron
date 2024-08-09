@@ -61,7 +61,6 @@ pub struct LongRunningTaskHandles {
     pub zone_bundler: ZoneBundler,
 }
 
-// TODO: SOme logging here
 /// Spawn all long running tasks
 pub async fn spawn_all_longrunning_tasks(
     log: &Logger,
@@ -209,7 +208,6 @@ async fn spawn_bootstore_tasks(
     .unwrap();
 
     let log = log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
-    // TODO: Add some logging here?
     // Create and spawn the bootstore
     info!(log, "Starting Bootstore");
     let (mut node, node_handle) = bootstore::Node::new(config, &log).await;

@@ -3897,7 +3897,9 @@ impl ServiceManager {
                 let prop_name = format!("uplinks/{}_0", port_config.port);
                 info!(
                     log,
-                    "Adding new property to uplinkd service. Name: {prop_name} Value: {}", addr.to_string(),
+                    "Adding new property to uplinkd service";
+                    "name" => ?prop_name,
+                    "value" => ?addr.to_string(),
                 );
                 smfh.addpropvalue_type(
                     &prop_name,

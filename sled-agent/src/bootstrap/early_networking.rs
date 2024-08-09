@@ -372,9 +372,7 @@ impl<'a> EarlyNetworkSetup<'a> {
         );
         let mgs_client = MgsClient::new(
             &format!("http://[{}]:{}", switch_zone_underlay_ip, MGS_PORT),
-            log.new(o!(
-                "component" => "MgsClient",
-            )),
+            log.new(o!("component" => "MgsClient")),
         );
         let switch_slot = retry_notify(
             retry_policy_local(),
