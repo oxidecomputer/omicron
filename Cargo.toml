@@ -533,7 +533,7 @@ smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
 sqlformat = "0.2.4"
-sqlparser = { version = "0.45.0", features = [ "visitor" ] }
+sqlparser = { version = "0.49.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
 # Please do not change the Steno version to a Git dependency.  It makes it
 # harder than expected to make breaking changes (even if you specify a specific
