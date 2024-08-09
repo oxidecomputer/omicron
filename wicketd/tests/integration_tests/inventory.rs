@@ -49,9 +49,10 @@ async fn test_inventory() {
     // 4 SPs attached to the inventory.
     assert_eq!(inventory.sps.len(), 4);
 
-    // Test CLI command
+    // Test CLI with JSON output
     {
-        let args = vec!["inventory", "configured-bootstrap-sleds", "--json"];
+        let args =
+            vec!["inventory", "configured-bootstrap-sleds", "--format", "json"];
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let output = OutputKind::Captured {

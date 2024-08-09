@@ -8,7 +8,7 @@ use crate::cli::CommandOutput;
 use crate::wicketd::create_wicketd_client;
 use anyhow::Context;
 use anyhow::Result;
-use clap::Subcommand;
+use clap::{Subcommand, ValueEnum};
 use owo_colors::OwoColorize;
 use sled_hardware_types::Baseboard;
 use slog::Logger;
@@ -22,10 +22,20 @@ const WICKETD_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) enum InventoryArgs {
     /// List state of all bootstrap sleds, as configured with rack-setup
     ConfiguredBootstrapSleds {
-        /// Print output as json
+        /// Select output format
         #[clap(long)]
-        json: bool,
+        format: OutputFormat,
     },
+}
+
+#[derive(Debug, ValueEnum, Default, Clone)]
+pub enum OutputFormat {
+    /// Print output as operator-readable table
+    #[default]
+    Table,
+
+    /// Print output as json
+    Json,
 }
 
 impl InventoryArgs {
@@ -38,7 +48,7 @@ impl InventoryArgs {
         let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
 
         match self {
-            InventoryArgs::ConfiguredBootstrapSleds { json } => {
+            InventoryArgs::ConfiguredBootstrapSleds { format } => {
                 // We don't use the /bootstrap-sleds endpoint, because that
                 // gets all sleds visible on the bootstrap network. We want
                 // something subtly different here.
@@ -57,14 +67,18 @@ impl InventoryArgs {
                     .context("failed to get rss config")?;
 
                 let bootstrap_sleds = &conf.insensitive.bootstrap_sleds;
-                if json {
-                    let json_str = serde_json::to_string(bootstrap_sleds)
-                        .context("serializing sled data failed")?;
-                    writeln!(output.stdout, "{}", json_str)
-                        .expect("writing to stdout failed");
-                } else {
-                    for sled in bootstrap_sleds {
-                        print_bootstrap_sled_data(sled, &mut output);
+                match format {
+                    OutputFormat::Json => {
+                        let json_str =
+                            serde_json::to_string_pretty(bootstrap_sleds)
+                                .context("serializing sled data failed")?;
+                        writeln!(output.stdout, "{}", json_str)
+                            .expect("writing to stdout failed");
+                    }
+                    OutputFormat::Table => {
+                        for sled in bootstrap_sleds {
+                            print_bootstrap_sled_data(sled, &mut output);
+                        }
                     }
                 }
 
@@ -96,14 +110,14 @@ fn print_bootstrap_sled_data(
 
     let addr_fmt = match address {
         None => "(not available)".to_string(),
-        Some(addr) => format!("\t{}", addr),
+        Some(addr) => format!("{}", addr),
     };
 
     // Print out this entry. We say "Cubby" rather than "Slot" here purely
     // because the TUI also says "Cubby".
     writeln!(
         output.stdout,
-        "{status} Cubby {:02}\t{identifier}{addr_fmt}",
+        "{status} Cubby {:02}\t{identifier}\t{addr_fmt}",
         slot
     )
     .expect("writing to stdout failed");
