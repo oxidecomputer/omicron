@@ -1828,7 +1828,12 @@ mod tests {
                         .clone(),
                 )
                 .unwrap(),
-            EnsureMultiple::Changed { added: 4, updated: 0, removed: 0 }
+            EnsureMultiple::Changed {
+                added: 4,
+                updated: 0,
+                expunged: 0,
+                removed: 0
+            }
         );
 
         // Add zones to our new sled.

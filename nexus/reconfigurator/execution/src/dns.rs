@@ -1298,7 +1298,12 @@ mod test {
             .unwrap();
         assert_eq!(
             rv,
-            EnsureMultiple::Changed { added: 1, updated: 0, removed: 0 }
+            EnsureMultiple::Changed {
+                added: 1,
+                updated: 0,
+                expunged: 0,
+                removed: 0
+            }
         );
         let blueprint2 = builder.build();
         eprintln!("blueprint2: {}", blueprint2.display());

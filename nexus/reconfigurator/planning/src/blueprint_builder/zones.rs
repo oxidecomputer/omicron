@@ -389,6 +389,13 @@ mod tests {
             }
         );
 
+        // Ensure all datasets are created for the zones we've provisioned
+        for (sled_id, resources) in
+            input2.all_sled_resources(SledFilter::Commissioned)
+        {
+            builder.sled_ensure_datasets(sled_id, resources).unwrap();
+        }
+
         // Now build the blueprint and ensure that all the changes we described
         // above are present.
         let blueprint = builder.build();

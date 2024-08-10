@@ -230,8 +230,12 @@ impl<'a> Planner<'a> {
         {
             // First, we need to ensure that sleds are using their expected
             // disks. This is necessary before we can allocate any zones.
-            if let EnsureMultiple::Changed { added, updated, removed } =
-                self.blueprint.sled_ensure_disks(sled_id, &sled_resources)?
+            if let EnsureMultiple::Changed {
+                added,
+                updated,
+                expunged: _,
+                removed,
+            } = self.blueprint.sled_ensure_disks(sled_id, &sled_resources)?
             {
                 info!(
                     &self.log,
@@ -353,7 +357,12 @@ impl<'a> Planner<'a> {
         for (sled_id, sled_resources) in
             self.input.all_sled_resources(SledFilter::InService)
         {
-            if let EnsureMultiple::Changed { added, updated, removed } =
+            if let EnsureMultiple::Changed {
+                added,
+                updated,
+                expunged,
+                removed,
+            } =
                 self.blueprint.sled_ensure_datasets(sled_id, &sled_resources)?
             {
                 info!(
@@ -362,12 +371,14 @@ impl<'a> Planner<'a> {
                     "sled_id" => %sled_id,
                     "added" => added,
                     "updated" => updated,
+                    "expunged" => expunged,
                     "removed" => removed,
                 );
                 self.blueprint.record_operation(Operation::UpdateDatasets {
                     sled_id,
                     added,
                     updated,
+                    expunged,
                     removed,
                 });
             }
@@ -548,7 +559,12 @@ impl<'a> Planner<'a> {
                 }
             };
             match result {
-                EnsureMultiple::Changed { added, updated: _, removed: _ } => {
+                EnsureMultiple::Changed {
+                    added,
+                    updated: _,
+                    expunged: _,
+                    removed: _,
+                } => {
                     info!(
                         self.log, "will add {added} Nexus zone(s) to sled";
                         "sled_id" => %sled_id,
