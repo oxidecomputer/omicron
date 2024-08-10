@@ -19,62 +19,29 @@ use tokio::sync::{broadcast, mpsc, oneshot, Notify};
 use tokio::time::{interval, Duration, MissedTickBehavior};
 use uuid::Uuid;
 
-/// A thin wrapper over a progenitor-generated NexusClient.
-///
-/// Also attaches the "DNS resolver" for historical reasons.
-#[derive(Clone)]
-pub struct NexusClientWithResolver {
-    client: NexusClient,
+pub(crate) fn make_nexus_client(
+    log: &Logger,
     resolver: Arc<Resolver>,
+) -> Result<NexusClient, ResolveError> {
+    make_nexus_client_with_port(log, resolver, NEXUS_INTERNAL_PORT)
 }
 
-impl NexusClientWithResolver {
-    pub fn new(
-        log: &Logger,
-        resolver: Arc<Resolver>,
-    ) -> Result<Self, ResolveError> {
-        Ok(Self::new_from_resolver_with_port(
-            log,
-            resolver,
-            NEXUS_INTERNAL_PORT,
-        ))
-    }
+pub(crate) fn make_nexus_client_with_port(
+    log: &Logger,
+    resolver: Arc<Resolver>,
+    port: u16,
+) -> Result<NexusClient, ResolveError> {
+    let client = reqwest::ClientBuilder::new()
+        .dns_resolver(resolver)
+        .build()
+        .expect("Failed to build client");
 
-    pub fn new_from_resolver_with_port(
-        log: &Logger,
-        resolver: Arc<Resolver>,
-        port: u16,
-    ) -> Self {
-        let client = reqwest::ClientBuilder::new()
-            .dns_resolver(resolver.clone())
-            .build()
-            .expect("Failed to build client");
-
-        let dns_name = ServiceName::Nexus.srv_name();
-        Self {
-            client: NexusClient::new_with_client(
-                &format!("http://{dns_name}:{port}"),
-                client,
-                log.new(o!("component" => "NexusClient")),
-            ),
-            resolver,
-        }
-    }
-
-    /// Access the progenitor-based Nexus Client.
-    pub fn client(&self) -> &NexusClient {
-        &self.client
-    }
-
-    /// Access the DNS resolver used by the Nexus Client.
-    ///
-    /// WARNING: If you're using this resolver to access an IP address of
-    /// another service, be aware that it might change if that service moves
-    /// around! Be cautious when accessing and persisting IP addresses of other
-    /// services.
-    pub fn resolver(&self) -> &Arc<Resolver> {
-        &self.resolver
-    }
+    let dns_name = ServiceName::Nexus.srv_name();
+    Ok(NexusClient::new_with_client(
+        &format!("http://{dns_name}:{port}"),
+        client,
+        log.new(o!("component" => "NexusClient")),
+    ))
 }
 
 pub fn d2n_params(

@@ -12,7 +12,6 @@ use crate::instance_manager::{
     Error as ManagerError, InstanceManagerServices, InstanceTicket,
 };
 use crate::metrics::MetricsRequestQueue;
-use crate::nexus::NexusClientWithResolver;
 use crate::params::ZoneBundleMetadata;
 use crate::params::{InstanceExternalIpBody, ZoneBundleCause};
 use crate::params::{
@@ -349,7 +348,7 @@ struct InstanceRunner {
     running_state: Option<RunningState>,
 
     // Connection to Nexus
-    nexus_client: NexusClientWithResolver,
+    nexus_client: nexus_client::Client,
 
     // Storage resources
     storage: StorageHandle,
@@ -528,7 +527,6 @@ impl InstanceRunner {
                 );
 
                 self.nexus_client
-                    .client()
                     .cpapi_instances_put(
                         &self.id().into_untyped_uuid(),
                         &state.into(),

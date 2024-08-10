@@ -1,5 +1,4 @@
 use crate::metrics::MetricsRequestQueue;
-use crate::nexus::NexusClientWithResolver;
 use anyhow::{anyhow, Result};
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
@@ -54,7 +53,7 @@ struct RunningProbes {
 
 pub(crate) struct ProbeManagerInner {
     join_handle: Mutex<Option<JoinHandle<()>>>,
-    nexus_client: NexusClientWithResolver,
+    nexus_client: nexus_client::Client,
     log: Logger,
     sled_id: Uuid,
     vnic_allocator: VnicAllocator<Etherstub>,
@@ -67,7 +66,7 @@ pub(crate) struct ProbeManagerInner {
 impl ProbeManager {
     pub(crate) fn new(
         sled_id: Uuid,
-        nexus_client: NexusClientWithResolver,
+        nexus_client: nexus_client::Client,
         etherstub: Etherstub,
         storage: StorageHandle,
         port_manager: PortManager,
@@ -248,7 +247,6 @@ impl ProbeManagerInner {
                 if n_added > 0 {
                     if let Err(e) = self
                         .nexus_client
-                        .client()
                         .bgtask_activate(&BackgroundTasksActivateRequest {
                             bgtask_names: vec!["vpc_route_manager".into()],
                         })
@@ -439,7 +437,6 @@ impl ProbeManagerInner {
     async fn target_state(self: &Arc<Self>) -> Result<HashSet<ProbeState>> {
         Ok(self
             .nexus_client
-            .client()
             .probes_get(
                 &self.sled_id,
                 None, //limit
