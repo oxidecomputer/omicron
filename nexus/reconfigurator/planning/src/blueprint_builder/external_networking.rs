@@ -6,11 +6,13 @@ use super::Error;
 use anyhow::bail;
 use debug_ignore::DebugIgnore;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::inventory::SourceNatConfig;
 use omicron_common::address::IpRange;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::DNS_OPTE_IPV6_SUBNET;
@@ -20,7 +22,9 @@ use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
 use omicron_common::address::NTP_OPTE_IPV6_SUBNET;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::MacAddr;
+use omicron_common::api::internal::shared::SourceNatConfigError;
 use oxnet::IpNet;
+use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
@@ -28,22 +32,13 @@ use std::hash::Hash;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
-
-// These imports are currently only used `#[cfg(test)]` methods, but those
-// methods will become non-test-only once we support boundary NTP zone
-// allocation.
-#[cfg(test)]
-use nexus_types::inventory::SourceNatConfig;
-#[cfg(test)]
-use omicron_common::api::internal::shared::SourceNatConfigError;
-#[cfg(test)]
-use std::collections::btree_map::Entry;
-#[cfg(test)]
 use strum::IntoEnumIterator as _;
 
 #[derive(Debug)]
 pub(super) struct BuilderExternalNetworking<'a> {
     // These fields mirror how RSS chooses addresses for zone NICs.
+    boundary_ntp_v4_ips: AvailableIterator<'static, Ipv4Addr>,
+    boundary_ntp_v6_ips: AvailableIterator<'static, Ipv6Addr>,
     nexus_v4_ips: AvailableIterator<'static, Ipv4Addr>,
     nexus_v6_ips: AvailableIterator<'static, Ipv6Addr>,
 
@@ -100,6 +95,10 @@ impl<'a> BuilderExternalNetworking<'a> {
 
         let mut existing_nexus_v4_ips: HashSet<Ipv4Addr> = HashSet::new();
         let mut existing_nexus_v6_ips: HashSet<Ipv6Addr> = HashSet::new();
+        let mut existing_boundary_ntp_v4_ips: HashSet<Ipv4Addr> =
+            HashSet::new();
+        let mut existing_boundary_ntp_v6_ips: HashSet<Ipv6Addr> =
+            HashSet::new();
         let mut external_ip_alloc =
             ExternalIpAllocator::new(input.service_ip_pool_ranges());
         let mut used_macs: HashSet<MacAddr> = HashSet::new();
@@ -108,8 +107,20 @@ impl<'a> BuilderExternalNetworking<'a> {
             parent_blueprint.all_omicron_zones(BlueprintZoneFilter::All)
         {
             let zone_type = &z.zone_type;
-            if let BlueprintZoneType::Nexus(nexus) = zone_type {
-                match nexus.nic.ip {
+            match zone_type {
+                BlueprintZoneType::BoundaryNtp(ntp) => match ntp.nic.ip {
+                    IpAddr::V4(ip) => {
+                        if !existing_boundary_ntp_v4_ips.insert(ip) {
+                            bail!("duplicate Boundary NTP NIC IP: {ip}");
+                        }
+                    }
+                    IpAddr::V6(ip) => {
+                        if !existing_boundary_ntp_v6_ips.insert(ip) {
+                            bail!("duplicate Boundary NTP NIC IP: {ip}");
+                        }
+                    }
+                },
+                BlueprintZoneType::Nexus(nexus) => match nexus.nic.ip {
                     IpAddr::V4(ip) => {
                         if !existing_nexus_v4_ips.insert(ip) {
                             bail!("duplicate Nexus NIC IP: {ip}");
@@ -120,7 +131,8 @@ impl<'a> BuilderExternalNetworking<'a> {
                             bail!("duplicate Nexus NIC IP: {ip}");
                         }
                     }
-                }
+                },
+                _ => (),
             }
 
             if let Some((external_ip, nic)) = zone_type.external_networking() {
@@ -171,7 +183,12 @@ impl<'a> BuilderExternalNetworking<'a> {
                     }
                 }
                 IpAddr::V4(ip) if NTP_OPTE_IPV4_SUBNET.contains(ip) => {
-                    // TODO check existing_ntp_v4_ips, once it exists
+                    if !existing_boundary_ntp_v4_ips.contains(&ip) {
+                        bail!(
+                            "planning input contains unexpected NIC \
+                             (IP not found in parent blueprint): {nic_entry:?}"
+                        );
+                    }
                 }
                 IpAddr::V4(ip) if DNS_OPTE_IPV4_SUBNET.contains(ip) => {
                     // TODO check existing_dns_v4_ips, once it exists
@@ -185,7 +202,12 @@ impl<'a> BuilderExternalNetworking<'a> {
                     }
                 }
                 IpAddr::V6(ip) if NTP_OPTE_IPV6_SUBNET.contains(ip) => {
-                    // TODO check existing_ntp_v6_ips, once it exists
+                    if !existing_boundary_ntp_v6_ips.contains(&ip) {
+                        bail!(
+                            "planning input contains unexpected NIC \
+                             (IP not found in parent blueprint): {nic_entry:?}"
+                        );
+                    }
                 }
                 IpAddr::V6(ip) if DNS_OPTE_IPV6_SUBNET.contains(ip) => {
                     // TODO check existing_dns_v6_ips, once it exists
@@ -217,10 +239,22 @@ impl<'a> BuilderExternalNetworking<'a> {
                 .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
             existing_nexus_v6_ips,
         );
+        let boundary_ntp_v4_ips = AvailableIterator::new(
+            NTP_OPTE_IPV4_SUBNET
+                .addr_iter()
+                .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
+            existing_boundary_ntp_v4_ips,
+        );
+        let boundary_ntp_v6_ips = AvailableIterator::new(
+            NTP_OPTE_IPV6_SUBNET.iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
+            existing_boundary_ntp_v6_ips,
+        );
         let available_system_macs =
             AvailableIterator::new(MacAddr::iter_system(), used_macs);
 
         Ok(Self {
+            boundary_ntp_v4_ips,
+            boundary_ntp_v6_ips,
             nexus_v4_ips,
             nexus_v6_ips,
             external_ip_alloc,
@@ -236,14 +270,14 @@ impl<'a> BuilderExternalNetworking<'a> {
             IpAddr::V4(_) => (
                 self.nexus_v4_ips
                     .next()
-                    .ok_or(Error::ExhaustedNexusIps)?
+                    .ok_or(Error::ExhaustedOpteIps { kind: ZoneKind::Nexus })?
                     .into(),
                 IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
             ),
             IpAddr::V6(_) => (
                 self.nexus_v6_ips
                     .next()
-                    .ok_or(Error::ExhaustedNexusIps)?
+                    .ok_or(Error::ExhaustedOpteIps { kind: ZoneKind::Nexus })?
                     .into(),
                 IpNet::from(*NEXUS_OPTE_IPV6_SUBNET),
             ),
@@ -260,11 +294,56 @@ impl<'a> BuilderExternalNetworking<'a> {
             nic_mac,
         })
     }
+
+    pub(super) fn for_new_boundary_ntp(
+        &mut self,
+    ) -> Result<ExternalSnatNetworkingChoice, Error> {
+        let snat_cfg = self.external_ip_alloc.claim_next_snat_ip()?;
+        let (nic_ip, nic_subnet) = match snat_cfg.ip {
+            IpAddr::V4(_) => (
+                self.boundary_ntp_v4_ips
+                    .next()
+                    .ok_or(Error::ExhaustedOpteIps {
+                        kind: ZoneKind::BoundaryNtp,
+                    })?
+                    .into(),
+                IpNet::from(*NTP_OPTE_IPV4_SUBNET),
+            ),
+            IpAddr::V6(_) => (
+                self.boundary_ntp_v6_ips
+                    .next()
+                    .ok_or(Error::ExhaustedOpteIps {
+                        kind: ZoneKind::BoundaryNtp,
+                    })?
+                    .into(),
+                IpNet::from(*NTP_OPTE_IPV6_SUBNET),
+            ),
+        };
+        let nic_mac = self
+            .available_system_macs
+            .next()
+            .ok_or(Error::NoSystemMacAddressAvailable)?;
+
+        Ok(ExternalSnatNetworkingChoice {
+            snat_cfg,
+            nic_ip,
+            nic_subnet,
+            nic_mac,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ExternalNetworkingChoice {
     pub(super) external_ip: IpAddr,
+    pub(super) nic_ip: IpAddr,
+    pub(super) nic_subnet: IpNet,
+    pub(super) nic_mac: MacAddr,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ExternalSnatNetworkingChoice {
+    pub(super) snat_cfg: SourceNatConfig,
     pub(super) nic_ip: IpAddr,
     pub(super) nic_subnet: IpNet,
     pub(super) nic_mac: MacAddr,
@@ -407,9 +486,6 @@ impl<'a> ExternalIpAllocator<'a> {
         Err(Error::NoExternalServiceIpAvailable)
     }
 
-    // This is currently only used by a unit test, but will be used by real code
-    // once we support boundary NTP zone allocation.
-    #[cfg(test)]
     fn claim_next_snat_ip(&mut self) -> Result<SourceNatConfig, Error> {
         // Prefer reusing an existing SNAT IP, if we still have port ranges
         // available on that ip.
@@ -453,9 +529,6 @@ enum SnatPortRange {
 }
 
 impl SnatPortRange {
-    // This is currently only used by a unit test, but will be used by real code
-    // once we support boundary NTP zone allocation.
-    #[cfg(test)]
     fn into_source_nat_config(self, ip: IpAddr) -> SourceNatConfig {
         let first = match self {
             SnatPortRange::One => 0,

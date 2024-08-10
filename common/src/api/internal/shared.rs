@@ -704,13 +704,9 @@ pub struct ResolvedVpcRouteSet {
 }
 
 /// Describes the purpose of the dataset.
-#[derive(
-    Debug, JsonSchema, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, EnumCount,
-)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, EnumCount)]
 pub enum DatasetKind {
     // Durable datasets for zones
-    #[serde(rename = "cockroachdb")]
     Cockroach,
     Crucible,
     Clickhouse,
@@ -720,9 +716,7 @@ pub enum DatasetKind {
 
     // Zone filesystems
     ZoneRoot,
-    Zone {
-        name: String,
-    },
+    Zone { name: String },
 
     // Other datasets
     Debug,
@@ -744,6 +738,27 @@ impl<'de> Deserialize<'de> for DatasetKind {
     {
         let s = String::deserialize(deserializer)?;
         s.parse().map_err(de::Error::custom)
+    }
+}
+
+impl JsonSchema for DatasetKind {
+    fn schema_name() -> String {
+        "DatasetKind".to_string()
+    }
+
+    fn json_schema(
+        gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        // The schema is a bit more complicated than this -- it's either one of
+        // the fixed values or a string starting with "zone/" -- but this is
+        // good enough for now.
+        let mut schema = <String>::json_schema(gen).into_object();
+        schema.metadata().description = Some(
+            "The kind of dataset. See the `DatasetKind` enum \
+             in omicron-common for possible values."
+                .to_owned(),
+        );
+        schema.into()
     }
 }
 

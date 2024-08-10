@@ -34,6 +34,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VnicUuid;
 use reedline::{Reedline, Signal};
@@ -435,6 +436,8 @@ enum BlueprintEditCommands {
     },
     /// add a CockroachDB instance to a particular sled
     AddCockroach { sled_id: SledUuid },
+    /// expunge a particular zone from a particular sled
+    ExpungeZone { sled_id: SledUuid, zone_id: OmicronZoneUuid },
 }
 
 #[derive(Debug, Args)]
@@ -747,8 +750,8 @@ fn cmd_blueprint_edit(
 
     let label = match args.edit_command {
         BlueprintEditCommands::AddNexus { sled_id } => {
-            let current =
-                builder.sled_num_zones_of_kind(sled_id, ZoneKind::Nexus);
+            let current = builder
+                .sled_num_running_zones_of_kind(sled_id, ZoneKind::Nexus);
             let added = builder
                 .sled_ensure_zone_multiple_nexus(sled_id, current + 1)
                 .context("failed to add Nexus zone")?;
@@ -764,8 +767,8 @@ fn cmd_blueprint_edit(
             format!("added Nexus zone to sled {}", sled_id)
         }
         BlueprintEditCommands::AddCockroach { sled_id } => {
-            let current =
-                builder.sled_num_zones_of_kind(sled_id, ZoneKind::CockroachDb);
+            let current = builder
+                .sled_num_running_zones_of_kind(sled_id, ZoneKind::CockroachDb);
             let added = builder
                 .sled_ensure_zone_multiple_cockroachdb(sled_id, current + 1)
                 .context("failed to add CockroachDB zone")?;
@@ -780,9 +783,25 @@ fn cmd_blueprint_edit(
             );
             format!("added CockroachDB zone to sled {}", sled_id)
         }
+        BlueprintEditCommands::ExpungeZone { sled_id, zone_id } => {
+            builder
+                .sled_expunge_zone(sled_id, zone_id)
+                .context("failed to expunge zone")?;
+            format!("expunged zone {zone_id} from sled {sled_id}")
+        }
     };
 
-    let new_blueprint = builder.build();
+    let mut new_blueprint = builder.build();
+
+    // Normally `builder.build()` would construct the cockroach fingerprint
+    // based on what we read from CRDB and put into the planning input, but
+    // since we don't have a CRDB we had to make something up for our planning
+    // input's CRDB fingerprint. In the absense of a better alternative, we'll
+    // just copy our parent's CRDB fingerprint and carry it forward.
+    new_blueprint
+        .cockroachdb_fingerprint
+        .clone_from(&blueprint.cockroachdb_fingerprint);
+
     let rv = format!(
         "blueprint {} created from blueprint {}: {}",
         new_blueprint.id, blueprint_id, label

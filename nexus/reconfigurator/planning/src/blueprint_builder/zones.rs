@@ -5,7 +5,8 @@
 use std::collections::BTreeSet;
 
 use nexus_types::deployment::{
-    BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZonesConfig,
+    BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneFilter,
+    BlueprintZonesConfig,
 };
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -71,6 +72,31 @@ impl BuilderZonesConfig {
         Ok(())
     }
 
+    pub(super) fn expunge_zone(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+    ) -> Result<(), BuilderZonesConfigError> {
+        let zone = self
+            .zones
+            .iter_mut()
+            .find(|zone| zone.zone.id == zone_id)
+            .ok_or_else(|| {
+            let mut unmatched = BTreeSet::new();
+            unmatched.insert(zone_id);
+            BuilderZonesConfigError::ExpungeUnmatchedZones { unmatched }
+        })?;
+
+        // Check that the zone is expungeable. Typically, zones passed
+        // in here should have had this check done to them already, but
+        // in case they're not, or in case something else about those
+        // zones changed in between, check again.
+        is_already_expunged(&zone.zone, zone.state)?;
+        zone.zone.disposition = BlueprintZoneDisposition::Expunged;
+        zone.state = BuilderZoneState::Modified;
+
+        Ok(())
+    }
+
     pub(super) fn expunge_zones(
         &mut self,
         mut zones: BTreeSet<OmicronZoneUuid>,
@@ -100,8 +126,9 @@ impl BuilderZonesConfig {
 
     pub(super) fn iter_zones(
         &self,
+        filter: BlueprintZoneFilter,
     ) -> impl Iterator<Item = &BuilderZoneConfig> {
-        self.zones.iter()
+        self.zones.iter().filter(move |z| z.zone().disposition.matches(filter))
     }
 
     pub(super) fn build(self) -> BlueprintZonesConfig {
@@ -283,7 +310,10 @@ mod tests {
         // Iterate over the zones for the sled and ensure that the NTP zone is
         // present.
         {
-            let mut zones = builder.zones.current_sled_zones(new_sled_id);
+            let mut zones = builder.zones.current_sled_zones(
+                new_sled_id,
+                BlueprintZoneFilter::ShouldBeRunning,
+            );
             let (_, state) = zones.next().expect("exactly one zone for sled");
             assert!(zones.next().is_none(), "exactly one zone for sled");
             assert_eq!(
@@ -327,7 +357,7 @@ mod tests {
 
         // Attempt to expunge one of the other zones on the sled.
         let existing_zone_id = change
-            .iter_zones()
+            .iter_zones(BlueprintZoneFilter::ShouldBeRunning)
             .find(|z| z.zone.id != new_zone_id)
             .expect("at least one existing zone")
             .zone
@@ -356,7 +386,10 @@ mod tests {
         {
             // Iterate over the zones and ensure that the Oximeter zone is
             // present, and marked added.
-            let mut zones = builder.zones.current_sled_zones(existing_sled_id);
+            let mut zones = builder.zones.current_sled_zones(
+                existing_sled_id,
+                BlueprintZoneFilter::ShouldBeRunning,
+            );
             zones
                 .find_map(|(z, state)| {
                     if z.id == new_zone_id {

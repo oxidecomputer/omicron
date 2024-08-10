@@ -13,6 +13,7 @@ use super::MAX_SSH_KEYS_PER_INSTANCE;
 use super::MAX_VCPU_PER_INSTANCE;
 use super::MIN_MEMORY_BYTES_PER_INSTANCE;
 use crate::app::sagas;
+use crate::app::sagas::NexusSaga;
 use crate::cidata::InstanceCiData;
 use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
@@ -20,13 +21,12 @@ use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
-use nexus_db_model::Vmm;
+use nexus_db_model::Vmm as DbVmm;
 use nexus_db_model::VmmState as DbVmmState;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::datastore::instance::InstanceUpdateResult;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup;
@@ -46,7 +46,6 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::internal::nexus;
-use omicron_common::api::internal::nexus::VmmState;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -59,10 +58,8 @@ use propolis_client::support::InstanceSerialConsoleHelper;
 use propolis_client::support::WSClientOffset;
 use propolis_client::support::WebSocketStream;
 use sagas::instance_common::ExternalIpAttach;
-use sled_agent_client::types::InstanceMigrationSourceParams;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::InstanceProperties;
-use sled_agent_client::types::InstancePutMigrationIdsBody;
 use sled_agent_client::types::InstancePutStateBody;
 use std::matches;
 use std::net::SocketAddr;
@@ -187,6 +184,11 @@ enum InstanceStateChangeRequestAction {
 pub(crate) enum InstanceRegisterReason {
     Start { vmm_id: PropolisUuid },
     Migrate { vmm_id: PropolisUuid, target_vmm_id: PropolisUuid },
+}
+
+enum InstanceStartDisposition {
+    Start,
+    AlreadyStarted,
 }
 
 impl super::Nexus {
@@ -524,144 +526,6 @@ impl super::Nexus {
         self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
     }
 
-    /// Attempts to set the migration IDs for the supplied instance via the
-    /// sled specified in `db_instance`.
-    ///
-    /// The caller is assumed to have fetched the current instance record from
-    /// the DB and verified that the record has no migration IDs.
-    ///
-    /// Returns `Ok` and the updated instance record if this call successfully
-    /// updated the instance with the sled agent and that update was
-    /// successfully reflected into CRDB. Returns `Err` with an appropriate
-    /// error otherwise.
-    ///
-    /// # Panics
-    ///
-    /// Asserts that `db_instance` has no migration ID or destination Propolis
-    /// ID set.
-    pub(crate) async fn instance_set_migration_ids(
-        &self,
-        opctx: &OpContext,
-        instance_id: InstanceUuid,
-        sled_id: SledUuid,
-        prev_instance_runtime: &db::model::InstanceRuntimeState,
-        migration_params: InstanceMigrationSourceParams,
-    ) -> UpdateResult<db::model::Instance> {
-        assert!(prev_instance_runtime.migration_id.is_none());
-        assert!(prev_instance_runtime.dst_propolis_id.is_none());
-
-        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
-            .instance_id(instance_id.into_untyped_uuid())
-            .lookup_for(authz::Action::Modify)
-            .await?;
-
-        let sa = self.sled_client(&sled_id).await?;
-        let instance_put_result = sa
-            .instance_put_migration_ids(
-                &instance_id,
-                &InstancePutMigrationIdsBody {
-                    old_runtime: prev_instance_runtime.clone().into(),
-                    migration_params: Some(migration_params),
-                },
-            )
-            .await
-            .map(|res| Some(res.into_inner().into()))
-            .map_err(|e| SledAgentInstancePutError(e));
-
-        // Write the updated instance runtime state back to CRDB. If this
-        // outright fails, this operation fails. If the operation nominally
-        // succeeds but nothing was updated, this action is outdated and the
-        // caller should not proceed with migration.
-        let InstanceUpdateResult { instance_updated, .. } =
-            match instance_put_result {
-                Ok(state) => {
-                    self.write_returned_instance_state(&instance_id, state)
-                        .await?
-                }
-                Err(e) => {
-                    if e.instance_unhealthy() {
-                        let _ = self
-                            .mark_instance_failed(
-                                &instance_id,
-                                &prev_instance_runtime,
-                                &e,
-                            )
-                            .await;
-                    }
-                    return Err(e.into());
-                }
-            };
-
-        if instance_updated {
-            Ok(self
-                .db_datastore
-                .instance_refetch(opctx, &authz_instance)
-                .await?)
-        } else {
-            Err(Error::conflict(
-                "instance is already migrating, or underwent an operation that \
-                 prevented this migration from proceeding"
-            ))
-        }
-    }
-
-    /// Attempts to clear the migration IDs for the supplied instance via the
-    /// sled specified in `db_instance`.
-    ///
-    /// The supplied instance record must contain valid migration IDs.
-    ///
-    /// Returns `Ok` if sled agent accepted the request to clear migration IDs
-    /// and the resulting attempt to write instance runtime state back to CRDB
-    /// succeeded. This routine returns `Ok` even if the update was not actually
-    /// applied (due to a separate generation number change).
-    ///
-    /// # Panics
-    ///
-    /// Asserts that `db_instance` has a migration ID and destination Propolis
-    /// ID set.
-    pub(crate) async fn instance_clear_migration_ids(
-        &self,
-        instance_id: InstanceUuid,
-        sled_id: SledUuid,
-        prev_instance_runtime: &db::model::InstanceRuntimeState,
-    ) -> Result<(), Error> {
-        assert!(prev_instance_runtime.migration_id.is_some());
-        assert!(prev_instance_runtime.dst_propolis_id.is_some());
-
-        let sa = self.sled_client(&sled_id).await?;
-        let instance_put_result = sa
-            .instance_put_migration_ids(
-                &instance_id,
-                &InstancePutMigrationIdsBody {
-                    old_runtime: prev_instance_runtime.clone().into(),
-                    migration_params: None,
-                },
-            )
-            .await
-            .map(|res| Some(res.into_inner().into()))
-            .map_err(|e| SledAgentInstancePutError(e));
-
-        match instance_put_result {
-            Ok(state) => {
-                self.write_returned_instance_state(&instance_id, state).await?;
-            }
-            Err(e) => {
-                if e.instance_unhealthy() {
-                    let _ = self
-                        .mark_instance_failed(
-                            &instance_id,
-                            &prev_instance_runtime,
-                            &e,
-                        )
-                        .await;
-                }
-                return Err(e.into());
-            }
-        }
-
-        Ok(())
-    }
-
     /// Reboot the specified instance.
     pub(crate) async fn instance_reboot(
         &self,
@@ -719,54 +583,26 @@ impl super::Nexus {
             .db_datastore
             .instance_fetch_with_vmm(opctx, &authz_instance)
             .await?;
-        let (instance, vmm) = (state.instance(), state.vmm());
 
-        if let Some(vmm) = vmm {
-            match vmm.runtime.state {
-                DbVmmState::Starting
-                | DbVmmState::Running
-                | DbVmmState::Rebooting => {
-                    debug!(self.log, "asked to start an active instance";
-                           "instance_id" => %authz_instance.id());
+        match instance_start_allowed(&self.log, &state)? {
+            InstanceStartDisposition::AlreadyStarted => Ok(state),
+            InstanceStartDisposition::Start => {
+                let saga_params = sagas::instance_start::Params {
+                    serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+                    db_instance: state.instance().clone(),
+                };
 
-                    return Ok(state);
-                }
-                DbVmmState::Stopped => {
-                    let propolis_id = instance
-                        .runtime()
-                        .propolis_id
-                        .expect("needed a VMM ID to fetch a VMM record");
-                    error!(self.log,
-                           "instance is stopped but still has an active VMM";
-                           "instance_id" => %authz_instance.id(),
-                           "propolis_id" => %propolis_id);
+                self.sagas
+                    .saga_execute::<sagas::instance_start::SagaInstanceStart>(
+                        saga_params,
+                    )
+                    .await?;
 
-                    return Err(Error::internal_error(
-                        "instance is stopped but still has an active VMM",
-                    ));
-                }
-                _ => {
-                    return Err(Error::conflict(&format!(
-                        "instance is in state {} but must be {} to be started",
-                        vmm.runtime.state,
-                        InstanceState::Stopped
-                    )));
-                }
+                self.db_datastore
+                    .instance_fetch_with_vmm(opctx, &authz_instance)
+                    .await
             }
         }
-
-        let saga_params = sagas::instance_start::Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            db_instance: instance.clone(),
-        };
-
-        self.sagas
-            .saga_execute::<sagas::instance_start::SagaInstanceStart>(
-                saga_params,
-            )
-            .await?;
-
-        self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
     }
 
     /// Make sure the given Instance is stopped.
@@ -858,11 +694,10 @@ impl super::Nexus {
         vmm_state: &Option<db::model::Vmm>,
         requested: &InstanceStateChangeRequest,
     ) -> Result<InstanceStateChangeRequestAction, Error> {
-        let effective_state = if let Some(vmm) = vmm_state {
-            vmm.runtime.state.into()
-        } else {
-            instance_state.runtime().nexus_state.into()
-        };
+        let effective_state = InstanceAndActiveVmm::determine_effective_state(
+            instance_state,
+            vmm_state.as_ref(),
+        );
 
         // Requests that operate on active instances have to be directed to the
         // instance's current sled agent. If there is none, the request needs to
@@ -1014,13 +849,13 @@ impl super::Nexus {
                 // the caller to let it decide how to handle it.
                 //
                 // When creating the zone for the first time, we just get
-                // Ok(None) here, which is a no-op in write_returned_instance_state.
+                // Ok(None) here, in which case, there's nothing to write back.
                 match instance_put_result {
-                    Ok(state) => self
-                        .write_returned_instance_state(&instance_id, state)
+                    Ok(Some(ref state)) => self
+                        .notify_instance_updated(opctx, instance_id, state)
                         .await
-                        .map(|_| ())
                         .map_err(Into::into),
+                    Ok(None) => Ok(()),
                     Err(e) => Err(InstanceStateChangeError::SledAgent(e)),
                 }
             }
@@ -1301,12 +1136,13 @@ impl super::Nexus {
                 },
             )
             .await
-            .map(|res| Some(res.into_inner().into()))
+            .map(|res| res.into_inner().into())
             .map_err(|e| SledAgentInstancePutError(e));
 
         match instance_register_result {
             Ok(state) => {
-                self.write_returned_instance_state(&instance_id, state).await?;
+                self.notify_instance_updated(opctx, instance_id, &state)
+                    .await?;
             }
             Err(e) => {
                 if e.instance_unhealthy() {
@@ -1323,59 +1159,6 @@ impl super::Nexus {
         }
 
         Ok(())
-    }
-
-    /// Takes an updated instance state returned from a call to sled agent and
-    /// writes it back to the database.
-    ///
-    /// # Return value
-    ///
-    /// - `Ok((instance_updated, vmm_updated))` if no failures occurred. The
-    ///   tuple fields indicate which database records (if any) were updated.
-    ///   Note that it is possible for sled agent not to return an updated
-    ///   instance state from a particular API call. In that case, the `state`
-    ///   parameter is `None` and this routine returns `Ok((false, false))`.
-    /// - `Err` if an error occurred while writing state to the database. A
-    ///   database operation that succeeds but doesn't update anything (e.g.
-    ///   owing to an outdated generation number) will return `Ok`.
-    async fn write_returned_instance_state(
-        &self,
-        instance_id: &InstanceUuid,
-        state: Option<nexus::SledInstanceState>,
-    ) -> Result<InstanceUpdateResult, Error> {
-        slog::debug!(&self.log,
-                     "writing instance state returned from sled agent";
-                     "instance_id" => %instance_id,
-                     "new_state" => ?state);
-
-        if let Some(state) = state {
-            let update_result = self
-                .db_datastore
-                .instance_and_vmm_update_runtime(
-                    instance_id,
-                    &state.instance_state.into(),
-                    &state.propolis_id,
-                    &state.vmm_state.into(),
-                    &state.migration_state,
-                )
-                .await;
-
-            slog::debug!(&self.log,
-                         "attempted to write instance state from sled agent";
-                         "instance_id" => %instance_id,
-                         "propolis_id" => %state.propolis_id,
-                         "result" => ?update_result);
-
-            update_result
-        } else {
-            // There was no instance state to write back, so --- perhaps
-            // obviously --- nothing happened.
-            Ok(InstanceUpdateResult {
-                instance_updated: false,
-                vmm_updated: false,
-                migration_updated: None,
-            })
-        }
     }
 
     /// Attempts to move an instance from `prev_instance_runtime` to the
@@ -1541,21 +1324,74 @@ impl super::Nexus {
     pub(crate) async fn notify_instance_updated(
         &self,
         opctx: &OpContext,
-        instance_id: &InstanceUuid,
+        instance_id: InstanceUuid,
         new_runtime_state: &nexus::SledInstanceState,
     ) -> Result<(), Error> {
-        notify_instance_updated(
-            &self.datastore(),
-            self.resolver(),
-            &self.opctx_alloc,
+        let saga = notify_instance_updated(
+            &self.db_datastore,
             opctx,
-            &self.log,
             instance_id,
             new_runtime_state,
-            &self.background_tasks.task_v2p_manager,
         )
         .await?;
-        self.vpc_needed_notify_sleds();
+
+        // We don't need to wait for the instance update saga to run to
+        // completion to return OK to the sled-agent --- all it needs to care
+        // about is that the VMM/migration state in the database was updated.
+        // Even if we fail to successfully start an update saga, the
+        // instance-updater background task will eventually see that the
+        // instance is in a state which requires an update saga, and ensure that
+        // one is eventually executed.
+        //
+        // Therefore, just spawn the update saga in a new task, and return.
+        if let Some(saga) = saga {
+            info!(opctx.log, "starting update saga for {instance_id}";
+                "instance_id" => %instance_id,
+                "vmm_state" => ?new_runtime_state.vmm_state,
+                "migration_state" => ?new_runtime_state.migrations(),
+            );
+            let sagas = self.sagas.clone();
+            let task_instance_updater =
+                self.background_tasks.task_instance_updater.clone();
+            let log = opctx.log.clone();
+            tokio::spawn(async move {
+                // TODO(eliza): maybe we should use the lower level saga API so
+                // we can see if the saga failed due to the lock being held and
+                // retry it immediately?
+                let running_saga = async move {
+                    let runnable_saga = sagas.saga_prepare(saga).await?;
+                    runnable_saga.start().await
+                }
+                .await;
+                let result = match running_saga {
+                    Err(error) => {
+                        error!(&log, "failed to start update saga for {instance_id}";
+                            "instance_id" => %instance_id,
+                            "error" => %error,
+                        );
+                        // If we couldn't start the update saga for this
+                        // instance, kick the instance-updater background task
+                        // to try and start it again in a timely manner.
+                        task_instance_updater.activate();
+                        return;
+                    }
+                    Ok(saga) => {
+                        saga.wait_until_stopped().await.into_omicron_result()
+                    }
+                };
+                if let Err(error) = result {
+                    error!(&log, "update saga for {instance_id} failed";
+                        "instance_id" => %instance_id,
+                        "error" => %error,
+                    );
+                    // If we couldn't complete the update saga for this
+                    // instance, kick the instance-updater background task
+                    // to try and start it again in a timely manner.
+                    task_instance_updater.activate();
+                }
+            });
+        }
+
         Ok(())
     }
 
@@ -1670,7 +1506,7 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         action: authz::Action,
-    ) -> Result<(Vmm, SocketAddr), Error> {
+    ) -> Result<(DbVmm, SocketAddr), Error> {
         let (.., authz_instance) = instance_lookup.lookup_for(action).await?;
 
         let state = self
@@ -1717,7 +1553,7 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         action: authz::Action,
-    ) -> Result<(Vmm, propolis_client::Client), Error> {
+    ) -> Result<(DbVmm, propolis_client::Client), Error> {
         let (vmm, client_addr) = self
             .propolis_addr_for_instance(opctx, instance_lookup, action)
             .await?;
@@ -1995,193 +1831,136 @@ impl super::Nexus {
 }
 
 /// Invoked by a sled agent to publish an updated runtime state for an
-/// Instance.
-#[allow(clippy::too_many_arguments)] // :(
+/// Instance, returning an update saga for that instance (if one must be
+/// executed).
 pub(crate) async fn notify_instance_updated(
     datastore: &DataStore,
-    resolver: &internal_dns::resolver::Resolver,
-    opctx_alloc: &OpContext,
     opctx: &OpContext,
-    log: &slog::Logger,
-    instance_id: &InstanceUuid,
+    instance_id: InstanceUuid,
     new_runtime_state: &nexus::SledInstanceState,
-    v2p_manager: &crate::app::background::Activator,
-) -> Result<Option<InstanceUpdateResult>, Error> {
+) -> Result<Option<steno::SagaDag>, Error> {
+    use sagas::instance_update;
+
+    let migrations = new_runtime_state.migrations();
     let propolis_id = new_runtime_state.propolis_id;
+    info!(opctx.log, "received new VMM runtime state from sled agent";
+        "instance_id" => %instance_id,
+        "propolis_id" => %propolis_id,
+        "vmm_state" => ?new_runtime_state.vmm_state,
+        "migration_state" => ?migrations,
+    );
 
-    info!(log, "received new runtime state from sled agent";
-            "instance_id" => %instance_id,
-            "instance_state" => ?new_runtime_state.instance_state,
-            "propolis_id" => %propolis_id,
-            "vmm_state" => ?new_runtime_state.vmm_state,
-            "migration_state" => ?new_runtime_state.migration_state);
-
-    // Grab the current state of the instance in the DB to reason about
-    // whether this update is stale or not.
-    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(instance_id.into_untyped_uuid())
-        .fetch()
-        .await?;
-
-    // Update OPTE and Dendrite if the instance's active sled assignment
-    // changed or a migration was retired. If these actions fail, sled agent
-    // is expected to retry this update.
-    //
-    // This configuration must be updated before updating any state in CRDB
-    // so that, if the instance was migrating or has shut down, it will not
-    // appear to be able to migrate or start again until the appropriate
-    // networking state has been written. Without this interlock, another
-    // thread or another Nexus can race with this routine to write
-    // conflicting configuration.
-    //
-    // In the future, this should be replaced by a call to trigger a
-    // networking state update RPW.
-    super::instance_network::ensure_updated_instance_network_config(
-        datastore,
-        log,
-        resolver,
-        opctx,
-        opctx_alloc,
-        &authz_instance,
-        db_instance.runtime(),
-        &new_runtime_state.instance_state,
-        v2p_manager,
-    )
-    .await?;
-
-    // If the supplied instance state indicates that the instance no longer
-    // has an active VMM, attempt to delete the virtual provisioning record,
-    // and the assignment of the Propolis metric producer to an oximeter
-    // collector.
-    //
-    // As with updating networking state, this must be done before
-    // committing the new runtime state to the database: once the DB is
-    // written, a new start saga can arrive and start the instance, which
-    // will try to create its own virtual provisioning charges, which will
-    // race with this operation.
-    if new_runtime_state.instance_state.propolis_id.is_none() {
-        datastore
-            .virtual_provisioning_collection_delete_instance(
-                opctx,
-                *instance_id,
-                db_instance.project_id,
-                i64::from(db_instance.ncpus.0 .0),
-                db_instance.memory,
-                (&new_runtime_state.instance_state.gen).into(),
-            )
-            .await?;
-
-        // TODO-correctness: The `notify_instance_updated` method can run
-        // concurrently with itself in some situations, such as where a
-        // sled-agent attempts to update Nexus about a stopped instance;
-        // that times out; and it makes another request to a different
-        // Nexus. The call to `unassign_producer` is racy in those
-        // situations, and we may end with instances with no metrics.
-        //
-        // This unfortunate case should be handled as part of
-        // instance-lifecycle improvements, notably using a reliable
-        // persistent workflow to correctly update the oximete assignment as
-        // an instance's state changes.
-        //
-        // Tracked in https://github.com/oxidecomputer/omicron/issues/3742.
-        super::oximeter::unassign_producer(
-            datastore,
-            log,
-            opctx,
-            &instance_id.into_untyped_uuid(),
-        )
-        .await?;
-    }
-
-    // Write the new instance and VMM states back to CRDB. This needs to be
-    // done before trying to clean up the VMM, since the datastore will only
-    // allow a VMM to be marked as deleted if it is already in a terminal
-    // state.
     let result = datastore
-        .instance_and_vmm_update_runtime(
-            instance_id,
-            &db::model::InstanceRuntimeState::from(
-                new_runtime_state.instance_state.clone(),
-            ),
-            &propolis_id,
-            &db::model::VmmRuntimeState::from(
-                new_runtime_state.vmm_state.clone(),
-            ),
-            &new_runtime_state.migration_state,
+        .vmm_and_migration_update_runtime(
+            &opctx,
+            propolis_id,
+            // TODO(eliza): probably should take this by value...
+            &new_runtime_state.vmm_state.clone().into(),
+            migrations,
         )
-        .await;
+        .await?;
 
-    // If the VMM is now in a terminal state, make sure its resources get
-    // cleaned up.
+    // If an instance-update saga must be executed as a result of this update,
+    // prepare and return it.
+    if instance_update::update_saga_needed(
+        &opctx.log,
+        instance_id,
+        new_runtime_state,
+        &result,
+    ) {
+        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
+            .instance_id(instance_id.into_untyped_uuid())
+            .lookup_for(authz::Action::Modify)
+            .await?;
+        let saga = instance_update::SagaInstanceUpdate::prepare(
+            &instance_update::Params {
+                serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+                authz_instance,
+            },
+        )?;
+        Ok(Some(saga))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Determines the disposition of a request to start an instance given its state
+/// (and its current VMM's state, if it has one) in the database.
+fn instance_start_allowed(
+    log: &slog::Logger,
+    state: &InstanceAndActiveVmm,
+) -> Result<InstanceStartDisposition, Error> {
+    let (instance, vmm) = (state.instance(), state.vmm());
+
+    // If the instance has an active VMM, there's nothing to start, but this
+    // disposition of this call (succeed for idempotency vs. fail with an
+    // error describing the conflict) depends on the state that VMM is in.
     //
-    // For idempotency, only check to see if the update was successfully
-    // processed and ignore whether the VMM record was actually updated.
-    // This is required to handle the case where this routine is called
-    // once, writes the terminal VMM state, fails before all per-VMM
-    // resources are released, returns a retriable error, and is retried:
-    // the per-VMM resources still need to be cleaned up, but the DB update
-    // will return Ok(_, false) because the database was already updated.
-    //
-    // Unlike the pre-update cases, it is legal to do this cleanup *after*
-    // committing state to the database, because a terminated VMM cannot be
-    // reused (restarting or migrating its former instance will use new VMM
-    // IDs).
-    if result.is_ok() {
-        let propolis_terminated = matches!(
-            new_runtime_state.vmm_state.state,
-            VmmState::Destroyed | VmmState::Failed
-        );
+    // If the instance doesn't have an active VMM, see if the instance state
+    // permits it to start.
+    match state.effective_state() {
+        // If the VMM is already starting or is in another "active"
+        // state, succeed to make successful start attempts idempotent.
+        s @ InstanceState::Starting
+        | s @ InstanceState::Running
+        | s @ InstanceState::Rebooting
+        | s @ InstanceState::Migrating => {
+            debug!(log, "asked to start an active instance";
+                   "instance_id" => %instance.id(),
+                   "state" => ?s);
 
-        if propolis_terminated {
-            info!(log, "vmm is terminated, cleaning up resources";
-                    "instance_id" => %instance_id,
-                    "propolis_id" => %propolis_id);
+            Ok(InstanceStartDisposition::AlreadyStarted)
+        }
+        InstanceState::Stopped => {
+            match vmm.as_ref() {
+                // If a previous start saga failed and left behind a VMM in the
+                // SagaUnwound state, allow a new start saga to try to overwrite
+                // it.
+                Some(vmm) if vmm.runtime.state == DbVmmState::SagaUnwound => {
+                    debug!(
+                        log,
+                        "instance's last VMM's start saga unwound, OK to start";
+                        "instance_id" => %instance.id()
+                    );
 
-            datastore
-                .sled_reservation_delete(opctx, propolis_id.into_untyped_uuid())
-                .await?;
+                    Ok(InstanceStartDisposition::Start)
+                }
+                // This shouldn't happen: `InstanceAndVmm::effective_state` should
+                // only return `Stopped` if there is no active VMM or if the VMM is
+                // `SagaUnwound`.
+                Some(vmm) => {
+                    error!(log,
+                            "instance is stopped but still has an active VMM";
+                            "instance_id" => %instance.id(),
+                            "propolis_id" => %vmm.id,
+                            "propolis_state" => ?vmm.runtime.state);
 
-            if !datastore.vmm_mark_deleted(opctx, &propolis_id).await? {
-                warn!(log, "failed to mark vmm record as deleted";
-                    "instance_id" => %instance_id,
-                    "propolis_id" => %propolis_id,
-                    "vmm_state" => ?new_runtime_state.vmm_state);
+                    Err(Error::internal_error(
+                        "instance is stopped but still has an active VMM",
+                    ))
+                }
+                // Ah, it's actually stopped. We can restart it.
+                None => Ok(InstanceStartDisposition::Start),
             }
         }
-    }
-
-    match result {
-        Ok(result) => {
-            info!(log, "instance and vmm updated by sled agent";
-                    "instance_id" => %instance_id,
-                    "propolis_id" => %propolis_id,
-                    "instance_updated" => result.instance_updated,
-                    "vmm_updated" => result.vmm_updated,
-                    "migration_updated" => ?result.migration_updated);
-            Ok(Some(result))
+        InstanceState::Stopping => {
+            let (propolis_id, propolis_state) = match vmm.as_ref() {
+                Some(vmm) => (Some(vmm.id), Some(vmm.runtime.state)),
+                None => (None, None),
+            };
+            debug!(log, "instance's VMM is still in the process of stopping";
+                   "instance_id" => %instance.id(),
+                   "propolis_id" => ?propolis_id,
+                   "propolis_state" => ?propolis_state);
+            Err(Error::conflict(
+                "instance must finish stopping before it can be started",
+            ))
         }
-
-        // The update command should swallow object-not-found errors and
-        // return them back as failures to update, so this error case is
-        // unexpected. There's no work to do if this occurs, however.
-        Err(Error::ObjectNotFound { .. }) => {
-            error!(log, "instance/vmm update unexpectedly returned \
-                    an object not found error";
-                    "instance_id" => %instance_id,
-                    "propolis_id" => %propolis_id);
-            Ok(None)
-        }
-
-        // If the datastore is unavailable, propagate that to the caller.
-        // TODO-robustness Really this should be any _transient_ error.  How
-        // can we distinguish?  Maybe datastore should emit something
-        // different from Error with an Into<Error>.
-        Err(error) => {
-            warn!(log, "failed to update instance from sled agent";
-                    "instance_id" => %instance_id,
-                    "propolis_id" => %propolis_id,
-                    "error" => ?error);
-            Err(error)
+        s => {
+            return Err(Error::conflict(&format!(
+                "instance is in state {s} but it must be {} to be started",
+                InstanceState::Stopped
+            )))
         }
     }
 }
@@ -2189,15 +1968,23 @@ pub(crate) async fn notify_instance_updated(
 #[cfg(test)]
 mod tests {
     use super::super::Nexus;
-    use super::{CloseCode, CloseFrame, WebSocketMessage, WebSocketStream};
+    use super::*;
     use core::time::Duration;
     use futures::{SinkExt, StreamExt};
+    use nexus_db_model::{
+        Instance as DbInstance, InstanceState as DbInstanceState,
+        VmmInitialState, VmmState as DbVmmState,
+    };
+    use omicron_common::api::external::{
+        Hostname, IdentityMetadataCreateParams, InstanceCpuCount, Name,
+    };
     use omicron_test_utils::dev::test_setup_log;
+    use params::InstanceNetworkInterfaceAttachment;
     use propolis_client::support::tungstenite::protocol::Role;
     use propolis_client::support::{
         InstanceSerialConsoleHelper, WSClientOffset,
     };
-    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 
     #[tokio::test]
     async fn test_serial_console_stream_proxying() {
@@ -2288,6 +2075,107 @@ mod tests {
             .expect("proxy task shut down within 1s")
             .expect("task successfully completed")
             .expect("proxy task exited successfully");
+        logctx.cleanup_successful();
+    }
+
+    /// Creates an instance record and a VMM record that points back to it. Note
+    /// that the VMM is *not* installed in the instance's `active_propolis_id`
+    /// field.
+    fn make_instance_and_vmm() -> (DbInstance, DbVmm) {
+        let params = params::InstanceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: Name::try_from("elysium".to_owned()).unwrap(),
+                description: "this instance is disco".to_owned(),
+            },
+            ncpus: InstanceCpuCount(1),
+            memory: ByteCount::from_gibibytes_u32(1),
+            hostname: Hostname::try_from("elysium").unwrap(),
+            user_data: vec![],
+            network_interfaces: InstanceNetworkInterfaceAttachment::None,
+            external_ips: vec![],
+            disks: vec![],
+            ssh_public_keys: None,
+            start: false,
+        };
+
+        let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
+        let project_id = Uuid::new_v4();
+        let instance = DbInstance::new(instance_id, project_id, &params);
+
+        let propolis_id = PropolisUuid::from_untyped_uuid(Uuid::new_v4());
+        let sled_id = SledUuid::from_untyped_uuid(Uuid::new_v4());
+        let vmm = DbVmm::new(
+            propolis_id,
+            instance_id,
+            sled_id,
+            ipnetwork::IpNetwork::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0)
+                .unwrap(),
+            0,
+            VmmInitialState::Starting,
+        );
+
+        (instance, vmm)
+    }
+
+    #[test]
+    fn test_instance_start_allowed_when_no_vmm() {
+        let logctx = test_setup_log("test_instance_start_allowed_when_no_vmm");
+        let (mut instance, _vmm) = make_instance_and_vmm();
+        instance.runtime_state.nexus_state = DbInstanceState::NoVmm;
+        let state = InstanceAndActiveVmm::from((instance, None));
+        assert!(instance_start_allowed(&logctx.log, &state).is_ok());
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_instance_start_allowed_when_vmm_in_saga_unwound() {
+        let logctx = test_setup_log(
+            "test_instance_start_allowed_when_vmm_in_saga_unwound",
+        );
+        let (mut instance, mut vmm) = make_instance_and_vmm();
+        instance.runtime_state.nexus_state = DbInstanceState::Vmm;
+        instance.runtime_state.propolis_id = Some(vmm.id);
+        vmm.runtime.state = DbVmmState::SagaUnwound;
+        let state = InstanceAndActiveVmm::from((instance, Some(vmm)));
+        assert!(instance_start_allowed(&logctx.log, &state).is_ok());
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_instance_start_forbidden_while_creating() {
+        let logctx =
+            test_setup_log("test_instance_start_forbidden_while_creating");
+        let (mut instance, _vmm) = make_instance_and_vmm();
+        instance.runtime_state.nexus_state = DbInstanceState::Creating;
+        let state = InstanceAndActiveVmm::from((instance, None));
+        assert!(instance_start_allowed(&logctx.log, &state).is_err());
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_instance_start_idempotent_if_active() {
+        let logctx = test_setup_log("test_instance_start_idempotent_if_active");
+        let (mut instance, mut vmm) = make_instance_and_vmm();
+        instance.runtime_state.nexus_state = DbInstanceState::Vmm;
+        instance.runtime_state.propolis_id = Some(vmm.id);
+        vmm.runtime.state = DbVmmState::Starting;
+        let state =
+            InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));
+        assert!(instance_start_allowed(&logctx.log, &state).is_ok());
+
+        vmm.runtime.state = DbVmmState::Running;
+        let state =
+            InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));
+        assert!(instance_start_allowed(&logctx.log, &state).is_ok());
+
+        vmm.runtime.state = DbVmmState::Rebooting;
+        let state =
+            InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));
+        assert!(instance_start_allowed(&logctx.log, &state).is_ok());
+
+        vmm.runtime.state = DbVmmState::Migrating;
+        let state = InstanceAndActiveVmm::from((instance, Some(vmm)));
+        assert!(instance_start_allowed(&logctx.log, &state).is_ok());
         logctx.cleanup_successful();
     }
 }

@@ -208,23 +208,6 @@ pub struct InstanceMigrationSourceParams {
     pub dst_propolis_id: PropolisUuid,
 }
 
-/// The body of a request to set or clear the migration identifiers from a
-/// sled agent's instance state records.
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct InstancePutMigrationIdsBody {
-    /// The last instance runtime state known to this requestor. This request
-    /// will succeed if either (a) the state generation in the sled agent's
-    /// runtime state matches the generation in this record, or (b) the sled
-    /// agent's runtime state matches what would result from applying this
-    /// request to the caller's runtime state. This latter condition provides
-    /// idempotency.
-    pub old_runtime: InstanceRuntimeState,
-
-    /// The migration identifiers to set. If `None`, this operation clears the
-    /// migration IDs.
-    pub migration_params: Option<InstanceMigrationSourceParams>,
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub enum DiskType {
     U2,
