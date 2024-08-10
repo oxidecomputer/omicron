@@ -559,7 +559,10 @@ impl quote::ToTokens for TimeseriesSchema {
         let created = quote_creation_time(self.created);
         let toks = quote! {
             ::oximeter::schema::TimeseriesSchema {
-                timeseries_name: ::oximeter::TimeseriesName::try_from(#timeseries_name).unwrap(),
+                timeseries_name:
+                    <::oximeter::TimeseriesName as ::std::convert::TryFrom<&str>>::try_from(
+                        #timeseries_name
+                    ).unwrap(),
                 description: ::oximeter::schema::TimeseriesDescription {
                     target: String::from(#target_description),
                     metric: String::from(#metric_description),

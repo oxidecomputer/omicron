@@ -81,17 +81,9 @@ pub fn from_diesel(e: DieselError) -> external::Error {
 #[derive(Clone)]
 enum UpdateKind {
     InsertStorage(VirtualProvisioningResource),
-    DeleteStorage {
-        id: uuid::Uuid,
-        disk_byte_diff: ByteCount,
-    },
+    DeleteStorage { id: uuid::Uuid, disk_byte_diff: ByteCount },
     InsertInstance(VirtualProvisioningResource),
-    DeleteInstance {
-        id: uuid::Uuid,
-        max_instance_gen: i64,
-        cpus_diff: i64,
-        ram_diff: ByteCount,
-    },
+    DeleteInstance { id: uuid::Uuid, cpus_diff: i64, ram_diff: ByteCount },
 }
 
 type SelectableSql<T> = <
@@ -246,15 +238,7 @@ WITH
     ),")
                 .bind::<sql_types::Uuid, _>(id)
             },
-            UpdateKind::DeleteInstance { id, max_instance_gen, .. } => {
-                // The filter condition here ensures that the provisioning record is
-                // only deleted if the corresponding instance has a generation
-                // number less than the supplied `max_instance_gen`. This allows a
-                // caller that is about to apply an instance update that will stop
-                // the instance and that bears generation G to avoid deleting
-                // resources if the instance generation was already advanced to or
-                // past G.
-                //
+            UpdateKind::DeleteInstance { id, .. } => {
                 // If the relevant instance ID is not in the database, then some
                 // other operation must have ensured the instance was previously
                 // stopped (because that's the only way it could have been deleted),
@@ -279,14 +263,13 @@ WITH
           FROM
             instance
           WHERE
-            instance.id = ").param().sql(" AND instance.state_generation < ").param().sql("
+            instance.id = ").param().sql("
           LIMIT 1
         )
           AS update
     ),")
                 .bind::<sql_types::Uuid, _>(id)
                 .bind::<sql_types::Uuid, _>(id)
-                .bind::<sql_types::BigInt, _>(max_instance_gen)
             },
         };
 
@@ -477,7 +460,6 @@ FROM
 
     pub fn new_delete_instance(
         id: InstanceUuid,
-        max_instance_gen: i64,
         cpus_diff: i64,
         ram_diff: ByteCount,
         project_id: uuid::Uuid,
@@ -485,7 +467,6 @@ FROM
         Self::apply_update(
             UpdateKind::DeleteInstance {
                 id: id.into_untyped_uuid(),
-                max_instance_gen,
                 cpus_diff,
                 ram_diff,
             },
@@ -567,14 +548,9 @@ mod test {
         let project_id = Uuid::nil();
         let cpus_diff = 4;
         let ram_diff = 2048.try_into().unwrap();
-        let max_instance_gen = 0;
 
         let query = VirtualProvisioningCollectionUpdate::new_delete_instance(
-            id,
-            max_instance_gen,
-            cpus_diff,
-            ram_diff,
-            project_id,
+            id, cpus_diff, ram_diff, project_id,
         );
 
         expectorate_query_contents(
@@ -678,17 +654,12 @@ mod test {
         let conn = pool.pool().get().await.unwrap();
 
         let id = InstanceUuid::nil();
-        let max_instance_gen = 0;
         let project_id = Uuid::nil();
         let cpus_diff = 16.try_into().unwrap();
         let ram_diff = 2048.try_into().unwrap();
 
         let query = VirtualProvisioningCollectionUpdate::new_delete_instance(
-            id,
-            max_instance_gen,
-            cpus_diff,
-            ram_diff,
-            project_id,
+            id, cpus_diff, ram_diff, project_id,
         );
         let _ = query
             .explain_async(&conn)

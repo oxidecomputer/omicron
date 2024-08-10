@@ -64,6 +64,9 @@ pub enum ExecutionError {
     #[error("Failed to manipulate process contract: {err}")]
     ContractFailure { err: std::io::Error },
 
+    #[error("Failed to parse command output")]
+    ParseFailure(String),
+
     #[error("Zone is not running")]
     NotRunning,
 }

@@ -23,6 +23,7 @@ use crate::db::model::ExternalIp;
 use crate::db::model::FloatingIp;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::IpKind;
+use crate::db::model::IpPool;
 use crate::db::model::Name;
 use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
@@ -169,9 +170,9 @@ impl DataStore {
     }
 
     /// Fetch all external IP addresses of any kind for the provided service.
-    pub async fn external_ip_list_service(
+    pub async fn external_ip_list_service_on_connection(
         &self,
-        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         service_id: Uuid,
     ) -> LookupResult<Vec<ExternalIp>> {
         use db::schema::external_ip::dsl;
@@ -180,7 +181,7 @@ impl DataStore {
             .filter(dsl::parent_id.eq(service_id))
             .filter(dsl::time_deleted.is_null())
             .select(ExternalIp::as_select())
-            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .get_results_async(conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
@@ -327,6 +328,25 @@ impl DataStore {
             zone_kind,
         );
         self.allocate_external_ip(opctx, data).await
+    }
+
+    /// Variant of [Self::external_ip_allocate_omicron_zone] which may be called
+    /// from a transaction context.
+    pub(crate) async fn external_ip_allocate_omicron_zone_on_connection(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        service_pool: &IpPool,
+        zone_id: OmicronZoneUuid,
+        zone_kind: ZoneKind,
+        external_ip: OmicronZoneExternalIp,
+    ) -> Result<ExternalIp, TransactionError<Error>> {
+        let data = IncompleteExternalIp::for_omicron_zone(
+            service_pool.id(),
+            external_ip,
+            zone_id,
+            zone_kind,
+        );
+        Self::allocate_external_ip_on_connection(conn, data).await
     }
 
     /// List one page of all external IPs allocated to internal services
@@ -637,6 +657,17 @@ impl DataStore {
         opctx: &OpContext,
         ip_id: Uuid,
     ) -> Result<bool, Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.deallocate_external_ip_on_connection(&conn, ip_id).await
+    }
+
+    /// Variant of [Self::deallocate_external_ip] which may be called from a
+    /// transaction context.
+    pub(crate) async fn deallocate_external_ip_on_connection(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        ip_id: Uuid,
+    ) -> Result<bool, Error> {
         use db::schema::external_ip::dsl;
         let now = Utc::now();
         diesel::update(dsl::external_ip)
@@ -644,7 +675,7 @@ impl DataStore {
             .filter(dsl::id.eq(ip_id))
             .set(dsl::time_deleted.eq(now))
             .check_if_exists::<ExternalIp>(ip_id)
-            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
+            .execute_and_check(conn)
             .await
             .map(|r| match r.status {
                 UpdateStatus::Updated => true,

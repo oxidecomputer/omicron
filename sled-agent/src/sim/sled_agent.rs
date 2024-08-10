@@ -7,14 +7,14 @@
 use super::collection::{PokeMode, SimCollection};
 use super::config::Config;
 use super::disk::SimDisk;
-use super::instance::SimInstance;
+use super::instance::{self, SimInstance};
 use super::storage::CrucibleData;
 use super::storage::Storage;
 use crate::nexus::NexusClient;
 use crate::params::{
     DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
-    InstanceMetadata, InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse,
+    InstanceMetadata, InstancePutStateResponse, InstanceStateRequested,
+    InstanceUnregisterResponse,
 };
 use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
@@ -30,7 +30,7 @@ use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
 };
 use omicron_common::api::internal::nexus::{
-    DiskRuntimeState, SledInstanceState,
+    DiskRuntimeState, MigrationRuntimeState, MigrationState, SledInstanceState,
 };
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, VmmRuntimeState,
@@ -368,15 +368,24 @@ impl SledAgent {
             }
         }
 
+        let migration_in = instance_runtime.migration_id.map(|migration_id| {
+            MigrationRuntimeState {
+                migration_id,
+                state: MigrationState::Pending,
+                gen: Generation::new(),
+                time_updated: chrono::Utc::now(),
+            }
+        });
+
         let instance_run_time_state = self
             .instances
             .sim_ensure(
                 &instance_id.into_untyped_uuid(),
                 SledInstanceState {
-                    instance_state: instance_runtime,
                     vmm_state: vmm_runtime,
                     propolis_id,
-                    migration_state: None,
+                    migration_in,
+                    migration_out: None,
                 },
                 None,
             )
@@ -540,6 +549,24 @@ impl SledAgent {
         Ok(instance.current())
     }
 
+    pub async fn instance_simulate_migration_source(
+        &self,
+        instance_id: InstanceUuid,
+        migration: instance::SimulateMigrationSource,
+    ) -> Result<(), HttpError> {
+        let instance = self
+            .instances
+            .sim_get_cloned_object(&instance_id.into_untyped_uuid())
+            .await
+            .map_err(|_| {
+                crate::sled_agent::Error::Instance(
+                    crate::instance_manager::Error::NoSuchInstance(instance_id),
+                )
+            })?;
+        instance.set_simulated_migration_source(migration);
+        Ok(())
+    }
+
     pub async fn set_instance_ensure_state_error(&self, error: Option<Error>) {
         *self.instance_ensure_state_error.lock().await = error;
     }
@@ -561,20 +588,6 @@ impl SledAgent {
             .await?;
 
         Ok(())
-    }
-
-    pub async fn instance_put_migration_ids(
-        self: &Arc<Self>,
-        instance_id: InstanceUuid,
-        old_runtime: &InstanceRuntimeState,
-        migration_ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<SledInstanceState, Error> {
-        let instance = self
-            .instances
-            .sim_get_cloned_object(&instance_id.into_untyped_uuid())
-            .await?;
-
-        instance.put_migration_ids(old_runtime, migration_ids).await
     }
 
     /// Idempotently ensures that the given API Disk (described by `api_disk`)
@@ -601,8 +614,8 @@ impl SledAgent {
         self.disks.size().await
     }
 
-    pub async fn instance_poke(&self, id: InstanceUuid) {
-        self.instances.sim_poke(id.into_untyped_uuid(), PokeMode::Drain).await;
+    pub async fn instance_poke(&self, id: InstanceUuid, mode: PokeMode) {
+        self.instances.sim_poke(id.into_untyped_uuid(), mode).await;
     }
 
     pub async fn disk_poke(&self, id: Uuid) {

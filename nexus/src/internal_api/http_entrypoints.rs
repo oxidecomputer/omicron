@@ -177,7 +177,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             nexus
                 .notify_instance_updated(
                     &opctx,
-                    &InstanceUuid::from_untyped_uuid(path.instance_id),
+                    InstanceUuid::from_untyped_uuid(path.instance_id),
                     &new_state,
                 )
                 .await?;

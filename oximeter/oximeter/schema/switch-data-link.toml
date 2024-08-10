@@ -90,6 +90,15 @@ versions = [
 ]
 
 [[metrics]]
+name = "link_enabled"
+description = "Reports whether the link is currently enabled"
+units = "none"
+datum_type = "bool"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[[metrics]]
 name = "link_fsm"
 description = """\
 Total entries into each state of the autonegotation / \
@@ -164,6 +173,60 @@ versions = [
     { added_in = 1, fields = [ "port_id", "link_id" ] }
 ]
 
+[[metrics]]
+name = "pcs_sync_loss"
+description = "Total number of times PCS sync was lost on the data link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[[metrics]]
+name = "fec_high_symbol_errors"
+description = "FEC symbol error threshold exceeded"
+units = "none"
+datum_type = "bool"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[[metrics]]
+name = "fec_sync_aligned"
+description = "All lanes synchronized and aligned"
+units = "none"
+datum_type = "bool"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[[metrics]]
+name = "fec_corrected_blocks"
+description = "Total number of FEC blocks that were corrected"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[[metrics]]
+name = "fec_uncorrected_blocks"
+description = "Total number of FEC blocks that were uncorrected"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "port_id", "link_id" ] }
+]
+
+[[metrics]]
+name = "fec_symbol_errors"
+description = "Total number of FEC symbol errors"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "port_id", "lane", "link_id" ] }
+]
+
 [fields.rack_id]
 type = "uuid"
 description = "ID of the rack the link's switch is in"
@@ -203,6 +266,10 @@ description = "Serial number of the switch the link is on"
 [fields.port_id]
 type = "string"
 description = "Physical switch port the link is on"
+
+[fields.lane]
+type = "u8"
+description = "Lane (Tx/Rx pair) within a single link"
 
 [fields.link_id]
 type = "u8"

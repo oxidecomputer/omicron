@@ -929,6 +929,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             /// number of stale instance metrics that were deleted
             pruned_instances: usize,
 
+            /// update sagas queued due to instance updates.
+            update_sagas_queued: usize,
+
             /// instance states from completed checks.
             ///
             /// this is a mapping of stringified instance states to the number
@@ -970,6 +973,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             ),
             Ok(TaskSuccess {
                 total_instances,
+                update_sagas_queued,
                 pruned_instances,
                 instance_states,
                 failed_checks,
@@ -987,7 +991,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 for (state, count) in &instance_states {
                     println!("       -> {count} instances {state}")
                 }
-
+                println!("       update sagas queued: {update_sagas_queued}");
                 println!("       failed checks: {total_failures}");
                 for (failure, count) in &failed_checks {
                     println!("       -> {count} {failure}")
@@ -1239,11 +1243,6 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
     } else if name == "lookup_region_port" {
         match serde_json::from_value::<LookupRegionPortStatus>(details.clone())
         {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
-
             Ok(LookupRegionPortStatus { found_port_ok, errors }) => {
                 println!("    total filled in ports: {}", found_port_ok.len());
                 for line in &found_port_ok {
@@ -1253,6 +1252,83 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 println!("    errors: {}", errors.len());
                 for line in &errors {
                     println!("    > {line}");
+                }
+            }
+
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details,
+            ),
+        }
+    } else if name == "instance_updater" {
+        #[derive(Deserialize)]
+        struct UpdaterStatus {
+            /// number of instances found with destroyed active VMMs
+            destroyed_active_vmms: usize,
+
+            /// number of instances found with terminated active migrations
+            terminated_active_migrations: usize,
+
+            /// number of update sagas started.
+            sagas_started: usize,
+
+            /// number of sagas completed successfully
+            sagas_completed: usize,
+
+            /// number of sagas which failed
+            sagas_failed: usize,
+
+            /// number of sagas which could not be started
+            saga_start_failures: usize,
+
+            /// the last error that occurred during execution.
+            error: Option<String>,
+        }
+        match serde_json::from_value::<UpdaterStatus>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(UpdaterStatus {
+                destroyed_active_vmms,
+                terminated_active_migrations,
+                sagas_started,
+                sagas_completed,
+                sagas_failed,
+                saga_start_failures,
+                error,
+            }) => {
+                if let Some(error) = error {
+                    println!("    task did not complete successfully!");
+                    println!("      most recent error: {error}");
+                }
+
+                println!(
+                    "    total instances in need of updates: {}",
+                    destroyed_active_vmms + terminated_active_migrations
+                );
+                println!(
+                    "      instances with destroyed active VMMs: {}",
+                    destroyed_active_vmms,
+                );
+                println!(
+                    "      instances with terminated active migrations: {}",
+                    terminated_active_migrations,
+                );
+                println!("    update sagas started: {sagas_started}");
+                println!(
+                    "    update sagas completed successfully: {}",
+                    sagas_completed,
+                );
+
+                let total_failed = sagas_failed + saga_start_failures;
+                if total_failed > 0 {
+                    println!("    unsuccessful update sagas: {total_failed}");
+                    println!(
+                        "      sagas which could not be started: {}",
+                        saga_start_failures
+                    );
+                    println!("      sagas failed: {sagas_failed}");
                 }
             }
         };

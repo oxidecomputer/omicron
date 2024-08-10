@@ -14,6 +14,7 @@ pub mod dns_config;
 pub mod dns_propagation;
 pub mod dns_servers;
 pub mod external_endpoints;
+pub mod instance_updater;
 pub mod instance_watcher;
 pub mod inventory_collection;
 pub mod lookup_region_port;

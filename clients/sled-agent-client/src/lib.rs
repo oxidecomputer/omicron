@@ -5,6 +5,9 @@
 //! Interface for making API requests to a Sled Agent
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
 use std::convert::TryFrom;
 use uuid::Uuid;
 
@@ -38,6 +41,7 @@ progenitor::generate_api!(
     replace = {
         Baseboard = nexus_sled_agent_shared::inventory::Baseboard,
         ByteCount = omicron_common::api::external::ByteCount,
+        DatasetKind = omicron_common::api::internal::shared::DatasetKind,
         DiskIdentity = omicron_common::disk::DiskIdentity,
         DiskVariant = omicron_common::disk::DiskVariant,
         Generation = omicron_common::api::external::Generation,
@@ -163,10 +167,10 @@ impl From<types::SledInstanceState>
 {
     fn from(s: types::SledInstanceState) -> Self {
         Self {
-            instance_state: s.instance_state.into(),
             propolis_id: s.propolis_id,
             vmm_state: s.vmm_state.into(),
-            migration_state: s.migration_state.map(Into::into),
+            migration_in: s.migration_in.map(Into::into),
+            migration_out: s.migration_out.map(Into::into),
         }
     }
 }
@@ -178,21 +182,8 @@ impl From<types::MigrationRuntimeState>
         Self {
             migration_id: s.migration_id,
             state: s.state.into(),
-            role: s.role.into(),
             gen: s.gen,
             time_updated: s.time_updated,
-        }
-    }
-}
-
-impl From<types::MigrationRole>
-    for omicron_common::api::internal::nexus::MigrationRole
-{
-    fn from(r: types::MigrationRole) -> Self {
-        use omicron_common::api::internal::nexus::MigrationRole as Output;
-        match r {
-            types::MigrationRole::Source => Output::Source,
-            types::MigrationRole::Target => Output::Target,
         }
     }
 }
@@ -458,12 +449,29 @@ impl From<types::SledIdentifiers>
 /// are bonus endpoints, not generated in the real client.
 #[async_trait]
 pub trait TestInterfaces {
+    async fn instance_single_step(&self, id: Uuid);
     async fn instance_finish_transition(&self, id: Uuid);
+    async fn instance_simulate_migration_source(
+        &self,
+        id: Uuid,
+        params: SimulateMigrationSource,
+    );
     async fn disk_finish_transition(&self, id: Uuid);
 }
 
 #[async_trait]
 impl TestInterfaces for Client {
+    async fn instance_single_step(&self, id: Uuid) {
+        let baseurl = self.baseurl();
+        let client = self.client();
+        let url = format!("{}/instances/{}/poke-single-step", baseurl, id);
+        client
+            .post(url)
+            .send()
+            .await
+            .expect("instance_single_step() failed unexpectedly");
+    }
+
     async fn instance_finish_transition(&self, id: Uuid) {
         let baseurl = self.baseurl();
         let client = self.client();
@@ -485,4 +493,46 @@ impl TestInterfaces for Client {
             .await
             .expect("disk_finish_transition() failed unexpectedly");
     }
+
+    async fn instance_simulate_migration_source(
+        &self,
+        id: Uuid,
+        params: SimulateMigrationSource,
+    ) {
+        let baseurl = self.baseurl();
+        let client = self.client();
+        let url = format!("{baseurl}/instances/{id}/sim-migration-source");
+        client
+            .post(url)
+            .json(&params)
+            .send()
+            .await
+            .expect("instance_simulate_migration_source() failed unexpectedly");
+    }
+}
+
+/// Parameters to the `/instances/{id}/sim-migration-source` test API.
+///
+/// This message type is not included in the OpenAPI spec, because this API
+/// exists only in test builds.
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SimulateMigrationSource {
+    /// The ID of the migration out of the instance's current active VMM.
+    pub migration_id: Uuid,
+    /// What migration result (success or failure) to simulate.
+    pub result: SimulatedMigrationResult,
+}
+
+/// The result of a simulated migration out from an instance's current active
+/// VMM.
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub enum SimulatedMigrationResult {
+    /// Simulate a successful migration out.
+    Success,
+    /// Simulate a failed migration out.
+    ///
+    /// # Note
+    ///
+    /// This is not currently implemented by the simulated sled-agent.
+    Failure,
 }
