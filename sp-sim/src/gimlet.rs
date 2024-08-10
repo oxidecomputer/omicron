@@ -36,6 +36,7 @@ use gateway_messages::SpStateV2;
 use gateway_messages::{version, MessageKind};
 use gateway_messages::{ComponentDetails, Message, MgsError, StartupOptions};
 use gateway_messages::{DiscoverResponse, IgnitionState, PowerState};
+use gateway_types::component::SpState;
 use slog::{debug, error, info, warn, Logger};
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -104,8 +105,8 @@ impl Drop for Gimlet {
 
 #[async_trait]
 impl SimulatedSp for Gimlet {
-    async fn state(&self) -> omicron_gateway::http_entrypoints::SpState {
-        omicron_gateway::http_entrypoints::SpState::from(
+    async fn state(&self) -> SpState {
+        SpState::from(
             self.handler.as_ref().unwrap().lock().await.sp_state_impl(),
         )
     }
@@ -1435,34 +1436,6 @@ impl SpHandler for Handler {
             (SpComponent::STAGE0, b"NAME", _, false) => STAGE0_NAME,
             (SpComponent::STAGE0, b"VERS", 0, false) => STAGE0_VERS0,
             (SpComponent::STAGE0, b"VERS", 1, false) => STAGE0_VERS1,
-            _ => return Err(SpError::NoSuchCabooseKey(key)),
-        };
-
-        buf[..val.len()].copy_from_slice(val);
-        Ok(val.len())
-    }
-
-    #[cfg(any(feature = "no-caboose", feature = "old-state"))]
-    fn get_component_caboose_value(
-        &mut self,
-        component: SpComponent,
-        slot: u16,
-        key: [u8; 4],
-        buf: &mut [u8],
-    ) -> std::result::Result<usize, SpError> {
-        let val = match (component, &key, slot) {
-            (SpComponent::SP_ITSELF, b"GITC", 0) => SP_GITC0,
-            (SpComponent::SP_ITSELF, b"GITC", 1) => SP_GITC1,
-            (SpComponent::SP_ITSELF, b"BORD", _) => SP_BORD,
-            (SpComponent::SP_ITSELF, b"NAME", _) => SP_NAME,
-            (SpComponent::SP_ITSELF, b"VERS", 0) => SP_VERS0,
-            (SpComponent::SP_ITSELF, b"VERS", 1) => SP_VERS1,
-            (SpComponent::ROT, b"GITC", 0) => ROT_GITC0,
-            (SpComponent::ROT, b"GITC", 1) => ROT_GITC1,
-            (SpComponent::ROT, b"BORD", _) => ROT_BORD,
-            (SpComponent::ROT, b"NAME", _) => ROT_NAME,
-            (SpComponent::ROT, b"VERS", 0) => ROT_VERS0,
-            (SpComponent::ROT, b"VERS", 1) => ROT_VERS1,
             _ => return Err(SpError::NoSuchCabooseKey(key)),
         };
 

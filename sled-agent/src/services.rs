@@ -30,12 +30,12 @@ use crate::bootstrap::early_networking::{
 };
 use crate::bootstrap::BootstrapNetworking;
 use crate::config::SidecarRevision;
+use crate::metrics::MetricsRequestQueue;
 use crate::params::{
     DendriteAsic, OmicronZoneConfigExt, OmicronZoneTypeExt, TimeSync,
     ZoneBundleCause, ZoneBundleMetadata,
 };
 use crate::profile::*;
-use crate::smf_helper::SmfHelper;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
@@ -55,10 +55,13 @@ use illumos_utils::running_zone::{
     EnsureAddressError, InstalledZone, RunCommandError, RunningZone,
     ZoneBuilderFactory,
 };
+use illumos_utils::smf_helper::SmfHelper;
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zpool::{PathInPool, ZpoolName};
 use illumos_utils::{execute, PFEXEC};
+use internal_dns::names::BOUNDARY_NTP_DNS_NAME;
+use internal_dns::names::DNS_ZONE;
 use internal_dns::resolver::Resolver;
 use itertools::Itertools;
 use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
@@ -121,6 +124,9 @@ use illumos_utils::zone::MockZones as Zones;
 use illumos_utils::zone::Zones;
 
 const IPV6_UNSPECIFIED: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
+
+const COCKROACH: &str = "/opt/oxide/cockroachdb/bin/cockroach";
+
 pub const SWITCH_ZONE_BASEBOARD_FILE: &str = "/opt/oxide/baseboard.json";
 
 #[derive(thiserror::Error, Debug, slog_error_chain::SlogInlineError)]
@@ -153,11 +159,11 @@ pub enum Error {
     #[error("No U.2 devices found with a {ZONE_DATASET} mountpoint")]
     U2NotFound,
 
-    #[error("Sled-local zone error: {0}")]
-    SledLocalZone(anyhow::Error),
+    #[error("Switch zone error: {0}")]
+    SwitchZone(anyhow::Error),
 
     #[error("Failed to issue SMF command: {0}")]
-    SmfCommand(#[from] crate::smf_helper::Error),
+    SmfCommand(#[from] illumos_utils::smf_helper::Error),
 
     #[error("{}", display_zone_init_errors(.0))]
     ZoneInitialize(Vec<(String, Box<Error>)>),
@@ -206,8 +212,8 @@ pub enum Error {
     #[error("Error contacting dpd: {0}")]
     DpdError(#[from] DpdError<DpdTypes::Error>),
 
-    #[error("Failed to create Vnic in sled-local zone: {0}")]
-    SledLocalVnicCreation(illumos_utils::dladm::CreateVnicError),
+    #[error("Failed to create Vnic in the switch zone: {0}")]
+    SwitchZoneVnicCreation(illumos_utils::dladm::CreateVnicError),
 
     #[error("Failed to add GZ addresses: {message}: {err}")]
     GzAddress {
@@ -498,7 +504,7 @@ enum SwitchService {
     SpSim,
 }
 
-impl crate::smf_helper::Service for SwitchService {
+impl illumos_utils::smf_helper::Service for SwitchService {
     fn service_name(&self) -> String {
         match self {
             SwitchService::ManagementGatewayService => "mgs",
@@ -544,9 +550,9 @@ impl<'a> ZoneArgs<'a> {
         }
     }
 
-    /// If this is a sled-local (switch) zone, iterate over the services it's
+    /// If this is a switch zone, iterate over the services it's
     /// supposed to be running
-    pub fn sled_local_services(
+    pub fn switch_zone_services(
         &self,
     ) -> Box<dyn Iterator<Item = &'a SwitchService> + 'a> {
         match self {
@@ -586,8 +592,8 @@ impl Task {
     }
 }
 
-/// Describes the state of a sled-local zone.
-enum SledLocalZone {
+/// Describes the state of a switch zone.
+enum SwitchZoneState {
     // The zone is not currently running.
     Disabled,
     // The zone is still initializing - it may be awaiting the initialization
@@ -645,7 +651,7 @@ type ZoneMap = BTreeMap<String, OmicronZone>;
 pub struct ServiceManagerInner {
     log: Logger,
     global_zone_bootstrap_link_local_address: Ipv6Addr,
-    switch_zone: Mutex<SledLocalZone>,
+    switch_zone: Mutex<SwitchZoneState>,
     sled_mode: SledMode,
     time_sync_config: TimeSyncConfig,
     time_synced: AtomicBool,
@@ -675,6 +681,7 @@ struct SledAgentInfo {
     underlay_address: Ipv6Addr,
     rack_id: Uuid,
     rack_network_config: Option<RackNetworkConfig>,
+    metrics_queue: MetricsRequestQueue,
 }
 
 pub(crate) enum TimeSyncConfig {
@@ -727,7 +734,7 @@ impl ServiceManager {
                     .global_zone_bootstrap_link_local_ip,
                 // TODO(https://github.com/oxidecomputer/omicron/issues/725):
                 // Load the switch zone if it already exists?
-                switch_zone: Mutex::new(SledLocalZone::Disabled),
+                switch_zone: Mutex::new(SwitchZoneState::Disabled),
                 sled_mode,
                 time_sync_config,
                 time_synced: AtomicBool::new(false),
@@ -894,13 +901,14 @@ impl ServiceManager {
     /// Sets up "Sled Agent" information, including underlay info.
     ///
     /// Any subsequent calls after the first invocation return an error.
-    pub fn sled_agent_started(
+    pub async fn sled_agent_started(
         &self,
         config: Config,
         port_manager: PortManager,
         underlay_address: Ipv6Addr,
         rack_id: Uuid,
         rack_network_config: Option<RackNetworkConfig>,
+        metrics_queue: MetricsRequestQueue,
     ) -> Result<(), Error> {
         info!(&self.inner.log, "sled agent started"; "underlay_address" => underlay_address.to_string());
         self.inner
@@ -915,9 +923,27 @@ impl ServiceManager {
                 underlay_address,
                 rack_id,
                 rack_network_config,
+                metrics_queue: metrics_queue.clone(),
             })
             .map_err(|_| "already set".to_string())
             .expect("Sled Agent should only start once");
+
+        // At this point, we've already started up the switch zone, but the
+        // VNICs inside it cannot have been tracked by the sled-agent's metrics
+        // task (the sled-agent didn't exist at the time we started the switch
+        // zone!). Notify that task about the zone's VNICs now.
+        if let SwitchZoneState::Running { zone, .. } =
+            &*self.inner.switch_zone.lock().await
+        {
+            if !metrics_queue.track_zone_links(zone).await {
+                error!(
+                    self.inner.log,
+                    "Failed to track one or more data links in \
+                    the switch zone, some metrics will not \
+                    be produced."
+                );
+            }
+        }
 
         Ok(())
     }
@@ -943,7 +969,7 @@ impl ServiceManager {
     // physical devices need to be mapped into the zone when it is created.
     fn devices_needed(zone_args: &ZoneArgs<'_>) -> Result<Vec<String>, Error> {
         let mut devices = vec![];
-        for svc_details in zone_args.sled_local_services() {
+        for svc_details in zone_args.switch_zone_services() {
             match svc_details {
                 SwitchService::Dendrite {
                     asic: DendriteAsic::TofinoAsic,
@@ -991,7 +1017,7 @@ impl ServiceManager {
                 .inner
                 .bootstrap_vnic_allocator
                 .new_bootstrap()
-                .map_err(Error::SledLocalVnicCreation)?;
+                .map_err(Error::SwitchZoneVnicCreation)?;
             Ok(Some((link, self.inner.switch_zone_bootstrap_address)))
         } else {
             Ok(None)
@@ -1027,7 +1053,7 @@ impl ServiceManager {
             Error::Underlay(underlay::Error::SystemDetection(e))
         })?;
 
-        for svc_details in zone_args.sled_local_services() {
+        for svc_details in zone_args.switch_zone_services() {
             match &svc_details {
                 SwitchService::Tfport { pkt_source, asic: _ } => {
                     // The tfport service requires a MAC device to/from which
@@ -1251,7 +1277,7 @@ impl ServiceManager {
             "dtrace_user".to_string(),
             "dtrace_proc".to_string(),
         ];
-        for svc_details in zone_args.sled_local_services() {
+        for svc_details in zone_args.switch_zone_services() {
             match svc_details {
                 SwitchService::Tfport { .. } => {
                     needed.push("sys_dl_config".to_string());
@@ -1507,11 +1533,7 @@ impl ServiceManager {
             ServiceBuilder::new("network/dns/client")
                 .add_instance(ServiceInstanceBuilder::new("default"));
 
-        // TODO(https://github.com/oxidecomputer/omicron/issues/1898):
-        //
-        // These zones are self-assembling -- after they boot, there should
-        // be no "zlogin" necessary to initialize.
-        match &request {
+        let running_zone = match &request {
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
                     OmicronZoneConfig {
@@ -1562,7 +1584,7 @@ impl ServiceManager {
                     .map_err(|err| {
                         Error::io("Failed to setup clickhouse profile", err)
                     })?;
-                return Ok(RunningZone::boot(installed_zone).await?);
+                RunningZone::boot(installed_zone).await?
             }
 
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
@@ -1618,7 +1640,7 @@ impl ServiceManager {
                             err,
                         )
                     })?;
-                return Ok(RunningZone::boot(installed_zone).await?);
+                RunningZone::boot(installed_zone).await?
             }
 
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
@@ -1692,7 +1714,7 @@ impl ServiceManager {
                     .map_err(|err| {
                         Error::io("Failed to setup CRDB profile", err)
                     })?;
-                return Ok(RunningZone::boot(installed_zone).await?);
+                RunningZone::boot(installed_zone).await?
             }
 
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
@@ -1750,7 +1772,7 @@ impl ServiceManager {
                     .map_err(|err| {
                         Error::io("Failed to setup crucible profile", err)
                     })?;
-                return Ok(RunningZone::boot(installed_zone).await?);
+                RunningZone::boot(installed_zone).await?
             }
 
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
@@ -1798,8 +1820,7 @@ impl ServiceManager {
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
                     .map_err(|err| Error::io("crucible pantry profile", err))?;
-                let running_zone = RunningZone::boot(installed_zone).await?;
-                return Ok(running_zone);
+                RunningZone::boot(installed_zone).await?
             }
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
@@ -1847,7 +1868,7 @@ impl ServiceManager {
                     .map_err(|err| {
                         Error::io("Failed to setup Oximeter profile", err)
                     })?;
-                return Ok(RunningZone::boot(installed_zone).await?);
+                RunningZone::boot(installed_zone).await?
             }
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
@@ -1913,7 +1934,7 @@ impl ServiceManager {
                     .map_err(|err| {
                         Error::io("Failed to setup External DNS profile", err)
                     })?;
-                return Ok(RunningZone::boot(installed_zone).await?);
+                RunningZone::boot(installed_zone).await?
             }
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
@@ -1975,15 +1996,17 @@ impl ServiceManager {
                     .add_property(
                         "boundary",
                         "boolean",
-                        &is_boundary.to_string(),
+                        is_boundary.to_string(),
+                    )
+                    .add_property(
+                        "boundary_pool",
+                        "astring",
+                        format!("{BOUNDARY_NTP_DNS_NAME}.{DNS_ZONE}"),
                     );
 
                 for s in ntp_servers {
-                    chrony_config = chrony_config.add_property(
-                        "server",
-                        "astring",
-                        &s.to_string(),
-                    );
+                    chrony_config =
+                        chrony_config.add_property("server", "astring", s);
                 }
 
                 let dns_client_service;
@@ -2024,7 +2047,7 @@ impl ServiceManager {
                         Error::io("Failed to set up NTP profile", err)
                     })?;
 
-                return Ok(RunningZone::boot(installed_zone).await?);
+                RunningZone::boot(installed_zone).await?
             }
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
@@ -2104,7 +2127,7 @@ impl ServiceManager {
                     .map_err(|err| {
                         Error::io("Failed to setup Internal DNS profile", err)
                     })?;
-                return Ok(RunningZone::boot(installed_zone).await?);
+                RunningZone::boot(installed_zone).await?
             }
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
@@ -2252,7 +2275,7 @@ impl ServiceManager {
                     .map_err(|err| {
                         Error::io("Failed to setup Nexus profile", err)
                     })?;
-                return Ok(RunningZone::boot(installed_zone).await?);
+                RunningZone::boot(installed_zone).await?
             }
             ZoneArgs::Switch(SwitchZoneConfigLocal {
                 zone: SwitchZoneConfig { id, services, addresses },
@@ -2530,7 +2553,7 @@ impl ServiceManager {
                                                 &device_names[0].clone(),
                                             );
                                     } else {
-                                        return Err(Error::SledLocalZone(
+                                        return Err(Error::SwitchZone(
                                             anyhow::anyhow!(
                                                 "{dev_cnt} devices needed \
                                                     for tofino asic"
@@ -2951,9 +2974,34 @@ impl ServiceManager {
                     .map_err(|err| {
                         Error::io("Failed to setup Switch zone profile", err)
                     })?;
-                return Ok(RunningZone::boot(installed_zone).await?);
+                RunningZone::boot(installed_zone).await?
+            }
+        };
+
+        // Now that we've booted the zone, we'll notify the sled-agent about:
+        //
+        // - Its control VNIC (all zones have one)
+        // - Any bootstrap network VNIC (only the switch zone has one)
+        // - Any OPTE ports (instance zones, or Oxide zones with external
+        // connectivity).
+        //
+        // Note that we'll almost always have started the sled-agent at this
+        // point. The only exception is the switch zone, during bootstrapping
+        // but before we've either run RSS or unlocked the rack. In both those
+        // cases, we have a `StartSledAgentRequest`, and so a metrics queue.
+        if let Some(queue) =
+            self.inner.sled_info.get().map(|sa| &sa.metrics_queue)
+        {
+            if !queue.track_zone_links(&running_zone).await {
+                error!(
+                    self.inner.log,
+                    "Failed to track one or more links in the zone, \
+                    some metrics will not be produced";
+                    "zone_name" => running_zone.name(),
+                );
             }
         }
+        Ok(running_zone)
     }
 
     // Ensures that a single Omicron zone is running.
@@ -3077,7 +3125,7 @@ impl ServiceManager {
         name: &str,
     ) -> Result<ZoneBundleMetadata, BundleError> {
         // Search for the named zone.
-        if let SledLocalZone::Running { zone, .. } =
+        if let SwitchZoneState::Running { zone, .. } =
             &*self.inner.switch_zone.lock().await
         {
             if zone.name() == name {
@@ -3318,6 +3366,13 @@ impl ServiceManager {
             );
             return;
         };
+        // Ensure that the sled agent's metrics task is not tracking the zone's
+        // VNICs or OPTE ports.
+        if let Some(queue) =
+            self.inner.sled_info.get().map(|sa| &sa.metrics_queue)
+        {
+            queue.untrack_zone_links(&zone.runtime).await;
+        }
         debug!(
             log,
             "removing an existing zone";
@@ -3355,6 +3410,12 @@ impl ServiceManager {
                     "zone" => &zone_name,
                     "state" => ?zone.state(),
                 );
+                // NOTE: We might want to tell the sled-agent's metrics task to
+                // stop tracking any links in this zone. However, we don't have
+                // very easy access to them, without running a command in the
+                // zone. These links are about to be deleted, and the metrics
+                // task will expire them after a while anyway, but it might be
+                // worth the trouble to do that in the future.
                 if let Err(e) =
                     Zones::halt_and_remove_logged(&self.inner.log, &zone_name)
                         .await
@@ -3487,7 +3548,7 @@ impl ServiceManager {
                     "Initializing CRDB Cluster - sending request to {host}"
                 );
                 if let Err(err) = zone.runtime.run_cmd(&[
-                    "/opt/oxide/cockroachdb/bin/cockroach",
+                    COCKROACH,
                     "init",
                     "--insecure",
                     "--host",
@@ -3503,7 +3564,7 @@ impl ServiceManager {
                 info!(log, "Formatting CRDB");
                 zone.runtime
                     .run_cmd(&[
-                        "/opt/oxide/cockroachdb/bin/cockroach",
+                        COCKROACH,
                         "sql",
                         "--insecure",
                         "--host",
@@ -3514,7 +3575,7 @@ impl ServiceManager {
                     .map_err(|err| Error::CockroachInit { err })?;
                 zone.runtime
                     .run_cmd(&[
-                        "/opt/oxide/cockroachdb/bin/cockroach",
+                        COCKROACH,
                         "sql",
                         "--insecure",
                         "--host",
@@ -3670,7 +3731,7 @@ impl ServiceManager {
             // A pure gimlet sled should not be trying to activate a switch
             // zone.
             SledMode::Gimlet => {
-                return Err(Error::SledLocalZone(anyhow::anyhow!(
+                return Err(Error::SwitchZone(anyhow::anyhow!(
                     "attempted to activate switch zone on non-scrimlet sled"
                 )))
             }
@@ -3753,7 +3814,7 @@ impl ServiceManager {
         let request =
             SwitchZoneConfig { id: Uuid::new_v4(), addresses, services };
 
-        self.ensure_zone(
+        self.ensure_switch_zone(
             // request=
             Some(request),
             // filesystems=
@@ -3806,15 +3867,15 @@ impl ServiceManager {
         let mut switch_zone = self.inner.switch_zone.lock().await;
 
         let zone = match &mut *switch_zone {
-            SledLocalZone::Running { zone, .. } => zone,
-            SledLocalZone::Disabled => {
-                return Err(Error::SledLocalZone(anyhow!(
+            SwitchZoneState::Running { zone, .. } => zone,
+            SwitchZoneState::Disabled => {
+                return Err(Error::SwitchZone(anyhow!(
                     "Cannot configure switch zone uplinks: \
                      switch zone disabled"
                 )));
             }
-            SledLocalZone::Initializing { .. } => {
-                return Err(Error::SledLocalZone(anyhow!(
+            SwitchZoneState::Initializing { .. } => {
+                return Err(Error::SwitchZone(anyhow!(
                     "Cannot configure switch zone uplinks: \
                      switch zone still initializing"
                 )));
@@ -3847,7 +3908,7 @@ impl ServiceManager {
 
     /// Ensures that no switch zone is active.
     pub async fn deactivate_switch(&self) -> Result<(), Error> {
-        self.ensure_zone(
+        self.ensure_switch_zone(
             // request=
             None,
             // filesystems=
@@ -3858,32 +3919,32 @@ impl ServiceManager {
         .await
     }
 
-    // Forcefully initialize a sled-local zone.
+    // Forcefully initialize a sled-local switch zone.
     //
-    // This is a helper function for "ensure_zone".
-    fn start_zone(
+    // This is a helper function for "ensure_switch_zone".
+    fn start_switch_zone(
         self,
-        zone: &mut SledLocalZone,
+        zone: &mut SwitchZoneState,
         request: SwitchZoneConfig,
         filesystems: Vec<zone::Fs>,
         data_links: Vec<String>,
     ) {
         let (exit_tx, exit_rx) = oneshot::channel();
-        *zone = SledLocalZone::Initializing {
+        *zone = SwitchZoneState::Initializing {
             request,
             filesystems,
             data_links,
             worker: Some(Task {
                 exit_tx,
                 initializer: tokio::task::spawn(async move {
-                    self.initialize_zone_loop(exit_rx).await
+                    self.initialize_switch_zone_loop(exit_rx).await
                 }),
             }),
         };
     }
 
     // Moves the current state to align with the "request".
-    async fn ensure_zone(
+    async fn ensure_switch_zone(
         &self,
         request: Option<SwitchZoneConfig>,
         filesystems: Vec<zone::Fs>,
@@ -3895,9 +3956,9 @@ impl ServiceManager {
         let zone_typestr = "switch";
 
         match (&mut *sled_zone, request) {
-            (SledLocalZone::Disabled, Some(request)) => {
+            (SwitchZoneState::Disabled, Some(request)) => {
                 info!(log, "Enabling {zone_typestr} zone (new)");
-                self.clone().start_zone(
+                self.clone().start_switch_zone(
                     &mut sled_zone,
                     request,
                     filesystems,
@@ -3905,7 +3966,7 @@ impl ServiceManager {
                 );
             }
             (
-                SledLocalZone::Initializing { request, .. },
+                SwitchZoneState::Initializing { request, .. },
                 Some(new_request),
             ) => {
                 info!(log, "Enabling {zone_typestr} zone (already underway)");
@@ -3913,7 +3974,7 @@ impl ServiceManager {
                 // the next request with our new request.
                 *request = new_request;
             }
-            (SledLocalZone::Running { request, zone }, Some(new_request))
+            (SwitchZoneState::Running { request, zone }, Some(new_request))
                 if request.addresses != new_request.addresses =>
             {
                 // If the switch zone is running but we have new addresses, it
@@ -4225,31 +4286,40 @@ impl ServiceManager {
                     }
                 }
             }
-            (SledLocalZone::Running { .. }, Some(_)) => {
+            (SwitchZoneState::Running { .. }, Some(_)) => {
                 info!(log, "Enabling {zone_typestr} zone (already complete)");
             }
-            (SledLocalZone::Disabled, None) => {
+            (SwitchZoneState::Disabled, None) => {
                 info!(log, "Disabling {zone_typestr} zone (already complete)");
             }
-            (SledLocalZone::Initializing { worker, .. }, None) => {
+            (SwitchZoneState::Initializing { worker, .. }, None) => {
                 info!(log, "Disabling {zone_typestr} zone (was initializing)");
                 worker.take().unwrap().stop().await;
-                *sled_zone = SledLocalZone::Disabled;
+                *sled_zone = SwitchZoneState::Disabled;
             }
-            (SledLocalZone::Running { zone, .. }, None) => {
+            (SwitchZoneState::Running { zone, .. }, None) => {
                 info!(log, "Disabling {zone_typestr} zone (was running)");
+
+                // Notify the sled-agent's metrics task to stop collecting from
+                // the VNICs in the zone (if the agent exists).
+                if let Some(queue) =
+                    self.inner.sled_info.get().map(|sa| &sa.metrics_queue)
+                {
+                    queue.untrack_zone_links(zone).await;
+                }
+
                 let _ = zone.stop().await;
-                *sled_zone = SledLocalZone::Disabled;
+                *sled_zone = SwitchZoneState::Disabled;
             }
         }
         Ok(())
     }
 
-    async fn try_initialize_sled_local_zone(
+    async fn try_initialize_switch_zone(
         &self,
-        sled_zone: &mut SledLocalZone,
+        sled_zone: &mut SwitchZoneState,
     ) -> Result<(), Error> {
-        let SledLocalZone::Initializing {
+        let SwitchZoneState::Initializing {
             request,
             filesystems,
             data_links,
@@ -4273,18 +4343,21 @@ impl ServiceManager {
         let zone = self
             .initialize_zone(zone_args, filesystems, data_links, None)
             .await?;
-        *sled_zone = SledLocalZone::Running { request: request.clone(), zone };
+        *sled_zone =
+            SwitchZoneState::Running { request: request.clone(), zone };
         Ok(())
     }
 
     // Body of a tokio task responsible for running until the switch zone is
     // inititalized, or it has been told to stop.
-    async fn initialize_zone_loop(&self, mut exit_rx: oneshot::Receiver<()>) {
+    async fn initialize_switch_zone_loop(
+        &self,
+        mut exit_rx: oneshot::Receiver<()>,
+    ) {
         loop {
             {
                 let mut sled_zone = self.inner.switch_zone.lock().await;
-                match self.try_initialize_sled_local_zone(&mut sled_zone).await
-                {
+                match self.try_initialize_switch_zone(&mut sled_zone).await {
                     Ok(()) => return,
                     Err(e) => warn!(
                         self.inner.log,
@@ -4307,6 +4380,8 @@ impl ServiceManager {
 
 #[cfg(all(test, target_os = "illumos"))]
 mod test {
+    use crate::metrics;
+
     use super::*;
     use illumos_utils::{
         dladm::{
@@ -4318,8 +4393,12 @@ mod test {
     };
 
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
-    use std::net::{Ipv6Addr, SocketAddrV6};
     use std::os::unix::process::ExitStatusExt;
+    use std::{
+        net::{Ipv6Addr, SocketAddrV6},
+        time::Duration,
+    };
+    use tokio::sync::mpsc::error::TryRecvError;
     use uuid::Uuid;
 
     // Just placeholders. Not used.
@@ -4328,6 +4407,10 @@ mod test {
 
     const EXPECTED_ZONE_NAME_PREFIX: &str = "oxz_ntp";
     const EXPECTED_PORT: u16 = 12223;
+
+    // Timeout within which we must have received a message about a zone's links
+    // to track. This is very generous.
+    const LINK_NOTIFICATION_TIMEOUT: Duration = Duration::from_secs(5);
 
     fn make_bootstrap_networking_config() -> BootstrapNetworking {
         BootstrapNetworking {
@@ -4594,7 +4677,7 @@ mod test {
     //
     // This will shut down all allocated zones, and delete their
     // associated VNICs.
-    fn drop_service_manager(mgr: ServiceManager) {
+    async fn drop_service_manager(mgr: ServiceManager) {
         let halt_ctx = MockZones::halt_and_remove_logged_context();
         halt_ctx.expect().returning(|_, name| {
             assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
@@ -4602,6 +4685,13 @@ mod test {
         });
         let delete_vnic_ctx = MockDladm::delete_vnic_context();
         delete_vnic_ctx.expect().returning(|_| Ok(()));
+
+        // Also send a message to the metrics task that the VNIC has been
+        // deleted.
+        let queue = &mgr.inner.sled_info.get().unwrap().metrics_queue;
+        for zone in mgr.inner.zones.lock().await.values() {
+            queue.untrack_zone_links(&zone.runtime).await;
+        }
 
         // Explicitly drop the service manager
         drop(mgr);
@@ -4713,10 +4803,11 @@ mod test {
             mgr
         }
 
-        fn sled_agent_started(
+        async fn sled_agent_started(
             log: &slog::Logger,
             test_config: &TestConfig,
             mgr: &ServiceManager,
+            metrics_queue: MetricsRequestQueue,
         ) {
             let port_manager = PortManager::new(
                 log.new(o!("component" => "PortManager")),
@@ -4731,7 +4822,9 @@ mod test {
                 Ipv6Addr::LOCALHOST,
                 Uuid::new_v4(),
                 None,
+                metrics_queue,
             )
+            .await
             .unwrap();
         }
     }
@@ -4744,7 +4837,14 @@ mod test {
         let mut helper =
             LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
         let mgr = helper.new_service_manager();
-        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
+        let (metrics_queue, mut metrics_rx) = MetricsRequestQueue::for_test();
+        LedgerTestHelper::sled_agent_started(
+            &logctx.log,
+            &test_config,
+            &mgr,
+            metrics_queue,
+        )
+        .await;
 
         let v1 = Generation::new();
         let found =
@@ -4768,7 +4868,27 @@ mod test {
         assert_eq!(found.zones.len(), 1);
         assert_eq!(found.zones[0].id, id);
 
-        drop_service_manager(mgr);
+        // Check that we received a message about the zone's VNIC.
+        let message = tokio::time::timeout(
+            LINK_NOTIFICATION_TIMEOUT,
+            metrics_rx.recv(),
+        )
+            .await
+            .expect(
+                "Should have received a message about the zone's VNIC within the timeout"
+            )
+            .expect("Should have received a message about the zone's VNIC");
+        let zone_name = format!("oxz_ntp_{}", id);
+        assert_eq!(
+            message,
+            metrics::Message::TrackVnic {
+                zone_name,
+                name: "oxControlService0".into()
+            },
+        );
+        assert_eq!(metrics_rx.try_recv(), Err(TryRecvError::Empty));
+
+        drop_service_manager(mgr).await;
 
         helper.cleanup().await;
         logctx.cleanup_successful();
@@ -4785,7 +4905,14 @@ mod test {
 
         let mgr =
             helper.new_service_manager_with_timesync(TimeSyncConfig::Fail);
-        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
+        let (metrics_queue, mut metrics_rx) = MetricsRequestQueue::for_test();
+        LedgerTestHelper::sled_agent_started(
+            &logctx.log,
+            &test_config,
+            &mgr,
+            metrics_queue,
+        )
+        .await;
 
         let v1 = Generation::new();
         let found =
@@ -4820,6 +4947,10 @@ mod test {
             Error::TimeNotSynchronized
         );
 
+        // Ensure we have _not_ received a message about the zone's VNIC,
+        // because there isn't a zone.
+        assert_eq!(metrics_rx.try_recv(), Err(TryRecvError::Empty));
+
         // Next, ensure this still converts to an "unavail" common error
         let common_err = omicron_common::api::external::Error::from(err);
         assert_matches::assert_matches!(
@@ -4844,7 +4975,7 @@ mod test {
         .await
         .unwrap();
 
-        drop_service_manager(mgr);
+        drop_service_manager(mgr).await;
         helper.cleanup().await;
         logctx.cleanup_successful();
     }
@@ -4858,7 +4989,14 @@ mod test {
         let mut helper =
             LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
         let mgr = helper.new_service_manager();
-        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
+        let (metrics_queue, mut metrics_rx) = MetricsRequestQueue::for_test();
+        LedgerTestHelper::sled_agent_started(
+            &logctx.log,
+            &test_config,
+            &mgr,
+            metrics_queue,
+        )
+        .await;
 
         let v2 = Generation::new().next();
         let id = Uuid::new_v4();
@@ -4872,7 +5010,29 @@ mod test {
         assert_eq!(found.zones.len(), 1);
         assert_eq!(found.zones[0].id, id);
 
-        drop_service_manager(mgr);
+        // In this case, the manager creates the zone once, and then "ensuring"
+        // it a second time is a no-op. So we simply expect the same message
+        // sequence as starting a zone for the first time.
+        let message = tokio::time::timeout(
+            LINK_NOTIFICATION_TIMEOUT,
+            metrics_rx.recv(),
+        )
+            .await
+            .expect(
+                "Should have received a message about the zone's VNIC within the timeout"
+            )
+            .expect("Should have received a message about the zone's VNIC");
+        let zone_name = format!("oxz_ntp_{}", id);
+        assert_eq!(
+            message,
+            metrics::Message::TrackVnic {
+                zone_name,
+                name: "oxControlService0".into()
+            },
+        );
+        assert_eq!(metrics_rx.try_recv(), Err(TryRecvError::Empty));
+
+        drop_service_manager(mgr).await;
 
         helper.cleanup().await;
         logctx.cleanup_successful();
@@ -4890,7 +5050,14 @@ mod test {
         // First, spin up a ServiceManager, create a new zone, and then tear
         // down the ServiceManager.
         let mgr = helper.new_service_manager();
-        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
+        let (metrics_queue, mut metrics_rx) = MetricsRequestQueue::for_test();
+        LedgerTestHelper::sled_agent_started(
+            &logctx.log,
+            &test_config,
+            &mgr,
+            metrics_queue,
+        )
+        .await;
 
         let v2 = Generation::new().next();
         let id = Uuid::new_v4();
@@ -4901,13 +5068,47 @@ mod test {
             String::from(test_config.config_dir.path().as_str()),
         )
         .await;
-        drop_service_manager(mgr);
+        drop_service_manager(mgr).await;
+
+        // Check that we received a message about the zone's VNIC. Since the
+        // manager is being dropped, it should also send a message about the
+        // VNIC being deleted.
+        let zone_name = format!("oxz_ntp_{}", id);
+        for expected_message in [
+            metrics::Message::TrackVnic {
+                zone_name,
+                name: "oxControlService0".into(),
+            },
+            metrics::Message::UntrackVnic { name: "oxControlService0".into() },
+        ] {
+            println!("Expecting message from manager: {expected_message:#?}");
+            let message = tokio::time::timeout(
+                LINK_NOTIFICATION_TIMEOUT,
+                metrics_rx.recv(),
+            )
+                .await
+                .expect(
+                    "Should have received a message about the zone's VNIC within the timeout"
+                )
+                .expect("Should have received a message about the zone's VNIC");
+            assert_eq!(message, expected_message,);
+        }
+        // Note that the manager has been dropped, so we should get
+        // disconnected, not empty.
+        assert_eq!(metrics_rx.try_recv(), Err(TryRecvError::Disconnected));
 
         // Before we re-create the service manager - notably, using the same
         // config file! - expect that a service gets initialized.
         let _expectations = expect_new_service(EXPECTED_ZONE_NAME_PREFIX);
         let mgr = helper.new_service_manager();
-        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
+        let (metrics_queue, mut metrics_rx) = MetricsRequestQueue::for_test();
+        LedgerTestHelper::sled_agent_started(
+            &logctx.log,
+            &test_config,
+            &mgr,
+            metrics_queue,
+        )
+        .await;
         illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
 
         let found =
@@ -4916,7 +5117,13 @@ mod test {
         assert_eq!(found.zones.len(), 1);
         assert_eq!(found.zones[0].id, id);
 
-        drop_service_manager(mgr);
+        // Note that the `omicron_zones_list()` request just returns the
+        // configured zones, stored in the on-disk ledger. There is nothing
+        // above that actually ensures that those zones exist, as far as I can
+        // tell!
+        assert_eq!(metrics_rx.try_recv(), Err(TryRecvError::Empty));
+
+        drop_service_manager(mgr).await;
 
         helper.cleanup().await;
         logctx.cleanup_successful();
@@ -4934,7 +5141,14 @@ mod test {
         // First, spin up a ServiceManager, create a new zone, and then tear
         // down the ServiceManager.
         let mgr = helper.new_service_manager();
-        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
+        let metrics_handles = MetricsRequestQueue::for_test();
+        LedgerTestHelper::sled_agent_started(
+            &logctx.log,
+            &test_config,
+            &mgr,
+            metrics_handles.0.clone(),
+        )
+        .await;
 
         let v1 = Generation::new();
         let v2 = v1.next();
@@ -4946,7 +5160,7 @@ mod test {
             String::from(test_config.config_dir.path().as_str()),
         )
         .await;
-        drop_service_manager(mgr);
+        drop_service_manager(mgr).await;
 
         // Next, delete the ledger. This means the zone we just created will not
         // be remembered on the next initialization.
@@ -4957,14 +5171,21 @@ mod test {
 
         // Observe that the old service is not re-initialized.
         let mgr = helper.new_service_manager();
-        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
+        let metrics_handles = MetricsRequestQueue::for_test();
+        LedgerTestHelper::sled_agent_started(
+            &logctx.log,
+            &test_config,
+            &mgr,
+            metrics_handles.0.clone(),
+        )
+        .await;
 
         let found =
             mgr.omicron_zones_list().await.expect("failed to list zones");
         assert_eq!(found.generation, v1);
         assert!(found.zones.is_empty());
 
-        drop_service_manager(mgr);
+        drop_service_manager(mgr).await;
 
         helper.cleanup().await;
         logctx.cleanup_successful();
@@ -4979,7 +5200,14 @@ mod test {
         let mut helper =
             LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
         let mgr = helper.new_service_manager();
-        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
+        let metrics_handles = MetricsRequestQueue::for_test();
+        LedgerTestHelper::sled_agent_started(
+            &logctx.log,
+            &test_config,
+            &mgr,
+            metrics_handles.0.clone(),
+        )
+        .await;
 
         // Like the normal tests, set up a generation with one zone in it.
         let v1 = Generation::new();
@@ -5084,7 +5312,7 @@ mod test {
         found_zones.sort_by(|a, b| a.id.cmp(&b.id));
         assert_eq!(our_zones, found_zones);
 
-        drop_service_manager(mgr);
+        drop_service_manager(mgr).await;
 
         illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         helper.cleanup().await;

@@ -93,12 +93,6 @@ pub struct InstanceMetadata {
     pub project_id: Uuid,
 }
 
-impl From<InstanceMetadata> for propolis_client::types::InstanceMetadata {
-    fn from(md: InstanceMetadata) -> Self {
-        Self { silo_id: md.silo_id, project_id: md.project_id }
-    }
-}
-
 /// The body of a request to ensure that a instance and VMM are known to a sled
 /// agent.
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -216,23 +210,6 @@ pub struct InstanceMigrationSourceParams {
     pub dst_propolis_id: PropolisUuid,
 }
 
-/// The body of a request to set or clear the migration identifiers from a
-/// sled agent's instance state records.
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct InstancePutMigrationIdsBody {
-    /// The last instance runtime state known to this requestor. This request
-    /// will succeed if either (a) the state generation in the sled agent's
-    /// runtime state matches the generation in this record, or (b) the sled
-    /// agent's runtime state matches what would result from applying this
-    /// request to the caller's runtime state. This latter condition provides
-    /// idempotency.
-    pub old_runtime: InstanceRuntimeState,
-
-    /// The migration identifiers to set. If `None`, this operation clears the
-    /// migration IDs.
-    pub migration_params: Option<InstanceMigrationSourceParams>,
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub enum DiskType {
     U2,
@@ -330,15 +307,6 @@ impl OmicronZoneTypeExt for OmicronZoneType {
 impl OmicronZoneTypeExt for OmicronZoneConfig {
     fn as_omicron_zone_type(&self) -> &OmicronZoneType {
         &self.zone_type
-    }
-}
-
-impl crate::smf_helper::Service for OmicronZoneType {
-    fn service_name(&self) -> String {
-        self.kind().service_prefix().to_owned()
-    }
-    fn smf_name(&self) -> String {
-        format!("svc:/oxide/{}", self.service_name())
     }
 }
 

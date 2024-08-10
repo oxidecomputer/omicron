@@ -196,7 +196,7 @@ async fn srrf_update_request_record(
     // record to 'Complete' and clear the operating saga id. There is no undo
     // step for this, it should succeed idempotently.
     datastore
-        .set_region_replacement_complete(&opctx, params.request.id, saga_id)
+        .set_region_replacement_complete(&opctx, params.request, saga_id)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -249,6 +249,7 @@ pub(crate) mod test {
                 10,
                 10,
                 12345,
+                false,
             )
         };
 

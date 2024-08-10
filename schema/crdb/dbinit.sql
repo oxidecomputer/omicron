@@ -581,7 +581,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.region (
     blocks_per_extent INT NOT NULL,
     extent_count INT NOT NULL,
 
-    port INT4
+    port INT4,
+
+    read_only BOOL NOT NULL
 );
 
 /*
@@ -4017,6 +4019,64 @@ CREATE INDEX IF NOT EXISTS lookup_any_disk_by_volume_id ON omicron.public.disk (
 
 CREATE INDEX IF NOT EXISTS lookup_snapshot_by_destination_volume_id ON omicron.public.snapshot ( destination_volume_id );
 
+CREATE TYPE IF NOT EXISTS omicron.public.region_snapshot_replacement_state AS ENUM (
+  'requested',
+  'allocating',
+  'replacement_done',
+  'deleting_old_volume',
+  'running',
+  'complete'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot_replacement (
+    id UUID PRIMARY KEY,
+
+    request_time TIMESTAMPTZ NOT NULL,
+
+    old_dataset_id UUID NOT NULL,
+    old_region_id UUID NOT NULL,
+    old_snapshot_id UUID NOT NULL,
+
+    old_snapshot_volume_id UUID,
+
+    new_region_id UUID,
+
+    replacement_state omicron.public.region_snapshot_replacement_state NOT NULL,
+
+    operating_saga_id UUID
+);
+
+CREATE INDEX IF NOT EXISTS lookup_region_snapshot_replacement_by_state on omicron.public.region_snapshot_replacement (replacement_state);
+
+CREATE TYPE IF NOT EXISTS omicron.public.region_snapshot_replacement_step_state AS ENUM (
+  'requested',
+  'running',
+  'complete',
+  'volume_deleted'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot_replacement_step (
+    id UUID PRIMARY KEY,
+
+    request_id UUID NOT NULL,
+
+    request_time TIMESTAMPTZ NOT NULL,
+
+    volume_id UUID NOT NULL,
+
+    old_snapshot_volume_id UUID,
+
+    replacement_state omicron.public.region_snapshot_replacement_step_state NOT NULL,
+
+    operating_saga_id UUID
+);
+
+CREATE INDEX IF NOT EXISTS lookup_region_snapshot_replacement_step_by_state
+    on omicron.public.region_snapshot_replacement_step (replacement_state);
+
+CREATE INDEX IF NOT EXISTS lookup_region_snapshot_replacement_step_by_old_volume_id
+    on omicron.public.region_snapshot_replacement_step (old_snapshot_volume_id);
+
 /*
  * Metadata for the schema itself. This version number isn't great, as there's
  * nothing to ensure it gets bumped when it should be, but it's a start.
@@ -4129,6 +4189,15 @@ CREATE INDEX IF NOT EXISTS lookup_migrations_by_instance_id ON omicron.public.mi
     instance_id
 );
 
+/* Migrations by time created.
+ *
+ * Currently, this is only used by OMDB for ordering the `omdb migration list`
+ * output, but it may be used by other UIs in the future...
+*/
+CREATE INDEX IF NOT EXISTS migrations_by_time_created ON omicron.public.migration (
+    time_created
+);
+
 /* Lookup region snapshot by snapshot id */
 CREATE INDEX IF NOT EXISTS lookup_region_snapshot_by_snapshot_id on omicron.public.region_snapshot (
     snapshot_id
@@ -4145,7 +4214,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '83.0.0', NULL)
+    (TRUE, NOW(), NOW(), '86.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

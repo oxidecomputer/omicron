@@ -8,9 +8,9 @@ use super::sled_agent::SledAgent;
 use crate::bootstrap::params::AddSledRequest;
 use crate::params::{
     BootstoreStatus, CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
-    InstanceExternalIpBody, InstancePutMigrationIdsBody, InstancePutStateBody,
-    InstancePutStateResponse, InstanceUnregisterResponse, TimeSync,
-    VpcFirewallRulesEnsureBody, ZoneBundleId, ZoneBundleMetadata, Zpool,
+    InstanceExternalIpBody, InstancePutStateBody, InstancePutStateResponse,
+    InstanceUnregisterResponse, TimeSync, VpcFirewallRulesEnsureBody,
+    ZoneBundleId, ZoneBundleMetadata, Zpool,
 };
 use crate::sled_agent::Error as SledAgentError;
 use crate::zone_bundle;
@@ -54,7 +54,6 @@ pub fn api() -> SledApiDescription {
         api.register(disk_put)?;
         api.register(cockroachdb_init)?;
         api.register(instance_issue_disk_snapshot_request)?;
-        api.register(instance_put_migration_ids)?;
         api.register(instance_put_state)?;
         api.register(instance_get_state)?;
         api.register(instance_put_external_ip)?;
@@ -494,28 +493,6 @@ async fn instance_get_state(
     let sa = rqctx.context();
     let instance_id = path_params.into_inner().instance_id;
     Ok(HttpResponseOk(sa.instance_get_state(instance_id).await?))
-}
-
-#[endpoint {
-    method = PUT,
-    path = "/instances/{instance_id}/migration-ids",
-}]
-async fn instance_put_migration_ids(
-    rqctx: RequestContext<SledAgent>,
-    path_params: Path<InstancePathParam>,
-    body: TypedBody<InstancePutMigrationIdsBody>,
-) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
-    let sa = rqctx.context();
-    let instance_id = path_params.into_inner().instance_id;
-    let body_args = body.into_inner();
-    Ok(HttpResponseOk(
-        sa.instance_put_migration_ids(
-            instance_id,
-            &body_args.old_runtime,
-            &body_args.migration_params,
-        )
-        .await?,
-    ))
 }
 
 #[endpoint {
@@ -1023,7 +1000,7 @@ async fn inventory(
 async fn sled_identifiers(
     request_context: RequestContext<SledAgent>,
 ) -> Result<HttpResponseOk<SledIdentifiers>, HttpError> {
-    Ok(HttpResponseOk(request_context.context().sled_identifiers().await))
+    Ok(HttpResponseOk(request_context.context().sled_identifiers()))
 }
 
 /// Get the internal state of the local bootstore node

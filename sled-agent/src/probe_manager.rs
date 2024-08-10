@@ -1,4 +1,5 @@
-use crate::nexus::NexusClientWithResolver;
+use crate::metrics::MetricsRequestQueue;
+use crate::nexus::NexusClient;
 use anyhow::{anyhow, Result};
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
@@ -53,22 +54,24 @@ struct RunningProbes {
 
 pub(crate) struct ProbeManagerInner {
     join_handle: Mutex<Option<JoinHandle<()>>>,
-    nexus_client: NexusClientWithResolver,
+    nexus_client: NexusClient,
     log: Logger,
     sled_id: Uuid,
     vnic_allocator: VnicAllocator<Etherstub>,
     storage: StorageHandle,
     port_manager: PortManager,
+    metrics_queue: MetricsRequestQueue,
     running_probes: Mutex<RunningProbes>,
 }
 
 impl ProbeManager {
     pub(crate) fn new(
         sled_id: Uuid,
-        nexus_client: NexusClientWithResolver,
+        nexus_client: NexusClient,
         etherstub: Etherstub,
         storage: StorageHandle,
         port_manager: PortManager,
+        metrics_queue: MetricsRequestQueue,
         log: Logger,
     ) -> Self {
         Self {
@@ -87,6 +90,7 @@ impl ProbeManager {
                 sled_id,
                 storage,
                 port_manager,
+                metrics_queue,
             }),
         }
     }
@@ -244,7 +248,6 @@ impl ProbeManagerInner {
                 if n_added > 0 {
                     if let Err(e) = self
                         .nexus_client
-                        .client()
                         .bgtask_activate(&BackgroundTasksActivateRequest {
                             bgtask_names: vec!["vpc_route_manager".into()],
                         })
@@ -345,6 +348,17 @@ impl ProbeManagerInner {
         rz.ensure_address_for_port("overlay", 0).await?;
         info!(self.log, "started probe {}", probe.id);
 
+        // Notify the sled-agent's metrics task to start tracking the VNIC and
+        // any OPTE ports in the zone.
+        if !self.metrics_queue.track_zone_links(&rz).await {
+            error!(
+                self.log,
+                "Failed to track one or more datalinks in the zone, \
+                some metrics will not be produced";
+                "zone_name" => rz.name(),
+            );
+        }
+
         self.running_probes.lock().await.zones.insert(probe.id, rz);
 
         Ok(())
@@ -375,12 +389,19 @@ impl ProbeManagerInner {
     ) {
         match probes.zones.remove(&id) {
             Some(mut running_zone) => {
+                // TODO-correctness: There are no physical links in the zone, is
+                // this intended to delete the control VNIC?
                 for l in running_zone.links_mut() {
                     if let Err(e) = l.delete() {
                         error!(self.log, "delete probe link {}: {e}", l.name());
                     }
                 }
+
+                // Ask the sled-agent to stop tracking our datalinks, and then
+                // delete the OPTE ports.
+                self.metrics_queue.untrack_zone_links(&running_zone).await;
                 running_zone.release_opte_ports();
+
                 if let Err(e) = running_zone.stop().await {
                     error!(self.log, "stop probe: {e}")
                 }
@@ -417,7 +438,6 @@ impl ProbeManagerInner {
     async fn target_state(self: &Arc<Self>) -> Result<HashSet<ProbeState>> {
         Ok(self
             .nexus_client
-            .client()
             .probes_get(
                 &self.sled_id,
                 None, //limit

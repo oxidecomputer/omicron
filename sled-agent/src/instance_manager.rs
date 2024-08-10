@@ -6,13 +6,14 @@
 
 use crate::instance::propolis_zone_name;
 use crate::instance::Instance;
-use crate::nexus::NexusClientWithResolver;
+use crate::metrics::MetricsRequestQueue;
+use crate::nexus::NexusClient;
 use crate::params::InstanceExternalIpBody;
 use crate::params::InstanceMetadata;
 use crate::params::ZoneBundleMetadata;
 use crate::params::{
-    InstanceHardware, InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse,
+    InstanceHardware, InstancePutStateResponse, InstanceStateRequested,
+    InstanceUnregisterResponse,
 };
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
 use crate::zone_bundle::BundleError;
@@ -28,6 +29,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
+use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use sled_storage::manager::StorageHandle;
@@ -72,12 +74,13 @@ pub enum Error {
 }
 
 pub(crate) struct InstanceManagerServices {
-    pub nexus_client: NexusClientWithResolver,
+    pub nexus_client: NexusClient,
     pub vnic_allocator: VnicAllocator<Etherstub>,
     pub port_manager: PortManager,
     pub storage: StorageHandle,
     pub zone_bundler: ZoneBundler,
     pub zone_builder_factory: ZoneBuilderFactory,
+    pub metrics_queue: MetricsRequestQueue,
 }
 
 // Describes the internals of the "InstanceManager", though most of the
@@ -100,13 +103,14 @@ impl InstanceManager {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         log: Logger,
-        nexus_client: NexusClientWithResolver,
+        nexus_client: NexusClient,
         etherstub: Etherstub,
         port_manager: PortManager,
         storage: StorageHandle,
         zone_bundler: ZoneBundler,
         zone_builder_factory: ZoneBuilderFactory,
         vmm_reservoir_manager: VmmReservoirManagerHandle,
+        metrics_queue: MetricsRequestQueue,
     ) -> Result<InstanceManager, Error> {
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
         let (terminate_tx, terminate_rx) = mpsc::unbounded_channel();
@@ -125,6 +129,7 @@ impl InstanceManager {
             storage,
             zone_bundler,
             zone_builder_factory,
+            metrics_queue,
         };
 
         let runner_handle =
@@ -148,6 +153,7 @@ impl InstanceManager {
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         propolis_addr: SocketAddr,
+        sled_identifiers: SledIdentifiers,
         metadata: InstanceMetadata,
     ) -> Result<SledInstanceState, Error> {
         let (tx, rx) = oneshot::channel();
@@ -160,6 +166,7 @@ impl InstanceManager {
                 instance_runtime,
                 vmm_runtime,
                 propolis_addr,
+                sled_identifiers: Box::new(sled_identifiers),
                 metadata,
                 tx,
             })
@@ -216,26 +223,6 @@ impl InstanceManager {
             InstanceStateRequested::Stopped
             | InstanceStateRequested::Reboot => rx.await?,
         }
-    }
-
-    pub async fn put_migration_ids(
-        &self,
-        instance_id: InstanceUuid,
-        old_runtime: &InstanceRuntimeState,
-        migration_ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<SledInstanceState, Error> {
-        let (tx, rx) = oneshot::channel();
-        self.inner
-            .tx
-            .send(InstanceManagerRequest::PutMigrationIds {
-                instance_id,
-                old_runtime: old_runtime.clone(),
-                migration_ids: *migration_ids,
-                tx,
-            })
-            .await
-            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
-        rx.await?
     }
 
     pub async fn instance_issue_disk_snapshot_request(
@@ -362,6 +349,12 @@ enum InstanceManagerRequest {
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         propolis_addr: SocketAddr,
+        // These are boxed because they are, apparently, quite large, and Clippy
+        // whinges about the overall size of this variant relative to the
+        // others. Since we will generally send `EnsureRegistered` requests much
+        // less frequently than most of the others, boxing this seems like a
+        // reasonable choice...
+        sled_identifiers: Box<SledIdentifiers>,
         metadata: InstanceMetadata,
         tx: oneshot::Sender<Result<SledInstanceState, Error>>,
     },
@@ -374,12 +367,7 @@ enum InstanceManagerRequest {
         target: InstanceStateRequested,
         tx: oneshot::Sender<Result<InstancePutStateResponse, Error>>,
     },
-    PutMigrationIds {
-        instance_id: InstanceUuid,
-        old_runtime: InstanceRuntimeState,
-        migration_ids: Option<InstanceMigrationSourceParams>,
-        tx: oneshot::Sender<Result<SledInstanceState, Error>>,
-    },
+
     InstanceIssueDiskSnapshot {
         instance_id: InstanceUuid,
         disk_id: Uuid,
@@ -434,7 +422,7 @@ struct InstanceManagerRunner {
     terminate_tx: mpsc::UnboundedSender<InstanceDeregisterRequest>,
     terminate_rx: mpsc::UnboundedReceiver<InstanceDeregisterRequest>,
 
-    nexus_client: NexusClientWithResolver,
+    nexus_client: NexusClient,
 
     // TODO: If we held an object representing an enum of "Created OR Running"
     // instance, we could avoid the methods within "instance.rs" that panic
@@ -448,6 +436,7 @@ struct InstanceManagerRunner {
     storage: StorageHandle,
     zone_bundler: ZoneBundler,
     zone_builder_factory: ZoneBuilderFactory,
+    metrics_queue: MetricsRequestQueue,
 }
 
 impl InstanceManagerRunner {
@@ -485,19 +474,26 @@ impl InstanceManagerRunner {
                             instance_runtime,
                             vmm_runtime,
                             propolis_addr,
+                            sled_identifiers,
                             metadata,
                             tx,
                         }) => {
-                            tx.send(self.ensure_registered(instance_id, propolis_id, hardware, instance_runtime, vmm_runtime, propolis_addr, metadata).await).map_err(|_| Error::FailedSendClientClosed)
+                            tx.send(self.ensure_registered(
+                                instance_id,
+                                propolis_id,
+                                hardware,
+                                instance_runtime,
+                                vmm_runtime,
+                                propolis_addr,
+                                *sled_identifiers,
+                                metadata
+                            ).await).map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(EnsureUnregistered { instance_id, tx }) => {
                             self.ensure_unregistered(tx, instance_id).await
                         },
                         Some(EnsureState { instance_id, target, tx }) => {
                             self.ensure_state(tx, instance_id, target).await
-                        },
-                        Some(PutMigrationIds { instance_id, old_runtime, migration_ids, tx }) => {
-                            self.put_migration_ids(tx, instance_id, &old_runtime, &migration_ids).await
                         },
                         Some(InstanceIssueDiskSnapshot { instance_id, disk_id, snapshot_id, tx }) => {
                             self.instance_issue_disk_snapshot_request(tx, instance_id, disk_id, snapshot_id).await
@@ -572,6 +568,7 @@ impl InstanceManagerRunner {
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         propolis_addr: SocketAddr,
+        sled_identifiers: SledIdentifiers,
         metadata: InstanceMetadata,
     ) -> Result<SledInstanceState, Error> {
         info!(
@@ -611,7 +608,8 @@ impl InstanceManagerRunner {
                 info!(&self.log,
                       "registering new instance";
                       "instance_id" => ?instance_id);
-                let instance_log = self.log.new(o!());
+                let instance_log =
+                    self.log.new(o!("instance_id" => format!("{instance_id}")));
                 let ticket =
                     InstanceTicket::new(instance_id, self.terminate_tx.clone());
 
@@ -622,13 +620,14 @@ impl InstanceManagerRunner {
                     storage: self.storage.clone(),
                     zone_bundler: self.zone_bundler.clone(),
                     zone_builder_factory: self.zone_builder_factory.clone(),
+                    metrics_queue: self.metrics_queue.clone(),
                 };
 
                 let state = crate::instance::InstanceInitialState {
                     hardware,
-                    instance_runtime,
                     vmm_runtime,
                     propolis_addr,
+                    migration_id: instance_runtime.migration_id,
                 };
 
                 let instance = Instance::new(
@@ -638,6 +637,7 @@ impl InstanceManagerRunner {
                     ticket,
                     state,
                     services,
+                    sled_identifiers,
                     metadata,
                 )?;
                 let _old =
@@ -704,25 +704,6 @@ impl InstanceManagerRunner {
             return Ok(());
         };
         instance.put_state(tx, target).await?;
-        Ok(())
-    }
-
-    /// Idempotently attempts to set the instance's migration IDs to the
-    /// supplied IDs.
-    async fn put_migration_ids(
-        &mut self,
-        tx: oneshot::Sender<Result<SledInstanceState, Error>>,
-        instance_id: InstanceUuid,
-        old_runtime: &InstanceRuntimeState,
-        migration_ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<(), Error> {
-        let (_, instance) = self
-            .instances
-            .get(&instance_id)
-            .ok_or_else(|| Error::NoSuchInstance(instance_id))?;
-        instance
-            .put_migration_ids(tx, old_runtime.clone(), *migration_ids)
-            .await?;
         Ok(())
     }
 

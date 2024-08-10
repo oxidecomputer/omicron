@@ -15,17 +15,6 @@ use openapiv3::OpenAPI;
 pub fn all_apis() -> Vec<ApiSpec> {
     vec![
         ApiSpec {
-            title: "CockroachDB Cluster Admin API",
-            version: "0.0.1",
-            description: "API for interacting with the Oxide control plane's \
-                CockroachDB cluster",
-            boundary: ApiBoundary::Internal,
-            api_description:
-                cockroach_admin_api::cockroach_admin_api_mod::stub_api_description,
-            filename: "cockroach-admin.json",
-            extra_validation: None,
-        },
-        ApiSpec {
             title: "Bootstrap Agent API",
             version: "0.0.1",
             description: "Per-sled API for setup and teardown",
@@ -36,12 +25,34 @@ pub fn all_apis() -> Vec<ApiSpec> {
             extra_validation: None,
         },
         ApiSpec {
+            title: "CockroachDB Cluster Admin API",
+            version: "0.0.1",
+            description: "API for interacting with the Oxide \
+                control plane's CockroachDB cluster",
+            boundary: ApiBoundary::Internal,
+            api_description:
+                cockroach_admin_api::cockroach_admin_api_mod::stub_api_description,
+            filename: "cockroach-admin.json",
+            extra_validation: None,
+        },
+        ApiSpec {
+            title: "Oxide Management Gateway Service API",
+            version: "0.0.1",
+            description: "API for interacting with the Oxide \
+                control plane's gateway service",
+            boundary: ApiBoundary::Internal,
+            api_description:
+                gateway_api::gateway_api_mod::stub_api_description,
+            filename: "gateway.json",
+            extra_validation: None,
+        },
+        ApiSpec {
             title: "Internal DNS",
             version: "0.0.1",
             description: "API for the internal DNS server",
             boundary: ApiBoundary::Internal,
             api_description:
-                dns_server_api::dns_server_api::stub_api_description,
+                dns_server_api::dns_server_api_mod::stub_api_description,
             filename: "dns-server.json",
             extra_validation: None,
         },
@@ -52,7 +63,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
                 and report progress",
             boundary: ApiBoundary::Internal,
             api_description:
-                installinator_api::installinator_api::stub_api_description,
+                installinator_api::installinator_api_mod::stub_api_description,
             filename: "installinator.json",
             extra_validation: None,
         },

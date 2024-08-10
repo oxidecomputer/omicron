@@ -12,6 +12,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 /// Wraps commands for interacting with routing tables.
 pub struct Route {}
 
+#[derive(Debug, Clone, Copy)]
 pub enum Gateway {
     Ipv4(Ipv4Addr),
     Ipv6(Ipv6Addr),

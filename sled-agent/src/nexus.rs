@@ -2,12 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-pub use nexus_client::Client as NexusClient;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskVariant;
 
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
-use internal_dns::resolver::{ResolveError, Resolver};
+use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
 use nexus_client::types::SledAgentInfo;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
@@ -19,62 +18,33 @@ use tokio::sync::{broadcast, mpsc, oneshot, Notify};
 use tokio::time::{interval, Duration, MissedTickBehavior};
 use uuid::Uuid;
 
-/// A thin wrapper over a progenitor-generated NexusClient.
-///
-/// Also attaches the "DNS resolver" for historical reasons.
-#[derive(Clone)]
-pub struct NexusClientWithResolver {
-    client: NexusClient,
+// Re-export the nexus_client::Client crate. (Use a type alias to be more
+// rust-analyzer friendly.)
+pub(crate) type NexusClient = nexus_client::Client;
+
+pub(crate) fn make_nexus_client(
+    log: &Logger,
     resolver: Arc<Resolver>,
+) -> NexusClient {
+    make_nexus_client_with_port(log, resolver, NEXUS_INTERNAL_PORT)
 }
 
-impl NexusClientWithResolver {
-    pub fn new(
-        log: &Logger,
-        resolver: Arc<Resolver>,
-    ) -> Result<Self, ResolveError> {
-        Ok(Self::new_from_resolver_with_port(
-            log,
-            resolver,
-            NEXUS_INTERNAL_PORT,
-        ))
-    }
+pub(crate) fn make_nexus_client_with_port(
+    log: &Logger,
+    resolver: Arc<Resolver>,
+    port: u16,
+) -> NexusClient {
+    let client = reqwest::ClientBuilder::new()
+        .dns_resolver(resolver)
+        .build()
+        .expect("Failed to build client");
 
-    pub fn new_from_resolver_with_port(
-        log: &Logger,
-        resolver: Arc<Resolver>,
-        port: u16,
-    ) -> Self {
-        let client = reqwest::ClientBuilder::new()
-            .dns_resolver(resolver.clone())
-            .build()
-            .expect("Failed to build client");
-
-        let dns_name = ServiceName::Nexus.srv_name();
-        Self {
-            client: NexusClient::new_with_client(
-                &format!("http://{dns_name}:{port}"),
-                client,
-                log.new(o!("component" => "NexusClient")),
-            ),
-            resolver,
-        }
-    }
-
-    /// Access the progenitor-based Nexus Client.
-    pub fn client(&self) -> &NexusClient {
-        &self.client
-    }
-
-    /// Access the DNS resolver used by the Nexus Client.
-    ///
-    /// WARNING: If you're using this resolver to access an IP address of
-    /// another service, be aware that it might change if that service moves
-    /// around! Be cautious when accessing and persisting IP addresses of other
-    /// services.
-    pub fn resolver(&self) -> &Arc<Resolver> {
-        &self.resolver
-    }
+    let dns_name = ServiceName::Nexus.srv_name();
+    NexusClient::new_with_client(
+        &format!("http://{dns_name}:{port}"),
+        client,
+        log.new(o!("component" => "NexusClient")),
+    )
 }
 
 pub fn d2n_params(
@@ -165,6 +135,7 @@ enum NexusNotifierMsg {
 }
 
 #[derive(Debug)]
+#[allow(unused)]
 pub struct NexusNotifierTaskStatus {
     pub nexus_known_info: Option<NexusKnownInfo>,
     pub has_pending_notification: bool,

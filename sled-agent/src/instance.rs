@@ -11,13 +11,14 @@ use crate::common::instance::{
 use crate::instance_manager::{
     Error as ManagerError, InstanceManagerServices, InstanceTicket,
 };
-use crate::nexus::NexusClientWithResolver;
+use crate::metrics::MetricsRequestQueue;
+use crate::nexus::NexusClient;
 use crate::params::ZoneBundleMetadata;
 use crate::params::{InstanceExternalIpBody, ZoneBundleCause};
 use crate::params::{
-    InstanceHardware, InstanceMetadata, InstanceMigrationSourceParams,
-    InstanceMigrationTargetParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse, VpcFirewallRule,
+    InstanceHardware, InstanceMetadata, InstanceMigrationTargetParams,
+    InstancePutStateResponse, InstanceStateRequested,
+    InstanceUnregisterResponse, VpcFirewallRule,
 };
 use crate::profile::*;
 use crate::zone_bundle::BundleError;
@@ -31,12 +32,11 @@ use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::svc::wait_for_service;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
-use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::api::internal::nexus::{
-    InstanceRuntimeState, SledInstanceState, VmmRuntimeState,
+    SledInstanceState, VmmRuntimeState,
 };
 use omicron_common::api::internal::shared::{
-    NetworkInterface, SourceNatConfig,
+    NetworkInterface, SledIdentifiers, SourceNatConfig,
 };
 use omicron_common::backoff;
 use omicron_common::zpool_name::ZpoolName;
@@ -48,7 +48,7 @@ use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::net::IpAddr;
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
@@ -131,6 +131,9 @@ pub enum Error {
 
     #[error("Instance dropped our request")]
     RequestDropped(#[from] oneshot::error::RecvError),
+
+    #[error("Instance is terminating")]
+    Terminating,
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -224,11 +227,6 @@ enum InstanceRequest {
     PutState {
         state: crate::params::InstanceStateRequested,
         tx: oneshot::Sender<Result<InstancePutStateResponse, ManagerError>>,
-    },
-    PutMigrationIds {
-        old_runtime: InstanceRuntimeState,
-        migration_ids: Option<InstanceMigrationSourceParams>,
-        tx: oneshot::Sender<Result<SledInstanceState, ManagerError>>,
     },
     Terminate {
         mark_failed: bool,
@@ -351,7 +349,7 @@ struct InstanceRunner {
     running_state: Option<RunningState>,
 
     // Connection to Nexus
-    nexus_client: NexusClientWithResolver,
+    nexus_client: NexusClient,
 
     // Storage resources
     storage: StorageHandle,
@@ -362,12 +360,16 @@ struct InstanceRunner {
     // Object used to collect zone bundles from this instance when terminated.
     zone_bundler: ZoneBundler,
 
+    // Queue to notify the sled agent's metrics task about our VNICs.
+    metrics_queue: MetricsRequestQueue,
+
     // Object representing membership in the "instance manager".
     instance_ticket: InstanceTicket,
 }
 
 impl InstanceRunner {
     async fn run(mut self) {
+        use InstanceRequest::*;
         while !self.should_terminate {
             tokio::select! {
                 biased;
@@ -377,10 +379,7 @@ impl InstanceRunner {
                     use InstanceMonitorRequest::*;
                     match request {
                         Some(Update { state, tx }) => {
-                            let observed = ObservedPropolisState::new(
-                                self.state.instance(),
-                                &state,
-                            );
+                            let observed = ObservedPropolisState::new(&state);
                             let reaction = self.observe_state(&observed).await;
                             self.publish_state_to_nexus().await;
 
@@ -404,7 +403,6 @@ impl InstanceRunner {
                 },
                 // Handle external requests to act upon the instance.
                 request = self.rx.recv() => {
-                    use InstanceRequest::*;
                     let request_variant = request.as_ref().map(|r| r.to_string());
                     let result = match request {
                         Some(RequestZoneBundle { tx }) => {
@@ -424,15 +422,6 @@ impl InstanceRunner {
                                 .map(|r| InstancePutStateResponse { updated_runtime: Some(r) })
                                 .map_err(|e| e.into()))
                                 .map_err(|_| Error::FailedSendClientClosed)
-                        },
-                        Some(PutMigrationIds{ old_runtime, migration_ids, tx }) => {
-                            tx.send(
-                                self.put_migration_ids(
-                                    &old_runtime,
-                                    &migration_ids
-                                ).await.map_err(|e| e.into())
-                            )
-                            .map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(Terminate { mark_failed, tx }) => {
                             tx.send(Ok(InstanceUnregisterResponse {
@@ -479,6 +468,39 @@ impl InstanceRunner {
             }
         }
         self.publish_state_to_nexus().await;
+
+        // Okay, now that we've terminated the instance, drain any outstanding
+        // requests in the queue, so that they see an error indicating that the
+        // instance is going away.
+        while let Some(request) = self.rx.recv().await {
+            // If the receiver for this request has been dropped, ignore it
+            // instead of bailing out, since we still need to drain the rest of
+            // the queue,
+            let _ = match request {
+                RequestZoneBundle { tx } => tx
+                    .send(Err(BundleError::InstanceTerminating))
+                    .map_err(|_| ()),
+                GetFilesystemPool { tx } => tx.send(None).map_err(|_| ()),
+                CurrentState { tx } => {
+                    tx.send(self.current_state()).map_err(|_| ())
+                }
+                PutState { tx, .. } => {
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
+                }
+                Terminate { tx, .. } => {
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
+                }
+                IssueSnapshotRequest { tx, .. } => {
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
+                }
+                AddExternalIp { tx, .. } => {
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
+                }
+                DeleteExternalIp { tx, .. } => {
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
+                }
+            };
+        }
     }
 
     /// Yields this instance's ID.
@@ -506,7 +528,6 @@ impl InstanceRunner {
                 );
 
                 self.nexus_client
-                    .client()
                     .cpapi_instances_put(
                         &self.id().into_untyped_uuid(),
                         &state.into(),
@@ -607,7 +628,6 @@ impl InstanceRunner {
             self.log,
             "updated state after observing Propolis state change";
             "propolis_id" => %self.state.propolis_id(),
-            "new_instance_state" => ?self.state.instance(),
             "new_vmm_state" => ?self.state.vmm()
         );
 
@@ -669,10 +689,27 @@ impl InstanceRunner {
 
         let migrate = match migrate {
             Some(params) => {
-                let migration_id =
-                    self.state.instance().migration_id.ok_or_else(|| {
-                        Error::Migration(anyhow!("Missing Migration UUID"))
-                    })?;
+                let migration_id = self.state
+                    .migration_in()
+                    // TODO(eliza): This is a bit of an unfortunate dance: the
+                    // initial instance-ensure-registered request is what sends
+                    // the migration ID, but it's the subsequent
+                    // instance-ensure-state request (which we're handling here)
+                    // that includes migration the source VMM's UUID and IP
+                    // address. Because the API currently splits the migration
+                    // IDs between the instance-ensure-registered and
+                    // instance-ensure-state requests, we have to stash the
+                    // migration ID in an `Option` and `expect()` it here,
+                    // panicking if we get an instance-ensure-state request with
+                    // a source Propolis ID if the instance wasn't registered
+                    // with a migration in ID.
+                    //
+                    // This is kind of a shame. Eventually, we should consider
+                    // reworking the API ensure-state request contains the
+                    // migration ID, and we don't have to unwrap here. See:
+                    // https://github.com/oxidecomputer/omicron/issues/6073
+                    .expect("if we have migration target params, we should also have a migration in")
+                    .migration_id;
                 Some(propolis_client::types::InstanceMigrateInitiateRequest {
                     src_addr: params.src_propolis_addr.to_string(),
                     src_uuid: params.src_propolis_id,
@@ -767,6 +804,12 @@ impl InstanceRunner {
             self.instance_ticket.deregister();
             return;
         };
+
+        // Ask the sled-agent's metrics task to stop tracking statistics for our
+        // control VNIC and any OPTE ports in the zone as well.
+        self.metrics_queue
+            .untrack_zone_links(&running_state.running_zone)
+            .await;
 
         // Take a zone bundle whenever this instance stops.
         if let Err(e) = self
@@ -921,9 +964,11 @@ pub struct Instance {
 #[derive(Debug)]
 pub(crate) struct InstanceInitialState {
     pub hardware: InstanceHardware,
-    pub instance_runtime: InstanceRuntimeState,
     pub vmm_runtime: VmmRuntimeState,
     pub propolis_addr: SocketAddr,
+    /// UUID of the migration in to this VMM, if the VMM is being created as the
+    /// target of an active migration.
+    pub migration_id: Option<Uuid>,
 }
 
 impl Instance {
@@ -938,7 +983,9 @@ impl Instance {
     ///   instance manager's tracking table.
     /// * `state`: The initial state of this instance.
     /// * `services`: A set of instance manager-provided services.
+    /// * `sled_identifiers`: Sled-related metadata used to track statistics.
     /// * `metadata`: Instance-related metadata used to track statistics.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         log: Logger,
         id: InstanceUuid,
@@ -946,18 +993,20 @@ impl Instance {
         ticket: InstanceTicket,
         state: InstanceInitialState,
         services: InstanceManagerServices,
+        sled_identifiers: SledIdentifiers,
         metadata: InstanceMetadata,
     ) -> Result<Self, Error> {
         info!(log, "initializing new Instance";
               "instance_id" => %id,
               "propolis_id" => %propolis_id,
+              "migration_id" => ?state.migration_id,
               "state" => ?state);
 
         let InstanceInitialState {
             hardware,
-            instance_runtime,
             vmm_runtime,
             propolis_addr,
+            migration_id,
         } = state;
 
         let InstanceManagerServices {
@@ -967,6 +1016,7 @@ impl Instance {
             storage,
             zone_bundler,
             zone_builder_factory,
+            metrics_queue,
         } = services;
 
         let mut dhcp_config = DhcpCfg {
@@ -1004,6 +1054,15 @@ impl Instance {
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
         let (tx_monitor, rx_monitor) = mpsc::channel(1);
 
+        let metadata = propolis_client::types::InstanceMetadata {
+            project_id: metadata.project_id,
+            silo_id: metadata.silo_id,
+            sled_id: sled_identifiers.sled_id,
+            sled_model: sled_identifiers.model,
+            sled_revision: sled_identifiers.revision,
+            sled_serial: sled_identifiers.serial,
+        };
+
         let runner = InstanceRunner {
             log: log.new(o!("instance_id" => id.to_string())),
             should_terminate: false,
@@ -1023,7 +1082,7 @@ impl Instance {
                 // TODO: we should probably make propolis aligned with
                 // InstanceCpuCount here, to avoid any casting...
                 vcpus: hardware.properties.ncpus.0 as u8,
-                metadata: metadata.into(),
+                metadata,
             },
             propolis_id,
             propolis_addr,
@@ -1037,16 +1096,13 @@ impl Instance {
             dhcp_config,
             requested_disks: hardware.disks,
             cloud_init_bytes: hardware.cloud_init_bytes,
-            state: InstanceStates::new(
-                instance_runtime,
-                vmm_runtime,
-                propolis_id,
-            ),
+            state: InstanceStates::new(vmm_runtime, propolis_id, migration_id),
             running_state: None,
             nexus_client,
             storage,
             zone_builder_factory,
             zone_bundler,
+            metrics_queue,
             instance_ticket: ticket,
         };
 
@@ -1106,23 +1162,6 @@ impl Instance {
     ) -> Result<(), Error> {
         self.tx
             .send(InstanceRequest::PutState { state, tx })
-            .await
-            .map_err(|_| Error::FailedSendChannelClosed)?;
-        Ok(())
-    }
-
-    pub async fn put_migration_ids(
-        &self,
-        tx: oneshot::Sender<Result<SledInstanceState, ManagerError>>,
-        old_runtime: InstanceRuntimeState,
-        migration_ids: Option<InstanceMigrationSourceParams>,
-    ) -> Result<(), Error> {
-        self.tx
-            .send(InstanceRequest::PutMigrationIds {
-                old_runtime,
-                migration_ids,
-                tx,
-            })
             .await
             .map_err(|_| Error::FailedSendChannelClosed)?;
         Ok(())
@@ -1314,39 +1353,12 @@ impl InstanceRunner {
         Ok(self.state.sled_instance_state())
     }
 
-    async fn put_migration_ids(
-        &mut self,
-        old_runtime: &InstanceRuntimeState,
-        migration_ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<SledInstanceState, Error> {
-        // Check that the instance's current generation matches the one the
-        // caller expects to transition from. This helps Nexus ensure that if
-        // multiple migration sagas launch at Propolis generation N, then only
-        // one of them will successfully set the instance's migration IDs.
-        if self.state.instance().gen != old_runtime.gen {
-            // Allow this transition for idempotency if the instance is
-            // already in the requested goal state.
-            if self.state.migration_ids_already_set(old_runtime, migration_ids)
-            {
-                return Ok(self.state.sled_instance_state());
-            }
-
-            return Err(Error::Transition(
-                omicron_common::api::external::Error::conflict(format!(
-                    "wrong instance state generation: expected {}, got {}",
-                    self.state.instance().gen,
-                    old_runtime.gen
-                )),
-            ));
-        }
-
-        self.state.set_migration_ids(migration_ids, Utc::now());
-        Ok(self.state.sled_instance_state())
-    }
-
     async fn setup_propolis_inner(&mut self) -> Result<PropolisSetup, Error> {
-        // Create OPTE ports for the instance
+        // Create OPTE ports for the instance. We also store the names of all
+        // those ports to notify the metrics task to start collecting statistics
+        // for them.
         let mut opte_ports = Vec::with_capacity(self.requested_nics.len());
+        let mut opte_port_names = Vec::with_capacity(self.requested_nics.len());
         for nic in self.requested_nics.iter() {
             let (snat, ephemeral_ip, floating_ips) = if nic.primary {
                 (
@@ -1366,6 +1378,7 @@ impl InstanceRunner {
                 dhcp_config: self.dhcp_config.clone(),
                 is_service: false,
             })?;
+            opte_port_names.push(port.0.name().to_string());
             opte_ports.push(port);
         }
 
@@ -1407,28 +1420,6 @@ impl InstanceRunner {
             .await?;
 
         let gateway = self.port_manager.underlay_ip();
-
-        // TODO: We should not be using the resolver here to lookup the Nexus IP
-        // address. It would be preferable for Propolis, and through Propolis,
-        // Oximeter, to access the Nexus internal interface using a progenitor
-        // resolver that relies on a DNS resolver.
-        //
-        // - With the current implementation: if Nexus' IP address changes, this
-        // breaks.
-        // - With a DNS resolver: the metric producer would be able to continue
-        // sending requests to new servers as they arise.
-        let metric_ip = self
-            .nexus_client
-            .resolver()
-            .lookup_ipv6(internal_dns::ServiceName::Nexus)
-            .await?;
-        let metric_addr = SocketAddr::V6(SocketAddrV6::new(
-            metric_ip,
-            NEXUS_INTERNAL_PORT,
-            0,
-            0,
-        ));
-
         let config = PropertyGroupBuilder::new("config")
             .add_property(
                 "datalink",
@@ -1446,7 +1437,9 @@ impl InstanceRunner {
                 "astring",
                 &self.propolis_addr.port().to_string(),
             )
-            .add_property("metric_addr", "astring", &metric_addr.to_string());
+            // Allow Propolis's `oximeter_producer::Server` to use DNS, based on
+            // the underlay IP address supplied in `listen_addr` above.
+            .add_property("metric_addr", "astring", "dns");
 
         let profile = ProfileBuilder::new("omicron").add_service(
             ServiceBuilder::new("system/illumos/propolis-server").add_instance(
@@ -1467,6 +1460,16 @@ impl InstanceRunner {
             .await
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
         info!(self.log, "Propolis SMF service is online");
+
+        // Notify the metrics task about the instance zone's datalinks.
+        if !self.metrics_queue.track_zone_links(&running_zone).await {
+            error!(
+                self.log,
+                "Failed to track one or more datalinks in the zone, \
+                some metrics will not be produced";
+                "zone_name" => running_zone.name(),
+            );
+        }
 
         // We use a custom client builder here because the default progenitor
         // one has a timeout of 15s but we want to be able to wait indefinitely.
@@ -1563,6 +1566,8 @@ impl InstanceRunner {
 mod tests {
     use super::*;
     use crate::fakes::nexus::{FakeNexusServer, ServerContext};
+    use crate::metrics;
+    use crate::nexus::make_nexus_client_with_port;
     use crate::vmm_reservoir::VmmReservoirManagerHandle;
     use crate::zone_bundle::CleanupContext;
     use camino_tempfile::Utf8TempDir;
@@ -1580,16 +1585,26 @@ mod tests {
     use omicron_common::api::external::{
         ByteCount, Generation, Hostname, InstanceCpuCount,
     };
-    use omicron_common::api::internal::nexus::{InstanceProperties, VmmState};
+    use omicron_common::api::internal::nexus::{
+        InstanceProperties, InstanceRuntimeState, VmmState,
+    };
+    use omicron_common::api::internal::shared::SledIdentifiers;
     use omicron_common::FileKv;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use std::net::Ipv6Addr;
+    use std::net::SocketAddrV6;
     use std::str::FromStr;
+    use std::time::Duration;
     use tokio::sync::watch::Receiver;
     use tokio::time::timeout;
 
     const TIMEOUT_DURATION: tokio::time::Duration =
         tokio::time::Duration::from_secs(30);
+
+    // Make the Propolis ID const, so we can refer to it in tests that check the
+    // zone name is included in requests to track the zone's links.
+    const PROPOLIS_ID: Uuid =
+        uuid::uuid!("e8e95a60-2aaf-4453-90e4-e0e58f126762");
 
     #[derive(Default, Clone)]
     enum ReceivedInstanceState {
@@ -1619,7 +1634,7 @@ mod tests {
     }
 
     struct FakeNexusParts {
-        nexus_client: NexusClientWithResolver,
+        nexus_client: NexusClient,
         _nexus_server: HttpServer<ServerContext>,
         state_rx: Receiver<ReceivedInstanceState>,
         _dns_server: TransientServer,
@@ -1647,12 +1662,11 @@ mod tests {
                 .unwrap(),
             );
 
-            let nexus_client =
-                NexusClientWithResolver::new_from_resolver_with_port(
-                    &log,
-                    resolver,
-                    _nexus_server.local_addr().port(),
-                );
+            let nexus_client = make_nexus_client_with_port(
+                &log,
+                resolver,
+                _nexus_server.local_addr().port(),
+            );
 
             Self { nexus_client, _nexus_server, state_rx, _dns_server }
         }
@@ -1745,22 +1759,21 @@ mod tests {
     async fn instance_struct(
         log: &Logger,
         propolis_addr: SocketAddr,
-        nexus_client_with_resolver: NexusClientWithResolver,
+        nexus_client: NexusClient,
         storage_handle: StorageHandle,
         temp_dir: &String,
-    ) -> Instance {
+    ) -> (Instance, MetricsRx) {
         let id = InstanceUuid::new_v4();
-        let propolis_id = PropolisUuid::new_v4();
+        let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
 
         let ticket = InstanceTicket::new_without_manager_for_test(id);
 
-        let initial_state =
-            fake_instance_initial_state(propolis_id, propolis_addr);
+        let initial_state = fake_instance_initial_state(propolis_addr);
 
-        let services = fake_instance_manager_services(
+        let (services, rx) = fake_instance_manager_services(
             log,
             storage_handle,
-            nexus_client_with_resolver,
+            nexus_client,
             temp_dir,
         );
 
@@ -1768,21 +1781,29 @@ mod tests {
             silo_id: Uuid::new_v4(),
             project_id: Uuid::new_v4(),
         };
+        let sled_identifiers = SledIdentifiers {
+            rack_id: Uuid::new_v4(),
+            sled_id: Uuid::new_v4(),
+            model: "fake-model".into(),
+            revision: 1,
+            serial: "fake-serial".into(),
+        };
 
-        Instance::new(
+        let instance = Instance::new(
             log.new(o!("component" => "Instance")),
             id,
             propolis_id,
             ticket,
             initial_state,
             services,
+            sled_identifiers,
             metadata,
         )
-        .unwrap()
+        .unwrap();
+        (instance, rx)
     }
 
     fn fake_instance_initial_state(
-        propolis_id: PropolisUuid,
         propolis_addr: SocketAddr,
     ) -> InstanceInitialState {
         let hardware = InstanceHardware {
@@ -1812,28 +1833,25 @@ mod tests {
 
         InstanceInitialState {
             hardware,
-            instance_runtime: InstanceRuntimeState {
-                propolis_id: Some(propolis_id),
-                dst_propolis_id: None,
-                migration_id: None,
-                gen: Generation::new(),
-                time_updated: Default::default(),
-            },
             vmm_runtime: VmmRuntimeState {
                 state: VmmState::Starting,
                 gen: Generation::new(),
                 time_updated: Default::default(),
             },
             propolis_addr,
+            migration_id: None,
         }
     }
+
+    // Helper alias for the receive-side of the metrics request queue.
+    type MetricsRx = mpsc::Receiver<metrics::Message>;
 
     fn fake_instance_manager_services(
         log: &Logger,
         storage_handle: StorageHandle,
-        nexus_client_with_resolver: NexusClientWithResolver,
+        nexus_client: NexusClient,
         temp_dir: &String,
-    ) -> InstanceManagerServices {
+    ) -> (InstanceManagerServices, MetricsRx) {
         let vnic_allocator =
             VnicAllocator::new("Foo", Etherstub("mystub".to_string()));
         let port_manager = PortManager::new(
@@ -1848,14 +1866,17 @@ mod tests {
             cleanup_context,
         );
 
-        InstanceManagerServices {
-            nexus_client: nexus_client_with_resolver,
+        let (metrics_queue, rx) = MetricsRequestQueue::for_test();
+        let services = InstanceManagerServices {
+            nexus_client,
             vnic_allocator,
             port_manager,
             storage: storage_handle,
             zone_bundler,
             zone_builder_factory: ZoneBuilderFactory::fake(Some(temp_dir)),
-        }
+            metrics_queue,
+        };
+        (services, rx)
     }
 
     #[tokio::test]
@@ -1885,7 +1906,7 @@ mod tests {
         let temp_guard = Utf8TempDir::new().unwrap();
         let temp_dir = temp_guard.path().to_string();
 
-        let inst = timeout(
+        let (inst, mut metrics_rx) = timeout(
             TIMEOUT_DURATION,
             instance_struct(
                 &log,
@@ -1928,6 +1949,25 @@ mod tests {
         .expect("timed out waiting for InstanceState::Running in FakeNexus")
         .expect("failed to receive FakeNexus' InstanceState");
 
+        // We should have received exactly one message on the metrics request
+        // queue, for the control VNIC. The instance has no OPTE ports.
+        let message =
+            metrics_rx.try_recv().expect("Should have received a message");
+        let zone_name =
+            propolis_zone_name(&PropolisUuid::from_untyped_uuid(PROPOLIS_ID));
+        assert_eq!(
+            message,
+            metrics::Message::TrackVnic {
+                zone_name,
+                name: "oxControlFoo0".into(),
+            },
+            "Expected instance zone to send a message on its metrics \
+            request queue, asking to track its control VNIC",
+        );
+        metrics_rx
+            .try_recv()
+            .expect_err("The metrics request queue should have one message");
+
         storage_harness.cleanup().await;
         logctx.cleanup_successful();
     }
@@ -1957,7 +1997,7 @@ mod tests {
         let temp_guard = Utf8TempDir::new().unwrap();
         let temp_dir = temp_guard.path().to_string();
 
-        let inst = timeout(
+        let (inst, _) = timeout(
             TIMEOUT_DURATION,
             instance_struct(
                 &log,
@@ -2003,7 +2043,7 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_instance_create_timeout_while_creating_zone() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_instance_create_timeout_while_creating_zone",
@@ -2013,12 +2053,39 @@ mod tests {
         // automock'd things used during this test
         let _mock_vnic_contexts = mock_vnic_contexts();
 
-        let rt_handle = tokio::runtime::Handle::current();
-
         // time out while booting zone, on purpose!
         let boot_ctx = MockZones::boot_context();
-        boot_ctx.expect().return_once(move |_| {
-            rt_handle.block_on(tokio::time::sleep(TIMEOUT_DURATION * 2));
+        const TIMEOUT: Duration = Duration::from_secs(1);
+        let (boot_continued_tx, boot_continued_rx) =
+            std::sync::mpsc::sync_channel(1);
+        let boot_log = log.clone();
+        boot_ctx.expect().times(1).return_once(move |_| {
+            // We need a way to slow down zone boot, but that doesn't block the
+            // entire Tokio runtime. Since this closure is synchronous, it also
+            // has no way to await anything, all waits are blocking. That means
+            // we cannot use a single-threaded runtime, which also means no
+            // manually advancing time. The test has to take the full "slow boot
+            // time".
+            //
+            // To do this, we use a multi-threaded runtime, and call
+            // block_in_place so that we can just literally sleep for a while.
+            // The sleep duration here is twice a timeout we set on the attempt
+            // to actually set the instance running below.
+            //
+            // This boot method also directly signals the main test code to
+            // continue when it's done sleeping to synchronize with it.
+            tokio::task::block_in_place(move || {
+                debug!(
+                    boot_log,
+                    "MockZones::boot() called, waiting for timeout"
+                );
+                std::thread::sleep(TIMEOUT * 2);
+                debug!(
+                    boot_log,
+                    "MockZones::boot() waited for timeout, continuing"
+                );
+                boot_continued_tx.send(()).unwrap();
+            });
             Ok(())
         });
         let wait_ctx = illumos_utils::svc::wait_for_service_context();
@@ -2039,7 +2106,7 @@ mod tests {
         let temp_guard = Utf8TempDir::new().unwrap();
         let temp_dir = temp_guard.path().to_string();
 
-        let inst = timeout(
+        let (inst, _) = timeout(
             TIMEOUT_DURATION,
             instance_struct(
                 &log,
@@ -2053,8 +2120,6 @@ mod tests {
         .await
         .expect("timed out creating Instance struct");
 
-        tokio::time::pause();
-
         let (put_tx, put_rx) = oneshot::channel();
 
         // pretending we're InstanceManager::ensure_state, try in vain to start
@@ -2063,15 +2128,16 @@ mod tests {
             .await
             .expect("failed to send Instance::put_state");
 
-        let timeout_fut = timeout(TIMEOUT_DURATION, put_rx);
-
-        tokio::time::advance(TIMEOUT_DURATION * 2).await;
-
-        tokio::time::resume();
-
+        // Timeout our future waiting for the instance-state-change at 1s. This
+        // is much shorter than the actual `TIMEOUT_DURATION`, but the test
+        // structure requires that we actually wait this period, since we cannot
+        // advance time manually in a multi-threaded runtime.
+        let timeout_fut = timeout(TIMEOUT, put_rx);
+        debug!(log, "Awaiting zone-boot timeout");
         timeout_fut
             .await
             .expect_err("*should've* timed out waiting for Instance::put_state, but didn't?");
+        debug!(log, "Zone-boot timeout awaited");
 
         if let ReceivedInstanceState::InstancePut(SledInstanceState {
             vmm_state: VmmRuntimeState { state: VmmState::Running, .. },
@@ -2080,6 +2146,14 @@ mod tests {
         {
             panic!("Nexus's InstanceState should never have reached running if zone creation timed out");
         }
+
+        // Notify the "boot" closure that it can continue, and then wait to
+        // ensure it's actually called.
+        debug!(log, "Waiting for zone-boot to continue");
+        tokio::task::spawn_blocking(move || boot_continued_rx.recv().unwrap())
+            .await
+            .unwrap();
+        debug!(log, "Received continued message from MockZones::boot()");
 
         storage_harness.cleanup().await;
         logctx.cleanup_successful();
@@ -2109,6 +2183,12 @@ mod tests {
         let temp_guard = Utf8TempDir::new().unwrap();
         let temp_dir = temp_guard.path().to_string();
 
+        let (services, mut metrics_rx) = fake_instance_manager_services(
+            &log,
+            storage_handle,
+            nexus_client,
+            &temp_dir,
+        );
         let InstanceManagerServices {
             nexus_client,
             vnic_allocator: _,
@@ -2116,12 +2196,8 @@ mod tests {
             storage,
             zone_bundler,
             zone_builder_factory,
-        } = fake_instance_manager_services(
-            &log,
-            storage_handle,
-            nexus_client,
-            &temp_dir,
-        );
+            metrics_queue,
+        } = services;
 
         let etherstub = Etherstub("mystub".to_string());
 
@@ -2136,6 +2212,7 @@ mod tests {
             zone_bundler,
             zone_builder_factory,
             vmm_reservoir_manager,
+            metrics_queue,
         )
         .unwrap();
 
@@ -2144,17 +2221,32 @@ mod tests {
         let propolis_addr = propolis_server.local_addr();
 
         let instance_id = InstanceUuid::new_v4();
-        let propolis_id = PropolisUuid::new_v4();
+        let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
         let InstanceInitialState {
             hardware,
-            instance_runtime,
             vmm_runtime,
             propolis_addr,
-        } = fake_instance_initial_state(propolis_id, propolis_addr);
+            migration_id: _,
+        } = fake_instance_initial_state(propolis_addr);
 
         let metadata = InstanceMetadata {
             silo_id: Uuid::new_v4(),
             project_id: Uuid::new_v4(),
+        };
+        let sled_identifiers = SledIdentifiers {
+            rack_id: Uuid::new_v4(),
+            sled_id: Uuid::new_v4(),
+            model: "fake-model".into(),
+            revision: 1,
+            serial: "fake-serial".into(),
+        };
+
+        let instance_runtime = InstanceRuntimeState {
+            propolis_id: Some(propolis_id),
+            dst_propolis_id: None,
+            migration_id: None,
+            gen: Generation::new(),
+            time_updated: Default::default(),
         };
 
         mgr.ensure_registered(
@@ -2164,6 +2256,7 @@ mod tests {
             instance_runtime,
             vmm_runtime,
             propolis_addr,
+            sled_identifiers,
             metadata,
         )
         .await
@@ -2185,6 +2278,24 @@ mod tests {
         .await
         .expect("timed out waiting for InstanceState::Running in FakeNexus")
         .expect("failed to receive FakeNexus' InstanceState");
+
+        // We should have received exactly one message on the metrics request
+        // queue, for the control VNIC. The instance has no OPTE ports.
+        let message =
+            metrics_rx.try_recv().expect("Should have received a message");
+        let zone_name = propolis_zone_name(&propolis_id);
+        assert_eq!(
+            message,
+            metrics::Message::TrackVnic {
+                zone_name,
+                name: "oxControlInstance0".into(),
+            },
+            "Expected instance zone to send a message on its metrics \
+            request queue, asking to track its control VNIC",
+        );
+        metrics_rx
+            .try_recv()
+            .expect_err("The metrics request queue should have one message");
 
         storage_harness.cleanup().await;
         logctx.cleanup_successful();

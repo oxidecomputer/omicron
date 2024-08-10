@@ -34,7 +34,6 @@ pub mod rack_setup;
 pub mod server;
 pub mod services;
 mod sled_agent;
-mod smf_helper;
 mod storage_monitor;
 mod swap_device;
 mod updates;

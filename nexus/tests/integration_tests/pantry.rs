@@ -4,6 +4,7 @@
 
 //! Tests Nexus' interactions with Crucible's pantry
 
+use crate::integration_tests::instances::instance_wait_for_state;
 use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
@@ -24,6 +25,7 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::InstanceState;
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
 use omicron_uuid_kinds::GenericUuid;
@@ -157,6 +159,7 @@ async fn create_instance_and_attach_disk(
     // is an artificial limitation without hotplug support.
     set_instance_state(&client, INSTANCE_NAME, "stop").await;
     instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(&client, instance_id, InstanceState::Stopped).await;
 
     let url_instance_attach_disk =
         get_disk_attach_url(instance.identity.name.as_str());

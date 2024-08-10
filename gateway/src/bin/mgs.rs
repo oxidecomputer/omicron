@@ -9,7 +9,7 @@ use camino::Utf8PathBuf;
 use clap::Parser;
 use futures::StreamExt;
 use omicron_common::cmd::{fatal, CmdError};
-use omicron_gateway::{run_openapi, start_server, Config, MgsArguments};
+use omicron_gateway::{start_server, Config, MgsArguments};
 use signal_hook::consts::signal;
 use signal_hook_tokio::Signals;
 use std::net::SocketAddrV6;
@@ -18,9 +18,6 @@ use uuid::Uuid;
 #[derive(Debug, Parser)]
 #[clap(name = "gateway", about = "See README.adoc for more information")]
 enum Args {
-    /// Print the external OpenAPI Spec document and exit
-    Openapi,
-
     /// Start an MGS server
     Run {
         #[clap(name = "CONFIG_FILE_PATH", action)]
@@ -71,9 +68,6 @@ async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
 
     match args {
-        Args::Openapi => {
-            run_openapi().map_err(|e| CmdError::Failure(anyhow!(e)))
-        }
         Args::Run {
             config_file_path,
             id_and_address_from_smf,
