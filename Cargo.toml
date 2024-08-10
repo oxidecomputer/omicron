@@ -301,7 +301,7 @@ const_format = "0.2.32"
 cookie = "0.18"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
-crossterm = { version = "0.27.0", features = ["event-stream"] }
+crossterm = { version = "0.28.1", features = ["event-stream"] }
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "e58ca3693cb9ce0438947beba10e97ee38a0966b" }
 crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "e58ca3693cb9ce0438947beba10e97ee38a0966b" }
 crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "e58ca3693cb9ce0438947beba10e97ee38a0966b" }
@@ -477,7 +477,7 @@ rand = "0.8.5"
 rand_core = "0.6.4"
 rand_distr = "0.4.3"
 rand_seeder = "0.3.0"
-ratatui = "0.27.0"
+ratatui = "0.28.0"
 rayon = "1.10"
 rcgen = "0.12.1"
 reedline = "0.31.0"
@@ -569,7 +569,7 @@ trust-dns-server = "0.22"
 trybuild = "1.0.99"
 tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
-tui-tree-widget = "0.21.0"
+tui-tree-widget = "0.22.0"
 typed-rng = { path = "typed-rng" }
 unicode-width = "0.1.13"
 update-common = { path = "update-common" }

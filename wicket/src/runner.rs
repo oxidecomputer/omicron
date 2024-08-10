@@ -75,7 +75,7 @@ impl RunnerCore {
     /// Resize and draw the initial screen before handling `Event`s
     pub fn init_screen(&mut self) -> anyhow::Result<()> {
         // Size the initial screen
-        let rect = self.terminal.get_frame().size();
+        let rect = self.terminal.get_frame().area();
         self.screen.resize(&mut self.state, rect.width, rect.height);
 
         // Draw the initial screen
