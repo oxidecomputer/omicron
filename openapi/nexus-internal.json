@@ -3306,53 +3306,6 @@
           }
         ]
       },
-      "InstanceRuntimeState": {
-        "description": "The dynamic runtime properties of an instance: its current VMM ID (if any), migration information (if any), and the instance state to report if there is no active VMM.",
-        "type": "object",
-        "properties": {
-          "dst_propolis_id": {
-            "nullable": true,
-            "description": "If a migration is active, the ID of the target VMM.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
-              }
-            ]
-          },
-          "gen": {
-            "description": "Generation number for this state.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          },
-          "migration_id": {
-            "nullable": true,
-            "description": "If a migration is active, the ID of that migration.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "propolis_id": {
-            "nullable": true,
-            "description": "The instance's currently active VMM ID.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
-              }
-            ]
-          },
-          "time_updated": {
-            "description": "Timestamp for this information.",
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "gen",
-          "time_updated"
-        ]
-      },
       "IpNet": {
         "x-rust-type": {
           "crate": "oxnet",
@@ -3594,24 +3547,6 @@
         "minLength": 5,
         "maxLength": 17
       },
-      "MigrationRole": {
-        "oneOf": [
-          {
-            "description": "This update concerns the source VMM of a migration.",
-            "type": "string",
-            "enum": [
-              "source"
-            ]
-          },
-          {
-            "description": "This update concerns the target VMM of a migration.",
-            "type": "string",
-            "enum": [
-              "target"
-            ]
-          }
-        ]
-      },
       "MigrationRuntimeState": {
         "description": "An update from a sled regarding the state of a migration, indicating the role of the VMM whose migration state was updated.",
         "type": "object",
@@ -3622,9 +3557,6 @@
           "migration_id": {
             "type": "string",
             "format": "uuid"
-          },
-          "role": {
-            "$ref": "#/components/schemas/MigrationRole"
           },
           "state": {
             "$ref": "#/components/schemas/MigrationState"
@@ -3638,7 +3570,6 @@
         "required": [
           "gen",
           "migration_id",
-          "role",
           "state",
           "time_updated"
         ]
@@ -4839,17 +4770,18 @@
         "description": "A wrapper type containing a sled's total knowledge of the state of a specific VMM and the instance it incarnates.",
         "type": "object",
         "properties": {
-          "instance_state": {
-            "description": "The sled's conception of the state of the instance.",
+          "migration_in": {
+            "nullable": true,
+            "description": "The current state of any inbound migration to this VMM.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/InstanceRuntimeState"
+                "$ref": "#/components/schemas/MigrationRuntimeState"
               }
             ]
           },
-          "migration_state": {
+          "migration_out": {
             "nullable": true,
-            "description": "The current state of any in-progress migration for this instance, as understood by this sled.",
+            "description": "The state of any outbound migration from this VMM.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/MigrationRuntimeState"
@@ -4874,7 +4806,6 @@
           }
         },
         "required": [
-          "instance_state",
           "propolis_id",
           "vmm_state"
         ]

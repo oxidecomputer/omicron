@@ -314,7 +314,8 @@ db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
 derive_more = "0.99.18"
 derive-where = "1.2.7"
-diesel = { version = "2.1.6", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+# Having the i-implement-... feature here makes diesel go away from the workspace-hack
+diesel = { version = "2.2.2", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", branch = "main" }
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
@@ -385,7 +386,7 @@ libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d32
 linear-map = "1.2.0"
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
-mockall = "0.12"
+mockall = "0.13"
 newtype_derive = "0.1.6"
 mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "220dd026e83142b83bd93123f465a64dd4600201" }
 ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "220dd026e83142b83bd93123f465a64dd4600201" }
@@ -470,7 +471,7 @@ progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branc
 bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9" }
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9" }
 propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9" }
-proptest = "1.4.0"
+proptest = "1.5.0"
 quote = "1.0"
 rand = "0.8.5"
 rand_core = "0.6.4"

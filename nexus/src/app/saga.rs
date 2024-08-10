@@ -371,12 +371,6 @@ pub(crate) struct StoppedSaga {
 
 impl StoppedSaga {
     /// Fetches the raw Steno result for the saga's execution
-    ///
-    /// This is a test-only routine meant for use in tests that need to examine
-    /// the details of a saga's final state (e.g., examining the exact point at
-    /// which it failed).  Non-test callers should use `into_omicron_result`
-    /// instead.
-    #[cfg(test)]
     pub(crate) fn into_raw_result(self) -> SagaResult {
         self.result
     }
