@@ -82,6 +82,15 @@ async fn test_omdb_usage_errors() {
         &["nexus", "background-tasks"],
         &["nexus", "blueprints"],
         &["nexus", "sagas"],
+        // Missing "--destructive" flag.  The URL is bogus but just ensures that
+        // we get far enough to hit the error we care about.
+        &[
+            "nexus",
+            "--nexus-internal-url",
+            "http://[::1]:111",
+            "sagas",
+            "demo-create",
+        ],
         &["nexus", "sleds"],
         &["sled-agent"],
         &["sled-agent", "zones"],
@@ -136,7 +145,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["nexus", "background-tasks", "doc"],
         &["nexus", "background-tasks", "show"],
         &["nexus", "sagas", "list"],
-        &["nexus", "sagas", "demo-create"],
+        &["--destructive", "nexus", "sagas", "demo-create"],
         &["nexus", "sagas", "list"],
         &[
             "--destructive",

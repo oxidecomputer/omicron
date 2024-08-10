@@ -453,10 +453,13 @@ impl NexusArgs {
                 match command {
                     SagasCommands::List => cmd_nexus_sagas_list(&client).await,
                     SagasCommands::DemoCreate => {
-                        cmd_nexus_sagas_demo_create(&client).await
+                        let token = omdb.check_allow_destructive()?;
+                        cmd_nexus_sagas_demo_create(&client, token).await
                     }
                     SagasCommands::DemoComplete(args) => {
-                        cmd_nexus_sagas_demo_complete(&client, args).await
+                        let token = omdb.check_allow_destructive()?;
+                        cmd_nexus_sagas_demo_complete(&client, args, token)
+                            .await
                     }
                 }
             }
@@ -1657,13 +1660,14 @@ async fn cmd_nexus_sagas_list(
 /// Runs `omdb nexus sagas demo-create`
 async fn cmd_nexus_sagas_demo_create(
     client: &nexus_client::Client,
+    _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let demo_saga =
         client.saga_demo_create().await.context("creating demo saga")?;
     println!("saga id:      {}", demo_saga.saga_id);
     println!(
         "demo saga id: {} (use this with `demo-complete`)",
-        demo_saga.demo_saga_id.to_string(),
+        demo_saga.demo_saga_id,
     );
     Ok(())
 }
@@ -1672,6 +1676,7 @@ async fn cmd_nexus_sagas_demo_create(
 async fn cmd_nexus_sagas_demo_complete(
     client: &nexus_client::Client,
     args: &DemoSagaIdArgs,
+    _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     if let Err(error) = client
         .saga_demo_complete(&args.demo_saga_id)

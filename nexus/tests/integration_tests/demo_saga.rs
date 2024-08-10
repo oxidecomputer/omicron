@@ -32,7 +32,7 @@ async fn test_demo_saga(cptestctx: &ControlPlaneTestContext) {
     eprintln!("found sagas (before): {:?}", sagas_before);
     let demo_saga = nexus_client.saga_demo_create().await.unwrap();
     let saga_id = demo_saga.saga_id;
-    assert!(sagas_before.into_iter().find(|s| s.id == saga_id).is_none());
+    assert!(!sagas_before.into_iter().any(|s| s.id == saga_id));
 
     let sagas_after = list_sagas(&nexus_client).await;
     eprintln!("found sagas (after): {:?}", sagas_after);

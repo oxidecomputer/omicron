@@ -547,6 +547,15 @@ Connection Options:
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
 =============================================
+EXECUTING COMMAND: omdb ["nexus", "--nexus-internal-url", "http://[::1]:111", "sagas", "demo-create"]
+termination: Exited(1)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+note: using Nexus URL http://[::1]:111
+Error: This command is potentially destructive. Pass the `-w` / `--destructive` flag to allow it.
+=============================================
 EXECUTING COMMAND: omdb ["nexus", "sleds"]
 termination: Exited(2)
 ---------------------------------------------

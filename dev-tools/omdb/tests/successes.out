@@ -621,7 +621,7 @@ NOTE: This command only reads in-memory state from the targeted Nexus instance.
 Sagas may be missing if they were run by a different Nexus instance or if they
 finished before this Nexus instance last started up.
 =============================================
-EXECUTING COMMAND: omdb ["nexus", "sagas", "demo-create"]
+EXECUTING COMMAND: omdb ["--destructive", "nexus", "sagas", "demo-create"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
