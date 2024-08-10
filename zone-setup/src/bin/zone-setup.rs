@@ -104,6 +104,13 @@ struct ChronySetupArgs {
     /// allowed IPv6 range
     #[arg(short, long)]
     allow: Ipv6Net,
+    /// DNS name for the boundary NTP zone pool
+    #[arg(
+        short = 'p',
+        long,
+        value_parser = NonEmptyStringValueParser::default(),
+    )]
+    boundary_pool: String,
 }
 
 // The default clap parser for `serde_json::Value` is to wrap the argument in a
@@ -396,6 +403,9 @@ makestep 1.0 3
 leapsecmode slew
 maxslewrate 2708.333
 
+# Refresh boundary NTP servers every two minutes instead of every two weeks
+refresh 120
+
 ";
 
     let boundary_ntp_tpl = "#
@@ -447,6 +457,7 @@ maxslewrate 2708.333
         boundary: is_boundary,
         servers,
         allow,
+        boundary_pool,
     } = args;
 
     let mut new_config =
@@ -464,10 +475,19 @@ maxslewrate 2708.333
             .expect("write to String is infallible");
         }
     } else {
+        // TODO-cleanup: Remove specific boundary NTP servers after R10 is cut;
+        // once all racks are setting up the boundary NTP pool we can drop
+        // individual server lines:
+        // https://github.com/oxidecomputer/omicron/issues/6261
         for s in servers {
             writeln!(&mut new_config, "server {s} iburst minpoll 0 maxpoll 4")
                 .expect("write to String is infallible");
         }
+        writeln!(
+            &mut new_config,
+            "pool {boundary_pool} iburst maxdelay 0.1 maxsources 16",
+        )
+        .expect("write to String is infallible");
     }
 
     // We read the contents from the old configuration file if it existed

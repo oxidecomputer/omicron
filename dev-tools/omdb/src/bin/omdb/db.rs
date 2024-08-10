@@ -55,6 +55,7 @@ use nexus_db_model::DnsVersion;
 use nexus_db_model::DnsZone;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::HwBaseboardId;
+use nexus_db_model::Image;
 use nexus_db_model::Instance;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvPhysicalDisk;
@@ -91,6 +92,7 @@ use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::ServiceKind;
+use nexus_db_queries::db::pagination::paginated;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
@@ -486,6 +488,27 @@ struct RegionArgs {
 enum RegionCommands {
     /// List regions that are still missing ports
     ListRegionsMissingPorts,
+
+    /// List all regions
+    List(RegionListArgs),
+
+    /// Find what is using a region
+    UsedBy(RegionUsedByArgs),
+
+    /// Find deleted volume regions
+    FindDeletedVolumeRegions,
+}
+
+#[derive(Debug, Args)]
+struct RegionListArgs {
+    /// Print region IDs only
+    #[arg(short)]
+    id_only: bool,
+}
+
+#[derive(Debug, Args)]
+struct RegionUsedByArgs {
+    region_id: Vec<Uuid>,
 }
 
 #[derive(Debug, Args)]
@@ -738,6 +761,29 @@ impl DbArgs {
             DbCommands::Region(RegionArgs {
                 command: RegionCommands::ListRegionsMissingPorts,
             }) => cmd_db_region_missing_porst(&opctx, &datastore).await,
+            DbCommands::Region(RegionArgs {
+                command: RegionCommands::List(region_list_args),
+            }) => {
+                cmd_db_region_list(
+                    &datastore,
+                    &self.fetch_opts,
+                    region_list_args,
+                )
+                .await
+            }
+            DbCommands::Region(RegionArgs {
+                command: RegionCommands::UsedBy(region_used_by_args),
+            }) => {
+                cmd_db_region_used_by(
+                    &datastore,
+                    &self.fetch_opts,
+                    region_used_by_args,
+                )
+                .await
+            }
+            DbCommands::Region(RegionArgs {
+                command: RegionCommands::FindDeletedVolumeRegions,
+            }) => cmd_db_region_find_deleted(&datastore).await,
             DbCommands::RegionReplacement(RegionReplacementArgs {
                 command: RegionReplacementCommands::List(args),
             }) => {
@@ -1990,6 +2036,305 @@ async fn cmd_db_region_missing_porst(
     for region in regions {
         println!("{:?}", region.id());
     }
+
+    Ok(())
+}
+
+/// List all regions
+async fn cmd_db_region_list(
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &RegionListArgs,
+) -> Result<(), anyhow::Error> {
+    use db::schema::region::dsl;
+
+    let regions: Vec<Region> = paginated(
+        dsl::region,
+        dsl::id,
+        &first_page::<dsl::id>(fetch_opts.fetch_limit),
+    )
+    .select(Region::as_select())
+    .load_async(&*datastore.pool_connection_for_tests().await?)
+    .await?;
+
+    check_limit(&regions, fetch_opts.fetch_limit, || {
+        String::from("listing regions")
+    });
+
+    if args.id_only {
+        for region in regions {
+            println!("{}", region.id());
+        }
+    } else {
+        #[derive(Tabled)]
+        struct RegionRow {
+            id: Uuid,
+            dataset_id: Uuid,
+            volume_id: Uuid,
+            block_size: i64,
+            blocks_per_extent: u64,
+            extent_count: u64,
+            read_only: bool,
+        }
+
+        let rows: Vec<_> = regions
+            .into_iter()
+            .map(|region: Region| RegionRow {
+                id: region.id(),
+                dataset_id: region.dataset_id(),
+                volume_id: region.volume_id(),
+                block_size: region.block_size().into(),
+                blocks_per_extent: region.blocks_per_extent(),
+                extent_count: region.extent_count(),
+                read_only: region.read_only(),
+            })
+            .collect();
+
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::psql())
+            .to_string();
+
+        println!("{}", table);
+    }
+
+    Ok(())
+}
+
+/// Find what is using a region
+async fn cmd_db_region_used_by(
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &RegionUsedByArgs,
+) -> Result<(), anyhow::Error> {
+    use db::schema::region::dsl;
+
+    let regions: Vec<Region> = paginated(
+        dsl::region,
+        dsl::id,
+        &first_page::<dsl::id>(fetch_opts.fetch_limit),
+    )
+    .filter(dsl::id.eq_any(args.region_id.clone()))
+    .select(Region::as_select())
+    .load_async(&*datastore.pool_connection_for_tests().await?)
+    .await?;
+
+    check_limit(&regions, fetch_opts.fetch_limit, || {
+        String::from("listing regions")
+    });
+
+    let volumes: Vec<Uuid> = regions.iter().map(|x| x.volume_id()).collect();
+
+    let disks_used: Vec<Disk> = {
+        let volumes = volumes.clone();
+        datastore
+            .pool_connection_for_tests()
+            .await?
+            .transaction_async(|conn| async move {
+                use db::schema::disk::dsl;
+
+                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+                paginated(
+                    dsl::disk,
+                    dsl::id,
+                    &first_page::<dsl::id>(fetch_opts.fetch_limit),
+                )
+                .filter(dsl::volume_id.eq_any(volumes))
+                .select(Disk::as_select())
+                .load_async(&conn)
+                .await
+            })
+            .await?
+    };
+
+    check_limit(&disks_used, fetch_opts.fetch_limit, || {
+        String::from("listing disks used")
+    });
+
+    let snapshots_used: Vec<Snapshot> = {
+        let volumes = volumes.clone();
+        datastore
+            .pool_connection_for_tests()
+            .await?
+            .transaction_async(|conn| async move {
+                use db::schema::snapshot::dsl;
+
+                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+                paginated(
+                    dsl::snapshot,
+                    dsl::id,
+                    &first_page::<dsl::id>(fetch_opts.fetch_limit),
+                )
+                .filter(
+                    dsl::volume_id
+                        .eq_any(volumes.clone())
+                        .or(dsl::destination_volume_id.eq_any(volumes.clone())),
+                )
+                .select(Snapshot::as_select())
+                .load_async(&conn)
+                .await
+            })
+            .await?
+    };
+
+    check_limit(&snapshots_used, fetch_opts.fetch_limit, || {
+        String::from("listing snapshots used")
+    });
+
+    let images_used: Vec<Image> = {
+        let volumes = volumes.clone();
+        datastore
+            .pool_connection_for_tests()
+            .await?
+            .transaction_async(|conn| async move {
+                use db::schema::image::dsl;
+
+                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+                paginated(
+                    dsl::image,
+                    dsl::id,
+                    &first_page::<dsl::id>(fetch_opts.fetch_limit),
+                )
+                .filter(dsl::volume_id.eq_any(volumes))
+                .select(Image::as_select())
+                .load_async(&conn)
+                .await
+            })
+            .await?
+    };
+
+    check_limit(&images_used, fetch_opts.fetch_limit, || {
+        String::from("listing images used")
+    });
+
+    #[derive(Tabled)]
+    struct RegionRow {
+        id: Uuid,
+        volume_id: Uuid,
+        usage_type: String,
+        usage_id: String,
+        usage_name: String,
+        deleted: bool,
+    }
+
+    let rows: Vec<_> = regions
+        .into_iter()
+        .map(|region: Region| {
+            if let Some(image) =
+                images_used.iter().find(|x| x.volume_id == region.volume_id())
+            {
+                RegionRow {
+                    id: region.id(),
+                    volume_id: region.volume_id(),
+
+                    usage_type: String::from("image"),
+                    usage_id: image.id().to_string(),
+                    usage_name: image.name().to_string(),
+                    deleted: image.time_deleted().is_some(),
+                }
+            } else if let Some(snapshot) = snapshots_used
+                .iter()
+                .find(|x| x.volume_id == region.volume_id())
+            {
+                RegionRow {
+                    id: region.id(),
+                    volume_id: region.volume_id(),
+
+                    usage_type: String::from("snapshot"),
+                    usage_id: snapshot.id().to_string(),
+                    usage_name: snapshot.name().to_string(),
+                    deleted: snapshot.time_deleted().is_some(),
+                }
+            } else if let Some(snapshot) = snapshots_used
+                .iter()
+                .find(|x| x.destination_volume_id == region.volume_id())
+            {
+                RegionRow {
+                    id: region.id(),
+                    volume_id: region.volume_id(),
+
+                    usage_type: String::from("snapshot dest"),
+                    usage_id: snapshot.id().to_string(),
+                    usage_name: snapshot.name().to_string(),
+                    deleted: snapshot.time_deleted().is_some(),
+                }
+            } else if let Some(disk) =
+                disks_used.iter().find(|x| x.volume_id == region.volume_id())
+            {
+                RegionRow {
+                    id: region.id(),
+                    volume_id: region.volume_id(),
+
+                    usage_type: String::from("disk"),
+                    usage_id: disk.id().to_string(),
+                    usage_name: disk.name().to_string(),
+                    deleted: disk.time_deleted().is_some(),
+                }
+            } else {
+                RegionRow {
+                    id: region.id(),
+                    volume_id: region.volume_id(),
+
+                    usage_type: String::from("unknown!"),
+                    usage_id: String::from(""),
+                    usage_name: String::from(""),
+                    deleted: false,
+                }
+            }
+        })
+        .collect();
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::psql())
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+/// Find deleted volume regions
+async fn cmd_db_region_find_deleted(
+    datastore: &DataStore,
+) -> Result<(), anyhow::Error> {
+    let datasets_regions_volumes =
+        datastore.find_deleted_volume_regions().await?;
+
+    #[derive(Tabled)]
+    struct Row {
+        dataset_id: Uuid,
+        region_id: Uuid,
+        region_snapshot_id: String,
+        volume_id: Uuid,
+    }
+
+    let rows: Vec<Row> = datasets_regions_volumes
+        .into_iter()
+        .map(|row| {
+            let (dataset, region, region_snapshot, volume) = row;
+
+            Row {
+                dataset_id: dataset.id(),
+                region_id: region.id(),
+                region_snapshot_id: if let Some(region_snapshot) =
+                    region_snapshot
+                {
+                    region_snapshot.snapshot_id.to_string()
+                } else {
+                    String::from("")
+                },
+                volume_id: volume.id(),
+            }
+        })
+        .collect();
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::psql())
+        .to_string();
+
+    println!("{}", table);
 
     Ok(())
 }
