@@ -53,7 +53,7 @@ use omicron_common::api::{
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
-use omicron_common::disk::OmicronPhysicalDisksConfig;
+use omicron_common::disk::{DisksManagementResult, OmicronPhysicalDisksConfig};
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
 use sled_agent_api::Zpool;
@@ -74,7 +74,6 @@ use sled_hardware::{underlay, HardwareManager};
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_hardware_types::Baseboard;
 use sled_storage::manager::StorageHandle;
-use sled_storage::resources::DisksManagementResult;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};

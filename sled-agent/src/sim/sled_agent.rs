@@ -35,7 +35,8 @@ use omicron_common::api::internal::shared::{
     VirtualNetworkInterfaceHost,
 };
 use omicron_common::disk::{
-    DiskIdentity, DiskVariant, OmicronPhysicalDisksConfig,
+    DiskIdentity, DiskVariant, DisksManagementResult,
+    OmicronPhysicalDisksConfig,
 };
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, ZpoolUuid};
 use oxnet::Ipv6Net;
@@ -52,7 +53,6 @@ use sled_agent_types::instance::{
     InstancePutStateResponse, InstanceStateRequested,
     InstanceUnregisterResponse,
 };
-use sled_storage::resources::DisksManagementResult;
 use slog::Logger;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};

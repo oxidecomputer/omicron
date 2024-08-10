@@ -9113,7 +9113,6 @@ dependencies = [
  "serde",
  "sled-agent-types",
  "sled-hardware-types",
- "sled-storage",
  "uuid",
 ]
 
@@ -9163,7 +9162,6 @@ dependencies = [
  "serde_json",
  "sha3",
  "sled-hardware-types",
- "sled-storage",
  "slog",
  "thiserror",
  "toml 0.8.19",

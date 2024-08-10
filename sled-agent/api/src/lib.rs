@@ -21,7 +21,7 @@ use omicron_common::{
             SwitchPorts, VirtualNetworkInterfaceHost,
         },
     },
-    disk::{DiskVariant, OmicronPhysicalDisksConfig},
+    disk::{DiskVariant, DisksManagementResult, OmicronPhysicalDisksConfig},
 };
 use omicron_uuid_kinds::{InstanceUuid, ZpoolUuid};
 use schemars::JsonSchema;
@@ -46,7 +46,6 @@ use sled_agent_types::{
         ZoneBundleId, ZoneBundleMetadata,
     },
 };
-use sled_storage::resources::DisksManagementResult;
 use uuid::Uuid;
 
 #[dropshot::api_description]

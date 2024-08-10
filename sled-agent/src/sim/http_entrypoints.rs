@@ -21,6 +21,7 @@ use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use omicron_common::api::internal::shared::{
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
 };
+use omicron_common::disk::DisksManagementResult;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use schemars::JsonSchema;
@@ -34,7 +35,6 @@ use sled_agent_types::instance::InstancePutStateBody;
 use sled_agent_types::instance::InstancePutStateResponse;
 use sled_agent_types::instance::InstanceUnregisterResponse;
 use sled_agent_types::sled::AddSledRequest;
-use sled_storage::resources::DisksManagementResult;
 use std::sync::Arc;
 use uuid::Uuid;
 

@@ -27,7 +27,9 @@ use omicron_common::api::internal::shared::{
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SledIdentifiers, SwitchPorts,
     VirtualNetworkInterfaceHost,
 };
-use omicron_common::disk::{DiskVariant, M2Slot, OmicronPhysicalDisksConfig};
+use omicron_common::disk::{
+    DiskVariant, DisksManagementResult, M2Slot, OmicronPhysicalDisksConfig,
+};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use sled_agent_api::*;
 use sled_agent_types::boot_disk::{
@@ -48,7 +50,6 @@ use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     StorageLimit, ZoneBundleId, ZoneBundleMetadata,
 };
-use sled_storage::resources::DisksManagementResult;
 use std::collections::BTreeMap;
 
 type SledApiDescription = ApiDescription<SledAgent>;
