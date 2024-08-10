@@ -52,8 +52,7 @@ impl Server {
             .map_err(|e| e.to_string())?,
         );
 
-        let nexus_client =
-            make_nexus_client(&log, resolver).map_err(|e| e.to_string())?;
+        let nexus_client = make_nexus_client(&log, resolver);
 
         let sled_agent = SledAgent::new(
             &config,

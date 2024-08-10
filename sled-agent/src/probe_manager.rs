@@ -1,4 +1,5 @@
 use crate::metrics::MetricsRequestQueue;
+use crate::nexus::NexusClient;
 use anyhow::{anyhow, Result};
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
@@ -53,7 +54,7 @@ struct RunningProbes {
 
 pub(crate) struct ProbeManagerInner {
     join_handle: Mutex<Option<JoinHandle<()>>>,
-    nexus_client: nexus_client::Client,
+    nexus_client: NexusClient,
     log: Logger,
     sled_id: Uuid,
     vnic_allocator: VnicAllocator<Etherstub>,
@@ -66,7 +67,7 @@ pub(crate) struct ProbeManagerInner {
 impl ProbeManager {
     pub(crate) fn new(
         sled_id: Uuid,
-        nexus_client: nexus_client::Client,
+        nexus_client: NexusClient,
         etherstub: Etherstub,
         storage: StorageHandle,
         port_manager: PortManager,

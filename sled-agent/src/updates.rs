@@ -252,8 +252,8 @@ impl UpdateManager {
 mod test {
     use super::*;
     use crate::fakes::nexus::FakeNexusServer;
+    use crate::nexus::NexusClient;
     use flate2::write::GzEncoder;
-    use nexus_client::Client as NexusClient;
     use omicron_common::api::external::{Error, SemverVersion};
     use omicron_common::api::internal::nexus::UpdateArtifactId;
     use omicron_test_utils::dev::test_setup_log;

@@ -13,7 +13,7 @@ use crate::instance_manager::InstanceManager;
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::metrics::MetricsManager;
 use crate::nexus::{
-    NexusNotifierHandle, NexusNotifierInput, NexusNotifierTask,
+    NexusClient, NexusNotifierHandle, NexusNotifierInput, NexusNotifierTask,
 };
 use crate::params::{
     DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
@@ -319,7 +319,7 @@ struct SledAgentInner {
     services: ServiceManager,
 
     // Connection to Nexus.
-    nexus_client: nexus_client::Client,
+    nexus_client: NexusClient,
 
     // A mechanism for notifiying nexus about sled-agent updates
     nexus_notifier: NexusNotifierHandle,
@@ -364,7 +364,7 @@ impl SledAgent {
     pub async fn new(
         config: &Config,
         log: Logger,
-        nexus_client: nexus_client::Client,
+        nexus_client: NexusClient,
         request: StartSledAgentRequest,
         services: ServiceManager,
         long_running_task_handles: LongRunningTaskHandles,

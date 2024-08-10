@@ -2,12 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-pub use nexus_client::Client as NexusClient;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskVariant;
 
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
-use internal_dns::resolver::{ResolveError, Resolver};
+use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
 use nexus_client::types::SledAgentInfo;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
@@ -19,10 +18,14 @@ use tokio::sync::{broadcast, mpsc, oneshot, Notify};
 use tokio::time::{interval, Duration, MissedTickBehavior};
 use uuid::Uuid;
 
+// Re-export the nexus_client::Client crate. (Use a type alias to be more
+// rust-analyzer friendly.)
+pub(crate) type NexusClient = nexus_client::Client;
+
 pub(crate) fn make_nexus_client(
     log: &Logger,
     resolver: Arc<Resolver>,
-) -> Result<NexusClient, ResolveError> {
+) -> NexusClient {
     make_nexus_client_with_port(log, resolver, NEXUS_INTERNAL_PORT)
 }
 
@@ -30,18 +33,18 @@ pub(crate) fn make_nexus_client_with_port(
     log: &Logger,
     resolver: Arc<Resolver>,
     port: u16,
-) -> Result<NexusClient, ResolveError> {
+) -> NexusClient {
     let client = reqwest::ClientBuilder::new()
         .dns_resolver(resolver)
         .build()
         .expect("Failed to build client");
 
     let dns_name = ServiceName::Nexus.srv_name();
-    Ok(NexusClient::new_with_client(
+    NexusClient::new_with_client(
         &format!("http://{dns_name}:{port}"),
         client,
         log.new(o!("component" => "NexusClient")),
-    ))
+    )
 }
 
 pub fn d2n_params(
