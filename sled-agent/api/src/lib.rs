@@ -36,8 +36,7 @@ use sled_agent_types::{
     early_networking::EarlyNetworkConfig,
     firewall_rules::VpcFirewallRulesEnsureBody,
     instance::{
-        InstanceEnsureBody, InstanceExternalIpBody,
-        InstancePutMigrationIdsBody, InstancePutStateBody,
+        InstanceEnsureBody, InstanceExternalIpBody, InstancePutStateBody,
         InstancePutStateResponse, InstanceUnregisterResponse,
     },
     sled::AddSledRequest,
@@ -50,9 +49,7 @@ use sled_agent_types::{
 use sled_storage::resources::DisksManagementResult;
 use uuid::Uuid;
 
-#[dropshot::api_description {
-    module = "sled_agent_api_mod",
-}]
+#[dropshot::api_description]
 pub trait SledAgentApi {
     type Context;
 
@@ -250,16 +247,6 @@ pub trait SledAgentApi {
     async fn instance_get_state(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<InstancePathParam>,
-    ) -> Result<HttpResponseOk<SledInstanceState>, HttpError>;
-
-    #[endpoint {
-        method = PUT,
-        path = "/instances/{instance_id}/migration-ids",
-    }]
-    async fn instance_put_migration_ids(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
-        body: TypedBody<InstancePutMigrationIdsBody>,
     ) -> Result<HttpResponseOk<SledInstanceState>, HttpError>;
 
     #[endpoint {

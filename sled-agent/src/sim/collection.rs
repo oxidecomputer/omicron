@@ -421,7 +421,6 @@ mod test {
     use omicron_common::api::external::Error;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::nexus::DiskRuntimeState;
-    use omicron_common::api::internal::nexus::InstanceRuntimeState;
     use omicron_common::api::internal::nexus::SledInstanceState;
     use omicron_common::api::internal::nexus::VmmRuntimeState;
     use omicron_common::api::internal::nexus::VmmState;
@@ -434,14 +433,6 @@ mod test {
         logctx: &LogContext,
     ) -> (SimObject<SimInstance>, Receiver<()>) {
         let propolis_id = PropolisUuid::new_v4();
-        let instance_vmm = InstanceRuntimeState {
-            propolis_id: Some(propolis_id),
-            dst_propolis_id: None,
-            migration_id: None,
-            gen: Generation::new(),
-            time_updated: Utc::now(),
-        };
-
         let vmm_state = VmmRuntimeState {
             state: VmmState::Starting,
             gen: Generation::new(),
@@ -449,10 +440,10 @@ mod test {
         };
 
         let state = SledInstanceState {
-            instance_state: instance_vmm,
             vmm_state,
             propolis_id,
-            migration_state: None,
+            migration_in: None,
+            migration_out: None,
         };
 
         SimObject::new_simulated_auto(&state, logctx.log.new(o!()))
@@ -502,14 +493,8 @@ mod test {
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_none());
         let rnext = instance.object.current();
-        assert!(rnext.instance_state.gen > rprev.instance_state.gen);
         assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
-        assert!(
-            rnext.instance_state.time_updated
-                >= rprev.instance_state.time_updated
-        );
         assert!(rnext.vmm_state.time_updated >= rprev.vmm_state.time_updated);
-        assert!(rnext.instance_state.propolis_id.is_none());
         assert_eq!(rnext.vmm_state.state, VmmState::Destroyed);
         assert!(rx.try_next().is_err());
 
@@ -633,7 +618,6 @@ mod test {
         assert!(rnext.vmm_state.time_updated >= rprev.vmm_state.time_updated);
         assert_eq!(rprev.vmm_state.state, VmmState::Stopping);
         assert_eq!(rnext.vmm_state.state, VmmState::Destroyed);
-        assert!(rnext.instance_state.gen > rprev.instance_state.gen);
         logctx.cleanup_successful();
     }
 

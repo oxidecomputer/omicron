@@ -14,6 +14,7 @@ pub(crate) mod query_summary;
 mod sql;
 
 pub use self::dbwrite::DbWrite;
+pub use self::dbwrite::TestDbWrite;
 use crate::client::query_summary::QuerySummary;
 use crate::model;
 use crate::query;
@@ -50,11 +51,13 @@ use std::ops::Bound;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use std::time::Duration;
 use std::time::Instant;
 use tokio::fs;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const CLICKHOUSE_DB_MISSING: &'static str = "Database oximeter does not exist";
 const CLICKHOUSE_DB_VERSION_MISSING: &'static str =
     "Table oximeter.version does not exist";
@@ -76,11 +79,22 @@ pub struct Client {
     url: String,
     client: reqwest::Client,
     schema: Mutex<BTreeMap<TimeseriesName, TimeseriesSchema>>,
+    request_timeout: Duration,
 }
 
 impl Client {
     /// Construct a new ClickHouse client of the database at `address`.
     pub fn new(address: SocketAddr, log: &Logger) -> Self {
+        Self::new_with_request_timeout(address, log, DEFAULT_REQUEST_TIMEOUT)
+    }
+
+    /// Construct a new ClickHouse client of the database at `address`, and a
+    /// custom request timeout.
+    pub fn new_with_request_timeout(
+        address: SocketAddr,
+        log: &Logger,
+        request_timeout: Duration,
+    ) -> Self {
         let id = Uuid::new_v4();
         let log = log.new(slog::o!(
             "component" => "clickhouse-client",
@@ -89,7 +103,12 @@ impl Client {
         let client = reqwest::Client::new();
         let url = format!("http://{}", address);
         let schema = Mutex::new(BTreeMap::new());
-        Self { _id: id, log, url, client, schema }
+        Self { _id: id, log, url, client, schema, request_timeout }
+    }
+
+    /// Return the url the client is trying to connect to
+    pub fn url(&self) -> &str {
+        &self.url
     }
 
     /// Ping the ClickHouse server to verify connectivitiy.
@@ -859,7 +878,7 @@ impl Client {
     // TODO-robustness This currently does no validation of the statement.
     async fn execute<S>(&self, sql: S) -> Result<(), Error>
     where
-        S: AsRef<str>,
+        S: Into<String>,
     {
         self.execute_with_body(sql).await?;
         Ok(())
@@ -873,9 +892,9 @@ impl Client {
         sql: S,
     ) -> Result<(QuerySummary, String), Error>
     where
-        S: AsRef<str>,
+        S: Into<String>,
     {
-        let sql = sql.as_ref().to_string();
+        let sql = sql.into();
         trace!(
             self.log,
             "executing SQL query";
@@ -895,6 +914,7 @@ impl Client {
         let response = self
             .client
             .post(&self.url)
+            .timeout(self.request_timeout)
             .query(&[
                 ("output_format_json_quote_64bit_integers", "0"),
                 // TODO-performance: This is needed to get the correct counts of
@@ -1064,6 +1084,15 @@ impl Client {
         }
     }
 
+    /// Useful for testing and introspection
+    pub async fn list_replicated_tables(&self) -> Result<Vec<String>, Error> {
+        self.list_oximeter_database_tables(ListDetails {
+            include_version: true,
+            replicated: true,
+        })
+        .await
+    }
+
     /// List tables in the oximeter database.
     async fn list_oximeter_database_tables(
         &self,
@@ -1173,7 +1202,6 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
     use tempfile::TempDir;
-    use tokio::time::sleep;
     use uuid::Uuid;
 
     pub enum InstallationType {
@@ -1416,9 +1444,6 @@ mod tests {
         // Tests that the expected error is returned on a wrong address
         bad_db_connection_test().await.unwrap();
 
-        // Tests data is replicated in a cluster
-        data_is_replicated_test(&cluster).await.unwrap();
-
         // Tests that a new client has started and it is part of a cluster
         is_oximeter_cluster_test(
             cluster.replica_1.address,
@@ -1659,67 +1684,6 @@ mod tests {
             Err(Error::DatabaseUnavailable(_))
         ));
 
-        logctx.cleanup_successful();
-        Ok(())
-    }
-
-    async fn data_is_replicated_test(
-        cluster: &ClickHouseCluster,
-    ) -> Result<(), Error> {
-        let logctx = test_setup_log("test_data_is_replicated");
-        let log = &logctx.log;
-
-        // Create database in node 1
-        let client_1 = Client::new(cluster.replica_1.address, &log);
-        assert!(client_1.is_oximeter_cluster().await.unwrap());
-        client_1
-            .init_replicated_db()
-            .await
-            .expect("Failed to initialize timeseries database");
-
-        // Verify database exists in node 2
-        let client_2 = Client::new(cluster.replica_2.address, &log);
-        assert!(client_2.is_oximeter_cluster().await.unwrap());
-        let sql = String::from("SHOW DATABASES FORMAT JSONEachRow;");
-
-        // Try a few times to make sure data has been synchronised.
-        let mut result = String::from("");
-        let tries = 5;
-        for _ in 0..tries {
-            result = client_2.execute_with_body(sql.clone()).await.unwrap().1;
-            if !result.contains("oximeter") {
-                sleep(Duration::from_secs(1)).await;
-                continue;
-            } else {
-                break;
-            }
-        }
-
-        assert!(result.contains("oximeter"));
-
-        // Insert row into one of the tables
-        let sql = String::from(
-            "INSERT INTO oximeter.measurements_string (datum) VALUES ('hiya');",
-        );
-        let result = client_2.execute_with_body(sql.clone()).await.unwrap().1;
-        info!(log, "Inserted datum to client #2"; "sql" => sql, "result" => result);
-
-        // Make sure replicas are synched
-        let sql = String::from(
-            "SYSTEM SYNC REPLICA oximeter.measurements_string_local;",
-        );
-        let result = client_1.execute_with_body(sql.clone()).await.unwrap().1;
-        info!(log, "Synced replicas via client #1"; "sql" => sql, "result" => result);
-
-        // Make sure data exists in the other replica
-        let sql = String::from(
-            "SELECT * FROM oximeter.measurements_string FORMAT JSONEachRow;",
-        );
-        let result = client_1.execute_with_body(sql.clone()).await.unwrap().1;
-        info!(log, "Retrieved values via client #1"; "sql" => sql, "result" => result.clone());
-        assert!(result.contains("hiya"));
-
-        client_1.wipe_replicated_db().await?;
         logctx.cleanup_successful();
         Ok(())
     }

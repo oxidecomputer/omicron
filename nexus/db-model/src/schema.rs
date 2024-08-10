@@ -425,6 +425,8 @@ table! {
     }
 }
 
+joinable!(instance -> vmm (active_propolis_id));
+
 table! {
     vmm (id) {
         id -> Uuid,
@@ -1046,6 +1048,8 @@ table! {
         extent_count -> Int8,
 
         port -> Nullable<Int4>,
+
+        read_only -> Bool,
     }
 }
 
@@ -1752,6 +1756,40 @@ table! {
         step_associated_pantry_job_id -> Nullable<Uuid>,
     }
 }
+
+table! {
+    region_snapshot_replacement (id) {
+        id -> Uuid,
+        request_time -> Timestamptz,
+        old_dataset_id -> Uuid,
+        old_region_id -> Uuid,
+        old_snapshot_id -> Uuid,
+        old_snapshot_volume_id -> Nullable<Uuid>,
+        new_region_id -> Nullable<Uuid>,
+        replacement_state -> crate::RegionSnapshotReplacementStateEnum,
+        operating_saga_id -> Nullable<Uuid>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(zpool, region_snapshot);
+
+table! {
+    region_snapshot_replacement_step (id) {
+        id -> Uuid,
+        request_id -> Uuid,
+        request_time -> Timestamptz,
+        volume_id -> Uuid,
+        old_snapshot_volume_id -> Nullable<Uuid>,
+        replacement_state -> crate::RegionSnapshotReplacementStepStateEnum,
+        operating_saga_id -> Nullable<Uuid>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    region_snapshot_replacement,
+    region_snapshot_replacement_step,
+    volume
+);
 
 table! {
     db_metadata (singleton) {

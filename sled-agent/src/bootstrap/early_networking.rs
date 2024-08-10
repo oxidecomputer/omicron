@@ -11,6 +11,7 @@ use dpd_client::types::{
 use dpd_client::Client as DpdClient;
 use futures::future;
 use gateway_client::Client as MgsClient;
+use http::StatusCode;
 use internal_dns::resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
 use mg_admin_client::types::BfdPeerConfig as MgBfdPeerConfig;
@@ -40,6 +41,7 @@ use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
 use std::time::{Duration, Instant};
 use thiserror::Error;
+use tokio::time::sleep;
 
 const BGP_SESSION_RESOLUTION: u64 = 100;
 
@@ -436,17 +438,39 @@ impl<'a> EarlyNetworkSetup<'a> {
                 "Configuring default uplink on switch";
                 "config" => #?dpd_port_settings
             );
-            dpd.port_settings_apply(
-                &port_id,
-                Some(OMICRON_DPD_TAG),
-                &dpd_port_settings,
-            )
-            .await
-            .map_err(|e| {
-                EarlyNetworkSetupError::Dendrite(format!(
-                    "unable to apply uplink port configuration: {e}"
-                ))
-            })?;
+
+            loop {
+                match dpd
+                    .port_settings_apply(
+                        &port_id,
+                        Some(OMICRON_DPD_TAG),
+                        &dpd_port_settings,
+                    )
+                    .await
+                {
+                    Ok(_) => break Ok(()),
+                    Err(e) => {
+                        if let Some(StatusCode::SERVICE_UNAVAILABLE) =
+                            e.status()
+                        {
+                            warn!(
+                                self.log,
+                                "unable to apply uplink configuration, dendrite not available";
+                                "port_id" => ?port_id,
+                                "configuration" => ?dpd_port_settings,
+                            );
+                            sleep(Duration::from_secs(5)).await;
+                            continue;
+                        } else {
+                            break Err(EarlyNetworkSetupError::Dendrite(
+                                format!(
+                                "unable to apply uplink port configuration: {e}"
+                            ),
+                            ));
+                        }
+                    }
+                }
+            }?;
         }
 
         let mgd = MgdClient::new(

@@ -215,7 +215,7 @@
     "/inventory": {
       "get": {
         "summary": "A status endpoint used to report high level information known to",
-        "description": "wicketd.\nThis endpoint can be polled to see if there have been state changes in the system that are useful to report to wicket.\nWicket, and possibly other callers, will retrieve the changed information, with follow up calls.",
+        "description": "wicketd.\n\nThis endpoint can be polled to see if there have been state changes in the system that are useful to report to wicket.\n\nWicket, and possibly other callers, will retrieve the changed information, with follow up calls.",
         "operationId": "get_inventory",
         "requestBody": {
           "content": {
@@ -460,7 +460,7 @@
     "/rack-setup/config/bgp/auth-key": {
       "get": {
         "summary": "Return information about BGP authentication keys, including checking",
-        "description": "validity of keys.\nProduces an error if the rack setup config wasn't set, or if any of the requested key IDs weren't found.",
+        "description": "validity of keys.\n\nProduces an error if the rack setup config wasn't set, or if any of the requested key IDs weren't found.",
         "operationId": "get_bgp_auth_key_info",
         "requestBody": {
           "content": {

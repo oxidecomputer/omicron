@@ -41,10 +41,10 @@
 
   <dependency name='chrony-setup' grouping='require_all' restart_on='refresh'
     type='service'>
-  <service_fmri value='svc:/oxide/zone-network-setup:default' />
+  <service_fmri value='svc:/oxide/chrony-setup:default' />
   </dependency>
 
-  <!-- 
+  <!--
     Only Boundary NTP needs the opte interface.
   -->
   <dependency name='opte_interface_setup' grouping='optional_all' restart_on='none'
@@ -63,8 +63,8 @@
     regardless of whether it was linked with -zaslr
   -->
 
-  <exec_method type="method" name="start" 
-    exec='/usr/sbin/chronyd -d &amp;' 
+  <exec_method type="method" name="start"
+    exec='/usr/sbin/chronyd -d &amp;'
     timeout_seconds="60">
   <method_context security_flags="aslr">
   <method_credential user="root" group="root"

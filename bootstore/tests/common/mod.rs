@@ -39,7 +39,9 @@ pub struct CommonTestState {
     // The generated configuration
     pub config: FsmConfig,
 
-    // IDs of all initial members
+    // IDs of all initial members. Not currently used, but useful for
+    // debugging.
+    #[allow(dead_code)]
     pub initial_members: BTreeSet<Baseboard>,
 
     // Any peers connected to the SUT Fsm

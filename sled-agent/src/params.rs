@@ -86,12 +86,3 @@ impl OmicronZoneTypeExt for OmicronZoneConfig {
         &self.zone_type
     }
 }
-
-impl crate::smf_helper::Service for OmicronZoneType {
-    fn service_name(&self) -> String {
-        self.kind().service_prefix().to_owned()
-    }
-    fn smf_name(&self) -> String {
-        format!("svc:/oxide/{}", self.service_name())
-    }
-}

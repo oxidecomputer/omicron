@@ -87,6 +87,10 @@ impl PlanningInput {
         &self.cockroachdb_settings
     }
 
+    pub fn target_boundary_ntp_zone_count(&self) -> usize {
+        self.policy.target_boundary_ntp_zone_count
+    }
+
     pub fn target_nexus_zone_count(&self) -> usize {
         self.policy.target_nexus_zone_count
     }
@@ -692,6 +696,9 @@ pub struct Policy {
     /// services (e.g., external DNS, Nexus, boundary NTP)
     pub service_ip_pool_ranges: Vec<IpRange>,
 
+    /// desired total number of deployed Boundary NTP zones
+    pub target_boundary_ntp_zone_count: usize,
+
     /// desired total number of deployed Nexus zones
     pub target_nexus_zone_count: usize,
 
@@ -749,6 +756,7 @@ impl PlanningInputBuilder {
         PlanningInput {
             policy: Policy {
                 service_ip_pool_ranges: Vec::new(),
+                target_boundary_ntp_zone_count: 0,
                 target_nexus_zone_count: 0,
                 target_cockroachdb_zone_count: 0,
                 target_cockroachdb_cluster_version:

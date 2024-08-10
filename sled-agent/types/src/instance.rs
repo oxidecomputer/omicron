@@ -77,12 +77,6 @@ pub struct InstanceMetadata {
     pub project_id: Uuid,
 }
 
-impl From<InstanceMetadata> for propolis_client::types::InstanceMetadata {
-    fn from(md: InstanceMetadata) -> Self {
-        Self { silo_id: md.silo_id, project_id: md.project_id }
-    }
-}
-
 /// The body of a request to move a previously-ensured instance into a specific
 /// runtime state.
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -153,30 +147,6 @@ pub struct InstanceUnregisterResponse {
     /// unregister it. If the instance's state did not change, this field is
     /// `None`.
     pub updated_runtime: Option<SledInstanceState>,
-}
-
-/// The body of a request to set or clear the migration identifiers from a
-/// sled agent's instance state records.
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct InstancePutMigrationIdsBody {
-    /// The last instance runtime state known to this requestor. This request
-    /// will succeed if either (a) the state generation in the sled agent's
-    /// runtime state matches the generation in this record, or (b) the sled
-    /// agent's runtime state matches what would result from applying this
-    /// request to the caller's runtime state. This latter condition provides
-    /// idempotency.
-    pub old_runtime: InstanceRuntimeState,
-
-    /// The migration identifiers to set. If `None`, this operation clears the
-    /// migration IDs.
-    pub migration_params: Option<InstanceMigrationSourceParams>,
-}
-
-/// Instance runtime state to update for a migration.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceMigrationSourceParams {
-    pub migration_id: Uuid,
-    pub dst_propolis_id: PropolisUuid,
 }
 
 /// Parameters used when directing Propolis to initialize itself via live

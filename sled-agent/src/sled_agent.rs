@@ -12,8 +12,7 @@ use crate::instance_manager::InstanceManager;
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::metrics::MetricsManager;
 use crate::nexus::{
-    NexusClientWithResolver, NexusNotifierHandle, NexusNotifierInput,
-    NexusNotifierTask,
+    NexusClient, NexusNotifierHandle, NexusNotifierInput, NexusNotifierTask,
 };
 use crate::params::OmicronZoneTypeExt;
 use crate::probe_manager::ProbeManager;
@@ -57,14 +56,13 @@ use omicron_common::backoff::{
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
-use oximeter::types::ProducerRegistry;
 use sled_agent_api::Zpool;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::instance::{
     InstanceExternalIpBody, InstanceHardware, InstanceMetadata,
-    InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse,
+    InstancePutStateResponse, InstanceStateRequested,
+    InstanceUnregisterResponse,
 };
 use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
 use sled_agent_types::time_sync::TimeSync;
@@ -186,6 +184,7 @@ impl From<Error> for omicron_common::api::external::Error {
 // Provide a more specific HTTP error for some sled agent errors.
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
+        const NO_SUCH_INSTANCE: &str = "NO_SUCH_INSTANCE";
         match err {
             Error::Instance(crate::instance_manager::Error::Instance(
                 instance_error,
@@ -218,13 +217,20 @@ impl From<Error> for dropshot::HttpError {
                         // Progenitor client error it gets back.
                         HttpError::from(omicron_error)
                     }
+                    crate::instance::Error::Terminating => {
+                        HttpError::for_client_error(
+                            Some(NO_SUCH_INSTANCE.to_string()),
+                            http::StatusCode::GONE,
+                            instance_error.to_string(),
+                        )
+                    }
                     e => HttpError::for_internal_error(e.to_string()),
                 }
             }
             Error::Instance(
                 e @ crate::instance_manager::Error::NoSuchInstance(_),
             ) => HttpError::for_not_found(
-                Some("NO_SUCH_INSTANCE".to_string()),
+                Some(NO_SUCH_INSTANCE.to_string()),
                 e.to_string(),
             ),
             Error::ZoneBundle(ref inner) => match inner {
@@ -238,6 +244,13 @@ impl From<Error> for dropshot::HttpError {
                 | BundleError::CleanupPeriodCreate(_)
                 | BundleError::PriorityOrderCreate(_) => {
                     HttpError::for_bad_request(None, inner.to_string())
+                }
+                BundleError::InstanceTerminating => {
+                    HttpError::for_client_error(
+                        Some(NO_SUCH_INSTANCE.to_string()),
+                        http::StatusCode::GONE,
+                        inner.to_string(),
+                    )
                 }
                 _ => HttpError::for_internal_error(err.to_string()),
             },
@@ -314,7 +327,7 @@ struct SledAgentInner {
     services: ServiceManager,
 
     // Connection to Nexus.
-    nexus_client: NexusClientWithResolver,
+    nexus_client: NexusClient,
 
     // A mechanism for notifiying nexus about sled-agent updates
     nexus_notifier: NexusNotifierHandle,
@@ -329,7 +342,7 @@ struct SledAgentInner {
     bootstore: bootstore::NodeHandle,
 
     // Object handling production of metrics for oximeter.
-    metrics_manager: MetricsManager,
+    _metrics_manager: MetricsManager,
 
     // Handle to the traffic manager for writing OS updates to our boot disks.
     boot_disk_os_writer: BootDiskOsWriter,
@@ -359,7 +372,7 @@ impl SledAgent {
     pub async fn new(
         config: &Config,
         log: Logger,
-        nexus_client: NexusClientWithResolver,
+        nexus_client: NexusClient,
         request: StartSledAgentRequest,
         services: ServiceManager,
         long_running_task_handles: LongRunningTaskHandles,
@@ -427,38 +440,23 @@ impl SledAgent {
         illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)?;
 
         // Start collecting metric data.
-        //
-        // First, we're creating a shareable type for managing the metrics
-        // themselves early on, so that we can pass it to other components of
-        // the sled agent that need it.
-        //
-        // Then we'll start tracking physical links and register as a producer
-        // with Nexus in the background.
-        let metrics_manager = MetricsManager::new(
-            request.body.id,
-            request.body.rack_id,
-            long_running_task_handles.hardware_manager.baseboard(),
-            *sled_address.ip(),
-            log.new(o!("component" => "MetricsManager")),
-        )?;
+        let baseboard = long_running_task_handles.hardware_manager.baseboard();
+        let identifiers = SledIdentifiers {
+            rack_id: request.body.rack_id,
+            sled_id: request.body.id,
+            model: baseboard.model().to_string(),
+            revision: baseboard.revision(),
+            serial: baseboard.identifier().to_string(),
+        };
+        let metrics_manager =
+            MetricsManager::new(&log, identifiers, *sled_address.ip())?;
 
         // Start tracking the underlay physical links.
-        for nic in underlay::find_nics(&config.data_links)? {
-            let link_name = nic.interface();
-            if let Err(e) = metrics_manager
-                .track_physical_link(
-                    link_name,
-                    crate::metrics::LINK_SAMPLE_INTERVAL,
-                )
-                .await
-            {
-                error!(
-                    log,
-                    "failed to start tracking physical link metrics";
-                    "link_name" => link_name,
-                    "error" => ?e,
-                );
-            }
+        for link in underlay::find_chelsio_links(&config.data_links)? {
+            metrics_manager
+                .request_queue()
+                .track_physical("global", &link.0)
+                .await;
         }
 
         // Create the PortManager to manage all the OPTE ports on the sled.
@@ -489,6 +487,7 @@ impl SledAgent {
             long_running_task_handles.zone_bundler.clone(),
             ZoneBuilderFactory::default(),
             vmm_reservoir_manager.clone(),
+            metrics_manager.request_queue(),
         )?;
 
         let update_config = ConfigUpdates {
@@ -544,20 +543,23 @@ impl SledAgent {
              network config from bootstore",
             );
 
-        services.sled_agent_started(
-            svc_config,
-            port_manager.clone(),
-            *sled_address.ip(),
-            request.body.rack_id,
-            rack_network_config.clone(),
-        )?;
+        services
+            .sled_agent_started(
+                svc_config,
+                port_manager.clone(),
+                *sled_address.ip(),
+                request.body.rack_id,
+                rack_network_config.clone(),
+                metrics_manager.request_queue(),
+            )
+            .await?;
 
         // Spawn a background task for managing notifications to nexus
         // about this sled-agent.
         let nexus_notifier_input = NexusNotifierInput {
             sled_id: request.body.id,
             sled_address: get_sled_address(request.body.subnet),
-            nexus_client: nexus_client.client().clone(),
+            nexus_client: nexus_client.clone(),
             hardware: long_running_task_handles.hardware_manager.clone(),
             vmm_reservoir_manager: vmm_reservoir_manager.clone(),
         };
@@ -574,6 +576,7 @@ impl SledAgent {
             etherstub.clone(),
             storage_manager.clone(),
             port_manager.clone(),
+            metrics_manager.request_queue(),
             log.new(o!("component" => "ProbeManager")),
         );
 
@@ -597,7 +600,7 @@ impl SledAgent {
                 rack_network_config,
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
-                metrics_manager,
+                _metrics_manager: metrics_manager,
                 boot_disk_os_writer: BootDiskOsWriter::new(&parent_log),
             }),
             log: log.clone(),
@@ -692,7 +695,6 @@ impl SledAgent {
 
         self.inner
             .nexus_client
-            .client()
             .sled_firewall_rules_request(&sled_id)
             .await
             .map_err(|err| Error::FirewallRequest(err))?;
@@ -975,6 +977,7 @@ impl SledAgent {
                 instance_runtime,
                 vmm_runtime,
                 propolis_addr,
+                self.sled_identifiers(),
                 metadata,
             )
             .await
@@ -1007,23 +1010,6 @@ impl SledAgent {
         self.inner
             .instances
             .ensure_state(instance_id, target)
-            .await
-            .map_err(|e| Error::Instance(e))
-    }
-
-    /// Idempotently ensures that the instance's runtime state contains the
-    /// supplied migration IDs, provided that the caller continues to meet the
-    /// conditions needed to change those IDs. See the doc comments for
-    /// [`crate::params::InstancePutMigrationIdsBody`].
-    pub async fn instance_put_migration_ids(
-        &self,
-        instance_id: InstanceUuid,
-        old_runtime: &InstanceRuntimeState,
-        migration_ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<SledInstanceState, Error> {
-        self.inner
-            .instances
-            .put_migration_ids(instance_id, old_runtime, migration_ids)
             .await
             .map_err(|e| Error::Instance(e))
     }
@@ -1091,7 +1077,7 @@ impl SledAgent {
     ) -> Result<(), Error> {
         self.inner
             .updates
-            .download_artifact(artifact, &self.inner.nexus_client.client())
+            .download_artifact(artifact, &self.inner.nexus_client)
             .await?;
         Ok(())
     }
@@ -1182,13 +1168,6 @@ impl SledAgent {
         self.inner.port_manager.vpc_routes_ensure(routes).map_err(Error::from)
     }
 
-    /// Return the metric producer registry.
-    // XXX: can this be removed?
-    #[allow(dead_code)]
-    pub fn metrics_registry(&self) -> &ProducerRegistry {
-        self.inner.metrics_manager.registry()
-    }
-
     pub(crate) fn storage(&self) -> &StorageHandle {
         &self.inner.storage
     }
@@ -1206,7 +1185,7 @@ impl SledAgent {
     /// interested in the switch identifiers, MGS is the current best way to do
     /// that, by asking for the local switch's slot, and then that switch's SP
     /// state.
-    pub(crate) async fn sled_identifiers(&self) -> SledIdentifiers {
+    pub(crate) fn sled_identifiers(&self) -> SledIdentifiers {
         let baseboard = self.inner.hardware.baseboard();
         SledIdentifiers {
             rack_id: self.inner.start_request.body.rack_id,

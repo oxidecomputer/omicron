@@ -39,8 +39,8 @@ use sled_agent_types::disk::DiskEnsureBody;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::{
-    InstanceEnsureBody, InstanceExternalIpBody, InstancePutMigrationIdsBody,
-    InstancePutStateBody, InstancePutStateResponse, InstanceUnregisterResponse,
+    InstanceEnsureBody, InstanceExternalIpBody, InstancePutStateBody,
+    InstancePutStateResponse, InstanceUnregisterResponse,
 };
 use sled_agent_types::sled::AddSledRequest;
 use sled_agent_types::time_sync::TimeSync;
@@ -344,24 +344,6 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let instance_id = path_params.into_inner().instance_id;
         Ok(HttpResponseOk(sa.instance_get_state(instance_id).await?))
-    }
-
-    async fn instance_put_migration_ids(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
-        body: TypedBody<InstancePutMigrationIdsBody>,
-    ) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
-        let sa = rqctx.context();
-        let instance_id = path_params.into_inner().instance_id;
-        let body_args = body.into_inner();
-        Ok(HttpResponseOk(
-            sa.instance_put_migration_ids(
-                instance_id,
-                &body_args.old_runtime,
-                &body_args.migration_params,
-            )
-            .await?,
-        ))
     }
 
     async fn instance_put_external_ip(
@@ -701,7 +683,7 @@ impl SledAgentApi for SledAgentImpl {
     async fn sled_identifiers(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledIdentifiers>, HttpError> {
-        Ok(HttpResponseOk(request_context.context().sled_identifiers().await))
+        Ok(HttpResponseOk(request_context.context().sled_identifiers()))
     }
 
     async fn bootstore_status(

@@ -8,7 +8,7 @@ use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use crate::long_running_tasks::LongRunningTaskHandles;
-use crate::nexus::NexusClientWithResolver;
+use crate::nexus::make_nexus_client;
 use crate::services::ServiceManager;
 use internal_dns::resolver::Resolver;
 use sled_agent_types::sled::StartSledAgentRequest;
@@ -52,8 +52,7 @@ impl Server {
             .map_err(|e| e.to_string())?,
         );
 
-        let nexus_client = NexusClientWithResolver::new(&log, resolver)
-            .map_err(|e| e.to_string())?;
+        let nexus_client = make_nexus_client(&log, resolver);
 
         let sled_agent = SledAgent::new(
             &config,

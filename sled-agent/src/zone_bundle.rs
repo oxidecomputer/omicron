@@ -579,6 +579,9 @@ pub enum BundleError {
 
     #[error("Failed to get ZFS property value")]
     GetProperty(#[from] GetValueError),
+
+    #[error("Instance is terminating")]
+    InstanceTerminating,
 }
 
 // Helper function to write an array of bytes into the tar archive, with
@@ -1850,7 +1853,10 @@ mod illumos_tests {
         let new_context = CleanupContext {
             period: CleanupPeriod::new(ctx.context.period.as_duration() / 2)
                 .unwrap(),
-            storage_limit: StorageLimit(ctx.context.storage_limit.as_u8() / 2),
+            storage_limit: StorageLimit::new(
+                ctx.context.storage_limit.as_u8() / 2,
+            )
+            .unwrap(),
             priority: PriorityOrder::new(
                 &ctx.context.priority.iter().copied().rev().collect::<Vec<_>>(),
             )
@@ -2032,7 +2038,11 @@ mod illumos_tests {
         // First, reduce the storage limit, so that we only need to add a few
         // bundles.
         ctx.bundler
-            .update_cleanup_context(None, Some(StorageLimit(2)), None)
+            .update_cleanup_context(
+                None,
+                Some(StorageLimit::new(2).unwrap()),
+                None,
+            )
             .await
             .context("failed to update cleanup context")?;
 
