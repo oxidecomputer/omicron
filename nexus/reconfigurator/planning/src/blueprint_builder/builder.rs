@@ -2563,12 +2563,9 @@ pub mod test {
         let sled_resources = input.sled_resources(&sled_id).unwrap();
         let crucible_zone_id = builder
             .zones
-            .current_sled_zones(sled_id)
+            .current_sled_zones(sled_id, BlueprintZoneFilter::ShouldBeRunning)
             .find_map(|(zone_config, _)| {
-                if zone_config.disposition
-                    == BlueprintZoneDisposition::InService
-                    && zone_config.zone_type.is_crucible()
-                {
+                if zone_config.zone_type.is_crucible() {
                     return Some(zone_config.id);
                 }
                 None
