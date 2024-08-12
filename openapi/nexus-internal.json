@@ -364,6 +364,59 @@
         }
       }
     },
+    "/demo-saga": {
+      "post": {
+        "summary": "Kick off an instance of the \"demo\" saga",
+        "description": "This saga is used for demo and testing.  The saga just waits until you complete using the `saga_demo_complete` API.",
+        "operationId": "saga_demo_create",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoSaga"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/demo-saga/{demo_saga_id}/complete": {
+      "post": {
+        "summary": "Complete a waiting demo saga",
+        "description": "Note that the id used here is not the same as the id of the saga.  It's the one returned by the `saga_demo_create` API.",
+        "operationId": "saga_demo_complete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "demo_saga_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForDemoSagaKind"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/deployment/blueprints/all": {
       "get": {
         "summary": "Lists blueprints",
@@ -2622,6 +2675,23 @@
         "required": [
           "address",
           "kind"
+        ]
+      },
+      "DemoSaga": {
+        "description": "Identifies an instance of the demo saga",
+        "type": "object",
+        "properties": {
+          "demo_saga_id": {
+            "$ref": "#/components/schemas/TypedUuidForDemoSagaKind"
+          },
+          "saga_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "demo_saga_id",
+          "saga_id"
         ]
       },
       "DiskIdentity": {
@@ -4896,6 +4966,10 @@
       },
       "SwitchPutResponse": {
         "type": "object"
+      },
+      "TypedUuidForDemoSagaKind": {
+        "type": "string",
+        "format": "uuid"
       },
       "TypedUuidForDownstairsRegionKind": {
         "type": "string",
