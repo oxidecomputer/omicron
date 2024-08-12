@@ -671,6 +671,11 @@ impl BlueprintZoneConfig {
                     blueprint_zone_type::ClickhouseKeeper { address, dataset },
                 )
             }
+            OmicronZoneType::ClickhouseServer { address, dataset } => {
+                BlueprintZoneType::ClickhouseServer(
+                    blueprint_zone_type::ClickhouseServer { address, dataset },
+                )
+            }
             OmicronZoneType::CockroachDb { address, dataset } => {
                 BlueprintZoneType::CockroachDb(
                     blueprint_zone_type::CockroachDb { address, dataset },

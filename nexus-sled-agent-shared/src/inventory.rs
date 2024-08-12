@@ -134,15 +134,26 @@ pub enum OmicronZoneType {
         snat_cfg: SourceNatConfig,
     },
 
+    /// Type of clickhouse zone used for a single node clickhouse deployment
     Clickhouse {
         address: SocketAddrV6,
         dataset: OmicronZoneDataset,
     },
 
+    /// A zone used to run a Clickhouse Keeper node
+    ///
+    /// Keepers are only used in replicated clickhouse setups
     ClickhouseKeeper {
         address: SocketAddrV6,
         dataset: OmicronZoneDataset,
     },
+
+    /// A zone used to run a Clickhouse Server in a replicated deployment
+    ClickhouseServer {
+        address: SocketAddrV6,
+        dataset: OmicronZoneDataset,
+    },
+
     CockroachDb {
         address: SocketAddrV6,
         dataset: OmicronZoneDataset,
@@ -212,6 +223,9 @@ impl OmicronZoneType {
             OmicronZoneType::ClickhouseKeeper { .. } => {
                 ZoneKind::ClickhouseKeeper
             }
+            OmicronZoneType::ClickhouseServer { .. } => {
+                ZoneKind::ClickhouseServer
+            }
             OmicronZoneType::CockroachDb { .. } => ZoneKind::CockroachDb,
             OmicronZoneType::Crucible { .. } => ZoneKind::Crucible,
             OmicronZoneType::CruciblePantry { .. } => ZoneKind::CruciblePantry,
@@ -252,6 +266,7 @@ impl OmicronZoneType {
 
             OmicronZoneType::Clickhouse { .. }
             | OmicronZoneType::ClickhouseKeeper { .. }
+            | OmicronZoneType::ClickhouseServer { .. }
             | OmicronZoneType::CockroachDb { .. }
             | OmicronZoneType::Crucible { .. }
             | OmicronZoneType::CruciblePantry { .. }
@@ -271,6 +286,7 @@ impl OmicronZoneType {
             | OmicronZoneType::InternalNtp { .. }
             | OmicronZoneType::Clickhouse { .. }
             | OmicronZoneType::ClickhouseKeeper { .. }
+            | OmicronZoneType::ClickhouseServer { .. }
             | OmicronZoneType::CockroachDb { .. }
             | OmicronZoneType::Crucible { .. }
             | OmicronZoneType::CruciblePantry { .. }
@@ -289,6 +305,7 @@ impl OmicronZoneType {
             | OmicronZoneType::InternalNtp { .. }
             | OmicronZoneType::Clickhouse { .. }
             | OmicronZoneType::ClickhouseKeeper { .. }
+            | OmicronZoneType::ClickhouseServer { .. }
             | OmicronZoneType::CockroachDb { .. }
             | OmicronZoneType::CruciblePantry { .. }
             | OmicronZoneType::ExternalDns { .. }
@@ -310,6 +327,7 @@ impl OmicronZoneType {
             OmicronZoneType::InternalNtp { .. }
             | OmicronZoneType::Clickhouse { .. }
             | OmicronZoneType::ClickhouseKeeper { .. }
+            | OmicronZoneType::ClickhouseServer { .. }
             | OmicronZoneType::CockroachDb { .. }
             | OmicronZoneType::Crucible { .. }
             | OmicronZoneType::CruciblePantry { .. }
@@ -328,6 +346,7 @@ impl OmicronZoneType {
             OmicronZoneType::InternalNtp { .. }
             | OmicronZoneType::Clickhouse { .. }
             | OmicronZoneType::ClickhouseKeeper { .. }
+            | OmicronZoneType::ClickhouseServer { .. }
             | OmicronZoneType::CockroachDb { .. }
             | OmicronZoneType::Crucible { .. }
             | OmicronZoneType::CruciblePantry { .. }
@@ -367,6 +386,7 @@ pub enum ZoneKind {
     BoundaryNtp,
     Clickhouse,
     ClickhouseKeeper,
+    ClickhouseServer,
     CockroachDb,
     Crucible,
     CruciblePantry,
@@ -390,6 +410,7 @@ impl ZoneKind {
             ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => Self::NTP_PREFIX,
             ZoneKind::Clickhouse => "clickhouse",
             ZoneKind::ClickhouseKeeper => "clickhouse_keeper",
+            ZoneKind::ClickhouseServer => "clickhouse_server",
             // Note "cockroachdb" for historical reasons.
             ZoneKind::CockroachDb => "cockroachdb",
             ZoneKind::Crucible => "crucible",
@@ -409,6 +430,7 @@ impl ZoneKind {
             ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => Self::NTP_PREFIX,
             ZoneKind::Clickhouse => "clickhouse",
             ZoneKind::ClickhouseKeeper => "clickhouse_keeper",
+            ZoneKind::ClickhouseServer => "clickhouse_server",
             // Note "cockroachdb" for historical reasons.
             ZoneKind::CockroachDb => "cockroachdb",
             ZoneKind::Crucible => "crucible",
@@ -431,6 +453,7 @@ impl ZoneKind {
             ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => Self::NTP_PREFIX,
             ZoneKind::Clickhouse => "clickhouse",
             ZoneKind::ClickhouseKeeper => "clickhouse-keeper",
+            ZoneKind::ClickhouseServer => "clickhouse_server",
             // Note "cockroach" for historical reasons.
             ZoneKind::CockroachDb => "cockroach",
             ZoneKind::Crucible => "crucible",
@@ -451,6 +474,7 @@ impl ZoneKind {
             ZoneKind::BoundaryNtp => "boundary_ntp",
             ZoneKind::Clickhouse => "clickhouse",
             ZoneKind::ClickhouseKeeper => "clickhouse_keeper",
+            ZoneKind::ClickhouseServer => "clickhouse_server",
             ZoneKind::CockroachDb => "cockroach_db",
             ZoneKind::Crucible => "crucible",
             ZoneKind::CruciblePantry => "crucible_pantry",

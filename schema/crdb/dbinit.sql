@@ -288,6 +288,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_switch_by_rack ON omicron.public.switch
 CREATE TYPE IF NOT EXISTS omicron.public.service_kind AS ENUM (
   'clickhouse',
   'clickhouse_keeper',
+  'clickhouse_server',
   'cockroach',
   'crucible',
   'crucible_pantry',
@@ -506,6 +507,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.dataset_kind AS ENUM (
   'cockroach',
   'clickhouse',
   'clickhouse_keeper',
+  'clickhouse_server',
   'external_dns',
   'internal_dns'
 );
@@ -3209,6 +3211,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.zone_type AS ENUM (
   'boundary_ntp',
   'clickhouse',
   'clickhouse_keeper',
+  'clickhouse_server',
   'cockroach_db',
   'crucible',
   'crucible_pantry',
