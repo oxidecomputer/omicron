@@ -7,7 +7,7 @@
 use crate::instance::propolis_zone_name;
 use crate::instance::Instance;
 use crate::metrics::MetricsRequestQueue;
-use crate::nexus::NexusClientWithResolver;
+use crate::nexus::NexusClient;
 use crate::params::InstanceExternalIpBody;
 use crate::params::InstanceMetadata;
 use crate::params::ZoneBundleMetadata;
@@ -74,7 +74,7 @@ pub enum Error {
 }
 
 pub(crate) struct InstanceManagerServices {
-    pub nexus_client: NexusClientWithResolver,
+    pub nexus_client: NexusClient,
     pub vnic_allocator: VnicAllocator<Etherstub>,
     pub port_manager: PortManager,
     pub storage: StorageHandle,
@@ -103,7 +103,7 @@ impl InstanceManager {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         log: Logger,
-        nexus_client: NexusClientWithResolver,
+        nexus_client: NexusClient,
         etherstub: Etherstub,
         port_manager: PortManager,
         storage: StorageHandle,
@@ -422,7 +422,7 @@ struct InstanceManagerRunner {
     terminate_tx: mpsc::UnboundedSender<InstanceDeregisterRequest>,
     terminate_rx: mpsc::UnboundedReceiver<InstanceDeregisterRequest>,
 
-    nexus_client: NexusClientWithResolver,
+    nexus_client: NexusClient,
 
     // TODO: If we held an object representing an enum of "Created OR Running"
     // instance, we could avoid the methods within "instance.rs" that panic

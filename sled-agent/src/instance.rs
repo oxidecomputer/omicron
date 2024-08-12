@@ -12,7 +12,7 @@ use crate::instance_manager::{
     Error as ManagerError, InstanceManagerServices, InstanceTicket,
 };
 use crate::metrics::MetricsRequestQueue;
-use crate::nexus::NexusClientWithResolver;
+use crate::nexus::NexusClient;
 use crate::params::ZoneBundleMetadata;
 use crate::params::{InstanceExternalIpBody, ZoneBundleCause};
 use crate::params::{
@@ -349,7 +349,7 @@ struct InstanceRunner {
     running_state: Option<RunningState>,
 
     // Connection to Nexus
-    nexus_client: NexusClientWithResolver,
+    nexus_client: NexusClient,
 
     // Storage resources
     storage: StorageHandle,
@@ -528,7 +528,6 @@ impl InstanceRunner {
                 );
 
                 self.nexus_client
-                    .client()
                     .cpapi_instances_put(
                         &self.id().into_untyped_uuid(),
                         &state.into(),
@@ -1568,6 +1567,7 @@ mod tests {
     use super::*;
     use crate::fakes::nexus::{FakeNexusServer, ServerContext};
     use crate::metrics;
+    use crate::nexus::make_nexus_client_with_port;
     use crate::vmm_reservoir::VmmReservoirManagerHandle;
     use crate::zone_bundle::CleanupContext;
     use camino_tempfile::Utf8TempDir;
@@ -1634,7 +1634,7 @@ mod tests {
     }
 
     struct FakeNexusParts {
-        nexus_client: NexusClientWithResolver,
+        nexus_client: NexusClient,
         _nexus_server: HttpServer<ServerContext>,
         state_rx: Receiver<ReceivedInstanceState>,
         _dns_server: TransientServer,
@@ -1662,12 +1662,11 @@ mod tests {
                 .unwrap(),
             );
 
-            let nexus_client =
-                NexusClientWithResolver::new_from_resolver_with_port(
-                    &log,
-                    resolver,
-                    _nexus_server.local_addr().port(),
-                );
+            let nexus_client = make_nexus_client_with_port(
+                &log,
+                resolver,
+                _nexus_server.local_addr().port(),
+            );
 
             Self { nexus_client, _nexus_server, state_rx, _dns_server }
         }
@@ -1760,7 +1759,7 @@ mod tests {
     async fn instance_struct(
         log: &Logger,
         propolis_addr: SocketAddr,
-        nexus_client_with_resolver: NexusClientWithResolver,
+        nexus_client: NexusClient,
         storage_handle: StorageHandle,
         temp_dir: &String,
     ) -> (Instance, MetricsRx) {
@@ -1774,7 +1773,7 @@ mod tests {
         let (services, rx) = fake_instance_manager_services(
             log,
             storage_handle,
-            nexus_client_with_resolver,
+            nexus_client,
             temp_dir,
         );
 
@@ -1850,7 +1849,7 @@ mod tests {
     fn fake_instance_manager_services(
         log: &Logger,
         storage_handle: StorageHandle,
-        nexus_client_with_resolver: NexusClientWithResolver,
+        nexus_client: NexusClient,
         temp_dir: &String,
     ) -> (InstanceManagerServices, MetricsRx) {
         let vnic_allocator =
@@ -1869,7 +1868,7 @@ mod tests {
 
         let (metrics_queue, rx) = MetricsRequestQueue::for_test();
         let services = InstanceManagerServices {
-            nexus_client: nexus_client_with_resolver,
+            nexus_client,
             vnic_allocator,
             port_manager,
             storage: storage_handle,
