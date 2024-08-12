@@ -21,6 +21,7 @@
 use super::NexusActionContext;
 use super::{ActionRegistry, NexusSaga, SagaInitError};
 use crate::app::sagas::declare_saga_actions;
+use anyhow::ensure;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::DemoSagaUuid;
 use serde::Deserialize;
@@ -60,13 +61,16 @@ impl CompletingDemoSagas {
             })
     }
 
-    pub fn subscribe(&mut self, id: DemoSagaUuid) -> oneshot::Receiver<()> {
+    pub fn subscribe(
+        &mut self,
+        id: DemoSagaUuid,
+    ) -> Result<oneshot::Receiver<()>, anyhow::Error> {
         let (tx, rx) = oneshot::channel();
-        assert!(
+        ensure!(
             self.ids.insert(id, tx).is_none(),
             "multiple subscriptions for the same demo saga"
         );
-        rx
+        Ok(rx)
     }
 }
 
@@ -111,7 +115,12 @@ async fn demo_wait(sagactx: NexusActionContext) -> Result<(), ActionError> {
             .nexus()
             .demo_sagas()
             .map_err(ActionError::action_failed)?;
-        demo_sagas.subscribe(demo_id)
+        demo_sagas.subscribe(demo_id).map_err(|e| {
+            ActionError::action_failed(Error::internal_error(&format!(
+                "demo saga subscribe failed: {:#}",
+                e
+            )))
+        })?
     };
     match rx.await {
         Ok(_) => {
