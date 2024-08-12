@@ -59,6 +59,7 @@ pub struct SpComponentConfig {
     ///
     /// Only supported for components inside a [`GimletConfig`].
     pub serial_console: Option<SocketAddrV6>,
+    pub sensors: Vec<SensorConfig>,
 }
 
 /// Configuration of a simulated sidecar SP
