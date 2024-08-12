@@ -362,6 +362,22 @@ impl RunningZone {
         self.inner.zonepath.pool.as_ref()
     }
 
+    /// Return the name of a bootstrap VNIC in the zone, if any.
+    pub fn bootstrap_vnic_name(&self) -> Option<&str> {
+        self.inner.get_bootstrap_vnic_name()
+    }
+
+    /// Return the name of the control VNIC.
+    pub fn control_vnic_name(&self) -> &str {
+        self.inner.get_control_vnic_name()
+    }
+
+    /// Return the names of any OPTE ports in the zone.
+    pub fn opte_port_names(&self) -> impl Iterator<Item = &str> {
+        self.inner.opte_ports().map(|port| port.name())
+    }
+
+    /// Return the control IP address.
     pub fn control_interface(&self) -> AddrObject {
         AddrObject::new(
             self.inner.get_control_vnic_name(),
@@ -939,10 +955,17 @@ impl InstalledZone {
         zone_name
     }
 
+    /// Get the name of the bootstrap VNIC in the zone, if any.
+    pub fn get_bootstrap_vnic_name(&self) -> Option<&str> {
+        self.bootstrap_vnic.as_ref().map(|link| link.name())
+    }
+
+    /// Get the name of the control VNIC in the zone.
     pub fn get_control_vnic_name(&self) -> &str {
         self.control_vnic.name()
     }
 
+    /// Return the name of the zone itself.
     pub fn name(&self) -> &str {
         &self.name
     }

@@ -7,7 +7,7 @@
 use crate::destructor::{Deletable, Destructor};
 use crate::dladm::{
     CreateVnicError, DeleteVnicError, VnicSource, VNIC_PREFIX,
-    VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL, VNIC_PREFIX_GUEST,
+    VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL,
 };
 use omicron_common::api::external::MacAddr;
 use std::sync::{
@@ -125,7 +125,6 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
 pub enum LinkKind {
     Physical,
     OxideControlVnic,
-    GuestVnic,
     OxideBootstrapVnic,
 }
 
@@ -135,12 +134,18 @@ impl LinkKind {
     pub fn from_name(name: &str) -> Option<Self> {
         if name.starts_with(VNIC_PREFIX) {
             Some(LinkKind::OxideControlVnic)
-        } else if name.starts_with(VNIC_PREFIX_GUEST) {
-            Some(LinkKind::GuestVnic)
         } else if name.starts_with(VNIC_PREFIX_BOOTSTRAP) {
             Some(LinkKind::OxideBootstrapVnic)
         } else {
             None
+        }
+    }
+
+    /// Return `true` if this link is a VNIC.
+    pub const fn is_vnic(&self) -> bool {
+        match self {
+            LinkKind::Physical => false,
+            LinkKind::OxideControlVnic | LinkKind::OxideBootstrapVnic => true,
         }
     }
 }
@@ -202,6 +207,11 @@ impl Link {
 
     pub fn kind(&self) -> LinkKind {
         self.kind
+    }
+
+    /// Return true if this is a VNIC.
+    pub fn is_vnic(&self) -> bool {
+        self.kind.is_vnic()
     }
 }
 

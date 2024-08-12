@@ -211,7 +211,7 @@ impl Server {
                 SocketAddr::V6(args.artifact_address),
             );
             let api_description =
-                installinator_api::installinator_api::api_description::<
+                installinator_api::installinator_api_mod::api_description::<
                     WicketdInstallinatorApiImpl,
                 >()?;
 

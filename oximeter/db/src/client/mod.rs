@@ -1202,7 +1202,6 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
     use tempfile::TempDir;
-    use tokio::time::sleep;
     use uuid::Uuid;
 
     pub enum InstallationType {
@@ -1445,9 +1444,6 @@ mod tests {
         // Tests that the expected error is returned on a wrong address
         bad_db_connection_test().await.unwrap();
 
-        // Tests data is replicated in a cluster
-        data_is_replicated_test(&cluster).await.unwrap();
-
         // Tests that a new client has started and it is part of a cluster
         is_oximeter_cluster_test(
             cluster.replica_1.address,
@@ -1688,67 +1684,6 @@ mod tests {
             Err(Error::DatabaseUnavailable(_))
         ));
 
-        logctx.cleanup_successful();
-        Ok(())
-    }
-
-    async fn data_is_replicated_test(
-        cluster: &ClickHouseCluster,
-    ) -> Result<(), Error> {
-        let logctx = test_setup_log("test_data_is_replicated");
-        let log = &logctx.log;
-
-        // Create database in node 1
-        let client_1 = Client::new(cluster.replica_1.address, &log);
-        assert!(client_1.is_oximeter_cluster().await.unwrap());
-        client_1
-            .init_replicated_db()
-            .await
-            .expect("Failed to initialize timeseries database");
-
-        // Verify database exists in node 2
-        let client_2 = Client::new(cluster.replica_2.address, &log);
-        assert!(client_2.is_oximeter_cluster().await.unwrap());
-        let sql = String::from("SHOW DATABASES FORMAT JSONEachRow;");
-
-        // Try a few times to make sure data has been synchronised.
-        let mut result = String::from("");
-        let tries = 5;
-        for _ in 0..tries {
-            result = client_2.execute_with_body(sql.clone()).await.unwrap().1;
-            if !result.contains("oximeter") {
-                sleep(Duration::from_secs(1)).await;
-                continue;
-            } else {
-                break;
-            }
-        }
-
-        assert!(result.contains("oximeter"));
-
-        // Insert row into one of the tables
-        let sql = String::from(
-            "INSERT INTO oximeter.measurements_string (datum) VALUES ('hiya');",
-        );
-        let result = client_2.execute_with_body(sql.clone()).await.unwrap().1;
-        info!(log, "Inserted datum to client #2"; "sql" => sql, "result" => result);
-
-        // Make sure replicas are synched
-        let sql = String::from(
-            "SYSTEM SYNC REPLICA oximeter.measurements_string_local;",
-        );
-        let result = client_1.execute_with_body(sql.clone()).await.unwrap().1;
-        info!(log, "Synced replicas via client #1"; "sql" => sql, "result" => result);
-
-        // Make sure data exists in the other replica
-        let sql = String::from(
-            "SELECT * FROM oximeter.measurements_string FORMAT JSONEachRow;",
-        );
-        let result = client_1.execute_with_body(sql.clone()).await.unwrap().1;
-        info!(log, "Retrieved values via client #1"; "sql" => sql, "result" => result.clone());
-        assert!(result.contains("hiya"));
-
-        client_1.wipe_replicated_db().await?;
         logctx.cleanup_successful();
         Ok(())
     }

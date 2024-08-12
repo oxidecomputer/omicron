@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 72b902d1405681df2dd46efc097da6840ff1234dc9d0d7c0ecf07bed0b0e7d8d # shrinks to input = _TestPlaceOmicronZonesArgs { input: ArbitraryTestInput { existing_sleds: {[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]: ExistingSled { zones: ZonesToPlace { zones: [] }, waiting_for_ntp: false, num_disks: 1 }}, zones_to_place: ZonesToPlace { zones: [Nexus] } } }
+cc d725ad7fd51d0409c2f24088730159c1c3043a7675d46b966e45cb86b570a141 # shrinks to input = _TestPlaceOmicronZonesArgs { input: ArbitraryTestInput { existing_sleds: {[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]: ExistingSled { zones: ZonesToPlace { zones: [] }, num_zpools: 2 }}, zones_to_place: ZonesToPlace { zones: [BoundaryNtp, BoundaryNtp] } } }

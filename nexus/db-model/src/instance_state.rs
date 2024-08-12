@@ -59,3 +59,8 @@ impl From<InstanceState> for omicron_common::api::external::InstanceState {
         }
     }
 }
+
+impl diesel::query_builder::QueryId for InstanceStateEnum {
+    type QueryId = ();
+    const HAS_STATIC_QUERY_ID: bool = false;
+}
