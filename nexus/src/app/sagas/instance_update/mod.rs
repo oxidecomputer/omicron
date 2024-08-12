@@ -2358,9 +2358,10 @@ mod test {
                 serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
                 instance: state.instance().clone(),
                 src_vmm: vmm.clone(),
-                migrate_params: params::InstanceMigrate {
-                    dst_sled_id: dst_sled_id.into_untyped_uuid(),
-                },
+                migrate_params:
+                    nexus_types::internal_api::params::InstanceMigrateParams {
+                        dst_sled_id: dst_sled_id.into_untyped_uuid(),
+                    },
             };
 
             nexus

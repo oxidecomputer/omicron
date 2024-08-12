@@ -10,6 +10,7 @@ use super::{
     instance_common::allocate_vmm_ipv6, NexusActionContext, NexusSaga,
     SagaInitError,
 };
+use crate::app::instance::InstanceEnsureRegisteredApiResources;
 use crate::app::instance::InstanceRegisterReason;
 use crate::app::instance::InstanceStateChangeError;
 use crate::app::sagas::declare_saga_actions;
@@ -502,17 +503,22 @@ async fn sis_ensure_registered(
           "instance_id" => %instance_id,
           "sled_id" => %sled_id);
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())
-        .instance_id(instance_id)
-        .lookup_for(authz::Action::Modify)
-        .await
-        .map_err(ActionError::action_failed)?;
+    let (authz_silo, authz_project, authz_instance) =
+        LookupPath::new(&opctx, &osagactx.datastore())
+            .instance_id(instance_id)
+            .lookup_for(authz::Action::Modify)
+            .await
+            .map_err(ActionError::action_failed)?;
 
     osagactx
         .nexus()
         .instance_ensure_registered(
             &opctx,
-            &authz_instance,
+            &InstanceEnsureRegisteredApiResources {
+                authz_silo,
+                authz_project,
+                authz_instance,
+            },
             &db_instance,
             &propolis_id,
             &vmm_record,

@@ -4,15 +4,15 @@
 
 use super::{NexusActionContext, NexusSaga, ACTION_GENERATE_ID};
 use crate::app::instance::{
-    InstanceRegisterReason, InstanceStateChangeError,
-    InstanceStateChangeRequest,
+    InstanceEnsureRegisteredApiResources, InstanceRegisterReason,
+    InstanceStateChangeError, InstanceStateChangeRequest,
 };
 use crate::app::sagas::{
     declare_saga_actions, instance_common::allocate_vmm_ipv6,
 };
-use crate::external_api::params;
 use nexus_db_queries::db::{identity::Resource, lookup::LookupPath};
 use nexus_db_queries::{authn, authz, db};
+use nexus_types::internal_api::params;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::Deserialize;
 use serde::Serialize;
@@ -30,7 +30,7 @@ pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub instance: db::model::Instance,
     pub src_vmm: db::model::Vmm,
-    pub migrate_params: params::InstanceMigrate,
+    pub migrate_params: params::InstanceMigrateParams,
 }
 
 // The migration saga is similar to the instance start saga: get a destination
@@ -401,11 +401,12 @@ async fn sim_ensure_destination_propolis(
           "dst_propolis_id" => %vmm.id,
           "dst_vmm_state" => ?vmm);
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())
-        .instance_id(db_instance.id())
-        .lookup_for(authz::Action::Modify)
-        .await
-        .map_err(ActionError::action_failed)?;
+    let (authz_silo, authz_project, authz_instance) =
+        LookupPath::new(&opctx, &osagactx.datastore())
+            .instance_id(db_instance.id())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .map_err(ActionError::action_failed)?;
 
     let src_propolis_id = PropolisUuid::from_untyped_uuid(params.src_vmm.id);
     let dst_propolis_id = PropolisUuid::from_untyped_uuid(vmm.id);
@@ -413,7 +414,11 @@ async fn sim_ensure_destination_propolis(
         .nexus()
         .instance_ensure_registered(
             &opctx,
-            &authz_instance,
+            &InstanceEnsureRegisteredApiResources {
+                authz_silo,
+                authz_project,
+                authz_instance,
+            },
             &db_instance,
             &dst_propolis_id,
             &vmm,
@@ -565,6 +570,7 @@ async fn sim_instance_migrate(
 mod tests {
     use super::*;
     use crate::app::sagas::test_helpers;
+    use crate::external_api::params as ExternalParams;
     use dropshot::test_util::ClientTestContext;
     use nexus_test_utils::resource_helpers::{
         create_default_ip_pool, create_project, object_create,
@@ -593,7 +599,7 @@ mod tests {
         object_create(
             client,
             &instances_url,
-            &params::InstanceCreate {
+            &ExternalParams::InstanceCreate {
                 identity: IdentityMetadataCreateParams {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: format!("instance {:?}", INSTANCE_NAME),
@@ -604,7 +610,7 @@ mod tests {
                 user_data: b"#cloud-config".to_vec(),
                 ssh_public_keys: Some(Vec::new()),
                 network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::None,
+                    ExternalParams::InstanceNetworkInterfaceAttachment::None,
                 external_ips: vec![],
                 disks: vec![],
                 start: true,
@@ -637,7 +643,7 @@ mod tests {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
             instance: state.instance().clone(),
             src_vmm: vmm.clone(),
-            migrate_params: params::InstanceMigrate {
+            migrate_params: params::InstanceMigrateParams {
                 dst_sled_id: dst_sled_id.into_untyped_uuid(),
             },
         };
@@ -706,7 +712,7 @@ mod tests {
                         ),
                         instance: old_instance.clone(),
                         src_vmm: old_vmm.clone(),
-                        migrate_params: params::InstanceMigrate {
+                        migrate_params: params::InstanceMigrateParams {
                             dst_sled_id: dst_sled_id.into_untyped_uuid(),
                         },
                     }

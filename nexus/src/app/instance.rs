@@ -191,6 +191,14 @@ enum InstanceStartDisposition {
     AlreadyStarted,
 }
 
+/// The set of API resources needed when ensuring that an instance is registered
+/// on a sled.
+pub(crate) struct InstanceEnsureRegisteredApiResources {
+    pub(crate) authz_silo: nexus_auth::authz::Silo,
+    pub(crate) authz_project: nexus_auth::authz::Project,
+    pub(crate) authz_instance: nexus_auth::authz::Instance,
+}
+
 impl super::Nexus {
     pub fn instance_lookup<'a>(
         &'a self,
@@ -473,14 +481,16 @@ impl super::Nexus {
         Ok(())
     }
 
-    pub(crate) async fn project_instance_migrate(
+    pub(crate) async fn instance_migrate(
         self: &Arc<Self>,
         opctx: &OpContext,
-        instance_lookup: &lookup::Instance<'_>,
-        params: params::InstanceMigrate,
+        id: InstanceUuid,
+        params: nexus_types::internal_api::params::InstanceMigrateParams,
     ) -> UpdateResult<InstanceAndActiveVmm> {
-        let (.., authz_instance) =
-            instance_lookup.lookup_for(authz::Action::Modify).await?;
+        let (.., authz_instance) = LookupPath::new(&opctx, &self.db_datastore)
+            .instance_id(id.into_untyped_uuid())
+            .lookup_for(authz::Action::Modify)
+            .await?;
 
         let state = self
             .db_datastore
@@ -867,7 +877,11 @@ impl super::Nexus {
     pub(crate) async fn instance_ensure_registered(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
+        InstanceEnsureRegisteredApiResources {
+            authz_silo,
+            authz_project,
+            authz_instance,
+        }: &InstanceEnsureRegisteredApiResources,
         db_instance: &db::model::Instance,
         propolis_id: &PropolisUuid,
         initial_vmm: &db::model::Vmm,
@@ -1067,23 +1081,9 @@ impl super::Nexus {
         let ssh_keys: Vec<String> =
             ssh_keys.map(|ssh_key| ssh_key.public_key).collect();
 
-        // Construct instance metadata used to track its statistics.
-        //
-        // This requires another fetch on the silo and project, to extract their
-        // IDs.
-        let (.., db_project) = self
-            .project_lookup(
-                opctx,
-                params::ProjectSelector {
-                    project: NameOrId::Id(db_instance.project_id),
-                },
-            )?
-            .fetch()
-            .await?;
-        let (_, db_silo) = self.current_silo_lookup(opctx)?.fetch().await?;
         let metadata = sled_agent_client::types::InstanceMetadata {
-            silo_id: db_silo.id(),
-            project_id: db_project.id(),
+            silo_id: authz_silo.id(),
+            project_id: authz_project.id(),
         };
 
         // Ask the sled agent to begin the state change.  Then update the
