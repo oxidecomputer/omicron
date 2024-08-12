@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Executable that starts the HTTP-configurable DNS server used for both
-//! internal DNS (RFD 248) and extenral DNS (RFD 357) for the Oxide system
+//! internal DNS (RFD 248) and external DNS (RFD 357) for the Oxide system
 
 use anyhow::anyhow;
 use anyhow::Context;
@@ -35,6 +35,14 @@ pub struct Config {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
+    use tracing_subscriber::fmt::format::FmtSpan;
+    tracing_subscriber::fmt()
+        .with_thread_names(true)
+        .with_span_events(FmtSpan::ENTER)
+        .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
+        .with_writer(std::fs::File::create("/var/tmp/trace").unwrap())
+        .init();
+
     let args = Args::parse();
     let config_file = &args.config_file;
     let config_file_contents = std::fs::read_to_string(config_file)
