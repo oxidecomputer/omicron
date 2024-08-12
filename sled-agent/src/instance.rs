@@ -676,11 +676,22 @@ impl InstanceRunner {
     ) -> Result<(), Error> {
         let nics = running_zone
             .opte_ports()
-            .map(|port| propolis_client::types::NetworkInterfaceRequest {
-                name: port.name().to_string(),
-                slot: propolis_client::types::Slot(port.slot()),
+            .filter_map(|port| {
+                let interface_id = self
+                    .requested_nics
+                    .iter()
+                    // We expect to match NIC slots to OPTE port slots.
+                    .find(|nic| nic.slot == port.slot())
+                    .map(|nic| nic.id);
+                interface_id.map(|id| {
+                    propolis_client::types::NetworkInterfaceRequest {
+                        interface_id: id,
+                        name: port.name().to_string(),
+                        slot: propolis_client::types::Slot(port.slot()),
+                    }
+                })
             })
-            .collect();
+            .collect::<Vec<_>>();
 
         let migrate = match migrate {
             Some(params) => {

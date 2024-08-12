@@ -1,0 +1,90 @@
+format_version = 1
+
+[target]
+name = "instance_data_link"
+description = "A network data link related to a guest/instance"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "kind", "interface_id", "instance_id", "project_id", "silo_id", "sled_id", "sled_model", "sled_revision", "sled_serial" ] },
+]
+
+[[metrics]]
+name = "bytes_sent"
+description = "Total number of bytes sent on the data link"
+units = "bytes"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "bytes_received"
+description = "Total number of bytes received on the data link"
+units = "bytes"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "packets_sent"
+description = "Total number of packets sent on the data link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "packets_received"
+description = "Total number of packets received on the data link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "packets_dropped"
+description = "Number of packets dropped on the RX queue of the data link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[fields.kind]
+type = "string"
+description = "The kind or class of the data link"
+
+[fields.interface_id]
+type = "uuid"
+description = "ID of the associated virtual network interface"
+
+[fields.instance_id]
+type = "uuid"
+description = "ID of the virtual machine instance"
+
+[fields.project_id]
+type = "uuid"
+description = "ID of the virtual machine instance's project"
+
+[fields.silo_id]
+type = "uuid"
+description = "ID of the virtual machine instance's silo"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID of the sled managing the link's switch"
+
+[fields.sled_model]
+type = "string"
+description = "Model number of the sled managing the link's switch"
+
+[fields.sled_revision]
+type = "u32"
+description = "Revision number of the sled managing the link's switch"
+
+[fields.sled_serial]
+type = "string"
+description = "Serial number of the sled managing the link's switch"
