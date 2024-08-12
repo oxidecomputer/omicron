@@ -25,6 +25,9 @@ pub const MAX_PORT: u16 = u16::MAX;
 /// minimum possible value for a tcp or udp port
 pub const MIN_PORT: u16 = u16::MIN;
 
+/// The amount of redundancy for boundary NTP servers.
+pub const BOUNDARY_NTP_REDUNDANCY: usize = 2;
+
 /// The amount of redundancy for Nexus services.
 ///
 /// This is used by both RSS (to distribute the initial set of services) and the

@@ -23,7 +23,7 @@ use nexus_types::{
             OximeterInfo, RackInitializationRequest, SledAgentInfo,
             SwitchPutRequest, SwitchPutResponse,
         },
-        views::{BackgroundTask, Ipv4NatEntryView, Saga},
+        views::{BackgroundTask, DemoSaga, Ipv4NatEntryView, Saga},
     },
 };
 use omicron_common::{
@@ -39,16 +39,14 @@ use omicron_common::{
     update::ArtifactId,
 };
 use omicron_uuid_kinds::{
-    DownstairsKind, SledUuid, TypedUuid, UpstairsKind, UpstairsRepairKind,
+    DemoSagaUuid, DownstairsKind, SledUuid, TypedUuid, UpstairsKind,
+    UpstairsRepairKind,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[dropshot::api_description {
-    // Named something different to let 'import nexus_internal_api::*;' work.
-    module = "nexus_internal_api_mod",
-}]
+#[dropshot::api_description]
 pub trait NexusInternalApi {
     type Context;
 
@@ -284,6 +282,31 @@ pub trait NexusInternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SagaPathParam>,
     ) -> Result<HttpResponseOk<Saga>, HttpError>;
+
+    /// Kick off an instance of the "demo" saga
+    ///
+    /// This saga is used for demo and testing.  The saga just waits until you
+    /// complete using the `saga_demo_complete` API.
+    #[endpoint {
+        method = POST,
+        path = "/demo-saga",
+    }]
+    async fn saga_demo_create(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<DemoSaga>, HttpError>;
+
+    /// Complete a waiting demo saga
+    ///
+    /// Note that the id used here is not the same as the id of the saga.  It's
+    /// the one returned by the `saga_demo_create` API.
+    #[endpoint {
+        method = POST,
+        path = "/demo-saga/{demo_saga_id}/complete",
+    }]
+    async fn saga_demo_complete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<DemoSagaPathParam>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     // Background Tasks
 
@@ -566,6 +589,12 @@ pub struct UpstairsDownstairsPathParam {
 pub struct SagaPathParam {
     #[serde(rename = "saga_id")]
     pub saga_id: Uuid,
+}
+
+/// Path parameters for DemoSaga requests
+#[derive(Deserialize, JsonSchema)]
+pub struct DemoSagaPathParam {
+    pub demo_saga_id: DemoSagaUuid,
 }
 
 /// Path parameters for Background Task requests

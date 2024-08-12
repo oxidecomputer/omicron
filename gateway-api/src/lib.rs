@@ -29,9 +29,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-#[dropshot::api_description {
-    module = "gateway_api_mod",
-}]
+#[dropshot::api_description]
 pub trait GatewayApi {
     type Context;
 

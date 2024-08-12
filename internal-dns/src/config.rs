@@ -60,7 +60,7 @@
 //!
 //! This module provides types used to assemble that configuration.
 
-use crate::names::{ServiceName, DNS_ZONE};
+use crate::names::{ServiceName, BOUNDARY_NTP_DNS_NAME, DNS_ZONE};
 use anyhow::{anyhow, ensure};
 use core::fmt;
 use dns_service_client::types::{DnsConfigParams, DnsConfigZone, DnsRecord};
@@ -407,6 +407,27 @@ impl DnsConfigBuilder {
             (name, vec![DnsRecord::Aaaa(sled_ip)])
         });
 
+        // Assemble the special boundary NTP name to support chrony on internal
+        // NTP zones.
+        //
+        // We leave this as `None` if there are no `BoundaryNtp` service zones,
+        // which omits it from the final set of records.
+        let boundary_ntp_records = self
+            .service_instances_zones
+            .get(&ServiceName::BoundaryNtp)
+            .map(|zone2port| {
+                let records = zone2port
+                    .iter()
+                    .map(|(zone, _port)| {
+                        let zone_ip = self.zones.get(&zone).expect(
+                            "service_backend_zone() ensures zones are defined",
+                        );
+                        DnsRecord::Aaaa(*zone_ip)
+                    })
+                    .collect::<Vec<DnsRecord>>();
+                (BOUNDARY_NTP_DNS_NAME.to_string(), records)
+            });
+
         // Assemble the set of AAAA records for zones.
         let zone_records = self.zones.into_iter().map(|(zone, zone_ip)| {
             (zone.dns_name(), vec![DnsRecord::Aaaa(zone_ip)])
@@ -454,6 +475,7 @@ impl DnsConfigBuilder {
 
         let all_records = sled_records
             .chain(zone_records)
+            .chain(boundary_ntp_records)
             .chain(srv_records_sleds)
             .chain(srv_records_zones)
             .collect();
@@ -592,6 +614,11 @@ mod test {
             // used in two services)
             b.service_backend_zone(ServiceName::Oximeter, &zone2, 125).unwrap();
             b.service_backend_zone(ServiceName::Oximeter, &zone3, 126).unwrap();
+
+            // Add a boundary NTP service to one of the zones; this will also
+            // populate the special `BOUNDARY_NTP_DNS_NAME`.
+            b.service_backend_zone(ServiceName::BoundaryNtp, &zone2, 127)
+                .unwrap();
 
             // A sharded service
             b.service_backend_sled(

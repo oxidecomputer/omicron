@@ -31,15 +31,15 @@ impl Widget for BoxConnector {
         if self.kind == BoxConnectorKind::Top
             || self.kind == BoxConnectorKind::Both
         {
-            buf.get_mut(rect.x, rect.y - 1).set_symbol("├");
-            buf.get_mut(rect.x + rect.width - 1, rect.y - 1).set_symbol("┤");
+            buf[(rect.x, rect.y - 1)].set_symbol("├");
+            buf[(rect.x + rect.width - 1, rect.y - 1)].set_symbol("┤");
         }
 
         if self.kind == BoxConnectorKind::Bottom
             || self.kind == BoxConnectorKind::Both
         {
-            buf.get_mut(rect.x, rect.y + rect.height).set_symbol("├");
-            buf.get_mut(rect.x + rect.width - 1, rect.y + rect.height)
+            buf[(rect.x, rect.y + rect.height)].set_symbol("├");
+            buf[(rect.x + rect.width - 1, rect.y + rect.height)]
                 .set_symbol("┤");
         }
     }

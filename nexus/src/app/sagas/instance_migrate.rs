@@ -16,9 +16,7 @@ use nexus_db_queries::{authn, authz, db};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::{
-    InstanceMigrationSourceParams, InstanceMigrationTargetParams,
-};
+use sled_agent_client::types::InstanceMigrationTargetParams;
 use slog::warn;
 use std::net::{Ipv6Addr, SocketAddr};
 use steno::ActionError;
@@ -72,22 +70,44 @@ declare_saga_actions! {
 
     CREATE_MIGRATION_RECORD -> "migration_record" {
         + sim_create_migration_record
-        - sim_delete_migration_record
+        - sim_fail_migration_record
     }
 
-
     // This step the instance's migration ID and destination Propolis ID
-    // fields. Because the instance is active, its current sled agent maintains
-    // its most recent runtime state, so to update it, the saga calls into the
-    // sled and asks it to produce an updated instance record with the
-    // appropriate migration IDs and a new generation number.
+    // fields in the database.
     //
-    // The source sled agent synchronizes concurrent attempts to set these IDs.
-    // Setting a new migration ID and re-setting an existing ID are allowed, but
-    // trying to set an ID when a different ID is already present fails.
+    // If the instance's migration ID has already been set when we attempt to
+    // set ours, that means we have probably raced with another migrate saga for
+    // the same instance. If this is the case, this action will fail and the
+    // saga will unwind.
+    //
+    // Yes, it's a bit unfortunate that our attempt to compare-and-swap in a
+    // migration ID happens only after we've created VMM and migration records,
+    // and that we'll have to destroy them as we unwind. However, the
+    // alternative, setting the migration IDs *before* records for the target
+    // VMM and the migration are created, would mean that there is a period of
+    // time during which the instance record contains foreign keys into the
+    // `vmm` and `migration` tables that don't have corresponding records to
+    // those tables. Because the `instance` table is queried in the public API,
+    // we take care to ensure that it doesn't have "dangling pointers" to
+    // records in the `vmm` and `migration` tables that don't exist yet.
+    //
+    // Note that unwinding this action does *not* clear the migration IDs from
+    // the instance record. This is to avoid a potential race with the instance
+    // update saga where:
+    //
+    // - a `instance-migrate` saga sets the migration IDs at instance state
+    //   generation  _N_
+    // - an `instance-update` saga increments the instance's state generation to
+    //   _N_ + 1
+    // - the `instance-migrate` saga unwinds and attempts to clear the migration
+    //   IDs, but can't, because the state generation has advanced.
+    //
+    // Instead, we leave the migration IDs in place and rely on setting the VMM
+    // state to `SagaUnwound` to indicate to other future `instance-migrate`
+    // sagas that it's okay to start a new migration.
     SET_MIGRATION_IDS -> "set_migration_ids" {
         + sim_set_migration_ids
-        - sim_clear_migration_ids
     }
 
     // This step registers the instance with the destination sled. Care is
@@ -239,7 +259,7 @@ async fn sim_create_migration_record(
         .map_err(ActionError::action_failed)
 }
 
-async fn sim_delete_migration_record(
+async fn sim_fail_migration_record(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx: &std::sync::Arc<crate::saga_interface::SagaContext> =
@@ -251,9 +271,24 @@ async fn sim_delete_migration_record(
     );
     let migration_id = sagactx.lookup::<Uuid>("migrate_id")?;
 
-    info!(osagactx.log(), "deleting migration record";
-          "migration_id" => %migration_id);
-    osagactx.datastore().migration_mark_deleted(&opctx, migration_id).await?;
+    info!(
+        osagactx.log(),
+        "migration saga unwinding, marking migration record as failed";
+        "instance_id" => %params.instance.id(),
+        "migration_id" => %migration_id,
+    );
+    // If the migration record wasn't updated, this means it's already deleted,
+    // which...seems weird, but isn't worth getting the whole saga unwind stuck over.
+    if let Err(e) =
+        osagactx.datastore().migration_mark_failed(&opctx, migration_id).await
+    {
+        warn!(osagactx.log(),
+              "Error marking migration record as failed during rollback";
+              "instance_id" => %params.instance.id(),
+              "migration_id" => %migration_id,
+              "error" => ?e);
+    }
+
     Ok(())
 }
 
@@ -323,75 +358,28 @@ async fn sim_set_migration_ids(
 
     let db_instance = &params.instance;
     let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
-    let src_sled_id = SledUuid::from_untyped_uuid(params.src_vmm.sled_id);
+    let src_propolis_id = PropolisUuid::from_untyped_uuid(params.src_vmm.id);
     let migration_id = sagactx.lookup::<Uuid>("migrate_id")?;
     let dst_propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
 
-    info!(osagactx.log(), "setting migration IDs on migration source sled";
+    info!(osagactx.log(), "setting instance migration IDs";
           "instance_id" => %db_instance.id(),
-          "sled_id" => %src_sled_id,
           "migration_id" => %migration_id,
+          "src_propolis_id" => %src_propolis_id,
           "dst_propolis_id" => %dst_propolis_id,
           "prev_runtime_state" => ?db_instance.runtime());
 
-    let updated_record = osagactx
-        .nexus()
+    osagactx
+        .datastore()
         .instance_set_migration_ids(
             &opctx,
             instance_id,
-            src_sled_id,
-            db_instance.runtime(),
-            InstanceMigrationSourceParams { dst_propolis_id, migration_id },
+            src_propolis_id,
+            migration_id,
+            dst_propolis_id,
         )
         .await
-        .map_err(ActionError::action_failed)?;
-
-    Ok(updated_record)
-}
-
-async fn sim_clear_migration_ids(
-    sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let src_sled_id = SledUuid::from_untyped_uuid(params.src_vmm.sled_id);
-    let db_instance =
-        sagactx.lookup::<db::model::Instance>("set_migration_ids")?;
-    let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
-
-    info!(osagactx.log(), "clearing migration IDs for saga unwind";
-          "instance_id" => %db_instance.id(),
-          "sled_id" => %src_sled_id,
-          "prev_runtime_state" => ?db_instance.runtime());
-
-    // Because the migration never actually started (and thus didn't finish),
-    // the instance should be at the same Propolis generation as it was when
-    // migration IDs were set, which means sled agent should accept a request to
-    // clear them. The only exception is if the instance stopped, but that also
-    // clears its migration IDs; in that case there is no work to do here.
-    //
-    // Other failures to clear migration IDs are handled like any other failure
-    // to update an instance's state: the callee attempts to mark the instance
-    // as failed; if the failure occurred because the instance changed state
-    // such that sled agent could not fulfill the request, the callee will
-    // produce a stale generation number and will not actually mark the instance
-    // as failed.
-    if let Err(e) = osagactx
-        .nexus()
-        .instance_clear_migration_ids(
-            instance_id,
-            src_sled_id,
-            db_instance.runtime(),
-        )
-        .await
-    {
-        warn!(osagactx.log(),
-              "Error clearing migration IDs during rollback";
-              "instance_id" => %instance_id,
-              "error" => ?e);
-    }
-
-    Ok(())
+        .map_err(ActionError::action_failed)
 }
 
 async fn sim_ensure_destination_propolis(
@@ -575,21 +563,16 @@ async fn sim_instance_migrate(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::app::sagas::test_helpers;
-    use camino::Utf8Path;
     use dropshot::test_util::ClientTestContext;
-    use nexus_test_interface::NexusServer;
     use nexus_test_utils::resource_helpers::{
         create_default_ip_pool, create_project, object_create,
     };
-    use nexus_test_utils::start_sled_agent;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
-    use omicron_sled_agent::sim::Server;
-
-    use super::*;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -601,35 +584,6 @@ mod tests {
         create_default_ip_pool(&client).await;
         let project = create_project(&client, PROJECT_NAME).await;
         project.identity.id
-    }
-
-    async fn add_sleds(
-        cptestctx: &ControlPlaneTestContext,
-        num_sleds: usize,
-    ) -> Vec<(SledUuid, Server)> {
-        let mut sas = Vec::with_capacity(num_sleds);
-        for _ in 0..num_sleds {
-            let sa_id = SledUuid::new_v4();
-            let log =
-                cptestctx.logctx.log.new(o!("sled_id" => sa_id.to_string()));
-            let addr =
-                cptestctx.server.get_http_server_internal_address().await;
-
-            info!(&cptestctx.logctx.log, "Adding simulated sled"; "sled_id" => %sa_id);
-            let update_dir = Utf8Path::new("/should/be/unused");
-            let sa = start_sled_agent(
-                log,
-                addr,
-                sa_id,
-                &update_dir,
-                omicron_sled_agent::sim::SimMode::Explicit,
-            )
-            .await
-            .unwrap();
-            sas.push((sa_id, sa));
-        }
-
-        sas
     }
 
     async fn create_instance(
@@ -659,32 +613,11 @@ mod tests {
         .await
     }
 
-    fn select_first_alternate_sled(
-        db_vmm: &db::model::Vmm,
-        other_sleds: &[(SledUuid, Server)],
-    ) -> SledUuid {
-        let default_sled_uuid: SledUuid =
-            nexus_test_utils::SLED_AGENT_UUID.parse().unwrap();
-        if other_sleds.is_empty() {
-            panic!("need at least one other sled");
-        }
-
-        if other_sleds.iter().any(|sled| sled.0 == default_sled_uuid) {
-            panic!("default test sled agent was in other_sleds");
-        }
-
-        if db_vmm.sled_id == default_sled_uuid.into_untyped_uuid() {
-            other_sleds[0].0
-        } else {
-            default_sled_uuid
-        }
-    }
-
     #[nexus_test(server = crate::Server)]
     async fn test_saga_basic_usage_succeeds(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let other_sleds = add_sleds(cptestctx, 1).await;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
@@ -698,7 +631,8 @@ mod tests {
 
         let state = test_helpers::instance_fetch(cptestctx, instance_id).await;
         let vmm = state.vmm().as_ref().unwrap();
-        let dst_sled_id = select_first_alternate_sled(vmm, &other_sleds);
+        let dst_sled_id =
+            test_helpers::select_first_alternate_sled(vmm, &other_sleds[..]);
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
             instance: state.instance().clone(),
@@ -731,7 +665,7 @@ mod tests {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let log = &cptestctx.logctx.log;
-        let other_sleds = add_sleds(cptestctx, 1).await;
+        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
@@ -756,8 +690,10 @@ mod tests {
                         .as_ref()
                         .expect("instance should have a vmm before migrating");
 
-                    let dst_sled_id =
-                        select_first_alternate_sled(old_vmm, &other_sleds);
+                    let dst_sled_id = test_helpers::select_first_alternate_sled(
+                        old_vmm,
+                        &other_sleds[..],
+                    );
 
                     info!(log, "setting up new migration saga";
                           "old_instance" => ?old_instance,
@@ -781,23 +717,43 @@ mod tests {
         let after_saga = || -> futures::future::BoxFuture<'_, ()> {
             Box::pin({
                 async {
-                    // Unwinding at any step should clear the migration IDs from
-                    // the instance record and leave the instance's location
-                    // otherwise untouched.
-                    let new_state =
-                        test_helpers::instance_fetch(cptestctx, instance_id)
-                            .await;
+                    let new_state = test_helpers::instance_fetch_all(
+                        cptestctx,
+                        instance_id,
+                    )
+                    .await;
 
-                    let new_instance = new_state.instance();
-                    let new_vmm =
-                        new_state.vmm().as_ref().expect("vmm should be active");
+                    let new_instance = new_state.instance;
+                    let new_vmm = new_state
+                        .active_vmm
+                        .as_ref()
+                        .expect("vmm should be active");
 
-                    assert!(new_instance.runtime().migration_id.is_none());
-                    assert!(new_instance.runtime().dst_propolis_id.is_none());
                     assert_eq!(
                         new_instance.runtime().propolis_id.unwrap(),
                         new_vmm.id
                     );
+
+                    // If the instance has had migration IDs set, then both
+                    // sides of the migration should be marked as failed.
+                    if let Some(migration) = new_state.migration {
+                        assert_eq!(
+                            migration.source_state,
+                            db::model::MigrationState::FAILED
+                        );
+                        assert_eq!(
+                            migration.target_state,
+                            db::model::MigrationState::FAILED
+                        );
+                    }
+                    // If the instance has a target VMM ID left behind by the
+                    // unwinding saga, that VMM must be in the `SagaUnwound` state.
+                    if let Some(target_vmm) = new_state.target_vmm {
+                        assert_eq!(
+                            target_vmm.runtime.state,
+                            db::model::VmmState::SagaUnwound
+                        );
+                    }
 
                     info!(
                         &log,
@@ -812,17 +768,19 @@ mod tests {
                     test_helpers::instance_stop(cptestctx, &instance_id).await;
                     test_helpers::instance_simulate(cptestctx, &instance_id)
                         .await;
-
-                    let new_state =
-                        test_helpers::instance_fetch(cptestctx, instance_id)
-                            .await;
+                    // Wait until the instance has advanced to the `NoVmm`
+                    // state. This may not happen immediately, as an
+                    // instance-update saga must complete to update the
+                    // instance's state.
+                    let new_state = test_helpers::instance_wait_for_state(
+                        cptestctx,
+                        instance_id,
+                        nexus_db_model::InstanceState::NoVmm,
+                    )
+                    .await;
 
                     let new_instance = new_state.instance();
                     let new_vmm = new_state.vmm().as_ref();
-                    assert_eq!(
-                        new_instance.runtime().nexus_state,
-                        nexus_db_model::InstanceState::NoVmm,
-                    );
                     assert!(new_instance.runtime().propolis_id.is_none());
                     assert!(new_vmm.is_none());
 

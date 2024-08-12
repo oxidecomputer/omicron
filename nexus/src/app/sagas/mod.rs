@@ -22,6 +22,7 @@ use steno::SagaType;
 use thiserror::Error;
 use uuid::Uuid;
 
+pub mod demo;
 pub mod disk_create;
 pub mod disk_delete;
 pub mod finalize_disk;
@@ -33,6 +34,7 @@ pub mod instance_ip_attach;
 pub mod instance_ip_detach;
 pub mod instance_migrate;
 pub mod instance_start;
+pub mod instance_update;
 pub mod project_create;
 pub mod region_replacement_drive;
 pub mod region_replacement_finish;
@@ -133,6 +135,7 @@ fn make_action_registry() -> ActionRegistry {
     let mut registry = steno::ActionRegistry::new();
     registry.register(Arc::clone(&*ACTION_GENERATE_ID));
 
+    <demo::SagaDemo as NexusSaga>::register_actions(&mut registry);
     <disk_create::SagaDiskCreate as NexusSaga>::register_actions(&mut registry);
     <disk_delete::SagaDiskDelete as NexusSaga>::register_actions(&mut registry);
     <finalize_disk::SagaFinalizeDisk as NexusSaga>::register_actions(
@@ -154,6 +157,9 @@ fn make_action_registry() -> ActionRegistry {
         &mut registry,
     );
     <instance_start::SagaInstanceStart as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <instance_update::SagaInstanceUpdate as NexusSaga>::register_actions(
         &mut registry,
     );
     <project_create::SagaProjectCreate as NexusSaga>::register_actions(
