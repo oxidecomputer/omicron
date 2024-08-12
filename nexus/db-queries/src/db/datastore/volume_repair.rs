@@ -44,13 +44,11 @@ impl DataStore {
                 DieselError::DatabaseError(
                     DatabaseErrorKind::UniqueViolation,
                     ref error_information,
-                ) => match error_information.constraint_name() {
-                    Some("volume_repair_pkey") => {
-                        Error::conflict("volume repair lock")
-                    }
-
-                    _ => public_error_from_diesel(e, ErrorHandler::Server),
-                },
+                ) if error_information.constraint_name()
+                    == Some("volume_repair_pkey") =>
+                {
+                    Error::conflict("volume repair lock")
+                }
 
                 _ => public_error_from_diesel(e, ErrorHandler::Server),
             })
