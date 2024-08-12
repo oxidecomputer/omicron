@@ -98,6 +98,7 @@ use super::tasks::dns_config;
 use super::tasks::dns_propagation;
 use super::tasks::dns_servers;
 use super::tasks::external_endpoints;
+use super::tasks::instance_updater;
 use super::tasks::instance_watcher;
 use super::tasks::inventory_collection;
 use super::tasks::lookup_region_port;
@@ -154,6 +155,7 @@ pub struct BackgroundTasks {
     pub task_region_replacement: Activator,
     pub task_region_replacement_driver: Activator,
     pub task_instance_watcher: Activator,
+    pub task_instance_updater: Activator,
     pub task_service_firewall_propagation: Activator,
     pub task_abandoned_vmm_reaper: Activator,
     pub task_vpc_route_manager: Activator,
@@ -234,6 +236,7 @@ impl BackgroundTasksInitializer {
             task_region_replacement: Activator::new(),
             task_region_replacement_driver: Activator::new(),
             task_instance_watcher: Activator::new(),
+            task_instance_updater: Activator::new(),
             task_service_firewall_propagation: Activator::new(),
             task_abandoned_vmm_reaper: Activator::new(),
             task_vpc_route_manager: Activator::new(),
@@ -294,6 +297,7 @@ impl BackgroundTasksInitializer {
             task_region_replacement,
             task_region_replacement_driver,
             task_instance_watcher,
+            task_instance_updater,
             task_service_firewall_propagation,
             task_abandoned_vmm_reaper,
             task_vpc_route_manager,
@@ -614,10 +618,9 @@ impl BackgroundTasksInitializer {
         {
             let watcher = instance_watcher::InstanceWatcher::new(
                 datastore.clone(),
-                resolver.clone(),
+                sagas.clone(),
                 producer_registry,
                 instance_watcher::WatcherIdentity { nexus_id, rack_id },
-                task_v2p_manager.clone(),
             );
             driver.register(TaskDefinition {
                 name: "instance_watcher",
@@ -629,6 +632,25 @@ impl BackgroundTasksInitializer {
                 activator: task_instance_watcher,
             })
         };
+
+        // Background task: schedule update sagas for instances in need of
+        // state updates.
+        {
+            let updater = instance_updater::InstanceUpdater::new(
+                datastore.clone(),
+                sagas.clone(),
+                config.instance_updater.disable,
+            );
+            driver.register( TaskDefinition {
+                name: "instance_updater",
+                description: "detects if instances require update sagas and schedules them",
+                period: config.instance_watcher.period_secs,
+                task_impl: Box::new(updater),
+                opctx: opctx.child(BTreeMap::new()),
+                watchers: vec![],
+                activator: task_instance_updater,
+            });
+        }
 
         // Background task: service firewall rule propagation
         driver.register(TaskDefinition {

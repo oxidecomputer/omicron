@@ -141,6 +141,7 @@ mod test {
     };
     use nexus_db_queries::authn;
     use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::db::DataStore;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintZoneFilter;
@@ -167,7 +168,9 @@ mod test {
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
-    fn create_blueprint(
+    async fn create_blueprint(
+        datastore: &DataStore,
+        opctx: &OpContext,
         blueprint_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
         blueprint_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
         dns_version: Generation,
@@ -179,28 +182,46 @@ mod test {
             .copied()
             .map(|sled_id| (sled_id, SledState::Active))
             .collect::<BTreeMap<_, _>>();
-        (
-            BlueprintTarget {
-                target_id: id,
-                enabled: true,
-                time_made_target: chrono::Utc::now(),
-            },
-            Blueprint {
-                id,
-                blueprint_zones,
-                blueprint_disks,
-                sled_state,
-                cockroachdb_setting_preserve_downgrade:
-                    CockroachDbPreserveDowngrade::DoNotModify,
-                parent_blueprint_id: None,
-                internal_dns_version: dns_version,
-                external_dns_version: dns_version,
-                cockroachdb_fingerprint: String::new(),
-                time_created: chrono::Utc::now(),
-                creator: "test".to_string(),
-                comment: "test blueprint".to_string(),
-            },
-        )
+
+        // Ensure the blueprint we're creating is the current target (required
+        // for successful blueprint realization). This requires its parent to be
+        // the existing target, so fetch that first.
+        let current_target = datastore
+            .blueprint_target_get_current(opctx)
+            .await
+            .expect("fetched current target blueprint");
+
+        let target = BlueprintTarget {
+            target_id: id,
+            enabled: true,
+            time_made_target: chrono::Utc::now(),
+        };
+        let blueprint = Blueprint {
+            id,
+            blueprint_zones,
+            blueprint_disks,
+            sled_state,
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::DoNotModify,
+            parent_blueprint_id: Some(current_target.target_id),
+            internal_dns_version: dns_version,
+            external_dns_version: dns_version,
+            cockroachdb_fingerprint: String::new(),
+            time_created: chrono::Utc::now(),
+            creator: "test".to_string(),
+            comment: "test blueprint".to_string(),
+        };
+
+        datastore
+            .blueprint_insert(opctx, &blueprint)
+            .await
+            .expect("inserted new blueprint");
+        datastore
+            .blueprint_target_set_current(opctx, target)
+            .await
+            .expect("set new blueprint as current target");
+
+        (target, blueprint)
     }
 
     #[nexus_test(server = crate::Server)]
@@ -271,11 +292,16 @@ mod test {
         // With a target blueprint having no zones, the task should trivially
         // complete and report a successful (empty) summary.
         let generation = Generation::new();
-        let blueprint = Arc::new(create_blueprint(
-            BTreeMap::new(),
-            BTreeMap::new(),
-            generation,
-        ));
+        let blueprint = Arc::new(
+            create_blueprint(
+                &datastore,
+                &opctx,
+                BTreeMap::new(),
+                BTreeMap::new(),
+                generation,
+            )
+            .await,
+        );
         blueprint_tx.send(Some(blueprint)).unwrap();
         let value = task.activate(&opctx).await;
         println!("activating with no zones: {:?}", value);
@@ -318,13 +344,16 @@ mod test {
         //
         // TODO: add expunged zones to the test (should not be deployed).
         let mut blueprint = create_blueprint(
+            &datastore,
+            &opctx,
             BTreeMap::from([
                 (sled_id1, make_zones(BlueprintZoneDisposition::InService)),
                 (sled_id2, make_zones(BlueprintZoneDisposition::Quiesced)),
             ]),
             BTreeMap::new(),
             generation,
-        );
+        )
+        .await;
 
         // Insert records for the zpools backing the datasets in these zones.
         for (sled_id, config) in

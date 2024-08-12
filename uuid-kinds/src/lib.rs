@@ -51,6 +51,7 @@ macro_rules! impl_typed_uuid_kind {
 impl_typed_uuid_kind! {
     Collection => "collection",
     Dataset => "dataset",
+    DemoSaga => "demo_saga",
     Downstairs => "downstairs",
     DownstairsRegion => "downstairs_region",
     ExternalIp => "external_ip",

@@ -29,7 +29,6 @@ use uuid::Uuid;
 mod cockroachdb;
 mod datasets;
 mod dns;
-mod external_networking;
 mod omicron_physical_disks;
 mod omicron_zones;
 mod overridables;
@@ -113,31 +112,14 @@ pub async fn realize_blueprint_with_overrides(
         "blueprint_id" => %blueprint.id
     );
 
-    // Deallocate external networking resources for non-externally-reachable
-    // zones first. This will allow external networking resource allocation to
-    // succeed if we are swapping an external IP between two zones (e.g., moving
-    // a specific external IP from an old external DNS zone to a new one).
-    external_networking::ensure_zone_external_networking_deallocated(
-        &opctx,
-        datastore,
-        blueprint
-            .all_omicron_zones_not_in(
-                BlueprintZoneFilter::ShouldBeExternallyReachable,
-            )
-            .map(|(_sled_id, zone)| zone),
-    )
-    .await
-    .map_err(|err| vec![err])?;
-
-    external_networking::ensure_zone_external_networking_allocated(
-        &opctx,
-        datastore,
-        blueprint
-            .all_omicron_zones(BlueprintZoneFilter::ShouldBeExternallyReachable)
-            .map(|(_sled_id, zone)| zone),
-    )
-    .await
-    .map_err(|err| vec![err])?;
+    datastore
+        .blueprint_ensure_external_networking_resources(&opctx, blueprint)
+        .await
+        .map_err(|err| {
+            vec![anyhow!(err).context(
+                "failed to ensure external networking resources in database",
+            )]
+        })?;
 
     let sleds_by_id: BTreeMap<SledUuid, _> = datastore
         .sled_list_all_batched(&opctx, SledFilter::InService)

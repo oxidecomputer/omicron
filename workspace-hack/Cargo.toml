@@ -32,13 +32,12 @@ byteorder = { version = "1.5.0" }
 bytes = { version = "1.7.1", features = ["serde"] }
 chrono = { version = "0.4.38", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.5.13", features = ["cargo", "derive", "env", "wrap_help"] }
-clap_builder = { version = "4.5.13", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+clap = { version = "4.5.15", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.5.15", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 console = { version = "0.15.8" }
 const-oid = { version = "0.9.6", default-features = false, features = ["db", "std"] }
 crossbeam-epoch = { version = "0.9.18" }
 crossbeam-utils = { version = "0.8.19" }
-crossterm = { version = "0.27.0", features = ["event-stream", "serde"] }
 crypto-common = { version = "0.1.6", default-features = false, features = ["getrandom", "std"] }
 der = { version = "0.7.9", default-features = false, features = ["derive", "flagset", "oid", "pem", "std"] }
 digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
@@ -86,13 +85,13 @@ predicates = { version = "3.1.2" }
 proc-macro2 = { version = "1.0.86" }
 regex = { version = "1.10.6" }
 regex-automata = { version = "0.4.6", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
-regex-syntax = { version = "0.8.3" }
+regex-syntax = { version = "0.8.4" }
 reqwest = { version = "0.11.27", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.8", features = ["std"] }
 schemars = { version = "0.8.21", features = ["bytes", "chrono", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.23", features = ["serde"] }
-serde = { version = "1.0.204", features = ["alloc", "derive", "rc"] }
+serde = { version = "1.0.206", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.122", features = ["raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.5.0", features = ["bytes", "inline", "unicode"] }
@@ -101,7 +100,7 @@ smallvec = { version = "1.13.2", default-features = false, features = ["const_ne
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.72", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.74", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.36", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1.38.1", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.11", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
@@ -136,13 +135,12 @@ byteorder = { version = "1.5.0" }
 bytes = { version = "1.7.1", features = ["serde"] }
 chrono = { version = "0.4.38", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.5.13", features = ["cargo", "derive", "env", "wrap_help"] }
-clap_builder = { version = "4.5.13", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+clap = { version = "4.5.15", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.5.15", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 console = { version = "0.15.8" }
 const-oid = { version = "0.9.6", default-features = false, features = ["db", "std"] }
 crossbeam-epoch = { version = "0.9.18" }
 crossbeam-utils = { version = "0.8.19" }
-crossterm = { version = "0.27.0", features = ["event-stream", "serde"] }
 crypto-common = { version = "0.1.6", default-features = false, features = ["getrandom", "std"] }
 der = { version = "0.7.9", default-features = false, features = ["derive", "flagset", "oid", "pem", "std"] }
 digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
@@ -190,13 +188,13 @@ predicates = { version = "3.1.2" }
 proc-macro2 = { version = "1.0.86" }
 regex = { version = "1.10.6" }
 regex-automata = { version = "0.4.6", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
-regex-syntax = { version = "0.8.3" }
+regex-syntax = { version = "0.8.4" }
 reqwest = { version = "0.11.27", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.8", features = ["std"] }
 schemars = { version = "0.8.21", features = ["bytes", "chrono", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.23", features = ["serde"] }
-serde = { version = "1.0.204", features = ["alloc", "derive", "rc"] }
+serde = { version = "1.0.206", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.122", features = ["raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.5.0", features = ["bytes", "inline", "unicode"] }
@@ -206,7 +204,7 @@ spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extra-traits", "fold", "full", "visit"] }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.72", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.74", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.36", features = ["formatting", "local-offset", "macros", "parsing"] }
 time-macros = { version = "0.2.18", default-features = false, features = ["formatting", "parsing"] }
 tokio = { version = "1.38.1", features = ["full", "test-util"] }
@@ -232,40 +230,47 @@ dof = { version = "0.3.0", default-features = false, features = ["des"] }
 linux-raw-sys = { version = "0.4.13", default-features = false, features = ["elf", "errno", "general", "ioctl", "no_std", "std", "system"] }
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
+signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
 linux-raw-sys = { version = "0.4.13", default-features = false, features = ["elf", "errno", "general", "ioctl", "no_std", "std", "system"] }
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
+signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 
 [target.x86_64-apple-darwin.dependencies]
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
+signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 
 [target.x86_64-apple-darwin.build-dependencies]
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
+signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 
 [target.aarch64-apple-darwin.dependencies]
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
+signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 
 [target.aarch64-apple-darwin.build-dependencies]
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
+signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 
 [target.x86_64-unknown-illumos.dependencies]
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
+signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 toml_datetime = { version = "0.6.8", default-features = false, features = ["serde"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 
@@ -273,7 +278,8 @@ toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", featu
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
 mio = { version = "0.8.11", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["fs", "system", "termios"] }
+rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
+signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 toml_datetime = { version = "0.6.8", default-features = false, features = ["serde"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 

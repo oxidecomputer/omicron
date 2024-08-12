@@ -13,14 +13,13 @@ use crate::instance_manager::InstanceManager;
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::metrics::MetricsManager;
 use crate::nexus::{
-    NexusClientWithResolver, NexusNotifierHandle, NexusNotifierInput,
-    NexusNotifierTask,
+    NexusClient, NexusNotifierHandle, NexusNotifierInput, NexusNotifierTask,
 };
 use crate::params::{
     DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
-    InstanceMetadata, InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse, OmicronZoneTypeExt,
-    TimeSync, VpcFirewallRule, ZoneBundleMetadata, Zpool,
+    InstanceMetadata, InstancePutStateResponse, InstanceStateRequested,
+    InstanceUnregisterResponse, OmicronZoneTypeExt, TimeSync, VpcFirewallRule,
+    ZoneBundleMetadata, Zpool,
 };
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
@@ -320,7 +319,7 @@ struct SledAgentInner {
     services: ServiceManager,
 
     // Connection to Nexus.
-    nexus_client: NexusClientWithResolver,
+    nexus_client: NexusClient,
 
     // A mechanism for notifiying nexus about sled-agent updates
     nexus_notifier: NexusNotifierHandle,
@@ -365,7 +364,7 @@ impl SledAgent {
     pub async fn new(
         config: &Config,
         log: Logger,
-        nexus_client: NexusClientWithResolver,
+        nexus_client: NexusClient,
         request: StartSledAgentRequest,
         services: ServiceManager,
         long_running_task_handles: LongRunningTaskHandles,
@@ -552,7 +551,7 @@ impl SledAgent {
         let nexus_notifier_input = NexusNotifierInput {
             sled_id: request.body.id,
             sled_address: get_sled_address(request.body.subnet),
-            nexus_client: nexus_client.client().clone(),
+            nexus_client: nexus_client.clone(),
             hardware: long_running_task_handles.hardware_manager.clone(),
             vmm_reservoir_manager: vmm_reservoir_manager.clone(),
         };
@@ -688,7 +687,6 @@ impl SledAgent {
 
         self.inner
             .nexus_client
-            .client()
             .sled_firewall_rules_request(&sled_id)
             .await
             .map_err(|err| Error::FirewallRequest(err))?;
@@ -1011,23 +1009,6 @@ impl SledAgent {
             .map_err(|e| Error::Instance(e))
     }
 
-    /// Idempotently ensures that the instance's runtime state contains the
-    /// supplied migration IDs, provided that the caller continues to meet the
-    /// conditions needed to change those IDs. See the doc comments for
-    /// [`crate::params::InstancePutMigrationIdsBody`].
-    pub async fn instance_put_migration_ids(
-        &self,
-        instance_id: InstanceUuid,
-        old_runtime: &InstanceRuntimeState,
-        migration_ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<SledInstanceState, Error> {
-        self.inner
-            .instances
-            .put_migration_ids(instance_id, old_runtime, migration_ids)
-            .await
-            .map_err(|e| Error::Instance(e))
-    }
-
     /// Idempotently ensures that an instance's OPTE/port state includes the
     /// specified external IP address.
     ///
@@ -1091,7 +1072,7 @@ impl SledAgent {
     ) -> Result<(), Error> {
         self.inner
             .updates
-            .download_artifact(artifact, &self.inner.nexus_client.client())
+            .download_artifact(artifact, &self.inner.nexus_client)
             .await?;
         Ok(())
     }

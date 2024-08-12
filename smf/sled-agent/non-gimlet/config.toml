@@ -84,7 +84,7 @@ data_links = ["net0", "net1"]
 request_body_max_bytes = 2_147_483_648
 
 [log]
-level = "debug"
+level = "info"
 mode = "file"
 path = "/dev/stdout"
 if_exists = "append"

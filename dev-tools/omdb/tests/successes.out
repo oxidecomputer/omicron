@@ -287,6 +287,10 @@ task: "external_endpoints"
     on each one
 
 
+task: "instance_updater"
+    detects if instances require update sagas and schedules them
+
+
 task: "instance_watcher"
     periodically checks instance states
 
@@ -482,6 +486,17 @@ task: "external_endpoints"
 
     TLS certificates: 0
 
+task: "instance_updater"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total instances in need of updates: 0
+      instances with destroyed active VMMs: 0
+      instances with terminated active migrations: 0
+    update sagas started: 0
+    update sagas completed successfully: 0
+
 task: "instance_watcher"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
@@ -490,6 +505,7 @@ task: "instance_watcher"
     total instances checked: 0
     checks completed: 0
        successful checks: 0
+       update sagas queued: 0
        failed checks: 0
     checks that could not be completed: 0
     stale instance metrics pruned: 0
@@ -608,6 +624,41 @@ warning: unknown background task: "vpc_route_manager" (don't know how to interpr
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "sagas", "list"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+SAGA_ID STATE 
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+NOTE: This command only reads in-memory state from the targeted Nexus instance.
+Sagas may be missing if they were run by a different Nexus instance or if they
+finished before this Nexus instance last started up.
+=============================================
+EXECUTING COMMAND: omdb ["--destructive", "nexus", "sagas", "demo-create"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+saga id:      ..........<REDACTED_UUID>...........
+demo saga id: ..........<REDACTED_UUID>........... (use this with `demo-complete`)
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "sagas", "list"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+SAGA_ID                              STATE   
+..........<REDACTED_UUID>........... running 
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+NOTE: This command only reads in-memory state from the targeted Nexus instance.
+Sagas may be missing if they were run by a different Nexus instance or if they
+finished before this Nexus instance last started up.
 =============================================
 EXECUTING COMMAND: omdb ["--destructive", "nexus", "background-tasks", "activate", "inventory_collection"]
 termination: Exited(0)

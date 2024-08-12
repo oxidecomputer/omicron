@@ -81,6 +81,16 @@ async fn test_omdb_usage_errors() {
         &["nexus"],
         &["nexus", "background-tasks"],
         &["nexus", "blueprints"],
+        &["nexus", "sagas"],
+        // Missing "--destructive" flag.  The URL is bogus but just ensures that
+        // we get far enough to hit the error we care about.
+        &[
+            "nexus",
+            "--nexus-internal-url",
+            "http://[::1]:111",
+            "sagas",
+            "demo-create",
+        ],
         &["nexus", "sleds"],
         &["sled-agent"],
         &["sled-agent", "zones"],
@@ -134,6 +144,9 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["mgs", "inventory"],
         &["nexus", "background-tasks", "doc"],
         &["nexus", "background-tasks", "show"],
+        &["nexus", "sagas", "list"],
+        &["--destructive", "nexus", "sagas", "demo-create"],
+        &["nexus", "sagas", "list"],
         &[
             "--destructive",
             "nexus",
@@ -325,6 +338,16 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
 
     let args = &["--dns-server", &dns_sockaddr.to_string(), "db", "sleds"];
     do_run(&mut output, move |exec| exec, &cmd_path, args).await;
+
+    // That said, the "sagas" command prints an extra warning in this case.
+    let args = &["nexus", "sagas", "list"];
+    do_run(
+        &mut output,
+        move |exec| exec.env("OMDB_DNS_SERVER", &dns_sockaddr.to_string()),
+        &cmd_path,
+        args,
+    )
+    .await;
 
     // Case: specified in multiple places (command-line argument wins)
     let args = &["oximeter", "--oximeter-url", "junk", "list-producers"];

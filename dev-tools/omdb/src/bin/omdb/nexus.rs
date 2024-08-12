@@ -25,6 +25,7 @@ use nexus_client::types::BackgroundTasksActivateRequest;
 use nexus_client::types::CurrentStatus;
 use nexus_client::types::LastResult;
 use nexus_client::types::PhysicalDiskPath;
+use nexus_client::types::SagaState;
 use nexus_client::types::SledSelector;
 use nexus_client::types::UninitializedSledId;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -34,6 +35,7 @@ use nexus_types::internal_api::background::LookupRegionPortStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
 use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::DemoSagaUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -71,6 +73,8 @@ enum NexusCommands {
     BackgroundTasks(BackgroundTasksArgs),
     /// interact with blueprints
     Blueprints(BlueprintsArgs),
+    /// view sagas, create and complete demo sagas
+    Sagas(SagasArgs),
     /// interact with sleds
     Sleds(SledsArgs),
 }
@@ -245,6 +249,36 @@ struct BlueprintImportArgs {
 }
 
 #[derive(Debug, Args)]
+struct SagasArgs {
+    #[command(subcommand)]
+    command: SagasCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum SagasCommands {
+    /// List sagas run by this Nexus
+    ///
+    /// Note that this is reporting in-memory state about sagas run by *this*
+    /// Nexus instance.  You'll get different answers if you ask different Nexus
+    /// instances.
+    List,
+
+    /// Create a "demo" saga
+    ///
+    /// This saga will wait until it's explicitly completed using the
+    /// "demo-complete" subcommand.
+    DemoCreate,
+
+    /// Complete a demo saga started with "demo-create".
+    DemoComplete(DemoSagaIdArgs),
+}
+
+#[derive(Debug, Args)]
+struct DemoSagaIdArgs {
+    demo_saga_id: DemoSagaUuid,
+}
+
+#[derive(Debug, Args)]
 struct SledsArgs {
     #[command(subcommand)]
     command: SledsCommands,
@@ -400,6 +434,34 @@ impl NexusArgs {
             }) => {
                 let token = omdb.check_allow_destructive()?;
                 cmd_nexus_blueprints_import(&client, token, args).await
+            }
+
+            NexusCommands::Sagas(SagasArgs { command }) => {
+                if self.nexus_internal_url.is_none() {
+                    eprintln!(
+                        "{}",
+                        textwrap::wrap(
+                            "WARNING: A Nexus instance was selected from DNS \
+                            because a specific one was not specified.  But \
+                            the `omdb nexus sagas` commands usually only make \
+                            sense when targeting a specific Nexus instance.",
+                            80
+                        )
+                        .join("\n")
+                    );
+                }
+                match command {
+                    SagasCommands::List => cmd_nexus_sagas_list(&client).await,
+                    SagasCommands::DemoCreate => {
+                        let token = omdb.check_allow_destructive()?;
+                        cmd_nexus_sagas_demo_create(&client, token).await
+                    }
+                    SagasCommands::DemoComplete(args) => {
+                        let token = omdb.check_allow_destructive()?;
+                        cmd_nexus_sagas_demo_complete(&client, args, token)
+                            .await
+                    }
+                }
             }
 
             NexusCommands::Sleds(SledsArgs {
@@ -929,6 +991,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             /// number of stale instance metrics that were deleted
             pruned_instances: usize,
 
+            /// update sagas queued due to instance updates.
+            update_sagas_queued: usize,
+
             /// instance states from completed checks.
             ///
             /// this is a mapping of stringified instance states to the number
@@ -970,6 +1035,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             ),
             Ok(TaskSuccess {
                 total_instances,
+                update_sagas_queued,
                 pruned_instances,
                 instance_states,
                 failed_checks,
@@ -987,7 +1053,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 for (state, count) in &instance_states {
                     println!("       -> {count} instances {state}")
                 }
-
+                println!("       update sagas queued: {update_sagas_queued}");
                 println!("       failed checks: {total_failures}");
                 for (failure, count) in &failed_checks {
                     println!("       -> {count} {failure}")
@@ -1239,11 +1305,6 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
     } else if name == "lookup_region_port" {
         match serde_json::from_value::<LookupRegionPortStatus>(details.clone())
         {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
-
             Ok(LookupRegionPortStatus { found_port_ok, errors }) => {
                 println!("    total filled in ports: {}", found_port_ok.len());
                 for line in &found_port_ok {
@@ -1253,6 +1314,83 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 println!("    errors: {}", errors.len());
                 for line in &errors {
                     println!("    > {line}");
+                }
+            }
+
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details,
+            ),
+        }
+    } else if name == "instance_updater" {
+        #[derive(Deserialize)]
+        struct UpdaterStatus {
+            /// number of instances found with destroyed active VMMs
+            destroyed_active_vmms: usize,
+
+            /// number of instances found with terminated active migrations
+            terminated_active_migrations: usize,
+
+            /// number of update sagas started.
+            sagas_started: usize,
+
+            /// number of sagas completed successfully
+            sagas_completed: usize,
+
+            /// number of sagas which failed
+            sagas_failed: usize,
+
+            /// number of sagas which could not be started
+            saga_start_failures: usize,
+
+            /// the last error that occurred during execution.
+            error: Option<String>,
+        }
+        match serde_json::from_value::<UpdaterStatus>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(UpdaterStatus {
+                destroyed_active_vmms,
+                terminated_active_migrations,
+                sagas_started,
+                sagas_completed,
+                sagas_failed,
+                saga_start_failures,
+                error,
+            }) => {
+                if let Some(error) = error {
+                    println!("    task did not complete successfully!");
+                    println!("      most recent error: {error}");
+                }
+
+                println!(
+                    "    total instances in need of updates: {}",
+                    destroyed_active_vmms + terminated_active_migrations
+                );
+                println!(
+                    "      instances with destroyed active VMMs: {}",
+                    destroyed_active_vmms,
+                );
+                println!(
+                    "      instances with terminated active migrations: {}",
+                    terminated_active_migrations,
+                );
+                println!("    update sagas started: {sagas_started}");
+                println!(
+                    "    update sagas completed successfully: {}",
+                    sagas_completed,
+                );
+
+                let total_failed = sagas_failed + saga_start_failures;
+                if total_failed > 0 {
+                    println!("    unsuccessful update sagas: {total_failed}");
+                    println!(
+                        "      sagas which could not be started: {}",
+                        saga_start_failures
+                    );
+                    println!("      sagas failed: {sagas_failed}");
                 }
             }
         };
@@ -1548,6 +1686,91 @@ async fn cmd_nexus_blueprints_import(
         .with_context(|| format!("upload {:?}", input_path))?;
     eprintln!("uploaded new blueprint {}", blueprint.id);
     Ok(())
+}
+
+/// Runs `omdb nexus sagas list`
+async fn cmd_nexus_sagas_list(
+    client: &nexus_client::Client,
+) -> Result<(), anyhow::Error> {
+    // We don't want users to confuse this with a general way to list all sagas.
+    // Such a command would read database state and it would go under "omdb db".
+    eprintln!(
+        "{}",
+        textwrap::wrap(
+            "NOTE: This command only reads in-memory state from the targeted \
+            Nexus instance.  Sagas may be missing if they were run by a \
+            different Nexus instance or if they finished before this Nexus \
+            instance last started up.",
+            80
+        )
+        .join("\n")
+    );
+
+    let saga_stream = client.saga_list_stream(None, None);
+    let sagas =
+        saga_stream.try_collect::<Vec<_>>().await.context("listing sagas")?;
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct SagaRow {
+        saga_id: Uuid,
+        state: &'static str,
+    }
+    let rows = sagas.into_iter().map(|saga| SagaRow {
+        saga_id: saga.id,
+        state: match saga.state {
+            SagaState::Running => "running",
+            SagaState::Succeeded => "succeeded",
+            SagaState::Failed { .. } => "failed",
+            SagaState::Stuck { .. } => "stuck",
+        },
+    });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+    println!("{}", table);
+    Ok(())
+}
+
+/// Runs `omdb nexus sagas demo-create`
+async fn cmd_nexus_sagas_demo_create(
+    client: &nexus_client::Client,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let demo_saga =
+        client.saga_demo_create().await.context("creating demo saga")?;
+    println!("saga id:      {}", demo_saga.saga_id);
+    println!(
+        "demo saga id: {} (use this with `demo-complete`)",
+        demo_saga.demo_saga_id,
+    );
+    Ok(())
+}
+
+/// Runs `omdb nexus sagas demo-complete`
+async fn cmd_nexus_sagas_demo_complete(
+    client: &nexus_client::Client,
+    args: &DemoSagaIdArgs,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    if let Err(error) = client
+        .saga_demo_complete(&args.demo_saga_id)
+        .await
+        .context("completing demo saga")
+    {
+        eprintln!("error: {:#}", error);
+        eprintln!(
+            "note: `demo-complete` must be run against the same Nexus \
+            instance that is currently running that saga."
+        );
+        eprintln!(
+            "note: Be sure that you're using the demo_saga_id, not the saga_id."
+        );
+        Err(error)
+    } else {
+        Ok(())
+    }
 }
 
 /// Runs `omdb nexus sleds list-uninitialized`
