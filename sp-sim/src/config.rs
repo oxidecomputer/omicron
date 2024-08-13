@@ -5,6 +5,7 @@
 //! Interfaces for parsing configuration files and working with a simulated SP
 //! configuration
 
+use crate::sensors;
 use dropshot::ConfigLogging;
 use gateway_messages::DeviceCapabilities;
 use gateway_messages::DevicePresence;
@@ -59,6 +60,8 @@ pub struct SpComponentConfig {
     ///
     /// Only supported for components inside a [`GimletConfig`].
     pub serial_console: Option<SocketAddrV6>,
+
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub sensors: Vec<SensorConfig>,
 }
 
@@ -92,6 +95,16 @@ pub struct Config {
     pub simulated_sps: SimulatedSpsConfig,
     /// Server-wide logging configuration.
     pub log: ConfigLogging,
+}
+
+/// Configuration for a component's sensor readings.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SensorConfig {
+    #[serde(flatten)]
+    pub def: sensors::SensorDef,
+
+    #[serde(flatten)]
+    pub state: sensors::SensorState,
 }
 
 impl Config {

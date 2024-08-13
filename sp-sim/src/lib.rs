@@ -5,6 +5,7 @@
 pub mod config;
 mod gimlet;
 mod helpers;
+mod sensors;
 mod server;
 mod sidecar;
 mod update;
