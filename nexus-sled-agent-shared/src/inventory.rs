@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 // Export this type for convenience -- this way, dependents don't have to
 // depend on sled-hardware-types.
 pub use sled_hardware_types::Baseboard;
+use strum::EnumIter;
 use uuid::Uuid;
 
 /// Identifies information about disks which may be attached to Sleds.
@@ -381,7 +382,9 @@ impl OmicronZoneType {
 /// the four representations if at all possible. If you must add a new one,
 /// please add it here rather than doing something ad-hoc in the calling code
 /// so it's more legible.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, EnumIter,
+)]
 pub enum ZoneKind {
     BoundaryNtp,
     Clickhouse,
@@ -453,7 +456,7 @@ impl ZoneKind {
             ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => Self::NTP_PREFIX,
             ZoneKind::Clickhouse => "clickhouse",
             ZoneKind::ClickhouseKeeper => "clickhouse-keeper",
-            ZoneKind::ClickhouseServer => "clickhouse_server",
+            ZoneKind::ClickhouseServer => "clickhouse-server",
             // Note "cockroach" for historical reasons.
             ZoneKind::CockroachDb => "cockroach",
             ZoneKind::Crucible => "crucible",
@@ -483,6 +486,27 @@ impl ZoneKind {
             ZoneKind::InternalNtp => "internal_ntp",
             ZoneKind::Nexus => "nexus",
             ZoneKind::Oximeter => "oximeter",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use omicron_common::api::external::Name;
+    use strum::IntoEnumIterator;
+
+    use super::*;
+
+    #[test]
+    fn test_name_prefixes() {
+        for zone_kind in ZoneKind::iter() {
+            let name_prefix = zone_kind.name_prefix();
+            name_prefix.parse::<Name>().unwrap_or_else(|e| {
+                panic!(
+                    "failed to parse name prefix {:?} for zone kind {:?}: {}",
+                    name_prefix, zone_kind, e
+                );
+            });
         }
     }
 }
