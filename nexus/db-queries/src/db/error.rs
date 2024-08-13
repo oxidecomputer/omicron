@@ -8,6 +8,7 @@ use crate::transaction_retry::OptionalError;
 use diesel::result::DatabaseErrorInformation;
 use diesel::result::DatabaseErrorKind as DieselErrorKind;
 use diesel::result::Error as DieselError;
+use omicron_common::api::external::MessagePair;
 use omicron_common::api::external::{
     Error as PublicError, LookupType, ResourceType,
 };
@@ -194,6 +195,40 @@ pub fn public_error_from_diesel(
             public_error_from_diesel_create(error, resource_type, object_name)
         }
         ErrorHandler::Server => PublicError::internal_error(&format!(
+            "unexpected database error: {:#}",
+            error
+        )),
+    }
+}
+
+/// Converts a Diesel transaction connection error to a public-facing error.
+/// This function is intended to be used whenever we have multiple db operations
+/// in a single transaction that can return different errors.
+///
+/// [`ErrorHandler`] may be used to add additional handlers for the error
+/// being returned.
+pub fn public_error_from_diesel_transaction(error: DieselError) -> PublicError {
+    match &error {
+        diesel::result::Error::DatabaseError(kind, info) => match kind {
+            diesel::result::DatabaseErrorKind::UniqueViolation => {
+                PublicError::conflict(info.message())
+            }
+            diesel::result::DatabaseErrorKind::NotNullViolation => {
+                PublicError::invalid_request(info.message())
+            }
+            diesel::result::DatabaseErrorKind::CheckViolation => {
+                PublicError::invalid_request(info.message())
+            }
+            _ => PublicError::internal_error(&format!(
+                "unexpected database error: {:#}",
+                error
+            )),
+        },
+        diesel::result::Error::NotFound => {
+            let message = MessagePair::new(error.to_string());
+            PublicError::NotFound { message }
+        }
+        _ => PublicError::internal_error(&format!(
             "unexpected database error: {:#}",
             error
         )),

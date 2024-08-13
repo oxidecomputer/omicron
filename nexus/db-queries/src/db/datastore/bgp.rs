@@ -5,7 +5,7 @@
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::{public_error_from_diesel, ErrorHandler};
+use crate::db::error::public_error_from_diesel_transaction;
 use crate::db::model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig, Name};
 use crate::db::pagination::paginated;
 use crate::transaction_retry::OptionalError;
@@ -110,7 +110,10 @@ impl DataStore {
                     .await
             })
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| {
+                error!(opctx.log, "database error: {e:#?}");
+                public_error_from_diesel_transaction(e)
+            })
     }
 
     pub async fn bgp_config_delete(
@@ -178,7 +181,9 @@ impl DataStore {
                         }
                     }
                 } else {
-                    public_error_from_diesel(e, ErrorHandler::Server)
+                    {
+error!(opctx.log, "database error: {e:#?}");
+ public_error_from_diesel_transaction(e)}
                 }
             })
     }
@@ -201,14 +206,20 @@ impl DataStore {
                 .limit(1)
                 .first_async::<BgpConfig>(&*conn)
                 .await
-                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server)),
+                .map_err(|e| {
+                    error!(opctx.log, "database error: {e:#?}");
+                    public_error_from_diesel_transaction(e)
+                }),
             NameOrId::Id(id) => dsl::bgp_config
                 .filter(bgp_config::id.eq(id))
                 .select(BgpConfig::as_select())
                 .limit(1)
                 .first_async::<BgpConfig>(&*conn)
                 .await
-                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server)),
+                .map_err(|e| {
+                    error!(opctx.log, "database error: {e:#?}");
+                    public_error_from_diesel_transaction(e)
+                }),
         }?;
 
         Ok(config)
@@ -237,7 +248,10 @@ impl DataStore {
         .select(BgpConfig::as_select())
         .load_async(&*conn)
         .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        .map_err(|e| {
+            error!(opctx.log, "database error: {e:#?}");
+            public_error_from_diesel_transaction(e)
+        })
     }
 
     pub async fn bgp_announce_list(
@@ -309,7 +323,10 @@ impl DataStore {
                         }
                     }
                 } else {
-                    public_error_from_diesel(e, ErrorHandler::Server)
+                    {
+                        error!(opctx.log, "database error: {e:#?}");
+                        public_error_from_diesel_transaction(e)
+                    }
                 }
             })
     }
@@ -383,7 +400,10 @@ impl DataStore {
                 Ok((db_as, db_annoucements))
             })
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| {
+                error!(opctx.log, "database error: {e:#?}");
+                public_error_from_diesel_transaction(e)
+            })
     }
 
     pub async fn bgp_create_announce_set(
@@ -466,7 +486,10 @@ impl DataStore {
                 Ok((db_as, db_annoucements))
             })
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| {
+                error!(opctx.log, "database error: {e:#?}");
+                public_error_from_diesel_transaction(e)
+            })
     }
 
     pub async fn bgp_delete_announce_set(
@@ -544,7 +567,10 @@ impl DataStore {
                         }
                     }
                 } else {
-                    public_error_from_diesel(e, ErrorHandler::Server)
+                    {
+                        error!(opctx.log, "database error: {e:#?}");
+                        public_error_from_diesel_transaction(e)
+                    }
                 }
             })
     }
@@ -563,7 +589,10 @@ impl DataStore {
             .select(BgpPeerView::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(|e| {
+                error!(opctx.log, "database error: {e:#?}");
+                public_error_from_diesel_transaction(e)
+            })?;
 
         Ok(results)
     }
@@ -583,7 +612,10 @@ impl DataStore {
             .filter(dsl::addr.eq(addr))
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(|e| {
+                error!(opctx.log, "database error: {e:#?}");
+                public_error_from_diesel_transaction(e)
+            })?;
 
         Ok(results)
     }
@@ -629,7 +661,10 @@ impl DataStore {
                 Ok(Some(list))
             })
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(|e| {
+                error!(opctx.log, "database error: {e:#?}");
+                public_error_from_diesel_transaction(e)
+            })?;
 
         Ok(result)
     }
@@ -675,7 +710,10 @@ impl DataStore {
                 Ok(Some(list))
             })
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(|e| {
+                error!(opctx.log, "database error: {e:#?}");
+                public_error_from_diesel_transaction(e)
+            })?;
 
         Ok(result)
     }
