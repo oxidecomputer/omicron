@@ -261,12 +261,29 @@ impl BackgroundTask for RegionSnapshotReplacementDetector {
 mod test {
     use super::*;
     use crate::app::background::init::test::NoopStartSaga;
+    use crate::app::MIN_DISK_SIZE_BYTES;
+    use chrono::Utc;
+    use nexus_db_model::BlockSize;
+    use nexus_db_model::Generation;
+    use nexus_db_model::PhysicalDiskPolicy;
+    use nexus_db_model::RegionSnapshot;
     use nexus_db_model::RegionSnapshotReplacement;
+    use nexus_db_model::Snapshot;
+    use nexus_db_model::SnapshotIdentity;
+    use nexus_db_model::SnapshotState;
+    use nexus_db_queries::authz;
+    use nexus_db_queries::db::lookup::LookupPath;
+    use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
+    use omicron_common::api::external;
+    use omicron_uuid_kinds::GenericUuid;
+    use std::collections::BTreeMap;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+    type DiskTest<'a> =
+        nexus_test_utils::resource_helpers::DiskTest<'a, crate::Server>;
 
     #[nexus_test(server = crate::Server)]
     async fn test_add_region_snapshot_replacement_causes_start(
@@ -327,5 +344,168 @@ mod test {
         );
 
         assert_eq!(starter.count_reset(), 1);
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_expunge_disk_causes_region_snapshot_replacement_start(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let disk_test = DiskTest::new(cptestctx).await;
+
+        let client = &cptestctx.external_client;
+        let project = create_project(&client, "testing").await;
+        let project_id = project.identity.id;
+
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        let starter = Arc::new(NoopStartSaga::new());
+        let mut task = RegionSnapshotReplacementDetector::new(
+            datastore.clone(),
+            starter.clone(),
+        );
+
+        // Noop test
+        let result: RegionSnapshotReplacementStartStatus =
+            serde_json::from_value(task.activate(&opctx).await).unwrap();
+        assert_eq!(result, RegionSnapshotReplacementStartStatus::default());
+        assert_eq!(starter.count_reset(), 0);
+
+        // Add three region snapshots for each dataset
+
+        let region_id = Uuid::new_v4();
+        let snapshot_id = Uuid::new_v4();
+        let mut dataset_to_zpool: BTreeMap<String, String> =
+            BTreeMap::default();
+
+        for zpool in disk_test.zpools() {
+            for dataset in &zpool.datasets {
+                dataset_to_zpool
+                    .insert(zpool.id.to_string(), dataset.id.to_string());
+
+                datastore
+                    .region_snapshot_create(RegionSnapshot::new(
+                        dataset.id,
+                        region_id,
+                        snapshot_id,
+                        String::from("[fd00:1122:3344::101]:12345"),
+                    ))
+                    .await
+                    .unwrap();
+            }
+        }
+
+        // Create the fake snapshot
+
+        let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+            .project_id(project_id)
+            .lookup_for(authz::Action::CreateChild)
+            .await
+            .unwrap();
+
+        datastore
+            .project_ensure_snapshot(
+                &opctx,
+                &authz_project,
+                Snapshot {
+                    identity: SnapshotIdentity {
+                        id: snapshot_id,
+                        name: external::Name::try_from("snapshot".to_string())
+                            .unwrap()
+                            .into(),
+                        description: "snapshot".into(),
+
+                        time_created: Utc::now(),
+                        time_modified: Utc::now(),
+                        time_deleted: None,
+                    },
+
+                    project_id,
+                    disk_id: Uuid::new_v4(),
+                    volume_id: Uuid::new_v4(),
+                    destination_volume_id: Uuid::new_v4(),
+
+                    gen: Generation::new(),
+                    state: SnapshotState::Creating,
+                    block_size: BlockSize::AdvancedFormat,
+
+                    size: external::ByteCount::try_from(MIN_DISK_SIZE_BYTES)
+                        .unwrap()
+                        .into(),
+                },
+            )
+            .await
+            .unwrap();
+
+        // Expunge one of the physical disks
+
+        let first_zpool =
+            disk_test.zpools().next().expect("Expected at least one zpool");
+
+        let (_, db_zpool) = LookupPath::new(&opctx, datastore)
+            .zpool_id(first_zpool.id.into_untyped_uuid())
+            .fetch()
+            .await
+            .unwrap();
+
+        datastore
+            .physical_disk_update_policy(
+                &opctx,
+                db_zpool.physical_disk_id,
+                PhysicalDiskPolicy::Expunged,
+            )
+            .await
+            .unwrap();
+
+        // Activate the task - it should pick that up and try to run the region
+        // snapshot replacement start saga for the region snapshot on that
+        // expunged disk
+
+        let result: RegionSnapshotReplacementStartStatus =
+            serde_json::from_value(task.activate(&opctx).await).unwrap();
+
+        eprintln!("{:?}", &result);
+
+        assert_eq!(result.requests_created_ok.len(), 1);
+        assert_eq!(result.start_invoked_ok.len(), 1);
+        assert!(result.errors.is_empty());
+
+        // The last part of the message is the region snapshot replacement
+        // request id
+        let request_created_uuid: Uuid = result.requests_created_ok[0]
+            .split(" ")
+            .last()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let request_started_uuid: Uuid = result.start_invoked_ok[0]
+            .split(" ")
+            .last()
+            .unwrap()
+            .parse()
+            .unwrap();
+
+        assert_eq!(request_created_uuid, request_started_uuid);
+
+        assert_eq!(starter.count_reset(), 1);
+
+        let request = datastore
+            .get_region_snapshot_replacement_request_by_id(
+                &opctx,
+                request_created_uuid,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(request.old_snapshot_id, snapshot_id);
+        assert_eq!(request.old_region_id, region_id);
+
+        let dataset_id =
+            dataset_to_zpool.get(&first_zpool.id.to_string()).unwrap();
+        assert_eq!(&request.old_dataset_id.to_string(), dataset_id);
     }
 }
