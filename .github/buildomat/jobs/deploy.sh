@@ -14,7 +14,7 @@
 #:  "%/pool/ext/*/crypt/debug/oxz_*/oxide-*.log.*",
 #:  "%/pool/ext/*/crypt/debug/oxz_*/system-illumos-*.log.*",
 #:  "!/pool/ext/*/crypt/debug/oxz_propolis-server_*/*.log.*",
-#:  "%/pool/ext/*/crypt/zone/oxz_internal_dns_*/var/tmp/trace"
+#:  "%/pool/ext/*/crypt/zone/oxz_internal_dns_*/root/var/tmp/trace"
 #: ]
 #: skip_clone = true
 #:
