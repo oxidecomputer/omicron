@@ -39,6 +39,7 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
@@ -241,6 +242,7 @@ impl super::Nexus {
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
         // Validate parameters
+        check_instance_cpu_memory_sizes(params.ncpus, params.memory)?;
         if params.disks.len() > MAX_DISKS_PER_INSTANCE as usize {
             return Err(Error::invalid_request(&format!(
                 "cannot attach more than {} disks to instance",
@@ -252,12 +254,6 @@ impl super::Nexus {
                 self.validate_disk_create_params(opctx, &authz_project, create)
                     .await?;
             }
-        }
-        if params.ncpus.0 > MAX_VCPU_PER_INSTANCE {
-            return Err(Error::invalid_request(&format!(
-                "cannot have more than {} vCPUs per instance",
-                MAX_VCPU_PER_INSTANCE
-            )));
         }
         if params.external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
             return Err(Error::invalid_request(&format!(
@@ -301,43 +297,6 @@ impl super::Nexus {
                     "All interfaces must be in the same VPC",
                 ));
             }
-        }
-
-        // Reject instances where the memory is not at least
-        // MIN_MEMORY_BYTES_PER_INSTANCE
-        if params.memory.to_bytes() < u64::from(MIN_MEMORY_BYTES_PER_INSTANCE) {
-            return Err(Error::invalid_value(
-                "size",
-                format!(
-                    "memory must be at least {}",
-                    ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE)
-                ),
-            ));
-        }
-
-        // Reject instances where the memory is not divisible by
-        // MIN_MEMORY_BYTES_PER_INSTANCE
-        if (params.memory.to_bytes() % u64::from(MIN_MEMORY_BYTES_PER_INSTANCE))
-            != 0
-        {
-            return Err(Error::invalid_value(
-                "size",
-                format!(
-                    "memory must be divisible by {}",
-                    ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE)
-                ),
-            ));
-        }
-
-        // Reject instances where the memory is greater than the limit
-        if params.memory.to_bytes() > MAX_MEMORY_BYTES_PER_INSTANCE {
-            return Err(Error::invalid_value(
-                "size",
-                format!(
-                    "memory must be less than or equal to {}",
-                    ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE).unwrap()
-                ),
-            ));
         }
 
         let actor = opctx.authn.actor_required().internal_context(
@@ -649,13 +608,14 @@ impl super::Nexus {
         self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
     }
 
-    /// Resizes the requested instance.
+    /// Resizes an instance.
     pub(crate) async fn instance_resize(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         new_size: params::InstanceResize,
     ) -> UpdateResult<InstanceAndActiveVmm> {
+        check_instance_cpu_memory_sizes(new_size.ncpus, new_size.memory)?;
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
@@ -1906,6 +1866,57 @@ pub(crate) async fn notify_instance_updated(
     }
 }
 
+/// Determines whether the supplied instance sizes (CPU count and memory size)
+/// are acceptable.
+fn check_instance_cpu_memory_sizes(
+    ncpus: InstanceCpuCount,
+    memory: ByteCount,
+) -> Result<(), Error> {
+    if ncpus.0 > MAX_VCPU_PER_INSTANCE {
+        return Err(Error::invalid_request(&format!(
+            "cannot have more than {} vCPUs per instance",
+            MAX_VCPU_PER_INSTANCE
+        )));
+    }
+
+    // Reject instances where the memory is not at least
+    // MIN_MEMORY_BYTES_PER_INSTANCE
+    if memory.to_bytes() < u64::from(MIN_MEMORY_BYTES_PER_INSTANCE) {
+        return Err(Error::invalid_value(
+            "size",
+            format!(
+                "memory must be at least {}",
+                ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE)
+            ),
+        ));
+    }
+
+    // Reject instances where the memory is not divisible by
+    // MIN_MEMORY_BYTES_PER_INSTANCE
+    if (memory.to_bytes() % u64::from(MIN_MEMORY_BYTES_PER_INSTANCE)) != 0 {
+        return Err(Error::invalid_value(
+            "size",
+            format!(
+                "memory must be divisible by {}",
+                ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE)
+            ),
+        ));
+    }
+
+    // Reject instances where the memory is greater than the limit
+    if memory.to_bytes() > MAX_MEMORY_BYTES_PER_INSTANCE {
+        return Err(Error::invalid_value(
+            "size",
+            format!(
+                "memory must be less than or equal to {}",
+                ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE).unwrap()
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
 /// Determines the disposition of a request to start an instance given its state
 /// (and its current VMM's state, if it has one) in the database.
 fn instance_start_allowed(
@@ -2199,5 +2210,40 @@ mod tests {
         let state = InstanceAndActiveVmm::from((instance, Some(vmm)));
         assert!(instance_start_allowed(&logctx.log, &state).is_ok());
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_invalid_instance_shapes() {
+        // Too many CPUs.
+        assert!(check_instance_cpu_memory_sizes(
+            InstanceCpuCount(MAX_VCPU_PER_INSTANCE + 1),
+            ByteCount::from_gibibytes_u32(1)
+        )
+        .is_err());
+
+        // Too little memory.
+        assert!(check_instance_cpu_memory_sizes(
+            InstanceCpuCount(1),
+            ByteCount::from_mebibytes_u32(1)
+        )
+        .is_err());
+
+        // Acceptable amount of memory, but not divisible into GiB.
+        assert!(check_instance_cpu_memory_sizes(
+            InstanceCpuCount(1),
+            ByteCount::from_mebibytes_u32(1024 + 1)
+        )
+        .is_err());
+
+        let gib =
+            u32::try_from(MAX_MEMORY_BYTES_PER_INSTANCE / (1024 * 1024 * 1024))
+                .unwrap();
+
+        // A whole number of GiB, but too many of them.
+        assert!(check_instance_cpu_memory_sizes(
+            InstanceCpuCount(1),
+            ByteCount::from_gibibytes_u32(gib + 1)
+        )
+        .is_err());
     }
 }
