@@ -5,7 +5,7 @@ request_body_max_bytes = 104857600
 
 [log]
 # Show log messages of this level and more severe
-level = "info"
+level = "debug"
 mode = "file"
 path = "/dev/stdout"
 if_exists = "append"
