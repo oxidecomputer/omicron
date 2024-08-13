@@ -14,4 +14,5 @@ omicron-workspace-hack.workspace = true
 schemars.workspace = true
 serde.workspace = true
 sled-hardware-types.workspace = true
+strum.workspace = true
 uuid.workspace = true

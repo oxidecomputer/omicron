@@ -5140,6 +5140,7 @@ dependencies = [
  "schemars",
  "serde",
  "sled-hardware-types",
+ "strum",
  "uuid",
 ]
 
