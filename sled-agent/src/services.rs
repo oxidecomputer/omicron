@@ -31,10 +31,7 @@ use crate::bootstrap::early_networking::{
 use crate::bootstrap::BootstrapNetworking;
 use crate::config::SidecarRevision;
 use crate::metrics::MetricsRequestQueue;
-use crate::params::{
-    DendriteAsic, OmicronZoneConfigExt, OmicronZoneTypeExt, TimeSync,
-    ZoneBundleCause, ZoneBundleMetadata,
-};
+use crate::params::{DendriteAsic, OmicronZoneConfigExt, OmicronZoneTypeExt};
 use crate::profile::*;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
@@ -96,6 +93,10 @@ use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use once_cell::sync::OnceCell;
 use rand::prelude::SliceRandom;
+use sled_agent_types::{
+    time_sync::TimeSync,
+    zone_bundle::{ZoneBundleCause, ZoneBundleMetadata},
+};
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
 use sled_hardware::SledMode;

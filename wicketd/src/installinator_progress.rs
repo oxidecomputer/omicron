@@ -295,10 +295,10 @@ mod tests {
 
     use installinator_common::{
         InstallinatorCompletionMetadata, InstallinatorComponent,
-        InstallinatorSpec, InstallinatorStepId, M2Slot, StepEvent,
-        StepEventKind, StepInfo, StepInfoWithMetadata, StepOutcome,
-        WriteOutput,
+        InstallinatorSpec, InstallinatorStepId, StepEvent, StepEventKind,
+        StepInfo, StepInfoWithMetadata, StepOutcome, WriteOutput,
     };
+    use omicron_common::disk::M2Slot;
     use omicron_test_utils::dev::test_setup_log;
     use schemars::JsonSchema;
     use update_engine::ExecutionId;
