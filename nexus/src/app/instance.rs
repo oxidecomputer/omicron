@@ -485,7 +485,7 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         id: InstanceUuid,
-        params: nexus_types::internal_api::params::InstanceMigrateParams,
+        params: nexus_types::internal_api::params::InstanceMigrateRequest,
     ) -> UpdateResult<InstanceAndActiveVmm> {
         let (.., authz_instance) = LookupPath::new(&opctx, &self.db_datastore)
             .instance_id(id.into_untyped_uuid())

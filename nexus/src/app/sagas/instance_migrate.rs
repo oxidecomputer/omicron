@@ -12,7 +12,7 @@ use crate::app::sagas::{
 };
 use nexus_db_queries::db::{identity::Resource, lookup::LookupPath};
 use nexus_db_queries::{authn, authz, db};
-use nexus_types::internal_api::params;
+use nexus_types::internal_api::params::InstanceMigrateRequest;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::Deserialize;
 use serde::Serialize;
@@ -30,7 +30,7 @@ pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub instance: db::model::Instance,
     pub src_vmm: db::model::Vmm,
-    pub migrate_params: params::InstanceMigrateParams,
+    pub migrate_params: InstanceMigrateRequest,
 }
 
 // The migration saga is similar to the instance start saga: get a destination
@@ -570,7 +570,7 @@ async fn sim_instance_migrate(
 mod tests {
     use super::*;
     use crate::app::sagas::test_helpers;
-    use crate::external_api::params as ExternalParams;
+    use crate::external_api::params;
     use dropshot::test_util::ClientTestContext;
     use nexus_test_utils::resource_helpers::{
         create_default_ip_pool, create_project, object_create,
@@ -599,7 +599,7 @@ mod tests {
         object_create(
             client,
             &instances_url,
-            &ExternalParams::InstanceCreate {
+            &params::InstanceCreate {
                 identity: IdentityMetadataCreateParams {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: format!("instance {:?}", INSTANCE_NAME),
@@ -610,7 +610,7 @@ mod tests {
                 user_data: b"#cloud-config".to_vec(),
                 ssh_public_keys: Some(Vec::new()),
                 network_interfaces:
-                    ExternalParams::InstanceNetworkInterfaceAttachment::None,
+                    params::InstanceNetworkInterfaceAttachment::None,
                 external_ips: vec![],
                 disks: vec![],
                 start: true,
@@ -643,7 +643,7 @@ mod tests {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
             instance: state.instance().clone(),
             src_vmm: vmm.clone(),
-            migrate_params: params::InstanceMigrateParams {
+            migrate_params: InstanceMigrateRequest {
                 dst_sled_id: dst_sled_id.into_untyped_uuid(),
             },
         };
@@ -712,7 +712,7 @@ mod tests {
                         ),
                         instance: old_instance.clone(),
                         src_vmm: old_vmm.clone(),
-                        migrate_params: params::InstanceMigrateParams {
+                        migrate_params: InstanceMigrateRequest {
                             dst_sled_id: dst_sled_id.into_untyped_uuid(),
                         },
                     }

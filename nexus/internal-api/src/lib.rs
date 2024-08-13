@@ -20,7 +20,7 @@ use nexus_types::{
     },
     internal_api::{
         params::{
-            InstanceMigrateParams, OximeterInfo, RackInitializationRequest,
+            InstanceMigrateRequest, OximeterInfo, RackInitializationRequest,
             SledAgentInfo, SwitchPutRequest, SwitchPutResponse,
         },
         views::{BackgroundTask, Ipv4NatEntryView, Saga},
@@ -125,7 +125,7 @@ pub trait NexusInternalApi {
     async fn instance_migrate(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<InstancePathParam>,
-        migrate_params: TypedBody<InstanceMigrateParams>,
+        migrate_params: TypedBody<InstanceMigrateRequest>,
     ) -> Result<HttpResponseOk<Instance>, HttpError>;
 
     /// Report updated state for a disk.

@@ -30,7 +30,7 @@ use nexus_types::external_api::params::UninitializedSledId;
 use nexus_types::external_api::shared::ProbeInfo;
 use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views::SledPolicy;
-use nexus_types::internal_api::params::InstanceMigrateParams;
+use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::internal_api::params::SledAgentInfo;
 use nexus_types::internal_api::params::SwitchPutRequest;
 use nexus_types::internal_api::params::SwitchPutResponse;
@@ -194,7 +194,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
     async fn instance_migrate(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<InstancePathParam>,
-        migrate_params: TypedBody<InstanceMigrateParams>,
+        migrate_params: TypedBody<InstanceMigrateRequest>,
     ) -> Result<HttpResponseOk<Instance>, HttpError> {
         let apictx = &rqctx.context().context;
         let nexus = &apictx.nexus;

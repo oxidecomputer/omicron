@@ -749,7 +749,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/InstanceMigrateParams"
+                "$ref": "#/components/schemas/InstanceMigrateRequest"
               }
             }
           },
@@ -3311,7 +3311,7 @@
         "format": "uint16",
         "minimum": 0
       },
-      "InstanceMigrateParams": {
+      "InstanceMigrateRequest": {
         "description": "Parameters used when migrating an instance.",
         "type": "object",
         "properties": {

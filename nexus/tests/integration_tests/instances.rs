@@ -48,7 +48,7 @@ use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::views::SshKey;
 use nexus_types::external_api::{params, views};
 use nexus_types::identity::Resource;
-use nexus_types::internal_api::params::InstanceMigrateParams;
+use nexus_types::internal_api::params::InstanceMigrateRequest;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
@@ -796,7 +796,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         format!("/instances/{}/migrate", &instance_id.to_string());
     let instance = NexusRequest::new(
         RequestBuilder::new(internal_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateParams {
+            .body(Some(&InstanceMigrateRequest {
                 dst_sled_id: dst_sled_id.into_untyped_uuid(),
             }))
             .expect_status(Some(StatusCode::OK)),
@@ -1003,7 +1003,7 @@ async fn test_instance_migrate_v2p_and_routes(
         format!("/instances/{}/migrate", &instance_id.to_string());
     let _ = NexusRequest::new(
         RequestBuilder::new(internal_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateParams {
+            .body(Some(&InstanceMigrateRequest {
                 dst_sled_id: dst_sled_id.into_untyped_uuid(),
             }))
             .expect_status(Some(StatusCode::OK)),
@@ -1388,7 +1388,7 @@ async fn test_instance_metrics_with_migration(
         format!("/instances/{}/migrate", &instance_id.to_string());
     let _ = NexusRequest::new(
         RequestBuilder::new(internal_client, Method::POST, &migrate_url)
-            .body(Some(&InstanceMigrateParams {
+            .body(Some(&InstanceMigrateRequest {
                 dst_sled_id: dst_sled_id.into_untyped_uuid(),
             }))
             .expect_status(Some(StatusCode::OK)),

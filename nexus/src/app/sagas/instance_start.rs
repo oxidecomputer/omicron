@@ -10,9 +10,10 @@ use super::{
     instance_common::allocate_vmm_ipv6, NexusActionContext, NexusSaga,
     SagaInitError,
 };
-use crate::app::instance::InstanceEnsureRegisteredApiResources;
-use crate::app::instance::InstanceRegisterReason;
-use crate::app::instance::InstanceStateChangeError;
+use crate::app::instance::{
+    InstanceEnsureRegisteredApiResources, InstanceRegisterReason,
+    InstanceStateChangeError,
+};
 use crate::app::sagas::declare_saga_actions;
 use chrono::Utc;
 use nexus_db_queries::db::{identity::Resource, lookup::LookupPath};

@@ -210,7 +210,7 @@ pub struct OximeterInfo {
 
 /// Parameters used when migrating an instance.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceMigrateParams {
+pub struct InstanceMigrateRequest {
     /// The ID of the sled to which to migrate the target instance.
     pub dst_sled_id: Uuid,
 }
