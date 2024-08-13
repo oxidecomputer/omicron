@@ -3746,6 +3746,7 @@
             ]
           },
           {
+            "description": "Type of clickhouse zone used for a single node clickhouse deployment",
             "type": "object",
             "properties": {
               "address": {
@@ -3768,6 +3769,7 @@
             ]
           },
           {
+            "description": "A zone used to run a Clickhouse Keeper node\n\nKeepers are only used in replicated clickhouse setups",
             "type": "object",
             "properties": {
               "address": {
@@ -3780,6 +3782,29 @@
                 "type": "string",
                 "enum": [
                   "clickhouse_keeper"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "description": "A zone used to run a Clickhouse Server in a replicated deployment",
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse_server"
                 ]
               }
             },

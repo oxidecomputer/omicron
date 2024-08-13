@@ -1591,6 +1591,24 @@ impl ServiceManager {
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
                     OmicronZoneConfig {
+                        zone_type: OmicronZoneType::ClickhouseServer { .. },
+                        underlay_address: _,
+                        ..
+                    },
+                ..
+            }) => {
+                // We aren't yet deploying this service
+                error!(
+                    &self.inner.log,
+                    "Deploying ClickhouseServer zones is not yet supported"
+                );
+
+                todo!()
+            }
+
+            ZoneArgs::Omicron(OmicronZoneConfigLocal {
+                zone:
+                    OmicronZoneConfig {
                         zone_type: OmicronZoneType::ClickhouseKeeper { .. },
                         underlay_address,
                         ..

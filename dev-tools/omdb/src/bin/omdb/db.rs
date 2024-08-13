@@ -1106,6 +1106,7 @@ async fn lookup_service_info(
         | BlueprintZoneType::InternalNtp(_) => ServiceKind::Ntp,
         BlueprintZoneType::Clickhouse(_) => ServiceKind::Clickhouse,
         BlueprintZoneType::ClickhouseKeeper(_) => ServiceKind::ClickhouseKeeper,
+        BlueprintZoneType::ClickhouseServer(_) => ServiceKind::ClickhouseServer,
         BlueprintZoneType::CockroachDb(_) => ServiceKind::Cockroach,
         BlueprintZoneType::Crucible(_) => ServiceKind::Crucible,
         BlueprintZoneType::CruciblePantry(_) => ServiceKind::CruciblePantry,

@@ -759,8 +759,12 @@ pub struct ResolvedVpcRouteSet {
 pub enum DatasetKind {
     Crucible,
     Cockroach,
+    /// Used for single-node clickhouse deployments
     Clickhouse,
+    /// Used for replicated clickhouse deployments
     ClickhouseKeeper,
+    /// Used for replicated clickhouse deployments
+    ClickhouseServer,
     ExternalDns,
     InternalDns,
 }
@@ -773,6 +777,7 @@ impl fmt::Display for DatasetKind {
             Cockroach => "cockroach",
             Clickhouse => "clickhouse",
             ClickhouseKeeper => "clickhouse_keeper",
+            ClickhouseServer => "clickhouse_server",
             ExternalDns => "external_dns",
             InternalDns => "internal_dns",
         };

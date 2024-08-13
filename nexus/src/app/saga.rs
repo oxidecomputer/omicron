@@ -58,12 +58,14 @@ use futures::FutureExt;
 use futures::StreamExt;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_types::internal_api::views::DemoSaga;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResult;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::DemoSagaUuid;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use steno::SagaDag;
@@ -296,7 +298,6 @@ pub(crate) struct RunnableSaga {
 }
 
 impl RunnableSaga {
-    #[cfg(test)]
     pub(crate) fn id(&self) -> SagaId {
         self.id
     }
@@ -456,5 +457,26 @@ impl super::Nexus {
     #[cfg(test)]
     pub(crate) fn sec(&self) -> &steno::SecClient {
         &self.sagas.sec_client
+    }
+
+    pub(crate) async fn saga_demo_create(&self) -> Result<DemoSaga, Error> {
+        use crate::app::sagas::demo;
+        let demo_saga_id = DemoSagaUuid::new_v4();
+        let saga_params = demo::Params { id: demo_saga_id };
+        let saga_dag = create_saga_dag::<demo::SagaDemo>(saga_params)?;
+        let runnable_saga = self.sagas.saga_prepare(saga_dag).await?;
+        let saga_id = runnable_saga.id().0;
+        // We don't need the handle that runnable_saga.start() returns because
+        // we're not going to wait for the saga to finish here.
+        let _ = runnable_saga.start().await?;
+        Ok(DemoSaga { saga_id, demo_saga_id })
+    }
+
+    pub(crate) fn saga_demo_complete(
+        &self,
+        demo_saga_id: DemoSagaUuid,
+    ) -> Result<(), Error> {
+        let mut demo_sagas = self.demo_sagas()?;
+        demo_sagas.complete(demo_saga_id)
     }
 }

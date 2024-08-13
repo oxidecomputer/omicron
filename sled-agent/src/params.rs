@@ -54,6 +54,9 @@ pub(crate) trait OmicronZoneTypeExt {
             OmicronZoneType::ClickhouseKeeper { dataset, address, .. } => {
                 Some((dataset, DatasetType::ClickhouseKeeper, address))
             }
+            OmicronZoneType::ClickhouseServer { dataset, address, .. } => {
+                Some((dataset, DatasetType::ClickhouseServer, address))
+            }
             OmicronZoneType::CockroachDb { dataset, address, .. } => {
                 Some((dataset, DatasetType::CockroachDb, address))
             }
