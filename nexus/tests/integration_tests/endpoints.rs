@@ -359,6 +359,12 @@ pub static DEMO_INSTANCE_REBOOT_URL: Lazy<String> = Lazy::new(|| {
         *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
     )
 });
+pub static DEMO_INSTANCE_RESIZE_URL: Lazy<String> = Lazy::new(|| {
+    format!(
+        "/v1/instances/{}/resize?{}",
+        *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
+    )
+});
 pub static DEMO_INSTANCE_MIGRATE_URL: Lazy<String> = Lazy::new(|| {
     format!(
         "/v1/instances/{}/migrate?{}",
@@ -1821,6 +1827,17 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(serde_json::Value::Null)
+            ],
+        },
+        VerifyEndpoint {
+            url: &DEMO_INSTANCE_RESIZE_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Put(serde_json::to_value(params::InstanceResize {
+                    ncpus: InstanceCpuCount(1), 
+                    memory: ByteCount::from_gibibytes_u32(1)
+                }).unwrap())
             ],
         },
         VerifyEndpoint {
