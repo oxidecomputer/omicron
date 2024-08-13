@@ -25,6 +25,7 @@ pub const DNS_ZONE_EXTERNAL_TESTING: &str = "oxide-dev.test";
 pub enum ServiceName {
     Clickhouse,
     ClickhouseKeeper,
+    ClickhouseServer,
     Cockroach,
     InternalDns,
     ExternalDns,
@@ -48,6 +49,7 @@ impl ServiceName {
         match self {
             ServiceName::Clickhouse => "clickhouse",
             ServiceName::ClickhouseKeeper => "clickhouse-keeper",
+            ServiceName::ClickhouseServer => "clickhouse-server",
             ServiceName::Cockroach => "cockroach",
             ServiceName::ExternalDns => "external-dns",
             ServiceName::InternalDns => "nameservice",
@@ -73,6 +75,7 @@ impl ServiceName {
         match self {
             ServiceName::Clickhouse
             | ServiceName::ClickhouseKeeper
+            | ServiceName::ClickhouseServer
             | ServiceName::Cockroach
             | ServiceName::InternalDns
             | ServiceName::ExternalDns

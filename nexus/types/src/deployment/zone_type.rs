@@ -25,6 +25,7 @@ pub enum BlueprintZoneType {
     BoundaryNtp(blueprint_zone_type::BoundaryNtp),
     Clickhouse(blueprint_zone_type::Clickhouse),
     ClickhouseKeeper(blueprint_zone_type::ClickhouseKeeper),
+    ClickhouseServer(blueprint_zone_type::ClickhouseServer),
     CockroachDb(blueprint_zone_type::CockroachDb),
     Crucible(blueprint_zone_type::Crucible),
     CruciblePantry(blueprint_zone_type::CruciblePantry),
@@ -60,6 +61,7 @@ impl BlueprintZoneType {
             }
             BlueprintZoneType::Clickhouse(_)
             | BlueprintZoneType::ClickhouseKeeper(_)
+            | BlueprintZoneType::ClickhouseServer(_)
             | BlueprintZoneType::CockroachDb(_)
             | BlueprintZoneType::Crucible(_)
             | BlueprintZoneType::CruciblePantry(_)
@@ -78,6 +80,7 @@ impl BlueprintZoneType {
             | BlueprintZoneType::ExternalDns(_)
             | BlueprintZoneType::Clickhouse(_)
             | BlueprintZoneType::ClickhouseKeeper(_)
+            | BlueprintZoneType::ClickhouseServer(_)
             | BlueprintZoneType::CockroachDb(_)
             | BlueprintZoneType::Crucible(_)
             | BlueprintZoneType::CruciblePantry(_)
@@ -94,6 +97,7 @@ impl BlueprintZoneType {
             | BlueprintZoneType::ExternalDns(_)
             | BlueprintZoneType::Clickhouse(_)
             | BlueprintZoneType::ClickhouseKeeper(_)
+            | BlueprintZoneType::ClickhouseServer(_)
             | BlueprintZoneType::CockroachDb(_)
             | BlueprintZoneType::Crucible(_)
             | BlueprintZoneType::CruciblePantry(_)
@@ -110,6 +114,7 @@ impl BlueprintZoneType {
             BlueprintZoneType::BoundaryNtp(_)
             | BlueprintZoneType::Clickhouse(_)
             | BlueprintZoneType::ClickhouseKeeper(_)
+            | BlueprintZoneType::ClickhouseServer(_)
             | BlueprintZoneType::CockroachDb(_)
             | BlueprintZoneType::CruciblePantry(_)
             | BlueprintZoneType::ExternalDns(_)
@@ -129,6 +134,9 @@ impl BlueprintZoneType {
             BlueprintZoneType::ClickhouseKeeper(
                 blueprint_zone_type::ClickhouseKeeper { dataset, address },
             ) => (dataset, DatasetKind::ClickhouseKeeper, address),
+            BlueprintZoneType::ClickhouseServer(
+                blueprint_zone_type::ClickhouseServer { dataset, address },
+            ) => (dataset, DatasetKind::ClickhouseServer, address),
             BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb { dataset, address },
             ) => (dataset, DatasetKind::Cockroach, address),
@@ -185,6 +193,12 @@ impl From<BlueprintZoneType> for OmicronZoneType {
                     dataset: zone.dataset,
                 }
             }
+            BlueprintZoneType::ClickhouseServer(zone) => {
+                Self::ClickhouseServer {
+                    address: zone.address,
+                    dataset: zone.dataset,
+                }
+            }
             BlueprintZoneType::CockroachDb(zone) => Self::CockroachDb {
                 address: zone.address,
                 dataset: zone.dataset,
@@ -235,6 +249,7 @@ impl BlueprintZoneType {
             Self::BoundaryNtp(_) => ZoneKind::BoundaryNtp,
             Self::Clickhouse(_) => ZoneKind::Clickhouse,
             Self::ClickhouseKeeper(_) => ZoneKind::ClickhouseKeeper,
+            Self::ClickhouseServer(_) => ZoneKind::ClickhouseServer,
             Self::CockroachDb(_) => ZoneKind::CockroachDb,
             Self::Crucible(_) => ZoneKind::Crucible,
             Self::CruciblePantry(_) => ZoneKind::CruciblePantry,
@@ -273,6 +288,7 @@ pub mod blueprint_zone_type {
         pub external_ip: OmicronZoneExternalSnatIp,
     }
 
+    /// Used in single-node clickhouse setups
     #[derive(
         Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
     )]
@@ -285,6 +301,15 @@ pub mod blueprint_zone_type {
         Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
     )]
     pub struct ClickhouseKeeper {
+        pub address: SocketAddrV6,
+        pub dataset: OmicronZoneDataset,
+    }
+
+    /// Used in replicated clickhouse setups
+    #[derive(
+        Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
+    )]
+    pub struct ClickhouseServer {
         pub address: SocketAddrV6,
         pub dataset: OmicronZoneDataset,
     }

@@ -275,6 +275,9 @@ pub fn blueprint_internal_dns_config(
             BlueprintZoneType::ClickhouseKeeper(
                 blueprint_zone_type::ClickhouseKeeper { address, .. },
             ) => (ServiceName::ClickhouseKeeper, address.port()),
+            BlueprintZoneType::ClickhouseServer(
+                blueprint_zone_type::ClickhouseServer { address, .. },
+            ) => (ServiceName::ClickhouseServer, address.port()),
             BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb { address, .. },
             ) => (ServiceName::Cockroach, address.port()),
