@@ -19805,7 +19805,10 @@
               "count",
               "bytes",
               "seconds",
-              "nanoseconds"
+              "nanoseconds",
+              "volts",
+              "amps",
+              "degrees_celcius"
             ]
           },
           {
@@ -19813,6 +19816,13 @@
             "type": "string",
             "enum": [
               "none"
+            ]
+          },
+          {
+            "description": "Rotations per minute.",
+            "type": "string",
+            "enum": [
+              "rpm"
             ]
           }
         ]
