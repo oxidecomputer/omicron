@@ -2870,7 +2870,7 @@ async fn instance_delete(
 /// Resize instance
 #[endpoint {
     method = PUT,
-    path = "/v1/instances/{instance}",
+    path = "/v1/instances/{instance}/resize",
     tags = ["instances"],
 }]
 async fn instance_resize(
