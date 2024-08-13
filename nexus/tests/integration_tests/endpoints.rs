@@ -1835,7 +1835,7 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Put(serde_json::to_value(params::InstanceResize {
-                    ncpus: InstanceCpuCount(1), 
+                    ncpus: InstanceCpuCount(1),
                     memory: ByteCount::from_gibibytes_u32(1)
                 }).unwrap())
             ],
