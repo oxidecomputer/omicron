@@ -1612,6 +1612,167 @@ async fn test_instances_invalid_creation_returns_bad_request(
 }
 
 #[nexus_test]
+async fn test_instance_resize(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let instance_name = "elastic-band";
+
+    create_project_and_pool(&client).await;
+
+    // Create a stopped instance.
+    let instance = create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &params::InstanceNetworkInterfaceAttachment::None,
+        vec![],
+        vec![],
+        false,
+    )
+    .await;
+
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    let resize_url =
+        format!("/v1/instances/{}/resize", instance_id.to_string());
+
+    // Resizing the instance right away, while it's still stopped, is legal.
+    let _ = NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &resize_url)
+            .body(Some(&params::InstanceResize {
+                ncpus: InstanceCpuCount(8),
+                memory: ByteCount::from_gibibytes_u32(8),
+            }))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<Instance>()
+    .unwrap();
+
+    // Start the instance; now resizing it should be illegal.
+    instance_post(&client, instance_name, InstanceOp::Start).await;
+    instance_simulate(nexus, &instance_id).await;
+    let _ = NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &resize_url)
+            .body(Some(&params::InstanceResize {
+                ncpus: InstanceCpuCount(4),
+                memory: ByteCount::from_gibibytes_u32(2),
+            }))
+            .expect_status(Some(StatusCode::CONFLICT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Once the instance has stopped, it's OK to resize it again.
+    instance_post(&client, instance_name, InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+    let _ = NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &resize_url)
+            .body(Some(&params::InstanceResize {
+                ncpus: InstanceCpuCount(4),
+                memory: ByteCount::from_gibibytes_u32(2),
+            }))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<Instance>()
+    .unwrap();
+}
+
+#[nexus_test]
+async fn test_instance_resize_invalid_parameters(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "elastic-band";
+
+    create_project_and_pool(&client).await;
+    let instance = create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &params::InstanceNetworkInterfaceAttachment::None,
+        vec![],
+        vec![],
+        false,
+    )
+    .await;
+
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    let resize_url =
+        format!("/v1/instances/{}/resize", instance_id.to_string());
+
+    // Too many vCPUs.
+    let _ = NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &resize_url)
+            .body(Some(&params::InstanceResize {
+                ncpus: InstanceCpuCount(MAX_VCPU_PER_INSTANCE + 1),
+                memory: ByteCount::from_gibibytes_u32(4),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Too little memory.
+    let _ = NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &resize_url)
+            .body(Some(&params::InstanceResize {
+                ncpus: InstanceCpuCount(MAX_VCPU_PER_INSTANCE + 1),
+                memory: ByteCount::from_gibibytes_u32(0),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Too much memory (but a proper multiple of the minimum memory size).
+    let max_gib =
+        u32::try_from(MAX_MEMORY_BYTES_PER_INSTANCE / (1024 * 1024 * 1024))
+            .unwrap();
+    let _ = NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &resize_url)
+            .body(Some(&params::InstanceResize {
+                ncpus: InstanceCpuCount(1),
+                memory: ByteCount::from_gibibytes_u32(max_gib + 1),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // An acceptable amount of memory, but not a multiple of the minimum
+    // memory size of 1 GiB.
+    let min_mib = MIN_MEMORY_BYTES_PER_INSTANCE / (1024 * 1024);
+    let _ = NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &resize_url)
+            .body(Some(&params::InstanceResize {
+                ncpus: InstanceCpuCount(1),
+                memory: ByteCount::from_mebibytes_u32(min_mib + 1),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
+#[nexus_test]
 async fn test_instance_using_image_from_other_project_fails(
     cptestctx: &ControlPlaneTestContext,
 ) {
