@@ -58,6 +58,7 @@ instance_network_interface_list          GET      /v1/network-interfaces
 instance_network_interface_update        PUT      /v1/network-interfaces/{interface}
 instance_network_interface_view          GET      /v1/network-interfaces/{interface}
 instance_reboot                          POST     /v1/instances/{instance}/reboot
+instance_resize                          PUT      /v1/instances/{instance}
 instance_serial_console                  GET      /v1/instances/{instance}/serial-console
 instance_serial_console_stream           GET      /v1/instances/{instance}/serial-console/stream
 instance_ssh_public_key_list             GET      /v1/instances/{instance}/ssh-public-keys

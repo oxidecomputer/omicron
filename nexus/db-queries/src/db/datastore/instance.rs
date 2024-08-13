@@ -18,8 +18,10 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
+use crate::db::model::ByteCount;
 use crate::db::model::Generation;
 use crate::db::model::Instance;
+use crate::db::model::InstanceCpuCount;
 use crate::db::model::InstanceRuntimeState;
 use crate::db::model::Migration;
 use crate::db::model::MigrationState;
@@ -50,6 +52,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::MessagePair;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -791,6 +794,61 @@ impl DataStore {
                 )
             })?;
         Ok(updated)
+    }
+
+    pub async fn instance_resize(
+        &self,
+        opctx: &OpContext,
+        instance_id: InstanceUuid,
+        cpus: InstanceCpuCount,
+        memory: ByteCount,
+    ) -> UpdateResult<()> {
+        use db::model::InstanceState as DbInstanceState;
+        use db::schema::instance::dsl;
+
+        const ALLOWED_RESIZE_STATES: &[DbInstanceState] =
+            &[DbInstanceState::NoVmm, DbInstanceState::Failed];
+
+        // Use check_if_exists to distinguish cases where the instance doesn't
+        // exist at all from cases where it exists but is in the wrong state.
+        let instance_id = instance_id.into_untyped_uuid();
+        let updated = diesel::update(dsl::instance)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(instance_id))
+            .filter(dsl::state.eq_any(ALLOWED_RESIZE_STATES))
+            .set((dsl::ncpus.eq(cpus), dsl::memory.eq(memory)))
+            .check_if_exists::<Instance>(instance_id.into_untyped_uuid())
+            .execute_and_check(&*self.pool_connection_authorized(&opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Instance,
+                        LookupType::ById(instance_id),
+                    ),
+                )
+            })?;
+
+        match updated.status {
+            UpdateStatus::Updated => Ok(()),
+            UpdateStatus::NotUpdatedButExists => {
+                // This query should only fail to update an extant instance if
+                // it's in the wrong state.
+                let found_state = updated.found.runtime().nexus_state;
+                if !ALLOWED_RESIZE_STATES.contains(&found_state) {
+                    let external_state: external::InstanceState =
+                        found_state.into();
+                    Err(Error::conflict(format!(
+                        "instance is in state {} but must be \
+                        stopped to be resized",
+                        external_state
+                    )))
+                } else {
+                    Err(Error::internal_error("failed to resize instance"))
+                }
+            }
+        }
     }
 
     /// Lists all instances on in-service sleds with active Propolis VMM

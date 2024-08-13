@@ -1093,6 +1093,16 @@ impl JsonSchema for UserData {
     }
 }
 
+/// Parameters for resizing an instance.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceResize {
+    /// The number of CPUs to assign to this instance.
+    pub ncpus: InstanceCpuCount,
+
+    /// The amount of memory to assign to this instance.
+    pub memory: ByteCount,
+}
+
 /// Migration parameters for an `Instance`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceMigrate {

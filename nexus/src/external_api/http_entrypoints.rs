@@ -171,6 +171,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(instance_reboot)?;
         api.register(instance_start)?;
         api.register(instance_stop)?;
+        api.register(instance_resize)?;
         api.register(instance_disk_list)?;
         api.register(instance_disk_attach)?;
         api.register(instance_disk_detach)?;
@@ -2858,6 +2859,42 @@ async fn instance_delete(
             nexus.instance_lookup(&opctx, instance_selector)?;
         nexus.project_destroy_instance(&opctx, &instance_lookup).await?;
         Ok(HttpResponseDeleted())
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+/// Resize instance
+#[endpoint {
+    method = PUT,
+    path = "/v1/instances/{instance}",
+    tags = ["instances"],
+}]
+async fn instance_resize(
+    rqctx: RequestContext<ApiContext>,
+    query_params: Query<params::OptionalProjectSelector>,
+    path_params: Path<params::InstancePath>,
+    new_size: TypedBody<params::InstanceResize>,
+) -> Result<HttpResponseOk<Instance>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.context.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let resize = new_size.into_inner();
+    let instance_selector = params::InstanceSelector {
+        project: query.project,
+        instance: path.instance,
+    };
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, instance_selector)?;
+        let instance =
+            nexus.instance_resize(&opctx, &instance_lookup, resize).await?;
+        Ok(HttpResponseOk(instance.into()))
     };
     apictx
         .context

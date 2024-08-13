@@ -1911,6 +1911,60 @@
           }
         }
       },
+      "put": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Resize instance",
+        "operationId": "instance_resize",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "Name or ID of the instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceResize"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "delete": {
         "tags": [
           "instances"
@@ -15518,6 +15572,32 @@
             }
           }
         }
+      },
+      "InstanceResize": {
+        "description": "Parameters for resizing an instance.",
+        "type": "object",
+        "properties": {
+          "memory": {
+            "description": "The amount of memory to assign to this instance.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "ncpus": {
+            "description": "The number of CPUs to assign to this instance.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceCpuCount"
+              }
+            ]
+          }
+        },
+        "required": [
+          "memory",
+          "ncpus"
+        ]
       },
       "InstanceResultsPage": {
         "description": "A single page of results",

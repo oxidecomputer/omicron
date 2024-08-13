@@ -649,6 +649,28 @@ impl super::Nexus {
         self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
     }
 
+    /// Resizes the requested instance.
+    pub(crate) async fn instance_resize(
+        &self,
+        opctx: &OpContext,
+        instance_lookup: &lookup::Instance<'_>,
+        new_size: params::InstanceResize,
+    ) -> UpdateResult<InstanceAndActiveVmm> {
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
+
+        self.db_datastore
+            .instance_resize(
+                opctx,
+                InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                new_size.ncpus.into(),
+                new_size.memory.into(),
+            )
+            .await?;
+
+        self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
+    }
+
     /// Idempotently ensures that the sled specified in `db_instance` does not
     /// have a record of the instance. If the instance is currently running on
     /// this sled, this operation rudely terminates it.
