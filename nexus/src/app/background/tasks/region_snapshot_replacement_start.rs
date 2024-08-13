@@ -185,25 +185,40 @@ impl RegionSnapshotReplacementDetector {
             let result = self
                 .send_start_request(
                     authn::saga::Serialized::for_opctx(opctx),
-                    request,
+                    request.clone(),
                 )
                 .await;
 
             match result {
                 Ok(()) => {
-                    let s = format!("start invoked ok for {request_id}");
+                    let s = format!(
+                        "region snapshot replacement start invoked ok for \
+                        {request_id}"
+                    );
 
-                    info!(&log, "{s}");
+                    info!(
+                        &log,
+                        "{s}";
+                        "request.snapshot_id" => %request.old_snapshot_id,
+                        "request.region_id" => %request.old_region_id,
+                        "request.dataset_id" => %request.old_dataset_id,
+                    );
                     status.start_invoked_ok.push(s);
                 }
 
                 Err(e) => {
                     let s = format!(
-                        "sending region snapshot replacement request failed: \
-                        {e}",
+                        "invoking region snapshot replacement start for \
+                        {request_id} failed: {e}",
                     );
 
-                    error!(&log, "{s}");
+                    error!(
+                        &log,
+                        "{s}";
+                        "request.snapshot_id" => %request.old_snapshot_id,
+                        "request.region_id" => %request.old_region_id,
+                        "request.dataset_id" => %request.old_dataset_id,
+                    );
                     status.errors.push(s);
                 }
             }
