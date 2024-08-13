@@ -414,7 +414,7 @@ async fn rsrss_new_region_ensure(
     // downstairs port. Once this goes away, Nexus will require a way to query
     // for the repair port!
 
-    let mut repair_addr: SocketAddrV6 =
+    let mut source_repair_addr: SocketAddrV6 =
         match region_snapshot.snapshot_addr.parse() {
             Ok(addr) => addr,
 
@@ -425,8 +425,9 @@ async fn rsrss_new_region_ensure(
             }
         };
 
-    repair_addr
-        .set_port(repair_addr.port() + crucible_common::REPAIR_PORT_OFFSET);
+    source_repair_addr.set_port(
+        source_repair_addr.port() + crucible_common::REPAIR_PORT_OFFSET,
+    );
 
     let ensured_region = osagactx
         .nexus()
@@ -434,7 +435,7 @@ async fn rsrss_new_region_ensure(
             log,
             &new_dataset,
             &new_region,
-            Some(repair_addr.to_string()),
+            Some(source_repair_addr.to_string()),
         )
         .await
         .map_err(ActionError::action_failed)?;
