@@ -2101,6 +2101,7 @@
             ]
           },
           {
+            "description": "Used in single-node clickhouse setups",
             "type": "object",
             "properties": {
               "address": {
@@ -2135,6 +2136,29 @@
                 "type": "string",
                 "enum": [
                   "clickhouse_keeper"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "description": "Used in replicated clickhouse setups",
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse_server"
                 ]
               }
             },
@@ -2592,14 +2616,37 @@
       },
       "DatasetKind": {
         "description": "Describes the purpose of the dataset.",
-        "type": "string",
-        "enum": [
-          "crucible",
-          "cockroach",
-          "clickhouse",
-          "clickhouse_keeper",
-          "external_dns",
-          "internal_dns"
+        "oneOf": [
+          {
+            "type": "string",
+            "enum": [
+              "crucible",
+              "cockroach",
+              "external_dns",
+              "internal_dns"
+            ]
+          },
+          {
+            "description": "Used for single-node clickhouse deployments",
+            "type": "string",
+            "enum": [
+              "clickhouse"
+            ]
+          },
+          {
+            "description": "Used for replicated clickhouse deployments",
+            "type": "string",
+            "enum": [
+              "clickhouse_keeper"
+            ]
+          },
+          {
+            "description": "Used for replicated clickhouse deployments",
+            "type": "string",
+            "enum": [
+              "clickhouse_server"
+            ]
+          }
         ]
       },
       "DatasetPutRequest": {
