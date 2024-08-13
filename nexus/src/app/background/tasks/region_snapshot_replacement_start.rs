@@ -337,7 +337,8 @@ mod test {
             RegionSnapshotReplacementStartStatus {
                 requests_created_ok: vec![],
                 start_invoked_ok: vec![format!(
-                    "start invoked ok for {request_id}"
+                    "region snapshot replacement start invoked ok for \
+                    {request_id}"
                 )],
                 errors: vec![],
             },
