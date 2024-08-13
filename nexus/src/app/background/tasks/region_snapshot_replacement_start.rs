@@ -97,7 +97,13 @@ impl RegionSnapshotReplacementDetector {
                     let s =
                         format!("error looking up replacement request: {e}");
 
-                    error!(&log, "{s}");
+                    error!(
+                        &log,
+                        "{s}";
+                        "snapshot_id" => %region_snapshot.snapshot_id,
+                        "region_id" => %region_snapshot.region_id,
+                        "dataset_id" => %region_snapshot.dataset_id,
+                    );
                     status.errors.push(s);
                     continue;
                 }
@@ -121,8 +127,9 @@ impl RegionSnapshotReplacementDetector {
                         info!(
                             &log,
                             "{s}";
-                            "region_id" => %region_snapshot.region_id,
                             "snapshot_id" => %region_snapshot.snapshot_id,
+                            "region_id" => %region_snapshot.region_id,
+                            "dataset_id" => %region_snapshot.dataset_id,
                         );
                         status.requests_created_ok.push(s);
                     }
@@ -131,7 +138,13 @@ impl RegionSnapshotReplacementDetector {
                         let s =
                             format!("error creating replacement request: {e}");
 
-                        error!(&log, "{s}");
+                        error!(
+                            &log,
+                            "{s}";
+                            "snapshot_id" => %region_snapshot.snapshot_id,
+                            "region_id" => %region_snapshot.region_id,
+                            "dataset_id" => %region_snapshot.dataset_id,
+                        );
                         status.errors.push(s);
                     }
                 }
