@@ -32,7 +32,7 @@ enum Args {
 }
 
 // TODO: Remove this comment and move config file to smf/clickhouse-admin
-// Test with clickhouse-admin run --http-address [::1]:8888 --config-file-path ./clickhouse-admin/dummy-config.toml
+// Test with cargo run --bin=clickhouse-admin -- run --http-address [::1]:8888 --config-file-path ./clickhouse-admin/dummy-config.toml
 
 #[tokio::main]
 async fn main() {
