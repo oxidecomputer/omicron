@@ -145,27 +145,6 @@ impl Resolver {
         self.resolver.clear_cache();
     }
 
-    /// Looks up a single [`Ipv6Addr`] based on the SRV name.
-    /// Returns an error if the record does not exist.
-    // TODO: There are lots of ways this API can expand: Caching,
-    // actually respecting TTL, looking up ports, etc.
-    //
-    // For now, however, it serves as a very simple "get everyone using DNS"
-    // API that can be improved upon later.
-    pub async fn lookup_ipv6(
-        &self,
-        srv: crate::ServiceName,
-    ) -> Result<Ipv6Addr, ResolveError> {
-        let name = srv.srv_name();
-        debug!(self.log, "lookup_ipv6 srv"; "dns_name" => &name);
-        let response = self.resolver.ipv6_lookup(&name).await?;
-        let address = response
-            .iter()
-            .next()
-            .ok_or_else(|| ResolveError::NotFound(srv))?;
-        Ok(*address)
-    }
-
     /// Returns the targets of the SRV records for a DNS name
     ///
     /// The returned values are generally other DNS names that themselves would
@@ -220,6 +199,12 @@ impl Resolver {
     // TODO-robustness: any callers of this should probably be using
     // all the targets for a given SRV and not just the first one
     // we get, see [`Resolver::lookup_all_socket_v6`].
+    //
+    // TODO: There are lots of ways this API can expand: Caching,
+    // actually respecting TTL, looking up ports, etc.
+    //
+    // For now, however, it serves as a very simple "get everyone using DNS"
+    // API that can be improved upon later.
     pub async fn lookup_socket_v6(
         &self,
         service: crate::ServiceName,
@@ -535,11 +520,11 @@ mod test {
         dns_server.update(&dns_config).await.unwrap();
 
         let resolver = dns_server.resolver().unwrap();
-        let found_ip = resolver
-            .lookup_ipv6(ServiceName::Cockroach)
+        let found_addr = resolver
+            .lookup_socket_v6(ServiceName::Cockroach)
             .await
             .expect("Should have been able to look up IP address");
-        assert_eq!(found_ip, ip,);
+        assert_eq!(found_addr.ip(), &ip,);
 
         dns_server.cleanup_successful();
         logctx.cleanup_successful();
@@ -617,11 +602,13 @@ mod test {
 
         // Look up Cockroach
         let resolver = dns_server.resolver().unwrap();
-        let ip = resolver
-            .lookup_ipv6(ServiceName::Cockroach)
+        let resolved_addr = resolver
+            .lookup_socket_v6(ServiceName::Cockroach)
             .await
             .expect("Should have been able to look up IP address");
-        assert!(cockroach_addrs.iter().any(|addr| addr.ip() == &ip));
+        assert!(cockroach_addrs
+            .iter()
+            .any(|addr| addr.ip() == resolved_addr.ip()));
 
         // Look up all the Cockroach addresses.
         let mut ips =
@@ -635,18 +622,18 @@ mod test {
         );
 
         // Look up Clickhouse
-        let ip = resolver
-            .lookup_ipv6(ServiceName::Clickhouse)
+        let addr = resolver
+            .lookup_socket_v6(ServiceName::Clickhouse)
             .await
             .expect("Should have been able to look up IP address");
-        assert_eq!(&ip, clickhouse_addr.ip());
+        assert_eq!(addr.ip(), clickhouse_addr.ip());
 
         // Look up Backend Service
-        let ip = resolver
-            .lookup_ipv6(srv_backend)
+        let addr = resolver
+            .lookup_socket_v6(srv_backend)
             .await
             .expect("Should have been able to look up IP address");
-        assert_eq!(&ip, crucible_addr.ip());
+        assert_eq!(addr.ip(), crucible_addr.ip());
 
         // If we deploy a new generation that removes all records, then we don't
         // find anything any more.
@@ -657,7 +644,7 @@ mod test {
         // If we remove the records for all services, we won't find them any
         // more.  (e.g., there's no hidden caching going on)
         let error = resolver
-            .lookup_ipv6(ServiceName::Cockroach)
+            .lookup_socket_v6(ServiceName::Cockroach)
             .await
             .expect_err("unexpectedly found records");
         assert_matches!(
@@ -694,11 +681,11 @@ mod test {
         dns_builder.service_backend_zone(srv_crdb, &zone, 12345).unwrap();
         let dns_config = dns_builder.build_full_config_for_initial_generation();
         dns_server.update(&dns_config).await.unwrap();
-        let found_ip = resolver
-            .lookup_ipv6(ServiceName::Cockroach)
+        let found_addr = resolver
+            .lookup_socket_v6(ServiceName::Cockroach)
             .await
             .expect("Should have been able to look up IP address");
-        assert_eq!(found_ip, ip1);
+        assert_eq!(found_addr.ip(), &ip1);
 
         // If we insert the same record with a new address, it should be
         // updated.
@@ -712,11 +699,11 @@ mod test {
             dns_builder.build_full_config_for_initial_generation();
         dns_config.generation += 1;
         dns_server.update(&dns_config).await.unwrap();
-        let found_ip = resolver
-            .lookup_ipv6(ServiceName::Cockroach)
+        let found_addr = resolver
+            .lookup_socket_v6(ServiceName::Cockroach)
             .await
             .expect("Should have been able to look up IP address");
-        assert_eq!(found_ip, ip2);
+        assert_eq!(found_addr.ip(), &ip2);
 
         dns_server.cleanup_successful();
         logctx.cleanup_successful();
@@ -847,11 +834,11 @@ mod test {
         dns_server.update(&dns_config).await.unwrap();
 
         // Confirm that we can access this record manually.
-        let found_ip = resolver
-            .lookup_ipv6(ServiceName::Nexus)
+        let found_addr = resolver
+            .lookup_socket_v6(ServiceName::Nexus)
             .await
             .expect("Should have been able to look up IP address");
-        assert_eq!(found_ip, ip);
+        assert_eq!(found_addr.ip(), &ip);
 
         // Confirm that the progenitor client can access this record too.
         let value = client.test_endpoint().await.unwrap();
