@@ -169,7 +169,10 @@ async fn handle_dns_packet(request: Request) {
         Err(error) => {
             let header = Header::response_from_request(mr.header());
             let rb_servfail = MessageResponseBuilder::from_message_request(&mr);
-            error!(log, "failed to handle incoming DNS message: {:#}", error);
+            error!(
+                log,
+                "failed to handle incoming DNS message: {:#?} {:#}", mr, error
+            );
             match error {
                 RequestError::NxDomain(_) => {
                     let rb_nxdomain =
