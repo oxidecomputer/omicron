@@ -4,8 +4,35 @@
 
 //! Executable program to run the Omicron ClickHouse admin interface
 
+use anyhow::anyhow;
+use camino::Utf8PathBuf;
+use clap::Parser;
+use omicron_clickhouse_admin::{Clickward, Config};
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+
+#[derive(Debug, Parser)]
+#[clap(
+    name = "clickhouse-admin",
+    about = "Omicron ClickHouse cluster admin server"
+)]
+enum Args {
+    /// Start the ClickHouse admin server
+    Run {
+        // TODO: take the clickhouse address as an argument
+        /// Address on which this server should run
+        #[clap(long, action)]
+        http_address: SocketAddrV6,
+
+        /// Path to the server config file
+        #[clap(long, action)]
+        config_file_path: Utf8PathBuf,
+    },
+}
+
+// TODO: Remove this comment and move config file to smf/clickhouse-admin
+// Test with clickhouse-admin run --http-address [::1]:8888 --config-file-path ./clickhouse-admin/dummy-config.toml
 
 #[tokio::main]
 async fn main() {
@@ -15,5 +42,28 @@ async fn main() {
 }
 
 async fn main_impl() -> Result<(), CmdError> {
-    todo!();
+    let args = Args::parse();
+
+    match args {
+        Args::Run { http_address, config_file_path } => {
+            let mut config = Config::from_file(&config_file_path)
+                .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+            config.dropshot.bind_address = SocketAddr::V6(http_address);
+
+            // TODO: Change for the actual clickhouse address
+            let dummy_address =
+                SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
+            let clickward = Clickward::new(dummy_address);
+
+            let server =
+                omicron_clickhouse_admin::start_server(clickward, config)
+                    .await
+                    .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+            server.await.map_err(|err| {
+                CmdError::Failure(anyhow!(
+                    "server failed after starting: {err}"
+                ))
+            })
+        }
+    }
 }
