@@ -226,6 +226,8 @@ struct AllocRegionParams {
     blocks_per_extent: u64,
     extent_count: u64,
     current_allocated_regions: Vec<(db::model::Dataset, db::model::Region)>,
+    snapshot_id: Uuid,
+    snapshot_volume_id: Uuid,
 }
 
 async fn rsrss_get_alloc_region_params(
@@ -264,6 +266,8 @@ async fn rsrss_get_alloc_region_params(
         blocks_per_extent: db_region.blocks_per_extent(),
         extent_count: db_region.extent_count(),
         current_allocated_regions,
+        snapshot_id: db_snapshot.id(),
+        snapshot_volume_id: db_snapshot.volume_id,
     })
 }
 
@@ -281,12 +285,6 @@ async fn rsrss_alloc_new_region(
     let alloc_region_params =
         sagactx.lookup::<AllocRegionParams>("alloc_region_params")?;
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &osagactx.datastore())
-        .snapshot_id(params.request.old_snapshot_id)
-        .fetch()
-        .await
-        .map_err(ActionError::action_failed)?;
-
     // Request an additional region for this snapshot volume. It's important
     // _not_ to delete the existing snapshot first, as (if it's still there)
     // then the Crucible agent could reuse the allocated port and cause trouble.
@@ -295,8 +293,8 @@ async fn rsrss_alloc_new_region(
         .arbitrary_region_allocate(
             &opctx,
             RegionAllocationFor::SnapshotVolume {
-                volume_id: db_snapshot.volume_id,
-                snapshot_id: db_snapshot.id(),
+                volume_id: alloc_region_params.snapshot_volume_id,
+                snapshot_id: alloc_region_params.snapshot_id,
             },
             RegionAllocationParameters::FromRaw {
                 block_size: alloc_region_params.block_size,
