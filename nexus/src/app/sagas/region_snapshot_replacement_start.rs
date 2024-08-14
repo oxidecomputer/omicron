@@ -336,7 +336,7 @@ async fn rsrss_alloc_new_region_undo(
             .regions_hard_delete(log, vec![region.id()])
             .await?;
     } else {
-        warn!(&log, "maybe_dataset_and_region is None!",);
+        warn!(&log, "maybe_dataset_and_region is None!");
     }
 
     Ok(())
@@ -383,7 +383,7 @@ async fn rsrss_new_region_ensure(
 
     // With a list of datasets and regions to ensure, other sagas need to have a
     // separate no-op forward step for the undo action to ensure that the undo
-    // step occurs in the case that the ensure partially fails. Here this not
+    // step occurs in the case that the ensure partially fails. Here this is not
     // required, there's only one dataset and region.
     let new_dataset_and_region = sagactx
         .lookup::<(db::model::Dataset, db::model::Region)>(
