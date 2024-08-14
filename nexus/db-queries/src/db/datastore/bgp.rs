@@ -638,6 +638,7 @@ error!(opctx.log, "database error: {e:#?}");
             .transaction(&conn, |conn| async move {
                 let active = peer_dsl::switch_port_settings_bgp_peer_config
                     .filter(db_peer::port_settings_id.eq(port_settings_id))
+                    .filter(db_peer::addr.eq(addr))
                     .select(db_peer::allow_export_list_active)
                     .limit(1)
                     .first_async::<bool>(&conn)
@@ -687,6 +688,7 @@ error!(opctx.log, "database error: {e:#?}");
             .transaction(&conn, |conn| async move {
                 let active = peer_dsl::switch_port_settings_bgp_peer_config
                     .filter(db_peer::port_settings_id.eq(port_settings_id))
+                    .filter(db_peer::addr.eq(addr))
                     .select(db_peer::allow_import_list_active)
                     .limit(1)
                     .first_async::<bool>(&conn)

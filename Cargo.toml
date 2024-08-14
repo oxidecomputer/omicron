@@ -85,6 +85,7 @@ members = [
     "passwords",
     "rpaths",
     "sled-agent",
+    "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
     "sled-agent/types",
     "sled-hardware",
@@ -196,6 +197,7 @@ default-members = [
     "passwords",
     "rpaths",
     "sled-agent",
+    "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
     "sled-agent/types",
     "sled-hardware",
@@ -305,6 +307,7 @@ crossterm = { version = "0.28.1", features = ["event-stream"] }
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "e58ca3693cb9ce0438947beba10e97ee38a0966b" }
 crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "e58ca3693cb9ce0438947beba10e97ee38a0966b" }
 crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "e58ca3693cb9ce0438947beba10e97ee38a0966b" }
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "e58ca3693cb9ce0438947beba10e97ee38a0966b" }
 csv = "1.3.0"
 curve25519-dalek = "4"
 datatest-stable = "0.2.9"
@@ -517,6 +520,7 @@ similar-asserts = "1.5.0"
 # are still doing mupdate a change to the on-disk format will break existing DNS
 # server zones.
 sled = "=0.34.7"
+sled-agent-api = { path = "sled-agent/api" }
 sled-agent-client = { path = "clients/sled-agent-client" }
 sled-agent-types = { path = "sled-agent/types" }
 sled-hardware = { path = "sled-hardware" }

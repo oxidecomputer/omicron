@@ -68,7 +68,6 @@
     },
     "/boot-disk/{boot_disk}/os/write/status": {
       "get": {
-        "summary": "Get the status of writing a new host OS",
         "operationId": "host_os_write_status_get",
         "parameters": [
           {
@@ -2945,7 +2944,7 @@
           "firewall_rules": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/VpcFirewallRule"
+              "$ref": "#/components/schemas/ResolvedVpcFirewallRule"
             }
           },
           "floating_ips": {
@@ -4251,6 +4250,60 @@
           "rack_subnet"
         ]
       },
+      "ResolvedVpcFirewallRule": {
+        "description": "VPC firewall rule after object name resolution has been performed by Nexus",
+        "type": "object",
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/VpcFirewallRuleAction"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/VpcFirewallRuleDirection"
+          },
+          "filter_hosts": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HostIdentifier"
+            }
+          },
+          "filter_ports": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/L4PortRange"
+            }
+          },
+          "filter_protocols": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRuleProtocol"
+            }
+          },
+          "priority": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "status": {
+            "$ref": "#/components/schemas/VpcFirewallRuleStatus"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkInterface"
+            }
+          }
+        },
+        "required": [
+          "action",
+          "direction",
+          "priority",
+          "status",
+          "targets"
+        ]
+      },
       "ResolvedVpcRoute": {
         "description": "A VPC route resolved into a concrete target.",
         "type": "object",
@@ -5101,60 +5154,6 @@
           }
         ]
       },
-      "VpcFirewallRule": {
-        "description": "VPC firewall rule after object name resolution has been performed by Nexus",
-        "type": "object",
-        "properties": {
-          "action": {
-            "$ref": "#/components/schemas/VpcFirewallRuleAction"
-          },
-          "direction": {
-            "$ref": "#/components/schemas/VpcFirewallRuleDirection"
-          },
-          "filter_hosts": {
-            "nullable": true,
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/HostIdentifier"
-            }
-          },
-          "filter_ports": {
-            "nullable": true,
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/L4PortRange"
-            }
-          },
-          "filter_protocols": {
-            "nullable": true,
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/VpcFirewallRuleProtocol"
-            }
-          },
-          "priority": {
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          },
-          "status": {
-            "$ref": "#/components/schemas/VpcFirewallRuleStatus"
-          },
-          "targets": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/NetworkInterface"
-            }
-          }
-        },
-        "required": [
-          "action",
-          "direction",
-          "priority",
-          "status",
-          "targets"
-        ]
-      },
       "VpcFirewallRuleAction": {
         "type": "string",
         "enum": [
@@ -5192,7 +5191,7 @@
           "rules": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/VpcFirewallRule"
+              "$ref": "#/components/schemas/ResolvedVpcFirewallRule"
             }
           },
           "vni": {
@@ -5317,7 +5316,7 @@
         "pattern": "^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
       },
       "M2Slot": {
-        "description": "An M.2 slot that was written.",
+        "description": "Describes an M.2 slot, often in the context of writing a system image to it.",
         "type": "string",
         "enum": [
           "A",

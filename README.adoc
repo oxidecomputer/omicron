@@ -223,7 +223,7 @@ Note that Omicron contains a nominally circular dependency:
 We effectively "break" this circular dependency by virtue of the OpenAPI
 documents being checked in.
 
-==== Updating Managed Services
+==== Updating or Creating New Managed Services
 
 See the documentation in link:./dev-tools/openapi-manager[`dev-tools/openapi-manager`] for more information.
 
