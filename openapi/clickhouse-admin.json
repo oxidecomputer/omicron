@@ -10,17 +10,17 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/test": {
+    "/node/address": {
       "get": {
-        "summary": "Get the status of all nodes in the ClickHouse cluster.",
-        "operationId": "ch_test",
+        "summary": "Retrieve the address the ClickHouse server or keeper node is listening on",
+        "operationId": "clickhouse_address",
         "responses": {
           "200": {
             "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ChTest"
+                  "$ref": "#/components/schemas/ClickhouseAddress"
                 }
               }
             }
@@ -37,15 +37,15 @@
   },
   "components": {
     "schemas": {
-      "ChTest": {
+      "ClickhouseAddress": {
         "type": "object",
         "properties": {
-          "result": {
+          "clickhouse_address": {
             "type": "string"
           }
         },
         "required": [
-          "result"
+          "clickhouse_address"
         ]
       },
       "Error": {

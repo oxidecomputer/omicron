@@ -5,23 +5,24 @@
 use dropshot::{HttpError, HttpResponseOk, RequestContext};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::net::SocketAddrV6;
 
 #[dropshot::api_description]
 pub trait ClickhouseAdminApi {
     type Context;
 
-    /// Get the status of all nodes in the ClickHouse cluster.
+    /// Retrieve the address the ClickHouse server or keeper node is listening on
     #[endpoint {
         method = GET,
-        path = "/test",
+        path = "/node/address",
     }]
-    async fn ch_test(
+    async fn clickhouse_address(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ChTest>, HttpError>;
+    ) -> Result<HttpResponseOk<ClickhouseAddress>, HttpError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct ChTest {
-    pub result: String,
+pub struct ClickhouseAddress {
+    pub clickhouse_address: SocketAddrV6,
 }

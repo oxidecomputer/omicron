@@ -1550,11 +1550,6 @@ impl ServiceManager {
 
                 let listen_addr = *underlay_address;
                 let listen_port = &CLICKHOUSE_PORT.to_string();
-                let admin_address = SocketAddr::new(
-                    IpAddr::V6(listen_addr),
-                    CLICKHOUSE_ADMIN_PORT,
-                )
-                .to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
@@ -1578,14 +1573,24 @@ impl ServiceManager {
                             .add_property_group(config),
                     );
 
+                    let ch_address = SocketAddr::new(
+                        IpAddr::V6(listen_addr),
+                        CLICKHOUSE_PORT,
+                    )
+                    .to_string();
+
+                    let admin_address = SocketAddr::new(
+                        IpAddr::V6(listen_addr),
+                        CLICKHOUSE_ADMIN_PORT,
+                    )
+                    .to_string();
+
                 let clickhouse_admin_config =
                     PropertyGroupBuilder::new("config")
-                        // TODO: Add zone ID?
-                        //.add_property("zone_id", "astring", zone_id.to_string())
                         .add_property(
                             "clickhouse_address",
                             "astring",
-                            listen_addr.to_string(),
+                            ch_address,
                         )
                         .add_property("http_address", "astring", admin_address);
                 let clickhouse_admin_service =
@@ -1625,11 +1630,6 @@ impl ServiceManager {
 
                 let listen_addr = *underlay_address;
                 let listen_port = &CLICKHOUSE_KEEPER_PORT.to_string();
-                let admin_address = SocketAddr::new(
-                    IpAddr::V6(listen_addr),
-                    CLICKHOUSE_ADMIN_PORT,
-                )
-                .to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
@@ -1654,14 +1654,24 @@ impl ServiceManager {
                                 .add_property_group(config),
                         );
 
+                        let ch_address = SocketAddr::new(
+                            IpAddr::V6(listen_addr),
+                            CLICKHOUSE_PORT,
+                        )
+                        .to_string();
+    
+                        let admin_address = SocketAddr::new(
+                            IpAddr::V6(listen_addr),
+                            CLICKHOUSE_ADMIN_PORT,
+                        )
+                        .to_string();
+
                 let clickhouse_admin_config =
                     PropertyGroupBuilder::new("config")
-                        // TODO: Add zone ID?
-                        //.add_property("zone_id", "astring", zone_id.to_string())
                         .add_property(
                             "clickhouse_address",
                             "astring",
-                            listen_addr.to_string(),
+                            ch_address,
                         )
                         .add_property("http_address", "astring", admin_address);
                 let clickhouse_admin_service =

@@ -17,12 +17,11 @@
   </dependency>
 
   <exec_method type='method' name='start'
-    exec='ctrun -l child -o noorphan,regent /opt/oxide/clickhouse-admin/bin/clickhouse-admin run -c /var/svc/manifest/site/clickhouse-admin/config.toml -H %{config/http_address} &amp;'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/clickhouse-admin/bin/clickhouse-admin run -c /var/svc/manifest/site/clickhouse-admin/config.toml -a %{config/clickhouse_address} -H %{config/http_address} &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
   <property_group name='config' type='application'>
-    <!-- TODO: Actually use clickhouse address for something -->
     <propval name='clickhouse_address' type='astring' value='unknown' />
     <propval name='http_address' type='astring' value='unknown' />
   </property_group>

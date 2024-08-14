@@ -21,11 +21,11 @@ enum ClickhouseAdminImpl {}
 impl ClickhouseAdminApi for ClickhouseAdminImpl {
     type Context = Arc<ServerContext>;
 
-    async fn ch_test(
+    async fn clickhouse_address(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ChTest>, HttpError> {
+    ) -> Result<HttpResponseOk<ClickhouseAddress>, HttpError> {
         let ctx = rqctx.context();
-        let output = ctx.clickward().noop()?;
+        let output = ctx.clickward().clickhouse_address()?;
         Ok(HttpResponseOk(output))
     }
 }

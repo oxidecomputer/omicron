@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use clickhouse_admin_api::ChTest;
+use clickhouse_admin_api::ClickhouseAddress;
 use dropshot::HttpError;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::io;
@@ -43,7 +43,7 @@ impl Clickward {
         Self { clickhouse_address }
     }
 
-    pub fn noop(&self) -> Result<ChTest, ClickwardError> {
-        Ok(ChTest { result: format!("it works!: {}", self.clickhouse_address) })
+    pub fn clickhouse_address(&self) -> Result<ClickhouseAddress, ClickwardError> {
+        Ok(ClickhouseAddress { clickhouse_address: self.clickhouse_address })
     }
 }
