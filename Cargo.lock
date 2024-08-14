@@ -6431,6 +6431,7 @@ dependencies = [
  "bootstrap-agent-api",
  "camino",
  "clap",
+ "clickhouse-admin-api",
  "cockroach-admin-api",
  "dns-server-api",
  "dropshot",

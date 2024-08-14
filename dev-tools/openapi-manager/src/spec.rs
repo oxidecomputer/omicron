@@ -25,6 +25,17 @@ pub fn all_apis() -> Vec<ApiSpec> {
             extra_validation: None,
         },
         ApiSpec {
+            title: "ClickHouse Cluster Admin API",
+            version: "0.0.1",
+            description: "API for interacting with the Oxide \
+                control plane's ClickHouse cluster",
+            boundary: ApiBoundary::Internal,
+            api_description:
+                clickhouse_admin_api::clickhouse_admin_api_mod::stub_api_description,
+            filename: "clickhouse-admin.json",
+            extra_validation: None,
+        },
+        ApiSpec {
             title: "CockroachDB Cluster Admin API",
             version: "0.0.1",
             description: "API for interacting with the Oxide \

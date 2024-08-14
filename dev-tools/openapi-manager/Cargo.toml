@@ -12,6 +12,7 @@ anyhow.workspace = true
 atomicwrites.workspace = true
 bootstrap-agent-api.workspace = true
 camino.workspace = true
+clickhouse-admin-api.workspace = true
 cockroach-admin-api.workspace = true
 clap.workspace = true
 dns-server-api.workspace = true
