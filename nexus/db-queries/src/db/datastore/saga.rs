@@ -201,7 +201,22 @@ impl DataStore {
         Ok(events)
     }
 
-    // XXX-dap TODO-doc
+    /// Updates all sagas that are currently assigned to any of the Nexus
+    /// instances in `nexus_zone_ids`, assigning them to `new_sec_id` instead.
+    ///
+    /// This change causes the Nexus instance `new_sec_id` to discover these
+    /// sagas and resume executing them the next time it performs saga recovery
+    /// (which is normally on startup and periodically).  Generally,
+    /// `new_sec_id` is the _current_ Nexus instance and the caller should
+    /// activate the saga recovery background task after calling this function
+    /// to immediately resume the newly-assigned sagas.
+    ///
+    /// **Warning:** This operation is only safe if the Nexus instances
+    /// `nexus_zone_ids` are not currently running.  If those Nexus instances
+    /// are still running, then two (or more) Nexus instances may wind up
+    /// running the same saga concurrently.  This would likely violate implicit
+    /// assumptions made by various saga actions, leading to hard-to-debug
+    /// errors and state corruption.
     pub async fn sagas_reassign_sec(
         &self,
         opctx: &OpContext,
@@ -243,10 +258,15 @@ impl DataStore {
 mod test {
     use super::*;
     use crate::db::datastore::test_utils::datastore_test;
+    use async_bb8_diesel::AsyncConnection;
+    use async_bb8_diesel::AsyncSimpleConnection;
+    use db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_db_model::{SagaNodeEvent, SecId};
     use nexus_test_utils::db::test_setup_database;
+    use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
     use rand::seq::SliceRandom;
+    use std::collections::BTreeSet;
     use uuid::Uuid;
 
     // Tests pagination in listing sagas that are candidates for recovery
@@ -536,14 +556,156 @@ mod test {
             SagaNodeEvent::new(event, self.sec_id)
         }
     }
-}
 
-// XXX-dap TODO-coverage want test that inserts:
-// - some sagas assigned to this SEC that are done
-// - more than BATCH_SIZE sagas assigned to this SEC that are unwinding
-// - more than BATCH_SIZE sagas assigned to this SEC that are running
-// - some sagas assigned to another SEC that are running
-//
-// then two tests:
-// 1. run the one-batch thing and make sure we only got at most the batch size
-// 2. run the whole thing and make sure that we got exactly the right ones
+    #[tokio::test]
+    async fn test_saga_reassignment() {
+        // Test setup
+        let logctx = dev::test_setup_log("test_saga_reassignment");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (_, datastore) = datastore_test(&logctx, &db).await;
+        let opctx = OpContext::for_tests(logctx.log.clone(), datastore.clone());
+
+        // Populate the database with a few different sagas:
+        //
+        // - assigned to SEC A: done, running, and unwinding
+        // - assigned to SEC B: done, running, and unwinding
+        // - assigned to SEC C: done, running, and unwinding
+        // - assigned to SEC D: done, running, and unwinding
+        //
+        // Then we'll reassign SECs B's and C's sagas to SEC A and check exactly
+        // which sagas were changed by this.  This exercises:
+        // - that we don't touch A's sagas (the one we're assigning *to*)
+        // - that we do touch both B's and C's sagas (the ones we're assigning
+        //   *from*)
+        // - that we don't touch D's sagas (some other SEC)
+        // - that we don't touch any "done" sagas
+        // - that we do touch both running and unwinding sagas
+        let mut sagas_to_insert = Vec::new();
+        let sec_a = SecId(Uuid::new_v4());
+        let sec_b = SecId(Uuid::new_v4());
+        let sec_c = SecId(Uuid::new_v4());
+        let sec_d = SecId(Uuid::new_v4());
+
+        for sec_id in [sec_a, sec_b, sec_c, sec_d] {
+            for state in [
+                steno::SagaCachedState::Running,
+                steno::SagaCachedState::Unwinding,
+                steno::SagaCachedState::Done,
+            ] {
+                let params = steno::SagaCreateParams {
+                    id: steno::SagaId(Uuid::new_v4()),
+                    name: steno::SagaName::new("tewst saga"),
+                    dag: serde_json::value::Value::Null,
+                    state,
+                };
+
+                sagas_to_insert
+                    .push(db::model::saga_types::Saga::new(sec_id, params));
+            }
+        }
+        println!("sagas to insert: {:?}", sagas_to_insert);
+
+        // These two sets are complements, but we write out the conditions to
+        // double-check that we've got it right.
+        let sagas_affected: BTreeSet<_> = sagas_to_insert
+            .iter()
+            .filter_map(|saga| {
+                ((saga.creator == sec_b || saga.creator == sec_c)
+                    && (saga.saga_state.0 == steno::SagaCachedState::Running
+                        || saga.saga_state.0
+                            == steno::SagaCachedState::Unwinding))
+                    .then(|| saga.id)
+            })
+            .collect();
+        let sagas_unaffected: BTreeSet<_> = sagas_to_insert
+            .iter()
+            .filter_map(|saga| {
+                (saga.creator == sec_a
+                    || saga.creator == sec_d
+                    || saga.saga_state.0 == steno::SagaCachedState::Done)
+                    .then(|| saga.id)
+            })
+            .collect();
+        println!("sagas affected: {:?}", sagas_affected);
+        println!("sagas UNaffected: {:?}", sagas_unaffected);
+        assert_eq!(sagas_affected.intersection(&sagas_unaffected).count(), 0);
+        assert_eq!(
+            sagas_affected.len() + sagas_unaffected.len(),
+            sagas_to_insert.len()
+        );
+
+        // Insert the sagas.
+        let count = {
+            use db::schema::saga::dsl;
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            diesel::insert_into(dsl::saga)
+                .values(sagas_to_insert)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+                .expect("successful insertion")
+        };
+        assert_eq!(count, sagas_affected.len() + sagas_unaffected.len());
+
+        // Reassign uncompleted sagas from SECs B and C to SEC A.
+        let nreassigned = datastore
+            .sagas_reassign_sec(&opctx, &[sec_b, sec_c], sec_a)
+            .await
+            .expect("failed to re-assign sagas");
+
+        // Fetch all the sagas and check their states.
+        let all_sagas: Vec<_> = datastore
+            .pool_connection_for_tests()
+            .await
+            .unwrap()
+            .transaction_async(|conn| async move {
+                use db::schema::saga::dsl;
+                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+                dsl::saga
+                    .select(nexus_db_model::Saga::as_select())
+                    .load_async(&conn)
+                    .await
+            })
+            .await
+            .unwrap();
+
+        for saga in all_sagas {
+            println!("checking saga: {:?}", saga);
+            let current_sec = saga.current_sec.unwrap();
+            if sagas_affected.contains(&saga.id) {
+                assert!(saga.creator == sec_b || saga.creator == sec_c);
+                assert_eq!(current_sec, sec_a);
+                assert_eq!(*saga.adopt_generation, Generation::from(2));
+                assert!(
+                    saga.saga_state.0 == steno::SagaCachedState::Running
+                        || saga.saga_state.0
+                            == steno::SagaCachedState::Unwinding
+                );
+            } else if sagas_unaffected.contains(&saga.id) {
+                assert_eq!(current_sec, saga.creator);
+                assert_eq!(*saga.adopt_generation, Generation::from(1));
+                // Its SEC and state could be anything since we've deliberately
+                // included sagas with various states and SECs that should not
+                // be affected by the reassignment.
+            } else {
+                println!(
+                    "ignoring saga that was not created by this test: {:?}",
+                    saga
+                );
+            }
+        }
+
+        assert_eq!(nreassigned, sagas_affected.len());
+
+        // If we do it again, we should make no changes.
+        let nreassigned = datastore
+            .sagas_reassign_sec(&opctx, &[sec_b, sec_c], sec_a)
+            .await
+            .expect("failed to re-assign sagas");
+        assert_eq!(nreassigned, 0);
+
+        // Test cleanup
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+}
