@@ -59,6 +59,7 @@ pub const COCKROACH_ADMIN_PORT: u16 = 32222;
 pub const CRUCIBLE_PORT: u16 = 32345;
 pub const CLICKHOUSE_PORT: u16 = 8123;
 pub const CLICKHOUSE_KEEPER_PORT: u16 = 9181;
+pub const CLICKHOUSE_ADMIN_PORT: u16 = 8888;
 pub const OXIMETER_PORT: u16 = 12223;
 pub const DENDRITE_PORT: u16 = 12224;
 pub const LLDP_PORT: u16 = 12230;

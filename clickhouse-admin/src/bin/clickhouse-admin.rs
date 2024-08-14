@@ -22,17 +22,17 @@ enum Args {
     Run {
         // TODO: take the clickhouse address as an argument
         /// Address on which this server should run
-        #[clap(long, action)]
+        #[clap(long, short = 'H', action)]
         http_address: SocketAddrV6,
 
-        /// Path to the server config file
-        #[clap(long, action)]
-        config_file_path: Utf8PathBuf,
+        /// Path to the server configuration file
+        #[clap(long, short, action)]
+        config: Utf8PathBuf,
     },
 }
 
 // TODO: Remove this comment and move config file to smf/clickhouse-admin
-// Test with cargo run --bin=clickhouse-admin -- run --http-address [::1]:8888 --config-file-path ./clickhouse-admin/dummy-config.toml
+// Test with cargo run --bin=clickhouse-admin -- run -H [::1]:8888 -c ./clickhouse-admin/dummy-config.toml
 
 #[tokio::main]
 async fn main() {
@@ -45,8 +45,8 @@ async fn main_impl() -> Result<(), CmdError> {
     let args = Args::parse();
 
     match args {
-        Args::Run { http_address, config_file_path } => {
-            let mut config = Config::from_file(&config_file_path)
+        Args::Run { http_address, config } => {
+            let mut config = Config::from_file(&config)
                 .map_err(|err| CmdError::Failure(anyhow!(err)))?;
             config.dropshot.bind_address = SocketAddr::V6(http_address);
 
