@@ -7,7 +7,6 @@
 use futures::TryStreamExt;
 use nexus_client::types::Saga;
 use nexus_client::types::SagaState;
-use nexus_test_interface::NexusServer;
 use nexus_test_utils_macros::nexus_test;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
@@ -20,13 +19,7 @@ type ControlPlaneTestContext =
 // saga's state matches what we expect along the way.
 #[nexus_test]
 async fn test_demo_saga(cptestctx: &ControlPlaneTestContext) {
-    let log = &cptestctx.logctx.log;
-    let nexus_internal_url = format!(
-        "http://{}",
-        cptestctx.server.get_http_server_internal_address().await
-    );
-    let nexus_client =
-        nexus_client::Client::new(&nexus_internal_url, log.clone());
+    let nexus_client = cptestctx.nexus_internal_client().await;
 
     let sagas_before = list_sagas(&nexus_client).await;
     eprintln!("found sagas (before): {:?}", sagas_before);

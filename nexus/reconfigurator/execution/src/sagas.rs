@@ -59,3 +59,9 @@ pub(crate) async fn reassign_sagas_from_expunged(
         }
     }
 }
+
+// We do not have tests at this layer since it's so thin.  The datastore
+// operation (which is the main thing above) is tested separately.  There's an
+// integration test in Nexus that tests not only that we re-assigned any
+// in-progress sagas but that the recovery process picked them up and completed
+// them.

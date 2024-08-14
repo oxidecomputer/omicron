@@ -107,7 +107,9 @@ impl BlueprintExecutor {
 
         // Return the result as a `serde_json::Value`
         match result {
-            Ok(_) => json!({}),
+            Ok(_) => json!({
+                "target_id": blueprint.id.to_string(),
+            }),
             Err(errors) => {
                 let errors: Vec<_> =
                     errors.into_iter().map(|e| format!("{:#}", e)).collect();
@@ -133,35 +135,53 @@ impl BackgroundTask for BlueprintExecutor {
 mod test {
     use super::BlueprintExecutor;
     use crate::app::background::{Activator, BackgroundTask};
+    use crate::app::saga::create_saga_dag;
+    use crate::app::sagas::demo;
+    use anyhow::Context;
+    use futures::TryStreamExt;
     use httptest::matchers::{all_of, request};
     use httptest::responders::status_code;
     use httptest::Expectation;
+    use nexus_client::types::{BlueprintTargetSet, SagaState};
     use nexus_db_model::{
         ByteCount, SledBaseboard, SledSystemHardware, SledUpdate, Zpool,
     };
     use nexus_db_queries::authn;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
+    use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::{
         blueprint_zone_type, Blueprint, BlueprintPhysicalDisksConfig,
         BlueprintTarget, BlueprintZoneConfig, BlueprintZoneDisposition,
         BlueprintZoneType, BlueprintZonesConfig, CockroachDbPreserveDowngrade,
+        OmicronZoneExternalFloatingIp, SledDetails, SledDisk, SledResources,
     };
-    use nexus_types::external_api::views::SledState;
-    use omicron_common::api::external::Generation;
+    use nexus_types::deployment::{BlueprintZoneFilter, PlanningInputBuilder};
+    use nexus_types::external_api::views::{
+        PhysicalDiskPolicy, PhysicalDiskState, SledPolicy, SledProvisionPolicy,
+        SledState,
+    };
+    use omicron_common::address::{IpRange, Ipv4Range, Ipv6Subnet};
+    use omicron_common::api::external::{Generation, MacAddr, Vni};
+    use omicron_common::api::internal::shared::{
+        NetworkInterface, NetworkInterfaceKind,
+    };
+    use omicron_common::disk::DiskIdentity;
     use omicron_common::zpool_name::ZpoolName;
-    use omicron_uuid_kinds::GenericUuid;
-    use omicron_uuid_kinds::OmicronZoneUuid;
-    use omicron_uuid_kinds::SledUuid;
+    use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
     use omicron_uuid_kinds::ZpoolUuid;
+    use omicron_uuid_kinds::{DemoSagaUuid, GenericUuid};
+    use omicron_uuid_kinds::{ExternalIpUuid, SledUuid};
+    use omicron_uuid_kinds::{OmicronZoneUuid, PhysicalDiskUuid};
+    use oxnet::IpNet;
     use serde::Deserialize;
     use serde_json::json;
-    use std::collections::BTreeMap;
-    use std::net::SocketAddr;
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
     use std::sync::Arc;
+    use std::time::Duration;
     use tokio::sync::watch;
     use uuid::Uuid;
 
@@ -174,6 +194,7 @@ mod test {
         blueprint_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
         blueprint_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
         dns_version: Generation,
+        enabled: bool,
     ) -> (BlueprintTarget, Blueprint) {
         let id = Uuid::new_v4();
         // Assume all sleds are active.
@@ -193,7 +214,7 @@ mod test {
 
         let target = BlueprintTarget {
             target_id: id,
-            enabled: true,
+            enabled,
             time_made_target: chrono::Utc::now(),
         };
         let blueprint = Blueprint {
@@ -299,13 +320,15 @@ mod test {
                 BTreeMap::new(),
                 BTreeMap::new(),
                 generation,
+                true,
             )
             .await,
         );
+        let blueprint_id = blueprint.1.id;
         blueprint_tx.send(Some(blueprint)).unwrap();
         let value = task.activate(&opctx).await;
         println!("activating with no zones: {:?}", value);
-        assert_eq!(value, json!({}));
+        assert_eq!(value, json!({"target_id": blueprint_id}));
 
         // Create a non-empty blueprint describing two servers and verify that
         // the task correctly winds up making requests to both of them and
@@ -352,8 +375,10 @@ mod test {
             ]),
             BTreeMap::new(),
             generation,
+            true,
         )
         .await;
+        let blueprint_id = blueprint.1.id;
 
         // Insert records for the zpools backing the datasets in these zones.
         for (sled_id, config) in
@@ -393,7 +418,7 @@ mod test {
         // Activate the task to trigger zone configuration on the sled-agents
         let value = task.activate(&opctx).await;
         println!("activating two sled agents: {:?}", value);
-        assert_eq!(value, json!({}));
+        assert_eq!(value, json!({"target_id": blueprint_id}));
         s1.verify_and_clear();
         s2.verify_and_clear();
 
@@ -448,5 +473,285 @@ mod test {
         );
         s1.verify_and_clear();
         s2.verify_and_clear();
+    }
+
+    // Tests that sagas assigned to expunged Nexus zones get re-assigned,
+    // recovered, and completed.
+    #[nexus_test(server = crate::Server)]
+    async fn test_saga_reassignment(cptestctx: &ControlPlaneTestContext) {
+        let nexus_client = cptestctx.nexus_internal_client().await;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let logctx = &cptestctx.logctx;
+        let opctx = OpContext::for_tests(logctx.log.clone(), datastore.clone());
+
+        // First, create a blueprint whose execution will assign sagas to this
+        // Nexus.
+        let (new_nexus_zone_id, blueprint) = {
+            let sled_id = SledUuid::new_v4();
+            let rack_id = Uuid::new_v4();
+            let update = SledUpdate::new(
+                sled_id.into_untyped_uuid(),
+                SocketAddrV6::new(Ipv6Addr::LOCALHOST, 12345, 0, 0),
+                SledBaseboard {
+                    serial_number: "one".into(),
+                    part_number: "test".into(),
+                    revision: 1,
+                },
+                SledSystemHardware {
+                    is_scrimlet: false,
+                    usable_hardware_threads: 4,
+                    usable_physical_ram: ByteCount(1000.into()),
+                    reservoir_size: ByteCount(999.into()),
+                },
+                rack_id,
+                nexus_db_model::Generation::new(),
+            );
+            datastore
+                .sled_upsert(update)
+                .await
+                .expect("Failed to insert sled to db");
+
+            let new_nexus_zone_id = OmicronZoneUuid::new_v4();
+            let pool_id = ZpoolUuid::new_v4();
+            let zones = BTreeMap::from([(
+                sled_id,
+                BlueprintZonesConfig {
+                    generation: Generation::new(),
+                    zones: vec![BlueprintZoneConfig {
+                        disposition: BlueprintZoneDisposition::Expunged,
+                        id: new_nexus_zone_id,
+                        underlay_address: "::1".parse().unwrap(),
+                        filesystem_pool: Some(ZpoolName::new_external(pool_id)),
+                        zone_type: BlueprintZoneType::Nexus(
+                            blueprint_zone_type::Nexus {
+                                internal_address: "[::1]:0".parse().unwrap(),
+                                external_ip: OmicronZoneExternalFloatingIp {
+                                    id: ExternalIpUuid::new_v4(),
+                                    ip: Ipv4Addr::LOCALHOST.into(),
+                                },
+                                nic: NetworkInterface {
+                                    id: Uuid::new_v4(),
+                                    kind: NetworkInterfaceKind::Service {
+                                        id: new_nexus_zone_id
+                                            .into_untyped_uuid(),
+                                    },
+                                    name: "test-nic".parse().unwrap(),
+                                    ip: Ipv4Addr::LOCALHOST.into(),
+                                    mac: MacAddr::random_system(),
+                                    subnet: IpNet::new(
+                                        Ipv4Addr::LOCALHOST.into(),
+                                        8,
+                                    )
+                                    .unwrap(),
+                                    vni: Vni::SERVICES_VNI,
+                                    primary: true,
+                                    slot: 0,
+                                    transit_ips: Default::default(),
+                                },
+                                external_tls: false,
+                                external_dns_servers: Vec::new(),
+                            },
+                        ),
+                    }],
+                },
+            )]);
+            let (_, blueprint) = create_blueprint(
+                &datastore,
+                &opctx,
+                zones,
+                BTreeMap::new(),
+                Generation::new(),
+                false,
+            )
+            .await;
+            (new_nexus_zone_id, blueprint)
+        };
+
+        // Create an entry in the database for a new "demo" saga owned by that
+        // expunged Nexus.  There will be no log entries, so it's as though that
+        // Nexus has just created the saga when it was expunged.
+        let new_saga_id = steno::SagaId(Uuid::new_v4());
+        println!("new saga id {}", new_saga_id);
+        let other_nexus_sec_id =
+            nexus_db_model::SecId(new_nexus_zone_id.into_untyped_uuid());
+        let demo_saga_id = DemoSagaUuid::from_untyped_uuid(Uuid::new_v4());
+        let saga_params = demo::Params { id: demo_saga_id };
+        let dag = serde_json::to_value(
+            create_saga_dag::<demo::SagaDemo>(saga_params)
+                .expect("create demo saga DAG"),
+        )
+        .expect("serialize demo saga DAG");
+        let params = steno::SagaCreateParams {
+            id: new_saga_id,
+            name: steno::SagaName::new("test saga"),
+            dag,
+            state: steno::SagaCachedState::Running,
+        };
+        let new_saga = nexus_db_model::Saga::new(other_nexus_sec_id, params);
+        datastore.saga_create(&new_saga).await.expect("created saga");
+
+        // Set the blueprint that we created as the target and enable execution.
+        println!("setting blueprint target {}", blueprint.id);
+        nexus_client
+            .blueprint_target_set_enabled(&BlueprintTargetSet {
+                target_id: blueprint.id,
+                enabled: true,
+            })
+            .await
+            .expect("set blueprint target");
+
+        // Helper to take the response from bgtask_list() and pull out the
+        // status for a particular background task.
+        fn last_task_status_map<'a>(
+            tasks: &'a BTreeMap<String, nexus_client::types::BackgroundTask>,
+            name: &'a str,
+        ) -> Result<
+            &'a serde_json::Map<String, serde_json::Value>,
+            CondCheckError<()>,
+        > {
+            let task = tasks
+                .get(name)
+                .with_context(|| format!("missing task {:?}", name))
+                .unwrap();
+            let nexus_client::types::LastResult::Completed(r) = &task.last
+            else {
+                println!(
+                    "waiting for task {:?} to complete at least once",
+                    name
+                );
+                return Err(CondCheckError::NotYet);
+            };
+            let details = &r.details;
+            Ok(details
+                .as_object()
+                .with_context(|| {
+                    format!("task {}: last status was not a map", name)
+                })
+                .unwrap())
+        }
+
+        fn status_target_id(
+            status: &serde_json::Map<String, serde_json::Value>,
+        ) -> Result<Uuid, CondCheckError<()>> {
+            Ok(status
+                .get("target_id")
+                .ok_or_else(|| {
+                    println!("waiting for task to report a target_id");
+                    CondCheckError::NotYet
+                })?
+                .as_str()
+                .expect("target_id was not a string")
+                .parse()
+                .expect("target_id was not a uuid"))
+        }
+
+        // Wait a bit for:
+        //
+        // - the new target blueprint to be loaded
+        // - the new target blueprint to be executed
+        // - the saga to be transferred
+        //
+        // We could just wait for the end result but debugging will be easier if
+        // we can report where things got stuck.
+        wait_for_condition(
+            || async {
+                let task_status = nexus_client
+                    .bgtask_list()
+                    .await
+                    .expect("list background tasks");
+                let tasks = task_status
+                    .into_inner()
+                    .into_iter()
+                    .collect::<BTreeMap<_, _>>();
+
+                // Wait for the loader to report our new blueprint as the
+                // current target.
+                let loader_status =
+                    last_task_status_map(&tasks, "blueprint_loader")?;
+                println!("waiting: found loader status: {:?}", loader_status);
+                let target_id = status_target_id(&loader_status)?;
+                if target_id != blueprint.id {
+                    println!(
+                        "waiting: taking lap (loader target id is not ours)"
+                    );
+                    return Err(CondCheckError::NotYet);
+                }
+
+                // Wait for the execution task to report having tried to execute
+                // our blueprint.  For our purposes, it's not critical that it
+                // succeeded.  It might fail for reasons not having to do with
+                // what we're testing.
+                let execution_status =
+                    last_task_status_map(&tasks, "blueprint_executor")?;
+                println!(
+                    "waiting: found execution status: {:?}",
+                    execution_status
+                );
+                let target_id = status_target_id(&execution_status)?;
+                if target_id != blueprint.id {
+                    println!(
+                        "waiting: taking lap (execution target id is not ours)"
+                    );
+                    return Err(CondCheckError::NotYet);
+                }
+
+                // For debugging, print out the saga recovery task's status.
+                // It's not worth trying to parse it.  And it might not yet have
+                // even carried out recovery.
+                println!(
+                    "waiting: found saga recovery status: {:?}",
+                    last_task_status_map(&tasks, "saga_recovery"),
+                );
+
+                // Wait too for our demo saga to show up in the saga list.  That
+                // means recovery has completed.
+                let sagas = nexus_client
+                    .saga_list_stream(None, None)
+                    .try_collect::<Vec<_>>()
+                    .await
+                    .expect("listed sagas");
+                if sagas.iter().any(|s| s.id == new_saga_id.0) {
+                    Ok(())
+                } else {
+                    println!("waiting: taking lap (saga not yet found)");
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &Duration::from_millis(50),
+            &Duration::from_secs(60),
+        )
+        .await
+        .expect("execution completion");
+
+        // Now complete the demo saga.
+        nexus_client
+            .saga_demo_complete(&demo_saga_id)
+            .await
+            .expect("demo saga complete");
+
+        // And wait for it to actually finish.
+        wait_for_condition(
+            || async {
+                let saga = nexus_client
+                    .saga_list_stream(None, None)
+                    .try_collect::<Vec<_>>()
+                    .await
+                    .expect("listed sagas")
+                    .into_iter()
+                    .find(|s| s.id == new_saga_id.0)
+                    .expect("demo saga in list of sagas");
+                println!("checking saga status: {:?}", saga);
+                if saga.state == SagaState::Succeeded {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &Duration::from_millis(50),
+            &Duration::from_secs(10),
+        )
+        .await
+        .expect("saga completion");
     }
 }
