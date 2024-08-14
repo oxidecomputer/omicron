@@ -101,7 +101,10 @@ enum BackgroundTasksCommands {
 
 #[derive(Debug, Args)]
 struct BackgroundTasksShowArgs {
-    /// Name of the background tasks to show (default: all)
+    /// Names of background tasks to show (default: all)
+    ///
+    /// You can use any background task name here or one of the special strings
+    /// "all", "dns_external", or "dns_internal".
     #[clap(value_name = "TASK_NAME")]
     tasks: Vec<String>,
 }

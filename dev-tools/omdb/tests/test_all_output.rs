@@ -80,6 +80,7 @@ async fn test_omdb_usage_errors() {
         &["mgs"],
         &["nexus"],
         &["nexus", "background-tasks"],
+        &["nexus", "background-tasks", "show", "--help"],
         &["nexus", "blueprints"],
         &["nexus", "sagas"],
         // Missing "--destructive" flag.  The URL is bogus but just ensures that
