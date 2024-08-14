@@ -9,7 +9,6 @@ use super::SQL_BATCH_SIZE;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::model::Generation;
 use crate::db::pagination::paginated;
 use crate::db::pagination::paginated_multicolumn;
 use crate::db::pagination::Paginator;
@@ -82,21 +81,15 @@ impl DataStore {
     /// now, we're implementing saga adoption only in cases where the original
     /// SEC/Nexus has been expunged.)
     ///
-    /// However, in the future, it may be possible for multiple SECs to try and
-    /// update the same saga, and overwrite each other's state. For example,
-    /// one SEC might try and update the state to Running while the other one
-    /// updates it to Done. That case would have to be carefully considered and
-    /// tested here, probably using the (currently unused)
-    /// `current_adopt_generation` field to enable optimistic concurrency.
-    ///
-    /// To reiterate, we are *not* considering the case where several SECs try
-    /// to update the same saga. That will be a future enhancement.
+    /// It's conceivable that multiple SECs do try to udpate the same saga
+    /// concurrently.  That would be a bug.  This is noticed and prevented by
+    /// making this query conditional on current_sec and failing with a conflict
+    /// if the current SEC has changed.
     pub async fn saga_update_state(
         &self,
         saga_id: steno::SagaId,
         new_state: steno::SagaCachedState,
         current_sec: db::saga_types::SecId,
-        current_adopt_generation: Generation,
     ) -> Result<(), Error> {
         use db::schema::saga::dsl;
 
@@ -104,7 +97,6 @@ impl DataStore {
         let result = diesel::update(dsl::saga)
             .filter(dsl::id.eq(saga_id))
             .filter(dsl::current_sec.eq(current_sec))
-            .filter(dsl::adopt_generation.eq(current_adopt_generation))
             .set(dsl::saga_state.eq(db::saga_types::SagaCachedState(new_state)))
             .check_if_exists::<db::saga_types::Saga>(saga_id)
             .execute_and_check(&*self.pool_connection_unauthorized().await?)
@@ -121,20 +113,19 @@ impl DataStore {
 
         match result.status {
             UpdateStatus::Updated => Ok(()),
-            UpdateStatus::NotUpdatedButExists => Err(Error::invalid_request(
-                format!(
-                    "failed to update saga {:?} with state {:?}: preconditions not met: \
-                    expected current_sec = {:?}, adopt_generation = {:?}, \
-                    but found current_sec = {:?}, adopt_generation = {:?}, state = {:?}",
+            UpdateStatus::NotUpdatedButExists => {
+                Err(Error::invalid_request(format!(
+                    "failed to update saga {:?} with state {:?}:\
+                     preconditions not met: \
+                     expected current_sec = {:?}, \
+                     but found current_sec = {:?}, state = {:?}",
                     saga_id,
                     new_state,
                     current_sec,
-                    current_adopt_generation,
                     result.found.current_sec,
-                    result.found.adopt_generation,
                     result.found.saga_state,
-                )
-            )),
+                )))
+            }
         }
     }
 
@@ -479,7 +470,6 @@ mod test {
                 node_cx.saga_id,
                 steno::SagaCachedState::Running,
                 node_cx.sec_id,
-                db::model::Generation::new(),
             )
             .await
             .expect("updating state to Running again");
@@ -490,7 +480,6 @@ mod test {
                 node_cx.saga_id,
                 steno::SagaCachedState::Done,
                 node_cx.sec_id,
-                db::model::Generation::new(),
             )
             .await
             .expect("updating state to Done");
@@ -502,7 +491,6 @@ mod test {
                 node_cx.saga_id,
                 steno::SagaCachedState::Done,
                 node_cx.sec_id,
-                db::model::Generation::new(),
             )
             .await
             .expect("updating state to Done again");
