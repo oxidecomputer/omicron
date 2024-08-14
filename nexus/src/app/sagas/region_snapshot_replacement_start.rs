@@ -32,7 +32,7 @@
 //! 1. Allocate a new region
 //!
 //! 2. Create a blank volume that can be later deleted to stash the snapshot
-//!    being replaced. This is filled in the `volume_replace_snapshot`
+//!    being replaced. This is populated in the `volume_replace_snapshot`
 //!    transaction so that `volume_references` for the corresponding region
 //!    snapshot remains accurate.
 //!
