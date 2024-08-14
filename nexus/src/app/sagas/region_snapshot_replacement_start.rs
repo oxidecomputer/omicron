@@ -335,6 +335,8 @@ async fn rsrss_alloc_new_region_undo(
             .datastore()
             .regions_hard_delete(log, vec![region.id()])
             .await?;
+    } else {
+        warn!(&log, "maybe_dataset_and_region is None!",);
     }
 
     Ok(())
