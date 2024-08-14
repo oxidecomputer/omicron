@@ -144,8 +144,15 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["mgs", "inventory"],
         &["nexus", "background-tasks", "doc"],
         &["nexus", "background-tasks", "show"],
-        // background tasks: test picking out a specific name
+        // background tasks: test picking out specific names
         &["nexus", "background-tasks", "show", "saga_recovery"],
+        &[
+            "nexus",
+            "background-tasks",
+            "show",
+            "blueprint_loader",
+            "blueprint_executor",
+        ],
         // background tasks: test recognized group names
         &["nexus", "background-tasks", "show", "dns_internal"],
         &["nexus", "background-tasks", "show", "dns_external"],

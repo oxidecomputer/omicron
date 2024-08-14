@@ -654,6 +654,28 @@ task: "saga_recovery"
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
+EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "blueprint_loader", "blueprint_executor"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+task: "blueprint_loader"
+  configured period: every 1m <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
+
+task: "blueprint_executor"
+  configured period: every 10m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: no blueprint
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
 EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "dns_internal"]
 termination: Exited(0)
 ---------------------------------------------
