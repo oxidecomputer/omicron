@@ -19,6 +19,8 @@ use std::{
 };
 use uuid::Uuid;
 
+use super::nexus::HostIdentifier;
+
 /// The type of network interface
 #[derive(
     Clone,
@@ -635,6 +637,53 @@ pub struct ResolvedVpcRoute {
     pub target: RouterTarget,
 }
 
+/// VPC firewall rule after object name resolution has been performed by Nexus
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ResolvedVpcFirewallRule {
+    pub status: external::VpcFirewallRuleStatus,
+    pub direction: external::VpcFirewallRuleDirection,
+    pub targets: Vec<NetworkInterface>,
+    pub filter_hosts: Option<Vec<HostIdentifier>>,
+    pub filter_ports: Option<Vec<external::L4PortRange>>,
+    pub filter_protocols: Option<Vec<external::VpcFirewallRuleProtocol>>,
+    pub action: external::VpcFirewallRuleAction,
+    pub priority: external::VpcFirewallRulePriority,
+}
+
+/// A mapping from a virtual NIC to a physical host
+#[derive(
+    Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct VirtualNetworkInterfaceHost {
+    pub virtual_ip: IpAddr,
+    pub virtual_mac: external::MacAddr,
+    pub physical_host_ip: Ipv6Addr,
+    pub vni: external::Vni,
+}
+
+/// DHCP configuration for a port
+///
+/// Not present here: Hostname (DHCPv4 option 12; used in DHCPv6 option 39); we
+/// use `InstanceRuntimeState::hostname` for this value.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DhcpConfig {
+    /// DNS servers to send to the instance
+    ///
+    /// (DHCPv4 option 6; DHCPv6 option 23)
+    pub dns_servers: Vec<IpAddr>,
+
+    /// DNS zone this instance's hostname belongs to (e.g. the `project.example`
+    /// part of `instance1.project.example`)
+    ///
+    /// (DHCPv4 option 15; used in DHCPv6 option 39)
+    pub host_domain: Option<String>,
+
+    /// DNS search domains
+    ///
+    /// (DHCPv4 option 119; DHCPv6 option 24)
+    pub search_domains: Vec<String>,
+}
+
 /// The target for a given router entry.
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
@@ -710,8 +759,12 @@ pub struct ResolvedVpcRouteSet {
 pub enum DatasetKind {
     Crucible,
     Cockroach,
+    /// Used for single-node clickhouse deployments
     Clickhouse,
+    /// Used for replicated clickhouse deployments
     ClickhouseKeeper,
+    /// Used for replicated clickhouse deployments
+    ClickhouseServer,
     ExternalDns,
     InternalDns,
 }
@@ -724,6 +777,7 @@ impl fmt::Display for DatasetKind {
             Cockroach => "cockroach",
             Clickhouse => "clickhouse",
             ClickhouseKeeper => "clickhouse_keeper",
+            ClickhouseServer => "clickhouse_server",
             ExternalDns => "external_dns",
             InternalDns => "internal_dns",
         };

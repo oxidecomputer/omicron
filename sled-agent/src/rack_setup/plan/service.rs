@@ -4,7 +4,6 @@
 
 //! Plan generation for "where should services be initialized".
 
-use crate::bootstrap::params::StartSledAgentRequest;
 use camino::Utf8PathBuf;
 use dns_service_client::types::DnsConfigParams;
 use illumos_utils::zpool::ZpoolName;
@@ -40,6 +39,7 @@ use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
 };
 use sled_agent_types::rack_init::RackInitializeRequest as Config;
+use sled_agent_types::sled::StartSledAgentRequest;
 use sled_storage::dataset::{DatasetName, DatasetType, CONFIG_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;

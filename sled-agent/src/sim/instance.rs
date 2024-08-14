@@ -8,7 +8,6 @@ use super::simulatable::Simulatable;
 
 use crate::common::instance::{ObservedPropolisState, PublishedVmmState};
 use crate::nexus::NexusClient;
-use crate::params::InstanceStateRequested;
 use async_trait::async_trait;
 use chrono::Utc;
 use nexus_client;
@@ -21,6 +20,7 @@ use propolis_client::types::{
     InstanceMigrationStatus as PropolisMigrationStatus,
     InstanceState as PropolisInstanceState, InstanceStateMonitorResponse,
 };
+use sled_agent_types::instance::InstanceStateRequested;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
