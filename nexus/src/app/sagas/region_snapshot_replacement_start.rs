@@ -675,6 +675,10 @@ async fn rsrss_replace_snapshot_in_volume_undo(
 
     let replacement_params = get_replace_params(&sagactx).await?;
 
+    // Note the old and new are _not_ swapped in this log message! The intention
+    // is that someone reviewing the logs could search for "replacing UUID with
+    // UUID in volume UUID" and get (in the case of no re-execution) two
+    // results.
     info!(
         log,
         "undo: replacing {} with {} in volume {}",
