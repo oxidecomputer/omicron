@@ -1,0 +1,67 @@
+[target]
+name = "sled"
+description = "A compute sled"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = ["rack_id", "sled_id", "sled_model", "sled_model", "sled_revision", "sled_serial" ]}
+]
+
+[fields.rack_id]
+type = "uuid"
+description = "ID for the sled's rack"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID for the sled"
+
+[fields.sled_model]
+type = "string"
+description = "Model number of the the sled"
+
+[fields.sled_revision]
+type = "u32"
+description = "Revision number of the sled"
+
+[fields.sled_serial]
+type = "string"
+description = "Serial number of the sled"
+
+[fields.sensor]
+type = "string"
+description = "A name identifying the sensor that recorded a measurement"
+
+[[metrics]]
+name = "temperature"
+description = "Temperature reading in degrees Celcius"
+units = "degrees_celcius"
+datum_type = "f64"
+versions = [
+    { added_in = 1, fields = ["sensor"]}
+]
+
+[[metrics]]
+name = "current"
+description = "Electric current reading in amperes"
+units = "amps"
+datum_type = "f64"
+versions = [
+    { added_in = 1, fields = ["sensor"]}
+]
+
+[[metrics]]
+name = "voltage"
+description = "A voltage reading"
+units = "volts"
+datum_type = "f64"
+versions = [
+    { added_in = 1, fields = ["sensor"]}
+]
+
+[[metrics]]
+name = "fan_speed"
+description = "A fan speed measurement, in rotations per minute"
+units = "rpm"
+datum_type = "f64"
+versions = [
+    { added_in = 1, fields = ["sensor"]}
+]
