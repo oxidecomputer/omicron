@@ -536,8 +536,7 @@ async fn cmd_nexus_background_tasks_list(
         client.bgtask_list().await.context("listing background tasks")?;
     // Convert the HashMap to a BTreeMap because we want the keys in sorted
     // order.
-    let tasks =
-        response.into_inner().into_iter().collect::<BTreeMap<_, _>>();
+    let tasks = response.into_inner().into_iter().collect::<BTreeMap<_, _>>();
     let table_rows = tasks.values().map(BackgroundTaskStatusRow::from);
     let table = tabled::Table::new(table_rows)
         .with(tabled::settings::Style::empty())
