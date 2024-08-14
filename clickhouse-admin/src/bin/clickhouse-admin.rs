@@ -20,6 +20,8 @@ use std::net::{SocketAddr, SocketAddrV6};
 enum Args {
     /// Start the ClickHouse admin server
     Run {
+        // TODO: This address is solely for testing now. We should remove it
+        // once we have more endpoints up and running.
         /// Socket address for a running clickhouse server or keeper instance
         #[clap(long, short = 'a', action)]
         clickhouse_address: SocketAddrV6,

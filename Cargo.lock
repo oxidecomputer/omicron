@@ -5567,7 +5567,6 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "once_cell",
  "openapi-lint",
  "openapiv3",
  "schemars",

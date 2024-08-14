@@ -15,7 +15,6 @@ http.workspace = true
 illumos-utils.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
-once_cell.workspace = true
 schemars.workspace = true
 slog.workspace = true
 slog-async.workspace = true

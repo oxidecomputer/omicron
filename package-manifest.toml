@@ -153,6 +153,8 @@ source.type = "composite"
 source.packages = [
   "clickhouse_svc.tar.gz",
   "internal-dns-cli.tar.gz",
+  # TODO: This package is for solely for testing purposes.
+  # Remove once replicated clickhouse is up and running.
   "omicron-clickhouse-admin.tar.gz",
   "zone-setup.tar.gz",
   "zone-network-install.tar.gz"
