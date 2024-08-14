@@ -108,11 +108,11 @@ declare_saga_actions! {
     GET_OLD_SNAPSHOT_VOLUME_ID -> "old_snapshot_volume_id" {
         + rsrss_get_old_snapshot_volume_id
     }
-    CREATE_FAKE_VOLUME -> "unused_3" {
+    CREATE_FAKE_VOLUME -> "unused_2" {
         + rsrss_create_fake_volume
         - rsrss_create_fake_volume_undo
     }
-    REPLACE_SNAPSHOT_IN_VOLUME -> "unused_2" {
+    REPLACE_SNAPSHOT_IN_VOLUME -> "unused_3" {
         + rsrss_replace_snapshot_in_volume
         - rsrss_replace_snapshot_in_volume_undo
     }
