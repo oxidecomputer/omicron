@@ -53,7 +53,6 @@ use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::external_api::views::SledState;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
@@ -864,7 +863,6 @@ impl DataStore {
                         SelectFlavor::ForUpdate,
                     )
                     .await
-                    .internal_context("getting current target")
                     .map_err(|e| err.bail(e))?;
                 if current_target.target_id != blueprint.id {
                     return Err(err.bail(Error::invalid_request(format!(
@@ -899,7 +897,6 @@ impl DataStore {
                         .map(|(_sled_id, zone)| zone),
                 )
                 .await
-                .internal_context("ensure_zone_external_networking_deallocated")
                 .map_err(|e| err.bail(e))?;
                 self.ensure_zone_external_networking_allocated_on_connection(
                     &conn,
@@ -911,7 +908,6 @@ impl DataStore {
                         .map(|(_sled_id, zone)| zone),
                 )
                 .await
-                .internal_context("ensure_zone_external_networking_allocated")
                 .map_err(|e| err.bail(e))?;
 
                 // See the comment on this method; this lets us wait until our

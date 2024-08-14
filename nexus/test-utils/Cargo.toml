@@ -25,7 +25,6 @@ http.workspace = true
 hyper.workspace = true
 illumos-utils.workspace = true
 internal-dns.workspace = true
-nexus-client.workspace = true
 nexus-config.workspace = true
 nexus-db-queries.workspace = true
 nexus-sled-agent-shared.workspace = true

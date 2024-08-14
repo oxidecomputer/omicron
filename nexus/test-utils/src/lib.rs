@@ -142,15 +142,6 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         format!("*.sys.{}", self.external_dns_zone_name)
     }
 
-    pub async fn nexus_internal_client(&self) -> nexus_client::Client {
-        let log = &self.logctx.log;
-        let nexus_internal_url = format!(
-            "http://{}",
-            self.server.get_http_server_internal_address().await
-        );
-        nexus_client::Client::new(&nexus_internal_url, log.clone())
-    }
-
     pub async fn teardown(mut self) {
         self.server.close().await;
         self.database.cleanup().await.unwrap();
