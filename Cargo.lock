@@ -2213,7 +2213,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.10.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#52d900a470b8f08eddf021813470b2a9194f2cc0"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#06c8dab40e28d313f8bb0e15e1027eeace3bce89"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2259,7 +2259,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.10.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#52d900a470b8f08eddf021813470b2a9194f2cc0"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#06c8dab40e28d313f8bb0e15e1027eeace3bce89"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -3520,7 +3520,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.7",
+ "socket2 0.4.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -6415,6 +6415,7 @@ dependencies = [
  "similar",
  "slog",
  "smallvec 1.13.2",
+ "socket2 0.5.7",
  "spin 0.9.8",
  "string_cache",
  "subtle",
