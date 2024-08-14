@@ -20,7 +20,7 @@ use std::net::{SocketAddr, SocketAddrV6};
 enum Args {
     /// Start the ClickHouse admin server
     Run {
-        /// Socket address for a running clickhouse server orr keeper instance
+        /// Socket address for a running clickhouse server or keeper instance
         #[clap(long, short = 'a', action)]
         clickhouse_address: SocketAddrV6,
 
