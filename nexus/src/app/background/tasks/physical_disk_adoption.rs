@@ -96,7 +96,6 @@ impl BackgroundTask for PhysicalDiskAdoption {
             }
 
             let mut disks_added = 0;
-            let log = &opctx.log;
 
             let collection_id = *self.rx_inventory_collection.borrow();
             let Some(collection_id) = collection_id else {

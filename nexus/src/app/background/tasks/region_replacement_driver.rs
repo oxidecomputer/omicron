@@ -227,8 +227,6 @@ impl BackgroundTask for RegionReplacementDriver {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
-            let log = &opctx.log;
-
             let mut status = RegionReplacementDriverStatus::default();
 
             self.drive_running_replacements_forward(opctx, &mut status).await;
