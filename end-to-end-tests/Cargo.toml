@@ -19,7 +19,7 @@ omicron-test-utils.workspace = true
 oxide-client.workspace = true
 rand.workspace = true
 reqwest = { workspace = true, features = ["cookies"] }
-russh = "0.43.0"
+russh = "0.44.1"
 russh-keys = "0.43.0"
 serde.workspace = true
 serde_json.workspace = true
