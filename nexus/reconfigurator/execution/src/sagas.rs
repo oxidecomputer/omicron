@@ -25,6 +25,16 @@ pub(crate) async fn reassign_sagas_from_expunged(
 
     // Identify any Nexus zones that have been expunged and need to have sagas
     // re-assigned.
+    //
+    // TODO: Currently, we take any expunged Nexus instances and attempt to
+    // assign all their sagas to ourselves.  Per RFD 289, we can only re-assign
+    // sagas between two instances of Nexus that are at the same version.  Right
+    // now this can't happen so there's nothing to do here to ensure that
+    // constraint.  However, once we support allowing the control plane to be
+    // online _during_ an upgrade, there may be multiple different Nexus
+    // instances running at the same time.  At that point, we will need to make
+    // sure that we only ever try to assign ourselves sagas from other Nexus
+    // instances that we know are running the same version as ourselves.
     let nexus_zone_ids: Vec<_> = blueprint
         .all_omicron_zones(BlueprintZoneFilter::Expunged)
         .filter_map(|(_, z)| {
