@@ -7,14 +7,7 @@
 use crate::instance::propolis_zone_name;
 use crate::instance::Instance;
 use crate::metrics::MetricsRequestQueue;
-use crate::nexus::NexusClientWithResolver;
-use crate::params::InstanceExternalIpBody;
-use crate::params::InstanceMetadata;
-use crate::params::ZoneBundleMetadata;
-use crate::params::{
-    InstanceHardware, InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse,
-};
+use crate::nexus::NexusClient;
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
@@ -32,6 +25,8 @@ use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use sled_agent_types::instance::*;
+use sled_agent_types::zone_bundle::ZoneBundleMetadata;
 use sled_storage::manager::StorageHandle;
 use sled_storage::resources::AllDisks;
 use slog::Logger;
@@ -74,7 +69,7 @@ pub enum Error {
 }
 
 pub(crate) struct InstanceManagerServices {
-    pub nexus_client: NexusClientWithResolver,
+    pub nexus_client: NexusClient,
     pub vnic_allocator: VnicAllocator<Etherstub>,
     pub port_manager: PortManager,
     pub storage: StorageHandle,
@@ -103,7 +98,7 @@ impl InstanceManager {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         log: Logger,
-        nexus_client: NexusClientWithResolver,
+        nexus_client: NexusClient,
         etherstub: Etherstub,
         port_manager: PortManager,
         storage: StorageHandle,
@@ -422,7 +417,7 @@ struct InstanceManagerRunner {
     terminate_tx: mpsc::UnboundedSender<InstanceDeregisterRequest>,
     terminate_rx: mpsc::UnboundedReceiver<InstanceDeregisterRequest>,
 
-    nexus_client: NexusClientWithResolver,
+    nexus_client: NexusClient,
 
     // TODO: If we held an object representing an enum of "Created OR Running"
     // instance, we could avoid the methods within "instance.rs" that panic

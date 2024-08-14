@@ -7,10 +7,10 @@
 use super::params::version;
 use super::params::Request;
 use super::params::RequestEnvelope;
-use super::params::StartSledAgentRequest;
 use super::views::SledAgentResponse;
 use crate::bootstrap::views::Response;
 use crate::bootstrap::views::ResponseEnvelope;
+use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
 use std::borrow::Cow;
 use std::io;

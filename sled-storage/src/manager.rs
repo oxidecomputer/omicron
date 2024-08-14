@@ -10,7 +10,7 @@ use crate::config::MountConfig;
 use crate::dataset::{DatasetName, CONFIG_DATASET};
 use crate::disk::RawDisk;
 use crate::error::Error;
-use crate::resources::{AllDisks, DisksManagementResult, StorageResources};
+use crate::resources::{AllDisks, StorageResources};
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
 use futures::future::FutureExt;
@@ -18,7 +18,8 @@ use illumos_utils::zfs::{Mountpoint, Zfs};
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::{
-    DiskIdentity, DiskVariant, OmicronPhysicalDisksConfig,
+    DiskIdentity, DiskVariant, DisksManagementResult,
+    OmicronPhysicalDisksConfig,
 };
 use omicron_common::ledger::Ledger;
 use slog::{info, o, warn, Logger};
@@ -826,10 +827,10 @@ mod tests {
     use crate::dataset::DatasetType;
     use crate::disk::RawSyntheticDisk;
     use crate::manager_test_harness::StorageManagerTestHarness;
-    use crate::resources::DiskManagementError;
 
     use super::*;
     use camino_tempfile::tempdir_in;
+    use omicron_common::disk::DiskManagementError;
     use omicron_common::ledger;
     use omicron_test_utils::dev::test_setup_log;
     use sled_hardware::DiskFirmware;

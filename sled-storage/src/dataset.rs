@@ -142,6 +142,7 @@ pub enum DatasetType {
     Crucible,
     Clickhouse,
     ClickhouseKeeper,
+    ClickhouseServer,
     ExternalDns,
     InternalDns,
 }
@@ -164,6 +165,7 @@ impl DatasetType {
             Self::CockroachDb => DatasetKind::Cockroach,
             Self::Clickhouse => DatasetKind::Clickhouse,
             Self::ClickhouseKeeper => DatasetKind::ClickhouseKeeper,
+            Self::ClickhouseServer => DatasetKind::ClickhouseServer,
             Self::ExternalDns => DatasetKind::ExternalDns,
             Self::InternalDns => DatasetKind::InternalDns,
         }
@@ -206,6 +208,7 @@ impl std::fmt::Display for DatasetType {
             CockroachDb => "cockroachdb",
             Clickhouse => "clickhouse",
             ClickhouseKeeper => "clickhouse_keeper",
+            ClickhouseServer => "clickhouse_server",
             ExternalDns => "external_dns",
             InternalDns => "internal_dns",
         };

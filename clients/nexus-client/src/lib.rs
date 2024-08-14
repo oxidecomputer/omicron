@@ -42,6 +42,7 @@ progenitor::generate_api!(
         OmicronPhysicalDisksConfig = nexus_types::disk::OmicronPhysicalDisksConfig,
         RecoverySiloConfig = nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
         TypedUuidForCollectionKind = omicron_uuid_kinds::CollectionUuid,
+        TypedUuidForDemoSagaKind = omicron_uuid_kinds::DemoSagaUuid,
         TypedUuidForDownstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::DownstairsKind>,
         TypedUuidForPropolisKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::PropolisKind>,
         TypedUuidForSledKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::SledKind>,

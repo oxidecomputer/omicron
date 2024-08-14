@@ -109,6 +109,9 @@ impl OmicronZone {
             OmicronZoneType::ClickhouseKeeper { address, dataset } => {
                 (ZoneType::ClickhouseKeeper, address, Some(dataset))
             }
+            OmicronZoneType::ClickhouseServer { address, dataset } => {
+                (ZoneType::ClickhouseServer, address, Some(dataset))
+            }
             OmicronZoneType::CockroachDb { address, dataset } => {
                 (ZoneType::CockroachDb, address, Some(dataset))
             }
@@ -258,6 +261,12 @@ impl OmicronZone {
                     dataset: common.dataset?,
                 },
             ),
+            ZoneType::ClickhouseServer => BlueprintZoneType::ClickhouseServer(
+                blueprint_zone_type::ClickhouseServer {
+                    address,
+                    dataset: common.dataset?,
+                },
+            ),
             ZoneType::CockroachDb => BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb {
                     address,
@@ -389,6 +398,10 @@ impl OmicronZone {
                 dataset: common.dataset?,
             },
             ZoneType::ClickhouseKeeper => OmicronZoneType::ClickhouseKeeper {
+                address,
+                dataset: common.dataset?,
+            },
+            ZoneType::ClickhouseServer => OmicronZoneType::ClickhouseServer {
                 address,
                 dataset: common.dataset?,
             },

@@ -14,12 +14,10 @@ use illumos_utils::zpool::{PathInPool, ZpoolName};
 use key_manager::StorageKeyRequester;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::{
-    DiskIdentity, DiskVariant, OmicronPhysicalDiskConfig,
+    DiskIdentity, DiskManagementError, DiskManagementStatus, DiskVariant,
+    DisksManagementResult, OmicronPhysicalDiskConfig,
     OmicronPhysicalDisksConfig,
 };
-use omicron_uuid_kinds::ZpoolUuid;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use sled_hardware::DiskFirmware;
 use slog::{info, o, warn, Logger};
 use std::collections::BTreeMap;
@@ -31,76 +29,6 @@ const BUNDLE_DIRECTORY: &str = "bundle";
 
 // The directory for zone bundles.
 const ZONE_BUNDLE_DIRECTORY: &str = "zone";
-
-#[derive(Debug, thiserror::Error, JsonSchema, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "type", content = "value")]
-pub enum DiskManagementError {
-    #[error("Disk requested by control plane, but not found on device")]
-    NotFound,
-
-    #[error("Expected zpool UUID of {expected}, but saw {observed}")]
-    ZpoolUuidMismatch { expected: ZpoolUuid, observed: ZpoolUuid },
-
-    #[error("Failed to access keys necessary to unlock storage. This error may be transient.")]
-    KeyManager(String),
-
-    #[error("Other error starting disk management: {0}")]
-    Other(String),
-}
-
-impl DiskManagementError {
-    fn retryable(&self) -> bool {
-        match self {
-            DiskManagementError::KeyManager(_) => true,
-            _ => false,
-        }
-    }
-}
-
-/// Identifies how a single disk management operation may have succeeded or
-/// failed.
-#[derive(Debug, JsonSchema, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct DiskManagementStatus {
-    pub identity: DiskIdentity,
-    pub err: Option<DiskManagementError>,
-}
-
-/// The result from attempting to manage underlying disks.
-///
-/// This is more complex than a simple "Error" type because it's possible
-/// for some disks to be initialized correctly, while others can fail.
-///
-/// This structure provides a mechanism for callers to learn about partial
-/// failures, and handle them appropriately on a per-disk basis.
-#[derive(Default, Debug, JsonSchema, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[must_use = "this `DiskManagementResult` may contain errors, which should be handled"]
-pub struct DisksManagementResult {
-    pub status: Vec<DiskManagementStatus>,
-}
-
-impl DisksManagementResult {
-    pub fn has_error(&self) -> bool {
-        for status in &self.status {
-            if status.err.is_some() {
-                return true;
-            }
-        }
-        false
-    }
-
-    pub fn has_retryable_error(&self) -> bool {
-        for status in &self.status {
-            if let Some(err) = &status.err {
-                if err.retryable() {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-}
 
 // The Sled Agent is responsible for both observing disks and managing them at
 // the request of the broader control plane. This enum encompasses that duality,
