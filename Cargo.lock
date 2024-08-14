@@ -5895,6 +5895,7 @@ dependencies = [
  "indicatif",
  "internal-dns",
  "ipnetwork",
+ "itertools 0.13.0",
  "multimap",
  "nexus-client",
  "nexus-config",
