@@ -2409,7 +2409,7 @@ dependencies = [
  "rand 0.8.5",
  "reqwest",
  "russh",
- "russh-keys 0.43.0",
+ "russh-keys",
  "serde",
  "serde_json",
  "sled-agent-types",
@@ -6347,7 +6347,6 @@ dependencies = [
  "mio 0.8.11",
  "nix 0.28.0",
  "nom",
- "num-bigint",
  "num-bigint-dig",
  "num-integer",
  "num-iter",
@@ -6402,7 +6401,6 @@ dependencies = [
  "usdt",
  "usdt-impl",
  "uuid",
- "yasna",
  "zerocopy 0.7.34",
  "zeroize",
 ]
@@ -8517,7 +8515,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_core 0.6.4",
  "russh-cryptovec",
- "russh-keys 0.44.0",
+ "russh-keys",
  "sha1",
  "sha2",
  "ssh-encoding",
@@ -8535,45 +8533,6 @@ checksum = "2b077b6dd8d8c085dac62f7fcc5a83df60c7f7a22d49bfba994f2f4dbf60bc74"
 dependencies = [
  "libc",
  "winapi",
-]
-
-[[package]]
-name = "russh-keys"
-version = "0.43.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa4a5afa2fab6fd49d0c470a3b75c3c70a4f363c38db32df5ae3b44a3abf5ab9"
-dependencies = [
- "aes",
- "async-trait",
- "bcrypt-pbkdf",
- "bit-vec",
- "block-padding",
- "byteorder",
- "cbc",
- "ctr",
- "data-encoding",
- "dirs",
- "ed25519-dalek",
- "futures",
- "hmac",
- "inout",
- "log",
- "md5",
- "num-bigint",
- "num-integer",
- "p256",
- "p521",
- "pbkdf2 0.11.0",
- "rand 0.7.3",
- "rand_core 0.6.4",
- "russh-cryptovec",
- "serde",
- "sha1",
- "sha2",
- "thiserror",
- "tokio",
- "tokio-stream",
- "yasna",
 ]
 
 [[package]]
@@ -11023,7 +10982,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
  "cfg-if",
- "rand 0.8.5",
+ "rand 0.7.3",
  "static_assertions",
 ]
 
@@ -12162,8 +12121,6 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e17bb3549cc1321ae1296b9cdc2698e2b6cb1992adfa19a8c72e5b7a738f44cd"
 dependencies = [
- "bit-vec",
- "num-bigint",
  "time",
 ]
 
