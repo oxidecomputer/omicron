@@ -1114,6 +1114,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98cc8fbded0c607b7ba9dd60cd98df59af97e84d24e49c8557331cfc26d301ce"
 
 [[package]]
+name = "clickhouse-admin-api"
+version = "0.1.0"
+dependencies = [
+ "dropshot",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+]
+
+[[package]]
 name = "clickward"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/clickward?rev=ceec762e6a87d2a22bf56792a3025e145caa095e#ceec762e6a87d2a22bf56792a3025e145caa095e"
@@ -5655,6 +5667,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-clickhouse-admin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "chrono",
+ "clap",
+ "clickhouse-admin-api",
+ "dropshot",
+ "expectorate",
+ "http 0.2.12",
+ "illumos-utils",
+ "nexus-test-utils",
+ "omicron-common",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "openapi-lint",
+ "openapiv3",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "slog-async",
+ "slog-dtrace",
+ "slog-error-chain",
+ "subprocess",
+ "thiserror",
+ "tokio",
+ "tokio-postgres",
+ "toml 0.8.19",
+ "url",
+]
+
+[[package]]
 name = "omicron-cockroach-admin"
 version = "0.1.0"
 dependencies = [
@@ -6476,6 +6523,7 @@ dependencies = [
  "bootstrap-agent-api",
  "camino",
  "clap",
+ "clickhouse-admin-api",
  "cockroach-admin-api",
  "dns-server-api",
  "dropshot",
