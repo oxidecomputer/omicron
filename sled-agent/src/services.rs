@@ -1573,17 +1573,15 @@ impl ServiceManager {
                             .add_property_group(config),
                     );
 
-                    let ch_address = SocketAddr::new(
-                        IpAddr::V6(listen_addr),
-                        CLICKHOUSE_PORT,
-                    )
-                    .to_string();
+                let ch_address =
+                    SocketAddr::new(IpAddr::V6(listen_addr), CLICKHOUSE_PORT)
+                        .to_string();
 
-                    let admin_address = SocketAddr::new(
-                        IpAddr::V6(listen_addr),
-                        CLICKHOUSE_ADMIN_PORT,
-                    )
-                    .to_string();
+                let admin_address = SocketAddr::new(
+                    IpAddr::V6(listen_addr),
+                    CLICKHOUSE_ADMIN_PORT,
+                )
+                .to_string();
 
                 let clickhouse_admin_config =
                     PropertyGroupBuilder::new("config")
@@ -1654,17 +1652,15 @@ impl ServiceManager {
                                 .add_property_group(config),
                         );
 
-                        let ch_address = SocketAddr::new(
-                            IpAddr::V6(listen_addr),
-                            CLICKHOUSE_PORT,
-                        )
+                let ch_address =
+                    SocketAddr::new(IpAddr::V6(listen_addr), CLICKHOUSE_PORT)
                         .to_string();
-    
-                        let admin_address = SocketAddr::new(
-                            IpAddr::V6(listen_addr),
-                            CLICKHOUSE_ADMIN_PORT,
-                        )
-                        .to_string();
+
+                let admin_address = SocketAddr::new(
+                    IpAddr::V6(listen_addr),
+                    CLICKHOUSE_ADMIN_PORT,
+                )
+                .to_string();
 
                 let clickhouse_admin_config =
                     PropertyGroupBuilder::new("config")

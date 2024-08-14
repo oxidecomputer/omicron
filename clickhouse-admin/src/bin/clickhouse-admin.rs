@@ -34,9 +34,6 @@ enum Args {
     },
 }
 
-// TODO: Remove this comment and move config file to smf/clickhouse-admin
-// Test with cargo run --bin=clickhouse-admin -- run -a [fd00:1122:3344:101::e]:8888 -H [::1]:8888 -c ./clickhouse-admin/dummy-config.toml
-
 #[tokio::main]
 async fn main() {
     if let Err(err) = main_impl().await {
@@ -53,9 +50,6 @@ async fn main_impl() -> Result<(), CmdError> {
                 .map_err(|err| CmdError::Failure(anyhow!(err)))?;
             config.dropshot.bind_address = SocketAddr::V6(http_address);
 
-            // TODO: Change for the actual clickhouse address
-           // let dummy_address =
-           //     SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
             let clickward = Clickward::new(clickhouse_address);
 
             let server =

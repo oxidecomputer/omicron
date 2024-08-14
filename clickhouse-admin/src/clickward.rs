@@ -43,7 +43,9 @@ impl Clickward {
         Self { clickhouse_address }
     }
 
-    pub fn clickhouse_address(&self) -> Result<ClickhouseAddress, ClickwardError> {
+    pub fn clickhouse_address(
+        &self,
+    ) -> Result<ClickhouseAddress, ClickwardError> {
         Ok(ClickhouseAddress { clickhouse_address: self.clickhouse_address })
     }
 }
