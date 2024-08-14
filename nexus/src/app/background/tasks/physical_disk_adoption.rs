@@ -97,7 +97,6 @@ impl BackgroundTask for PhysicalDiskAdoption {
 
             let mut disks_added = 0;
             let log = &opctx.log;
-            warn!(&log, "physical disk adoption task started");
 
             let collection_id = *self.rx_inventory_collection.borrow();
             let Some(collection_id) = collection_id else {
@@ -171,7 +170,6 @@ impl BackgroundTask for PhysicalDiskAdoption {
                 );
             }
 
-            warn!(&log, "physical disk adoption task done");
             json!({
                 "physical_disks_added": disks_added,
             })
