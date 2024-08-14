@@ -137,6 +137,7 @@ lookup_region_port.period_secs = 60
 # Therefore, disable the background task during tests.
 instance_updater.disable = true
 instance_updater.period_secs = 60
+region_snapshot_replacement_start.period_secs = 30
 
 [default_region_allocation_strategy]
 # we only have one sled in the test environment, so we need to use the

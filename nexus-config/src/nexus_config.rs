@@ -391,6 +391,8 @@ pub struct BackgroundTaskConfig {
     pub saga_recovery: SagaRecoveryConfig,
     /// configuration for lookup region port task
     pub lookup_region_port: LookupRegionPortConfig,
+    /// configuration for region snapshot replacement starter task
+    pub region_snapshot_replacement_start: RegionSnapshotReplacementStartConfig,
 }
 
 #[serde_as]
@@ -622,6 +624,14 @@ pub struct RegionReplacementDriverConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LookupRegionPortConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RegionSnapshotReplacementStartConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -874,6 +884,7 @@ mod test {
             abandoned_vmm_reaper.period_secs = 60
             saga_recovery.period_secs = 60
             lookup_region_port.period_secs = 60
+            region_snapshot_replacement_start.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1036,6 +1047,10 @@ mod test {
                         lookup_region_port: LookupRegionPortConfig {
                             period_secs: Duration::from_secs(60),
                         },
+                        region_snapshot_replacement_start:
+                            RegionSnapshotReplacementStartConfig {
+                                period_secs: Duration::from_secs(30),
+                            },
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -1112,6 +1127,7 @@ mod test {
             abandoned_vmm_reaper.period_secs = 60
             saga_recovery.period_secs = 60
             lookup_region_port.period_secs = 60
+            region_snapshot_replacement_start.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             "##,
