@@ -5,18 +5,15 @@ name = "sled_component"
 description = "A component on a compute sled which reports sensor measurements"
 authz_scope = "fleet"
 versions = [
-    {
-        version = 1,
-        fields = [
-            "rack_id",
-            "sled_id",
-            "sled_model",
-            "sled_revision",
-            "sled_serial",
-            "component",
-            "device",
-        ]
-    }
+    { version = 1, fields = [
+        "rack_id",
+        "sled_id",
+        "sled_model",
+        "sled_revision",
+        "sled_serial",
+        "component",
+        "device",
+    ]}
 ]
 
 [fields.rack_id]
