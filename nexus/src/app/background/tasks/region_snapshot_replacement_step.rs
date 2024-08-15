@@ -257,8 +257,8 @@ impl RegionSnapshotReplacementFindAffected {
             };
 
             for volume in volumes {
-                // Otherwise, any volume referencing the old socket addr needs
-                // to be replaced. Create a "step" record for this.
+                // Any volume referencing the old socket addr needs to be
+                // replaced. Create a "step" record for this.
                 //
                 // Note: this function returns a conflict error if there already
                 // exists a step record referencing this volume ID because a
