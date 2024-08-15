@@ -30,11 +30,15 @@ description = "Serial number of the sled"
 type = "string"
 description = "A name identifying the sensor that recorded a measurement"
 
+[fields.error]
+type = "string"
+description = "A string identifying the type of sensor error that occurred"
+
 [[metrics]]
 name = "temperature"
 description = "Temperature reading in degrees Celcius"
 units = "degrees_celcius"
-datum_type = "f64"
+datum_type = "f32"
 versions = [
     { added_in = 1, fields = ["sensor"]}
 ]
@@ -43,7 +47,7 @@ versions = [
 name = "current"
 description = "Electric current reading in amperes"
 units = "amps"
-datum_type = "f64"
+datum_type = "f32"
 versions = [
     { added_in = 1, fields = ["sensor"]}
 ]
@@ -52,7 +56,7 @@ versions = [
 name = "voltage"
 description = "A voltage reading"
 units = "volts"
-datum_type = "f64"
+datum_type = "f32"
 versions = [
     { added_in = 1, fields = ["sensor"]}
 ]
@@ -61,7 +65,16 @@ versions = [
 name = "fan_speed"
 description = "A fan speed measurement, in rotations per minute"
 units = "rpm"
-datum_type = "f64"
+datum_type = "f32"
 versions = [
     { added_in = 1, fields = ["sensor"]}
+]
+
+[[metrics]]
+name = "sensor_error_count"
+description = "Cumulative count of errors reported by a sensor"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = ["sensor", "error"]}
 ]
