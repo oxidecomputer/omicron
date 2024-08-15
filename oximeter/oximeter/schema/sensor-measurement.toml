@@ -1,76 +1,49 @@
 format_version = 1
 
 [target]
-name = "sled_component"
-description = "A component on a compute sled which reports sensor measurements"
+name = "component"
+description = "A component which reports sensor measurements"
 authz_scope = "fleet"
 versions = [
     { version = 1, fields = [
         "rack_id",
-        "sled_id",
-        "sled_model",
-        "sled_revision",
-        "sled_serial",
+        "chassis_type",
+        "model",
+        "revision",
+        "serial",
         "component",
         "device",
     ]}
 ]
 
-# [target]
-# name = "switch_component"
-# description = "A component on a rack switch which reports sensor measurements"
-# authz_scope = "fleet"
-# versions = [
-#     { version = 1, fields = [
-#         "rack_id",
-#         "switch_id",
-#         "switch_revision",
-#         "switch_component",
-#         "switch_serial",
-#         "component",
-#         "device",
-#     ]}
-# ]
-
 [fields.rack_id]
 type = "uuid"
-description = "ID for the sled's rack"
+description = "ID of the rack on which this measurement was recorded."
 
-[fields.sled_id]
-type = "uuid"
-description = "ID for the sled"
-
-[fields.sled_model]
+[fields.model]
 type = "string"
-description = "Model number of the the sled"
+description = "Model number of the sled, switch, or power shelf"
 
-[fields.sled_revision]
+[fields.revision]
 type = "u32"
-description = "Revision number of the sled"
+description = "Revision number of the sled, switch, or power shelf"
 
-[fields.sled_serial]
+[fields.serial]
 type = "string"
-description = "Serial number of the sled"
+description = "Serial number of the sled, switch, or power shelf"
 
-[fields.switch_id]
-type = "uuid"
-description = "ID for the switch"
-
-[fields.switch_model]
+[fields.chassis_type]
 type = "string"
-description = "Model number of the the switch"
-
-[fields.switch_revision]
-type = "u32"
-description = "Revision number of the switch"
-
-[fields.switch_serial]
-type = "string"
-description = "Serial number of the switch"
+description = """
+What kind of thing the component resides on. This will be one of 'sled'\
+for components on compute sled; 'switch', for components on rack switches; \
+or 'power', for components on power shelves."""
 
 [fields.component]
 type = "string"
-description = "The service processor component ID uniquely identifying the component on the sled"
+description = """
+The service processor component ID uniquely identifying the component on
+the sled, switch, or power shelf."""
 
 [fields.device]
 type = "string"
