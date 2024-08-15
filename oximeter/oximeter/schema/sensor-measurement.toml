@@ -16,22 +16,21 @@ versions = [
     ]}
 ]
 
-[target]
-name = "switch_component"
-description = "A component on a rack switch which reports sensor measurements"
-authz_scope = "fleet"
-versions = [
-    { version = 1, fields = [
-        "rack_id",
-        "switch_id",
-        "switch_revision",
-        "switch_component",
-        "switch_serial",
-        "component",
-        "device",
-    ]}
-]
-
+# [target]
+# name = "switch_component"
+# description = "A component on a rack switch which reports sensor measurements"
+# authz_scope = "fleet"
+# versions = [
+#     { version = 1, fields = [
+#         "rack_id",
+#         "switch_id",
+#         "switch_revision",
+#         "switch_component",
+#         "switch_serial",
+#         "component",
+#         "device",
+#     ]}
+# ]
 
 [fields.rack_id]
 type = "uuid"
