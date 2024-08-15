@@ -1647,10 +1647,11 @@ impl ServiceManager {
                     .add_property("listen_port", "astring", listen_port)
                     .add_property("store", "astring", "/data");
                 let clickhouse_server_service =
-                    ServiceBuilder::new("oxide/clickhouse_server").add_instance(
-                        ServiceInstanceBuilder::new("default")
-                            .add_property_group(config),
-                    );
+                    ServiceBuilder::new("oxide/clickhouse_server")
+                        .add_instance(
+                            ServiceInstanceBuilder::new("default")
+                                .add_property_group(config),
+                        );
 
                 let ch_address =
                     SocketAddr::new(IpAddr::V6(listen_addr), CLICKHOUSE_PORT)
@@ -1687,7 +1688,10 @@ impl ServiceManager {
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
                     .map_err(|err| {
-                        Error::io("Failed to setup clickhouse server profile", err)
+                        Error::io(
+                            "Failed to setup clickhouse server profile",
+                            err,
+                        )
                     })?;
                 RunningZone::boot(installed_zone).await?
             }

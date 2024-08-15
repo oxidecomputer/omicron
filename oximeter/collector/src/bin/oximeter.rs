@@ -142,7 +142,14 @@ async fn do_run() -> Result<(), CmdError> {
                 .context("Failed to create oximeter")
                 .map_err(CmdError::Failure)
         }
-        Args::Standalone { id, address, nexus, clickhouse, log_level, replicated } => {
+        Args::Standalone {
+            id,
+            address,
+            nexus,
+            clickhouse,
+            log_level,
+            replicated,
+        } => {
             // Start the standalone Nexus server, for registration of both the
             // collector and producers.
             let nexus_server = StandaloneNexus::new(nexus.into(), log_level)

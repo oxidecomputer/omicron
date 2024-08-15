@@ -47,7 +47,9 @@ impl From<ServiceName> for internal_dns::ServiceName {
         match value {
             ServiceName::Cockroach => internal_dns::ServiceName::Cockroach,
             ServiceName::Clickhouse => internal_dns::ServiceName::Clickhouse,
-            ServiceName::ClickhouseServer => internal_dns::ServiceName::ClickhouseServer,
+            ServiceName::ClickhouseServer => {
+                internal_dns::ServiceName::ClickhouseServer
+            }
             ServiceName::ClickhouseKeeper => {
                 internal_dns::ServiceName::ClickhouseKeeper
             }
