@@ -13,6 +13,19 @@ use crate::storage::Store;
 use anyhow::anyhow;
 use anyhow::Context;
 use dns_server_api::DnsRecord;
+use hickory_proto::op::Header;
+use hickory_proto::op::ResponseCode;
+use hickory_proto::rr::rdata::SRV;
+use hickory_proto::rr::RData;
+use hickory_proto::rr::Record;
+use hickory_proto::rr::RecordType;
+use hickory_proto::serialize::binary::BinDecodable;
+use hickory_proto::serialize::binary::BinDecoder;
+use hickory_proto::serialize::binary::BinEncoder;
+use hickory_resolver::Name;
+use hickory_server::authority::MessageRequest;
+use hickory_server::authority::MessageResponse;
+use hickory_server::authority::MessageResponseBuilder;
 use pretty_hex::*;
 use serde::Deserialize;
 use slog::{debug, error, info, o, trace, Logger};
@@ -21,17 +34,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::net::UdpSocket;
-use trust_dns_proto::op::header::Header;
-use trust_dns_proto::op::response_code::ResponseCode;
-use trust_dns_proto::rr::rdata::SRV;
-use trust_dns_proto::rr::record_data::RData;
-use trust_dns_proto::rr::record_type::RecordType;
-use trust_dns_proto::rr::{Name, Record};
-use trust_dns_proto::serialize::binary::{
-    BinDecodable, BinDecoder, BinEncoder,
-};
-use trust_dns_server::authority::MessageResponse;
-use trust_dns_server::authority::{MessageRequest, MessageResponseBuilder};
 use uuid::Uuid;
 
 /// Configuration related to the DNS server
@@ -167,7 +169,10 @@ async fn handle_dns_packet(request: Request) {
         Err(error) => {
             let header = Header::response_from_request(mr.header());
             let rb_servfail = MessageResponseBuilder::from_message_request(&mr);
-            error!(log, "failed to handle incoming DNS message: {:#}", error);
+            error!(
+                log,
+                "failed to handle incoming DNS message: {:#?} {:#}", mr, error
+            );
             match error {
                 RequestError::NxDomain(_) => {
                     let rb_nxdomain =
@@ -222,7 +227,7 @@ fn dns_record_to_record(
             let mut a = Record::new();
             a.set_name(name.clone())
                 .set_rr_type(RecordType::A)
-                .set_data(Some(RData::A(addr)));
+                .set_data(Some(RData::A(addr.into())));
             Ok(a)
         }
 
@@ -230,7 +235,7 @@ fn dns_record_to_record(
             let mut aaaa = Record::new();
             aaaa.set_name(name.clone())
                 .set_rr_type(RecordType::AAAA)
-                .set_data(Some(RData::AAAA(addr)));
+                .set_data(Some(RData::AAAA(addr.into())));
             Ok(aaaa)
         }
 

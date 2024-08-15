@@ -60,6 +60,7 @@ getrandom = { version = "0.2.14", default-features = false, features = ["js", "r
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.14.5", features = ["raw"] }
 hex = { version = "0.4.3", features = ["serde"] }
+hickory-proto = { version = "0.24.1", features = ["text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "0.14.30", features = ["full"] }
 indexmap = { version = "2.4.0", features = ["serde"] }
@@ -113,7 +114,6 @@ tokio-util = { version = "0.7.11", features = ["codec", "io-util"] }
 toml = { version = "0.7.8" }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.20", features = ["serde"] }
 tracing = { version = "0.1.40", features = ["log"] }
-trust-dns-proto = { version = "0.22.0" }
 unicode-bidi = { version = "0.3.15" }
 unicode-normalization = { version = "0.1.23" }
 usdt = { version = "0.5.0" }
@@ -167,6 +167,7 @@ getrandom = { version = "0.2.14", default-features = false, features = ["js", "r
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.14.5", features = ["raw"] }
 hex = { version = "0.4.3", features = ["serde"] }
+hickory-proto = { version = "0.24.1", features = ["text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "0.14.30", features = ["full"] }
 indexmap = { version = "2.4.0", features = ["serde"] }
@@ -222,7 +223,6 @@ tokio-util = { version = "0.7.11", features = ["codec", "io-util"] }
 toml = { version = "0.7.8" }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.20", features = ["serde"] }
 tracing = { version = "0.1.40", features = ["log"] }
-trust-dns-proto = { version = "0.22.0" }
 unicode-bidi = { version = "0.3.15" }
 unicode-normalization = { version = "0.1.23" }
 unicode-xid = { version = "0.2.4" }
