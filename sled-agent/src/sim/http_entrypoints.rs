@@ -84,7 +84,7 @@ impl SledAgentApi for SledAgentSimImpl {
     type Context = Arc<SledAgent>;
 
     async fn instance_register(
-        rqctx: RequestContext<Arc<SledAgent>>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<InstancePathParam>,
         body: TypedBody<InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
@@ -105,7 +105,7 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn instance_unregister(
-        rqctx: RequestContext<Arc<SledAgent>>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<InstancePathParam>,
     ) -> Result<HttpResponseOk<InstanceUnregisterResponse>, HttpError> {
         let sa = rqctx.context();
@@ -114,7 +114,7 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn instance_put_state(
-        rqctx: RequestContext<Arc<SledAgent>>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<InstancePathParam>,
         body: TypedBody<InstancePutStateBody>,
     ) -> Result<HttpResponseOk<InstancePutStateResponse>, HttpError> {
@@ -127,7 +127,7 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn instance_get_state(
-        rqctx: RequestContext<Arc<SledAgent>>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<InstancePathParam>,
     ) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
         let sa = rqctx.context();
@@ -136,7 +136,7 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn instance_put_external_ip(
-        rqctx: RequestContext<Arc<SledAgent>>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<InstancePathParam>,
         body: TypedBody<InstanceExternalIpBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -148,7 +148,7 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn instance_delete_external_ip(
-        rqctx: RequestContext<Arc<SledAgent>>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<InstancePathParam>,
         body: TypedBody<InstanceExternalIpBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -160,7 +160,7 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn disk_put(
-        rqctx: RequestContext<Arc<SledAgent>>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<DiskPathParam>,
         body: TypedBody<DiskEnsureBody>,
     ) -> Result<HttpResponseOk<DiskRuntimeState>, HttpError> {
@@ -178,7 +178,7 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn update_artifact(
-        rqctx: RequestContext<Arc<SledAgent>>,
+        rqctx: RequestContext<Self::Context>,
         artifact: TypedBody<UpdateArtifactId>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
@@ -193,7 +193,7 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn instance_issue_disk_snapshot_request(
-        rqctx: RequestContext<Arc<SledAgent>>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<InstanceIssueDiskSnapshotRequestPathParam>,
         body: TypedBody<InstanceIssueDiskSnapshotRequestBody>,
     ) -> Result<
@@ -218,7 +218,7 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn vpc_firewall_rules_put(
-        rqctx: RequestContext<Arc<SledAgent>>,
+        rqctx: RequestContext<Self::Context>,
         path_params: Path<VpcPathParam>,
         body: TypedBody<VpcFirewallRulesEnsureBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -230,7 +230,7 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn set_v2p(
-        rqctx: RequestContext<Arc<SledAgent>>,
+        rqctx: RequestContext<Self::Context>,
         body: TypedBody<VirtualNetworkInterfaceHost>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
@@ -244,7 +244,7 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn del_v2p(
-        rqctx: RequestContext<Arc<SledAgent>>,
+        rqctx: RequestContext<Self::Context>,
         body: TypedBody<VirtualNetworkInterfaceHost>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
@@ -258,7 +258,7 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn list_v2p(
-        rqctx: RequestContext<Arc<SledAgent>>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<VirtualNetworkInterfaceHost>>, HttpError>
     {
         let sa = rqctx.context();
@@ -269,14 +269,14 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn uplink_ensure(
-        _rqctx: RequestContext<Arc<SledAgent>>,
+        _rqctx: RequestContext<Self::Context>,
         _body: TypedBody<SwitchPorts>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn read_network_bootstore_config_cache(
-        rqctx: RequestContext<Arc<SledAgent>>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError> {
         let config =
             rqctx.context().bootstore_network_config.lock().await.clone();
@@ -284,7 +284,7 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn write_network_bootstore_config(
-        rqctx: RequestContext<Arc<SledAgent>>,
+        rqctx: RequestContext<Self::Context>,
         body: TypedBody<EarlyNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let mut config = rqctx.context().bootstore_network_config.lock().await;
@@ -294,7 +294,7 @@ impl SledAgentApi for SledAgentSimImpl {
 
     /// Fetch basic information about this sled
     async fn inventory(
-        rqctx: RequestContext<Arc<SledAgent>>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Inventory>, HttpError> {
         let sa = rqctx.context();
         Ok(HttpResponseOk(
@@ -305,7 +305,7 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn omicron_physical_disks_put(
-        rqctx: RequestContext<Arc<SledAgent>>,
+        rqctx: RequestContext<Self::Context>,
         body: TypedBody<OmicronPhysicalDisksConfig>,
     ) -> Result<HttpResponseOk<DisksManagementResult>, HttpError> {
         let sa = rqctx.context();
@@ -315,21 +315,21 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn omicron_physical_disks_get(
-        rqctx: RequestContext<Arc<SledAgent>>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<OmicronPhysicalDisksConfig>, HttpError> {
         let sa = rqctx.context();
         Ok(HttpResponseOk(sa.omicron_physical_disks_list().await?))
     }
 
     async fn omicron_zones_get(
-        rqctx: RequestContext<Arc<SledAgent>>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<OmicronZonesConfig>, HttpError> {
         let sa = rqctx.context();
         Ok(HttpResponseOk(sa.omicron_zones_list().await))
     }
 
     async fn omicron_zones_put(
-        rqctx: RequestContext<Arc<SledAgent>>,
+        rqctx: RequestContext<Self::Context>,
         body: TypedBody<OmicronZonesConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
@@ -339,21 +339,21 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn sled_add(
-        _rqctx: RequestContext<Arc<SledAgent>>,
+        _rqctx: RequestContext<Self::Context>,
         _body: TypedBody<AddSledRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn list_vpc_routes(
-        rqctx: RequestContext<Arc<SledAgent>>,
+        rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<ResolvedVpcRouteState>>, HttpError> {
         let sa = rqctx.context();
         Ok(HttpResponseOk(sa.list_vpc_routes().await))
     }
 
     async fn set_vpc_routes(
-        rqctx: RequestContext<Arc<SledAgent>>,
+        rqctx: RequestContext<Self::Context>,
         body: TypedBody<Vec<ResolvedVpcRouteSet>>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
