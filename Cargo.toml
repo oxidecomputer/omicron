@@ -734,8 +734,6 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.rand_core]
 opt-level = 3
-[profile.dev.package.rand_hc]
-opt-level = 3
 [profile.dev.package.rand_xorshift]
 opt-level = 3
 [profile.dev.package.rsa]
