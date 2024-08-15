@@ -980,6 +980,14 @@ task: "region_replacement_driver"
     number of region replacement finish sagas started ok: 0
     number of errors: 0
 
+task: "region_snapshot_replacement_garbage_collection"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total garbage collections requested: 0
+    errors: 0
+
 task: "region_snapshot_replacement_start"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
