@@ -1,9 +1,22 @@
+format_version = 1
+
 [target]
-name = "sled"
-description = "A compute sled"
+name = "sled_component"
+description = "A component on a compute sled which reports sensor measurements"
 authz_scope = "fleet"
 versions = [
-    { version = 1, fields = ["rack_id", "sled_id", "sled_model", "sled_model", "sled_revision", "sled_serial" ]}
+    {
+        version = 1,
+        fields = [
+            "rack_id",
+            "sled_id",
+            "sled_model",
+            "sled_revision",
+            "sled_serial",
+            "component",
+            "device",
+        ]
+    }
 ]
 
 [fields.rack_id]
@@ -26,9 +39,17 @@ description = "Revision number of the sled"
 type = "string"
 description = "Serial number of the sled"
 
-[fields.sensor]
+[fields.component]
 type = "string"
-description = "A name identifying the sensor that recorded a measurement"
+description = "The service processor component ID uniquely identifying the component on the sled"
+
+[fields.device]
+type = "string"
+description = "The name of the device which recorded a sensor reading"
+
+[fields.measurement]
+type = "string"
+description = "A name identifying the quantity measured by a sensor measurement"
 
 [fields.error]
 type = "string"
@@ -40,7 +61,7 @@ description = "Temperature reading in degrees Celcius"
 units = "degrees_celcius"
 datum_type = "f32"
 versions = [
-    { added_in = 1, fields = ["sensor"]}
+    { added_in = 1, fields = ["measurement"]}
 ]
 
 [[metrics]]
@@ -49,7 +70,7 @@ description = "Electric current reading in amperes"
 units = "amps"
 datum_type = "f32"
 versions = [
-    { added_in = 1, fields = ["sensor"]}
+    { added_in = 1, fields = ["measurement"]}
 ]
 
 [[metrics]]
@@ -58,7 +79,7 @@ description = "A voltage reading"
 units = "volts"
 datum_type = "f32"
 versions = [
-    { added_in = 1, fields = ["sensor"]}
+    { added_in = 1, fields = ["measurement"]}
 ]
 
 [[metrics]]
@@ -67,7 +88,7 @@ description = "A fan speed measurement, in rotations per minute"
 units = "rpm"
 datum_type = "f32"
 versions = [
-    { added_in = 1, fields = ["sensor"]}
+    { added_in = 1, fields = ["measurement"]}
 ]
 
 [[metrics]]
@@ -76,5 +97,5 @@ description = "Cumulative count of errors reported by a sensor"
 units = "count"
 datum_type = "cumulative_u64"
 versions = [
-    { added_in = 1, fields = ["sensor", "error"]}
+    { added_in = 1, fields = ["measurement", "error"]}
 ]
