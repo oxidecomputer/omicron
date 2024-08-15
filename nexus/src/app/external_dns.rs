@@ -31,6 +31,7 @@ impl Resolver {
             });
         }
         let mut opts = ResolverOpts::default();
+        // Enable edns for potentially larger records
         opts.edns0 = true;
         opts.use_hosts_file = false;
         // Do as many requests in parallel as we have configured servers

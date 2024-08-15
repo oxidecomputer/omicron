@@ -566,7 +566,6 @@ tokio-util = { version = "0.7.11", features = ["io", "io-util"] }
 toml = "0.8.19"
 toml_edit = "0.22.20"
 tough = { version = "0.17.1", features = [ "http" ] }
-tracing-subscriber = "0.3.18"
 trybuild = "1.0.99"
 tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }

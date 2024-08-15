@@ -13,8 +13,7 @@
 #:  "%/pool/ext/*/crypt/debug/global/oxide-sled-agent:default.log.*",
 #:  "%/pool/ext/*/crypt/debug/oxz_*/oxide-*.log.*",
 #:  "%/pool/ext/*/crypt/debug/oxz_*/system-illumos-*.log.*",
-#:  "!/pool/ext/*/crypt/debug/oxz_propolis-server_*/*.log.*",
-#:  "%/pool/ext/*/crypt/zone/oxz_internal_dns_*/root/var/tmp/trace"
+#:  "!/pool/ext/*/crypt/debug/oxz_propolis-server_*/*.log.*"
 #: ]
 #: skip_clone = true
 #:

@@ -57,6 +57,7 @@ impl Resolver {
         log: slog::Logger,
     ) -> Result<Self, ResolveError> {
         let (rc, mut opts) = hickory_resolver::system_conf::read_system_conf()?;
+        // Enable edns for potentially larger records
         opts.edns0 = true;
 
         let resolver = TokioAsyncResolver::tokio(rc, opts);
@@ -83,6 +84,7 @@ impl Resolver {
             });
         }
         let mut opts = ResolverOpts::default();
+        // Enable edns for potentially larger records
         opts.edns0 = true;
         opts.use_hosts_file = false;
         opts.num_concurrent_reqs = dns_server_count;
@@ -326,7 +328,7 @@ impl Resolver {
     //   (1) it returns `IpAddr`'s rather than `SocketAddr`'s
     //   (2) it doesn't actually return all the addresses from the Additional
     //       section of the DNS server's response.
-    //       See bluejekyll/hickory-dns#1980
+    //       See hickory-dns/hickory-dns#1980
     //
     // (1) is not a huge deal as we can try to match up the targets ourselves
     // to grab the port for creating a `SocketAddr` but (2) means we need to do

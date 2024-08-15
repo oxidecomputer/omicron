@@ -383,6 +383,7 @@ async fn init_client_server(
         bind_addr: None,
     });
     let mut resolver_opts = ResolverOpts::default();
+    // Enable edns for potentially larger records
     resolver_opts.edns0 = true;
 
     let resolver = TokioAsyncResolver::tokio(resolver_config, resolver_opts);

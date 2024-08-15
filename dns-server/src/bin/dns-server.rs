@@ -35,15 +35,6 @@ pub struct Config {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    std::fs::write("/var/tmp/trace", "xxx\n").unwrap();
-    use tracing_subscriber::fmt::format::FmtSpan;
-    tracing_subscriber::fmt()
-        .with_thread_names(true)
-        .with_span_events(FmtSpan::ENTER)
-        .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
-        .with_writer(std::fs::File::create("/var/tmp/trace").unwrap())
-        .init();
-
     let args = Args::parse();
     let config_file = &args.config_file;
     let config_file_contents = std::fs::read_to_string(config_file)
