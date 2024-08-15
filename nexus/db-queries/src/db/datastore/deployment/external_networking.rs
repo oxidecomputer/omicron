@@ -327,6 +327,7 @@ impl DataStore {
             ZoneKind::Nexus => &*NEXUS_VPC_SUBNET,
             ZoneKind::Clickhouse
             | ZoneKind::ClickhouseKeeper
+            | ZoneKind::ClickhouseServer
             | ZoneKind::CockroachDb
             | ZoneKind::Crucible
             | ZoneKind::CruciblePantry

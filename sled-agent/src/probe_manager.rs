@@ -3,7 +3,6 @@ use crate::nexus::NexusClient;
 use anyhow::{anyhow, Result};
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
-use illumos_utils::opte::params::VpcFirewallRule;
 use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::Zones;
@@ -14,7 +13,9 @@ use omicron_common::api::external::{
     Generation, VpcFirewallRuleAction, VpcFirewallRuleDirection,
     VpcFirewallRulePriority, VpcFirewallRuleStatus,
 };
-use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_common::api::internal::shared::{
+    NetworkInterface, ResolvedVpcFirewallRule,
+};
 use rand::prelude::IteratorRandom;
 use rand::SeedableRng;
 use sled_storage::dataset::ZONE_DATASET;
@@ -308,7 +309,7 @@ impl ProbeManagerInner {
             source_nat: None,
             ephemeral_ip: Some(eip.ip),
             floating_ips: &[],
-            firewall_rules: &[VpcFirewallRule {
+            firewall_rules: &[ResolvedVpcFirewallRule {
                 status: VpcFirewallRuleStatus::Enabled,
                 direction: VpcFirewallRuleDirection::Inbound,
                 targets: vec![nic.clone()],

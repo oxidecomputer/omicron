@@ -1403,6 +1403,7 @@ mod test {
         create_default_ip_pool, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::internal_api::params::InstanceMigrateRequest;
     use omicron_common::api::internal::nexus::{
         MigrationRuntimeState, MigrationState, Migrations,
     };
@@ -2358,7 +2359,7 @@ mod test {
                 serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
                 instance: state.instance().clone(),
                 src_vmm: vmm.clone(),
-                migrate_params: params::InstanceMigrate {
+                migrate_params: InstanceMigrateRequest {
                     dst_sled_id: dst_sled_id.into_untyped_uuid(),
                 },
             };

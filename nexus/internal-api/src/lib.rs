@@ -20,15 +20,15 @@ use nexus_types::{
     },
     internal_api::{
         params::{
-            OximeterInfo, RackInitializationRequest, SledAgentInfo,
-            SwitchPutRequest, SwitchPutResponse,
+            InstanceMigrateRequest, OximeterInfo, RackInitializationRequest,
+            SledAgentInfo, SwitchPutRequest, SwitchPutResponse,
         },
         views::{BackgroundTask, DemoSaga, Ipv4NatEntryView, Saga},
     },
 };
 use omicron_common::{
     api::{
-        external::http_pagination::PaginatedById,
+        external::{http_pagination::PaginatedById, Instance},
         internal::nexus::{
             DiskRuntimeState, DownstairsClientStopRequest,
             DownstairsClientStopped, ProducerEndpoint,
@@ -118,6 +118,16 @@ pub trait NexusInternalApi {
         path_params: Path<InstancePathParam>,
         new_runtime_state: TypedBody<SledInstanceState>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = POST,
+        path = "/instances/{instance_id}/migrate",
+    }]
+    async fn instance_migrate(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<InstancePathParam>,
+        migrate_params: TypedBody<InstanceMigrateRequest>,
+    ) -> Result<HttpResponseOk<Instance>, HttpError>;
 
     /// Report updated state for a disk.
     #[endpoint {

@@ -20,6 +20,7 @@ impl_enum_type!(
     // Enum values
     Clickhouse => b"clickhouse"
     ClickhouseKeeper => b"clickhouse_keeper"
+    ClickhouseServer => b"clickhouse_server"
     Cockroach => b"cockroach"
     Crucible => b"crucible"
     CruciblePantry => b"crucible_pantry"

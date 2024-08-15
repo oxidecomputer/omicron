@@ -179,7 +179,6 @@ pub struct TimeseriesDescription {
 /// Measurement units for timeseries samples.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
-// TODO-completeness: Include more units, such as power / temperature.
 // TODO-completeness: Decide whether and how to handle dimensional analysis
 // during queries, if needed.
 pub enum Units {
@@ -189,6 +188,11 @@ pub enum Units {
     Bytes,
     Seconds,
     Nanoseconds,
+    Volts,
+    Amps,
+    DegreesCelcius,
+    /// Rotations per minute.
+    Rpm,
 }
 
 /// The schema for a timeseries.

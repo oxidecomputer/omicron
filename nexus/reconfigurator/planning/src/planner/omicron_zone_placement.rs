@@ -31,6 +31,7 @@ impl DiscretionaryOmicronZone {
             // Zones that we should place but don't yet.
             BlueprintZoneType::Clickhouse(_)
             | BlueprintZoneType::ClickhouseKeeper(_)
+            | BlueprintZoneType::ClickhouseServer(_)
             | BlueprintZoneType::CruciblePantry(_)
             | BlueprintZoneType::ExternalDns(_)
             | BlueprintZoneType::InternalDns(_)

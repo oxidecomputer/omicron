@@ -31,10 +31,7 @@ use crate::bootstrap::early_networking::{
 use crate::bootstrap::BootstrapNetworking;
 use crate::config::SidecarRevision;
 use crate::metrics::MetricsRequestQueue;
-use crate::params::{
-    DendriteAsic, OmicronZoneConfigExt, OmicronZoneTypeExt, TimeSync,
-    ZoneBundleCause, ZoneBundleMetadata,
-};
+use crate::params::{DendriteAsic, OmicronZoneConfigExt, OmicronZoneTypeExt};
 use crate::profile::*;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
@@ -68,6 +65,7 @@ use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
 use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig, ZoneKind,
 };
+use omicron_common::address::CLICKHOUSE_ADMIN_PORT;
 use omicron_common::address::CLICKHOUSE_KEEPER_PORT;
 use omicron_common::address::CLICKHOUSE_PORT;
 use omicron_common::address::COCKROACH_PORT;
@@ -96,6 +94,10 @@ use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use once_cell::sync::OnceCell;
 use rand::prelude::SliceRandom;
+use sled_agent_types::{
+    time_sync::TimeSync,
+    zone_bundle::{ZoneBundleCause, ZoneBundleMetadata},
+};
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
 use sled_hardware::SledMode;
@@ -1572,12 +1574,37 @@ impl ServiceManager {
                             .add_property_group(config),
                     );
 
+                let ch_address =
+                    SocketAddr::new(IpAddr::V6(listen_addr), CLICKHOUSE_PORT)
+                        .to_string();
+
+                let admin_address = SocketAddr::new(
+                    IpAddr::V6(listen_addr),
+                    CLICKHOUSE_ADMIN_PORT,
+                )
+                .to_string();
+
+                let clickhouse_admin_config =
+                    PropertyGroupBuilder::new("config")
+                        .add_property(
+                            "clickhouse_address",
+                            "astring",
+                            ch_address,
+                        )
+                        .add_property("http_address", "astring", admin_address);
+                let clickhouse_admin_service =
+                    ServiceBuilder::new("oxide/clickhouse-admin").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(clickhouse_admin_config),
+                    );
+
                 let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
                     .add_service(disabled_ssh_service)
                     .add_service(clickhouse_service)
                     .add_service(dns_service)
-                    .add_service(enabled_dns_client_service);
+                    .add_service(enabled_dns_client_service)
+                    .add_service(clickhouse_admin_service);
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
@@ -1585,6 +1612,24 @@ impl ServiceManager {
                         Error::io("Failed to setup clickhouse profile", err)
                     })?;
                 RunningZone::boot(installed_zone).await?
+            }
+
+            ZoneArgs::Omicron(OmicronZoneConfigLocal {
+                zone:
+                    OmicronZoneConfig {
+                        zone_type: OmicronZoneType::ClickhouseServer { .. },
+                        underlay_address: _,
+                        ..
+                    },
+                ..
+            }) => {
+                // We aren't yet deploying this service
+                error!(
+                    &self.inner.log,
+                    "Deploying ClickhouseServer zones is not yet supported"
+                );
+
+                todo!()
             }
 
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
@@ -1625,12 +1670,38 @@ impl ServiceManager {
                             ServiceInstanceBuilder::new("default")
                                 .add_property_group(config),
                         );
+
+                let ch_address =
+                    SocketAddr::new(IpAddr::V6(listen_addr), CLICKHOUSE_PORT)
+                        .to_string();
+
+                let admin_address = SocketAddr::new(
+                    IpAddr::V6(listen_addr),
+                    CLICKHOUSE_ADMIN_PORT,
+                )
+                .to_string();
+
+                let clickhouse_admin_config =
+                    PropertyGroupBuilder::new("config")
+                        .add_property(
+                            "clickhouse_address",
+                            "astring",
+                            ch_address,
+                        )
+                        .add_property("http_address", "astring", admin_address);
+                let clickhouse_admin_service =
+                    ServiceBuilder::new("oxide/clickhouse-admin").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(clickhouse_admin_config),
+                    );
+
                 let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
                     .add_service(disabled_ssh_service)
                     .add_service(clickhouse_keeper_service)
                     .add_service(dns_service)
-                    .add_service(enabled_dns_client_service);
+                    .add_service(enabled_dns_client_service)
+                    .add_service(clickhouse_admin_service);
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await

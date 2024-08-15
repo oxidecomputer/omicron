@@ -167,7 +167,6 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(instance_view)?;
         api.register(instance_create)?;
         api.register(instance_delete)?;
-        api.register(instance_migrate)?;
         api.register(instance_reboot)?;
         api.register(instance_start)?;
         api.register(instance_stop)?;
@@ -2858,48 +2857,6 @@ async fn instance_delete(
             nexus.instance_lookup(&opctx, instance_selector)?;
         nexus.project_destroy_instance(&opctx, &instance_lookup).await?;
         Ok(HttpResponseDeleted())
-    };
-    apictx
-        .context
-        .external_latencies
-        .instrument_dropshot_handler(&rqctx, handler)
-        .await
-}
-
-// TODO should this be in the public API?
-/// Migrate an instance
-#[endpoint {
-    method = POST,
-    path = "/v1/instances/{instance}/migrate",
-    tags = ["instances"],
-}]
-async fn instance_migrate(
-    rqctx: RequestContext<ApiContext>,
-    query_params: Query<params::OptionalProjectSelector>,
-    path_params: Path<params::InstancePath>,
-    migrate_params: TypedBody<params::InstanceMigrate>,
-) -> Result<HttpResponseOk<Instance>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.context.nexus;
-    let path = path_params.into_inner();
-    let query = query_params.into_inner();
-    let migrate_instance_params = migrate_params.into_inner();
-    let instance_selector = params::InstanceSelector {
-        project: query.project,
-        instance: path.instance,
-    };
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let instance_lookup =
-            nexus.instance_lookup(&opctx, instance_selector)?;
-        let instance = nexus
-            .project_instance_migrate(
-                &opctx,
-                &instance_lookup,
-                migrate_instance_params,
-            )
-            .await?;
-        Ok(HttpResponseOk(instance.into()))
     };
     apictx
         .context

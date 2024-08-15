@@ -13,13 +13,6 @@ use crate::instance_manager::{
 };
 use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClient;
-use crate::params::ZoneBundleMetadata;
-use crate::params::{InstanceExternalIpBody, ZoneBundleCause};
-use crate::params::{
-    InstanceHardware, InstanceMetadata, InstanceMigrationTargetParams,
-    InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse, VpcFirewallRule,
-};
 use crate::profile::*;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
@@ -36,7 +29,7 @@ use omicron_common::api::internal::nexus::{
     SledInstanceState, VmmRuntimeState,
 };
 use omicron_common::api::internal::shared::{
-    NetworkInterface, SledIdentifiers, SourceNatConfig,
+    NetworkInterface, ResolvedVpcFirewallRule, SledIdentifiers, SourceNatConfig,
 };
 use omicron_common::backoff;
 use omicron_common::zpool_name::ZpoolName;
@@ -44,6 +37,8 @@ use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid};
 use propolis_client::Client as PropolisClient;
 use rand::prelude::IteratorRandom;
 use rand::SeedableRng;
+use sled_agent_types::instance::*;
+use sled_agent_types::zone_bundle::{ZoneBundleCause, ZoneBundleMetadata};
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
@@ -225,7 +220,7 @@ enum InstanceRequest {
         tx: oneshot::Sender<SledInstanceState>,
     },
     PutState {
-        state: crate::params::InstanceStateRequested,
+        state: InstanceStateRequested,
         tx: oneshot::Sender<Result<InstancePutStateResponse, ManagerError>>,
     },
     Terminate {
@@ -337,7 +332,7 @@ struct InstanceRunner {
     source_nat: SourceNatConfig,
     ephemeral_ip: Option<IpAddr>,
     floating_ips: Vec<IpAddr>,
-    firewall_rules: Vec<VpcFirewallRule>,
+    firewall_rules: Vec<ResolvedVpcFirewallRule>,
     dhcp_config: DhcpCfg,
 
     // Disk related properties
@@ -1158,7 +1153,7 @@ impl Instance {
     pub async fn put_state(
         &self,
         tx: oneshot::Sender<Result<InstancePutStateResponse, ManagerError>>,
-        state: crate::params::InstanceStateRequested,
+        state: InstanceStateRequested,
     ) -> Result<(), Error> {
         self.tx
             .send(InstanceRequest::PutState { state, tx })
@@ -1305,7 +1300,7 @@ impl InstanceRunner {
 
     async fn put_state(
         &mut self,
-        state: crate::params::InstanceStateRequested,
+        state: InstanceStateRequested,
     ) -> Result<SledInstanceState, Error> {
         use propolis_client::types::InstanceStateRequested as PropolisRequest;
         let (propolis_state, next_published) = match state {
@@ -1569,14 +1564,12 @@ mod tests {
     use crate::metrics;
     use crate::nexus::make_nexus_client_with_port;
     use crate::vmm_reservoir::VmmReservoirManagerHandle;
-    use crate::zone_bundle::CleanupContext;
     use camino_tempfile::Utf8TempDir;
     use dns_server::TransientServer;
     use dropshot::HttpServer;
     use illumos_utils::dladm::MockDladm;
     use illumos_utils::dladm::__mock_MockDladm::__create_vnic::Context as MockDladmCreateVnicContext;
     use illumos_utils::dladm::__mock_MockDladm::__delete_vnic::Context as MockDladmDeleteVnicContext;
-    use illumos_utils::opte::params::DhcpConfig;
     use illumos_utils::svc::__wait_for_service::Context as MockWaitForServiceContext;
     use illumos_utils::zone::MockZones;
     use illumos_utils::zone::__mock_MockZones::__boot::Context as MockZonesBootContext;
@@ -1588,8 +1581,9 @@ mod tests {
     use omicron_common::api::internal::nexus::{
         InstanceProperties, InstanceRuntimeState, VmmState,
     };
-    use omicron_common::api::internal::shared::SledIdentifiers;
+    use omicron_common::api::internal::shared::{DhcpConfig, SledIdentifiers};
     use omicron_common::FileKv;
+    use sled_agent_types::zone_bundle::CleanupContext;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
