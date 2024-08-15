@@ -815,7 +815,7 @@ async fn refresh_producer_list(agent: OximeterAgent, resolver: Resolver) {
 async fn resolve_nexus_with_backoff(
     log: &Logger,
     resolver: &Resolver,
-) -> SocketAddr {
+) -> SocketAddrV6 {
     let log_failure = |error, delay| {
         warn!(
             log,
@@ -829,7 +829,6 @@ async fn resolve_nexus_with_backoff(
             .lookup_socket_v6(ServiceName::Nexus)
             .await
             .map_err(|e| BackoffError::transient(e.to_string()))
-            .map(|addr| SocketAddr::V6(addr))
     };
     backoff::retry_notify(
         backoff::retry_policy_internal_service(),
