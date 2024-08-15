@@ -8,9 +8,10 @@ versions = [
     { version = 1, fields = [
         "rack_id",
         "chassis_type",
+        "serial",
         "model",
         "revision",
-        "serial",
+        "firmware_id",
         "component",
         "device",
     ]}
@@ -32,6 +33,10 @@ description = "Revision number of the sled, switch, or power shelf"
 type = "string"
 description = "Serial number of the sled, switch, or power shelf"
 
+[fields.firmware_id]
+type = "string"
+description = "Hubris archive ID of the service processor when the measurement was recorded."
+
 [fields.chassis_type]
 type = "string"
 description = """
@@ -49,7 +54,7 @@ the sled, switch, or power shelf."""
 type = "string"
 description = "The name of the device which recorded a sensor reading"
 
-[fields.measurement]
+[fields.name]
 type = "string"
 description = "A name identifying the quantity measured by a sensor measurement"
 
@@ -63,26 +68,47 @@ description = "Temperature reading in degrees Celcius"
 units = "degrees_celcius"
 datum_type = "f32"
 versions = [
-    { added_in = 1, fields = ["measurement"]}
+    { added_in = 1, fields = ["name"]}
 ]
 
 [[metrics]]
 name = "current"
-description = "Electric current reading in amperes"
+description = "Output current reading in amperes"
 units = "amps"
 datum_type = "f32"
 versions = [
+    { added_in = 1, fields = ["name"]}
+]
     { added_in = 1, fields = ["measurement"]}
 ]
 
 [[metrics]]
 name = "voltage"
-description = "A voltage reading"
+description = "Output voltage reading, in volts"
 units = "volts"
 datum_type = "f32"
 versions = [
-    { added_in = 1, fields = ["measurement"]}
+    { added_in = 1, fields = ["name"]}
 ]
+
+[[metrics]]
+name = "input_current"
+description = "Input electric current reading in amperes"
+units = "amps"
+datum_type = "f32"
+versions = [
+    { added_in = 1, fields = ["name"]}
+]
+
+[[metrics]]
+name = "input_voltage"
+description = "Input electric voltage reading, in volts"
+units = "volts"
+datum_type = "f32"
+versions = [
+    { added_in = 1, fields = ["name"]}
+]
+
 
 [[metrics]]
 name = "fan_speed"
@@ -90,7 +116,7 @@ description = "A fan speed measurement, in rotations per minute"
 units = "rpm"
 datum_type = "f32"
 versions = [
-    { added_in = 1, fields = ["measurement"]}
+    { added_in = 1, fields = ["name"]}
 ]
 
 [[metrics]]
@@ -99,5 +125,5 @@ description = "Cumulative count of errors reported by a sensor"
 units = "count"
 datum_type = "cumulative_u64"
 versions = [
-    { added_in = 1, fields = ["measurement", "error"]}
+    { added_in = 1, fields = ["name", "error"]}
 ]
