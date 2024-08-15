@@ -99,6 +99,22 @@ impl PlanningInput {
         self.policy.target_cockroachdb_zone_count
     }
 
+    pub fn target_clickhouse_server_zone_count(&self) -> usize {
+        self.policy
+            .clickhouse_policy
+            .as_ref()
+            .map(|policy| policy.target_servers)
+            .unwrap_or(0)
+    }
+
+    pub fn target_clickhouse_keeper_zone_count(&self) -> usize {
+        self.policy
+            .clickhouse_policy
+            .as_ref()
+            .map(|policy| policy.target_keepers)
+            .unwrap_or(0)
+    }
+
     pub fn target_cockroachdb_cluster_version(
         &self,
     ) -> CockroachDbClusterVersion {

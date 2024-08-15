@@ -357,6 +357,8 @@ impl<'a> Planner<'a> {
             DiscretionaryOmicronZone::BoundaryNtp,
             DiscretionaryOmicronZone::CockroachDb,
             DiscretionaryOmicronZone::Nexus,
+            DiscretionaryOmicronZone::ClickhouseServer,
+            DiscretionaryOmicronZone::ClickhouseKeeper,
         ] {
             let num_zones_to_add = self.num_additional_zones_needed(zone_kind);
             if num_zones_to_add == 0 {
@@ -436,6 +438,12 @@ impl<'a> Planner<'a> {
             }
             DiscretionaryOmicronZone::Nexus => {
                 self.input.target_nexus_zone_count()
+            }
+            DiscretionaryOmicronZone::ClickhouseServer => {
+                self.input.target_clickhouse_server_zone_count()
+            }
+            DiscretionaryOmicronZone::ClickhouseKeeper => {
+                self.input.target_clickhouse_keeper_zone_count()
             }
         };
 
@@ -518,6 +526,18 @@ impl<'a> Planner<'a> {
                 }
                 DiscretionaryOmicronZone::Nexus => {
                     self.blueprint.sled_ensure_zone_multiple_nexus(
+                        sled_id,
+                        new_total_zone_count,
+                    )?
+                }
+                DiscretionaryOmicronZone::ClickhouseServer => {
+                    self.blueprint.sled_ensure_zone_multiple_clickhouse_server(
+                        sled_id,
+                        new_total_zone_count,
+                    )?
+                }
+                DiscretionaryOmicronZone::ClickhouseKeeper => {
+                    self.blueprint.sled_ensure_zone_multiple_clickhouse_keeper(
                         sled_id,
                         new_total_zone_count,
                     )?

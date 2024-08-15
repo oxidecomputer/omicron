@@ -1146,7 +1146,7 @@ dependencies = [
 [[package]]
 name = "clickward"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/clickward?rev=ceec762e6a87d2a22bf56792a3025e145caa095e#ceec762e6a87d2a22bf56792a3025e145caa095e"
+source = "git+https://github.com/oxidecomputer/clickward?rev=4ee0f74db55f440d589232256458c0750f6a641e#4ee0f74db55f440d589232256458c0750f6a641e"
 dependencies = [
  "anyhow",
  "camino",
