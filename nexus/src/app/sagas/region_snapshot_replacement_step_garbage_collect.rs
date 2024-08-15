@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Clean up the volume that stashes the target replaced during a region
-//! snapshot replacement step saga. After that's done, change the region
-//! snapshot replacement step's state to "VolumeDeleted".
+//! Delete the volume that stashes the target replaced during a region snapshot
+//! replacement step saga. After that's done, change the region snapshot
+//! replacement step's state to "VolumeDeleted".
 
 use super::{ActionRegistry, NexusActionContext, NexusSaga, SagaInitError};
 use crate::app::sagas::declare_saga_actions;
