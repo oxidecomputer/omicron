@@ -52,6 +52,18 @@ impl reqwest::dns::Resolve for Resolver {
 }
 
 impl Resolver {
+    /// Construct a new DNS resolver from the system configuration.
+    pub fn new_from_system_conf(
+        log: slog::Logger,
+    ) -> Result<Self, ResolveError> {
+        let (rc, mut opts) = hickory_resolver::system_conf::read_system_conf()?;
+        opts.edns0 = true;
+
+        let resolver = TokioAsyncResolver::tokio(rc, opts);
+
+        Ok(Self { log, resolver })
+    }
+
     /// Construct a new DNS resolver from specific DNS server addresses.
     pub fn new_from_addrs(
         log: slog::Logger,

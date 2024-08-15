@@ -610,13 +610,10 @@ impl Store {
     ) -> Result<Vec<DnsRecord>, QueryError> {
         let config = self.read_config().map_err(QueryError::QueryFail)?;
 
-        println!("zones");
-
         let zone_name = config
             .zones
             .iter()
             .find(|z| {
-                println!("zone {z}");
                 let zone_name = LowerName::from(Name::from_str(&z).unwrap());
                 zone_name.zone_of(name)
             })
