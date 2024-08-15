@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Feet policy related functionality used by both Reconfigurator and RSS.
+//! Fleet policy related functionality used by both Reconfigurator and RSS.
 
 /// The amount of redundancy for boundary NTP servers.
 pub const BOUNDARY_NTP_REDUNDANCY: usize = 2;

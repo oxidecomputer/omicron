@@ -57,13 +57,13 @@ const OXIMETER_COUNT: usize = 1;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Clickhouse.
 // TODO(https://github.com/oxidecomputer/omicron/issues/4000): Use
-// omicron_common::policy::CLICKHOUSE_SERVER_REDUNANCY once we enable
+// omicron_common::policy::CLICKHOUSE_SERVER_REDUNDANCY once we enable
 // replicated ClickHouse
 const CLICKHOUSE_COUNT: usize = 1;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Clickhouse keeper.
 // TODO(https://github.com/oxidecomputer/omicron/issues/4000): Use
-// omicron_common::policy::CLICKHOUSE_KEEPER_REDUDNANCY once we enable
+// omicron_common::policy::CLICKHOUSE_KEEPER_REDUNDANCY once we enable
 // replicated ClickHouse
 const CLICKHOUSE_KEEPER_COUNT: usize = 0;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
