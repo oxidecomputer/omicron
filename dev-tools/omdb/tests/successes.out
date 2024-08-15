@@ -587,7 +587,9 @@ task: "region_snapshot_replacement_start"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "region_snapshot_replacement_start" (don't know how to interpret details: Object {"errors": Array [], "requests_created_ok": Array [], "start_invoked_ok": Array []})
+    total requests created ok: 0
+    total start saga invoked ok: 0
+    errors: 0
 
 task: "saga_recovery"
   configured period: every 10m
@@ -993,7 +995,9 @@ task: "region_snapshot_replacement_start"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "region_snapshot_replacement_start" (don't know how to interpret details: Object {"errors": Array [], "requests_created_ok": Array [], "start_invoked_ok": Array []})
+    total requests created ok: 0
+    total start saga invoked ok: 0
+    errors: 0
 
 task: "saga_recovery"
   configured period: every 10m
