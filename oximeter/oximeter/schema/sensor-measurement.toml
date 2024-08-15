@@ -16,6 +16,23 @@ versions = [
     ]}
 ]
 
+[target]
+name = "switch_component"
+description = "A component on a rack switch which reports sensor measurements"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [
+        "rack_id",
+        "switch_id",
+        "switch_revision",
+        "switch_component",
+        "switch_serial",
+        "component",
+        "device",
+    ]}
+]
+
+
 [fields.rack_id]
 type = "uuid"
 description = "ID for the sled's rack"
@@ -35,6 +52,22 @@ description = "Revision number of the sled"
 [fields.sled_serial]
 type = "string"
 description = "Serial number of the sled"
+
+[fields.switch_id]
+type = "uuid"
+description = "ID for the switch"
+
+[fields.switch_model]
+type = "string"
+description = "Model number of the the switch"
+
+[fields.switch_revision]
+type = "u32"
+description = "Revision number of the switch"
+
+[fields.switch_serial]
+type = "string"
+description = "Serial number of the switch"
 
 [fields.component]
 type = "string"
