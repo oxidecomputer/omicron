@@ -49,6 +49,12 @@ enum Args {
         /// The socket address at which `oximeter`'s HTTP server runs.
         #[clap(short, long, action)]
         address: SocketAddrV6,
+
+        // TODO: This flag should be removed once single node functionality
+        // is removed.
+        /// Is `oximeter` connecting to a replicated ClickHouse cluster
+        #[clap(short, long, num_args = 0, action)]
+        replicated: bool,
     },
 
     /// Run `oximeter` in standalone mode for development.
@@ -99,6 +105,12 @@ enum Args {
         /// The log-level.
         #[arg(long, default_value_t = Level::Info, value_parser = parse_log_level)]
         log_level: Level,
+
+        // TODO: This flag should be removed once single node functionality
+        // is removed.
+        /// Is `oximeter` connecting to a replicated ClickHouse cluster
+        #[clap(short, long, num_args = 0, action)]
+        replicated: bool,
     },
 
     /// Print the fake Nexus's standalone API.
@@ -119,9 +131,9 @@ async fn main() {
 async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
     match args {
-        Args::Run { config_file, id, address } => {
+        Args::Run { config_file, id, address, replicated } => {
             let config = Config::from_file(config_file).unwrap();
-            let args = OximeterArguments { id, address };
+            let args = OximeterArguments { id, address, replicated };
             Oximeter::new(&config, &args)
                 .await
                 .unwrap()
@@ -130,13 +142,13 @@ async fn do_run() -> Result<(), CmdError> {
                 .context("Failed to create oximeter")
                 .map_err(CmdError::Failure)
         }
-        Args::Standalone { id, address, nexus, clickhouse, log_level } => {
+        Args::Standalone { id, address, nexus, clickhouse, log_level, replicated } => {
             // Start the standalone Nexus server, for registration of both the
             // collector and producers.
             let nexus_server = StandaloneNexus::new(nexus.into(), log_level)
                 .context("Failed to create nexus")
                 .map_err(CmdError::Failure)?;
-            let args = OximeterArguments { id, address };
+            let args = OximeterArguments { id, address, replicated };
             Oximeter::new_standalone(
                 nexus_server.log(),
                 &args,

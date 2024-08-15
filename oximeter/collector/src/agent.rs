@@ -381,6 +381,7 @@ impl OximeterAgent {
         db_config: DbConfig,
         resolver: &Resolver,
         log: &Logger,
+        replicated: bool,
     ) -> Result<Self, Error> {
         let (result_sender, result_receiver) = mpsc::channel(8);
         let log = log.new(o!(
@@ -394,6 +395,11 @@ impl OximeterAgent {
         // database.
         let db_address = if let Some(address) = db_config.address {
             address
+        } else if replicated {
+            SocketAddr::new(
+                resolver.lookup_ip(ServiceName::ClickhouseServer).await?,
+                CLICKHOUSE_PORT,
+            )
         } else {
             SocketAddr::new(
                 resolver.lookup_ip(ServiceName::Clickhouse).await?,
@@ -423,10 +429,10 @@ impl OximeterAgent {
                 ..
             }) => {
                 debug!(log, "oximeter database does not exist, creating");
-                let replicated = client.is_oximeter_cluster().await?;
+                let is_oximeter_cluster = client.is_oximeter_cluster().await?;
                 client
                     .initialize_db_with_version(
-                        replicated,
+                        is_oximeter_cluster,
                         oximeter_db::OXIMETER_VERSION,
                     )
                     .await?;

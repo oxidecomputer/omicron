@@ -1437,6 +1437,8 @@ pub async fn start_oximeter(
     let args = oximeter_collector::OximeterArguments {
         id,
         address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+        // TODO: Should this be configurable?
+        replicated: false,
     };
     Oximeter::with_logger(&config, &args, log).await.map_err(|e| e.to_string())
 }

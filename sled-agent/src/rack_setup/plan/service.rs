@@ -54,12 +54,16 @@ use uuid::Uuid;
 const OXIMETER_COUNT: usize = 1;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Clickhouse.
-// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Set to 2 once we enable replicated ClickHouse
+// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Set to 0 when enabling replicated ClickHouse
 const CLICKHOUSE_COUNT: usize = 1;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Clickhouse keeper.
-// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Set to 3 once we enable replicated ClickHouse
+// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Set to 3 when enabling replicated ClickHouse
 const CLICKHOUSE_KEEPER_COUNT: usize = 0;
+// TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
+// when Nexus provisions Clickhouse server.
+// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Set to 2 when enabling replicated ClickHouse
+const CLICKHOUSE_SERVER_COUNT: usize = 0;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
 // when Nexus provisions Crucible.
 const MINIMUM_U2_COUNT: usize = 3;
@@ -613,6 +617,47 @@ impl Plan {
                 id: id.into_untyped_uuid(),
                 underlay_address: ip,
                 zone_type: OmicronZoneType::Clickhouse {
+                    address,
+                    dataset: OmicronZoneDataset {
+                        pool_name: dataset_name.pool().clone(),
+                    },
+                },
+                filesystem_pool,
+            });
+        }
+
+        // Provision Clickhouse server zones, continuing to stripe across sleds.
+        // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
+        // Temporary linter rule until replicated Clickhouse is enabled
+        #[allow(clippy::reversed_empty_ranges)]
+        for _ in 0..CLICKHOUSE_SERVER_COUNT {
+            let sled = {
+                let which_sled =
+                    sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
+                &mut sled_info[which_sled]
+            };
+            let id = OmicronZoneUuid::new_v4();
+            let ip = sled.addr_alloc.next().expect("Not enough addrs");
+            // TODO: Should this be a different port in case we want to have single node
+            // and replicated running side by side for some weird reason?
+            let port = omicron_common::address::CLICKHOUSE_PORT;
+            let address = SocketAddrV6::new(ip, port, 0, 0);
+            dns_builder
+                .host_zone_with_one_backend(
+                    id,
+                    ip,
+                    ServiceName::ClickhouseServer,
+                    port,
+                )
+                .unwrap();
+            let dataset_name =
+                sled.alloc_dataset_from_u2s(DatasetType::ClickhouseServer)?;
+            let filesystem_pool = Some(dataset_name.pool().clone());
+            sled.request.zones.push(OmicronZoneConfig {
+                // TODO-cleanup use TypedUuid everywhere
+                id: id.into_untyped_uuid(),
+                underlay_address: ip,
+                zone_type: OmicronZoneType::ClickhouseServer {
                     address,
                     dataset: OmicronZoneDataset {
                         pool_name: dataset_name.pool().clone(),

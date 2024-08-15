@@ -142,6 +142,9 @@ source.rust.release = true
 source.paths = [
   { from = "smf/oximeter", to = "/var/svc/manifest/site/oximeter" },
   { from = "oximeter/db/schema", to = "/opt/oxide/oximeter/schema" },
+  # TODO: Add something like rack-topology (slingle-sled vs multi-sled) to add `--replicated`?
+  # Example:
+  # { from = "smf/oximeter/{{ch-cluster-topology}}", to = "/var/svc/manifest/site/oximeter" },
 ]
 output.type = "zone"
 output.intermediate_only = true
@@ -170,6 +173,33 @@ source.paths = [
   { from = "smf/clickhouse/manifest.xml", to = "/var/svc/manifest/site/clickhouse/manifest.xml" },
   { from = "smf/clickhouse/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse.sh" },
   { from = "smf/clickhouse/config_replica.xml", to = "/opt/oxide/clickhouse/config.d/config_replica.xml" },
+]
+output.type = "zone"
+output.intermediate_only = true
+setup_hint = "Run `cargo xtask download clickhouse` to download the necessary binaries"
+
+[package.clickhouse_server]
+service_name = "clickhouse_server"
+only_for_targets.image = "standard"
+source.type = "composite"
+source.packages = [
+  "clickhouse_server_svc.tar.gz",
+  "internal-dns-cli.tar.gz",
+  "omicron-clickhouse-admin.tar.gz",
+  "zone-setup.tar.gz",
+  "zone-network-install.tar.gz"
+]
+output.type = "zone"
+
+[package.clickhouse_server_svc]
+service_name = "clickhouse_server_svc"
+only_for_targets.image = "standard"
+source.type = "local"
+source.paths = [
+  { from = "out/clickhouse", to = "/opt/oxide/clickhouse_server" },
+  { from = "smf/clickhouse_server/manifest.xml", to = "/var/svc/manifest/site/clickhouse_server/manifest.xml" },
+  { from = "smf/clickhouse_server/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse_server.sh" },
+  { from = "smf/clickhouse_server/config_replica.xml", to = "/opt/oxide/clickhouse_server/config.d/config_replica.xml" },
 ]
 output.type = "zone"
 output.intermediate_only = true

@@ -146,6 +146,8 @@ impl Config {
 pub struct OximeterArguments {
     pub id: Uuid,
     pub address: SocketAddrV6,
+    // TODO: Remove once single node ClickHouse functionality is removed
+    pub replicated: bool,
 }
 
 /// A server used to collect metrics from components in the control plane.
@@ -208,6 +210,7 @@ impl Oximeter {
                     config.db,
                     &resolver,
                     &log,
+                    args.replicated,
                 )
                 .await?,
             ))
