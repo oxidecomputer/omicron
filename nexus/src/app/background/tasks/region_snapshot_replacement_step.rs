@@ -267,7 +267,7 @@ impl RegionSnapshotReplacementFindAffected {
                 //
                 // Also note: this function returns a conflict error if another
                 // step record references this volume id in the "old snapshot
-                // volume id" colume - this is ok! Region snapshot replacement
+                // volume id" column - this is ok! Region snapshot replacement
                 // step records are created for some volume id, and a null old
                 // snapshot volume id:
                 //
