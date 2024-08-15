@@ -134,7 +134,10 @@ impl From<KnownTarget> for Target {
             map.insert("switch".to_string(), switch.to_string());
         }
         map.insert("rack-topology".to_string(), kt.rack_topology.to_string());
-        map.insert("clickhouse-topology".to_string(), kt.clickhouse_topology.to_string());
+        map.insert(
+            "clickhouse-topology".to_string(),
+            kt.clickhouse_topology.to_string(),
+        );
         Target(map)
     }
 }

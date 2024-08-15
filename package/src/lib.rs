@@ -77,7 +77,7 @@ pub enum TargetCommand {
         )]
         /// Specify whether clickhouse will be deployed as a replicated cluster
         /// or single-node configuration.
-        /// 
+        ///
         /// Replicated cluster configuration is an experimental feature to be
         /// used only for testing.
         clickhouse_topology: Option<crate::target::ClickhouseTopology>,

@@ -140,11 +140,8 @@ source.type = "local"
 source.rust.binary_names = ["oximeter", "clickhouse-schema-updater"]
 source.rust.release = true
 source.paths = [
-  #{ from = "smf/oximeter", to = "/var/svc/manifest/site/oximeter" },
   { from = "oximeter/db/schema", to = "/opt/oxide/oximeter/schema" },
   { from = "smf/oximeter/config.toml", to = "/var/svc/manifest/site/oximeter/config.toml" },
-  # TODO: Add something like rack-topology (slingle-sled vs multi-sled) to add `--replicated`?
-  # Example:
   { from = "smf/oximeter/{{clickhouse-topology}}/manifest.xml", to = "/var/svc/manifest/site/oximeter/manifest.xml" },
 ]
 output.type = "zone"
