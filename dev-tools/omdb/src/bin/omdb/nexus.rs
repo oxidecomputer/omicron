@@ -19,6 +19,7 @@ use clap::Subcommand;
 use clap::ValueEnum;
 use futures::future::try_join;
 use futures::TryStreamExt;
+use itertools::Itertools;
 use nexus_client::types::ActivationReason;
 use nexus_client::types::BackgroundTask;
 use nexus_client::types::BackgroundTasksActivateRequest;
@@ -33,6 +34,7 @@ use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
+use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::CollectionUuid;
@@ -46,6 +48,7 @@ use reedline::Reedline;
 use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::str::FromStr;
 use tabled::Tabled;
 use uuid::Uuid;
@@ -93,9 +96,19 @@ enum BackgroundTasksCommands {
     /// Print a summary of the status of all background tasks
     List,
     /// Print human-readable summary of the status of each background task
-    Show,
+    Show(BackgroundTasksShowArgs),
     /// Activate one or more background tasks
     Activate(BackgroundTasksActivateArgs),
+}
+
+#[derive(Debug, Args)]
+struct BackgroundTasksShowArgs {
+    /// Names of background tasks to show (default: all)
+    ///
+    /// You can use any background task name here or one of the special strings
+    /// "all", "dns_external", or "dns_internal".
+    #[clap(value_name = "TASK_NAME")]
+    tasks: Vec<String>,
 }
 
 #[derive(Debug, Args)]
@@ -361,8 +374,8 @@ impl NexusArgs {
                 command: BackgroundTasksCommands::List,
             }) => cmd_nexus_background_tasks_list(&client).await,
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {
-                command: BackgroundTasksCommands::Show,
-            }) => cmd_nexus_background_tasks_show(&client).await,
+                command: BackgroundTasksCommands::Show(args),
+            }) => cmd_nexus_background_tasks_show(&client, args).await,
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {
                 command: BackgroundTasksCommands::Activate(args),
             }) => {
@@ -523,7 +536,9 @@ async fn cmd_nexus_background_tasks_list(
 ) -> Result<(), anyhow::Error> {
     let response =
         client.bgtask_list().await.context("listing background tasks")?;
-    let tasks = response.into_inner();
+    // Convert the HashMap to a BTreeMap because we want the keys in sorted
+    // order.
+    let tasks = response.into_inner().into_iter().collect::<BTreeMap<_, _>>();
     let table_rows = tasks.values().map(BackgroundTaskStatusRow::from);
     let table = tabled::Table::new(table_rows)
         .with(tabled::settings::Style::empty())
@@ -536,6 +551,7 @@ async fn cmd_nexus_background_tasks_list(
 /// Runs `omdb nexus background-tasks show`
 async fn cmd_nexus_background_tasks_show(
     client: &nexus_client::Client,
+    args: &BackgroundTasksShowArgs,
 ) -> Result<(), anyhow::Error> {
     let response =
         client.bgtask_list().await.context("listing background tasks")?;
@@ -544,8 +560,50 @@ async fn cmd_nexus_background_tasks_show(
     let mut tasks =
         response.into_inner().into_iter().collect::<BTreeMap<_, _>>();
 
-    // We want to pick the order that we print some tasks intentionally.  Then
-    // we want to print anything else that we find.
+    // Now, pick out the tasks that the user selected.
+    //
+    // The set of user tasks may include:
+    //
+    // - nothing at all, in which case we include all tasks
+    // - individual task names
+    // - certain groups that we recognize, like "dns_external" for all the tasks
+    //   related to external DNS propagation.  "all" means "all tasks".
+    let selected_set: BTreeSet<_> =
+        args.tasks.iter().map(AsRef::as_ref).collect();
+    let selected_all = selected_set.is_empty() || selected_set.contains("all");
+    if !selected_all {
+        for s in &selected_set {
+            if !tasks.contains_key(*s)
+                && *s != "all"
+                && *s != "dns_external"
+                && *s != "dns_internal"
+            {
+                bail!(
+                    "unknown task name: {:?} (known task names: all, \
+                    dns_external, dns_internal, {})",
+                    s,
+                    tasks.keys().join(", ")
+                );
+            }
+        }
+
+        tasks.retain(|k, _| {
+            selected_set.contains(k.as_str())
+                || selected_set.contains("all")
+                || (selected_set.contains("dns_external")
+                    && k.starts_with("dns_")
+                    && k.ends_with("_external"))
+                || (selected_set.contains("dns_internal")
+                    && k.starts_with("dns_")
+                    && k.ends_with("_internal"))
+        });
+    }
+
+    // Some tasks should be grouped and printed together in a certain order,
+    // even though their names aren't alphabetical.  Notably, the DNS tasks
+    // logically go from config -> servers -> propagation, so we want to print
+    // them in that order.  So we pick these out first and then print anything
+    // else that we find in alphabetical order.
     for name in [
         "dns_config_internal",
         "dns_servers_internal",
@@ -559,7 +617,7 @@ async fn cmd_nexus_background_tasks_show(
     ] {
         if let Some(bgtask) = tasks.remove(name) {
             print_task(&bgtask);
-        } else {
+        } else if selected_all {
             eprintln!("warning: expected to find background task {:?}", name);
         }
     }
@@ -1395,7 +1453,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 }
             }
         };
-    } else if name == "region_snapshot_replacement" {
+    } else if name == "region_snapshot_replacement_start" {
         match serde_json::from_value::<RegionSnapshotReplacementStartStatus>(
             details.clone(),
         ) {
@@ -1418,6 +1476,31 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     status.start_invoked_ok.len(),
                 );
                 for line in &status.start_invoked_ok {
+                    println!("    > {line}");
+                }
+
+                println!("    errors: {}", status.errors.len());
+                for line in &status.errors {
+                    println!("    > {line}");
+                }
+            }
+        }
+    } else if name == "region_snapshot_replacement_garbage_collection" {
+        match serde_json::from_value::<
+            RegionSnapshotReplacementGarbageCollectStatus,
+        >(details.clone())
+        {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+
+            Ok(status) => {
+                println!(
+                    "    total garbage collections requested: {}",
+                    status.garbage_collect_requested.len(),
+                );
+                for line in &status.garbage_collect_requested {
                     println!("    > {line}");
                 }
 

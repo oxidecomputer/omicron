@@ -26,7 +26,7 @@ serde_json.workspace = true
 sled-agent-types.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 toml.workspace = true
-trust-dns-resolver.workspace = true
+hickory-resolver.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 ispf.workspace = true

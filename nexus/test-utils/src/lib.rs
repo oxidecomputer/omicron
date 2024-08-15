@@ -17,6 +17,11 @@ use dropshot::HandlerTaskMode;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use gateway_test_utils::setup::GatewayTestContext;
+use hickory_resolver::config::NameServerConfig;
+use hickory_resolver::config::Protocol;
+use hickory_resolver::config::ResolverConfig;
+use hickory_resolver::config::ResolverOpts;
+use hickory_resolver::TokioAsyncResolver;
 use nexus_config::Database;
 use nexus_config::DpdConfig;
 use nexus_config::InternalDns;
@@ -73,11 +78,6 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
-use trust_dns_resolver::config::NameServerConfig;
-use trust_dns_resolver::config::Protocol;
-use trust_dns_resolver::config::ResolverConfig;
-use trust_dns_resolver::config::ResolverOpts;
-use trust_dns_resolver::TokioAsyncResolver;
 use uuid::Uuid;
 
 pub use sim::TEST_HARDWARE_THREADS;
@@ -1588,12 +1588,12 @@ pub async fn start_dns_server(
         socket_addr: dns_server.local_address(),
         protocol: Protocol::Udp,
         tls_dns_name: None,
-        trust_nx_responses: false,
+        trust_negative_responses: false,
         bind_addr: None,
     });
-    let resolver =
-        TokioAsyncResolver::tokio(resolver_config, ResolverOpts::default())
-            .context("creating DNS resolver")?;
+    let mut resolver_opts = ResolverOpts::default();
+    resolver_opts.edns0 = true;
+    let resolver = TokioAsyncResolver::tokio(resolver_config, resolver_opts);
 
     Ok((dns_server, http_server, resolver))
 }
