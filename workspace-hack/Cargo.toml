@@ -110,7 +110,6 @@ tokio-util = { version = "0.7.11", features = ["codec", "io-util"] }
 toml = { version = "0.7.8" }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.20", features = ["serde"] }
 tracing = { version = "0.1.40", features = ["log"] }
-tracing-core = { version = "0.1.32" }
 unicode-bidi = { version = "0.3.15" }
 unicode-normalization = { version = "0.1.23" }
 usdt = { version = "0.5.0" }
@@ -216,7 +215,6 @@ tokio-util = { version = "0.7.11", features = ["codec", "io-util"] }
 toml = { version = "0.7.8" }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.20", features = ["serde"] }
 tracing = { version = "0.1.40", features = ["log"] }
-tracing-core = { version = "0.1.32" }
 unicode-bidi = { version = "0.3.15" }
 unicode-normalization = { version = "0.1.23" }
 unicode-xid = { version = "0.2.4" }
