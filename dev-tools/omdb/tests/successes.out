@@ -968,6 +968,13 @@ task: "region_replacement_driver"
     number of region replacement finish sagas started ok: 0
     number of errors: 0
 
+task: "region_snapshot_replacement_start"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "region_snapshot_replacement_start" (don't know how to interpret details: Object {"errors": Array [], "requests_created_ok": Array [], "start_invoked_ok": Array []})
+
 task: "saga_recovery"
   configured period: every 10m
   currently executing: no
