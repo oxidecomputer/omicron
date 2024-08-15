@@ -373,7 +373,7 @@ hyper-rustls = "0.26.0"
 hyper-staticfile = "0.9.5"
 illumos-utils = { path = "illumos-utils" }
 indent_write = "2.2.0"
-indexmap = "2.3.0"
+indexmap = "2.4.0"
 indicatif = { version = "0.17.8", features = ["rayon"] }
 installinator = { path = "installinator" }
 installinator-api = { path = "installinator-api" }
