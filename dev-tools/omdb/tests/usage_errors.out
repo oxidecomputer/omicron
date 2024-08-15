@@ -491,6 +491,46 @@ Connection Options:
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
 =============================================
+EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Print human-readable summary of the status of each background task
+
+Usage: omdb nexus background-tasks show [OPTIONS] [TASK_NAME]...
+
+Arguments:
+  [TASK_NAME]...
+          Names of background tasks to show (default: all)
+          
+          You can use any background task name here or one of the special strings "all",
+          "dns_external", or "dns_internal".
+
+Options:
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Connection Options:
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal API
+          
+          [env: OMDB_NEXUS_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
 EXECUTING COMMAND: omdb ["nexus", "blueprints"]
 termination: Exited(2)
 ---------------------------------------------
