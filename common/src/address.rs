@@ -8,6 +8,7 @@
 //! and Nexus, who need to agree upon addressing schemes.
 
 use crate::api::external::{self, Error};
+use crate::policy::{DNS_REDUNDANCY, MAX_DNS_REDUNDANCY};
 use ipnetwork::Ipv6Network;
 use once_cell::sync::Lazy;
 use oxnet::{Ipv4Net, Ipv6Net};
@@ -24,31 +25,6 @@ pub const MAX_PORT: u16 = u16::MAX;
 
 /// minimum possible value for a tcp or udp port
 pub const MIN_PORT: u16 = u16::MIN;
-
-/// The amount of redundancy for boundary NTP servers.
-pub const BOUNDARY_NTP_REDUNDANCY: usize = 2;
-
-/// The amount of redundancy for Nexus services.
-///
-/// This is used by both RSS (to distribute the initial set of services) and the
-/// Reconfigurator (to know whether to add new Nexus zones)
-pub const NEXUS_REDUNDANCY: usize = 3;
-
-/// The amount of redundancy for CockroachDb services.
-///
-/// This is used by both RSS (to distribute the initial set of services) and the
-/// Reconfigurator (to know whether to add new crdb zones)
-pub const COCKROACHDB_REDUNDANCY: usize = 5;
-
-/// The amount of redundancy for internal DNS servers.
-///
-/// Must be less than or equal to MAX_DNS_REDUNDANCY.
-pub const DNS_REDUNDANCY: usize = 3;
-
-/// The maximum amount of redundancy for DNS servers.
-///
-/// This determines the number of addresses which are reserved for DNS servers.
-pub const MAX_DNS_REDUNDANCY: usize = 5;
 
 pub const DNS_PORT: u16 = 53;
 pub const DNS_HTTP_PORT: u16 = 5353;

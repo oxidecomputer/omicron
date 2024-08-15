@@ -1454,7 +1454,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 }
             }
         };
-    } else if name == "region_snapshot_replacement" {
+    } else if name == "region_snapshot_replacement_start" {
         match serde_json::from_value::<RegionSnapshotReplacementStartStatus>(
             details.clone(),
         ) {
