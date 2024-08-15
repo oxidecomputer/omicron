@@ -1,7 +1,7 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
-
+use crate::ServerContext;
 use anyhow::Context;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
@@ -34,6 +34,7 @@ pub struct Metrics {
 struct Poller {
     samples: Arc<Mutex<Vec<Sample>>>,
     log: slog::Logger,
+    apictx: Arc<ServerContext>,
 }
 
 /// Manages a metrics server and stuff.
@@ -56,7 +57,8 @@ const METRIC_REQUEST_MAX_SIZE: usize = 10 * 1024 * 1024;
 impl Metrics {
     pub fn new(
         log: &slog::Logger,
-        MgsArguments { id, rack_id, addresses }: &MgsArguments,
+        MgsArguments { id, rack_id, addresses, .. }: &MgsArguments,
+        apictx: Arc<ServerContext>,
     ) -> anyhow::Result<Self> {
         let registry = ProducerRegistry::with_id(*id);
         let samples = Arc::new(Mutex::new(Vec::new()));
@@ -65,6 +67,11 @@ impl Metrics {
             .register_producer(Producer(samples.clone()))
             .context("failed to register metrics producer")?;
 
+        // Using a channel for this is, admittedly, a bit of an end-run around
+        // the `OnceLock` on the `ServerContext` that *also* stores the rack ID,
+        // but it has the nice benefit of allowing the `Poller` task to _await_
+        // the rack ID being set...we might want to change other code to use a
+        // similar approach in the future.
         let (rack_id_tx, rack_id_rx) = oneshot::channel();
         let rack_id_tx = if let Some(rack_id) = *rack_id {
             rack_id_tx.send(rack_id).expect(
@@ -78,6 +85,7 @@ impl Metrics {
         let poller = tokio::spawn(
             Poller {
                 samples,
+                apictx,
                 log: log.new(slog::o!("component" => "sensor-poller")),
             }
             .run(rack_id_rx),
