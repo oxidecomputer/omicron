@@ -30,6 +30,7 @@ use nexus_types::external_api::params::UninitializedSledId;
 use nexus_types::external_api::shared::ProbeInfo;
 use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views::SledPolicy;
+use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::internal_api::params::SledAgentInfo;
 use nexus_types::internal_api::params::SwitchPutRequest;
 use nexus_types::internal_api::params::SwitchPutResponse;
@@ -42,6 +43,7 @@ use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::ScanById;
 use omicron_common::api::external::http_pagination::ScanParams;
+use omicron_common::api::external::Instance;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::DownstairsClientStopRequest;
 use omicron_common::api::internal::nexus::DownstairsClientStopped;
@@ -183,6 +185,33 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 )
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn instance_migrate(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<InstancePathParam>,
+        migrate_params: TypedBody<InstanceMigrateRequest>,
+    ) -> Result<HttpResponseOk<Instance>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let migrate = migrate_params.into_inner();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            let instance = nexus
+                .instance_migrate(
+                    &opctx,
+                    InstanceUuid::from_untyped_uuid(path.instance_id),
+                    migrate,
+                )
+                .await?;
+            Ok(HttpResponseOk(instance.into()))
         };
         apictx
             .internal_latencies
