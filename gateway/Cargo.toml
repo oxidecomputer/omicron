@@ -39,6 +39,7 @@ tokio-tungstenite.workspace = true
 toml.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
+oximeter.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true

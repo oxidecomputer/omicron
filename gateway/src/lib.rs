@@ -6,6 +6,7 @@ mod config;
 mod context;
 mod error;
 mod management_switch;
+mod metrics;
 mod serial_console;
 
 pub mod http_entrypoints; // TODO pub only for testing - is this right?
