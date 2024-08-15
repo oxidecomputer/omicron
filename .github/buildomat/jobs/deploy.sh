@@ -46,6 +46,7 @@ _exit_trap() {
 	pfexec dladm show-link
 	pfexec dladm show-vnic
 	pfexec ipadm
+	pfexec ipadm show-if
 	pfexec netstat -rncva
 	pfexec netstat -anu
 	pfexec arp -an
