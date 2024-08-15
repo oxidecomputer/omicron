@@ -59,7 +59,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e89da841a80418a9b391ebaea17f5c112ffaaa96f621d2c285b5174da76b9011"
 dependencies = [
  "cfg-if",
- "getrandom 0.2.14",
+ "getrandom",
  "once_cell",
  "version_check",
  "zerocopy 0.7.34",
@@ -376,10 +376,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b62ddb9cb1ec0a098ad4bbf9344d0713fa193ae1a80af55febcff2627b6a00c1"
 dependencies = [
  "futures-core",
- "getrandom 0.2.14",
+ "getrandom",
  "instant",
  "pin-project-lite",
- "rand 0.8.5",
+ "rand",
  "tokio",
 ]
 
@@ -683,7 +683,7 @@ dependencies = [
  "omicron-workspace-hack",
  "pq-sys",
  "proptest",
- "rand 0.8.5",
+ "rand",
  "secrecy",
  "serde",
  "serde_with",
@@ -1609,7 +1609,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0dc92fb57ca44df6db8059111ab3af99a63d5d0f8375d9972e319a379c6bab76"
 dependencies = [
  "generic-array",
- "rand_core 0.6.4",
+ "rand_core",
  "subtle",
  "zeroize",
 ]
@@ -1621,7 +1621,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1bfb12502f3fc46cca1bb51ac28df9d618d813cdc3d2f25b9fe775a34af26bb3"
 dependencies = [
  "generic-array",
- "rand_core 0.6.4",
+ "rand_core",
  "typenum",
 ]
 
@@ -1676,7 +1676,7 @@ dependencies = [
  "curve25519-dalek-derive",
  "digest",
  "fiat-crypto",
- "rand_core 0.6.4",
+ "rand_core",
  "rustc_version 0.4.0",
  "subtle",
  "zeroize",
@@ -1934,7 +1934,7 @@ dependencies = [
  "dhcproto-macros",
  "hex",
  "ipnet",
- "rand 0.8.5",
+ "rand",
  "thiserror",
  "trust-dns-proto",
  "url",
@@ -2198,7 +2198,7 @@ dependencies = [
  "progenitor",
  "progenitor-client",
  "quote",
- "rand 0.8.5",
+ "rand",
  "regress",
  "reqwest",
  "rustfmt-wrapper",
@@ -2332,7 +2332,7 @@ checksum = "4a3daa8e81a3963a60642bcc1f90a670680bd4a77535faa384e9d1c79d620871"
 dependencies = [
  "curve25519-dalek",
  "ed25519",
- "rand_core 0.6.4",
+ "rand_core",
  "serde",
  "sha2",
  "subtle",
@@ -2360,7 +2360,7 @@ dependencies = [
  "hkdf",
  "pem-rfc7468",
  "pkcs8",
- "rand_core 0.6.4",
+ "rand_core",
  "sec1",
  "subtle",
  "zeroize",
@@ -2418,7 +2418,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "oxide-client",
- "rand 0.8.5",
+ "rand",
  "reqwest",
  "russh",
  "russh-keys",
@@ -2589,7 +2589,7 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ded41244b729663b1e574f1b4fb731469f69f79c17667b5d776b16cda0479449"
 dependencies = [
- "rand_core 0.6.4",
+ "rand_core",
  "subtle",
 ]
 
@@ -2905,7 +2905,7 @@ dependencies = [
  "gateway-messages",
  "omicron-workspace-hack",
  "progenitor",
- "rand 0.8.5",
+ "rand",
  "reqwest",
  "schemars",
  "serde",
@@ -3025,17 +3025,6 @@ dependencies = [
 
 [[package]]
 name = "getrandom"
-version = "0.1.16"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fc3cb4d91f53b50155bdcfd23f6a4c39ae1969c2ae85982b135750cccaf5fce"
-dependencies = [
- "cfg-if",
- "libc",
- "wasi 0.9.0+wasi-snapshot-preview1",
-]
-
-[[package]]
-name = "getrandom"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94b22e06ecb0110981051723910cbf0b5f5e09a2062dd7663334ee79a9d1286c"
@@ -3043,7 +3032,7 @@ dependencies = [
  "cfg-if",
  "js-sys",
  "libc",
- "wasi 0.11.0+wasi-snapshot-preview1",
+ "wasi",
  "wasm-bindgen",
 ]
 
@@ -3113,7 +3102,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0f9ef7462f7c099f518d754361858f86d8a07af53ba9af0fe635bbccb151a63"
 dependencies = [
  "ff",
- "rand_core 0.6.4",
+ "rand_core",
  "subtle",
 ]
 
@@ -3603,7 +3592,7 @@ dependencies = [
  "hyper 0.14.30",
  "mime_guess",
  "percent-encoding",
- "rand 0.8.5",
+ "rand",
  "tokio",
  "url",
  "winapi",
@@ -4254,7 +4243,7 @@ dependencies = [
  "portpicker",
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2018bbedafbc19f6ec1af)",
  "propolis-server-config",
- "rand 0.8.5",
+ "rand",
  "regex",
  "reqwest",
  "ron 0.7.1",
@@ -4669,7 +4658,7 @@ checksum = "a4a650543ca06a924e8b371db273b2756685faae30f8487da1b56505a8f78b0c"
 dependencies = [
  "libc",
  "log",
- "wasi 0.11.0+wasi-snapshot-preview1",
+ "wasi",
  "windows-sys 0.48.0",
 ]
 
@@ -4682,7 +4671,7 @@ dependencies = [
  "hermit-abi 0.3.9",
  "libc",
  "log",
- "wasi 0.11.0+wasi-snapshot-preview1",
+ "wasi",
  "windows-sys 0.52.0",
 ]
 
@@ -4744,7 +4733,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a51313c5820b0b02bd422f4b44776fbf47961755c74ce64afc73bfad10226c3"
 dependencies = [
- "getrandom 0.2.14",
+ "getrandom",
 ]
 
 [[package]]
@@ -4932,7 +4921,7 @@ dependencies = [
  "oxnet",
  "parse-display",
  "pq-sys",
- "rand 0.8.5",
+ "rand",
  "ref-cast",
  "schemars",
  "semver 1.0.23",
@@ -5001,7 +4990,7 @@ dependencies = [
  "pq-sys",
  "predicates",
  "pretty_assertions",
- "rand 0.8.5",
+ "rand",
  "rcgen",
  "ref-cast",
  "regex",
@@ -5035,7 +5024,7 @@ dependencies = [
  "omicron-workspace-hack",
  "once_cell",
  "oxnet",
- "rand 0.8.5",
+ "rand",
  "serde_json",
 ]
 
@@ -5200,7 +5189,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "proptest",
- "rand 0.8.5",
+ "rand",
  "sled-agent-client",
  "slog",
  "static_assertions",
@@ -5466,7 +5455,7 @@ checksum = "c165a9ab64cf766f73521c0dd2cfdff64f488b8f0b3e621face3462d3db536d7"
 dependencies = [
  "num-integer",
  "num-traits",
- "rand 0.8.5",
+ "rand",
 ]
 
 [[package]]
@@ -5481,7 +5470,7 @@ dependencies = [
  "num-integer",
  "num-iter",
  "num-traits",
- "rand 0.8.5",
+ "rand",
  "serde",
  "smallvec 1.13.2",
  "zeroize",
@@ -5771,7 +5760,7 @@ dependencies = [
  "progenitor",
  "progenitor-client",
  "proptest",
- "rand 0.8.5",
+ "rand",
  "regress",
  "reqwest",
  "schemars",
@@ -5989,7 +5978,7 @@ dependencies = [
  "pretty_assertions",
  "progenitor-client",
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=24a74d0c76b6a63961ecef76acb1516b6e66c5c9)",
- "rand 0.8.5",
+ "rand",
  "rcgen",
  "ref-cast",
  "regex",
@@ -6136,7 +6125,7 @@ dependencies = [
  "clap",
  "criterion",
  "omicron-workspace-hack",
- "rand 0.8.5",
+ "rand",
  "rust-argon2",
  "schemars",
  "serde",
@@ -6245,7 +6234,7 @@ dependencies = [
  "pretty_assertions",
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=24a74d0c76b6a63961ecef76acb1516b6e66c5c9)",
  "propolis-mock-server",
- "rand 0.8.5",
+ "rand",
  "rcgen",
  "reqwest",
  "schemars",
@@ -6375,7 +6364,7 @@ dependencies = [
  "futures-util",
  "gateway-messages",
  "generic-array",
- "getrandom 0.2.14",
+ "getrandom",
  "group",
  "hashbrown 0.14.5",
  "hex",
@@ -6692,7 +6681,7 @@ dependencies = [
  "hyper 0.14.30",
  "omicron-workspace-hack",
  "progenitor",
- "rand 0.8.5",
+ "rand",
  "regress",
  "reqwest",
  "serde",
@@ -6787,7 +6776,7 @@ dependencies = [
  "oximeter-api",
  "oximeter-client",
  "oximeter-db",
- "rand 0.8.5",
+ "rand",
  "reqwest",
  "schemars",
  "serde",
@@ -6870,7 +6859,7 @@ dependencies = [
  "prettyplease",
  "proc-macro2",
  "quote",
- "rand 0.8.5",
+ "rand",
  "rand_distr",
  "regex",
  "rstest",
@@ -6900,7 +6889,7 @@ dependencies = [
  "libc",
  "omicron-workspace-hack",
  "oximeter",
- "rand 0.8.5",
+ "rand",
  "schemars",
  "serde",
  "slog",
@@ -7015,7 +7004,7 @@ dependencies = [
  "ecdsa",
  "elliptic-curve",
  "primeorder",
- "rand_core 0.6.4",
+ "rand_core",
  "sha2",
 ]
 
@@ -7150,7 +7139,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7676374caaee8a325c9e7a2ae557f216c5563a171d6997b0ef8a65af35147700"
 dependencies = [
  "base64ct",
- "rand_core 0.6.4",
+ "rand_core",
  "subtle",
 ]
 
@@ -7161,7 +7150,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "346f04948ba92c43e8469c1ee6736c7563d71012b17d40745260fe106aac2166"
 dependencies = [
  "base64ct",
- "rand_core 0.6.4",
+ "rand_core",
  "subtle",
 ]
 
@@ -7410,7 +7399,7 @@ checksum = "f950b2377845cebe5cf8b5165cb3cc1a5e0fa5cfa3e1f7f55707d8fd82e0a7b7"
 dependencies = [
  "der",
  "pkcs5",
- "rand_core 0.6.4",
+ "rand_core",
  "spki",
 ]
 
@@ -7510,7 +7499,7 @@ version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be97d76faf1bfab666e1375477b23fde79eccf0276e9b63b92a39d676a889ba9"
 dependencies = [
- "rand 0.8.5",
+ "rand",
 ]
 
 [[package]]
@@ -7537,7 +7526,7 @@ dependencies = [
  "hmac",
  "md-5",
  "memchr",
- "rand 0.8.5",
+ "rand",
  "sha2",
  "stringprep",
 ]
@@ -7800,7 +7789,7 @@ dependencies = [
  "base64 0.21.7",
  "futures",
  "progenitor",
- "rand 0.8.5",
+ "rand",
  "reqwest",
  "schemars",
  "serde",
@@ -7821,7 +7810,7 @@ dependencies = [
  "base64 0.21.7",
  "futures",
  "progenitor",
- "rand 0.8.5",
+ "rand",
  "reqwest",
  "schemars",
  "serde",
@@ -7847,7 +7836,7 @@ dependencies = [
  "hyper 0.14.30",
  "progenitor",
  "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=24a74d0c76b6a63961ecef76acb1516b6e66c5c9)",
- "rand 0.8.5",
+ "rand",
  "reqwest",
  "schemars",
  "serde",
@@ -7904,8 +7893,8 @@ dependencies = [
  "bitflags 2.6.0",
  "lazy_static",
  "num-traits",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
+ "rand",
+ "rand_chacha",
  "rand_xorshift",
  "regex-syntax 0.8.4",
  "rusty-fork",
@@ -7983,36 +7972,13 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a6b1679d49b24bbfe0c803429aa1874472f50d9b363131f0e89fc356b544d03"
-dependencies = [
- "getrandom 0.1.16",
- "libc",
- "rand_chacha 0.2.2",
- "rand_core 0.5.1",
- "rand_hc",
-]
-
-[[package]]
-name = "rand"
 version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
 dependencies = [
  "libc",
- "rand_chacha 0.3.1",
- "rand_core 0.6.4",
-]
-
-[[package]]
-name = "rand_chacha"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4c8ed856279c9737206bf725bf36935d8666ead7aa69b52be55af369d193402"
-dependencies = [
- "ppv-lite86",
- "rand_core 0.5.1",
+ "rand_chacha",
+ "rand_core",
 ]
 
 [[package]]
@@ -8022,16 +7988,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88"
 dependencies = [
  "ppv-lite86",
- "rand_core 0.6.4",
-]
-
-[[package]]
-name = "rand_core"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90bde5296fc891b0cef12a6d03ddccc162ce7b2aff54160af9338f8d40df6d19"
-dependencies = [
- "getrandom 0.1.16",
+ "rand_core",
 ]
 
 [[package]]
@@ -8040,7 +7997,7 @@ version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
- "getrandom 0.2.14",
+ "getrandom",
 ]
 
 [[package]]
@@ -8050,16 +8007,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32cb0b9bc82b0a0876c2dd994a7e7a2683d3e7390ca40e6886785ef0c7e3ee31"
 dependencies = [
  "num-traits",
- "rand 0.8.5",
-]
-
-[[package]]
-name = "rand_hc"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca3129af7b92a17112d59ad498c6f81eaf463253766b90396d39ea7a39d6613c"
-dependencies = [
- "rand_core 0.5.1",
+ "rand",
 ]
 
 [[package]]
@@ -8068,7 +8016,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a9febe641d2842ffc76ee962668a17578767c4e01735e4802b21ed9a24b2e4e"
 dependencies = [
- "rand_core 0.6.4",
+ "rand_core",
 ]
 
 [[package]]
@@ -8077,7 +8025,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d25bf25ec5ae4a3f1b92f929810509a2f53d7dca2f50b794ff57e3face536c8f"
 dependencies = [
- "rand_core 0.6.4",
+ "rand_core",
 ]
 
 [[package]]
@@ -8208,7 +8156,7 @@ version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bd283d9651eeda4b2a83a43c1c91b266c40fd76ecd39a50a8c630ae69dc72891"
 dependencies = [
- "getrandom 0.2.14",
+ "getrandom",
  "libredox",
  "thiserror",
 ]
@@ -8416,7 +8364,7 @@ checksum = "c17fa4cb658e3583423e915b9f3acc01cceaee1860e33d59ebae66adc3a2dc0d"
 dependencies = [
  "cc",
  "cfg-if",
- "getrandom 0.2.14",
+ "getrandom",
  "libc",
  "spin 0.9.8",
  "untrusted 0.9.0",
@@ -8470,7 +8418,7 @@ dependencies = [
  "num-traits",
  "pkcs1",
  "pkcs8",
- "rand_core 0.6.4",
+ "rand_core",
  "serde",
  "sha2",
  "signature",
@@ -8561,8 +8509,8 @@ dependencies = [
  "p384",
  "p521",
  "poly1305",
- "rand 0.8.5",
- "rand_core 0.6.4",
+ "rand",
+ "rand_core",
  "russh-cryptovec",
  "russh-keys",
  "sha1",
@@ -8617,8 +8565,8 @@ dependencies = [
  "pkcs1",
  "pkcs5",
  "pkcs8",
- "rand 0.8.5",
- "rand_core 0.6.4",
+ "rand",
+ "rand_core",
  "rsa",
  "russh-cryptovec",
  "sec1",
@@ -8880,7 +8828,7 @@ dependencies = [
  "openssl-sys",
  "pkg-config",
  "quick-xml",
- "rand 0.8.5",
+ "rand",
  "serde",
  "thiserror",
  "url",
@@ -9120,9 +9068,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.124"
+version = "1.0.125"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66ad62847a56b3dba58cc891acd13884b9c61138d330c0d7b6181713d4fce38d"
+checksum = "83c8e735a073ccf5be70aa8066aa984eaf2fa000db6c8d0100ae605b366d31ed"
 dependencies = [
  "itoa",
  "memchr",
@@ -9330,7 +9278,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
  "digest",
- "rand_core 0.6.4",
+ "rand_core",
 ]
 
 [[package]]
@@ -9481,7 +9429,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "rand 0.8.5",
+ "rand",
  "schemars",
  "serde",
  "sled-hardware-types",
@@ -9525,7 +9473,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "rand 0.8.5",
+ "rand",
  "schemars",
  "serde",
  "serde_json",
@@ -9879,7 +9827,7 @@ dependencies = [
  "p256",
  "p384",
  "p521",
- "rand_core 0.6.4",
+ "rand_core",
  "rsa",
  "sec1",
  "sha2",
@@ -10549,7 +10497,7 @@ dependencies = [
  "pin-project-lite",
  "postgres-protocol",
  "postgres-types",
- "rand 0.8.5",
+ "rand",
  "socket2 0.5.7",
  "tokio",
  "tokio-util",
@@ -10818,7 +10766,7 @@ dependencies = [
  "futures-util",
  "lazy_static",
  "radix_trie",
- "rand 0.8.5",
+ "rand",
  "thiserror",
  "time",
  "tokio",
@@ -10842,7 +10790,7 @@ dependencies = [
  "idna 0.2.3",
  "ipnet",
  "lazy_static",
- "rand 0.8.5",
+ "rand",
  "smallvec 1.13.2",
  "thiserror",
  "tinyvec",
@@ -10961,7 +10909,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "parse-size",
- "rand 0.8.5",
+ "rand",
  "ring 0.17.8",
  "serde",
  "serde_json",
@@ -10998,7 +10946,7 @@ dependencies = [
  "http 0.2.12",
  "httparse",
  "log",
- "rand 0.8.5",
+ "rand",
  "sha1",
  "thiserror",
  "url",
@@ -11017,7 +10965,7 @@ dependencies = [
  "http 1.1.0",
  "httparse",
  "log",
- "rand 0.8.5",
+ "rand",
  "sha1",
  "thiserror",
  "url",
@@ -11031,7 +10979,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
  "cfg-if",
- "rand 0.7.3",
+ "rand",
  "static_assertions",
 ]
 
@@ -11047,8 +10995,8 @@ version = "0.1.0"
 dependencies = [
  "newtype-uuid",
  "omicron-workspace-hack",
- "rand 0.8.5",
- "rand_core 0.6.4",
+ "rand",
+ "rand_core",
  "rand_seeder",
  "uuid",
 ]
@@ -11232,7 +11180,7 @@ dependencies = [
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
- "rand 0.8.5",
+ "rand",
  "sha2",
  "slog",
  "thiserror",
@@ -11372,7 +11320,7 @@ version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81dfa00651efa65069b0b6b651f4aaa31ba9e3c3ce0137aaad053604ee7e0314"
 dependencies = [
- "getrandom 0.2.14",
+ "getrandom",
  "serde",
 ]
 
@@ -11440,9 +11388,9 @@ dependencies = [
  "curve25519-dalek",
  "elliptic-curve",
  "hex",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
- "rand_core 0.6.4",
+ "rand",
+ "rand_chacha",
+ "rand_core",
  "serde",
  "subtle",
  "thiserror-no-std",
@@ -11505,12 +11453,6 @@ checksum = "bfa7760aed19e106de2c7c0b581b509f2f25d3dacaf737cb82ac61bc6d760b0e"
 dependencies = [
  "try-lock",
 ]
-
-[[package]]
-name = "wasi"
-version = "0.9.0+wasi-snapshot-preview1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cccddf32554fecc6acb585f82a32a72e28b48f8c4c1883ddfeeeaa96f7d8e519"
 
 [[package]]
 name = "wasi"
@@ -11787,7 +11729,7 @@ dependencies = [
  "openapi-lint",
  "openapiv3",
  "oxnet",
- "rand 0.8.5",
+ "rand",
  "reqwest",
  "schemars",
  "serde",
