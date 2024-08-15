@@ -223,6 +223,8 @@ pub enum ProducerKind {
     Service,
     /// The producer is a Propolis VMM managing a guest instance.
     Instance,
+    /// The producer is a management gateway service.
+    ManagementGateway,
 }
 
 /// Information announced by a metric server, used so that clients can contact it and collect

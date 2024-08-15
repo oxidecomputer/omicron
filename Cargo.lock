@@ -5981,6 +5981,7 @@ dependencies = [
  "omicron-workspace-hack",
  "once_cell",
  "oximeter",
+ "oximeter-producer",
  "schemars",
  "serde",
  "serde_json",

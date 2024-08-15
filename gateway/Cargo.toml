@@ -41,6 +41,7 @@ toml.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 oximeter.workspace = true
+oximeter-producer.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
