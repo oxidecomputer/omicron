@@ -104,22 +104,25 @@ Query the control plane database (CockroachDB)
 Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
-  rack                 Print information about the rack
-  disks                Print information about virtual disks
-  dns                  Print information about internal and external DNS
-  inventory            Print information about collected hardware/software inventory
-  physical-disks       Print information about physical disks
-  reconfigurator-save  Save the current Reconfigurator inputs to a file
-  region               Print information about regions
-  region-replacement   Query for information about region replacements, optionally manually
-                           triggering one
-  sleds                Print information about sleds
-  instances            Print information about customer instances
-  network              Print information about the network
-  snapshots            Print information about snapshots
-  validate             Validate the contents of the database
-  volumes              Print information about volumes
-  help                 Print this message or the help of the given subcommand(s)
+  rack                         Print information about the rack
+  disks                        Print information about virtual disks
+  dns                          Print information about internal and external DNS
+  inventory                    Print information about collected hardware/software inventory
+  physical-disks               Print information about physical disks
+  reconfigurator-save          Save the current Reconfigurator inputs to a file
+  region                       Print information about regions
+  region-replacement           Query for information about region replacements, optionally manually
+                               triggering one
+  region-snapshot-replacement  Query for information about region snapshot replacements, optionally
+                               manually triggering one
+  sleds                        Print information about sleds
+  instances                    Print information about customer instances
+  network                      Print information about the network
+  migrations                   Print information about migrations
+  snapshots                    Print information about snapshots
+  validate                     Validate the contents of the database
+  volumes                      Print information about volumes
+  help                         Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
@@ -147,22 +150,25 @@ Query the control plane database (CockroachDB)
 Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
-  rack                 Print information about the rack
-  disks                Print information about virtual disks
-  dns                  Print information about internal and external DNS
-  inventory            Print information about collected hardware/software inventory
-  physical-disks       Print information about physical disks
-  reconfigurator-save  Save the current Reconfigurator inputs to a file
-  region               Print information about regions
-  region-replacement   Query for information about region replacements, optionally manually
-                           triggering one
-  sleds                Print information about sleds
-  instances            Print information about customer instances
-  network              Print information about the network
-  snapshots            Print information about snapshots
-  validate             Validate the contents of the database
-  volumes              Print information about volumes
-  help                 Print this message or the help of the given subcommand(s)
+  rack                         Print information about the rack
+  disks                        Print information about virtual disks
+  dns                          Print information about internal and external DNS
+  inventory                    Print information about collected hardware/software inventory
+  physical-disks               Print information about physical disks
+  reconfigurator-save          Save the current Reconfigurator inputs to a file
+  region                       Print information about regions
+  region-replacement           Query for information about region replacements, optionally manually
+                               triggering one
+  region-snapshot-replacement  Query for information about region snapshot replacements, optionally
+                               manually triggering one
+  sleds                        Print information about sleds
+  instances                    Print information about customer instances
+  network                      Print information about the network
+  migrations                   Print information about migrations
+  snapshots                    Print information about snapshots
+  validate                     Validate the contents of the database
+  volumes                      Print information about volumes
+  help                         Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
@@ -440,6 +446,7 @@ Usage: omdb nexus [OPTIONS] <COMMAND>
 Commands:
   background-tasks  print information about background tasks
   blueprints        interact with blueprints
+  sagas             view sagas, create and complete demo sagas
   sleds             interact with sleds
   help              Print this message or the help of the given subcommand(s)
 
@@ -515,6 +522,43 @@ Connection Options:
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "sagas"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+view sagas, create and complete demo sagas
+
+Usage: omdb nexus sagas [OPTIONS] <COMMAND>
+
+Commands:
+  list           List sagas run by this Nexus
+  demo-create    Create a "demo" saga
+  demo-complete  Complete a demo saga started with "demo-create"
+  help           Print this message or the help of the given subcommand(s)
+
+Options:
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+  -h, --help                   Print help
+
+Connection Options:
+      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
+                                                 OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "--nexus-internal-url", "http://[::1]:111", "sagas", "demo-create"]
+termination: Exited(1)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+note: using Nexus URL http://[::1]:111
+Error: This command is potentially destructive. Pass the `-w` / `--destructive` flag to allow it.
 =============================================
 EXECUTING COMMAND: omdb ["nexus", "sleds"]
 termination: Exited(2)

@@ -162,30 +162,17 @@ impl DataStore {
     }
 
     /// List network interfaces associated with a given service.
-    pub async fn service_list_network_interfaces(
+    pub async fn service_list_network_interfaces_on_connection(
         &self,
-        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         service_id: Uuid,
     ) -> ListResultVec<ServiceNetworkInterface> {
-        // See the comment in `service_create_network_interface`. There's no
-        // obvious parent for a service network interface (as opposed to
-        // instance network interfaces, which require ListChildren on the
-        // instance to list). As a logical proxy, we check for listing children
-        // of the service IP pool.
-        let (authz_service_ip_pool, _) =
-            self.ip_pools_service_lookup(opctx).await?;
-        opctx
-            .authorize(authz::Action::ListChildren, &authz_service_ip_pool)
-            .await?;
-
         use db::schema::service_network_interface::dsl;
         dsl::service_network_interface
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::service_id.eq(service_id))
             .select(ServiceNetworkInterface::as_select())
-            .get_results_async::<ServiceNetworkInterface>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+            .get_results_async::<ServiceNetworkInterface>(conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
@@ -450,6 +437,26 @@ impl DataStore {
             .await
             .map_err(network_interface::DeleteError::External)?;
 
+        let conn = self
+            .pool_connection_authorized(opctx)
+            .await
+            .map_err(network_interface::DeleteError::External)?;
+        self.service_delete_network_interface_on_connection(
+            &conn,
+            service_id,
+            network_interface_id,
+        )
+        .await
+    }
+
+    /// Variant of [Self::service_delete_network_interface] which may be called
+    /// from a transaction context.
+    pub async fn service_delete_network_interface_on_connection(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        service_id: Uuid,
+        network_interface_id: Uuid,
+    ) -> Result<bool, network_interface::DeleteError> {
         let query = network_interface::DeleteQuery::new(
             NetworkInterfaceKind::Service,
             service_id,
@@ -457,12 +464,7 @@ impl DataStore {
         );
         query
             .clone()
-            .execute_and_check(
-                &*self
-                    .pool_connection_authorized(opctx)
-                    .await
-                    .map_err(network_interface::DeleteError::External)?,
-            )
+            .execute_and_check(conn)
             .await
             .map_err(|e| network_interface::DeleteError::from_diesel(e, &query))
     }

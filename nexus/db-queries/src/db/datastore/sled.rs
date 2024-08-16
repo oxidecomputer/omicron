@@ -272,7 +272,7 @@ impl DataStore {
                         );
                     }
 
-                    sql_function!(fn random() -> diesel::sql_types::Float);
+                    define_sql_function!(fn random() -> diesel::sql_types::Float);
 
                     // We only actually care about one target here, so this
                     // query should have a `.limit(1)` attached. We fetch all

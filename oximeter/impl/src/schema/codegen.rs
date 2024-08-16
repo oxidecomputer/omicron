@@ -522,6 +522,12 @@ impl quote::ToTokens for Units {
             Units::Nanoseconds => {
                 quote! { ::oximeter::schema::Units::Nanoseconds }
             }
+            Units::Amps => quote! { ::oximeter::schema::Units::Amps },
+            Units::Volts => quote! { ::oximeter::schema::Units::Volts },
+            Units::DegreesCelcius => {
+                quote! { ::oximeter::schema::Units::DegreesCelcius }
+            }
+            Units::Rpm => quote! { ::oximeter::schema::Units::Rpm  },
         };
         toks.to_tokens(tokens);
     }
@@ -559,7 +565,10 @@ impl quote::ToTokens for TimeseriesSchema {
         let created = quote_creation_time(self.created);
         let toks = quote! {
             ::oximeter::schema::TimeseriesSchema {
-                timeseries_name: ::oximeter::TimeseriesName::try_from(#timeseries_name).unwrap(),
+                timeseries_name:
+                    <::oximeter::TimeseriesName as ::std::convert::TryFrom<&str>>::try_from(
+                        #timeseries_name
+                    ).unwrap(),
                 description: ::oximeter::schema::TimeseriesDescription {
                     target: String::from(#target_description),
                     metric: String::from(#metric_description),

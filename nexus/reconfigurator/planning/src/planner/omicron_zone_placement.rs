@@ -14,8 +14,9 @@ use std::mem;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub(crate) enum DiscretionaryOmicronZone {
-    Nexus,
+    BoundaryNtp,
     CockroachDb,
+    Nexus,
     // TODO expand this enum as we start to place more services
 }
 
@@ -24,12 +25,13 @@ impl DiscretionaryOmicronZone {
         zone_type: &BlueprintZoneType,
     ) -> Option<Self> {
         match zone_type {
-            BlueprintZoneType::Nexus(_) => Some(Self::Nexus),
+            BlueprintZoneType::BoundaryNtp(_) => Some(Self::BoundaryNtp),
             BlueprintZoneType::CockroachDb(_) => Some(Self::CockroachDb),
+            BlueprintZoneType::Nexus(_) => Some(Self::Nexus),
             // Zones that we should place but don't yet.
-            BlueprintZoneType::BoundaryNtp(_)
-            | BlueprintZoneType::Clickhouse(_)
+            BlueprintZoneType::Clickhouse(_)
             | BlueprintZoneType::ClickhouseKeeper(_)
+            | BlueprintZoneType::ClickhouseServer(_)
             | BlueprintZoneType::CruciblePantry(_)
             | BlueprintZoneType::ExternalDns(_)
             | BlueprintZoneType::InternalDns(_)
@@ -46,8 +48,9 @@ impl DiscretionaryOmicronZone {
 impl From<DiscretionaryOmicronZone> for ZoneKind {
     fn from(zone: DiscretionaryOmicronZone) -> Self {
         match zone {
-            DiscretionaryOmicronZone::Nexus => Self::Nexus,
+            DiscretionaryOmicronZone::BoundaryNtp => Self::BoundaryNtp,
             DiscretionaryOmicronZone::CockroachDb => Self::CockroachDb,
+            DiscretionaryOmicronZone::Nexus => Self::Nexus,
         }
     }
 }
@@ -66,6 +69,15 @@ pub(super) struct OmicronZonePlacementSledState {
     pub sled_id: SledUuid,
     pub num_zpools: usize,
     pub discretionary_zones: Vec<DiscretionaryOmicronZone>,
+}
+
+impl OmicronZonePlacementSledState {
+    fn num_discretionary_zones_of_kind(
+        &self,
+        kind: DiscretionaryOmicronZone,
+    ) -> usize {
+        self.discretionary_zones.iter().filter(|&&z| z == kind).count()
+    }
 }
 
 /// `OmicronZonePlacement` keeps an internal heap of sleds and their current
@@ -154,21 +166,24 @@ impl OmicronZonePlacement {
         let mut sleds_skipped = Vec::new();
         let mut chosen_sled = None;
         while let Some(sled) = self.sleds.pop() {
-            // Ensure we have at least one zpool more than the number of
-            // `zone_kind` zones already placed on this sled. If we don't, we
-            // already have a zone of this kind on each zpool, so we'll skip
-            // this sled.
-            if sled
-                .discretionary_zones
-                .iter()
-                .filter(|&&z| z == zone_kind)
-                .count()
-                < sled.num_zpools
-            {
+            let num_existing = sled.num_discretionary_zones_of_kind(zone_kind);
+
+            // For boundary NTP, a sled is only eligible if it does not already
+            // hold a boundary NTP zone.
+            let should_skip = zone_kind
+                == DiscretionaryOmicronZone::BoundaryNtp
+                && num_existing > 0;
+
+            // For all zone kinds, a sled is only eligible if it has at
+            // least one zpool more than the number of `zone_kind` zones
+            // already placed on this sled.
+            let should_skip = should_skip || num_existing >= sled.num_zpools;
+
+            if should_skip {
+                sleds_skipped.push(sled);
+            } else {
                 chosen_sled = Some(sled);
                 break;
-            } else {
-                sleds_skipped.push(sled);
             }
         }
 
@@ -374,14 +389,22 @@ pub mod test {
         ) -> Result<(), String> {
             let sled_state = self.sleds.get(&sled_id).expect("valid sled_id");
             let existing_zones = sled_state.count_zones_of_kind(kind);
-            if existing_zones < sled_state.num_zpools {
-                Ok(())
-            } else {
+
+            // Boundary NTP is special: there should be at most one instance per
+            // sled, so placing a new boundary NTP zone is only legal if the
+            // sled doesn't already have one.
+            if kind == DiscretionaryOmicronZone::BoundaryNtp
+                && existing_zones > 0
+            {
+                Err(format!("sled {sled_id} already has a boundary NTP zone"))
+            } else if existing_zones >= sled_state.num_zpools {
                 Err(format!(
                     "already have {existing_zones} \
                      {kind:?} instances but only {} zpools",
                     sled_state.num_zpools
                 ))
+            } else {
+                Ok(())
             }
         }
 
@@ -446,10 +469,20 @@ pub mod test {
             &self,
             kind: DiscretionaryOmicronZone,
         ) -> Result<(), String> {
-            // Zones should be placeable unless every sled already has a zone of
-            // this kind on every disk.
+            let max_this_kind_for_sled = |sled_state: &TestSledState| {
+                // Boundary NTP zones should be placeable unless every sled
+                // already has one. Other zone types should be placeable unless
+                // every sled already has a zone of that kind on every disk.
+                if kind == DiscretionaryOmicronZone::BoundaryNtp {
+                    usize::min(1, sled_state.num_zpools)
+                } else {
+                    sled_state.num_zpools
+                }
+            };
+
             for (sled_id, sled_state) in self.sleds.iter() {
-                if sled_state.count_zones_of_kind(kind) < sled_state.num_zpools
+                if sled_state.count_zones_of_kind(kind)
+                    < max_this_kind_for_sled(sled_state)
                 {
                     return Err(format!(
                         "sled {sled_id} is eligible for {kind:?} placement"

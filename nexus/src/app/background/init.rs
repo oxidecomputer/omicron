@@ -98,6 +98,7 @@ use super::tasks::dns_config;
 use super::tasks::dns_propagation;
 use super::tasks::dns_servers;
 use super::tasks::external_endpoints;
+use super::tasks::instance_updater;
 use super::tasks::instance_watcher;
 use super::tasks::inventory_collection;
 use super::tasks::lookup_region_port;
@@ -107,6 +108,7 @@ use super::tasks::phantom_disks;
 use super::tasks::physical_disk_adoption;
 use super::tasks::region_replacement;
 use super::tasks::region_replacement_driver;
+use super::tasks::region_snapshot_replacement_start::*;
 use super::tasks::saga_recovery;
 use super::tasks::service_firewall_rules;
 use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
@@ -154,11 +156,13 @@ pub struct BackgroundTasks {
     pub task_region_replacement: Activator,
     pub task_region_replacement_driver: Activator,
     pub task_instance_watcher: Activator,
+    pub task_instance_updater: Activator,
     pub task_service_firewall_propagation: Activator,
     pub task_abandoned_vmm_reaper: Activator,
     pub task_vpc_route_manager: Activator,
     pub task_saga_recovery: Activator,
     pub task_lookup_region_port: Activator,
+    pub task_region_snapshot_replacement_start: Activator,
 
     // Handles to activate background tasks that do not get used by Nexus
     // at-large.  These background tasks are implementation details as far as
@@ -234,11 +238,13 @@ impl BackgroundTasksInitializer {
             task_region_replacement: Activator::new(),
             task_region_replacement_driver: Activator::new(),
             task_instance_watcher: Activator::new(),
+            task_instance_updater: Activator::new(),
             task_service_firewall_propagation: Activator::new(),
             task_abandoned_vmm_reaper: Activator::new(),
             task_vpc_route_manager: Activator::new(),
             task_saga_recovery: Activator::new(),
             task_lookup_region_port: Activator::new(),
+            task_region_snapshot_replacement_start: Activator::new(),
 
             task_internal_dns_propagation: Activator::new(),
             task_external_dns_propagation: Activator::new(),
@@ -294,11 +300,13 @@ impl BackgroundTasksInitializer {
             task_region_replacement,
             task_region_replacement_driver,
             task_instance_watcher,
+            task_instance_updater,
             task_service_firewall_propagation,
             task_abandoned_vmm_reaper,
             task_vpc_route_manager,
             task_saga_recovery,
             task_lookup_region_port,
+            task_region_snapshot_replacement_start,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -613,10 +621,9 @@ impl BackgroundTasksInitializer {
         {
             let watcher = instance_watcher::InstanceWatcher::new(
                 datastore.clone(),
-                resolver.clone(),
+                sagas.clone(),
                 producer_registry,
                 instance_watcher::WatcherIdentity { nexus_id, rack_id },
-                task_v2p_manager.clone(),
             );
             driver.register(TaskDefinition {
                 name: "instance_watcher",
@@ -628,6 +635,25 @@ impl BackgroundTasksInitializer {
                 activator: task_instance_watcher,
             })
         };
+
+        // Background task: schedule update sagas for instances in need of
+        // state updates.
+        {
+            let updater = instance_updater::InstanceUpdater::new(
+                datastore.clone(),
+                sagas.clone(),
+                config.instance_updater.disable,
+            );
+            driver.register( TaskDefinition {
+                name: "instance_updater",
+                description: "detects if instances require update sagas and schedules them",
+                period: config.instance_watcher.period_secs,
+                task_impl: Box::new(updater),
+                opctx: opctx.child(BTreeMap::new()),
+                watchers: vec![],
+                activator: task_instance_updater,
+            });
+        }
 
         // Background task: service firewall rule propagation
         driver.register(TaskDefinition {
@@ -699,11 +725,26 @@ impl BackgroundTasksInitializer {
             description: "fill in missing ports for region records",
             period: config.lookup_region_port.period_secs,
             task_impl: Box::new(lookup_region_port::LookupRegionPort::new(
-                datastore,
+                datastore.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_lookup_region_port,
+        });
+
+        driver.register(TaskDefinition {
+            name: "region_snapshot_replacement_start",
+            description:
+                "detect if region snapshots need replacement and begin the \
+                process",
+            period: config.region_snapshot_replacement_start.period_secs,
+            task_impl: Box::new(RegionSnapshotReplacementDetector::new(
+                datastore,
+                sagas.clone(),
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_region_snapshot_replacement_start,
         });
 
         driver

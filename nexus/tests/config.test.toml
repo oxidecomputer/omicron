@@ -124,6 +124,20 @@ v2p_mapping_propagation.period_secs = 30
 abandoned_vmm_reaper.period_secs = 60
 saga_recovery.period_secs = 600
 lookup_region_port.period_secs = 60
+# The purpose of the `instance-updater` background task is to ensure that update
+# sagas are always *eventually* started for instances whose database state has
+# changed, even if the update saga was not started by the Nexus replica handling
+# an update from sled-agent. This is to ensure that updates are performed even
+# in cases where a Nexus crashes or otherwise disappears between when the
+# updated VMM and migration state is written to CRDB and when the resulting
+# update saga actually starts executing. However, we would prefer update sagas
+# to be executed in a timely manner, so for integration tests, we don't want to
+# *rely* on the instance-updater background task for running these sagas.
+#
+# Therefore, disable the background task during tests.
+instance_updater.disable = true
+instance_updater.period_secs = 60
+region_snapshot_replacement_start.period_secs = 30
 
 [default_region_allocation_strategy]
 # we only have one sled in the test environment, so we need to use the

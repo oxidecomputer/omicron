@@ -52,7 +52,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
             description: "API for the internal DNS server",
             boundary: ApiBoundary::Internal,
             api_description:
-                dns_server_api::dns_server_api::stub_api_description,
+                dns_server_api::dns_server_api_mod::stub_api_description,
             filename: "dns-server.json",
             extra_validation: None,
         },
@@ -63,7 +63,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
                 and report progress",
             boundary: ApiBoundary::Internal,
             api_description:
-                installinator_api::installinator_api::stub_api_description,
+                installinator_api::installinator_api_mod::stub_api_description,
             filename: "installinator.json",
             extra_validation: None,
         },
@@ -85,6 +85,16 @@ pub fn all_apis() -> Vec<ApiSpec> {
             api_description:
                 oximeter_api::oximeter_api_mod::stub_api_description,
             filename: "oximeter.json",
+            extra_validation: None,
+        },
+        ApiSpec {
+            title: "Oxide Sled Agent API",
+            version: "0.0.1",
+            description: "API for interacting with individual sleds",
+            boundary: ApiBoundary::Internal,
+            api_description:
+                sled_agent_api::sled_agent_api_mod::stub_api_description,
+            filename: "sled-agent.json",
             extra_validation: None,
         },
         ApiSpec {

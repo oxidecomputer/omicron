@@ -642,9 +642,13 @@ pub struct SwitchPortBgpPeerConfigCommunity {
 )]
 #[diesel(table_name = switch_port_settings_bgp_peer_config_allow_export)]
 pub struct SwitchPortBgpPeerConfigAllowExport {
+    /// Parent switch port configuration
     pub port_settings_id: Uuid,
+    /// Interface peer is reachable on
     pub interface_name: String,
+    /// Peer Address
     pub addr: IpNetwork,
+    /// Allowed Prefix
     pub prefix: IpNetwork,
 }
 
@@ -660,9 +664,13 @@ pub struct SwitchPortBgpPeerConfigAllowExport {
 )]
 #[diesel(table_name = switch_port_settings_bgp_peer_config_allow_import)]
 pub struct SwitchPortBgpPeerConfigAllowImport {
+    /// Parent switch port configuration
     pub port_settings_id: Uuid,
+    /// Interface peer is reachable on
     pub interface_name: String,
+    /// Peer Address
     pub addr: IpNetwork,
+    /// Allowed Prefix
     pub prefix: IpNetwork,
 }
 
