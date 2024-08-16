@@ -26,6 +26,7 @@ pub mod backoff;
 pub mod cmd;
 pub mod disk;
 pub mod ledger;
+pub mod policy;
 pub mod progenitor_operation_retry;
 pub mod update;
 pub mod vlan;

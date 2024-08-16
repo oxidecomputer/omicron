@@ -28,6 +28,7 @@ gateway-messages.workspace = true
 gateway-test-utils.workspace = true
 humantime.workspace = true
 internal-dns.workspace = true
+itertools.workspace = true
 nexus-client.workspace = true
 nexus-config.workspace = true
 nexus-db-model.workspace = true

@@ -153,6 +153,9 @@ source.type = "composite"
 source.packages = [
   "clickhouse_svc.tar.gz",
   "internal-dns-cli.tar.gz",
+  # TODO: This package is for solely for testing purposes.
+  # Remove once replicated clickhouse is up and running.
+  "omicron-clickhouse-admin.tar.gz",
   "zone-setup.tar.gz",
   "zone-network-install.tar.gz"
 ]
@@ -179,6 +182,7 @@ source.type = "composite"
 source.packages = [
   "clickhouse_keeper_svc.tar.gz",
   "internal-dns-cli.tar.gz",
+  "omicron-clickhouse-admin.tar.gz",
   "zone-setup.tar.gz",
   "zone-network-install.tar.gz"
 ]
@@ -197,6 +201,18 @@ source.paths = [
 output.type = "zone"
 output.intermediate_only = true
 setup_hint = "Run `cargo xtask download clickhouse` to download the necessary binaries"
+
+[package.omicron-clickhouse-admin]
+service_name = "clickhouse-admin"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["clickhouse-admin"]
+source.rust.release = true
+source.paths = [
+  { from = "smf/clickhouse-admin", to = "/var/svc/manifest/site/clickhouse-admin" },
+]
+output.type = "zone"
+output.intermediate_only = true
 
 [package.cockroachdb]
 service_name = "cockroachdb"

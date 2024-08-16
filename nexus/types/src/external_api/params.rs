@@ -1093,12 +1093,6 @@ impl JsonSchema for UserData {
     }
 }
 
-/// Migration parameters for an `Instance`
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceMigrate {
-    pub dst_sled_id: Uuid,
-}
-
 /// Forwarded to a propolis server to request the contents of an Instance's serial console.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct InstanceSerialConsoleRequest {

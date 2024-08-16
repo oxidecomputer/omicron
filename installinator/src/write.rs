@@ -918,6 +918,7 @@ mod tests {
     use anyhow::Result;
     use bytes::{Buf, Bytes};
     use camino::Utf8Path;
+    use camino_tempfile::tempdir;
     use futures::StreamExt;
     use installinator_common::{
         Event, InstallinatorCompletionMetadata, InstallinatorComponent,
@@ -934,7 +935,6 @@ mod tests {
         PartialAsyncWrite, PartialOp,
     };
     use proptest::prelude::*;
-    use tempfile::tempdir;
     use test_strategy::proptest;
     use tokio::io::AsyncReadExt;
     use tokio::sync::Mutex;
@@ -1032,7 +1032,7 @@ mod tests {
     ) -> Result<()> {
         let logctx = test_setup_log("test_write_artifact");
         let tempdir = tempdir()?;
-        let tempdir_path: &Utf8Path = tempdir.path().try_into()?;
+        let tempdir_path = tempdir.path();
 
         let destination_host = tempdir_path.join("test-host.bin");
         let destination_control_plane =
