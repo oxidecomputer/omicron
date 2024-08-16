@@ -146,7 +146,8 @@ impl Config {
 pub struct OximeterArguments {
     pub id: Uuid,
     pub address: SocketAddrV6,
-    // TODO: Remove once single node ClickHouse functionality is removed
+    // TODO TODO (https://github.com/oxidecomputer/omicron/issues/4148): Remove
+    // once single node ClickHouse functionality is removed
     pub replicated: bool,
 }
 

@@ -75,6 +75,8 @@ pub enum TargetCommand {
             default_value = Some("single-node"),
             required = false
         )]
+        // TODO (https://github.com/oxidecomputer/omicron/issues/4148): Remove
+        // once single-node functionality is removed.
         /// Specify whether clickhouse will be deployed as a replicated cluster
         /// or single-node configuration.
         ///

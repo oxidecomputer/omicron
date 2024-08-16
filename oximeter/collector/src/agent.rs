@@ -429,10 +429,9 @@ impl OximeterAgent {
                 ..
             }) => {
                 debug!(log, "oximeter database does not exist, creating");
-                let is_oximeter_cluster = client.is_oximeter_cluster().await?;
                 client
                     .initialize_db_with_version(
-                        is_oximeter_cluster,
+                        replicated,
                         oximeter_db::OXIMETER_VERSION,
                     )
                     .await?;

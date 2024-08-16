@@ -50,8 +50,8 @@ enum Args {
         #[clap(short, long, action)]
         address: SocketAddrV6,
 
-        // TODO: This flag should be removed once single node functionality
-        // is removed.
+        // TODO (https://github.com/oxidecomputer/omicron/issues/4148): This flag
+        // should be removed once single node functionality is removed.
         /// Is `oximeter` connecting to a replicated ClickHouse cluster
         #[clap(short, long, num_args = 0, action)]
         replicated: bool,
@@ -106,8 +106,8 @@ enum Args {
         #[arg(long, default_value_t = Level::Info, value_parser = parse_log_level)]
         log_level: Level,
 
-        // TODO: This flag should be removed once single node functionality
-        // is removed.
+        // TODO (https://github.com/oxidecomputer/omicron/issues/4148): This flag
+        // should be removed once single node functionality is removed.
         /// Is `oximeter` connecting to a replicated ClickHouse cluster
         #[clap(short, long, num_args = 0, action)]
         replicated: bool,
