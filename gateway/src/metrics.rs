@@ -65,6 +65,7 @@ struct Poller {
     samples: Arc<Mutex<Vec<Vec<Sample>>>>,
     log: slog::Logger,
     apictx: Arc<ServerContext>,
+    mgs_id: Uuid,
 }
 
 /// Manages a metrics server and stuff.
@@ -81,6 +82,7 @@ struct SpPoller {
     my_understanding: Mutex<SpUnderstanding>,
     log: slog::Logger,
     rack_id: Uuid,
+    mgs_id: Uuid,
 }
 
 #[derive(Default)]
@@ -137,6 +139,7 @@ impl Metrics {
                 samples,
                 apictx,
                 log: log.new(slog::o!("component" => "sensor-poller")),
+                mgs_id: id,
             }
             .run(rack_id_rx),
         );
@@ -251,6 +254,7 @@ impl Poller {
                         Arc::new(SpPoller {
                             spid,
                             rack_id,
+                            mgs_id: self.mgs_id,
                             apictx: self.apictx.clone(),
                             log: self.log.new(slog::o!(
                                 "sp_slot" => spid.slot,
@@ -379,6 +383,7 @@ impl SpPoller {
                     revision,
                     serial: Cow::Owned(serial.clone()),
                     rack_id: self.rack_id,
+                    gateway_id: self.mgs_id,
                     hubris_archive_id: Cow::Owned(hubris_archive_id.clone()),
                 };
                 devices.push((dev.component, target))

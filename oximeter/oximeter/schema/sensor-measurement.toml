@@ -13,6 +13,7 @@ versions = [
         "model",
         "revision",
         "hubris_archive_id",
+        "gateway_id",
         "component",
         "device",
     ]}
@@ -45,6 +46,12 @@ type = "string"
 description = """
 Hubris firmware archive ID of the service processor when the measurement \
 was recorded."""
+
+
+[fields.gateway_id]
+type = "uuid"
+description = """
+ID of the Management Gateway Service process which recorded the measurement."""
 
 [fields.chassis_type]
 type = "string"
