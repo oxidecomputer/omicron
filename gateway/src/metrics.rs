@@ -228,6 +228,7 @@ impl Poller {
                     Ok(Ok(samples)) => {
                         // No sense copying all the samples into the big vec thing,
                         // just push the vec instead.
+                        slog::info!(&self.log, "made a thingy: {samples:#?}");
                         self.samples.lock().unwrap().push(samples);
                     }
                     Ok(Err(error)) => {
@@ -359,13 +360,21 @@ impl SpPoller {
                     slog::warn!(
                         &self.log,
                         "failed to read details on SP component";
-                        "component" => %c,
+                        "sp_component" => %c,
                         "error" => %error,
                     );
                     // TODO(eliza): we should increment a metric here...
                     continue;
                 }
             };
+            if details.entries.is_empty() {
+                slog::warn!(
+                    &self.log,
+                    "a component which claimed to have measurement channels \
+                     had empty details. this seems weird...";
+                    "sp_component" => %c,
+                );
+            }
             for d in details.entries {
                 let ComponentDetails::Measurement(m) = d else { continue };
                 let name = Cow::Owned(m.name);
@@ -419,9 +428,9 @@ impl Manager {
             for addr in self.addrs.borrow_and_update().iter() {
                 let &ip = addr.ip();
                 // Don't bind the metrics endpoint on ::1
-                if ip.is_loopback() {
-                    continue;
-                }
+                // if ip.is_loopback() {
+                //     continue;
+                // }
                 // If our current address is contained in the new addresses,
                 // no need to rebind.
                 if current_ip == Some(IpAddr::V6(ip)) {
@@ -444,8 +453,10 @@ impl Manager {
                     let address = SocketAddr::new(ip.into(), 0);
 
                     // Discover Nexus via DNS
+
+                    // TODO(eliza) HARDCODED DEMO ADDRESS LOL
                     let registration_address =
-                        Some("[]::1]:12223".parse().unwrap());
+                        Some("[::1]:12221".parse().unwrap());
 
                     let server_info = ProducerEndpoint {
                         id: self.registry.producer_id(),
