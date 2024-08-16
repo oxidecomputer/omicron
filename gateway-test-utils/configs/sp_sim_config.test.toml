@@ -20,6 +20,10 @@ device = "fake-tmp-sensor"
 description = "FAKE temperature sensor 1"
 capabilities = 0x2
 presence = "Present"
+sensors = [
+    { name = "Southwest", kind = "Temperature", sensor_id = 0, last_data.value = 41.7890625, last_data.timestamp = 1234 },
+]
+
 
 [[simulated_sps.sidecar.components]]
 id = "dev-1"
