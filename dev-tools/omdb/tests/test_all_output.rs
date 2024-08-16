@@ -520,7 +520,8 @@ fn clear_omdb_env() {
     // and we won't be if we're run with `cargo test`.  But we will be
     // single-threaded in `cargo nextest` (the officially supported runner).
     // And these interfaces are also safe on illumos anyway.
-    for (env_var, _) in std::env::vars().filter(|(k, _)| k.starts_with("OMDB_")) {
+    for (env_var, _) in std::env::vars().filter(|(k, _)| k.starts_with("OMDB_"))
+    {
         eprintln!("removing {:?} from environment", env_var);
         std::env::remove_var(env_var);
     }
