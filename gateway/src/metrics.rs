@@ -401,6 +401,11 @@ impl SpPoller {
             }
         }
 
+        // Update our understanding again.
+        let mut understanding = self.my_understanding.lock().unwrap();
+        understanding.devices = devices;
+        understanding.state = Some(current_state);
+
         Ok(samples)
     }
 }
@@ -439,7 +444,8 @@ impl Manager {
                     let address = SocketAddr::new(ip.into(), 0);
 
                     // Discover Nexus via DNS
-                    let registration_address = None;
+                    let registration_address =
+                        Some("[]::1]:12223".parse().unwrap());
 
                     let server_info = ProducerEndpoint {
                         id: self.registry.producer_id(),
