@@ -201,26 +201,26 @@ impl DataStore {
         Ok(events)
     }
 
-    /// Updates all sagas that are currently assigned to any of the Nexus
-    /// instances in `nexus_zone_ids`, assigning them to `new_sec_id` instead.
+    /// Updates all sagas that are currently assigned to any of the SEC ids in
+    /// `sec_ids`, assigning them to `new_sec_id` instead.
     ///
-    /// This change causes the Nexus instance `new_sec_id` to discover these
-    /// sagas and resume executing them the next time it performs saga recovery
-    /// (which is normally on startup and periodically).  Generally,
-    /// `new_sec_id` is the _current_ Nexus instance and the caller should
-    /// activate the saga recovery background task after calling this function
-    /// to immediately resume the newly-assigned sagas.
+    /// Generally, an SEC id corresponds to a Nexus id.  This change causes the
+    /// Nexus instance `new_sec_id` to discover these sagas and resume executing
+    /// them the next time it performs saga recovery (which is normally on
+    /// startup and periodically).  Generally, `new_sec_id` is the _current_
+    /// Nexus instance and the caller should activate the saga recovery
+    /// background task after calling this function to immediately resume the
+    /// newly-assigned sagas.
     ///
-    /// **Warning:** This operation is only safe if the Nexus instances
-    /// `nexus_zone_ids` are not currently running.  If those Nexus instances
-    /// are still running, then two (or more) Nexus instances may wind up
-    /// running the same saga concurrently.  This would likely violate implicit
-    /// assumptions made by various saga actions, leading to hard-to-debug
-    /// errors and state corruption.
+    /// **Warning:** This operation is only safe if the other SECs `sec_ids` are
+    /// not currently running.  If those SECs are still running, then two (or
+    /// more) SECs may wind up running the same saga concurrently.  This would
+    /// likely violate implicit assumptions made by various saga actions,
+    /// leading to hard-to-debug errors and state corruption.
     pub async fn sagas_reassign_sec(
         &self,
         opctx: &OpContext,
-        nexus_zone_ids: &[db::saga_types::SecId],
+        sec_ids: &[db::saga_types::SecId],
         new_sec_id: db::saga_types::SecId,
     ) -> Result<usize, Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
@@ -237,7 +237,7 @@ impl DataStore {
             dsl::saga
                 .filter(dsl::current_sec.is_not_null())
                 .filter(dsl::current_sec.eq_any(
-                    nexus_zone_ids.into_iter().cloned().collect::<Vec<_>>(),
+                    sec_ids.into_iter().cloned().collect::<Vec<_>>(),
                 ))
                 .filter(dsl::saga_state.ne(db::saga_types::SagaCachedState(
                     steno::SagaCachedState::Done,
