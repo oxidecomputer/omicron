@@ -150,7 +150,7 @@ impl super::Nexus {
     }
 
     /// Call out to Crucible agent and perform region creation. Optionally,
-    /// supply a read-only source to invoke a clone.
+    /// supply a read-only source's repair address to invoke a clone.
     pub async fn ensure_region_in_dataset(
         &self,
         log: &Logger,
