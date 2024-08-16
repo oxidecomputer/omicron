@@ -4,6 +4,7 @@
 
 //! Integration testing facilities for Nexus
 
+#[cfg(feature = "omicron-dev")]
 use anyhow::Context;
 use anyhow::Result;
 use camino::Utf8Path;

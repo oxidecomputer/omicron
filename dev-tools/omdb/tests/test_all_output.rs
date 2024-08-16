@@ -56,6 +56,7 @@ fn assert_oximeter_list_producers_output(
 
 #[tokio::test]
 async fn test_omdb_usage_errors() {
+    clear_omdb_env();
     let cmd_path = path_to_executable(CMD_OMDB);
     let mut output = String::new();
     let invocations: &[&[&'static str]] = &[
@@ -111,6 +112,8 @@ async fn test_omdb_usage_errors() {
 
 #[nexus_test]
 async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
+    clear_omdb_env();
+
     let gwtestctx = gateway_test_utils::setup::test_setup(
         "test_omdb_success_case",
         gateway_messages::SpPort::One,
@@ -271,6 +274,8 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
 /// that's covered by the success tests above.
 #[nexus_test]
 async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
+    clear_omdb_env();
+
     let cmd_path = path_to_executable(CMD_OMDB);
     let postgres_url = cptestctx.database.listen_url().to_string();
     let nexus_internal_url =
@@ -503,4 +508,20 @@ async fn do_run_extra<F>(
     }
 
     write!(output, "=============================================\n").unwrap();
+}
+
+// OMDB environment variables can affect even the help output provided by clap.
+// See clap-rs/clap#5673 for an example.  This can cause spurious test failures.
+// Clear all the OMDB-related variables from the current process so that all
+// child processes don't have them.
+fn clear_omdb_env() {
+    // Rust documents that this is not safe to do in a multi-threaded process
+    // outside of Windows.  We cannot be sure that we are single-threaded,
+    // and we won't be if we're run with `cargo test`.  But we will be
+    // single-threaded in `cargo nextest` (the officially supported runner).
+    // And these interfaces are also safe on illumos anyway.
+    for (env_var, _) in std::env::vars().filter(|(k, _)| k.starts_with("OMDB_")) {
+        eprintln!("removing {:?} from environment", env_var);
+        std::env::remove_var(env_var);
+    }
 }
