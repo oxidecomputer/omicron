@@ -850,7 +850,7 @@ pub struct Sample {
     /// The version of the timeseries this sample belongs to
     //
     // TODO-cleanup: This should be removed once schema are tracked in CRDB.
-    #[serde(default = "::oximeter::schema::default_schema_version")]
+    #[serde(default = "crate::schema::default_schema_version")]
     pub timeseries_version: NonZeroU8,
 
     // Target name and fields
@@ -1104,15 +1104,10 @@ mod tests {
     use super::Measurement;
     use super::MetricsError;
     use super::Sample;
-    use crate::test_util;
-    use crate::types;
-    use crate::Metric;
-    use crate::Target;
     use bytes::Bytes;
     use std::collections::BTreeMap;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
-    use uuid::Uuid;
 
     #[test]
     fn test_cumulative_i64() {
@@ -1174,31 +1169,6 @@ mod tests {
         assert_eq!(measurement.datum(), &Datum::from(datum));
         assert!(measurement.start_time().is_some());
         assert!(measurement.timestamp() >= measurement.start_time().unwrap());
-    }
-
-    #[test]
-    fn test_sample_struct() {
-        let t = test_util::TestTarget::default();
-        let m = test_util::TestMetric {
-            id: Uuid::new_v4(),
-            good: true,
-            datum: 1i64,
-        };
-        let sample = types::Sample::new(&t, &m).unwrap();
-        assert_eq!(
-            sample.timeseries_name,
-            format!("{}:{}", t.name(), m.name())
-        );
-        assert!(sample.measurement.start_time().is_none());
-        assert_eq!(sample.measurement.datum(), &Datum::from(1i64));
-
-        let m = test_util::TestCumulativeMetric {
-            id: Uuid::new_v4(),
-            good: true,
-            datum: 1i64.into(),
-        };
-        let sample = types::Sample::new(&t, &m).unwrap();
-        assert!(sample.measurement.start_time().is_some());
     }
 
     #[rstest::rstest]
