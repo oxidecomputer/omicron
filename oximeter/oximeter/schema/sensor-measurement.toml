@@ -79,7 +79,14 @@ datum_type = "f32"
 versions = [
     { added_in = 1, fields = ["name"]}
 ]
-    { added_in = 1, fields = ["measurement"]}
+
+[[metrics]]
+name = "power"
+description = "Power reading, in watts"
+units = "watts"
+datum_type = "f32"
+versions = [
+    { added_in = 1, fields = ["name"]}
 ]
 
 [[metrics]]
