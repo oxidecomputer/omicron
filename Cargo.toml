@@ -568,7 +568,7 @@ textwrap = "0.16.1"
 test-strategy = "0.3.1"
 thiserror = "1.0"
 tofino = { git = "https://github.com/oxidecomputer/tofino", branch = "main" }
-tokio = "1.39.2"
+tokio = "1.38.1"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.15"
 tokio-tungstenite = "0.20"
