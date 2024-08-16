@@ -5,6 +5,7 @@ use crate::management_switch::SpIdentifier;
 use crate::management_switch::SpType;
 use crate::ServerContext;
 use anyhow::Context;
+use gateway_messages::measurement::MeasurementError;
 use gateway_messages::measurement::MeasurementKind;
 use gateway_messages::ComponentDetails;
 use gateway_messages::DeviceCapabilities;
@@ -416,7 +417,11 @@ impl SpPoller {
                 );
             }
             for d in details.entries {
-                let ComponentDetails::Measurement(m) = d else { continue };
+                let ComponentDetails::Measurement(m) = d else {
+                    // If the component details are switch port details rather
+                    // than measurement channels, ignore it for now.
+                    continue;
+                };
                 let name = Cow::Owned(m.name);
                 let sample = match (m.value, m.kind) {
                     (Ok(datum), MeasurementKind::Temperature) => Sample::new(
@@ -444,7 +449,37 @@ impl SpPoller {
                         target,
                         &component::FanSpeed { name, datum },
                     ),
-                    (Err(error), _) => todo!(),
+                    (Err(e), kind) => {
+                        let sensor_kind = match kind {
+                            MeasurementKind::Temperature => "temperature",
+                            MeasurementKind::Current => "current",
+                            MeasurementKind::Voltage => "voltage",
+                            MeasurementKind::Power => "power",
+                            MeasurementKind::InputCurrent => "input_current",
+                            MeasurementKind::InputVoltage => "input_voltage",
+                            MeasurementKind::Speed => "fan_speed",
+                        };
+                        let error = match e {
+                            MeasurementError::InvalidSensor => "invalid_sensor",
+                            MeasurementError::NoReading => "no_reading",
+                            MeasurementError::NotPresent => "not_present",
+                            MeasurementError::DeviceError => "device_error",
+                            MeasurementError::DeviceUnavailable => {
+                                "device_unavailable"
+                            }
+                            MeasurementError::DeviceTimeout => "device_timeout",
+                            MeasurementError::DeviceOff => "device_off",
+                        };
+                        Sample::new(
+                            target,
+                            &component::SensorErrorCount {
+                                error: Cow::Borrowed(error),
+                                name,
+                                datum: oximeter::types::Cumulative::new(1),
+                                sensor_kind: Cow::Borrowed(sensor_kind),
+                            },
+                        )
+                    }
                 }?;
                 samples.push(sample);
             }

@@ -31,6 +31,10 @@ device = "fake-tmp-sensor"
 description = "FAKE temperature sensor 2"
 capabilities = 0x2
 presence = "Failed"
+sensors = [
+    { name = "South", kind = "Temperature", sensor_id = 1, last_error.value = "DeviceError", last_error.timestamp = 1234 },
+]
+
 
 [[simulated_sps.sidecar]]
 multicast_addr = "::1"

@@ -71,6 +71,14 @@ description = "A name identifying the quantity measured by a sensor measurement"
 type = "string"
 description = "A string identifying the type of sensor error that occurred"
 
+[fields.sensor_kind]
+type = "string"
+description = """
+A string identifying which sensor could not be read. This will be one of \
+'temperature', 'current', 'power', 'voltage', 'input_current', \
+'input_voltage', or 'fan_speed' (the same names as the metrics emitted by \
+these sensors when they are read successfully)."""
+
 [[metrics]]
 name = "temperature"
 description = "Temperature reading in degrees Celcius"
@@ -141,5 +149,5 @@ description = "Cumulative count of errors reported by a sensor"
 units = "count"
 datum_type = "cumulative_u64"
 versions = [
-    { added_in = 1, fields = ["name", "error"]}
+    { added_in = 1, fields = ["name", "error", "sensor_kind"]}
 ]
