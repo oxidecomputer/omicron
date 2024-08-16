@@ -45,9 +45,9 @@ use std::ops::AddAssign;
 /// --------
 ///
 /// ```rust
-/// # // Rename the impl crate so the doctests can refer to the public
+/// # // Rename the types crate so the doctests can refer to the public
 /// # // `oximeter` crate, not the private impl.
-/// # extern crate oximeter_impl as oximeter;
+/// # extern crate oximeter_types as oximeter;
 /// # use oximeter_macro_impl::*;
 /// use oximeter::{traits::Target, types::FieldType};
 /// use uuid::Uuid;
@@ -75,9 +75,9 @@ use std::ops::AddAssign;
 /// supported types.
 ///
 /// ```compile_fail
-/// # // Rename the impl crate so the doctests can refer to the public
+/// # // Rename the types crate so the doctests can refer to the public
 /// # // `oximeter` crate, not the private impl.
-/// # extern crate oximeter_impl as oximeter;
+/// # extern crate oximeter_types as oximeter;
 /// # use oximeter_macro_impl::*;
 /// #[derive(oximeter::Target)]
 /// struct Bad {
@@ -160,9 +160,9 @@ pub trait Target {
 /// Example
 /// -------
 /// ```rust
-/// # // Rename the impl crate so the doctests can refer to the public
+/// # // Rename the types crate so the doctests can refer to the public
 /// # // `oximeter` crate, not the private impl.
-/// # extern crate oximeter_impl as oximeter;
+/// # extern crate oximeter_types as oximeter;
 /// # use oximeter_macro_impl::*;
 /// use chrono::Utc;
 /// use oximeter::Metric;
@@ -185,9 +185,9 @@ pub trait Target {
 /// an unsupported type.
 ///
 /// ```compile_fail
-/// # // Rename the impl crate so the doctests can refer to the public
+/// # // Rename the types crate so the doctests can refer to the public
 /// # // `oximeter` crate, not the private impl.
-/// # extern crate oximeter_impl as oximeter;
+/// # extern crate oximeter_types as oximeter;
 /// # use oximeter_macro_impl::*;
 /// #[derive(Metric)]
 /// pub struct BadType {
@@ -364,9 +364,9 @@ pub use crate::histogram::HistogramSupport;
 /// Example
 /// -------
 /// ```rust
-/// # // Rename the impl crate so the doctests can refer to the public
+/// # // Rename the types crate so the doctests can refer to the public
 /// # // `oximeter` crate, not the private impl.
-/// # extern crate oximeter_impl as oximeter;
+/// # extern crate oximeter_types as oximeter;
 /// # use oximeter_macro_impl::*;
 /// use oximeter::{Datum, MetricsError, Metric, Producer, Target};
 /// use oximeter::types::{Measurement, Sample, Cumulative};
