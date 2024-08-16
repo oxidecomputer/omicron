@@ -161,7 +161,7 @@ device = "sp3-host-cpu"
 description = "FAKE host cpu"
 capabilities = 0
 presence = "Present"
-serial_console = "[::1]:0"
+# serial_console = "[::1]:0"
 
 [[simulated_sps.gimlet.components]]
 id = "dev-0"
