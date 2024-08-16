@@ -5,7 +5,6 @@ use crate::management_switch::SpIdentifier;
 use crate::management_switch::SpType;
 use crate::ServerContext;
 use anyhow::Context;
-use clap::Parser;
 use gateway_messages::measurement::MeasurementKind;
 use gateway_messages::ComponentDetails;
 use gateway_messages::DeviceCapabilities;
@@ -41,7 +40,7 @@ pub struct Metrics {
 }
 
 /// CLI arguments for configuring metrics.
-#[derive(Copy, Clone, Debug, clap::Parser)]
+#[derive(Copy, Clone, Debug, Default, clap::Parser)]
 #[clap(next_help_heading = "SP Metrics Development Configuration")]
 pub struct Args {
     /// Override the Nexus address used to register the SP metrics Oximeter
@@ -148,7 +147,7 @@ impl Metrics {
                 log: log.new(slog::o!("component" => "producer-server")),
                 addrs: addrs_rx,
                 registry,
-                cfg: metrics_args,
+                args: metrics_args,
             }
             .run(),
         );

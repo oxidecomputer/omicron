@@ -8,6 +8,7 @@ use camino::Utf8Path;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use gateway_messages::SpPort;
+pub use omicron_gateway::metrics::Args as MgsMetricsArgs;
 use omicron_gateway::MgsArguments;
 use omicron_gateway::SpType;
 use omicron_gateway::SwitchPortConfig;
@@ -69,6 +70,7 @@ pub async fn test_setup(
         server_config,
         &sp_sim_config,
         None,
+        Default::default(),
     )
     .await
 }
@@ -99,6 +101,7 @@ pub async fn test_setup_with_config(
     mut server_config: omicron_gateway::Config,
     sp_sim_config: &sp_sim::Config,
     listen_addr: Option<SocketAddrV6>,
+    metrics_args: MgsMetricsArgs,
 ) -> GatewayTestContext {
     // Can't be `const` because `SocketAddrV6::new()` isn't const yet
     let localhost_port_0 = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
@@ -144,7 +147,8 @@ pub async fn test_setup_with_config(
     // Start gateway server
     let rack_id = Some(Uuid::parse_str(RACK_UUID).unwrap());
 
-    let args = MgsArguments { id: Uuid::new_v4(), addresses, rack_id };
+    let args =
+        MgsArguments { id: Uuid::new_v4(), addresses, rack_id, metrics_args };
     let server = omicron_gateway::Server::start(
         server_config.clone(),
         args,

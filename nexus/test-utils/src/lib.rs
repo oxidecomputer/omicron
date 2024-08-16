@@ -510,6 +510,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             mgs_config,
             &sp_sim_config,
             mgs_addr,
+            // TODO(eliza): pass the nexus address here...
+            Default::default(),
         )
         .await;
         self.gateway.insert(switch_location, gateway);
