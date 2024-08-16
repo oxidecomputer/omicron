@@ -155,6 +155,18 @@ impl RegionSnapshotReplacementFindAffected {
         }
     }
 
+    // Any request in state Running means that the target replacement has
+    // occurred already, meaning the region snapshot being replaced is not
+    // present as a target in the snapshot's volume construction request
+    // anymore. Any future usage of that snapshot (as a source for a disk or
+    // otherwise) will get a volume construction request that references the
+    // replacement read-only region.
+    //
+    // "step" records are created here for each volume found that still
+    // references the replaced region snapshot, most likely having been created
+    // by copying the snapshot's volume construction request before the target
+    // replacement occurred. These volumes also need to have target replacement
+    // performed, and this is captured in this "step" record.
     async fn create_step_records_for_affected_volumes(
         &self,
         opctx: &OpContext,
