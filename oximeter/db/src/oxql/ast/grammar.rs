@@ -189,11 +189,11 @@ peg::parser! {
         rule dashed_uuid_literal() -> Uuid
             = s:$(
                 "\""
-                ['a'..='f' | '0'..='9']*<8> "-"
-                ['a'..='f' | '0'..='9']*<4> "-"
-                ['a'..='f' | '0'..='9']*<4> "-"
-                ['a'..='f' | '0'..='9']*<4> "-"
-                ['a'..='f' | '0'..='9']*<12>
+                ['a'..='f' | 'A'..='F' | '0'..='9']*<8> "-"
+                ['a'..='f' | 'A'..='F' | '0'..='9']*<4> "-"
+                ['a'..='f' | 'A'..='F' | '0'..='9']*<4> "-"
+                ['a'..='f' | 'A'..='F' | '0'..='9']*<4> "-"
+                ['a'..='f' | 'A'..='F' | '0'..='9']*<12>
                 "\""
             ) {?
                 let Some(middle) = s.get(1..37) else {
@@ -202,7 +202,7 @@ peg::parser! {
                 middle.parse().or(Err("invalid UUID literal"))
             }
         rule undashed_uuid_literal() -> Uuid
-            = s:$("\"" ['a'..='f' | '0'..='9']*<32> "\"") {?
+            = s:$("\"" ['a'..='f' | 'A'..='F' | '0'..='9']*<32> "\"") {?
             let Some(middle) = s.get(1..33) else {
                 return Err("invalid UUID literal");
             };
@@ -732,6 +732,15 @@ mod tests {
             &without_dashes[1..without_dashes.len() - 2]
         )
         .is_err());
+    }
+
+    #[test]
+    fn test_uuid_literal_is_case_insensitive() {
+        const ID: Uuid = uuid::uuid!("880D82A1-102F-4699-BE1A-7E2A6A469E8E");
+        let as_str = format!("\"{ID}\"");
+        let as_lower = as_str.to_lowercase();
+        assert_eq!(query_parser::uuid_literal_impl(&as_str).unwrap(), ID,);
+        assert_eq!(query_parser::uuid_literal_impl(&as_lower).unwrap(), ID,);
     }
 
     #[test]
