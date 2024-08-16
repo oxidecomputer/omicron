@@ -59,9 +59,8 @@ pub fn use_timeseries(
                 Err(e) => {
                     let msg = format!(
                         "Failed to generate timeseries types \
-                        from '{}': {:?}",
+                        from '{}': {e}",
                         path.display(),
-                        e,
                     );
                     return syn::Error::new(token.span(), msg)
                         .into_compile_error()
