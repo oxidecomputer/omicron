@@ -5,7 +5,7 @@
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::public_error_from_diesel_transaction;
+use crate::db::error::{public_error_from_diesel, ErrorHandler};
 use crate::db::model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig, Name};
 use crate::db::pagination::paginated;
 use crate::transaction_retry::OptionalError;
@@ -41,78 +41,171 @@ impl DataStore {
         use diesel::IntoSql;
 
         let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
         self.transaction_retry_wrapper("bgp_config_set")
-            .transaction(&conn, |conn| async move {
-                let announce_set_id: Uuid = match &config.bgp_announce_set_id {
-                    NameOrId::Name(name) => {
-                        announce_set_dsl::bgp_announce_set
+            .transaction(&conn, |conn| {
+
+                let err = err.clone();
+                async move {
+                    let announce_set_id = match config.bgp_announce_set_id.clone() {
+                        // Resolve Name to UUID
+                        NameOrId::Name(name) => announce_set_dsl::bgp_announce_set
                             .filter(bgp_announce_set::time_deleted.is_null())
                             .filter(bgp_announce_set::name.eq(name.to_string()))
                             .select(bgp_announce_set::id)
                             .limit(1)
                             .first_async::<Uuid>(&conn)
-                            .await?
-                    }
-                    NameOrId::Id(id) => *id,
-                };
+                            .await
+                            .map_err(|e| {
+                                let msg = "failed to lookup announce set";
+                                error!(opctx.log, "{msg}"; "error" => ?e);
 
-                let config =
-                    BgpConfig::from_config_create(config, announce_set_id);
+                                match e {
+                                    diesel::result::Error::NotFound => {
+                                        err.bail(Error::not_found_by_name(
+                                            ResourceType::BgpAnnounceSet,
+                                            &name,
+                                        ))
+                                    }
+                                    _ => err.bail(Error::internal_error(msg)),
 
-                let matching_entry_subquery = dsl::bgp_config
-                    .filter(dsl::name.eq(Name::from(config.name().clone())))
-                    .filter(dsl::time_deleted.is_null())
-                    .select(dsl::name);
+                                }
+                            }),
 
-                // SELECT exactly the values we're trying to INSERT, but only
-                // if it does not already exist.
-                let new_entry_subquery = diesel::dsl::select((
-                    config.id().into_sql::<sql_types::Uuid>(),
-                    config.name().to_string().into_sql::<sql_types::Text>(),
-                    config
-                        .description()
-                        .to_string()
-                        .into_sql::<sql_types::Text>(),
-                    config.asn.into_sql::<sql_types::BigInt>(),
-                    config.bgp_announce_set_id.into_sql::<sql_types::Uuid>(),
-                    config
-                        .vrf
-                        .clone()
-                        .into_sql::<sql_types::Nullable<sql_types::Text>>(),
-                    Utc::now().into_sql::<sql_types::Timestamptz>(),
-                    Utc::now().into_sql::<sql_types::Timestamptz>(),
-                ))
-                .filter(diesel::dsl::not(diesel::dsl::exists(
-                    matching_entry_subquery,
-                )));
+                        // We cannot assume that the provide UUID is actually real.
+                        // Lookup the parent record by UUID to verify that it is valid.
+                        NameOrId::Id(id) => announce_set_dsl::bgp_announce_set
+                            .filter(bgp_announce_set::time_deleted.is_null())
+                            .filter(bgp_announce_set::id.eq(id))
+                            .select(bgp_announce_set::id)
+                            .limit(1)
+                            .first_async::<Uuid>(&conn)
+                            .await
+                            .map_err(|e| {
+                                let msg = "failed to lookup announce set";
+                                error!(opctx.log, "{msg}"; "error" => ?e);
 
-                diesel::insert_into(dsl::bgp_config)
-                    .values(new_entry_subquery)
-                    .into_columns((
-                        dsl::id,
-                        dsl::name,
-                        dsl::description,
-                        dsl::asn,
-                        dsl::bgp_announce_set_id,
-                        dsl::vrf,
-                        dsl::time_created,
-                        dsl::time_modified,
+                                match e {
+                                    diesel::result::Error::NotFound => {
+                                        err.bail(Error::not_found_by_id(
+                                            ResourceType::BgpAnnounceSet,
+                                            &id,
+                                        ))
+                                    }
+                                    _ => err.bail(Error::internal_error(msg)),
+
+                                }
+                            }),
+                    }?;
+
+                    let config =
+                        BgpConfig::from_config_create(config, announce_set_id);
+
+                    let matching_entry_subquery = dsl::bgp_config
+                        .filter(dsl::name.eq(Name::from(config.name().clone())))
+                        .filter(dsl::time_deleted.is_null())
+                        .select(dsl::name);
+
+                    // SELECT exactly the values we're trying to INSERT, but only
+                    // if they do not already exist.
+                    let new_entry_subquery = diesel::dsl::select((
+                        config.id().into_sql::<sql_types::Uuid>(),
+                        config.name().to_string().into_sql::<sql_types::Text>(),
+                        config
+                            .description()
+                            .to_string()
+                            .into_sql::<sql_types::Text>(),
+                        config.asn.into_sql::<sql_types::BigInt>(),
+                        config.bgp_announce_set_id.into_sql::<sql_types::Uuid>(),
+                        config
+                            .vrf
+                            .clone()
+                            .into_sql::<sql_types::Nullable<sql_types::Text>>(),
+                        Utc::now().into_sql::<sql_types::Timestamptz>(),
+                        Utc::now().into_sql::<sql_types::Timestamptz>(),
                     ))
-                    .execute_async(&conn)
-                    .await?;
+                        .filter(diesel::dsl::not(diesel::dsl::exists(
+                            matching_entry_subquery,
+                        )));
 
-                dsl::bgp_config
-                    .filter(dsl::name.eq(Name::from(config.name().clone())))
-                    .filter(dsl::time_deleted.is_null())
-                    .select(BgpConfig::as_select())
-                    .limit(1)
-                    .first_async(&conn)
-                    .await
+                    diesel::insert_into(dsl::bgp_config)
+                        .values(new_entry_subquery)
+                        .into_columns((
+                            dsl::id,
+                            dsl::name,
+                            dsl::description,
+                            dsl::asn,
+                            dsl::bgp_announce_set_id,
+                            dsl::vrf,
+                            dsl::time_created,
+                            dsl::time_modified,
+                        ))
+                        .execute_async(&conn)
+                        .await
+                        .map_err(|e | {
+                            let msg = "failed to insert bgp config";
+                            error!(opctx.log, "{msg}"; "error" => ?e);
+
+                            match e {
+                                diesel::result::Error::DatabaseError(kind, _) => {
+                                    match kind {
+                                        diesel::result::DatabaseErrorKind::UniqueViolation => {
+                                            err.bail(Error::conflict("a field that must be unique conflicts with an existing record"))
+                                        },
+                                        // technically we don't use Foreign Keys but it doesn't hurt to match on them
+                                        // instead of returning a 500 by default in the event that we do switch to Foreign Keys
+                                        diesel::result::DatabaseErrorKind::ForeignKeyViolation => {
+                                            err.bail(Error::conflict("an id field references an object that does not exist"))
+                                        }
+                                        diesel::result::DatabaseErrorKind::NotNullViolation => {
+                                            err.bail(Error::invalid_request("a required field was not provided"))
+                                        }
+                                        diesel::result::DatabaseErrorKind::CheckViolation => {
+                                            err.bail(Error::invalid_request("one or more fields are not valid values"))
+                                        },
+                                        _ => err.bail(Error::internal_error(msg)),
+                                    }
+                                }
+                                _ => err.bail(Error::internal_error(msg)),
+
+
+                            }
+                        })?;
+
+                    dsl::bgp_config
+                        .filter(dsl::name.eq(Name::from(config.name().clone())))
+                        .filter(dsl::time_deleted.is_null())
+                        .select(BgpConfig::as_select())
+                        .limit(1)
+                        .first_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            let msg = "failed to lookup bgp config";
+                            error!(opctx.log, "{msg}"; "error" => ?e);
+
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    err.bail(Error::not_found_by_name(
+                                        ResourceType::BgpConfig,
+                                        config.name(),
+                                    ))
+                                }
+                                _ => err.bail(Error::internal_error(msg)),
+
+                            }
+                        })
+                }
             })
             .await
-            .map_err(|e| {
-                error!(opctx.log, "database error: {e:#?}");
-                public_error_from_diesel_transaction(e)
+            .map_err(|e|{
+                let msg = "bgp_config_set failed";
+                if let Some(err) = err.take() {
+                    error!(opctx.log, "{msg}"; "error" => ?err);
+                    err
+                } else {
+                    error!(opctx.log, "{msg}"; "error" => ?e);
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
             })
     }
 
@@ -154,10 +247,10 @@ impl DataStore {
 
                     let count =
                         sps_bgp_peer_config_dsl::switch_port_settings_bgp_peer_config
-                            .filter(sps_bgp_peer_config::bgp_config_id.eq(id))
-                            .count()
-                            .execute_async(&conn)
-                            .await?;
+                        .filter(sps_bgp_peer_config::bgp_config_id.eq(id))
+                        .count()
+                        .execute_async(&conn)
+                        .await?;
 
                     if count > 0 {
                         return Err(err.bail(BgpConfigDeleteError::ConfigInUse));
@@ -182,8 +275,8 @@ impl DataStore {
                     }
                 } else {
                     {
-error!(opctx.log, "database error: {e:#?}");
- public_error_from_diesel_transaction(e)}
+                        error!(opctx.log, "database error: {e:#?}");
+                        public_error_from_diesel(e, ErrorHandler::Server)}
                 }
             })
     }
@@ -208,7 +301,7 @@ error!(opctx.log, "database error: {e:#?}");
                 .await
                 .map_err(|e| {
                     error!(opctx.log, "database error: {e:#?}");
-                    public_error_from_diesel_transaction(e)
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 }),
             NameOrId::Id(id) => dsl::bgp_config
                 .filter(bgp_config::id.eq(id))
@@ -218,7 +311,7 @@ error!(opctx.log, "database error: {e:#?}");
                 .await
                 .map_err(|e| {
                     error!(opctx.log, "database error: {e:#?}");
-                    public_error_from_diesel_transaction(e)
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 }),
         }?;
 
@@ -250,7 +343,7 @@ error!(opctx.log, "database error: {e:#?}");
         .await
         .map_err(|e| {
             error!(opctx.log, "database error: {e:#?}");
-            public_error_from_diesel_transaction(e)
+            public_error_from_diesel(e, ErrorHandler::Server)
         })
     }
 
@@ -293,11 +386,11 @@ error!(opctx.log, "database error: {e:#?}");
                                 .await
                                 .map_err(|e| {
                                     err.bail_retryable_or(
-                                e,
-                                BgpAnnounceListError::AnnounceSetNotFound(
-                                    Name::from(name.clone()),
-                                )
-                            )
+                                        e,
+                                        BgpAnnounceListError::AnnounceSetNotFound(
+                                            Name::from(name.clone()),
+                                        )
+                                    )
                                 })?
                         }
                     };
@@ -325,7 +418,7 @@ error!(opctx.log, "database error: {e:#?}");
                 } else {
                     {
                         error!(opctx.log, "database error: {e:#?}");
-                        public_error_from_diesel_transaction(e)
+                        public_error_from_diesel(e, ErrorHandler::Server)
                     }
                 }
             })
@@ -402,7 +495,7 @@ error!(opctx.log, "database error: {e:#?}");
             .await
             .map_err(|e| {
                 error!(opctx.log, "database error: {e:#?}");
-                public_error_from_diesel_transaction(e)
+                public_error_from_diesel(e, ErrorHandler::Server)
             })
     }
 
@@ -488,7 +581,7 @@ error!(opctx.log, "database error: {e:#?}");
             .await
             .map_err(|e| {
                 error!(opctx.log, "database error: {e:#?}");
-                public_error_from_diesel_transaction(e)
+                public_error_from_diesel(e, ErrorHandler::Server)
             })
     }
 
@@ -569,7 +662,7 @@ error!(opctx.log, "database error: {e:#?}");
                 } else {
                     {
                         error!(opctx.log, "database error: {e:#?}");
-                        public_error_from_diesel_transaction(e)
+                        public_error_from_diesel(e, ErrorHandler::Server)
                     }
                 }
             })
@@ -591,7 +684,7 @@ error!(opctx.log, "database error: {e:#?}");
             .await
             .map_err(|e| {
                 error!(opctx.log, "database error: {e:#?}");
-                public_error_from_diesel_transaction(e)
+                public_error_from_diesel(e, ErrorHandler::Server)
             })?;
 
         Ok(results)
@@ -614,7 +707,7 @@ error!(opctx.log, "database error: {e:#?}");
             .await
             .map_err(|e| {
                 error!(opctx.log, "database error: {e:#?}");
-                public_error_from_diesel_transaction(e)
+                public_error_from_diesel(e, ErrorHandler::Server)
             })?;
 
         Ok(results)
@@ -664,7 +757,7 @@ error!(opctx.log, "database error: {e:#?}");
             .await
             .map_err(|e| {
                 error!(opctx.log, "database error: {e:#?}");
-                public_error_from_diesel_transaction(e)
+                public_error_from_diesel(e, ErrorHandler::Server)
             })?;
 
         Ok(result)
@@ -714,7 +807,7 @@ error!(opctx.log, "database error: {e:#?}");
             .await
             .map_err(|e| {
                 error!(opctx.log, "database error: {e:#?}");
-                public_error_from_diesel_transaction(e)
+                public_error_from_diesel(e, ErrorHandler::Server)
             })?;
 
         Ok(result)
