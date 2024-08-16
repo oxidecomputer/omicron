@@ -236,9 +236,11 @@ impl DataStore {
         diesel::update(
             dsl::saga
                 .filter(dsl::current_sec.is_not_null())
-                .filter(dsl::current_sec.eq_any(
-                    sec_ids.into_iter().cloned().collect::<Vec<_>>(),
-                ))
+                .filter(
+                    dsl::current_sec.eq_any(
+                        sec_ids.into_iter().cloned().collect::<Vec<_>>(),
+                    ),
+                )
                 .filter(dsl::saga_state.ne(db::saga_types::SagaCachedState(
                     steno::SagaCachedState::Done,
                 ))),
