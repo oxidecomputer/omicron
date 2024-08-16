@@ -272,7 +272,6 @@ impl Poller {
                     Ok(Ok(samples)) => {
                         // No sense copying all the samples into the big vec thing,
                         // just push the vec instead.
-                        slog::info!(&self.log, "made a thingy: {samples:#?}");
                         self.samples.lock().unwrap().push(samples);
                     }
                     Ok(Err(error)) => {
