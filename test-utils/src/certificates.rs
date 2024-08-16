@@ -5,14 +5,14 @@
 //! Utilities for tests that need certificates.
 
 // Utility structure for making a test certificate
-pub struct CertificateChain {
-    root_cert: rustls::Certificate,
-    intermediate_cert: rustls::Certificate,
-    end_cert: rustls::Certificate,
+pub struct CertificateChain<'a> {
+    root_cert: rustls::pki_types::CertificateDer<'a>,
+    intermediate_cert: rustls::pki_types::CertificateDer<'a>,
+    end_cert: rustls::pki_types::CertificateDer<'a>,
     end_keypair: rcgen::Certificate,
 }
 
-impl CertificateChain {
+impl<'a> CertificateChain<'a> {
     pub fn new<S: Into<String>>(subject_alt_name: S) -> Self {
         let params =
             rcgen::CertificateParams::new(vec![subject_alt_name.into()]);
@@ -36,17 +36,17 @@ impl CertificateChain {
         let end_keypair = rcgen::Certificate::from_params(params)
             .expect("failed to generate end-entity keys");
 
-        let root_cert = rustls::Certificate(
+        let root_cert = rustls::pki_types::CertificateDer::from(
             root_keypair
                 .serialize_der()
                 .expect("failed to serialize root cert"),
         );
-        let intermediate_cert = rustls::Certificate(
+        let intermediate_cert = rustls::pki_types::CertificateDer::from(
             intermediate_keypair
                 .serialize_der_with_signer(&root_keypair)
                 .expect("failed to serialize intermediate cert"),
         );
-        let end_cert = rustls::Certificate(
+        let end_cert = rustls::pki_types::CertificateDer::from(
             end_keypair
                 .serialize_der_with_signer(&intermediate_keypair)
                 .expect("failed to serialize end-entity cert"),
@@ -63,7 +63,7 @@ impl CertificateChain {
         self.end_keypair.serialize_private_key_pem()
     }
 
-    fn cert_chain(&self) -> Vec<rustls::Certificate> {
+    fn cert_chain(&self) -> Vec<rustls::pki_types::CertificateDer<'a>> {
         vec![
             self.end_cert.clone(),
             self.intermediate_cert.clone(),
@@ -76,12 +76,12 @@ impl CertificateChain {
     }
 }
 
-fn tls_cert_to_pem(certs: &Vec<rustls::Certificate>) -> String {
+fn tls_cert_to_pem(certs: &Vec<rustls::pki_types::CertificateDer>) -> String {
     let mut serialized_certs = String::new();
     for cert in certs {
         let encoded_cert = pem::encode(&pem::Pem::new(
             "CERTIFICATE".to_string(),
-            cert.0.clone(),
+            cert.to_vec(),
         ));
 
         serialized_certs.push_str(&encoded_cert);

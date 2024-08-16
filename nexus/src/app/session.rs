@@ -156,9 +156,9 @@ impl super::Nexus {
                 | Error::ServiceUnavailable { .. }
                 | Error::InsufficientCapacity { .. }
                 | Error::TypeVersionMismatch { .. }
-                | Error::Conflict { .. } => {
-                    Reason::UnknownError { source: error }
-                }
+                | Error::Conflict { .. }
+                | Error::NotFound { .. }
+                | Error::Gone => Reason::UnknownError { source: error },
             })?;
         Ok(db_silo_user.silo_id)
     }

@@ -1,0 +1,136 @@
+# TODO Explanatory block comment
+
+# Delegated external DNS zone name
+#
+# The rack provides separate external API and console endpoints for each Silo.
+# These are named `$silo_name.sys.$external_dns_zone_name`.  For a Silo called
+# "eng" with delegated domain "oxide.example", the API would be accessible at
+# "eng.sys.oxide.example".  The rack runs external DNS servers that serve A/AAAA
+# records for these DNS names.
+external_dns_zone_name = "oxide.computer"
+
+# IP addresses for authoritative external DNS servers operated by the rack for
+# the DNS domain delegated to the rack by the customer. Each of these addresses
+# must be contained in one of the "internal services" IP Pool ranges listed
+# below.
+external_dns_ips = [
+    "10.0.0.1",
+]
+
+# External NTP servers; e.g., "ntp.eng.oxide.computer".
+ntp_servers = [
+    "ntp1.com",
+    "ntp2.com",
+]
+
+# External DNS server IP Addresses; e.g., "1.1.1.1", "9.9.9.9".
+dns_servers = [
+    "1.1.1.1",
+    "2.2.2.2",
+]
+
+# Ranges of the service IP pool which may be used for internal services.
+#
+# Elements of this list should be of the form:
+#
+#    { first = "first_ip", last = "last_ip" }
+#
+# where `last_ip` is equal to or higher than `first_ip`; e.g.,
+#
+#    { first = "172.20.26.1", last = "172.20.26.10" }
+internal_services_ip_pool_ranges = [
+    { first = "10.0.0.1", last = "10.0.0.5" },
+]
+
+# List of sleds to initialize.
+#
+# Confirm this list contains all expected sleds before continuing!
+bootstrap_sleds = [
+    1, # serial 1 2 3 (model model1 revision 3, IP address UNKNOWN)
+    5, # serial 4 5 6 (model model2 revision 5, ::1)
+]
+
+# Allowlist of source IPs that can make requests to user-facing services.
+#
+# Use the key:
+#
+# allow = "any"
+#
+# to indicate any external IPs are allowed to make requests. This is the default.
+#
+# Use the below two lines to only allow requests from the specified IP subnets.
+# Requests from any other source IPs are refused. Note that individual addresses
+# must include the netmask, e.g., "1.2.3.4/32".
+#
+# allow = "list"
+# ips = [ "1.2.3.4/5", "5.6.7.8/10" ]
+[allowed_source_ips]
+allow = "any"
+
+# TODO: docs on network config
+[rack_network_config]
+infra_ip_first = "172.30.0.1"
+infra_ip_last = "172.30.0.10"
+
+[rack_network_config.switch0.port0]
+routes = [{ nexthop = "172.30.0.10", destination = "0.0.0.0/0", vlan_id = 1 }]
+addresses = [{ address = "172.30.0.1/24" }]
+uplink_port_speed = "speed400_g"
+uplink_port_fec = "firecode"
+autoneg = true
+
+[[rack_network_config.switch0.port0.bgp_peers]]
+asn = 47
+port = "port0"
+addr = "10.2.3.4"
+hold_time = 6
+idle_hold_time = 3
+delay_open = 0
+connect_retry = 3
+keepalive = 2
+auth_key_id = "bgp-key-1"
+allowed_export = ["127.0.0.1/8"]
+enforce_first_as = false
+
+[[rack_network_config.switch0.port0.bgp_peers]]
+asn = 28
+port = "port0"
+addr = "10.2.3.5"
+hold_time = 10
+idle_hold_time = 20
+delay_open = 40
+connect_retry = 30
+keepalive = 50
+remote_asn = 200
+min_ttl = 90
+auth_key_id = "bgp-key-2"
+multi_exit_discriminator = 100
+communities = [60, 70]
+allowed_import = ["64:ff9b::/96", "255.255.0.0/16"]
+allowed_export = []
+local_pref = 80
+enforce_first_as = true
+
+[rack_network_config.switch1.port0]
+routes = [{ nexthop = "172.33.0.10", destination = "0.0.0.0/0", vlan_id = 1 }]
+addresses = [{ address = "172.32.0.1/24" }]
+uplink_port_speed = "speed400_g"
+uplink_port_fec = "firecode"
+autoneg = true
+
+[[rack_network_config.switch1.port0.bgp_peers]]
+asn = 47
+port = "port0"
+addr = "10.2.3.4"
+hold_time = 6
+idle_hold_time = 3
+delay_open = 0
+connect_retry = 3
+keepalive = 2
+auth_key_id = "bgp-key-1"
+allowed_import = ["224.0.0.0/4"]
+enforce_first_as = false
+
+[[rack_network_config.bgp]]
+asn = 47
+originate = ["10.0.0.0/16"]

@@ -4,6 +4,7 @@
 
 //! Tests Nexus' interactions with Crucible's pantry
 
+use crate::integration_tests::instances::instance_wait_for_state;
 use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
@@ -24,8 +25,11 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::InstanceState;
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use sled_agent_client::TestInterfaces as _;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -83,13 +87,13 @@ async fn set_instance_state(
     .unwrap()
 }
 
-async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
+async fn instance_simulate(nexus: &Arc<Nexus>, id: &InstanceUuid) {
     let sa = nexus
         .instance_sled_by_id(id)
         .await
         .unwrap()
         .expect("instance must be on a sled to simulate a state change");
-    sa.instance_finish_transition(*id).await;
+    sa.instance_finish_transition(id.into_untyped_uuid()).await;
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {
@@ -147,14 +151,15 @@ async fn create_instance_and_attach_disk(
 ) {
     // Create an instance to attach the disk.
     let instance = create_instance(&client, PROJECT_NAME, INSTANCE_NAME).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // TODO(https://github.com/oxidecomputer/omicron/issues/811):
     //
     // Instances must be stopped before disks can be attached - this
     // is an artificial limitation without hotplug support.
-    let instance_next =
-        set_instance_state(&client, INSTANCE_NAME, "stop").await;
-    instance_simulate(nexus, &instance_next.identity.id).await;
+    set_instance_state(&client, INSTANCE_NAME, "stop").await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(&client, instance_id, InstanceState::Stopped).await;
 
     let url_instance_attach_disk =
         get_disk_attach_url(instance.identity.name.as_str());
@@ -393,7 +398,7 @@ async fn test_cannot_mount_import_ready_disk(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;
@@ -424,7 +429,7 @@ async fn test_cannot_mount_import_from_bulk_writes_disk(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;
@@ -448,7 +453,7 @@ async fn test_import_blocks_with_bulk_write(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;
@@ -489,7 +494,7 @@ async fn test_import_blocks_with_bulk_write_with_snapshot(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;
@@ -732,7 +737,7 @@ async fn test_cannot_bulk_write_start_attached_disk(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;
@@ -762,7 +767,7 @@ async fn test_cannot_bulk_write_attached_disk(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;
@@ -792,7 +797,7 @@ async fn test_cannot_bulk_write_stop_attached_disk(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;
@@ -821,7 +826,7 @@ async fn test_cannot_finalize_attached_disk(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
 //! Types for publishing kernel statistics via oximeter.
 //!
@@ -87,6 +87,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+#[cfg(any(feature = "datalink", test))]
 pub mod link;
 mod sampler;
 
@@ -95,6 +96,22 @@ pub use sampler::ExpirationBehavior;
 pub use sampler::KstatSampler;
 pub use sampler::TargetId;
 pub use sampler::TargetStatus;
+
+cfg_if::cfg_if! {
+    if #[cfg(all(test, target_os = "illumos"))] {
+        type Timestamp = tokio::time::Instant;
+        #[inline(always)]
+        fn now() -> Timestamp {
+            tokio::time::Instant::now()
+        }
+    } else {
+        type Timestamp = chrono::DateTime<chrono::Utc>;
+        #[inline(always)]
+        fn now() -> Timestamp {
+            chrono::Utc::now()
+        }
+    }
+}
 
 /// The reason a kstat target was expired and removed from a sampler.
 #[derive(Clone, Copy, Debug)]
@@ -113,10 +130,7 @@ pub struct Expiration {
     /// The last error before expiration.
     pub error: Box<Error>,
     /// The time at which the expiration occurred.
-    #[cfg(test)]
-    pub expired_at: tokio::time::Instant,
-    #[cfg(not(test))]
-    pub expired_at: DateTime<Utc>,
+    pub expired_at: Timestamp,
 }
 
 /// Errors resulting from reporting kernel statistics.
@@ -190,7 +204,7 @@ pub trait KstatTarget:
 /// Convert from a high-res timestamp into UTC, if possible.
 pub fn hrtime_to_utc(hrtime: i64) -> Result<DateTime<Utc>, Error> {
     let utc_now = Utc::now();
-    let hrtime_now = unsafe { gethrtime() };
+    let hrtime_now = get_hires_time();
     match hrtime_now.cmp(&hrtime) {
         Ordering::Equal => Ok(utc_now),
         Ordering::Less => {
@@ -206,9 +220,9 @@ pub fn hrtime_to_utc(hrtime: i64) -> Result<DateTime<Utc>, Error> {
     }
 }
 
-// Helper trait for converting a `NamedData` item into a specific contained data
-// type, if possible.
-pub(crate) trait ConvertNamedData {
+/// Helper trait for converting a `NamedData` item into a specific contained data
+/// type, if possible.
+pub trait ConvertNamedData {
     fn as_i32(&self) -> Result<i32, Error>;
     fn as_u32(&self) -> Result<u32, Error>;
     fn as_i64(&self) -> Result<i64, Error>;
@@ -261,7 +275,27 @@ impl<'a> ConvertNamedData for NamedData<'a> {
     }
 }
 
-#[link(name = "c")]
-extern "C" {
-    fn gethrtime() -> i64;
+/// Return a high-resolution monotonic timestamp, in nanoseconds since an
+/// arbitrary point in the past.
+///
+/// This is equivalent to `gethrtime(3C)` on illumos, and `clock_gettime()` with
+/// an equivalent clock source on other platforms.
+pub fn get_hires_time() -> i64 {
+    // NOTE: See `man clock_gettime`, but this is an alias for `CLOCK_HIGHRES`,
+    // and is the same source that underlies `gethrtime()`, which this API is
+    // intended to emulate on other platforms.
+    #[cfg(target_os = "illumos")]
+    const SOURCE: libc::clockid_t = libc::CLOCK_MONOTONIC;
+    #[cfg(not(target_os = "illumos"))]
+    const SOURCE: libc::clockid_t = libc::CLOCK_MONOTONIC_RAW;
+    let mut tp = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+    if unsafe { libc::clock_gettime(SOURCE, &mut tp as *mut _) } == 0 {
+        const NANOS_PER_SEC: i64 = 1_000_000_000;
+        tp.tv_sec
+            .checked_mul(NANOS_PER_SEC)
+            .and_then(|nsec| nsec.checked_add(tp.tv_nsec))
+            .unwrap_or(0)
+    } else {
+        0
+    }
 }

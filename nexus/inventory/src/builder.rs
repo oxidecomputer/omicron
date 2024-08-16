@@ -14,6 +14,9 @@ use chrono::Utc;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
+use nexus_sled_agent_shared::inventory::Baseboard;
+use nexus_sled_agent_shared::inventory::Inventory;
+use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseFound;
@@ -26,11 +29,16 @@ use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::RotState;
 use nexus_types::inventory::ServiceProcessor;
 use nexus_types::inventory::SledAgent;
+use nexus_types::inventory::Zpool;
+use omicron_uuid_kinds::CollectionKind;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::hash::Hash;
 use std::sync::Arc;
 use thiserror::Error;
-use uuid::Uuid;
+use typed_rng::TypedUuidRng;
 
 /// Describes an operational error encountered during the collection process
 ///
@@ -83,8 +91,10 @@ pub struct CollectionBuilder {
         BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
     rot_pages_found:
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
-    sleds: BTreeMap<Uuid, SledAgent>,
-    omicron_zones: BTreeMap<Uuid, OmicronZonesFound>,
+    sleds: BTreeMap<SledUuid, SledAgent>,
+    omicron_zones: BTreeMap<SledUuid, OmicronZonesFound>,
+    // We just generate one UUID for each collection.
+    id_rng: TypedUuidRng<CollectionKind>,
 }
 
 impl CollectionBuilder {
@@ -93,11 +103,14 @@ impl CollectionBuilder {
     /// `collector` is an arbitrary string describing the agent that collected
     /// this data.  It's generally a Nexus instance uuid but it can be anything.
     /// It's just for debugging.
-    pub fn new(collector: &str) -> Self {
+    pub fn new<S>(collector: S) -> Self
+    where
+        String: From<S>,
+    {
         CollectionBuilder {
             errors: vec![],
-            time_started: now(),
-            collector: collector.to_owned(),
+            time_started: now_db_precision(),
+            collector: String::from(collector),
             baseboards: BTreeSet::new(),
             cabooses: BTreeSet::new(),
             rot_pages: BTreeSet::new(),
@@ -107,6 +120,7 @@ impl CollectionBuilder {
             rot_pages_found: BTreeMap::new(),
             sleds: BTreeMap::new(),
             omicron_zones: BTreeMap::new(),
+            id_rng: TypedUuidRng::from_entropy(),
         }
     }
 
@@ -119,10 +133,10 @@ impl CollectionBuilder {
         }
 
         Collection {
-            id: Uuid::new_v4(),
+            id: self.id_rng.next(),
             errors: self.errors.into_iter().map(|e| e.to_string()).collect(),
             time_started: self.time_started,
-            time_done: now(),
+            time_done: now_db_precision(),
             collector: self.collector,
             baseboards: self.baseboards,
             cabooses: self.cabooses,
@@ -134,6 +148,18 @@ impl CollectionBuilder {
             sled_agents: self.sleds,
             omicron_zones: self.omicron_zones,
         }
+    }
+
+    /// Within tests, set a seeded RNG for deterministic results.
+    ///
+    /// This will ensure that tests that use this builder will produce the same
+    /// results each time they are run.
+    pub fn set_rng_seed<H: Hash>(&mut self, seed: H) -> &mut Self {
+        // Important to add some more bytes here, so that builders with the
+        // same seed but different purposes don't end up with the same UUIDs.
+        const SEED_EXTRA: &str = "collection-builder";
+        self.id_rng.set_seed(seed, SEED_EXTRA);
+        self
     }
 
     /// Record service processor state `sp_state` reported by MGS
@@ -178,7 +204,7 @@ impl CollectionBuilder {
 
         // Separate the SP state into the SP-specific state and the RoT state,
         // if any.
-        let now = now();
+        let now = now_db_precision();
         let _ = self.sps.entry(baseboard.clone()).or_insert_with(|| {
             ServiceProcessor {
                 time_collected: now,
@@ -194,7 +220,7 @@ impl CollectionBuilder {
         });
 
         match sp_state.rot {
-            gateway_client::types::RotState::Enabled {
+            gateway_client::types::RotState::V2 {
                 active,
                 pending_persistent_boot_preference,
                 persistent_boot_preference,
@@ -213,6 +239,12 @@ impl CollectionBuilder {
                             transient_boot_preference,
                             slot_a_sha3_256_digest,
                             slot_b_sha3_256_digest,
+                            stage0_digest: None,
+                            stage0next_digest: None,
+                            slot_a_error: None,
+                            slot_b_error: None,
+                            stage0_error: None,
+                            stage0next_error: None,
                         }
                     });
             }
@@ -225,6 +257,40 @@ impl CollectionBuilder {
                     baseboard,
                     message
                 )));
+            }
+            gateway_client::types::RotState::V3 {
+                active,
+                pending_persistent_boot_preference,
+                persistent_boot_preference,
+                slot_a_fwid,
+                slot_b_fwid,
+                stage0_fwid,
+                stage0next_fwid,
+                transient_boot_preference,
+                slot_a_error,
+                slot_b_error,
+                stage0_error,
+                stage0next_error,
+            } => {
+                let _ =
+                    self.rots.entry(baseboard.clone()).or_insert_with(|| {
+                        RotState {
+                            time_collected: now,
+                            source: source.to_owned(),
+                            active_slot: active,
+                            persistent_boot_preference,
+                            pending_persistent_boot_preference,
+                            transient_boot_preference,
+                            slot_a_sha3_256_digest: Some(slot_a_fwid),
+                            slot_b_sha3_256_digest: Some(slot_b_fwid),
+                            stage0_digest: Some(stage0_fwid),
+                            stage0next_digest: Some(stage0next_fwid),
+                            slot_a_error,
+                            slot_b_error,
+                            stage0_error,
+                            stage0next_error,
+                        }
+                    });
             }
         }
 
@@ -279,7 +345,7 @@ impl CollectionBuilder {
         if let Some(previous) = by_id.insert(
             baseboard.clone(),
             CabooseFound {
-                time_collected: now(),
+                time_collected: now_db_precision(),
                 source: source.to_owned(),
                 caboose: sw_caboose.clone(),
             },
@@ -348,7 +414,7 @@ impl CollectionBuilder {
         if let Some(previous) = by_id.insert(
             baseboard.clone(),
             RotPageFound {
-                time_collected: now(),
+                time_collected: now_db_precision(),
                 source: source.to_owned(),
                 page: sw_rot_page.clone(),
             },
@@ -406,12 +472,10 @@ impl CollectionBuilder {
     pub fn found_sled_inventory(
         &mut self,
         source: &str,
-        inventory: sled_agent_client::types::Inventory,
+        inventory: Inventory,
     ) -> Result<(), anyhow::Error> {
-        let sled_id = inventory.sled_id;
+        let sled_id = SledUuid::from_untyped_uuid(inventory.sled_id);
 
-        // Normalize the baseboard id, if any.
-        use sled_agent_client::types::Baseboard;
         let baseboard_id = match inventory.baseboard {
             Baseboard::Pc { .. } => None,
             Baseboard::Gimlet { identifier, model, revision: _ } => {
@@ -425,8 +489,7 @@ impl CollectionBuilder {
             }
             Baseboard::Unknown => {
                 self.found_error(InventoryError::from(anyhow!(
-                    "sled {:?}: reported unknown baseboard",
-                    sled_id
+                    "sled {sled_id}: reported unknown baseboard",
                 )));
                 None
             }
@@ -436,37 +499,29 @@ impl CollectionBuilder {
         // means they don't get validated when everything else does.  This
         // error is an operational error in collecting the data, not a collector
         // bug.
-        let sled_agent_address = match inventory.sled_agent_address.parse() {
-            Ok(addr) => addr,
-            Err(error) => {
-                self.found_error(InventoryError::from(anyhow!(
-                    "sled {:?}: bad sled agent address: {:?}: {:#}",
-                    sled_id,
-                    inventory.sled_agent_address,
-                    error,
-                )));
-                return Ok(());
-            }
-        };
+        let time_collected = now_db_precision();
         let sled = SledAgent {
             source: source.to_string(),
-            sled_agent_address,
+            sled_agent_address: inventory.sled_agent_address,
             sled_role: inventory.sled_role,
             baseboard_id,
             usable_hardware_threads: inventory.usable_hardware_threads,
             usable_physical_ram: inventory.usable_physical_ram,
             reservoir_size: inventory.reservoir_size,
-            time_collected: now(),
+            time_collected,
             sled_id,
+            disks: inventory.disks.into_iter().map(|d| d.into()).collect(),
+            zpools: inventory
+                .zpools
+                .into_iter()
+                .map(|z| Zpool::new(time_collected, z))
+                .collect(),
         };
 
         if let Some(previous) = self.sleds.get(&sled_id) {
             Err(anyhow!(
-                "sled {:?}: reported sled multiple times \
-                (previously {:?}, now {:?})",
-                sled_id,
-                previous,
-                sled,
+                "sled {sled_id}: reported sled multiple times \
+                (previously {previous:?}, now {sled:?})",
             ))
         } else {
             self.sleds.insert(sled_id, sled);
@@ -478,20 +533,19 @@ impl CollectionBuilder {
     pub fn found_sled_omicron_zones(
         &mut self,
         source: &str,
-        sled_id: Uuid,
-        zones: sled_agent_client::types::OmicronZonesConfig,
+        sled_id: SledUuid,
+        zones: OmicronZonesConfig,
     ) -> Result<(), anyhow::Error> {
         if let Some(previous) = self.omicron_zones.get(&sled_id) {
             Err(anyhow!(
-                "sled {:?} omicron zones: reported previously: {:?}",
-                sled_id,
+                "sled {sled_id} omicron zones: reported previously: {:?}",
                 previous
             ))
         } else {
             self.omicron_zones.insert(
                 sled_id,
                 OmicronZonesFound {
-                    time_collected: now(),
+                    time_collected: now_db_precision(),
                     source: source.to_string(),
                     sled_id,
                     zones,
@@ -507,7 +561,7 @@ impl CollectionBuilder {
 /// This exists because the database doesn't store nanosecond-precision, so if
 /// we store nanosecond-precision timestamps, then DateTime conversion is lossy
 /// when round-tripping through the database.  That's rather inconvenient.
-fn now() -> DateTime<Utc> {
+pub fn now_db_precision() -> DateTime<Utc> {
     let ts = Utc::now();
     let nanosecs = ts.timestamp_subsec_nanos();
     let micros = ts.timestamp_subsec_micros();
@@ -517,7 +571,7 @@ fn now() -> DateTime<Utc> {
 
 #[cfg(test)]
 mod test {
-    use super::now;
+    use super::now_db_precision;
     use super::CollectionBuilder;
     use crate::examples::representative;
     use crate::examples::sp_state;
@@ -530,21 +584,21 @@ mod test {
     use gateway_client::types::SpComponentCaboose;
     use gateway_client::types::SpState;
     use gateway_client::types::SpType;
+    use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::Caboose;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPage;
     use nexus_types::inventory::RotPageWhich;
-    use nexus_types::inventory::SledRole;
     use omicron_common::api::external::ByteCount;
 
     // Verify the contents of an empty collection.
     #[test]
     fn test_empty() {
-        let time_before = now();
+        let time_before = now_db_precision();
         let builder = CollectionBuilder::new("test_empty");
         let collection = builder.build();
-        let time_after = now();
+        let time_after = now_db_precision();
 
         assert!(collection.errors.is_empty());
         assert!(time_before <= collection.time_started);
@@ -577,7 +631,7 @@ mod test {
     // a useful quick check.
     #[test]
     fn test_basic() {
-        let time_before = now();
+        let time_before = now_db_precision();
         let Representative {
             builder,
             sleds: [sled1_bb, sled2_bb, sled3_bb, sled4_bb],
@@ -587,7 +641,7 @@ mod test {
                 [sled_agent_id_basic, sled_agent_id_extra, sled_agent_id_pc, sled_agent_id_unknown],
         } = representative();
         let collection = builder.build();
-        let time_after = now();
+        let time_after = now_db_precision();
         println!("{:#?}", collection);
         assert!(time_before <= collection.time_started);
         assert!(collection.time_started <= collection.time_done);
@@ -907,6 +961,11 @@ mod test {
         let sled1_bb = sled1_agent.baseboard_id.as_ref().unwrap();
         assert_eq!(sled1_bb.part_number, "model1");
         assert_eq!(sled1_bb.serial_number, "s1");
+        assert_eq!(sled1_agent.disks.len(), 4);
+        assert_eq!(sled1_agent.disks[0].identity.vendor, "macrohard");
+        assert_eq!(sled1_agent.disks[0].identity.model, "box");
+        assert_eq!(sled1_agent.disks[0].identity.serial, "XXIV");
+
         let sled4_agent = &collection.sled_agents[&sled_agent_id_extra];
         let sled4_bb = sled4_agent.baseboard_id.as_ref().unwrap();
         assert_eq!(sled4_bb.serial_number, "s4");
@@ -936,7 +995,7 @@ mod test {
                     model: String::from("model1"),
                     power_state: PowerState::A0,
                     revision: 0,
-                    rot: RotState::Enabled {
+                    rot: RotState::V2 {
                         active: RotSlot::A,
                         pending_persistent_boot_preference: None,
                         persistent_boot_preference: RotSlot::A,
@@ -961,7 +1020,7 @@ mod test {
                     model: String::from("model1"),
                     power_state: PowerState::A0,
                     revision: 0,
-                    rot: RotState::Enabled {
+                    rot: RotState::V2 {
                         active: RotSlot::A,
                         pending_persistent_boot_preference: None,
                         persistent_boot_preference: RotSlot::A,
@@ -987,7 +1046,7 @@ mod test {
                     model: String::from("model1"),
                     power_state: PowerState::A0,
                     revision: 1,
-                    rot: RotState::Enabled {
+                    rot: RotState::V2 {
                         active: RotSlot::A,
                         pending_persistent_boot_preference: None,
                         persistent_boot_preference: RotSlot::A,

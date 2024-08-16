@@ -15,27 +15,34 @@ use std::sync::Arc;
 use steno::new_action_noop_undo;
 use steno::ActionContext;
 use steno::ActionError;
+use steno::DagBuilder;
+use steno::SagaDag;
+use steno::SagaName;
 use steno::SagaType;
 use thiserror::Error;
 use uuid::Uuid;
 
+pub mod demo;
 pub mod disk_create;
 pub mod disk_delete;
 pub mod finalize_disk;
 pub mod image_delete;
-mod instance_common;
+pub(crate) mod instance_common;
 pub mod instance_create;
 pub mod instance_delete;
+pub mod instance_ip_attach;
+pub mod instance_ip_detach;
 pub mod instance_migrate;
 pub mod instance_start;
-pub mod loopback_address_create;
-pub mod loopback_address_delete;
+pub mod instance_update;
 pub mod project_create;
+pub mod region_replacement_drive;
+pub mod region_replacement_finish;
+pub mod region_replacement_start;
+pub mod region_snapshot_replacement_garbage_collect;
+pub mod region_snapshot_replacement_start;
 pub mod snapshot_create;
 pub mod snapshot_delete;
-pub mod switch_port_settings_apply;
-pub mod switch_port_settings_clear;
-pub mod switch_port_settings_common;
 pub mod test_saga;
 pub mod volume_delete;
 pub mod volume_remove_rop;
@@ -47,7 +54,7 @@ pub mod common_storage;
 mod test_helpers;
 
 #[derive(Debug)]
-pub(crate) struct NexusSagaType;
+pub struct NexusSagaType;
 impl steno::SagaType for NexusSagaType {
     type ExecContextType = Arc<SagaContext>;
 }
@@ -69,6 +76,17 @@ pub(crate) trait NexusSaga {
         params: &Self::Params,
         builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError>;
+
+    fn prepare(
+        params: &Self::Params,
+    ) -> Result<SagaDag, omicron_common::api::external::Error> {
+        let builder = DagBuilder::new(SagaName::new(Self::NAME));
+        let dag = Self::make_saga_dag(&params, builder)?;
+        let params = serde_json::to_value(&params).map_err(|e| {
+            SagaInitError::SerializeError(format!("saga params: {params:?}"), e)
+        })?;
+        Ok(SagaDag::new(dag, params))
+    }
 }
 
 #[derive(Debug, Error)]
@@ -119,6 +137,7 @@ fn make_action_registry() -> ActionRegistry {
     let mut registry = steno::ActionRegistry::new();
     registry.register(Arc::clone(&*ACTION_GENERATE_ID));
 
+    <demo::SagaDemo as NexusSaga>::register_actions(&mut registry);
     <disk_create::SagaDiskCreate as NexusSaga>::register_actions(&mut registry);
     <disk_delete::SagaDiskDelete as NexusSaga>::register_actions(&mut registry);
     <finalize_disk::SagaFinalizeDisk as NexusSaga>::register_actions(
@@ -130,24 +149,19 @@ fn make_action_registry() -> ActionRegistry {
     <instance_delete::SagaInstanceDelete as NexusSaga>::register_actions(
         &mut registry,
     );
+    <instance_ip_attach::SagaInstanceIpAttach as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <instance_ip_detach::SagaInstanceIpDetach as NexusSaga>::register_actions(
+        &mut registry,
+    );
     <instance_migrate::SagaInstanceMigrate as NexusSaga>::register_actions(
         &mut registry,
     );
     <instance_start::SagaInstanceStart as NexusSaga>::register_actions(
         &mut registry,
     );
-    <loopback_address_create::SagaLoopbackAddressCreate
-        as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <loopback_address_delete::SagaLoopbackAddressDelete
-        as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <switch_port_settings_apply::SagaSwitchPortSettingsApply as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <switch_port_settings_clear::SagaSwitchPortSettingsClear as NexusSaga>::register_actions(
+    <instance_update::SagaInstanceUpdate as NexusSaga>::register_actions(
         &mut registry,
     );
     <project_create::SagaProjectCreate as NexusSaga>::register_actions(
@@ -167,6 +181,21 @@ fn make_action_registry() -> ActionRegistry {
     );
     <vpc_create::SagaVpcCreate as NexusSaga>::register_actions(&mut registry);
     <image_delete::SagaImageDelete as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <region_replacement_start::SagaRegionReplacementStart as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <region_replacement_drive::SagaRegionReplacementDrive as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <region_replacement_finish::SagaRegionReplacementFinish as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <region_snapshot_replacement_start::SagaRegionSnapshotReplacementStart as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <region_snapshot_replacement_garbage_collect::SagaRegionSnapshotReplacementGarbageCollect as NexusSaga>::register_actions(
         &mut registry,
     );
 
@@ -312,91 +341,7 @@ macro_rules! declare_saga_actions {
     };
 }
 
-use omicron_common::OMICRON_DPD_TAG as NEXUS_DPD_TAG;
-
 pub(crate) use __action_name;
 pub(crate) use __emit_action;
 pub(crate) use __stringify_ident;
 pub(crate) use declare_saga_actions;
-
-use futures::Future;
-
-/// Retry a progenitor client operation until a known result is returned.
-///
-/// Saga execution relies on the outcome of an external call being known: since
-/// they are idempotent, reissue the external call until a known result comes
-/// back. Retry if a communication error is seen, or if another retryable error
-/// is seen.
-///
-/// Note that retrying is only valid if the call itself is idempotent.
-pub(crate) async fn retry_until_known_result<F, T, E, Fut>(
-    log: &slog::Logger,
-    mut f: F,
-) -> Result<T, progenitor_client::Error<E>>
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = Result<T, progenitor_client::Error<E>>>,
-    E: std::fmt::Debug,
-{
-    use omicron_common::backoff;
-
-    backoff::retry_notify(
-        backoff::retry_policy_internal_service(),
-        move || {
-            let fut = f();
-            async move {
-                match fut.await {
-                    Err(progenitor_client::Error::CommunicationError(e)) => {
-                        warn!(
-                            log,
-                            "saw transient communication error {}, retrying...",
-                            e,
-                        );
-
-                        Err(backoff::BackoffError::transient(
-                            progenitor_client::Error::CommunicationError(e),
-                        ))
-                    }
-
-                    Err(progenitor_client::Error::ErrorResponse(
-                        response_value,
-                    )) => {
-                        match response_value.status() {
-                            // Retry on 503 or 429
-                            http::StatusCode::SERVICE_UNAVAILABLE
-                            | http::StatusCode::TOO_MANY_REQUESTS => {
-                                Err(backoff::BackoffError::transient(
-                                    progenitor_client::Error::ErrorResponse(
-                                        response_value,
-                                    ),
-                                ))
-                            }
-
-                            // Anything else is a permanent error
-                            _ => Err(backoff::BackoffError::Permanent(
-                                progenitor_client::Error::ErrorResponse(
-                                    response_value,
-                                ),
-                            )),
-                        }
-                    }
-
-                    Err(e) => {
-                        warn!(log, "saw permanent error {}, aborting", e,);
-
-                        Err(backoff::BackoffError::Permanent(e))
-                    }
-
-                    Ok(v) => Ok(v),
-                }
-            }
-        },
-        |error: progenitor_client::Error<_>, delay| {
-            warn!(
-                log,
-                "failed external call ({:?}), will retry in {:?}", error, delay,
-            );
-        },
-    )
-    .await
-}

@@ -4,8 +4,6 @@ README.html
 TODO.html
 logs
 out
-tools/clickhouse*
-tools/cockroach*
 /clickhouse/
 /cockroachdb/
 smf/nexus/root.json
@@ -15,3 +13,8 @@ debug.out
 rusty-tags.vi
 *.sw*
 tags
+.direnv
+.falcon/*
+.img/*
+connectivity-report.json
+*.local

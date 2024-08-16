@@ -60,12 +60,9 @@ mod test {
 
     #[test]
     fn test_identity() {
-        let ret = do_object_identity(
-            quote! {
-                struct Foo { identity: IdentityMetadata }
-            }
-            .into(),
-        );
+        let ret = do_object_identity(quote! {
+            struct Foo { identity: IdentityMetadata }
+        });
 
         let expected = quote! {
             impl ObjectIdentity for Foo {
@@ -80,12 +77,9 @@ mod test {
 
     #[test]
     fn test_identity_no_field() {
-        let ret = do_object_identity(
-            quote! {
-                struct Foo {}
-            }
-            .into(),
-        );
+        let ret = do_object_identity(quote! {
+            struct Foo {}
+        });
 
         let error = ret.unwrap_err();
         assert!(error.to_string().starts_with("deriving ObjectIdentity"));

@@ -3,23 +3,24 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::{Context, Result};
+use camino_tempfile::Utf8TempDir;
 use dns_service_client::{
     types::{DnsConfigParams, DnsConfigZone, DnsRecord, Srv},
     Client,
 };
 use dropshot::{test_util::LogContext, HandlerTaskMode};
+use hickory_resolver::error::ResolveErrorKind;
+use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::{
+    config::{NameServerConfig, Protocol, ResolverConfig, ResolverOpts},
+    proto::op::ResponseCode,
+};
 use omicron_test_utils::dev::test_setup_log;
 use slog::o;
 use std::{
     collections::HashMap,
     net::Ipv6Addr,
     net::{IpAddr, Ipv4Addr},
-};
-use trust_dns_resolver::error::ResolveErrorKind;
-use trust_dns_resolver::TokioAsyncResolver;
-use trust_dns_resolver::{
-    config::{NameServerConfig, Protocol, ResolverConfig, ResolverOpts},
-    proto::op::ResponseCode,
 };
 
 const TEST_ZONE: &'static str = "oxide.internal";
@@ -332,7 +333,7 @@ struct TestContext {
     resolver: TokioAsyncResolver,
     dns_server: dns_server::dns_server::ServerHandle,
     dropshot_server: dropshot::HttpServer<dns_server::http_server::Context>,
-    tmp: tempdir::TempDir,
+    tmp: Utf8TempDir,
     logctx: LogContext,
 }
 
@@ -373,17 +374,19 @@ async fn init_client_server(
     )
     .await?;
 
-    let mut rc = ResolverConfig::new();
-    rc.add_name_server(NameServerConfig {
+    let mut resolver_config = ResolverConfig::new();
+    resolver_config.add_name_server(NameServerConfig {
         socket_addr: dns_server.local_address(),
         protocol: Protocol::Udp,
         tls_dns_name: None,
-        trust_nx_responses: false,
+        trust_negative_responses: false,
         bind_addr: None,
     });
+    let mut resolver_opts = ResolverOpts::default();
+    // Enable edns for potentially larger records
+    resolver_opts.edns0 = true;
 
-    let resolver =
-        TokioAsyncResolver::tokio(rc, ResolverOpts::default()).unwrap();
+    let resolver = TokioAsyncResolver::tokio(resolver_config, resolver_opts);
     let client =
         Client::new(&format!("http://{}", dropshot_server.local_addr()), log);
 
@@ -401,7 +404,7 @@ fn test_config(
     test_name: &str,
 ) -> Result<
     (
-        tempdir::TempDir,
+        Utf8TempDir,
         dns_server::storage::Config,
         dropshot::ConfigDropshot,
         LogContext,
@@ -409,16 +412,16 @@ fn test_config(
     anyhow::Error,
 > {
     let logctx = test_setup_log(test_name);
-    let tmp_dir = tempdir::TempDir::new("dns-server-test")?;
+    let tmp_dir = Utf8TempDir::with_prefix("dns-server-test")?;
     let mut storage_path = tmp_dir.path().to_path_buf();
     storage_path.push("test");
-    let storage_path = storage_path.to_str().unwrap().into();
     let config_storage =
         dns_server::storage::Config { storage_path, keep_old_generations: 3 };
     let config_dropshot = dropshot::ConfigDropshot {
         bind_address: "[::1]:0".to_string().parse().unwrap(),
         request_body_max_bytes: 1024,
         default_handler_task_mode: HandlerTaskMode::Detached,
+        log_headers: vec![],
     };
 
     Ok((tmp_dir, config_storage, config_dropshot, logctx))

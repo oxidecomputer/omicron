@@ -6,7 +6,6 @@ use crate::config::GimletConfig;
 use crate::config::SpComponentConfig;
 use crate::helpers::rot_slot_id_from_u16;
 use crate::helpers::rot_slot_id_to_u16;
-use crate::rot::RotSprocketExt;
 use crate::serial_number_padded;
 use crate::server;
 use crate::server::SimSpHandler;
@@ -25,6 +24,7 @@ use gateway_messages::sp_impl::{BoundsChecked, DeviceDescription};
 use gateway_messages::CfpaPage;
 use gateway_messages::ComponentAction;
 use gateway_messages::Header;
+use gateway_messages::RotBootInfo;
 use gateway_messages::RotRequest;
 use gateway_messages::RotResponse;
 use gateway_messages::RotSlotId;
@@ -36,10 +36,8 @@ use gateway_messages::SpStateV2;
 use gateway_messages::{version, MessageKind};
 use gateway_messages::{ComponentDetails, Message, MgsError, StartupOptions};
 use gateway_messages::{DiscoverResponse, IgnitionState, PowerState};
+use gateway_types::component::SpState;
 use slog::{debug, error, info, warn, Logger};
-use sprockets_rot::common::msgs::{RotRequestV1, RotResponseV1};
-use sprockets_rot::common::Ed25519PublicKey;
-use sprockets_rot::{RotSprocket, RotSprocketError};
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::iter;
@@ -56,16 +54,44 @@ use tokio::sync::Mutex as TokioMutex;
 use tokio::task::{self, JoinHandle};
 
 pub const SIM_GIMLET_BOARD: &str = "SimGimletSp";
+const SP_GITC0: &[u8] = b"ffffffff";
+const SP_GITC1: &[u8] = b"fefefefe";
+const SP_BORD: &[u8] = SIM_GIMLET_BOARD.as_bytes();
+const SP_NAME: &[u8] = b"SimGimlet";
+const SP_VERS0: &[u8] = b"0.0.2";
+const SP_VERS1: &[u8] = b"0.0.1";
+
+const ROT_GITC0: &[u8] = b"eeeeeeee";
+const ROT_GITC1: &[u8] = b"edededed";
+const ROT_BORD: &[u8] = SIM_ROT_BOARD.as_bytes();
+const ROT_NAME: &[u8] = b"SimGimletRot";
+const ROT_VERS0: &[u8] = b"0.0.4";
+const ROT_VERS1: &[u8] = b"0.0.3";
+
+/// Type of request most recently handled by a simulated SP.
+///
+/// Many request types are not covered by this enum. This only exists to enable
+/// certain particular tests.
+// If you need an additional request type to be reported by this enum, feel free
+// to add it and update the appropriate `Handler` function below (see
+// `update_status()`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SimSpHandledRequest {
+    /// The most recent request was for the update status of a component.
+    ComponentUpdateStatus(SpComponent),
+    /// The most recent request was some other type that is currently not
+    /// implemented in this tracker.
+    NotImplemented,
+}
 
 pub struct Gimlet {
-    rot: Mutex<RotSprocket>,
-    manufacturing_public_key: Ed25519PublicKey,
     local_addrs: Option<[SocketAddrV6; 2]>,
     handler: Option<Arc<TokioMutex<Handler>>>,
     serial_console_addrs: HashMap<String, SocketAddrV6>,
     commands: mpsc::UnboundedSender<Command>,
     inner_tasks: Vec<JoinHandle<()>>,
     responses_sent_count: Option<watch::Receiver<usize>>,
+    last_request_handled: Arc<Mutex<Option<SimSpHandledRequest>>>,
 }
 
 impl Drop for Gimlet {
@@ -79,14 +105,10 @@ impl Drop for Gimlet {
 
 #[async_trait]
 impl SimulatedSp for Gimlet {
-    async fn state(&self) -> omicron_gateway::http_entrypoints::SpState {
-        omicron_gateway::http_entrypoints::SpState::from(
+    async fn state(&self) -> SpState {
+        SpState::from(
             self.handler.as_ref().unwrap().lock().await.sp_state_impl(),
         )
-    }
-
-    fn manufacturing_public_key(&self) -> Ed25519PublicKey {
-        self.manufacturing_public_key
     }
 
     fn local_addr(&self, port: SpPort) -> Option<SocketAddrV6> {
@@ -102,13 +124,6 @@ impl SimulatedSp for Gimlet {
         if let Ok(()) = self.commands.send(Command::SetResponsiveness(r, tx)) {
             rx.await.unwrap();
         }
-    }
-
-    fn rot_request(
-        &self,
-        request: RotRequestV1,
-    ) -> Result<RotResponseV1, RotSprocketError> {
-        self.rot.lock().unwrap().handle_deserialized(request)
     }
 
     async fn last_sp_update_data(&self) -> Option<Box<[u8]>> {
@@ -168,23 +183,20 @@ impl Gimlet {
         let mut serial_console_addrs = HashMap::new();
         let mut inner_tasks = Vec::new();
         let (commands, commands_rx) = mpsc::unbounded_channel();
-
-        let (manufacturing_public_key, rot) =
-            RotSprocket::bootstrap_from_config(&gimlet.common);
+        let last_request_handled = Arc::default();
 
         // Weird case - if we don't have any bind addresses, we're only being
         // created to simulate an RoT, so go ahead and return without actually
         // starting a simulated SP.
         let Some(bind_addrs) = gimlet.common.bind_addrs else {
             return Ok(Self {
-                rot: Mutex::new(rot),
-                manufacturing_public_key,
                 local_addrs: None,
                 handler: None,
                 serial_console_addrs,
                 commands,
                 inner_tasks,
                 responses_sent_count: None,
+                last_request_handled,
             });
         };
 
@@ -257,25 +269,31 @@ impl Gimlet {
             gimlet.common.serial_number.clone(),
             incoming_console_tx,
             commands_rx,
+            Arc::clone(&last_request_handled),
             log,
+            gimlet.common.old_rot_state,
+            gimlet.common.no_stage0_caboose,
         );
         inner_tasks
             .push(task::spawn(async move { inner.run().await.unwrap() }));
 
         Ok(Self {
-            rot: Mutex::new(rot),
-            manufacturing_public_key,
             local_addrs: Some(local_addrs),
             handler: Some(handler),
             serial_console_addrs,
             commands,
             inner_tasks,
             responses_sent_count: Some(responses_sent_count),
+            last_request_handled,
         })
     }
 
     pub fn serial_console_addr(&self, component: &str) -> Option<SocketAddrV6> {
         self.serial_console_addrs.get(component).copied()
+    }
+
+    pub fn last_request_handled(&self) -> Option<SimSpHandledRequest> {
+        *self.last_request_handled.lock().unwrap()
     }
 }
 
@@ -459,9 +477,11 @@ struct UdpTask {
     handler: Arc<TokioMutex<Handler>>,
     commands: mpsc::UnboundedReceiver<Command>,
     responses_sent_count: watch::Sender<usize>,
+    last_request_handled: Arc<Mutex<Option<SimSpHandledRequest>>>,
 }
 
 impl UdpTask {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         servers: [UdpServer; 2],
         components: Vec<SpComponentConfig>,
@@ -469,7 +489,10 @@ impl UdpTask {
         serial_number: String,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
         commands: mpsc::UnboundedReceiver<Command>,
+        last_request_handled: Arc<Mutex<Option<SimSpHandledRequest>>>,
         log: Logger,
+        old_rot_state: bool,
+        no_stage0_caboose: bool,
     ) -> (Self, Arc<TokioMutex<Handler>>, watch::Receiver<usize>) {
         let [udp0, udp1] = servers;
         let handler = Arc::new(TokioMutex::new(Handler::new(
@@ -478,6 +501,8 @@ impl UdpTask {
             attached_mgs,
             incoming_serial_console,
             log,
+            old_rot_state,
+            no_stage0_caboose,
         )));
         let responses_sent_count = watch::Sender::new(0);
         let responses_sent_count_rx = responses_sent_count.subscribe();
@@ -488,6 +513,7 @@ impl UdpTask {
                 handler: Arc::clone(&handler),
                 commands,
                 responses_sent_count,
+                last_request_handled,
             },
             handler,
             responses_sent_count_rx,
@@ -513,16 +539,27 @@ impl UdpTask {
                 }
 
                 recv0 = self.udp0.recv_from(), if throttle_count > 0 => {
-                    if let Some((resp, addr)) = server::handle_request(
-                        &mut *self.handler.lock().await,
-                        recv0,
-                        &mut out_buf,
-                        responsiveness,
-                        SpPort::One,
-                    ).await? {
+                    let (result, handled_request) = {
+                        let mut handler = self.handler.lock().await;
+                        handler.last_request_handled = None;
+                        let result = server::handle_request(
+                            &mut *handler,
+                            recv0,
+                            &mut out_buf,
+                            responsiveness,
+                            SpPort::One,
+                        ).await?;
+                        (result,
+                         handler.last_request_handled.unwrap_or(
+                             SimSpHandledRequest::NotImplemented,
+                        ))
+                    };
+                    if let Some((resp, addr)) = result {
                         throttle_count -= 1;
                         self.udp0.send_to(resp, addr).await?;
                         self.responses_sent_count.send_modify(|n| *n += 1);
+                        *self.last_request_handled.lock().unwrap() =
+                            Some(handled_request);
                     }
                 }
 
@@ -594,12 +631,16 @@ struct Handler {
     update_state: SimSpUpdate,
     reset_pending: Option<SpComponent>,
 
+    last_request_handled: Option<SimSpHandledRequest>,
+
     // To simulate an SP reset, we should (after doing whatever housekeeping we
     // need to track the reset) intentionally _fail_ to respond to the request,
     // simulating a `-> !` function on the SP that triggers a reset. To provide
     // this, our caller will pass us a function to call if they should ignore
     // whatever result we return and fail to respond at all.
     should_fail_to_respond_signal: Option<Box<dyn FnOnce() + Send>>,
+    no_stage0_caboose: bool,
+    old_rot_state: bool,
 }
 
 impl Handler {
@@ -609,6 +650,8 @@ impl Handler {
         attached_mgs: Arc<Mutex<Option<(SpComponent, SpPort, SocketAddrV6)>>>,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
         log: Logger,
+        old_rot_state: bool,
+        no_stage0_caboose: bool,
     ) -> Self {
         let mut leaked_component_device_strings =
             Vec::with_capacity(components.len());
@@ -635,12 +678,16 @@ impl Handler {
             startup_options: StartupOptions::empty(),
             update_state: SimSpUpdate::default(),
             reset_pending: None,
+            last_request_handled: None,
             should_fail_to_respond_signal: None,
+            old_rot_state,
+            no_stage0_caboose,
         }
     }
 
     fn sp_state_impl(&self) -> SpStateV2 {
-        const FAKE_GIMLET_MODEL: &[u8] = b"FAKE_SIM_GIMLET";
+        // Make the Baseboard a PC so that our testbeds work as expected.
+        const FAKE_GIMLET_MODEL: &[u8] = b"i86pc";
 
         let mut model = [0; 32];
         model[..FAKE_GIMLET_MODEL.len()].copy_from_slice(FAKE_GIMLET_MODEL);
@@ -657,8 +704,8 @@ impl Handler {
                 persistent_boot_preference: RotSlotId::A,
                 pending_persistent_boot_preference: None,
                 transient_boot_preference: None,
-                slot_a_sha3_256_digest: None,
-                slot_b_sha3_256_digest: None,
+                slot_a_sha3_256_digest: Some([0x55; 32]),
+                slot_b_sha3_256_digest: Some([0x66; 32]),
             }),
         }
     }
@@ -1003,6 +1050,8 @@ impl SpHandler for Handler {
             "port" => ?port,
             "component" => ?component,
         );
+        self.last_request_handled =
+            Some(SimSpHandledRequest::ComponentUpdateStatus(component));
         Ok(self.update_state.status())
     }
 
@@ -1203,12 +1252,13 @@ impl SpHandler for Handler {
             "port" => ?port,
             "component" => ?component,
         );
-        if component == SpComponent::ROT {
-            Ok(rot_slot_id_to_u16(self.rot_active_slot))
-        } else {
+        match component {
+            SpComponent::ROT => Ok(rot_slot_id_to_u16(self.rot_active_slot)),
+            // The only active component is stage0
+            SpComponent::STAGE0 => Ok(0),
             // The real SP returns `RequestUnsupportedForComponent` for anything
             // other than the RoT, including SP_ITSELF.
-            Err(SpError::RequestUnsupportedForComponent)
+            _ => Err(SpError::RequestUnsupportedForComponent),
         }
     }
 
@@ -1228,16 +1278,27 @@ impl SpHandler for Handler {
             "slot" => slot,
             "persist" => persist,
         );
-        if component == SpComponent::ROT {
-            self.rot_active_slot = rot_slot_id_from_u16(slot)?;
-            Ok(())
-        } else if component == SpComponent::HOST_CPU_BOOT_FLASH {
-            self.update_state.set_active_host_slot(slot);
-            Ok(())
-        } else {
-            // The real SP returns `RequestUnsupportedForComponent` for anything
-            // other than the RoT and host boot flash, including SP_ITSELF.
-            Err(SpError::RequestUnsupportedForComponent)
+        match component {
+            SpComponent::ROT => {
+                self.rot_active_slot = rot_slot_id_from_u16(slot)?;
+                Ok(())
+            }
+            SpComponent::STAGE0 => {
+                if slot == 1 {
+                    return Ok(());
+                } else {
+                    Err(SpError::RequestUnsupportedForComponent)
+                }
+            }
+            SpComponent::HOST_CPU_BOOT_FLASH => {
+                self.update_state.set_active_host_slot(slot);
+                Ok(())
+            }
+            _ => {
+                // The real SP returns `RequestUnsupportedForComponent` for anything
+                // other than the RoT and host boot flash, including SP_ITSELF.
+                Err(SpError::RequestUnsupportedForComponent)
+            }
         }
     }
 
@@ -1343,29 +1404,38 @@ impl SpHandler for Handler {
     fn get_component_caboose_value(
         &mut self,
         component: SpComponent,
-        _slot: u16,
+        slot: u16,
         key: [u8; 4],
         buf: &mut [u8],
     ) -> std::result::Result<usize, SpError> {
-        static SP_GITC: &[u8] = b"ffffffff";
-        static SP_BORD: &[u8] = SIM_GIMLET_BOARD.as_bytes();
-        static SP_NAME: &[u8] = b"SimGimlet";
-        static SP_VERS: &[u8] = b"0.0.1";
+        use crate::SIM_ROT_STAGE0_BOARD;
 
-        static ROT_GITC: &[u8] = b"eeeeeeee";
-        static ROT_BORD: &[u8] = SIM_ROT_BOARD.as_bytes();
-        static ROT_NAME: &[u8] = b"SimGimlet";
-        static ROT_VERS: &[u8] = b"0.0.1";
+        const STAGE0_GITC0: &[u8] = b"ddddddddd";
+        const STAGE0_GITC1: &[u8] = b"dadadadad";
+        const STAGE0_BORD: &[u8] = SIM_ROT_STAGE0_BOARD.as_bytes();
+        const STAGE0_NAME: &[u8] = b"SimGimletRot";
+        const STAGE0_VERS0: &[u8] = b"0.0.200";
+        const STAGE0_VERS1: &[u8] = b"0.0.200";
 
-        let val = match (component, &key) {
-            (SpComponent::SP_ITSELF, b"GITC") => SP_GITC,
-            (SpComponent::SP_ITSELF, b"BORD") => SP_BORD,
-            (SpComponent::SP_ITSELF, b"NAME") => SP_NAME,
-            (SpComponent::SP_ITSELF, b"VERS") => SP_VERS,
-            (SpComponent::ROT, b"GITC") => ROT_GITC,
-            (SpComponent::ROT, b"BORD") => ROT_BORD,
-            (SpComponent::ROT, b"NAME") => ROT_NAME,
-            (SpComponent::ROT, b"VERS") => ROT_VERS,
+        let val = match (component, &key, slot, self.no_stage0_caboose) {
+            (SpComponent::SP_ITSELF, b"GITC", 0, _) => SP_GITC0,
+            (SpComponent::SP_ITSELF, b"GITC", 1, _) => SP_GITC1,
+            (SpComponent::SP_ITSELF, b"BORD", _, _) => SP_BORD,
+            (SpComponent::SP_ITSELF, b"NAME", _, _) => SP_NAME,
+            (SpComponent::SP_ITSELF, b"VERS", 0, _) => SP_VERS0,
+            (SpComponent::SP_ITSELF, b"VERS", 1, _) => SP_VERS1,
+            (SpComponent::ROT, b"GITC", 0, _) => ROT_GITC0,
+            (SpComponent::ROT, b"GITC", 1, _) => ROT_GITC1,
+            (SpComponent::ROT, b"BORD", _, _) => ROT_BORD,
+            (SpComponent::ROT, b"NAME", _, _) => ROT_NAME,
+            (SpComponent::ROT, b"VERS", 0, _) => ROT_VERS0,
+            (SpComponent::ROT, b"VERS", 1, _) => ROT_VERS1,
+            (SpComponent::STAGE0, b"GITC", 0, false) => STAGE0_GITC0,
+            (SpComponent::STAGE0, b"GITC", 1, false) => STAGE0_GITC1,
+            (SpComponent::STAGE0, b"BORD", _, false) => STAGE0_BORD,
+            (SpComponent::STAGE0, b"NAME", _, false) => STAGE0_NAME,
+            (SpComponent::STAGE0, b"VERS", 0, false) => STAGE0_VERS0,
+            (SpComponent::STAGE0, b"VERS", 1, false) => STAGE0_VERS1,
             _ => return Err(SpError::NoSuchCabooseKey(key)),
         };
 
@@ -1398,6 +1468,114 @@ impl SpHandler for Handler {
         buf[..dummy_page.len()].copy_from_slice(dummy_page.as_bytes());
         buf[dummy_page.len()..].fill(0);
         Ok(RotResponse::Ok)
+    }
+
+    fn vpd_lock_status_all(
+        &mut self,
+        _buf: &mut [u8],
+    ) -> Result<usize, SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn reset_component_trigger_with_watchdog(
+        &mut self,
+        component: SpComponent,
+        _time_ms: u32,
+    ) -> Result<(), SpError> {
+        debug!(
+            &self.log, "received reset trigger with watchdog request";
+            "component" => ?component,
+        );
+        if component == SpComponent::SP_ITSELF {
+            if self.reset_pending == Some(SpComponent::SP_ITSELF) {
+                self.update_state.sp_reset();
+                self.reset_pending = None;
+                if let Some(signal) = self.should_fail_to_respond_signal.take()
+                {
+                    // Instruct `server::handle_request()` to _not_ respond to
+                    // this request at all, simulating an SP actually resetting.
+                    signal();
+                }
+                Ok(())
+            } else {
+                Err(SpError::ResetComponentTriggerWithoutPrepare)
+            }
+        } else if component == SpComponent::ROT {
+            if self.reset_pending == Some(SpComponent::ROT) {
+                self.update_state.rot_reset();
+                self.reset_pending = None;
+                Ok(())
+            } else {
+                Err(SpError::ResetComponentTriggerWithoutPrepare)
+            }
+        } else {
+            Err(SpError::RequestUnsupportedForComponent)
+        }
+    }
+
+    fn disable_component_watchdog(
+        &mut self,
+        _component: SpComponent,
+    ) -> Result<(), SpError> {
+        Ok(())
+    }
+    fn component_watchdog_supported(
+        &mut self,
+        _component: SpComponent,
+    ) -> Result<(), SpError> {
+        Ok(())
+    }
+
+    fn versioned_rot_boot_info(
+        &mut self,
+        _sender: SocketAddrV6,
+        _port: SpPort,
+        version: u8,
+    ) -> Result<RotBootInfo, SpError> {
+        if self.old_rot_state {
+            Err(SpError::RequestUnsupportedForSp)
+        } else {
+            const SLOT_A_DIGEST: [u8; 32] = [0xaa; 32];
+            const SLOT_B_DIGEST: [u8; 32] = [0xbb; 32];
+            const STAGE0_DIGEST: [u8; 32] = [0xcc; 32];
+            const STAGE0NEXT_DIGEST: [u8; 32] = [0xdd; 32];
+
+            match version {
+                0 => Err(SpError::Update(
+                    gateway_messages::UpdateError::VersionNotSupported,
+                )),
+                1 => Ok(RotBootInfo::V2(gateway_messages::RotStateV2 {
+                    active: RotSlotId::A,
+                    persistent_boot_preference: RotSlotId::A,
+                    pending_persistent_boot_preference: None,
+                    transient_boot_preference: None,
+                    slot_a_sha3_256_digest: Some(SLOT_A_DIGEST),
+                    slot_b_sha3_256_digest: Some(SLOT_B_DIGEST),
+                })),
+                _ => Ok(RotBootInfo::V3(gateway_messages::RotStateV3 {
+                    active: RotSlotId::A,
+                    persistent_boot_preference: RotSlotId::A,
+                    pending_persistent_boot_preference: None,
+                    transient_boot_preference: None,
+                    slot_a_fwid: gateway_messages::Fwid::Sha3_256(
+                        SLOT_A_DIGEST,
+                    ),
+                    slot_b_fwid: gateway_messages::Fwid::Sha3_256(
+                        SLOT_B_DIGEST,
+                    ),
+                    stage0_fwid: gateway_messages::Fwid::Sha3_256(
+                        STAGE0_DIGEST,
+                    ),
+                    stage0next_fwid: gateway_messages::Fwid::Sha3_256(
+                        STAGE0NEXT_DIGEST,
+                    ),
+                    slot_a_status: Ok(()),
+                    slot_b_status: Ok(()),
+                    stage0_status: Ok(()),
+                    stage0next_status: Ok(()),
+                })),
+            }
+        }
     }
 }
 

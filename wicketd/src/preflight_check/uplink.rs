@@ -11,23 +11,22 @@ use dpd_client::types::PortFec as DpdPortFec;
 use dpd_client::types::PortId;
 use dpd_client::types::PortSettings;
 use dpd_client::types::PortSpeed as DpdPortSpeed;
-use dpd_client::types::RouteSettingsV4;
 use dpd_client::Client as DpdClient;
 use dpd_client::ClientState as DpdClientState;
 use either::Either;
+use hickory_resolver::config::NameServerConfigGroup;
+use hickory_resolver::config::ResolverConfig;
+use hickory_resolver::config::ResolverOpts;
+use hickory_resolver::error::ResolveErrorKind;
+use hickory_resolver::TokioAsyncResolver;
 use illumos_utils::zone::SVCCFG;
 use illumos_utils::PFEXEC;
-use ipnetwork::IpNetwork;
 use omicron_common::address::DENDRITE_PORT;
-use omicron_common::api::internal::shared::PortConfigV1;
 use omicron_common::api::internal::shared::PortFec as OmicronPortFec;
 use omicron_common::api::internal::shared::PortSpeed as OmicronPortSpeed;
-use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::OMICRON_DPD_TAG;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
+use oxnet::IpNet;
 use slog::error;
 use slog::o;
 use slog::Logger;
@@ -39,16 +38,20 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
-use thiserror::Error;
 use tokio::process::Command;
 use tokio::sync::mpsc;
-use trust_dns_resolver::config::NameServerConfigGroup;
-use trust_dns_resolver::config::ResolverConfig;
-use trust_dns_resolver::config::ResolverOpts;
-use trust_dns_resolver::error::ResolveError;
-use trust_dns_resolver::error::ResolveErrorKind;
-use trust_dns_resolver::TokioAsyncResolver;
-use update_engine::StepSpec;
+use wicket_common::preflight_check::EventBuffer;
+use wicket_common::preflight_check::StepContext;
+use wicket_common::preflight_check::StepProgress;
+use wicket_common::preflight_check::StepResult;
+use wicket_common::preflight_check::StepSkipped;
+use wicket_common::preflight_check::StepSuccess;
+use wicket_common::preflight_check::StepWarning;
+use wicket_common::preflight_check::UpdateEngine;
+use wicket_common::preflight_check::UplinkPreflightStepId;
+use wicket_common::preflight_check::UplinkPreflightTerminalError;
+use wicket_common::rack_setup::UserSpecifiedPortConfig;
+use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 
 const DNS_PORT: u16 = 53;
 
@@ -68,7 +71,7 @@ const IPADM: &str = "/usr/sbin/ipadm";
 const ROUTE: &str = "/usr/sbin/route";
 
 pub(super) async fn run_local_uplink_preflight_check(
-    network_config: RackNetworkConfig,
+    network_config: UserSpecifiedRackNetworkConfig,
     dns_servers: Vec<IpAddr>,
     ntp_servers: Vec<String>,
     our_switch_location: SwitchLocation,
@@ -88,14 +91,11 @@ pub(super) async fn run_local_uplink_preflight_check(
     let (sender, mut receiver) = mpsc::channel(128);
     let mut engine = UpdateEngine::new(log, sender);
 
-    for uplink in network_config
-        .ports
-        .iter()
-        .filter(|uplink| uplink.switch == our_switch_location)
-    {
+    for (port, uplink) in network_config.port_map(our_switch_location) {
         add_steps_for_single_local_uplink_preflight_check(
             &mut engine,
             &dpd_client,
+            port,
             uplink,
             &dns_servers,
             &ntp_servers,
@@ -130,7 +130,8 @@ pub(super) async fn run_local_uplink_preflight_check(
 fn add_steps_for_single_local_uplink_preflight_check<'a>(
     engine: &mut UpdateEngine<'a>,
     dpd_client: &'a DpdClient,
-    uplink: &'a PortConfigV1,
+    port: &'a str,
+    uplink: &'a UserSpecifiedPortConfig,
     dns_servers: &'a [IpAddr],
     ntp_servers: &'a [String],
     dns_name_to_query: Option<&'a str>,
@@ -152,7 +153,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
     // Timeout we give to chronyd during the NTP check, in seconds.
     const CHRONYD_CHECK_TIMEOUT_SECS: &str = "30";
 
-    let registrar = engine.for_component(uplink.port.clone());
+    let registrar = engine.for_component(port.to_owned());
 
     let prev_step = registrar
         .new_step(
@@ -161,8 +162,11 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
             |_cx| async {
                 // Check that the port name is valid and that it has no links
                 // configured already.
-                let port_id = PortId::from_str(&uplink.port)
-                    .map_err(UplinkPreflightTerminalError::InvalidPortName)?;
+                let port_id = PortId::from_str(port).map_err(|_| {
+                    UplinkPreflightTerminalError::InvalidPortName(
+                        port.to_owned(),
+                    )
+                })?;
                 let links = dpd_client
                     .link_list(&port_id)
                     .await
@@ -298,10 +302,13 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                 // Tell the `uplink` service about the IP address we created on
                 // the switch when configuring the uplink.
                 let uplink_property =
-                    UplinkProperty(format!("uplinks/{}_0", uplink.port));
+                    UplinkProperty(format!("uplinks/{}_0", port));
 
                 for addr in &uplink.addresses {
-                    let uplink_cidr = addr.to_string();
+                    // This includes the CIDR only
+                    let uplink_cidr = addr.address.to_string();
+                    // This includes the VLAN ID, if any
+                    let uplink_cfg = addr.to_string();
                     if let Err(err) = execute_command(&[
                         SVCCFG,
                         "-s",
@@ -309,7 +316,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                         "addpropvalue",
                         &uplink_property.0,
                         "astring:",
-                        &uplink_cidr,
+                        &uplink_cfg,
                     ])
                     .await
                     {
@@ -720,11 +727,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                     .port_settings_apply(
                         &port_id,
                         Some(OMICRON_DPD_TAG),
-                        &PortSettings {
-                            links: HashMap::new(),
-                            v4_routes: HashMap::new(),
-                            v6_routes: HashMap::new(),
-                        },
+                        &PortSettings { links: HashMap::new() },
                     )
                     .await
                     .map_err(|err| {
@@ -741,7 +744,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
 }
 
 fn build_port_settings(
-    uplink: &PortConfigV1,
+    uplink: &UserSpecifiedPortConfig,
     link_id: &LinkId,
 ) -> PortSettings {
     // Map from omicron_common types to dpd_client types
@@ -762,13 +765,9 @@ fn build_port_settings(
         OmicronPortSpeed::Speed400G => DpdPortSpeed::Speed400G,
     };
 
-    let mut port_settings = PortSettings {
-        links: HashMap::new(),
-        v4_routes: HashMap::new(),
-        v6_routes: HashMap::new(),
-    };
+    let mut port_settings = PortSettings { links: HashMap::new() };
 
-    let addrs = uplink.addresses.iter().map(|a| a.ip()).collect();
+    let addrs = uplink.addresses.iter().map(|a| a.addr()).collect();
 
     port_settings.links.insert(
         link_id.to_string(),
@@ -785,13 +784,10 @@ fn build_port_settings(
     );
 
     for r in &uplink.routes {
-        if let (IpNetwork::V4(dst), IpAddr::V4(nexthop)) =
+        if let (IpNet::V4(_dst), IpAddr::V4(_nexthop)) =
             (r.destination, r.nexthop)
         {
-            port_settings.v4_routes.insert(
-                dst.to_string(),
-                vec![RouteSettingsV4 { link_id: link_id.0, nexthop }],
-            );
+            // TODO: do we need to create config for mgd?
         }
     }
 
@@ -873,73 +869,6 @@ struct RoutingSuccess {
     level2: L2Success,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "id", rename_all = "snake_case")]
-pub(super) enum UplinkPreflightStepId {
-    ConfigureSwitch,
-    WaitForL1Link,
-    ConfigureAddress,
-    ConfigureRouting,
-    CheckExternalDnsConnectivity,
-    CheckExternalNtpConnectivity,
-    CleanupRouting,
-    CleanupAddress,
-    CleanupL1,
-}
-
-type DpdError = dpd_client::Error<dpd_client::types::Error>;
-
-#[derive(Debug, Error)]
-pub(crate) enum UplinkPreflightTerminalError {
-    #[error("invalid port name: {0}")]
-    InvalidPortName(&'static str),
-    #[error("failed to connect to dpd to check for current configuration")]
-    GetCurrentConfig(#[source] DpdError),
-    #[error("uplink already configured - is rack already initialized?")]
-    UplinkAlreadyConfigured,
-    #[error("failed to create port {port_id:?}")]
-    ConfigurePort {
-        #[source]
-        err: DpdError,
-        port_id: PortId,
-    },
-    #[error(
-        "failed to remove host OS route {destination} -> {nexthop}: {err}"
-    )]
-    RemoveHostRoute { err: String, destination: IpNetwork, nexthop: IpAddr },
-    #[error("failed to remove uplink SMF property {property:?}: {err}")]
-    RemoveSmfProperty { property: String, err: String },
-    #[error("failed to refresh uplink service config: {0}")]
-    RefreshUplinkSmf(String),
-    #[error("failed to clear settings for port {port_id:?}")]
-    UnconfigurePort {
-        #[source]
-        err: DpdError,
-        port_id: PortId,
-    },
-}
-
-impl update_engine::AsError for UplinkPreflightTerminalError {
-    fn as_error(&self) -> &(dyn std::error::Error + 'static) {
-        self
-    }
-}
-
-#[derive(JsonSchema)]
-pub(super) enum UplinkPreflightCheckSpec {}
-
-impl StepSpec for UplinkPreflightCheckSpec {
-    type Component = String;
-    type StepId = UplinkPreflightStepId;
-    type StepMetadata = ();
-    type ProgressMetadata = String;
-    type CompletionMetadata = Vec<String>;
-    type SkippedMetadata = ();
-    type Error = UplinkPreflightTerminalError;
-}
-
-update_engine::define_update_engine!(pub(super) UplinkPreflightCheckSpec);
-
 #[derive(Debug, Default)]
 struct DnsLookupStep {
     // Usable output of this step: IP addrs of the NTP servers to use.
@@ -1000,16 +929,7 @@ impl DnsLookupStep {
         };
 
         'dns_servers: for &dns_ip in dns_servers {
-            let resolver = match self.build_resolver(dns_ip) {
-                Ok(resolver) => resolver,
-                Err(err) => {
-                    self.warnings.push(format!(
-                        "failed to create resolver for {dns_ip}: {}",
-                        DisplayErrorChain::new(&err)
-                    ));
-                    continue;
-                }
-            };
+            let resolver = self.build_resolver(dns_ip);
 
             // Attempt to resolve any NTP servers that aren't IP addresses.
             for &ntp_name in &ntp_names_to_resolve {
@@ -1122,14 +1042,18 @@ impl DnsLookupStep {
                 (
                     "A",
                     resolver.ipv4_lookup(name).await.map(|records| {
-                        Either::Left(records.into_iter().map(IpAddr::V4))
+                        Either::Left(
+                            records.into_iter().map(|x| IpAddr::V4(x.into())),
+                        )
                     }),
                 )
             } else {
                 (
                     "AAAA",
                     resolver.ipv6_lookup(name).await.map(|records| {
-                        Either::Right(records.into_iter().map(IpAddr::V6))
+                        Either::Right(
+                            records.into_iter().map(|x| IpAddr::V6(x.into())),
+                        )
                     }),
                 )
             };
@@ -1245,11 +1169,11 @@ impl DnsLookupStep {
     ///
     /// If building it fails, we'll append to our internal `warnings` and return
     /// `None`.
-    fn build_resolver(
-        &mut self,
-        dns_ip: IpAddr,
-    ) -> Result<TokioAsyncResolver, ResolveError> {
+    fn build_resolver(&mut self, dns_ip: IpAddr) -> TokioAsyncResolver {
         let mut options = ResolverOpts::default();
+
+        // Enable edns for potentially larger records
+        options.edns0 = true;
 
         // We will retry ourselves; we don't want the resolver
         // retrying internally too.

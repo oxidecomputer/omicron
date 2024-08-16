@@ -9,7 +9,7 @@ jobs:
   check-style:
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
       with:
         ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
     - name: Report cargo version
@@ -26,12 +26,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-22.04, macos-12 ]
+        os: [ ubuntu-22.04, macos-14 ]
     steps:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
+      if: ${{ startsWith(matrix.os, 'ubuntu') }}
       run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
-    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
       with:
         ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
     - uses: Swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84 # v2.7.3
@@ -52,7 +53,7 @@ jobs:
       run: cargo run --bin omicron-package -- -t default check
 
   # Note that `cargo clippy` includes `cargo check, so this ends up checking all
-  # of our code.
+  # of our (default) code.
   clippy-lint:
     runs-on: ubuntu-22.04
     env:
@@ -61,7 +62,7 @@ jobs:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
       run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
-    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
       with:
         ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
     - uses: Swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84 # v2.7.3
@@ -81,6 +82,36 @@ jobs:
     - name: Run Clippy Lints
       run: cargo xtask clippy
 
+  check-features:
+    runs-on: ubuntu-22.04
+    env:
+      CARGO_INCREMENTAL: 0
+    steps:
+    # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
+    - name: Disable packages.microsoft.com repo
+      run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
+    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      with:
+        ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
+    - uses: Swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84 # v2.7.3
+      if: ${{ github.ref != 'refs/heads/main' }}
+    - name: Report cargo version
+      run: cargo --version
+    - name: Update PATH
+      run: |
+        set -x
+        export PATH="./out/cargo-hack:$PATH"
+        source "./env.sh"; echo "PATH=$PATH" >> "$GITHUB_ENV"
+    - name: Print PATH
+      run: echo $PATH
+    - name: Print GITHUB_ENV
+      run: cat "$GITHUB_ENV"
+    - name: Install Pre-Requisites
+      run: ./tools/install_builder_prerequisites.sh -y
+    - name: Run Check on Feature Combinations (Feature-Powerset, No-Dev-Deps)
+      timeout-minutes: 120 # 2 hours
+      run: cargo xtask check-features --ci
+
   # This is just a test build of docs.  Publicly available docs are built via
   # the separate "rustdocs" repo.
   build-docs:
@@ -91,7 +122,7 @@ jobs:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
       run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
-    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
       with:
         ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
     - uses: Swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84 # v2.7.3
@@ -107,4 +138,4 @@ jobs:
     - name: Install Pre-Requisites
       run: ./tools/install_builder_prerequisites.sh -y
     - name: Test build documentation
-      run: RUSTDOCFLAGS="-Dwarnings" cargo doc
+      run: RUSTDOCFLAGS="--document-private-items -D warnings" cargo doc --workspace --no-deps

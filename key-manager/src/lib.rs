@@ -57,8 +57,8 @@ pub enum Error {
     #[error("Secret not loaded for {epoch}")]
     SecretNotLoaded { epoch: u64 },
 
-    #[error("Failed to retreive secret: {0}")]
-    SecretRetreival(#[from] SecretRetrieverError),
+    #[error("Failed to retrieve secret: {0}")]
+    SecretRetrieval(#[from] SecretRetrieverError),
 }
 
 /// Derived Disk Encryption key
@@ -102,7 +102,7 @@ enum StorageKeyRequest {
 /// the sled-agent starts. The `HardwareMonitor` gets the StorageKeyRequester
 /// from the bootstrap agent. If this changes, we should remove the `Clone` to
 /// limit who has access to the storage keys.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct StorageKeyRequester {
     tx: mpsc::Sender<StorageKeyRequest>,
 }

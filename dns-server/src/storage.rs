@@ -92,9 +92,11 @@
 // backwards-compatible way (but obviously one wouldn't get the scaling benefits
 // while continuing to use the old API).
 
-use crate::dns_types::{DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord};
 use anyhow::{anyhow, Context};
 use camino::Utf8PathBuf;
+use dns_server_api::{DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord};
+use hickory_proto::rr::LowerName;
+use hickory_resolver::Name;
 use serde::{Deserialize, Serialize};
 use sled::transaction::ConflictableTransactionError;
 use slog::{debug, error, info, o, warn};
@@ -104,8 +106,6 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
-use trust_dns_client::rr::LowerName;
-use trust_dns_client::rr::Name;
 
 const KEY_CONFIG: &'static str = "config";
 
@@ -586,7 +586,7 @@ impl Store {
     /// If the returned set would have been empty, returns `QueryError::NoName`.
     pub(crate) fn query(
         &self,
-        mr: &trust_dns_server::authority::MessageRequest,
+        mr: &hickory_server::authority::MessageRequest,
     ) -> Result<Vec<DnsRecord>, QueryError> {
         let name = mr.query().name();
         let orig_name = mr.query().original().name();
@@ -777,26 +777,27 @@ impl<'a, 'b> Drop for UpdateGuard<'a, 'b> {
 #[cfg(test)]
 mod test {
     use super::{Config, Store, UpdateError};
-    use crate::dns_types::DnsConfigParams;
-    use crate::dns_types::DnsConfigZone;
-    use crate::dns_types::DnsRecord;
     use crate::storage::QueryError;
     use anyhow::Context;
     use camino::Utf8PathBuf;
+    use camino_tempfile::Utf8TempDir;
+    use dns_server_api::DnsConfigParams;
+    use dns_server_api::DnsConfigZone;
+    use dns_server_api::DnsRecord;
+    use hickory_proto::rr::LowerName;
+    use hickory_resolver::Name;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
     use std::net::Ipv6Addr;
     use std::str::FromStr;
     use std::sync::Arc;
-    use trust_dns_client::rr::LowerName;
-    use trust_dns_client::rr::Name;
 
     /// As usual, `TestContext` groups the various pieces we need in a bunch of
     /// our tests and helps make sure they get cleaned up properly.
     struct TestContext {
         logctx: dropshot::test_util::LogContext,
-        tmpdir: tempdir::TempDir,
+        tmpdir: Utf8TempDir,
         store: Store,
         db: Arc<sled::Db>,
     }
@@ -804,12 +805,9 @@ mod test {
     impl TestContext {
         fn new(test_name: &str) -> TestContext {
             let logctx = test_setup_log(test_name);
-            let tmpdir = tempdir::TempDir::new("dns-server-storage-test")
+            let tmpdir = Utf8TempDir::with_prefix("dns-server-storage-test")
                 .expect("failed to create tmp directory for test");
-            let storage_path =
-                Utf8PathBuf::from_path_buf(tmpdir.path().to_path_buf()).expect(
-                    "failed to create Utf8PathBuf for test temporary directory",
-                );
+            let storage_path = tmpdir.path().to_path_buf();
 
             let db = Arc::new(
                 sled::open(&storage_path).context("creating db").unwrap(),

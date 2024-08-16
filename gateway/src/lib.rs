@@ -44,18 +44,6 @@ use std::net::SocketAddrV6;
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// Run the OpenAPI generator for the API; which emits the OpenAPI spec
-/// to stdout.
-pub fn run_openapi() -> Result<(), String> {
-    http_entrypoints::api()
-        .openapi("Oxide Management Gateway Service API", "0.0.1")
-        .description("API for interacting with the Oxide control plane's gateway service")
-        .contact_url("https://oxide.computer")
-        .contact_email("api@oxide.computer")
-        .write(&mut std::io::stdout())
-        .map_err(|e| e.to_string())
-}
-
 pub struct MgsArguments {
     pub id: Uuid,
     pub addresses: Vec<SocketAddrV6>,
@@ -98,6 +86,7 @@ fn start_dropshot_server(
         bind_address: SocketAddr::V6(addr),
         request_body_max_bytes,
         default_handler_task_mode: HandlerTaskMode::Detached,
+        log_headers: vec![],
     };
     let http_server_starter = dropshot::HttpServerStarter::new(
         &dropshot,
@@ -331,9 +320,8 @@ pub async fn start_server(
             .map_err(|message| format!("initializing logger: {}", message))?,
     );
     let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
-    if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
-        let err = InlineErrorChain::new(&e);
-        error!(log, "failed to register DTrace probes"; &err);
+    if let slog_dtrace::ProbeRegistration::Failed(err) = registration {
+        error!(log, "failed to register DTrace probes"; "err" => &err);
         return Err(format!("failed to register DTrace probes: {err}"));
     } else {
         debug!(log, "registered DTrace probes");

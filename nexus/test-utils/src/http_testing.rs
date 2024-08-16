@@ -7,6 +7,7 @@
 use anyhow::anyhow;
 use anyhow::ensure;
 use anyhow::Context;
+use camino::Utf8Path;
 use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
 use headers::authorization::Credentials;
@@ -64,8 +65,10 @@ pub struct RequestBuilder<'a> {
 
     expected_status: Option<http::StatusCode>,
     allowed_headers: Option<Vec<http::header::HeaderName>>,
-    // doesn't need Option<> because if it's empty, we don't check anything
-    expected_response_headers: http::HeaderMap<http::header::HeaderValue>,
+    // if an entry's value is `None`, we verify the header exists in the
+    // response, but we don't check the value
+    expected_response_headers:
+        http::HeaderMap<Option<http::header::HeaderValue>>,
 }
 
 impl<'a> RequestBuilder<'a> {
@@ -84,7 +87,6 @@ impl<'a> RequestBuilder<'a> {
             body: hyper::Body::empty(),
             expected_status: None,
             allowed_headers: Some(vec![
-                http::header::CACHE_CONTROL,
                 http::header::CONTENT_ENCODING,
                 http::header::CONTENT_LENGTH,
                 http::header::CONTENT_TYPE,
@@ -93,7 +95,7 @@ impl<'a> RequestBuilder<'a> {
                 http::header::SET_COOKIE,
                 http::header::HeaderName::from_static("x-request-id"),
             ]),
-            expected_response_headers: http::HeaderMap::new(),
+            expected_response_headers: http::HeaderMap::default(),
             error: None,
             allow_non_dropshot_errors: false,
         }
@@ -147,6 +149,35 @@ impl<'a> RequestBuilder<'a> {
         self
     }
 
+    /// Set the outgoing request body to the contents of a file.
+    ///
+    /// A handle to the file will be kept open until the request is completed.
+    ///
+    /// If `path` is `None`, the request body will be empty.
+    pub fn body_file(mut self, path: Option<&Utf8Path>) -> Self {
+        match path {
+            Some(path) => {
+                // Turn the file into a stream. (Opening the file with
+                // std::fs::File::open means that this method doesn't have to
+                // be async.)
+                let file = std::fs::File::open(path).with_context(|| {
+                    format!("failed to open request body file at {path}")
+                });
+                match file {
+                    Ok(file) => {
+                        let stream = tokio_util::io::ReaderStream::new(
+                            tokio::fs::File::from_std(file),
+                        );
+                        self.body = hyper::Body::wrap_stream(stream);
+                    }
+                    Err(error) => self.error = Some(error),
+                }
+            }
+            None => self.body = hyper::Body::empty(),
+        };
+        self
+    }
+
     /// Set the outgoing request body using URL encoding
     /// and set the content type appropriately
     ///
@@ -183,25 +214,10 @@ impl<'a> RequestBuilder<'a> {
         self
     }
 
-    /// Record a list of header names allowed in the response
-    ///
-    /// If this function is used, then [`Self::execute()`] will check each header in
-    /// the response against this list and raise an error if a header name is
-    /// found that's not in this list.
-    pub fn expect_allowed_headers<
-        I: IntoIterator<Item = http::header::HeaderName>,
-    >(
-        mut self,
-        allowed_headers: I,
-    ) -> Self {
-        self.allowed_headers = Some(allowed_headers.into_iter().collect());
-        self
-    }
-
     /// Add header and value to check for at execution time
     ///
-    /// Behaves like header() rather than expect_allowed_headers() in that it
-    /// takes one header at a time rather than a whole set.
+    /// Behaves like header() in that it takes one header at a time rather than
+    /// a whole set.
     pub fn expect_response_header<K, V, KE, VE>(
         mut self,
         name: K,
@@ -218,7 +234,7 @@ impl<'a> RequestBuilder<'a> {
                 self.error = Some(error);
             }
             Ok((name, value)) => {
-                self.expected_response_headers.append(name, value);
+                self.expected_response_headers.append(name, Some(value));
             }
         }
         self
@@ -249,6 +265,21 @@ impl<'a> RequestBuilder<'a> {
             )
     }
 
+    /// Expect a successful console asset response.
+    pub fn expect_console_asset(mut self) -> Self {
+        let headers = [
+            http::header::CACHE_CONTROL,
+            http::header::CONTENT_SECURITY_POLICY,
+            http::header::X_CONTENT_TYPE_OPTIONS,
+            http::header::X_FRAME_OPTIONS,
+        ];
+        self.allowed_headers.as_mut().unwrap().extend(headers.clone());
+        for header in headers {
+            self.expected_response_headers.entry(header).or_insert(None);
+        }
+        self.expect_status(Some(http::StatusCode::OK))
+    }
+
     /// Allow non-dropshot error responses, i.e., errors that are not compatible
     /// with `dropshot::HttpErrorResponseBody`.
     pub fn allow_non_dropshot_errors(mut self) -> Self {
@@ -260,8 +291,9 @@ impl<'a> RequestBuilder<'a> {
     /// response, and make the response available to the caller
     ///
     /// This function checks the returned status code (if [`Self::expect_status()`]
-    /// was used), allowed headers (if [`Self::expect_allowed_headers()`] was used), and
-    /// various other properties of the response.
+    /// was used), allowed headers (if [`Self::expect_websocket_handshake()`] or
+    /// [`Self::expect_console_asset()`] was used), and various other properties
+    /// of the response.
     pub async fn execute(self) -> Result<TestResponse, anyhow::Error> {
         if let Some(error) = self.error {
             return Err(error);
@@ -327,14 +359,17 @@ impl<'a> RequestBuilder<'a> {
                 "response did not contain expected header {:?}",
                 header_name
             );
-            let actual_value = headers.get(header_name).unwrap();
-            ensure!(
-                actual_value == expected_value,
-                "response contained expected header {:?}, but with value {:?} instead of expected {:?}",
-                header_name,
-                actual_value,
-                expected_value,
-            );
+            if let Some(expected_value) = expected_value {
+                let actual_value = headers.get(header_name).unwrap();
+                ensure!(
+                    actual_value == expected_value,
+                    "response contained expected header {:?}, but with value \
+                    {:?} instead of expected {:?}",
+                    header_name,
+                    actual_value,
+                    expected_value,
+                );
+            }
         }
 
         // Sanity check the Date header in the response.  This check assumes
@@ -394,7 +429,7 @@ impl<'a> RequestBuilder<'a> {
         // the body.
         if status == http::StatusCode::NO_CONTENT {
             ensure!(
-                response_body.len() == 0,
+                response_body.is_empty(),
                 "expected empty response for 204 status code"
             )
         }
@@ -554,6 +589,12 @@ impl<'a> NexusRequest<'a> {
     pub fn websocket_handshake(mut self) -> Self {
         self.request_builder =
             self.request_builder.expect_websocket_handshake();
+        self
+    }
+
+    /// Tells the request builder to expect headers specific to console assets.
+    pub fn console_asset(mut self) -> Self {
+        self.request_builder = self.request_builder.expect_console_asset();
         self
     }
 

@@ -5,18 +5,22 @@
 use crate::schema::{
     lldp_config, lldp_service_config, switch_port, switch_port_settings,
     switch_port_settings_address_config, switch_port_settings_bgp_peer_config,
+    switch_port_settings_bgp_peer_config_allow_export,
+    switch_port_settings_bgp_peer_config_allow_import,
+    switch_port_settings_bgp_peer_config_communities,
     switch_port_settings_group, switch_port_settings_groups,
     switch_port_settings_interface_config, switch_port_settings_link_config,
     switch_port_settings_port_config, switch_port_settings_route_config,
 };
-use crate::SqlU16;
 use crate::{impl_enum_type, SqlU32};
+use crate::{SqlU16, SqlU8};
 use db_macros::Resource;
 use diesel::AsChangeset;
 use ipnetwork::IpNetwork;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
+use omicron_common::api::external::{BgpPeer, ImportExportPolicy};
 use omicron_common::api::internal::shared::{PortFec, PortSpeed};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -106,12 +110,22 @@ impl From<SwitchLinkFec> for PortFec {
     }
 }
 
-impl From<params::LinkFec> for SwitchLinkFec {
-    fn from(value: params::LinkFec) -> Self {
+impl From<external::LinkFec> for SwitchLinkFec {
+    fn from(value: external::LinkFec) -> Self {
         match value {
-            params::LinkFec::Firecode => SwitchLinkFec::Firecode,
-            params::LinkFec::None => SwitchLinkFec::None,
-            params::LinkFec::Rs => SwitchLinkFec::Rs,
+            external::LinkFec::Firecode => SwitchLinkFec::Firecode,
+            external::LinkFec::None => SwitchLinkFec::None,
+            external::LinkFec::Rs => SwitchLinkFec::Rs,
+        }
+    }
+}
+
+impl From<SwitchLinkFec> for external::LinkFec {
+    fn from(value: SwitchLinkFec) -> Self {
+        match value {
+            SwitchLinkFec::Firecode => external::LinkFec::Firecode,
+            SwitchLinkFec::None => external::LinkFec::None,
+            SwitchLinkFec::Rs => external::LinkFec::Rs,
         }
     }
 }
@@ -132,18 +146,34 @@ impl From<SwitchLinkSpeed> for PortSpeed {
     }
 }
 
-impl From<params::LinkSpeed> for SwitchLinkSpeed {
-    fn from(value: params::LinkSpeed) -> Self {
+impl From<external::LinkSpeed> for SwitchLinkSpeed {
+    fn from(value: external::LinkSpeed) -> Self {
         match value {
-            params::LinkSpeed::Speed0G => SwitchLinkSpeed::Speed0G,
-            params::LinkSpeed::Speed1G => SwitchLinkSpeed::Speed1G,
-            params::LinkSpeed::Speed10G => SwitchLinkSpeed::Speed10G,
-            params::LinkSpeed::Speed25G => SwitchLinkSpeed::Speed25G,
-            params::LinkSpeed::Speed40G => SwitchLinkSpeed::Speed40G,
-            params::LinkSpeed::Speed50G => SwitchLinkSpeed::Speed50G,
-            params::LinkSpeed::Speed100G => SwitchLinkSpeed::Speed100G,
-            params::LinkSpeed::Speed200G => SwitchLinkSpeed::Speed200G,
-            params::LinkSpeed::Speed400G => SwitchLinkSpeed::Speed400G,
+            external::LinkSpeed::Speed0G => SwitchLinkSpeed::Speed0G,
+            external::LinkSpeed::Speed1G => SwitchLinkSpeed::Speed1G,
+            external::LinkSpeed::Speed10G => SwitchLinkSpeed::Speed10G,
+            external::LinkSpeed::Speed25G => SwitchLinkSpeed::Speed25G,
+            external::LinkSpeed::Speed40G => SwitchLinkSpeed::Speed40G,
+            external::LinkSpeed::Speed50G => SwitchLinkSpeed::Speed50G,
+            external::LinkSpeed::Speed100G => SwitchLinkSpeed::Speed100G,
+            external::LinkSpeed::Speed200G => SwitchLinkSpeed::Speed200G,
+            external::LinkSpeed::Speed400G => SwitchLinkSpeed::Speed400G,
+        }
+    }
+}
+
+impl From<SwitchLinkSpeed> for external::LinkSpeed {
+    fn from(value: SwitchLinkSpeed) -> Self {
+        match value {
+            SwitchLinkSpeed::Speed0G => external::LinkSpeed::Speed0G,
+            SwitchLinkSpeed::Speed1G => external::LinkSpeed::Speed1G,
+            SwitchLinkSpeed::Speed10G => external::LinkSpeed::Speed10G,
+            SwitchLinkSpeed::Speed25G => external::LinkSpeed::Speed25G,
+            SwitchLinkSpeed::Speed40G => external::LinkSpeed::Speed40G,
+            SwitchLinkSpeed::Speed50G => external::LinkSpeed::Speed50G,
+            SwitchLinkSpeed::Speed100G => external::LinkSpeed::Speed100G,
+            SwitchLinkSpeed::Speed200G => external::LinkSpeed::Speed200G,
+            SwitchLinkSpeed::Speed400G => external::LinkSpeed::Speed400G,
         }
     }
 }
@@ -387,6 +417,9 @@ impl Into<external::SwitchPortLinkConfig> for SwitchPortLinkConfig {
             lldp_service_config_id: self.lldp_service_config_id,
             link_name: self.link_name.clone(),
             mtu: self.mtu.into(),
+            fec: self.fec.into(),
+            speed: self.speed.into(),
+            autoneg: self.autoneg,
         }
     }
 }
@@ -568,6 +601,77 @@ pub struct SwitchPortBgpPeerConfig {
     pub delay_open: SqlU32,
     pub connect_retry: SqlU32,
     pub keepalive: SqlU32,
+    pub remote_asn: Option<SqlU32>,
+    pub min_ttl: Option<SqlU8>,
+    pub md5_auth_key: Option<String>,
+    pub multi_exit_discriminator: Option<SqlU32>,
+    pub local_pref: Option<SqlU32>,
+    pub enforce_first_as: bool,
+    pub allow_import_list_active: bool,
+    pub allow_export_list_active: bool,
+    pub vlan_id: Option<SqlU16>,
+}
+
+#[derive(
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    AsChangeset,
+)]
+#[diesel(table_name = switch_port_settings_bgp_peer_config_communities)]
+pub struct SwitchPortBgpPeerConfigCommunity {
+    pub port_settings_id: Uuid,
+    pub interface_name: String,
+    pub addr: IpNetwork,
+    pub community: SqlU32,
+}
+
+#[derive(
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    AsChangeset,
+)]
+#[diesel(table_name = switch_port_settings_bgp_peer_config_allow_export)]
+pub struct SwitchPortBgpPeerConfigAllowExport {
+    /// Parent switch port configuration
+    pub port_settings_id: Uuid,
+    /// Interface peer is reachable on
+    pub interface_name: String,
+    /// Peer Address
+    pub addr: IpNetwork,
+    /// Allowed Prefix
+    pub prefix: IpNetwork,
+}
+
+#[derive(
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    AsChangeset,
+)]
+#[diesel(table_name = switch_port_settings_bgp_peer_config_allow_import)]
+pub struct SwitchPortBgpPeerConfigAllowImport {
+    /// Parent switch port configuration
+    pub port_settings_id: Uuid,
+    /// Interface peer is reachable on
+    pub interface_name: String,
+    /// Peer Address
+    pub addr: IpNetwork,
+    /// Allowed Prefix
+    pub prefix: IpNetwork,
 }
 
 impl SwitchPortBgpPeerConfig {
@@ -576,34 +680,35 @@ impl SwitchPortBgpPeerConfig {
         port_settings_id: Uuid,
         bgp_config_id: Uuid,
         interface_name: String,
-        addr: IpNetwork,
-        hold_time: SqlU32,
-        idle_hold_time: SqlU32,
-        delay_open: SqlU32,
-        connect_retry: SqlU32,
-        keepalive: SqlU32,
+        p: &BgpPeer,
     ) -> Self {
         Self {
             port_settings_id,
             bgp_config_id,
             interface_name,
-            addr,
-            hold_time,
-            idle_hold_time,
-            delay_open,
-            connect_retry,
-            keepalive,
-        }
-    }
-}
-
-impl Into<external::SwitchPortBgpPeerConfig> for SwitchPortBgpPeerConfig {
-    fn into(self) -> external::SwitchPortBgpPeerConfig {
-        external::SwitchPortBgpPeerConfig {
-            port_settings_id: self.port_settings_id,
-            bgp_config_id: self.bgp_config_id,
-            interface_name: self.interface_name.clone(),
-            addr: self.addr.ip(),
+            addr: p.addr.into(),
+            hold_time: p.hold_time.into(),
+            idle_hold_time: p.delay_open.into(),
+            delay_open: p.connect_retry.into(),
+            connect_retry: p.connect_retry.into(),
+            keepalive: p.keepalive.into(),
+            remote_asn: p.remote_asn.map(|x| x.into()),
+            min_ttl: p.min_ttl.map(|x| x.into()),
+            md5_auth_key: p.md5_auth_key.clone(),
+            multi_exit_discriminator: p
+                .multi_exit_discriminator
+                .map(|x| x.into()),
+            local_pref: p.local_pref.map(|x| x.into()),
+            enforce_first_as: p.enforce_first_as,
+            allow_import_list_active: match &p.allowed_import {
+                ImportExportPolicy::NoFiltering => false,
+                _ => true,
+            },
+            allow_export_list_active: match &p.allowed_export {
+                ImportExportPolicy::NoFiltering => false,
+                _ => true,
+            },
+            vlan_id: p.vlan_id.map(|x| x.into()),
         }
     }
 }
@@ -625,6 +730,7 @@ pub struct SwitchPortAddressConfig {
     pub rsvd_address_lot_block_id: Uuid,
     pub address: IpNetwork,
     pub interface_name: String,
+    pub vlan_id: Option<SqlU16>,
 }
 
 impl SwitchPortAddressConfig {
@@ -634,6 +740,7 @@ impl SwitchPortAddressConfig {
         rsvd_address_lot_block_id: Uuid,
         address: IpNetwork,
         interface_name: String,
+        vlan_id: Option<u16>,
     ) -> Self {
         Self {
             port_settings_id,
@@ -641,6 +748,7 @@ impl SwitchPortAddressConfig {
             rsvd_address_lot_block_id,
             address,
             interface_name,
+            vlan_id: vlan_id.map(|x| x.into()),
         }
     }
 }
@@ -652,6 +760,7 @@ impl Into<external::SwitchPortAddressConfig> for SwitchPortAddressConfig {
             address_lot_block_id: self.address_lot_block_id,
             address: self.address.into(),
             interface_name: self.interface_name,
+            vlan_id: self.vlan_id.map(|x| x.into()),
         }
     }
 }

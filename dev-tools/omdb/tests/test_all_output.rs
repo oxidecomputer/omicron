@@ -8,10 +8,17 @@
 //! sure you're only breaking what you intend.
 
 use expectorate::assert_contents;
+use nexus_test_utils::{OXIMETER_UUID, PRODUCER_UUID};
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
+use omicron_test_utils::dev::test_cmds::redact_extra;
 use omicron_test_utils::dev::test_cmds::run_command;
+use omicron_test_utils::dev::test_cmds::ExtraRedactions;
+use slog_error_chain::InlineErrorChain;
 use std::fmt::Write;
+use std::net::IpAddr;
 use std::path::Path;
 use subprocess::Exec;
 
@@ -20,6 +27,32 @@ const CMD_OMDB: &str = env!("CARGO_BIN_EXE_omdb");
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
+
+/// The `oximeter` list-producers command output is not easy to compare as a
+/// string directly because the timing of registrations with both our test
+/// producer and the one nexus registers. But, let's find our test producer
+/// in the list.
+fn assert_oximeter_list_producers_output(
+    output: &str,
+    ox_url: &str,
+    test_producer: IpAddr,
+) {
+    assert!(
+        output.contains(format!("Collector ID: {}", OXIMETER_UUID).as_str())
+    );
+    assert!(output.contains(ox_url));
+
+    let found = output.lines().any(|line| {
+        line.contains(PRODUCER_UUID)
+            && line.contains(&test_producer.to_string())
+    });
+
+    assert!(
+        found,
+        "test producer {} and producer UUID {} not found on line together",
+        test_producer, PRODUCER_UUID
+    );
+}
 
 #[tokio::test]
 async fn test_omdb_usage_errors() {
@@ -41,15 +74,32 @@ async fn test_omdb_usage_errors() {
         &["db", "dns"],
         &["db", "dns", "diff"],
         &["db", "dns", "names"],
-        &["db", "services"],
+        &["db", "sleds", "--help"],
         &["db", "snapshots"],
         &["db", "network"],
         &["mgs"],
         &["nexus"],
         &["nexus", "background-tasks"],
+        &["nexus", "background-tasks", "show", "--help"],
+        &["nexus", "blueprints"],
+        &["nexus", "sagas"],
+        // Missing "--destructive" flag.  The URL is bogus but just ensures that
+        // we get far enough to hit the error we care about.
+        &[
+            "nexus",
+            "--nexus-internal-url",
+            "http://[::1]:111",
+            "sagas",
+            "demo-create",
+        ],
+        &["nexus", "sleds"],
         &["sled-agent"],
         &["sled-agent", "zones"],
         &["sled-agent", "zpools"],
+        &["oximeter", "--help"],
+        &["oxql", "--help"],
+        // Mispelled argument
+        &["oxql", "--summarizes"],
     ];
 
     for args in invocations {
@@ -67,23 +117,67 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
     let cmd_path = path_to_executable(CMD_OMDB);
+
     let postgres_url = cptestctx.database.listen_url();
     let nexus_internal_url =
         format!("http://{}/", cptestctx.internal_client.bind_address);
     let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
+    let ox_url = format!("http://{}/", cptestctx.oximeter.server_address());
+    let ox_test_producer = cptestctx.producer.address().ip();
+    let ch_url = format!("http://{}/", cptestctx.clickhouse.address);
+
+    let tmpdir = camino_tempfile::tempdir()
+        .expect("failed to create temporary directory");
+    let tmppath = tmpdir.path().join("reconfigurator-save.out");
+    let initial_blueprint_id = cptestctx.initial_blueprint_id.to_string();
+
     let mut output = String::new();
-    let invocations: &[&[&'static str]] = &[
+
+    let invocations: &[&[&str]] = &[
         &["db", "disks", "list"],
         &["db", "dns", "show"],
         &["db", "dns", "diff", "external", "2"],
         &["db", "dns", "names", "external", "2"],
         &["db", "instances"],
-        &["db", "services", "list-instances"],
-        &["db", "services", "list-by-sled"],
+        &["db", "reconfigurator-save", tmppath.as_str()],
         &["db", "sleds"],
+        &["db", "sleds", "-F", "discretionary"],
         &["mgs", "inventory"],
         &["nexus", "background-tasks", "doc"],
         &["nexus", "background-tasks", "show"],
+        // background tasks: test picking out specific names
+        &["nexus", "background-tasks", "show", "saga_recovery"],
+        &[
+            "nexus",
+            "background-tasks",
+            "show",
+            "blueprint_loader",
+            "blueprint_executor",
+        ],
+        // background tasks: test recognized group names
+        &["nexus", "background-tasks", "show", "dns_internal"],
+        &["nexus", "background-tasks", "show", "dns_external"],
+        &["nexus", "background-tasks", "show", "all"],
+        &["nexus", "sagas", "list"],
+        &["--destructive", "nexus", "sagas", "demo-create"],
+        &["nexus", "sagas", "list"],
+        &[
+            "--destructive",
+            "nexus",
+            "background-tasks",
+            "activate",
+            "inventory_collection",
+        ],
+        &["nexus", "blueprints", "list"],
+        &["nexus", "blueprints", "show", &initial_blueprint_id],
+        &["nexus", "blueprints", "show", "current-target"],
+        &[
+            "nexus",
+            "blueprints",
+            "diff",
+            &initial_blueprint_id,
+            "current-target",
+        ],
         // We can't easily test the sled agent output because that's only
         // provided by a real sled agent, which is not available in the
         // ControlPlaneTestContext.
@@ -94,20 +188,75 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         let p = postgres_url.to_string();
         let u = nexus_internal_url.clone();
         let g = mgs_url.clone();
-        do_run(
+        let ox = ox_url.clone();
+        let ch = ch_url.clone();
+        do_run_extra(
             &mut output,
             move |exec| {
                 exec.env("OMDB_DB_URL", &p)
                     .env("OMDB_NEXUS_URL", &u)
                     .env("OMDB_MGS_URL", &g)
+                    .env("OMDB_OXIMETER_URL", &ox)
+                    .env("OMDB_CLICKHOUSE_URL", &ch)
             },
             &cmd_path,
             args,
+            Some(
+                ExtraRedactions::new()
+                    .variable_length("tmp_path", tmppath.as_str())
+                    .fixed_length("blueprint_id", &initial_blueprint_id),
+            ),
         )
         .await;
     }
 
     assert_contents("tests/successes.out", &output);
+
+    // The `reconfigurator-save` output is not easy to compare as a string.  But
+    // let's make sure we can at least parse it and that it looks broadly like
+    // what we'd expect.
+    let generated = std::fs::read_to_string(&tmppath).unwrap_or_else(|error| {
+        panic!(
+            "failed to read temporary file containing reconfigurator-save \
+            output: {:?}: {}",
+            tmppath,
+            InlineErrorChain::new(&error),
+        )
+    });
+    let parsed: UnstableReconfiguratorState = serde_json::from_str(&generated)
+        .unwrap_or_else(|error| {
+            panic!(
+                "failed to parse reconfigurator-save output (path {}): {}",
+                tmppath,
+                InlineErrorChain::new(&error),
+            )
+        });
+    // Did we find at least one sled in the planning input, and at least one
+    // collection?
+    assert!(parsed
+        .planning_input
+        .all_sled_ids(SledFilter::Commissioned)
+        .next()
+        .is_some());
+    assert!(!parsed.collections.is_empty());
+
+    let ox_invocation = &["oximeter", "list-producers"];
+    let mut ox_output = String::new();
+    let ox = ox_url.clone();
+
+    do_run_no_redactions(
+        &mut ox_output,
+        move |exec| exec.env("OMDB_OXIMETER_URL", &ox),
+        &cmd_path,
+        ox_invocation,
+    )
+    .await;
+    assert_oximeter_list_producers_output(
+        &ox_output,
+        &ox_url,
+        ox_test_producer,
+    );
+
     gwtestctx.teardown().await;
 }
 
@@ -126,6 +275,9 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     let postgres_url = cptestctx.database.listen_url().to_string();
     let nexus_internal_url =
         format!("http://{}", cptestctx.internal_client.bind_address);
+    let ox_url = format!("http://{}/", cptestctx.oximeter.server_address());
+    let ox_test_producer = cptestctx.producer.address().ip();
+    let ch_url = format!("http://{}/", cptestctx.clickhouse.address);
     let dns_sockaddr = cptestctx.internal_dns.dns_server.local_address();
     let mut output = String::new();
 
@@ -201,7 +353,56 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     let args = &["--dns-server", &dns_sockaddr.to_string(), "db", "sleds"];
     do_run(&mut output, move |exec| exec, &cmd_path, args).await;
 
+    // That said, the "sagas" command prints an extra warning in this case.
+    let args = &["nexus", "sagas", "list"];
+    do_run(
+        &mut output,
+        move |exec| exec.env("OMDB_DNS_SERVER", &dns_sockaddr.to_string()),
+        &cmd_path,
+        args,
+    )
+    .await;
+
+    // Case: specified in multiple places (command-line argument wins)
+    let args = &["oximeter", "--oximeter-url", "junk", "list-producers"];
+    let ox = ox_url.clone();
+    do_run(
+        &mut output,
+        move |exec| exec.env("OMDB_OXIMETER_URL", &ox),
+        &cmd_path,
+        args,
+    )
+    .await;
+
+    // Case: specified in multiple places (command-line argument wins)
+    let args = &["oxql", "--clickhouse-url", "junk"];
+    do_run(
+        &mut output,
+        move |exec| exec.env("OMDB_CLICKHOUSE_URL", &ch_url),
+        &cmd_path,
+        args,
+    )
+    .await;
+
     assert_contents("tests/env.out", &output);
+
+    // Oximeter URL
+    // Case 1: specified on the command line.
+    // Case 2: is covered by the success tests above.
+    let ox_args1 = &["oximeter", "--oximeter-url", &ox_url, "list-producers"];
+    let mut ox_output1 = String::new();
+    do_run_no_redactions(
+        &mut ox_output1,
+        move |exec| exec,
+        &cmd_path,
+        ox_args1,
+    )
+    .await;
+    assert_oximeter_list_producers_output(
+        &ox_output1,
+        &ox_url,
+        ox_test_producer,
+    );
 }
 
 async fn do_run<F>(
@@ -212,12 +413,48 @@ async fn do_run<F>(
 ) where
     F: FnOnce(Exec) -> Exec + Send + 'static,
 {
-    println!("running command with args: {:?}", args);
+    do_run_extra(
+        output,
+        modexec,
+        cmd_path,
+        args,
+        Some(&ExtraRedactions::new()),
+    )
+    .await;
+}
+
+async fn do_run_no_redactions<F>(
+    output: &mut String,
+    modexec: F,
+    cmd_path: &Path,
+    args: &[&str],
+) where
+    F: FnOnce(Exec) -> Exec + Send + 'static,
+{
+    do_run_extra(output, modexec, cmd_path, args, None).await;
+}
+
+async fn do_run_extra<F>(
+    output: &mut String,
+    modexec: F,
+    cmd_path: &Path,
+    args: &[&str],
+    extra_redactions: Option<&ExtraRedactions<'_>>,
+) where
+    F: FnOnce(Exec) -> Exec + Send + 'static,
+{
     write!(
         output,
         "EXECUTING COMMAND: {} {:?}\n",
         cmd_path.file_name().expect("missing command").to_string_lossy(),
-        args.iter().map(|r| redact_variable(r)).collect::<Vec<_>>(),
+        args.iter()
+            .map(|r| {
+                extra_redactions.map_or_else(
+                    || r.to_string(),
+                    |redactions| redact_extra(r, redactions),
+                )
+            })
+            .collect::<Vec<_>>()
     )
     .unwrap();
 
@@ -249,75 +486,21 @@ async fn do_run<F>(
     write!(output, "termination: {:?}\n", exit_status).unwrap();
     write!(output, "---------------------------------------------\n").unwrap();
     write!(output, "stdout:\n").unwrap();
-    output.push_str(&redact_variable(&stdout_text));
+
+    if let Some(extra_redactions) = extra_redactions {
+        output.push_str(&redact_extra(&stdout_text, extra_redactions));
+    } else {
+        output.push_str(&stdout_text);
+    }
+
     write!(output, "---------------------------------------------\n").unwrap();
     write!(output, "stderr:\n").unwrap();
-    output.push_str(&redact_variable(&stderr_text));
+
+    if let Some(extra_redactions) = extra_redactions {
+        output.push_str(&redact_extra(&stderr_text, extra_redactions));
+    } else {
+        output.push_str(&stderr_text);
+    }
+
     write!(output, "=============================================\n").unwrap();
-}
-
-/// Redacts text from stdout/stderr that may change from invocation to invocation
-/// (e.g., assigned TCP port numbers, timestamps)
-///
-/// This allows use to use expectorate to verify the shape of the CLI output.
-fn redact_variable(input: &str) -> String {
-    // Replace TCP port numbers.  We include the localhost characters to avoid
-    // catching any random sequence of numbers.
-    let s = regex::Regex::new(r"\[::1\]:\d{4,5}")
-        .unwrap()
-        .replace_all(input, "[::1]:REDACTED_PORT")
-        .to_string();
-    let s = regex::Regex::new(r"\[::ffff:127.0.0.1\]:\d{4,5}")
-        .unwrap()
-        .replace_all(&s, "[::ffff:127.0.0.1]:REDACTED_PORT")
-        .to_string();
-    let s = regex::Regex::new(r"127\.0\.0\.1:\d{4,5}")
-        .unwrap()
-        .replace_all(&s, "127.0.0.1:REDACTED_PORT")
-        .to_string();
-
-    // Replace uuids.
-    let s = regex::Regex::new(
-        "[a-zA-Z0-9]{8}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-\
-        [a-zA-Z0-9]{4}-[a-zA-Z0-9]{12}",
-    )
-    .unwrap()
-    .replace_all(&s, "REDACTED_UUID_REDACTED_UUID_REDACTED")
-    .to_string();
-
-    // Replace timestamps.
-    let s = regex::Regex::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
-        .unwrap()
-        .replace_all(&s, "<REDACTED_TIMESTAMP>")
-        .to_string();
-
-    let s = regex::Regex::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z")
-        .unwrap()
-        .replace_all(&s, "<REDACTED     TIMESTAMP>")
-        .to_string();
-
-    // Replace formatted durations.  These are pretty specific to the background
-    // task output.
-    let s = regex::Regex::new(r"\d+s ago")
-        .unwrap()
-        .replace_all(&s, "<REDACTED DURATION>s ago")
-        .to_string();
-
-    let s = regex::Regex::new(r"\d+ms")
-        .unwrap()
-        .replace_all(&s, "<REDACTED DURATION>ms")
-        .to_string();
-
-    let s = regex::Regex::new(
-        r"note: database schema version matches expected \(\d+\.\d+\.\d+\)",
-    )
-    .unwrap()
-    .replace_all(
-        &s,
-        "note: database schema version matches expected \
-        (<redacted database version>)",
-    )
-    .to_string();
-
-    s
 }

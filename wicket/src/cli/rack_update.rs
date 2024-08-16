@@ -8,23 +8,29 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
+    io::{BufReader, Write},
     net::SocketAddrV6,
     time::Duration,
 };
 
 use anyhow::{anyhow, bail, Context, Result};
+use camino::Utf8PathBuf;
 use clap::{Args, Subcommand, ValueEnum};
 use slog::Logger;
 use tokio::{sync::watch, task::JoinHandle};
 use update_engine::{
     display::{GroupDisplay, LineDisplayStyles},
-    NestedError,
+    EventBuffer, NestedError,
 };
 use wicket_common::{
-    rack_update::ClearUpdateStateResponse, update_events::EventReport,
+    rack_update::ClearUpdateStateResponse,
+    update_events::{EventReport, WicketdEngineSpec},
     WICKETD_TIMEOUT,
 };
-use wicketd_client::types::{ClearUpdateStateParams, StartUpdateParams};
+use wicketd_client::types::{
+    ClearUpdateStateParams, GetArtifactsAndEventReportsResponse,
+    StartUpdateParams,
+};
 
 use crate::{
     cli::GlobalOpts,
@@ -41,10 +47,22 @@ use super::command::CommandOutput;
 pub(crate) enum RackUpdateArgs {
     /// Start one or more updates.
     Start(StartRackUpdateArgs),
+
     /// Attach to one or more running updates.
     Attach(AttachArgs),
+
     /// Clear updates.
     Clear(ClearArgs),
+
+    /// Dump artifacts and event reports from wicketd.
+    ///
+    /// Debug-only, intended for development.
+    DebugDump(DumpArgs),
+
+    /// Replay update logs from a dump file.
+    ///
+    /// Debug-only, intended for development.
+    DebugReplay(ReplayArgs),
 }
 
 impl RackUpdateArgs {
@@ -65,6 +83,12 @@ impl RackUpdateArgs {
             RackUpdateArgs::Clear(args) => {
                 args.exec(log, wicketd_addr, global_opts, output).await
             }
+            RackUpdateArgs::DebugDump(args) => {
+                args.exec(log, wicketd_addr).await
+            }
+            RackUpdateArgs::DebugReplay(args) => {
+                args.exec(log, global_opts, output)
+            }
         }
     }
 }
@@ -73,6 +97,10 @@ impl RackUpdateArgs {
 pub(crate) struct StartRackUpdateArgs {
     #[clap(flatten)]
     component_ids: ComponentIdSelector,
+
+    /// Force update the RoT Bootloader even if the version is the same.
+    #[clap(long, help_heading = "Update options")]
+    force_update_rot_bootloader: bool,
 
     /// Force update the RoT even if the version is the same.
     #[clap(long, help_heading = "Update options")]
@@ -101,6 +129,7 @@ impl StartRackUpdateArgs {
 
         let update_ids = self.component_ids.to_component_ids()?;
         let options = CreateStartUpdateOptions {
+            force_update_rot_bootloader: self.force_update_rot_bootloader,
             force_update_rot: self.force_update_rot,
             force_update_sp: self.force_update_sp,
         }
@@ -378,6 +407,155 @@ async fn do_clear_update_state(
         .context("error calling clear_update_state")?;
     let response = result.into_inner();
     Ok(response)
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct DumpArgs {
+    /// Pretty-print JSON output.
+    #[clap(long)]
+    pretty: bool,
+}
+
+impl DumpArgs {
+    async fn exec(self, log: Logger, wicketd_addr: SocketAddrV6) -> Result<()> {
+        let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+
+        let response = client
+            .get_artifacts_and_event_reports()
+            .await
+            .context("error calling get_artifacts_and_event_reports")?;
+        let response = response.into_inner();
+
+        // Return the response as a JSON object.
+        if self.pretty {
+            serde_json::to_writer_pretty(std::io::stdout(), &response)
+                .context("error writing to stdout")?;
+        } else {
+            serde_json::to_writer(std::io::stdout(), &response)
+                .context("error writing to stdout")?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ReplayArgs {
+    /// The dump file to replay.
+    ///
+    /// This should be the output of `rack-update debug-dump`, or something
+    /// like <curl http://localhost:12226/artifacts-and-event-reports>.
+    file: Utf8PathBuf,
+
+    /// How to feed events into the display.
+    #[clap(long, value_enum, default_value_t)]
+    strategy: ReplayStrategy,
+
+    #[clap(flatten)]
+    component_ids: ComponentIdSelector,
+}
+
+impl ReplayArgs {
+    fn exec(
+        self,
+        log: Logger,
+        global_opts: GlobalOpts,
+        output: CommandOutput<'_>,
+    ) -> Result<()> {
+        let update_ids = self.component_ids.to_component_ids()?;
+        let mut display = GroupDisplay::new_with_display(
+            &log,
+            update_ids.iter().copied(),
+            output.stderr,
+        );
+        if global_opts.use_color() {
+            display.set_styles(LineDisplayStyles::colorized());
+        }
+
+        let file = BufReader::new(
+            std::fs::File::open(&self.file)
+                .with_context(|| format!("error opening {}", self.file))?,
+        );
+        let response: GetArtifactsAndEventReportsResponse =
+            serde_json::from_reader(file)?;
+        let event_reports =
+            parse_event_report_map(&log, response.event_reports);
+
+        self.strategy.execute(display, event_reports)?;
+
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Default, Eq, PartialEq, Hash, Debug, ValueEnum)]
+enum ReplayStrategy {
+    /// Feed all events into the buffer immediately.
+    #[default]
+    Oneshot,
+
+    /// Feed events into the buffer one at a time.
+    Incremental,
+
+    /// Feed events into the buffer as 0, 0..1, 0..2, 0..3 etc.
+    Idempotent,
+}
+
+impl ReplayStrategy {
+    fn execute(
+        self,
+        mut display: GroupDisplay<
+            ComponentId,
+            &mut dyn Write,
+            WicketdEngineSpec,
+        >,
+        event_reports: BTreeMap<ComponentId, EventReport>,
+    ) -> Result<()> {
+        match self {
+            ReplayStrategy::Oneshot => {
+                // TODO: parallelize this computation?
+                for (id, event_report) in event_reports {
+                    // If display.add_event_report errors out, it's for a report for a
+                    // component we weren't interested in. Ignore it.
+                    _ = display.add_event_report(&id, event_report);
+                }
+
+                display.write_events()?;
+            }
+            ReplayStrategy::Incremental => {
+                for (id, event_report) in &event_reports {
+                    let mut buffer = EventBuffer::default();
+                    let mut last_seen = None;
+                    for event in &event_report.step_events {
+                        buffer.add_step_event(event.clone());
+                        let report =
+                            buffer.generate_report_since(&mut last_seen);
+
+                        // If display.add_event_report errors out, it's for a report for a
+                        // component we weren't interested in. Ignore it.
+                        _ = display.add_event_report(&id, report);
+
+                        display.write_events()?;
+                    }
+                }
+            }
+            ReplayStrategy::Idempotent => {
+                for (id, event_report) in &event_reports {
+                    let mut buffer = EventBuffer::default();
+                    for event in &event_report.step_events {
+                        buffer.add_step_event(event.clone());
+                        let report = buffer.generate_report();
+
+                        // If display.add_event_report errors out, it's for a report for a
+                        // component we weren't interested in. Ignore it.
+                        _ = display.add_event_report(&id, report);
+
+                        display.write_events()?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, ValueEnum)]

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -o pipefail
 set -o errexit
@@ -8,6 +8,7 @@ SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 function usage {
     echo "usage: $0 [-c COMMIT] [-n]"
     echo
+    echo "  -b COMMIT   Ask to update Propolis to HEAD on the named branch."
     echo "  -c COMMIT   Ask to update Propolis to a specific commit."
     echo "              If this is unset, Github is queried."
     echo "  -n          Dry-run"
@@ -30,8 +31,11 @@ REPO="oxidecomputer/propolis"
 function main {
     TARGET_COMMIT=""
     DRY_RUN=""
-    while getopts "c:n" o; do
+    while getopts "b:c:n" o; do
       case "${o}" in
+        b)
+          TARGET_BRANCH="$OPTARG"
+          ;;
         c)
           TARGET_COMMIT="$OPTARG"
           ;;
@@ -44,7 +48,9 @@ function main {
       esac
     done
 
-    TARGET_COMMIT=$(get_latest_commit_from_gh "$REPO" "$TARGET_COMMIT")
+    if [[ -z "$TARGET_COMMIT" ]]; then
+	    TARGET_COMMIT=$(get_latest_commit_from_gh "$REPO" "$TARGET_BRANCH")
+    fi
     install_toml2json
     do_update_packages "$TARGET_COMMIT" "$DRY_RUN" "$REPO" "${PACKAGES[@]}"
     do_update_crates "$TARGET_COMMIT" "$DRY_RUN" "$REPO" "${CRATES[@]}"

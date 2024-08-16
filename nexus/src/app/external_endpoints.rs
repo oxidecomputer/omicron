@@ -26,8 +26,7 @@
 //! "certificate resolver" object that impls
 //! [`rustls::server::ResolvesServerCert`].  See [`NexusCertResolver`].
 
-use super::silo::silo_dns_name;
-use crate::ServerContext;
+use crate::context::ApiContext;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
@@ -36,9 +35,10 @@ use nexus_db_model::Certificate;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::Discoverability;
-use nexus_db_queries::db::fixed_data::silo::SILO_ID;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO_ID;
 use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::DataStore;
+use nexus_reconfigurator_execution::silo_dns_name;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::DataPageParams;
@@ -225,7 +225,7 @@ impl ExternalEndpoints {
             .filter(|s| {
                 // Ignore the built-in Silo, which people are not supposed to
                 // log into.
-                s.id() != *SILO_ID
+                s.id() != *DEFAULT_SILO_ID
             })
             .find(|s| s.authentication_mode == AuthenticationMode::Local)
             .and_then(|s| {
@@ -429,19 +429,21 @@ impl TryFrom<Certificate> for TlsCertificate {
 
         // Assemble a rustls CertifiedKey with both the certificate and the key.
         let certified_key = {
-            let private_key_der = private_key
-                .private_key_to_der()
-                .context("serializing private key to DER")?;
-            let rustls_private_key = rustls::PrivateKey(private_key_der);
+            let mut cursor = std::io::Cursor::new(db_cert.key.clone());
+            let rustls_private_key = rustls_pemfile::private_key(&mut cursor)
+                .expect("parsing private key PEM")
+                .expect("no private keys found");
             let rustls_signing_key =
-                rustls::sign::any_supported_type(&rustls_private_key)
-                    .context("parsing DER private key")?;
+                rustls::crypto::ring::sign::any_supported_type(
+                    &rustls_private_key,
+                )
+                .context("parsing DER private key")?;
             let rustls_certs = certs_pem
                 .iter()
                 .map(|x509| {
                     x509.to_der()
                         .context("serializing cert to DER")
-                        .map(rustls::Certificate)
+                        .map(rustls::pki_types::CertificateDer::from)
                 })
                 .collect::<Result<_, _>>()?;
             Arc::new(CertifiedKey::new(rustls_certs, rustls_signing_key))
@@ -563,6 +565,7 @@ pub(crate) async fn read_all_endpoints(
 /// session.
 ///
 /// See the module-level comment for more details.
+#[derive(Debug)]
 pub struct NexusCertResolver {
     log: slog::Logger,
     config_rx: watch::Receiver<Option<ExternalEndpoints>>,
@@ -671,7 +674,7 @@ impl super::Nexus {
     /// case, we'll choose an arbitrary Silo.
     pub fn endpoint_for_request(
         &self,
-        rqctx: &dropshot::RequestContext<Arc<ServerContext>>,
+        rqctx: &dropshot::RequestContext<ApiContext>,
     ) -> Result<Arc<ExternalEndpoint>, Error> {
         let log = &rqctx.log;
         let rqinfo = &rqctx.request;

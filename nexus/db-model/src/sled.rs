@@ -2,13 +2,20 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{ByteCount, Generation, SqlU16, SqlU32};
+use super::{ByteCount, Generation, SledState, SqlU16, SqlU32};
 use crate::collection::DatastoreCollectionConfig;
-use crate::schema::{physical_disk, service, sled, zpool};
-use crate::{ipv6, SledProvisionState};
+use crate::ipv6;
+use crate::schema::{physical_disk, sled, zpool};
+use crate::sled::shared::Baseboard;
+use crate::sled_policy::DbSledPolicy;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
-use nexus_types::{external_api::shared, external_api::views, identity::Asset};
+use nexus_sled_agent_shared::inventory::SledRole;
+use nexus_types::{
+    external_api::{shared, views},
+    identity::Asset,
+    internal_api::params,
+};
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
@@ -20,7 +27,7 @@ use uuid::Uuid;
 pub struct SledBaseboard {
     pub serial_number: String,
     pub part_number: String,
-    pub revision: i64,
+    pub revision: u32,
 }
 
 /// Hardware information about the sled.
@@ -38,16 +45,16 @@ pub struct SledSystemHardware {
 #[diesel(table_name = sled)]
 pub struct Sled {
     #[diesel(embed)]
-    identity: SledIdentity,
+    pub identity: SledIdentity,
     time_deleted: Option<DateTime<Utc>>,
-    rcgen: Generation,
+    pub rcgen: Generation,
 
     pub rack_id: Uuid,
 
     is_scrimlet: bool,
     serial_number: String,
     part_number: String,
-    revision: i64,
+    revision: SqlU32,
 
     pub usable_hardware_threads: SqlU32,
     pub usable_physical_ram: ByteCount,
@@ -60,7 +67,17 @@ pub struct Sled {
     /// The last IP address provided to a propolis instance on this sled
     pub last_used_address: ipv6::Ipv6Addr,
 
-    provision_state: SledProvisionState,
+    #[diesel(column_name = sled_policy)]
+    policy: DbSledPolicy,
+
+    #[diesel(column_name = sled_state)]
+    state: SledState,
+
+    /// A generation number owned and incremented by sled-agent
+    ///
+    /// This is specifically distinct from `rcgen`, which is incremented by
+    /// child resources as part of `DatastoreCollectionConfig`.
+    pub sled_agent_gen: Generation,
 }
 
 impl Sled {
@@ -84,8 +101,23 @@ impl Sled {
         &self.serial_number
     }
 
-    pub fn provision_state(&self) -> SledProvisionState {
-        self.provision_state
+    pub fn part_number(&self) -> &str {
+        &self.part_number
+    }
+
+    /// The policy here is the `views::SledPolicy` because we expect external
+    /// users to always use that.
+    pub fn policy(&self) -> views::SledPolicy {
+        self.policy.into()
+    }
+
+    /// Returns the sled's state.
+    pub fn state(&self) -> SledState {
+        self.state
+    }
+
+    pub fn time_modified(&self) -> DateTime<Utc> {
+        self.identity.time_modified
     }
 }
 
@@ -97,11 +129,40 @@ impl From<Sled> for views::Sled {
             baseboard: shared::Baseboard {
                 serial: sled.serial_number,
                 part: sled.part_number,
-                revision: sled.revision,
+                revision: *sled.revision,
             },
-            provision_state: sled.provision_state.into(),
+            policy: sled.policy.into(),
+            state: sled.state.into(),
             usable_hardware_threads: sled.usable_hardware_threads.0,
             usable_physical_ram: *sled.usable_physical_ram,
+        }
+    }
+}
+
+impl From<Sled> for params::SledAgentInfo {
+    fn from(sled: Sled) -> Self {
+        let role = if sled.is_scrimlet {
+            SledRole::Scrimlet
+        } else {
+            SledRole::Gimlet
+        };
+        let decommissioned = match sled.state {
+            SledState::Active => false,
+            SledState::Decommissioned => true,
+        };
+        Self {
+            sa_address: sled.address(),
+            role,
+            baseboard: Baseboard {
+                serial: sled.serial_number.clone(),
+                part: sled.part_number.clone(),
+                revision: *sled.revision,
+            },
+            usable_hardware_threads: sled.usable_hardware_threads.into(),
+            usable_physical_ram: sled.usable_physical_ram.into(),
+            reservoir_size: sled.reservoir_size.into(),
+            generation: sled.sled_agent_gen.into(),
+            decommissioned,
         }
     }
 }
@@ -121,13 +182,6 @@ impl DatastoreCollectionConfig<super::Zpool> for Sled {
     type CollectionIdColumn = zpool::dsl::sled_id;
 }
 
-impl DatastoreCollectionConfig<super::Service> for Sled {
-    type CollectionId = Uuid;
-    type GenerationNumberColumn = sled::dsl::rcgen;
-    type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
-    type CollectionIdColumn = service::dsl::sled_id;
-}
-
 /// Form of `Sled` used for updates from sled-agent. This is missing some
 /// columns that are present in `Sled` because sled-agent doesn't control them.
 #[derive(Debug, Clone)]
@@ -139,7 +193,7 @@ pub struct SledUpdate {
     is_scrimlet: bool,
     serial_number: String,
     part_number: String,
-    revision: i64,
+    revision: SqlU32,
 
     pub usable_hardware_threads: SqlU32,
     pub usable_physical_ram: ByteCount,
@@ -148,6 +202,9 @@ pub struct SledUpdate {
     // ServiceAddress (Sled Agent).
     pub ip: ipv6::Ipv6Addr,
     pub port: SqlU16,
+
+    // Generation number - owned and incremented by sled-agent.
+    pub sled_agent_gen: Generation,
 }
 
 impl SledUpdate {
@@ -157,6 +214,7 @@ impl SledUpdate {
         baseboard: SledBaseboard,
         hardware: SledSystemHardware,
         rack_id: Uuid,
+        sled_agent_gen: Generation,
     ) -> Self {
         Self {
             id,
@@ -164,7 +222,7 @@ impl SledUpdate {
             is_scrimlet: hardware.is_scrimlet,
             serial_number: baseboard.serial_number,
             part_number: baseboard.part_number,
-            revision: baseboard.revision,
+            revision: SqlU32(baseboard.revision),
             usable_hardware_threads: SqlU32::new(
                 hardware.usable_hardware_threads,
             ),
@@ -172,6 +230,7 @@ impl SledUpdate {
             reservoir_size: hardware.reservoir_size,
             ip: addr.ip().into(),
             port: addr.port().into(),
+            sled_agent_gen,
         }
     }
 
@@ -197,14 +256,17 @@ impl SledUpdate {
             serial_number: self.serial_number,
             part_number: self.part_number,
             revision: self.revision,
-            // By default, sleds start as provisionable.
-            provision_state: SledProvisionState::Provisionable,
+            // By default, sleds start in-service.
+            policy: DbSledPolicy::InService,
+            // Currently, new sleds start in the "active" state.
+            state: SledState::Active,
             usable_hardware_threads: self.usable_hardware_threads,
             usable_physical_ram: self.usable_physical_ram,
             reservoir_size: self.reservoir_size,
             ip: self.ip,
             port: self.port,
             last_used_address,
+            sled_agent_gen: self.sled_agent_gen,
         }
     }
 
@@ -283,3 +345,67 @@ impl SledReservationConstraintBuilder {
         self.constraints
     }
 }
+
+mod diesel_util {
+    use crate::{
+        schema::sled::{sled_policy, sled_state},
+        sled_policy::DbSledPolicy,
+        to_db_sled_policy,
+    };
+    use diesel::{
+        helper_types::{And, EqAny},
+        prelude::*,
+        query_dsl::methods::FilterDsl,
+    };
+    use nexus_types::{
+        deployment::SledFilter,
+        external_api::views::{SledPolicy, SledState},
+    };
+
+    /// An extension trait to apply a [`SledFilter`] to a Diesel expression.
+    ///
+    /// This is applicable to any Diesel expression which includes the `sled`
+    /// table.
+    ///
+    /// This needs to live here, rather than in `nexus-db-queries`, because it
+    /// names the `DbSledPolicy` type which is private to this crate.
+    pub trait ApplySledFilterExt {
+        type Output;
+
+        /// Applies a [`SledFilter`] to a Diesel expression.
+        fn sled_filter(self, filter: SledFilter) -> Self::Output;
+    }
+
+    impl<E> ApplySledFilterExt for E
+    where
+        E: FilterDsl<SledFilterQuery>,
+    {
+        type Output = E::Output;
+
+        fn sled_filter(self, filter: SledFilter) -> Self::Output {
+            use crate::schema::sled::dsl as sled_dsl;
+
+            // These are only boxed for ease of reference above.
+            let all_matching_policies: BoxedIterator<DbSledPolicy> = Box::new(
+                SledPolicy::all_matching(filter).map(to_db_sled_policy),
+            );
+            let all_matching_states: BoxedIterator<crate::SledState> =
+                Box::new(SledState::all_matching(filter).map(Into::into));
+
+            FilterDsl::filter(
+                self,
+                sled_dsl::sled_policy
+                    .eq_any(all_matching_policies)
+                    .and(sled_dsl::sled_state.eq_any(all_matching_states)),
+            )
+        }
+    }
+
+    type BoxedIterator<T> = Box<dyn Iterator<Item = T>>;
+    type SledFilterQuery = And<
+        EqAny<sled_policy, BoxedIterator<DbSledPolicy>>,
+        EqAny<sled_state, BoxedIterator<crate::SledState>>,
+    >;
+}
+
+pub use diesel_util::ApplySledFilterExt;

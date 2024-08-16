@@ -141,7 +141,24 @@ fn define_test_steps(
             move |parent_cx| async move {
                 parent_cx
                     .with_nested_engine(|engine| {
-                        define_nested_engine(&parent_cx, engine);
+                        define_nested_engine(&parent_cx, engine, 3, "steps");
+                        Ok(())
+                    })
+                    .await
+                    .expect_err("this is expected to fail");
+
+                // Define a second nested engine -- this verifies that internal
+                // buffer indexes match up.
+                parent_cx
+                    .with_nested_engine(|engine| {
+                        define_nested_engine(
+                            &parent_cx,
+                            engine,
+                            10,
+                            // The tests in buffer.rs expect the units to be
+                            // "steps" exactly once, so use a different name here.
+                            "steps (again)",
+                        );
                         Ok(())
                     })
                     .await
@@ -214,18 +231,20 @@ fn define_test_steps(
 fn define_nested_engine<'a>(
     parent_cx: &'a StepContext<TestSpec>,
     engine: &mut UpdateEngine<'a, TestSpec>,
+    start_id: usize,
+    step_units: &'static str,
 ) {
     engine
         .new_step(
             "nested-foo".to_owned(),
-            4,
+            start_id + 1,
             "Nested step 1",
             move |cx| async move {
                 parent_cx
                     .send_progress(StepProgress::with_current_and_total(
                         1,
                         3,
-                        "steps",
+                        step_units,
                         Default::default(),
                     ))
                     .await;
@@ -239,7 +258,7 @@ fn define_nested_engine<'a>(
     engine
         .new_step::<_, _, ()>(
             "nested-bar".to_owned(),
-            5,
+            start_id + 2,
             "Nested step 2 (fails)",
             move |cx| async move {
                 // This is used by NestedProgressCheck below.
@@ -247,7 +266,7 @@ fn define_nested_engine<'a>(
                     .send_progress(StepProgress::with_current_and_total(
                         2,
                         3,
-                        "steps",
+                        step_units,
                         Default::default(),
                     ))
                     .await;
@@ -263,7 +282,7 @@ fn define_nested_engine<'a>(
                     .send_progress(StepProgress::with_current_and_total(
                         3,
                         3,
-                        "steps",
+                        step_units,
                         Default::default(),
                     ))
                     .await;

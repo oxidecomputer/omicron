@@ -5,6 +5,7 @@
 //! [`DataStore`] methods on [`NetworkInterface`]s.
 
 use super::DataStore;
+use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
@@ -22,6 +23,7 @@ use crate::db::model::NetworkInterfaceKind;
 use crate::db::model::NetworkInterfaceUpdate;
 use crate::db::model::VpcSubnet;
 use crate::db::pagination::paginated;
+use crate::db::pagination::Paginator;
 use crate::db::pool::DbConnection;
 use crate::db::queries::network_interface;
 use crate::transaction_retry::OptionalError;
@@ -29,16 +31,18 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
-use omicron_common::api::external;
+use nexus_db_model::ServiceNetworkInterface;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
-use sled_agent_client::types as sled_client_types;
 use uuid::Uuid;
 
 /// OPTE requires information that's currently split across the network
@@ -56,33 +60,40 @@ struct NicInfo {
     vni: db::model::Vni,
     primary: bool,
     slot: i16,
+    transit_ips: Vec<ipnetwork::IpNetwork>,
 }
 
-impl From<NicInfo> for sled_client_types::NetworkInterface {
-    fn from(nic: NicInfo) -> sled_client_types::NetworkInterface {
+impl From<NicInfo> for omicron_common::api::internal::shared::NetworkInterface {
+    fn from(
+        nic: NicInfo,
+    ) -> omicron_common::api::internal::shared::NetworkInterface {
         let ip_subnet = if nic.ip.is_ipv4() {
-            external::IpNet::V4(nic.ipv4_block.0)
+            oxnet::IpNet::V4(nic.ipv4_block.0)
         } else {
-            external::IpNet::V6(nic.ipv6_block.0)
+            oxnet::IpNet::V6(nic.ipv6_block.0)
         };
         let kind = match nic.kind {
             NetworkInterfaceKind::Instance => {
-                sled_client_types::NetworkInterfaceKind::Instance(nic.parent_id)
+                omicron_common::api::internal::shared::NetworkInterfaceKind::Instance{ id: nic.parent_id }
             }
             NetworkInterfaceKind::Service => {
-                sled_client_types::NetworkInterfaceKind::Service(nic.parent_id)
+                omicron_common::api::internal::shared::NetworkInterfaceKind::Service{ id: nic.parent_id }
+            }
+            NetworkInterfaceKind::Probe => {
+                omicron_common::api::internal::shared::NetworkInterfaceKind::Probe{ id: nic.parent_id }
             }
         };
-        sled_client_types::NetworkInterface {
+        omicron_common::api::internal::shared::NetworkInterface {
             id: nic.id,
             kind,
             name: nic.name.into(),
             ip: nic.ip.ip(),
-            mac: sled_client_types::MacAddr::from(nic.mac.0),
-            subnet: sled_client_types::IpNet::from(ip_subnet),
-            vni: sled_client_types::Vni::from(nic.vni.0),
+            mac: nic.mac.0,
+            subnet: ip_subnet,
+            vni: nic.vni.0,
             primary: nic.primary,
             slot: u8::try_from(nic.slot).unwrap(),
+            transit_ips: nic.transit_ips.iter().map(|v| (*v).into()).collect(),
         }
     }
 }
@@ -107,6 +118,14 @@ impl DataStore {
         self.instance_create_network_interface_raw(&opctx, interface).await
     }
 
+    pub async fn probe_create_network_interface(
+        &self,
+        opctx: &OpContext,
+        interface: IncompleteNetworkInterface,
+    ) -> Result<NetworkInterface, network_interface::InsertError> {
+        self.create_network_interface_raw(&opctx, interface).await
+    }
+
     pub(crate) async fn instance_create_network_interface_raw(
         &self,
         opctx: &OpContext,
@@ -119,22 +138,131 @@ impl DataStore {
                 ),
             ));
         }
-        self.create_network_interface_raw(opctx, interface)
+
+        let out = self
+            .create_network_interface_raw(opctx, interface)
             .await
             // Convert to `InstanceNetworkInterface` before returning; we know
             // this is valid as we've checked the condition on-entry.
-            .map(NetworkInterface::as_instance)
+            .map(NetworkInterface::as_instance)?;
+
+        // `instance:xxx` targets in router rules resolve to the primary
+        // NIC of that instance. Accordingly, NIC create may cause dangling
+        // entries to re-resolve to a valid instance (even if it is not yet
+        // started).
+        // This will not trigger the route RPW directly, we still need to do
+        // so in e.g. the instance watcher task.
+        if out.primary {
+            self.vpc_increment_rpw_version(opctx, out.vpc_id)
+                .await
+                .map_err(|e| network_interface::InsertError::External(e))?;
+        }
+
+        Ok(out)
     }
 
-    #[cfg(test)]
+    /// List network interfaces associated with a given service.
+    pub async fn service_list_network_interfaces_on_connection(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        service_id: Uuid,
+    ) -> ListResultVec<ServiceNetworkInterface> {
+        use db::schema::service_network_interface::dsl;
+        dsl::service_network_interface
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::service_id.eq(service_id))
+            .select(ServiceNetworkInterface::as_select())
+            .get_results_async::<ServiceNetworkInterface>(conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List one page of all network interfaces associated with internal services
+    pub async fn service_network_interfaces_all_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<ServiceNetworkInterface> {
+        use db::schema::service_network_interface::dsl;
+
+        // See the comment in `service_create_network_interface`. There's no
+        // obvious parent for a service network interface (as opposed to
+        // instance network interfaces, which require ListChildren on the
+        // instance to list). As a logical proxy, we check for listing children
+        // of the service IP pool.
+        let (authz_pool, _pool) = self.ip_pools_service_lookup(opctx).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz_pool).await?;
+
+        paginated(dsl::service_network_interface, dsl::id, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .select(ServiceNetworkInterface::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List all network interfaces associated with internal services, making as
+    /// many queries as needed to get them all
+    ///
+    /// This should generally not be used in API handlers or other
+    /// latency-sensitive contexts, but it can make sense in saga actions or
+    /// background tasks.
+    pub async fn service_network_interfaces_all_list_batched(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<ServiceNetworkInterface> {
+        opctx.check_complex_operations_allowed()?;
+
+        let mut all_ips = Vec::new();
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .service_network_interfaces_all_list(
+                    opctx,
+                    &p.current_pagparams(),
+                )
+                .await?;
+            paginator = p
+                .found_batch(&batch, &|nic: &ServiceNetworkInterface| nic.id());
+            all_ips.extend(batch);
+        }
+        Ok(all_ips)
+    }
+
+    /// Create a network interface attached to the provided service zone.
+    pub async fn service_create_network_interface(
+        &self,
+        opctx: &OpContext,
+        interface: IncompleteNetworkInterface,
+    ) -> Result<ServiceNetworkInterface, network_interface::InsertError> {
+        // In `instance_create_network_interface`, the authz checks are for
+        // creating children of the VpcSubnet and the instance. We don't have an
+        // instance. We do have a VpcSubet, but for services these are all
+        // fixed data subnets.
+        //
+        // As a proxy auth check that isn't really guarding the right resource
+        // but should logically be equivalent, we can insert a authz check for
+        // creating children of the service IP pool. For any service zone with
+        // external networking, we create an external IP (in the service IP
+        // pool) and a network interface (in the relevant VpcSubnet). Putting
+        // this check here ensures that the caller can't proceed if they also
+        // couldn't proceed with creating the corresponding external IP.
+        let (authz_service_ip_pool, _) = self
+            .ip_pools_service_lookup(opctx)
+            .await
+            .map_err(network_interface::InsertError::External)?;
+        opctx
+            .authorize(authz::Action::CreateChild, &authz_service_ip_pool)
+            .await
+            .map_err(network_interface::InsertError::External)?;
+        self.service_create_network_interface_raw(opctx, interface).await
+    }
+
     pub(crate) async fn service_create_network_interface_raw(
         &self,
         opctx: &OpContext,
         interface: IncompleteNetworkInterface,
-    ) -> Result<
-        db::model::ServiceNetworkInterface,
-        network_interface::InsertError,
-    > {
+    ) -> Result<ServiceNetworkInterface, network_interface::InsertError> {
         if interface.kind != NetworkInterfaceKind::Service {
             return Err(network_interface::InsertError::External(
                 Error::invalid_request(
@@ -216,16 +344,50 @@ impl DataStore {
         Ok(())
     }
 
+    /// Delete all network interfaces attached to the given probe.
+    pub async fn probe_delete_all_network_interfaces(
+        &self,
+        opctx: &OpContext,
+        probe_id: Uuid,
+    ) -> DeleteResult {
+        use db::schema::network_interface::dsl;
+        let now = Utc::now();
+        diesel::update(dsl::network_interface)
+            .filter(dsl::parent_id.eq(probe_id))
+            .filter(dsl::kind.eq(NetworkInterfaceKind::Probe))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::time_deleted.eq(now))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Probe,
+                        LookupType::ById(probe_id),
+                    ),
+                )
+            })?;
+        Ok(())
+    }
+
     /// Delete an `InstanceNetworkInterface` attached to a provided instance.
     ///
     /// Note that the primary interface for an instance cannot be deleted if
     /// there are any secondary interfaces.
+    ///
+    /// To support idempotency, such as in saga operations, this method returns
+    /// an extra boolean. The meaning of return values are:
+    /// - `Ok(true)`: The record was deleted during this call
+    /// - `Ok(false)`: The record was already deleted, such as by a previous
+    /// call
+    /// - `Err(_)`: Any other condition, including a non-existent record.
     pub async fn instance_delete_network_interface(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
         authz_interface: &authz::InstanceNetworkInterface,
-    ) -> Result<(), network_interface::DeleteError> {
+    ) -> Result<bool, network_interface::DeleteError> {
         opctx
             .authorize(authz::Action::Delete, authz_interface)
             .await
@@ -237,17 +399,74 @@ impl DataStore {
         );
         query
             .clone()
-            .execute_async(
+            .execute_and_check(
                 &*self
                     .pool_connection_authorized(opctx)
                     .await
                     .map_err(network_interface::DeleteError::External)?,
             )
             .await
-            .map_err(|e| {
-                network_interface::DeleteError::from_diesel(e, &query)
-            })?;
-        Ok(())
+            .map_err(|e| network_interface::DeleteError::from_diesel(e, &query))
+    }
+
+    /// Delete a `ServiceNetworkInterface` attached to a provided service.
+    ///
+    /// To support idempotency, such as in saga operations, this method returns
+    /// an extra boolean. The meaning of return values are:
+    /// - `Ok(true)`: The record was deleted during this call
+    /// - `Ok(false)`: The record was already deleted, such as by a previous
+    /// call
+    /// - `Err(_)`: Any other condition, including a non-existent record.
+    pub async fn service_delete_network_interface(
+        &self,
+        opctx: &OpContext,
+        service_id: Uuid,
+        network_interface_id: Uuid,
+    ) -> Result<bool, network_interface::DeleteError> {
+        // See the comment in `service_create_network_interface`. There's no
+        // obvious parent for a service network interface (as opposed to
+        // instance network interfaces, which require permissions on the
+        // instance). As a logical proxy, we check for listing children of the
+        // service IP pool.
+        let (authz_service_ip_pool, _) = self
+            .ip_pools_service_lookup(opctx)
+            .await
+            .map_err(network_interface::DeleteError::External)?;
+        opctx
+            .authorize(authz::Action::Delete, &authz_service_ip_pool)
+            .await
+            .map_err(network_interface::DeleteError::External)?;
+
+        let conn = self
+            .pool_connection_authorized(opctx)
+            .await
+            .map_err(network_interface::DeleteError::External)?;
+        self.service_delete_network_interface_on_connection(
+            &conn,
+            service_id,
+            network_interface_id,
+        )
+        .await
+    }
+
+    /// Variant of [Self::service_delete_network_interface] which may be called
+    /// from a transaction context.
+    pub async fn service_delete_network_interface_on_connection(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        service_id: Uuid,
+        network_interface_id: Uuid,
+    ) -> Result<bool, network_interface::DeleteError> {
+        let query = network_interface::DeleteQuery::new(
+            NetworkInterfaceKind::Service,
+            service_id,
+            network_interface_id,
+        );
+        query
+            .clone()
+            .execute_and_check(conn)
+            .await
+            .map_err(|e| network_interface::DeleteError::from_diesel(e, &query))
     }
 
     /// Return information about network interfaces required for the sled
@@ -258,7 +477,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         partial_query: BoxedQuery<db::schema::network_interface::table>,
-    ) -> ListResultVec<sled_client_types::NetworkInterface> {
+    ) -> ListResultVec<omicron_common::api::internal::shared::NetworkInterface>
+    {
         use db::schema::network_interface;
         use db::schema::vpc;
         use db::schema::vpc_subnet;
@@ -286,6 +506,7 @@ impl DataStore {
                 vpc::vni,
                 network_interface::is_primary,
                 network_interface::slot,
+                network_interface::transit_ips,
             ))
             .get_results_async::<NicInfo>(
                 &*self.pool_connection_authorized(opctx).await?,
@@ -294,7 +515,7 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         Ok(rows
             .into_iter()
-            .map(sled_client_types::NetworkInterface::from)
+            .map(omicron_common::api::internal::shared::NetworkInterface::from)
             .collect())
     }
 
@@ -304,7 +525,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-    ) -> ListResultVec<sled_client_types::NetworkInterface> {
+    ) -> ListResultVec<omicron_common::api::internal::shared::NetworkInterface>
+    {
         opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
 
         use db::schema::network_interface;
@@ -320,13 +542,31 @@ impl DataStore {
         .await
     }
 
+    pub async fn derive_probe_network_interface_info(
+        &self,
+        opctx: &OpContext,
+        probe_id: Uuid,
+    ) -> ListResultVec<omicron_common::api::internal::shared::NetworkInterface>
+    {
+        use db::schema::network_interface;
+        self.derive_network_interface_info(
+            opctx,
+            network_interface::table
+                .filter(network_interface::parent_id.eq(probe_id))
+                .filter(network_interface::kind.eq(NetworkInterfaceKind::Probe))
+                .into_boxed(),
+        )
+        .await
+    }
+
     /// Return information about all VNICs connected to a VPC required
     /// for the sled agent to instantiate firewall rules via OPTE.
     pub async fn derive_vpc_network_interface_info(
         &self,
         opctx: &OpContext,
         authz_vpc: &authz::Vpc,
-    ) -> ListResultVec<sled_client_types::NetworkInterface> {
+    ) -> ListResultVec<omicron_common::api::internal::shared::NetworkInterface>
+    {
         opctx.authorize(authz::Action::ListChildren, authz_vpc).await?;
 
         use db::schema::network_interface;
@@ -345,7 +585,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_subnet: &authz::VpcSubnet,
-    ) -> ListResultVec<sled_client_types::NetworkInterface> {
+    ) -> ListResultVec<omicron_common::api::internal::shared::NetworkInterface>
+    {
         opctx.authorize(authz::Action::ListChildren, authz_subnet).await?;
 
         use db::schema::network_interface;
@@ -386,6 +627,47 @@ impl DataStore {
         )
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Retrieve the primary network interface for a given instance.
+    pub async fn instance_get_primary_network_interface(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+    ) -> LookupResult<InstanceNetworkInterface> {
+        opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
+
+        use db::schema::instance_network_interface::dsl;
+        dsl::instance_network_interface
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::instance_id.eq(authz_instance.id()))
+            .filter(dsl::is_primary.eq(true))
+            .select(InstanceNetworkInterface::as_select())
+            .limit(1)
+            .first_async::<InstanceNetworkInterface>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Get network interface associated with a given probe.
+    pub async fn probe_get_network_interface(
+        &self,
+        opctx: &OpContext,
+        probe_id: Uuid,
+    ) -> LookupResult<NetworkInterface> {
+        use db::schema::network_interface::dsl;
+
+        dsl::network_interface
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::parent_id.eq(probe_id))
+            .select(NetworkInterface::as_select())
+            .first_async::<NetworkInterface>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Update a network interface associated with a given instance.
@@ -441,8 +723,7 @@ impl DataStore {
                 .filter(dsl::time_deleted.is_null())
                 .select(Instance::as_select())
         };
-        let stopped =
-            db::model::InstanceState::new(external::InstanceState::Stopped);
+        let stopped = db::model::InstanceState::NoVmm;
 
         // This is the actual query to update the target interface.
         // Unlike Postgres, CockroachDB doesn't support inserting or updating a view
@@ -473,7 +754,6 @@ impl DataStore {
             self.transaction_retry_wrapper("instance_update_network_interface")
                 .transaction(&conn, |conn| {
                     let err = err.clone();
-                    let stopped = stopped.clone();
                     let update_target_query = update_target_query.clone();
                     async move {
                         let instance_runtime =
@@ -519,7 +799,6 @@ impl DataStore {
             self.transaction_retry_wrapper("instance_update_network_interface")
                 .transaction(&conn, |conn| {
                     let err = err.clone();
-                    let stopped = stopped.clone();
                     let update_target_query = update_target_query.clone();
                     async move {
                         let instance_state =
@@ -551,5 +830,168 @@ impl DataStore {
             }
             public_error_from_diesel(e, ErrorHandler::Server)
         })
+    }
+
+    /// List all network interfaces associated with all instances, making as
+    /// many queries as needed to get them all
+    ///
+    /// This should generally not be used in API handlers or other
+    /// latency-sensitive contexts, but it can make sense in saga actions or
+    /// background tasks.
+    ///
+    /// This particular method was added for propagating v2p mappings via RPWs
+    pub async fn instance_network_interfaces_all_list_batched(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<InstanceNetworkInterface> {
+        opctx.check_complex_operations_allowed()?;
+
+        let mut all_interfaces = Vec::new();
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .instance_network_interfaces_all_list(
+                    opctx,
+                    &p.current_pagparams(),
+                )
+                .await?;
+            paginator = p
+                .found_batch(&batch, &|nic: &InstanceNetworkInterface| {
+                    nic.id()
+                });
+            all_interfaces.extend(batch);
+        }
+        Ok(all_interfaces)
+    }
+
+    /// List one page of all network interfaces associated with instances
+    pub async fn instance_network_interfaces_all_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<InstanceNetworkInterface> {
+        use db::schema::instance_network_interface::dsl;
+
+        // See the comment in `service_create_network_interface`. There's no
+        // obvious parent for a service network interface (as opposed to
+        // instance network interfaces, which require ListChildren on the
+        // instance to list). As a logical proxy, we check for listing children
+        // of the service IP pool.
+        let (authz_pool, _pool) = self.ip_pools_service_lookup(opctx).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz_pool).await?;
+
+        paginated(dsl::instance_network_interface, dsl::id, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .select(InstanceNetworkInterface::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::datastore::test_utils::datastore_test;
+    use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+    use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
+    use nexus_test_utils::db::test_setup_database;
+    use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
+    use omicron_test_utils::dev;
+    use std::collections::BTreeSet;
+
+    async fn read_all_service_nics(
+        datastore: &DataStore,
+        opctx: &OpContext,
+    ) -> Vec<ServiceNetworkInterface> {
+        let all_batched = datastore
+            .service_network_interfaces_all_list_batched(opctx)
+            .await
+            .expect("failed to fetch all service NICs batched");
+        let all_paginated = datastore
+            .service_network_interfaces_all_list(
+                opctx,
+                &DataPageParams::max_page(),
+            )
+            .await
+            .expect("failed to fetch all service NICs paginated");
+        assert_eq!(all_batched, all_paginated);
+        all_batched
+    }
+
+    #[tokio::test]
+    async fn test_service_network_interfaces_list() {
+        usdt::register_probes().unwrap();
+        let logctx =
+            dev::test_setup_log("test_service_network_interfaces_list");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // No IPs, to start
+        let nics = read_all_service_nics(&datastore, &opctx).await;
+        assert_eq!(nics, vec![]);
+
+        // Insert 10 Nexus NICs
+        let ip_range = NEXUS_OPTE_IPV4_SUBNET
+            .addr_iter()
+            .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES)
+            .take(10);
+        let mut macs = omicron_common::api::external::MacAddr::iter_system();
+        let mut service_nics = Vec::new();
+        for (i, ip) in ip_range.enumerate() {
+            let name = format!("service-nic-{i}");
+            let interface = IncompleteNetworkInterface::new_service(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                NEXUS_VPC_SUBNET.clone(),
+                omicron_common::api::external::IdentityMetadataCreateParams {
+                    name: name.parse().unwrap(),
+                    description: name,
+                },
+                ip.into(),
+                macs.next().unwrap(),
+                0,
+            )
+            .unwrap();
+            let nic = datastore
+                .service_create_network_interface(&opctx, interface)
+                .await
+                .expect("failed to insert service nic");
+            service_nics.push(nic);
+        }
+        service_nics.sort_by_key(|nic| nic.id());
+
+        // Ensure we see them all.
+        let nics = read_all_service_nics(&datastore, &opctx).await;
+        assert_eq!(nics, service_nics);
+
+        // Delete a few, and ensure we don't see them anymore.
+        let mut removed_nic_ids = BTreeSet::new();
+        for (i, nic) in service_nics.iter().enumerate() {
+            if i % 3 == 0 {
+                let id = nic.id();
+                datastore
+                    .service_delete_network_interface(
+                        &opctx,
+                        nic.service_id,
+                        id,
+                    )
+                    .await
+                    .expect("failed to delete NIC");
+                removed_nic_ids.insert(id);
+            }
+        }
+
+        // Check that we removed at least one, then prune them from our list of
+        // expected IPs.
+        assert!(!removed_nic_ids.is_empty());
+        service_nics.retain(|nic| !removed_nic_ids.contains(&nic.id()));
+
+        // Ensure we see them all remaining IPs.
+        let nics = read_all_service_nics(&datastore, &opctx).await;
+        assert_eq!(nics, service_nics);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }

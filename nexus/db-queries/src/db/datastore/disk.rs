@@ -170,7 +170,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
 
-        let ok_to_attach_disk_states = vec![
+        let ok_to_attach_disk_states = [
             api::external::DiskState::Creating,
             api::external::DiskState::Detached,
         ];
@@ -183,8 +183,8 @@ impl DataStore {
         //
         // We currently only permit attaching disks to stopped instances.
         let ok_to_attach_instance_states = vec![
-            db::model::InstanceState(api::external::InstanceState::Creating),
-            db::model::InstanceState(api::external::InstanceState::Stopped),
+            db::model::InstanceState::Creating,
+            db::model::InstanceState::NoVmm,
         ];
 
         let attach_update = DiskSetClauseForAttach::new(authz_instance.id());
@@ -206,7 +206,7 @@ impl DataStore {
 
         let (instance, disk) = query.attach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .or_else(|e| {
+        .or_else(|e: AttachError<Disk, _, _>| {
             match e {
                 AttachError::CollectionNotFound => {
                     Err(Error::not_found_by_id(
@@ -311,7 +311,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
 
         let ok_to_detach_disk_states =
-            vec![api::external::DiskState::Attached(authz_instance.id())];
+            [api::external::DiskState::Attached(authz_instance.id())];
         let ok_to_detach_disk_state_labels: Vec<_> =
             ok_to_detach_disk_states.iter().map(|s| s.label()).collect();
 
@@ -321,9 +321,9 @@ impl DataStore {
         //
         // We currently only permit detaching disks from stopped instances.
         let ok_to_detach_instance_states = vec![
-            db::model::InstanceState(api::external::InstanceState::Creating),
-            db::model::InstanceState(api::external::InstanceState::Stopped),
-            db::model::InstanceState(api::external::InstanceState::Failed),
+            db::model::InstanceState::Creating,
+            db::model::InstanceState::NoVmm,
+            db::model::InstanceState::Failed,
         ];
 
         let detached_label = api::external::DiskState::Detached.label();
@@ -348,7 +348,7 @@ impl DataStore {
         )
         .detach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .or_else(|e| {
+        .or_else(|e: DetachError<Disk, _, _>| {
             match e {
                 DetachError::CollectionNotFound => {
                     Err(Error::not_found_by_id(
@@ -811,13 +811,29 @@ impl DataStore {
             .map(|(disk, _, _)| disk)
             .collect())
     }
+
+    pub async fn disk_for_volume_id(
+        &self,
+        volume_id: Uuid,
+    ) -> LookupResult<Option<Disk>> {
+        let conn = self.pool_connection_unauthorized().await?;
+
+        use db::schema::disk::dsl;
+        dsl::disk
+            .filter(dsl::volume_id.eq(volume_id))
+            .select(Disk::as_select())
+            .first_async(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use crate::db::datastore::datastore_test;
+    use crate::db::datastore::test_utils::datastore_test;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
     use omicron_common::api::external;

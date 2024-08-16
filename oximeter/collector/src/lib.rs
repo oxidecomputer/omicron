@@ -14,7 +14,6 @@ use dropshot::HttpServerStarter;
 use internal_dns::resolver::ResolveError;
 use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
-use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::backoff;
 use omicron_common::FileKv;
@@ -31,6 +30,7 @@ use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -59,22 +59,13 @@ pub enum Error {
     #[error(transparent)]
     ResolveError(#[from] ResolveError),
 
-    #[error("No producer is registered with ID")]
-    NoSuchProducer(Uuid),
-
     #[error("Error running standalone")]
     Standalone(#[from] anyhow::Error),
 }
 
 impl From<Error> for HttpError {
     fn from(e: Error) -> Self {
-        match e {
-            Error::NoSuchProducer(id) => HttpError::for_not_found(
-                None,
-                format!("No such producer: {id}"),
-            ),
-            _ => HttpError::for_internal_error(e.to_string()),
-        }
+        HttpError::for_internal_error(e.to_string())
     }
 }
 
@@ -114,6 +105,11 @@ impl DbConfig {
     }
 }
 
+/// Default interval on which we refresh our list of producers from Nexus.
+pub const fn default_refresh_interval() -> Duration {
+    Duration::from_secs(60 * 10)
+}
+
 /// Configuration used to initialize an oximeter server
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Config {
@@ -122,6 +118,11 @@ pub struct Config {
     /// If "None", will be inferred from DNS.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nexus_address: Option<SocketAddr>,
+
+    /// The interval on which we periodically refresh our list of producers from
+    /// Nexus.
+    #[serde(default = "default_refresh_interval")]
+    pub refresh_interval: Duration,
 
     /// Configuration for working with ClickHouse
     pub db: DbConfig,
@@ -202,6 +203,7 @@ impl Oximeter {
                 OximeterAgent::with_id(
                     args.id,
                     args.address,
+                    config.refresh_interval,
                     config.db,
                     &resolver,
                     &log,
@@ -239,33 +241,43 @@ impl Oximeter {
         .start();
 
         // Notify Nexus that this oximeter instance is available.
-        let client = reqwest::Client::new();
+        let our_info = nexus_client::types::OximeterInfo {
+            address: server.local_addr().to_string(),
+            collector_id: agent.id,
+        };
         let notify_nexus = || async {
             debug!(log, "contacting nexus");
             let nexus_address = if let Some(address) = config.nexus_address {
                 address
             } else {
-                SocketAddr::V6(SocketAddrV6::new(
-                    resolver.lookup_ipv6(ServiceName::Nexus).await.map_err(
-                        |e| backoff::BackoffError::transient(e.to_string()),
-                    )?,
-                    NEXUS_INTERNAL_PORT,
-                    0,
-                    0,
-                ))
+                SocketAddr::V6(
+                    resolver
+                        .lookup_socket_v6(ServiceName::Nexus)
+                        .await
+                        .map_err(|e| {
+                            backoff::BackoffError::transient(e.to_string())
+                        })?,
+                )
             };
-
-            client
-                .post(format!("http://{}/metrics/collectors", nexus_address,))
-                .json(&nexus_client::types::OximeterInfo {
-                    address: server.local_addr().to_string(),
-                    collector_id: agent.id,
-                })
-                .send()
-                .await
-                .map_err(|e| backoff::BackoffError::transient(e.to_string()))?
-                .error_for_status()
-                .map_err(|e| backoff::BackoffError::transient(e.to_string()))
+            let client = nexus_client::Client::new(
+                &format!("http://{nexus_address}"),
+                log.clone(),
+            );
+            client.cpapi_collectors_post(&our_info).await.map_err(|e| {
+                match &e {
+                    // Failures to reach nexus, or server errors on its side
+                    // are retryable. Everything else is permanent.
+                    nexus_client::Error::CommunicationError(_) => {
+                        backoff::BackoffError::transient(e.to_string())
+                    }
+                    nexus_client::Error::ErrorResponse(inner)
+                        if inner.status().is_server_error() =>
+                    {
+                        backoff::BackoffError::transient(e.to_string())
+                    }
+                    _ => backoff::BackoffError::permanent(e.to_string()),
+                }
+            })
         };
         let log_notification_failure = |error, delay| {
             warn!(
@@ -281,6 +293,10 @@ impl Oximeter {
         )
         .await
         .expect("Expected an infinite retry loop contacting Nexus");
+
+        // Now that we've successfully registered, we'll start periodically
+        // polling for our list of producers from Nexus.
+        agent.ensure_producer_refresh_task(resolver);
 
         info!(log, "oximeter registered with nexus"; "id" => ?agent.id);
         Ok(Self { agent, server })
@@ -298,6 +314,7 @@ impl Oximeter {
             OximeterAgent::new_standalone(
                 args.id,
                 args.address,
+                crate::default_refresh_interval(),
                 db_config,
                 &log,
             )
@@ -371,6 +388,9 @@ impl Oximeter {
     }
 
     /// List producers.
+    ///
+    /// This returns up to `limit` producers, whose ID is _strictly greater_
+    /// than `start`, or all producers if `start` is `None`.
     pub async fn list_producers(
         &self,
         start: Option<Uuid>,
@@ -382,5 +402,15 @@ impl Oximeter {
     /// Delete a producer by ID, stopping its collection task.
     pub async fn delete_producer(&self, id: Uuid) -> Result<(), Error> {
         self.agent.delete_producer(id).await
+    }
+
+    /// Return the ID of this collector.
+    pub fn collector_id(&self) -> &Uuid {
+        &self.agent.id
+    }
+
+    /// Return the address of the server.
+    pub fn server_address(&self) -> SocketAddr {
+        self.server.local_addr()
     }
 }

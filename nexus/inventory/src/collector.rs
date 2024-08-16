@@ -15,6 +15,8 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use slog::o;
 use slog::{debug, error};
 use std::sync::Arc;
@@ -172,6 +174,8 @@ impl<'a> Collector<'a> {
                     CabooseWhich::SpSlot1 => ("sp", 1),
                     CabooseWhich::RotSlotA => ("rot", 0),
                     CabooseWhich::RotSlotB => ("rot", 1),
+                    CabooseWhich::Stage0 => ("stage0", 0),
+                    CabooseWhich::Stage0Next => ("stage0", 1),
                 };
 
                 let result = client
@@ -347,7 +351,7 @@ impl<'a> Collector<'a> {
             }
         };
 
-        let sled_id = inventory.sled_id;
+        let sled_id = SledUuid::from_untyped_uuid(inventory.sled_id);
         self.in_progress.found_sled_inventory(&sled_agent_url, inventory)?;
 
         let maybe_config =
@@ -373,9 +377,14 @@ mod test {
     use super::Collector;
     use crate::StaticSledAgentEnumerator;
     use gateway_messages::SpPort;
+    use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
+    use nexus_sled_agent_shared::inventory::OmicronZoneType;
+    use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
     use nexus_types::inventory::Collection;
     use omicron_common::api::external::Generation;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_sled_agent::sim;
+    use omicron_uuid_kinds::ZpoolUuid;
     use std::fmt::Write;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
@@ -490,7 +499,7 @@ mod test {
                         &mut s,
                         "        zone {} type {}\n",
                         zone.id,
-                        zone.zone_type.label(),
+                        zone.zone_type.kind().report_str(),
                     )
                     .unwrap();
                 }
@@ -526,8 +535,13 @@ mod test {
         zone_id: Uuid,
     ) -> sim::Server {
         // Start a simulated sled agent.
-        let config =
-            sim::Config::for_testing(sled_id, sim::SimMode::Auto, None, None);
+        let config = sim::Config::for_testing(
+            sled_id,
+            sim::SimMode::Auto,
+            None,
+            None,
+            Some(vec![]),
+        );
         let agent = sim::Server::start(&config, &log, false).await.unwrap();
 
         // Pretend to put some zones onto this sled.  We don't need to test this
@@ -538,17 +552,18 @@ mod test {
         let sled_url = format!("http://{}/", agent.http_server.local_addr());
         let client = sled_agent_client::Client::new(&sled_url, log);
 
+        let filesystem_pool = ZpoolName::new_external(ZpoolUuid::new_v4());
         let zone_address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0);
         client
-            .omicron_zones_put(&sled_agent_client::types::OmicronZonesConfig {
+            .omicron_zones_put(&OmicronZonesConfig {
                 generation: Generation::from(3),
-                zones: vec![sled_agent_client::types::OmicronZoneConfig {
+                zones: vec![OmicronZoneConfig {
                     id: zone_id,
                     underlay_address: *zone_address.ip(),
-                    zone_type:
-                        sled_agent_client::types::OmicronZoneType::Oximeter {
-                            address: zone_address.to_string(),
-                        },
+                    zone_type: OmicronZoneType::Oximeter {
+                        address: zone_address,
+                    },
+                    filesystem_pool: Some(filesystem_pool),
                 }],
             })
             .await

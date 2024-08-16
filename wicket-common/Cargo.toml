@@ -4,13 +4,28 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
-omicron-common.workspace = true
+dpd-client.workspace = true
+dropshot.workspace = true
 gateway-client.workspace = true
+maplit.workspace = true
+omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
+owo-colors.workspace = true
+oxnet.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+sled-hardware-types.workspace = true
+slog.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 update-engine.workspace = true
-omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+toml.workspace = true

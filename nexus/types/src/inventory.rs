@@ -9,30 +9,34 @@
 //! nexus/inventory does not currently know about nexus/db-model and it's
 //! convenient to separate these concerns.)
 
+use crate::external_api::params::PhysicalDiskKind;
 use crate::external_api::params::UninitializedSledId;
-use crate::external_api::shared::Baseboard;
 use chrono::DateTime;
 use chrono::Utc;
 pub use gateway_client::types::PowerState;
+pub use gateway_client::types::RotImageError;
 pub use gateway_client::types::RotSlot;
 pub use gateway_client::types::SpType;
+use nexus_sled_agent_shared::inventory::InventoryDisk;
+use nexus_sled_agent_shared::inventory::InventoryZpool;
+use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
+use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
+use nexus_sled_agent_shared::inventory::SledRole;
 use omicron_common::api::external::ByteCount;
-pub use sled_agent_client::types::NetworkInterface;
-pub use sled_agent_client::types::NetworkInterfaceKind;
-pub use sled_agent_client::types::OmicronZoneConfig;
-pub use sled_agent_client::types::OmicronZoneDataset;
-pub use sled_agent_client::types::OmicronZoneType;
-pub use sled_agent_client::types::OmicronZonesConfig;
-pub use sled_agent_client::types::SledRole;
-pub use sled_agent_client::types::SourceNatConfig;
-pub use sled_agent_client::types::Vni;
-pub use sled_agent_client::types::ZpoolName;
+pub use omicron_common::api::internal::shared::NetworkInterface;
+pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
+pub use omicron_common::api::internal::shared::SourceNatConfig;
+pub use omicron_common::zpool_name::ZpoolName;
+use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
+use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
-use uuid::Uuid;
 
 /// Results of collecting hardware/software inventory from various Omicron
 /// components
@@ -49,10 +53,11 @@ use uuid::Uuid;
 /// database.
 ///
 /// See the documentation in the database schema for more background.
-#[derive(Debug, Eq, PartialEq)]
+#[serde_as]
+#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Collection {
     /// unique identifier for this collection
-    pub id: Uuid,
+    pub id: CollectionUuid,
     /// errors encountered during collection
     pub errors: Vec<String>,
     /// time the collection started
@@ -80,16 +85,19 @@ pub struct Collection {
     ///
     /// In practice, these will be inserted into the `inv_service_processor`
     /// table.
+    #[serde_as(as = "Vec<(_, _)>")]
     pub sps: BTreeMap<Arc<BaseboardId>, ServiceProcessor>,
     /// all roots of trust, keyed by baseboard id
     ///
     /// In practice, these will be inserted into the `inv_root_of_trust` table.
+    #[serde_as(as = "Vec<(_, _)>")]
     pub rots: BTreeMap<Arc<BaseboardId>, RotState>,
     /// all caboose contents found, keyed first by the kind of caboose
     /// (`CabooseWhich`), then the baseboard id of the sled where they were
     /// found
     ///
     /// In practice, these will be inserted into the `inv_caboose` table.
+    #[serde_as(as = "BTreeMap<_, Vec<(_, _)>>")]
     pub cabooses_found:
         BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
     /// all root of trust page contents found, keyed first by the kind of page
@@ -98,14 +106,15 @@ pub struct Collection {
     ///
     /// In practice, these will be inserted into the `inv_root_of_trust_page`
     /// table.
+    #[serde_as(as = "BTreeMap<_, Vec<(_, _)>>")]
     pub rot_pages_found:
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
 
     /// Sled Agent information, by *sled* id
-    pub sled_agents: BTreeMap<Uuid, SledAgent>,
+    pub sled_agents: BTreeMap<SledUuid, SledAgent>,
 
     /// Omicron zones found, by *sled* id
-    pub omicron_zones: BTreeMap<Uuid, OmicronZonesFound>,
+    pub omicron_zones: BTreeMap<SledUuid, OmicronZonesFound>,
 }
 
 impl Collection {
@@ -128,6 +137,21 @@ impl Collection {
             .get(&which)
             .and_then(|by_bb| by_bb.get(baseboard_id))
     }
+
+    /// Iterate over all the Omicron zones in the collection
+    pub fn all_omicron_zones(
+        &self,
+    ) -> impl Iterator<Item = &OmicronZoneConfig> {
+        self.omicron_zones.values().flat_map(|z| z.zones.zones.iter())
+    }
+
+    /// Iterate over the sled ids of sleds identified as Scrimlets
+    pub fn scrimlets(&self) -> impl Iterator<Item = SledUuid> + '_ {
+        self.sled_agents
+            .iter()
+            .filter(|(_, inventory)| inventory.sled_role == SledRole::Scrimlet)
+            .map(|(sled_id, _)| *sled_id)
+    }
 }
 
 /// A unique baseboard id found during a collection
@@ -143,7 +167,9 @@ impl Collection {
 /// number.  We do not include that here.  If we ever did find a baseboard with
 /// the same part number and serial number but a new revision number, we'd want
 /// to treat that as the same baseboard as one with a different revision number.
-#[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
+#[derive(
+    Clone, Debug, Ord, Eq, PartialOrd, PartialEq, Deserialize, Serialize,
+)]
 pub struct BaseboardId {
     /// Oxide Part Number
     pub part_number: String,
@@ -151,8 +177,8 @@ pub struct BaseboardId {
     pub serial_number: String,
 }
 
-impl From<Baseboard> for BaseboardId {
-    fn from(value: Baseboard) -> Self {
+impl From<crate::external_api::shared::Baseboard> for BaseboardId {
+    fn from(value: crate::external_api::shared::Baseboard) -> Self {
         BaseboardId { part_number: value.part, serial_number: value.serial }
     }
 }
@@ -167,7 +193,9 @@ impl From<UninitializedSledId> for BaseboardId {
 ///
 /// These are normalized in the database.  Each distinct `Caboose` is assigned a
 /// uuid and shared across many possible collections that reference it.
-#[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
+#[derive(
+    Clone, Debug, Ord, Eq, PartialOrd, PartialEq, Deserialize, Serialize,
+)]
 pub struct Caboose {
     pub board: String,
     pub git_commit: String,
@@ -188,7 +216,9 @@ impl From<gateway_client::types::SpComponentCaboose> for Caboose {
 
 /// Indicates that a particular `Caboose` was found (at a particular time from a
 /// particular source, but these are only for debugging)
-#[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
+#[derive(
+    Clone, Debug, Ord, Eq, PartialOrd, PartialEq, Deserialize, Serialize,
+)]
 pub struct CabooseFound {
     pub time_collected: DateTime<Utc>,
     pub source: String,
@@ -196,7 +226,9 @@ pub struct CabooseFound {
 }
 
 /// Describes a service processor found during collection
-#[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
+#[derive(
+    Clone, Debug, Ord, Eq, PartialOrd, PartialEq, Deserialize, Serialize,
+)]
 pub struct ServiceProcessor {
     pub time_collected: DateTime<Utc>,
     pub source: String,
@@ -211,7 +243,9 @@ pub struct ServiceProcessor {
 
 /// Describes the root of trust state found (from a service processor) during
 /// collection
-#[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
+#[derive(
+    Clone, Debug, Ord, Eq, PartialOrd, PartialEq, Deserialize, Serialize,
+)]
 pub struct RotState {
     pub time_collected: DateTime<Utc>,
     pub source: String,
@@ -222,29 +256,53 @@ pub struct RotState {
     pub transient_boot_preference: Option<RotSlot>,
     pub slot_a_sha3_256_digest: Option<String>,
     pub slot_b_sha3_256_digest: Option<String>,
+    pub stage0_digest: Option<String>,
+    pub stage0next_digest: Option<String>,
+
+    pub slot_a_error: Option<RotImageError>,
+    pub slot_b_error: Option<RotImageError>,
+    pub stage0_error: Option<RotImageError>,
+    pub stage0next_error: Option<RotImageError>,
 }
 
 /// Describes which caboose this is (which component, which slot)
-#[derive(Clone, Copy, Debug, EnumIter, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    EnumIter,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+)]
 pub enum CabooseWhich {
     SpSlot0,
     SpSlot1,
     RotSlotA,
     RotSlotB,
+    Stage0,
+    Stage0Next,
 }
 
 /// Root of trust page contents found during a collection
 ///
 /// These are normalized in the database.  Each distinct `RotPage` is assigned a
 /// uuid and shared across many possible collections that reference it.
-#[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
+#[derive(
+    Clone, Debug, Ord, Eq, PartialOrd, PartialEq, Deserialize, Serialize,
+)]
 pub struct RotPage {
     pub data_base64: String,
 }
 
 /// Indicates that a particular `RotPage` was found (at a particular time from a
 /// particular source, but these are only for debugging)
-#[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
+#[derive(
+    Clone, Debug, Ord, Eq, PartialOrd, PartialEq, Deserialize, Serialize,
+)]
 pub struct RotPageFound {
     pub time_collected: DateTime<Utc>,
     pub source: String,
@@ -252,7 +310,18 @@ pub struct RotPageFound {
 }
 
 /// Describes which root of trust page this is
-#[derive(Clone, Copy, Debug, EnumIter, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    EnumIter,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+)]
 pub enum RotPageWhich {
     Cmpa,
     CfpaActive,
@@ -287,29 +356,71 @@ impl IntoRotPage for gateway_client::types::RotCfpa {
     }
 }
 
+/// A physical disk reported by a sled agent.
+///
+/// This identifies that a physical disk appears in a Sled.
+/// The existence of this object does not necessarily imply that
+/// the disk is being actively managed by the control plane.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct PhysicalDisk {
+    // XXX: Should this just be InventoryDisk? Do we need a separation between
+    // InventoryDisk and PhysicalDisk? The types are structurally the same, but
+    // maybe the separation is useful to indicate that a `PhysicalDisk` doesn't
+    // always show up in the inventory.
+    pub identity: omicron_common::disk::DiskIdentity,
+    pub variant: PhysicalDiskKind,
+    pub slot: i64,
+}
+
+impl From<InventoryDisk> for PhysicalDisk {
+    fn from(disk: InventoryDisk) -> PhysicalDisk {
+        PhysicalDisk {
+            identity: disk.identity,
+            variant: disk.variant.into(),
+            slot: disk.slot,
+        }
+    }
+}
+
+/// A zpool reported by a sled agent.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Zpool {
+    pub time_collected: DateTime<Utc>,
+    pub id: ZpoolUuid,
+    pub total_size: ByteCount,
+}
+
+impl Zpool {
+    pub fn new(time_collected: DateTime<Utc>, pool: InventoryZpool) -> Zpool {
+        Zpool { time_collected, id: pool.id, total_size: pool.total_size }
+    }
+}
+
 /// Inventory reported by sled agent
 ///
 /// This is a software notion of a sled, distinct from an underlying baseboard.
 /// A sled may be on a PC (in dev/test environments) and have no associated
 /// baseboard.  There might also be baseboards with no associated sled (if
 /// they have not been formally added to the control plane).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct SledAgent {
     pub time_collected: DateTime<Utc>,
     pub source: String,
-    pub sled_id: Uuid,
+    pub sled_id: SledUuid,
     pub baseboard_id: Option<Arc<BaseboardId>>,
     pub sled_agent_address: SocketAddrV6,
     pub sled_role: SledRole,
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
+    pub disks: Vec<PhysicalDisk>,
+    pub zpools: Vec<Zpool>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct OmicronZonesFound {
     pub time_collected: DateTime<Utc>,
     pub source: String,
-    pub sled_id: Uuid,
+    pub sled_id: SledUuid,
     pub zones: OmicronZonesConfig,
 }

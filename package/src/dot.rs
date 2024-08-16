@@ -10,7 +10,6 @@ use petgraph::graph::EdgeReference;
 use petgraph::graph::NodeIndex;
 use petgraph::Graph;
 use std::collections::BTreeMap;
-use std::path::Path;
 
 /// A node in our visual representation of the package manifest
 ///
@@ -132,13 +131,11 @@ pub fn do_dot(
             let pkg_node = pkg_nodes
                 .get(pkgname)
                 .expect("expected node for package already");
-            let output_directory = Path::new("/nonexistent");
+            let output_directory = camino::Utf8Path::new("/nonexistent");
             let output_basename = pkg
                 .get_output_path(pkgname, output_directory)
                 .file_name()
-                .unwrap()
-                .to_str()
-                .expect("expected package output filename to be UTF-8")
+                .expect("Missing file name")
                 .to_string();
             (output_basename, pkg_node)
         })
@@ -190,9 +187,8 @@ pub fn do_dot(
                 // on which it depends.
                 if let Some(blobs) = blobs {
                     for b in blobs {
-                        let s3_node = graph.add_node(GraphNode::Blob {
-                            path: b.display().to_string(),
-                        });
+                        let s3_node = graph
+                            .add_node(GraphNode::Blob { path: b.to_string() });
                         graph.add_edge(*pkg_node, s3_node, "download");
                     }
                 }
@@ -200,7 +196,7 @@ pub fn do_dot(
                 // Similarly, regardless of the type of local package, create
                 // a node showing any local paths that get included in the
                 // package.
-                if paths.len() > 0 {
+                if !paths.is_empty() {
                     let paths = paths
                         .iter()
                         .map(|mapping| {

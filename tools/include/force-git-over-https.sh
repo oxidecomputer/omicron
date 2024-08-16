@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # The token authentication mechanism that affords us access to other private
 # repositories requires that we use HTTPS URLs for GitHub, rather than SSH.

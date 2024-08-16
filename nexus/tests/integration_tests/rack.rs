@@ -5,6 +5,11 @@
 use dropshot::ResultsPage;
 use http::Method;
 use http::StatusCode;
+use nexus_client::types::SledId;
+use nexus_db_model::SledBaseboard;
+use nexus_db_model::SledSystemHardware;
+use nexus_db_model::SledUpdate;
+use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -13,11 +18,10 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views::Rack;
-use nexus_types::internal_api::params::Baseboard;
-use nexus_types::internal_api::params::SledAgentStartupInfo;
-use nexus_types::internal_api::params::SledRole;
+use nexus_types::internal_api::params::SledAgentInfo;
 use omicron_common::api::external::ByteCount;
-use omicron_nexus::TestInterfaces;
+use omicron_common::api::external::Generation;
+use omicron_uuid_kinds::GenericUuid;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -35,14 +39,17 @@ async fn test_list_own_rack(cptestctx: &ControlPlaneTestContext) {
             .all_items;
 
     assert_eq!(1, racks.len());
-    assert_eq!(cptestctx.server.apictx().nexus.rack_id(), racks[0].identity.id);
+    assert_eq!(
+        cptestctx.server.server_context().nexus.rack_id(),
+        racks[0].identity.id
+    );
 }
 
 #[nexus_test]
 async fn test_get_own_rack(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let expected_id = cptestctx.server.apictx().nexus.rack_id();
+    let expected_id = cptestctx.server.server_context().nexus.rack_id();
     let rack_url = format!("/v1/system/hardware/racks/{}", expected_id);
     let rack = NexusRequest::object_get(client, &rack_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -109,17 +116,15 @@ async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
     // Just pick some random fields other than `baseboard`
     let baseboard = uninitialized_sleds.pop().unwrap().baseboard;
     let sled_uuid = Uuid::new_v4();
-    let sa = SledAgentStartupInfo {
-        sa_address: "[fd00:1122:3344:01::1]:8080".parse().unwrap(),
+    let sa = SledAgentInfo {
+        sa_address: "[fd00:1122:3344:0100::1]:8080".parse().unwrap(),
         role: SledRole::Gimlet,
-        baseboard: Baseboard {
-            serial_number: baseboard.serial,
-            part_number: baseboard.part,
-            revision: baseboard.revision,
-        },
+        baseboard,
         usable_hardware_threads: 32,
         usable_physical_ram: ByteCount::from_gibibytes_u32(100),
         reservoir_size: ByteCount::from_mebibytes_u32(100),
+        generation: Generation::new(),
+        decommissioned: false,
     };
     internal_client
         .make_request(
@@ -145,4 +150,110 @@ async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
     debug!(cptestctx.logctx.log, "{:#?}", uninitialized_sleds);
     assert_eq!(1, uninitialized_sleds_2.len());
     assert_eq!(uninitialized_sleds, uninitialized_sleds_2);
+}
+
+#[nexus_test]
+async fn test_sled_add(cptestctx: &ControlPlaneTestContext) {
+    let external_client = &cptestctx.external_client;
+    let list_url = "/v1/system/hardware/sleds-uninitialized";
+    let mut uninitialized_sleds =
+        NexusRequest::object_get(external_client, list_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("failed to get uninitialized sleds")
+            .parsed_body::<ResultsPage<UninitializedSled>>()
+            .unwrap()
+            .items;
+    debug!(cptestctx.logctx.log, "{:#?}", uninitialized_sleds);
+
+    // There are currently two fake sim gimlets created in the latest inventory
+    // collection as part of test setup.
+    assert_eq!(2, uninitialized_sleds.len());
+
+    // Add one of these sleds.
+    let add_url = "/v1/system/hardware/sleds/";
+    let baseboard = uninitialized_sleds.pop().unwrap().baseboard;
+    let sled_id = NexusRequest::objects_post(
+        external_client,
+        add_url,
+        &params::UninitializedSledId {
+            serial: baseboard.serial.clone(),
+            part: baseboard.part.clone(),
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<SledId>()
+    .await
+    .id;
+
+    // Attempting to add the same sled again should succeed with the same sled
+    // ID: this operation should be idempotent up until the point at which the
+    // sled is inserted in the db.
+    let repeat_sled_id = NexusRequest::objects_post(
+        external_client,
+        add_url,
+        &params::UninitializedSledId {
+            serial: baseboard.serial.clone(),
+            part: baseboard.part.clone(),
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<SledId>()
+    .await
+    .id;
+    assert_eq!(sled_id, repeat_sled_id);
+
+    // Now upsert the sled.
+    let nexus = &cptestctx.server.server_context().nexus;
+    nexus
+        .datastore()
+        .sled_upsert(SledUpdate::new(
+            sled_id.into_untyped_uuid(),
+            "[::1]:0".parse().unwrap(),
+            SledBaseboard {
+                serial_number: baseboard.serial.clone(),
+                part_number: baseboard.part.clone(),
+                revision: 0,
+            },
+            SledSystemHardware {
+                is_scrimlet: false,
+                usable_hardware_threads: 8,
+                usable_physical_ram: (1 << 30).try_into().unwrap(),
+                reservoir_size: (1 << 20).try_into().unwrap(),
+            },
+            nexus.rack_id(),
+            Generation::new().into(),
+        ))
+        .await
+        .expect("inserted sled");
+
+    // The sled has been commissioned as part of the rack, so adding it should
+    // fail.
+    let error: dropshot::HttpErrorResponseBody =
+        NexusRequest::expect_failure_with_body(
+            external_client,
+            http::StatusCode::BAD_REQUEST,
+            http::Method::POST,
+            add_url,
+            &params::UninitializedSledId {
+                serial: baseboard.serial.clone(),
+                part: baseboard.part.clone(),
+            },
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("adding sled")
+        .parsed_body()
+        .expect("parsing error body");
+    assert_eq!(error.error_code, Some("ObjectAlreadyExists".to_string()));
+    assert!(
+        error.message.contains(&baseboard.serial)
+            && error.message.contains(&baseboard.part),
+        "expected to find {} and {} within error message: {}",
+        baseboard.serial,
+        baseboard.part,
+        error.message
+    );
 }

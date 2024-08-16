@@ -15,6 +15,9 @@
 // NOTE: emanates from Tabled macros
 #![allow(clippy::useless_vec)]
 
+use crate::check_allow_destructive::DestructiveOperationToken;
+use crate::helpers::CONNECTION_OPTIONS_HEADING;
+use crate::helpers::DATABASE_OPTIONS_HEADING;
 use crate::Omdb;
 use anyhow::anyhow;
 use anyhow::bail;
@@ -22,7 +25,11 @@ use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
+use camino::Utf8PathBuf;
+use chrono::DateTime;
 use chrono::SecondsFormat;
+use chrono::Utc;
+use clap::ArgAction;
 use clap::Args;
 use clap::Subcommand;
 use clap::ValueEnum;
@@ -32,8 +39,14 @@ use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::JoinOnDsl;
 use diesel::NullableExpressionMethods;
+use diesel::OptionalExtension;
 use diesel::TextExpressionMethods;
 use gateway_client::types::SpType;
+use indicatif::ProgressBar;
+use indicatif::ProgressDrawTarget;
+use indicatif::ProgressStyle;
+use ipnetwork::IpNetwork;
+use nexus_config::PostgresConfigWithUrl;
 use nexus_db_model::Dataset;
 use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
@@ -42,18 +55,35 @@ use nexus_db_model::DnsVersion;
 use nexus_db_model::DnsZone;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::HwBaseboardId;
+use nexus_db_model::Image;
 use nexus_db_model::Instance;
 use nexus_db_model::InvCollection;
+use nexus_db_model::InvPhysicalDisk;
+use nexus_db_model::IpAttachState;
+use nexus_db_model::IpKind;
+use nexus_db_model::NetworkInterface;
+use nexus_db_model::NetworkInterfaceKind;
+use nexus_db_model::PhysicalDisk;
+use nexus_db_model::Probe;
 use nexus_db_model::Project;
 use nexus_db_model::Region;
+use nexus_db_model::RegionReplacement;
+use nexus_db_model::RegionReplacementState;
+use nexus_db_model::RegionReplacementStep;
+use nexus_db_model::RegionReplacementStepType;
 use nexus_db_model::RegionSnapshot;
+use nexus_db_model::RegionSnapshotReplacement;
+use nexus_db_model::RegionSnapshotReplacementState;
 use nexus_db_model::Sled;
 use nexus_db_model::Snapshot;
 use nexus_db_model::SnapshotState;
 use nexus_db_model::SwCaboose;
 use nexus_db_model::SwRotPage;
+use nexus_db_model::UpstairsRepairNotification;
+use nexus_db_model::UpstairsRepairProgress;
 use nexus_db_model::Vmm;
 use nexus_db_model::Volume;
+use nexus_db_model::VpcSubnet;
 use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -64,8 +94,19 @@ use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::ServiceKind;
+use nexus_db_queries::db::pagination::paginated;
+use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::DataStore;
-use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
+use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::DiskFilter;
+use nexus_types::deployment::SledFilter;
+use nexus_types::external_api::views::PhysicalDiskPolicy;
+use nexus_types::external_api::views::PhysicalDiskState;
+use nexus_types::external_api::views::SledPolicy;
+use nexus_types::external_api::views::SledState;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
@@ -74,7 +115,12 @@ use nexus_types::inventory::Collection;
 use nexus_types::inventory::RotPageWhich;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
-use omicron_common::postgres_config::PostgresConfigWithUrl;
+use omicron_common::api::external::InstanceState;
+use omicron_common::api::external::MacAddr;
+use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::SledUuid;
 use sled_agent_client::types::VolumeConstructionRequest;
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -92,12 +138,18 @@ use uuid::Uuid;
 const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
 const NOT_ON_SLED_MSG: &str = "<not on any sled>";
 
-struct MaybePropolisId(Option<Uuid>);
-struct MaybeSledId(Option<Uuid>);
+struct MaybePropolisId(Option<PropolisUuid>);
+struct MaybeSledId(Option<SledUuid>);
 
 impl From<&InstanceAndActiveVmm> for MaybePropolisId {
     fn from(value: &InstanceAndActiveVmm) -> Self {
-        Self(value.instance().runtime().propolis_id)
+        Self(
+            value
+                .instance()
+                .runtime()
+                .propolis_id
+                .map(PropolisUuid::from_untyped_uuid),
+        )
     }
 }
 
@@ -129,9 +181,8 @@ impl Display for MaybeSledId {
 
 #[derive(Debug, Args)]
 pub struct DbArgs {
-    /// URL of the database SQL interface
-    #[clap(long, env("OMDB_DB_URL"))]
-    db_url: Option<PostgresConfigWithUrl>,
+    #[clap(flatten)]
+    db_url_opts: DbUrlOptions,
 
     #[clap(flatten)]
     fetch_opts: DbFetchOptions,
@@ -141,42 +192,148 @@ pub struct DbArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct DbUrlOptions {
+    /// URL of the database SQL interface
+    #[clap(
+        long,
+        env = "OMDB_DB_URL",
+        global = true,
+        help_heading = CONNECTION_OPTIONS_HEADING,
+    )]
+    db_url: Option<PostgresConfigWithUrl>,
+}
+
+impl DbUrlOptions {
+    async fn resolve_pg_url(
+        &self,
+        omdb: &Omdb,
+        log: &slog::Logger,
+    ) -> anyhow::Result<PostgresConfigWithUrl> {
+        match &self.db_url {
+            Some(cli_or_env_url) => Ok(cli_or_env_url.clone()),
+            None => {
+                eprintln!(
+                    "note: database URL not specified.  Will search DNS."
+                );
+                eprintln!("note: (override with --db-url or OMDB_DB_URL)");
+                let addrs = omdb
+                    .dns_lookup_all(
+                        log.clone(),
+                        internal_dns::ServiceName::Cockroach,
+                    )
+                    .await?;
+
+                format!(
+                    "postgresql://root@{}/omicron?sslmode=disable",
+                    addrs
+                        .into_iter()
+                        .map(|a| a.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+                .parse()
+                .context("failed to parse constructed postgres URL")
+            }
+        }
+    }
+
+    pub async fn connect(
+        &self,
+        omdb: &Omdb,
+        log: &slog::Logger,
+    ) -> anyhow::Result<Arc<DataStore>> {
+        let db_url = self.resolve_pg_url(omdb, log).await?;
+        eprintln!("note: using database URL {}", &db_url);
+
+        let db_config = db::Config { url: db_url.clone() };
+        let pool = Arc::new(db::Pool::new(&log.clone(), &db_config));
+
+        // Being a dev tool, we want to try this operation even if the schema
+        // doesn't match what we expect.  So we use `DataStore::new_unchecked()`
+        // here.  We will then check the schema version explicitly and warn the
+        // user if it doesn't match.
+        let datastore = Arc::new(
+            DataStore::new_unchecked(log.clone(), pool)
+                .map_err(|e| anyhow!(e).context("creating datastore"))?,
+        );
+        check_schema_version(&datastore).await;
+        Ok(datastore)
+    }
+}
+
+#[derive(Debug, Args)]
 pub struct DbFetchOptions {
     /// limit to apply to queries that fetch rows
     #[clap(
         long = "fetch-limit",
         default_value_t = NonZeroU32::new(500).unwrap(),
-        env("OMDB_FETCH_LIMIT"),
+        env = "OMDB_FETCH_LIMIT",
+        global = true,
+        help_heading = DATABASE_OPTIONS_HEADING,
     )]
     fetch_limit: NonZeroU32,
 
     /// whether to include soft-deleted records when enumerating objects that
     /// can be soft-deleted
-    #[clap(long, default_value_t = false)]
+    #[clap(
+        long,
+        default_value_t = false,
+        global = true,
+        help_heading = DATABASE_OPTIONS_HEADING,
+    )]
     include_deleted: bool,
 }
 
 /// Subcommands that query or update the database
 #[derive(Debug, Subcommand)]
 enum DbCommands {
-    /// Print information about disks
+    /// Print information about the rack
+    Rack(RackArgs),
+    /// Print information about virtual disks
     Disks(DiskArgs),
     /// Print information about internal and external DNS
     Dns(DnsArgs),
     /// Print information about collected hardware/software inventory
     Inventory(InventoryArgs),
-    /// Print information about control plane services
-    Services(ServicesArgs),
+    /// Print information about physical disks
+    PhysicalDisks(PhysicalDisksArgs),
+    /// Save the current Reconfigurator inputs to a file
+    ReconfiguratorSave(ReconfiguratorSaveArgs),
+    /// Print information about regions
+    Region(RegionArgs),
+    /// Query for information about region replacements, optionally manually
+    /// triggering one.
+    RegionReplacement(RegionReplacementArgs),
+    /// Query for information about region snapshot replacements, optionally
+    /// manually triggering one.
+    RegionSnapshotReplacement(RegionSnapshotReplacementArgs),
     /// Print information about sleds
-    Sleds,
+    Sleds(SledsArgs),
     /// Print information about customer instances
-    Instances,
+    Instances(InstancesOptions),
     /// Print information about the network
     Network(NetworkArgs),
+    /// Print information about migrations
+    #[clap(alias = "migration")]
+    Migrations(MigrationsArgs),
     /// Print information about snapshots
     Snapshots(SnapshotArgs),
     /// Validate the contents of the database
     Validate(ValidateArgs),
+    /// Print information about volumes
+    Volumes(VolumeArgs),
+}
+
+#[derive(Debug, Args)]
+struct RackArgs {
+    #[command(subcommand)]
+    command: RackCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum RackCommands {
+    /// Summarize current racks
+    List,
 }
 
 #[derive(Debug, Args)]
@@ -248,6 +405,13 @@ impl CliDnsGroup {
 }
 
 #[derive(Debug, Args)]
+struct InstancesOptions {
+    /// Only show the running instances
+    #[arg(short, long, action=ArgAction::SetTrue)]
+    running: bool,
+}
+
+#[derive(Debug, Args)]
 struct InventoryArgs {
     #[command(subcommand)]
     command: InventoryCommands,
@@ -261,6 +425,8 @@ enum InventoryCommands {
     Cabooses,
     /// list and show details from particular collections
     Collections(CollectionsArgs),
+    /// show all physical disks ever found
+    PhysicalDisks(InvPhysicalDisksArgs),
     /// list all root of trust pages ever found
     RotPages,
 }
@@ -282,24 +448,113 @@ enum CollectionsCommands {
 #[derive(Debug, Args)]
 struct CollectionsShowArgs {
     /// id of the collection
-    id: Uuid,
+    id: CollectionUuid,
     /// show long strings in their entirety
     #[clap(long)]
     show_long_strings: bool,
 }
 
+#[derive(Debug, Args, Clone, Copy)]
+struct InvPhysicalDisksArgs {
+    #[clap(long)]
+    collection_id: Option<CollectionUuid>,
+
+    #[clap(long, requires("collection_id"))]
+    sled_id: Option<SledUuid>,
+}
+
 #[derive(Debug, Args)]
-struct ServicesArgs {
+struct PhysicalDisksArgs {
+    /// Show disks that match the given filter
+    #[clap(short = 'F', long, value_enum)]
+    filter: Option<DiskFilter>,
+}
+
+#[derive(Debug, Args)]
+struct ReconfiguratorSaveArgs {
+    /// where to save the output
+    output_file: Utf8PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct SledsArgs {
+    /// Show sleds that match the given filter
+    #[clap(short = 'F', long, value_enum)]
+    filter: Option<SledFilter>,
+}
+
+#[derive(Debug, Args)]
+struct RegionArgs {
     #[command(subcommand)]
-    command: ServicesCommands,
+    command: RegionCommands,
 }
 
 #[derive(Debug, Subcommand)]
-enum ServicesCommands {
-    /// List service instances
-    ListInstances,
-    /// List service instances, grouped by sled
-    ListBySled,
+enum RegionCommands {
+    /// List regions that are still missing ports
+    ListRegionsMissingPorts,
+
+    /// List all regions
+    List(RegionListArgs),
+
+    /// Find what is using a region
+    UsedBy(RegionUsedByArgs),
+
+    /// Find deleted volume regions
+    FindDeletedVolumeRegions,
+}
+
+#[derive(Debug, Args)]
+struct RegionListArgs {
+    /// Print region IDs only
+    #[arg(short)]
+    id_only: bool,
+}
+
+#[derive(Debug, Args)]
+struct RegionUsedByArgs {
+    region_id: Vec<Uuid>,
+}
+
+#[derive(Debug, Args)]
+struct RegionReplacementArgs {
+    #[command(subcommand)]
+    command: RegionReplacementCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum RegionReplacementCommands {
+    /// List region replacement requests
+    List(RegionReplacementListArgs),
+    /// Show current region replacements and their status
+    Status,
+    /// Show detailed information for a region replacement
+    Info(RegionReplacementInfoArgs),
+    /// Manually request a region replacement
+    Request(RegionReplacementRequestArgs),
+}
+
+#[derive(Debug, Args)]
+struct RegionReplacementListArgs {
+    /// Only show region replacement requests in this state
+    #[clap(long)]
+    state: Option<RegionReplacementState>,
+
+    /// Only show region replacement requests after a certain date
+    #[clap(long)]
+    after: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Args)]
+struct RegionReplacementInfoArgs {
+    /// The UUID of the region replacement request
+    replacement_id: Uuid,
+}
+
+#[derive(Debug, Args)]
+struct RegionReplacementRequestArgs {
+    /// The UUID of the region to replace
+    region_id: Uuid,
 }
 
 #[derive(Debug, Args)]
@@ -308,7 +563,7 @@ struct NetworkArgs {
     command: NetworkCommands,
 
     /// Print out raw data structures from the data store.
-    #[clap(long)]
+    #[clap(long, global = true)]
     verbose: bool,
 }
 
@@ -316,6 +571,77 @@ struct NetworkArgs {
 enum NetworkCommands {
     /// List external IPs
     ListEips,
+    /// List virtual network interfaces
+    ListVnics,
+}
+
+#[derive(Debug, Args)]
+struct MigrationsArgs {
+    #[command(subcommand)]
+    command: MigrationsCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum MigrationsCommands {
+    /// List migrations
+    #[clap(alias = "ls")]
+    List(MigrationsListArgs),
+    // N.B. I'm making this a subcommand not because there are currently any
+    // other subcommands, but to reserve the optionality to add things other
+    // than `list`...
+}
+
+#[derive(Debug, Args)]
+struct MigrationsListArgs {
+    /// Include only migrations where at least one side reports the migration
+    /// is in progress.
+    ///
+    /// By default, migrations in all states are included. This can be combined
+    /// with the `--pending`, `--completed`, and `--failed` arguments to include
+    /// migrations in  multiple states.
+    #[arg(short = 'r', long, action = ArgAction::SetTrue)]
+    in_progress: bool,
+
+    /// Include only migrations where at least one side is still pending (the
+    /// sled-agent hasn't reported in yet).
+    ///
+    /// By default, migrations in all states are included. This can be combined
+    /// with the `--in-progress`, `--completed` and `--failed` arguments to
+    /// include migrations in multiple states.
+    #[arg(short = 'p', long, action = ArgAction::SetTrue)]
+    pending: bool,
+
+    /// Include only migrations where at least one side reports the migration
+    /// has completed.
+    ///
+    /// By default, migrations in all states are included. This can be combined
+    /// with the `--in-progress`, `--pending`, and `--failed` arguments to
+    /// include migrations in multiple states.
+    #[arg(short = 'c', long, action = ArgAction::SetTrue)]
+    completed: bool,
+
+    /// Include only migrations where at least one side reports the migration
+    /// has failed.
+    ///
+    /// By default, migrations in all states are included. This can be combined
+    /// with the `--pending`, `--in-progress`, and --completed` arguments to
+    /// include migrations  in multiple states.
+    #[arg(short = 'f', long, action = ArgAction::SetTrue)]
+    failed: bool,
+
+    /// Show only migrations for this instance ID.
+    ///
+    /// By default, all instances are shown. This argument be repeated to select
+    /// other instances.
+    #[arg(short = 'i', long = "instance-id")]
+    instance_ids: Vec<Uuid>,
+
+    /// Output all data from the migration record.
+    ///
+    /// This includes update and deletion timestamps, the source and target
+    /// generation numbers.
+    #[arg(short, long, action = ArgAction::SetTrue)]
+    verbose: bool,
 }
 
 #[derive(Debug, Args)]
@@ -339,6 +665,53 @@ struct SnapshotInfoArgs {
 }
 
 #[derive(Debug, Args)]
+struct RegionSnapshotReplacementArgs {
+    #[command(subcommand)]
+    command: RegionSnapshotReplacementCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum RegionSnapshotReplacementCommands {
+    /// List region snapshot replacement requests
+    List(RegionSnapshotReplacementListArgs),
+    /// Show current region snapshot replacements and their status
+    Status,
+    /// Show detailed information for a region snapshot replacement
+    Info(RegionSnapshotReplacementInfoArgs),
+    /// Manually request a region snapshot replacement
+    Request(RegionSnapshotReplacementRequestArgs),
+}
+
+#[derive(Debug, Args)]
+struct RegionSnapshotReplacementListArgs {
+    /// Only show region snapshot replacement requests in this state
+    #[clap(long)]
+    state: Option<RegionSnapshotReplacementState>,
+
+    /// Only show region snapshot replacement requests after a certain date
+    #[clap(long)]
+    after: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Args)]
+struct RegionSnapshotReplacementInfoArgs {
+    /// The UUID of the region snapshot replacement request
+    replacement_id: Uuid,
+}
+
+#[derive(Debug, Args)]
+struct RegionSnapshotReplacementRequestArgs {
+    /// The dataset id for a given region snapshot
+    dataset_id: Uuid,
+
+    /// The region id for a given region snapshot
+    region_id: Uuid,
+
+    /// The snapshot id for a given region snapshot
+    snapshot_id: Uuid,
+}
+
+#[derive(Debug, Args)]
 struct ValidateArgs {
     #[command(subcommand)]
     command: ValidateCommands,
@@ -355,6 +728,26 @@ enum ValidateCommands {
     ValidateRegionSnapshots,
 }
 
+#[derive(Debug, Args)]
+struct VolumeArgs {
+    #[command(subcommand)]
+    command: VolumeCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum VolumeCommands {
+    /// Get info for a specific volume
+    Info(VolumeInfoArgs),
+    /// Summarize current volumes
+    List,
+}
+
+#[derive(Debug, Args)]
+struct VolumeInfoArgs {
+    /// The UUID of the volume
+    uuid: Uuid,
+}
+
 impl DbArgs {
     /// Run a `omdb db` subcommand.
     pub(crate) async fn run_cmd(
@@ -362,49 +755,12 @@ impl DbArgs {
         omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
-        let db_url = match &self.db_url {
-            Some(cli_or_env_url) => cli_or_env_url.clone(),
-            None => {
-                eprintln!(
-                    "note: database URL not specified.  Will search DNS."
-                );
-                eprintln!("note: (override with --db-url or OMDB_DB_URL)");
-                let addrs = omdb
-                    .dns_lookup_all(
-                        log.clone(),
-                        internal_dns::ServiceName::Cockroach,
-                    )
-                    .await?;
-
-                format!(
-                    "postgresql://root@{}/omicron?sslmode=disable",
-                    addrs
-                        .into_iter()
-                        .map(|a| a.to_string())
-                        .collect::<Vec<_>>()
-                        .join(",")
-                )
-                .parse()
-                .context("failed to parse constructed postgres URL")?
-            }
-        };
-        eprintln!("note: using database URL {}", &db_url);
-
-        let db_config = db::Config { url: db_url.clone() };
-        let pool = Arc::new(db::Pool::new(&log.clone(), &db_config));
-
-        // Being a dev tool, we want to try this operation even if the schema
-        // doesn't match what we expect.  So we use `DataStore::new_unchecked()`
-        // here.  We will then check the schema version explicitly and warn the
-        // user if it doesn't match.
-        let datastore = Arc::new(
-            DataStore::new_unchecked(pool)
-                .map_err(|e| anyhow!(e).context("creating datastore"))?,
-        );
-        check_schema_version(&datastore).await;
-
+        let datastore = self.db_url_opts.connect(omdb, log).await?;
         let opctx = OpContext::for_tests(log.clone(), datastore.clone());
         match &self.command {
+            DbCommands::Rack(RackArgs { command: RackCommands::List }) => {
+                cmd_db_rack_list(&opctx, &datastore, &self.fetch_opts).await
+            }
             DbCommands::Disks(DiskArgs {
                 command: DiskCommands::Info(uuid),
             }) => cmd_db_disk_info(&opctx, &datastore, uuid).await,
@@ -437,31 +793,94 @@ impl DbArgs {
                 )
                 .await
             }
-            DbCommands::Services(ServicesArgs {
-                command: ServicesCommands::ListInstances,
+            DbCommands::PhysicalDisks(args) => {
+                cmd_db_physical_disks(
+                    &opctx,
+                    &datastore,
+                    &self.fetch_opts,
+                    args,
+                )
+                .await
+            }
+            DbCommands::ReconfiguratorSave(reconfig_save_args) => {
+                cmd_db_reconfigurator_save(
+                    &opctx,
+                    &datastore,
+                    reconfig_save_args,
+                )
+                .await
+            }
+            DbCommands::Region(RegionArgs {
+                command: RegionCommands::ListRegionsMissingPorts,
+            }) => cmd_db_region_missing_porst(&opctx, &datastore).await,
+            DbCommands::Region(RegionArgs {
+                command: RegionCommands::List(region_list_args),
             }) => {
-                cmd_db_services_list_instances(
+                cmd_db_region_list(
+                    &datastore,
+                    &self.fetch_opts,
+                    region_list_args,
+                )
+                .await
+            }
+            DbCommands::Region(RegionArgs {
+                command: RegionCommands::UsedBy(region_used_by_args),
+            }) => {
+                cmd_db_region_used_by(
+                    &datastore,
+                    &self.fetch_opts,
+                    region_used_by_args,
+                )
+                .await
+            }
+            DbCommands::Region(RegionArgs {
+                command: RegionCommands::FindDeletedVolumeRegions,
+            }) => cmd_db_region_find_deleted(&datastore).await,
+            DbCommands::RegionReplacement(RegionReplacementArgs {
+                command: RegionReplacementCommands::List(args),
+            }) => {
+                cmd_db_region_replacement_list(
+                    &datastore,
+                    &self.fetch_opts,
+                    args,
+                )
+                .await
+            }
+            DbCommands::RegionReplacement(RegionReplacementArgs {
+                command: RegionReplacementCommands::Status,
+            }) => {
+                cmd_db_region_replacement_status(
                     &opctx,
                     &datastore,
                     &self.fetch_opts,
                 )
                 .await
             }
-            DbCommands::Services(ServicesArgs {
-                command: ServicesCommands::ListBySled,
+            DbCommands::RegionReplacement(RegionReplacementArgs {
+                command: RegionReplacementCommands::Info(args),
             }) => {
-                cmd_db_services_list_by_sled(
-                    &opctx,
-                    &datastore,
-                    &self.fetch_opts,
+                cmd_db_region_replacement_info(&opctx, &datastore, args).await
+            }
+            DbCommands::RegionReplacement(RegionReplacementArgs {
+                command: RegionReplacementCommands::Request(args),
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_db_region_replacement_request(
+                    &opctx, &datastore, args, token,
                 )
                 .await
             }
-            DbCommands::Sleds => {
-                cmd_db_sleds(&opctx, &datastore, &self.fetch_opts).await
+            DbCommands::Sleds(args) => {
+                cmd_db_sleds(&opctx, &datastore, &self.fetch_opts, args).await
             }
-            DbCommands::Instances => {
-                cmd_db_instances(&opctx, &datastore, &self.fetch_opts).await
+            DbCommands::Instances(instances_options) => {
+                cmd_db_instances(
+                    &opctx,
+                    &datastore,
+                    &self.fetch_opts,
+                    instances_options.running,
+                )
+                .await
             }
             DbCommands::Network(NetworkArgs {
                 command: NetworkCommands::ListEips,
@@ -470,18 +889,85 @@ impl DbArgs {
                 cmd_db_eips(&opctx, &datastore, &self.fetch_opts, *verbose)
                     .await
             }
+            DbCommands::Network(NetworkArgs {
+                command: NetworkCommands::ListVnics,
+                verbose,
+            }) => {
+                cmd_db_network_list_vnics(
+                    &datastore,
+                    &self.fetch_opts,
+                    *verbose,
+                )
+                .await
+            }
+            DbCommands::Migrations(MigrationsArgs {
+                command: MigrationsCommands::List(args),
+            }) => {
+                cmd_db_migrations_list(&datastore, &self.fetch_opts, args).await
+            }
             DbCommands::Snapshots(SnapshotArgs {
                 command: SnapshotCommands::Info(uuid),
             }) => cmd_db_snapshot_info(&opctx, &datastore, uuid).await,
             DbCommands::Snapshots(SnapshotArgs {
                 command: SnapshotCommands::List,
             }) => cmd_db_snapshot_list(&datastore, &self.fetch_opts).await,
+            DbCommands::RegionSnapshotReplacement(
+                RegionSnapshotReplacementArgs {
+                    command: RegionSnapshotReplacementCommands::List(args),
+                },
+            ) => {
+                cmd_db_region_snapshot_replacement_list(
+                    &datastore,
+                    &self.fetch_opts,
+                    args,
+                )
+                .await
+            }
+            DbCommands::RegionSnapshotReplacement(
+                RegionSnapshotReplacementArgs {
+                    command: RegionSnapshotReplacementCommands::Status,
+                },
+            ) => {
+                cmd_db_region_snapshot_replacement_status(
+                    &opctx,
+                    &datastore,
+                    &self.fetch_opts,
+                )
+                .await
+            }
+            DbCommands::RegionSnapshotReplacement(
+                RegionSnapshotReplacementArgs {
+                    command: RegionSnapshotReplacementCommands::Info(args),
+                },
+            ) => {
+                cmd_db_region_snapshot_replacement_info(
+                    &opctx, &datastore, args,
+                )
+                .await
+            }
+            DbCommands::RegionSnapshotReplacement(
+                RegionSnapshotReplacementArgs {
+                    command: RegionSnapshotReplacementCommands::Request(args),
+                },
+            ) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_db_region_snapshot_replacement_request(
+                    &opctx, &datastore, args, token,
+                )
+                .await
+            }
             DbCommands::Validate(ValidateArgs {
                 command: ValidateCommands::ValidateVolumeReferences,
             }) => cmd_db_validate_volume_references(&datastore).await,
             DbCommands::Validate(ValidateArgs {
                 command: ValidateCommands::ValidateRegionSnapshots,
             }) => cmd_db_validate_region_snapshots(&datastore).await,
+            DbCommands::Volumes(VolumeArgs {
+                command: VolumeCommands::Info(uuid),
+            }) => cmd_db_volume_info(&datastore, uuid).await,
+            DbCommands::Volumes(VolumeArgs {
+                command: VolumeCommands::List,
+            }) => cmd_db_volume_list(&datastore, &self.fetch_opts).await,
         }
     }
 }
@@ -493,11 +979,18 @@ impl DbArgs {
 /// incompatible because in practice it may well not matter and it's very
 /// valuable for this tool to work if it possibly can.
 async fn check_schema_version(datastore: &DataStore) {
-    let expected_version = nexus_db_model::schema::SCHEMA_VERSION;
+    let expected_version = nexus_db_model::SCHEMA_VERSION;
     let version_check = datastore.database_schema_version().await;
 
     match version_check {
-        Ok(found_version) => {
+        Ok((found_version, found_target)) => {
+            if let Some(target) = found_target {
+                eprintln!(
+                    "note: database schema target exists (mid-upgrade?) ({})",
+                    target
+                );
+            }
+
             if found_version == expected_version {
                 eprintln!(
                     "note: database schema version matches expected ({})",
@@ -564,6 +1057,104 @@ fn first_page<'a, T>(limit: NonZeroU32) -> DataPageParams<'a, T> {
     }
 }
 
+/// Helper function to look up an instance with the given ID.
+async fn lookup_instance(
+    datastore: &DataStore,
+    instance_id: Uuid,
+) -> anyhow::Result<Option<Instance>> {
+    use db::schema::instance::dsl;
+
+    let conn = datastore.pool_connection_for_tests().await?;
+    dsl::instance
+        .filter(dsl::id.eq(instance_id))
+        .limit(1)
+        .select(Instance::as_select())
+        .get_result_async(&*conn)
+        .await
+        .optional()
+        .with_context(|| format!("loading instance {instance_id}"))
+}
+
+#[derive(Clone, Debug)]
+struct ServiceInfo {
+    service_kind: ServiceKind,
+    disposition: BlueprintZoneDisposition,
+}
+
+/// Helper function to look up the service with the given ID.
+///
+/// Requires the caller to first have fetched the current target blueprint.
+async fn lookup_service_info(
+    service_id: Uuid,
+    blueprint: &Blueprint,
+) -> anyhow::Result<Option<ServiceInfo>> {
+    let Some(zone_config) = blueprint
+        .all_omicron_zones(BlueprintZoneFilter::All)
+        .find_map(|(_sled_id, zone_config)| {
+            if zone_config.id.into_untyped_uuid() == service_id {
+                Some(zone_config)
+            } else {
+                None
+            }
+        })
+    else {
+        return Ok(None);
+    };
+
+    let service_kind = match &zone_config.zone_type {
+        BlueprintZoneType::BoundaryNtp(_)
+        | BlueprintZoneType::InternalNtp(_) => ServiceKind::Ntp,
+        BlueprintZoneType::Clickhouse(_) => ServiceKind::Clickhouse,
+        BlueprintZoneType::ClickhouseKeeper(_) => ServiceKind::ClickhouseKeeper,
+        BlueprintZoneType::ClickhouseServer(_) => ServiceKind::ClickhouseServer,
+        BlueprintZoneType::CockroachDb(_) => ServiceKind::Cockroach,
+        BlueprintZoneType::Crucible(_) => ServiceKind::Crucible,
+        BlueprintZoneType::CruciblePantry(_) => ServiceKind::CruciblePantry,
+        BlueprintZoneType::ExternalDns(_) => ServiceKind::ExternalDns,
+        BlueprintZoneType::InternalDns(_) => ServiceKind::InternalDns,
+        BlueprintZoneType::Nexus(_) => ServiceKind::Nexus,
+        BlueprintZoneType::Oximeter(_) => ServiceKind::Oximeter,
+    };
+
+    Ok(Some(ServiceInfo { service_kind, disposition: zone_config.disposition }))
+}
+
+/// Helper function to looks up a probe with the given ID.
+async fn lookup_probe(
+    datastore: &DataStore,
+    probe_id: Uuid,
+) -> anyhow::Result<Option<Probe>> {
+    use db::schema::probe::dsl;
+
+    let conn = datastore.pool_connection_for_tests().await?;
+    dsl::probe
+        .filter(dsl::id.eq(probe_id))
+        .limit(1)
+        .select(Probe::as_select())
+        .get_result_async(&*conn)
+        .await
+        .optional()
+        .with_context(|| format!("loading probe {probe_id}"))
+}
+
+/// Helper function to looks up a project with the given ID.
+async fn lookup_project(
+    datastore: &DataStore,
+    project_id: Uuid,
+) -> anyhow::Result<Option<Project>> {
+    use db::schema::project::dsl;
+
+    let conn = datastore.pool_connection_for_tests().await?;
+    dsl::project
+        .filter(dsl::id.eq(project_id))
+        .limit(1)
+        .select(Project::as_select())
+        .get_result_async(&*conn)
+        .await
+        .optional()
+        .with_context(|| format!("loading project {project_id}"))
+}
+
 // Disks
 
 /// Run `omdb db disk list`.
@@ -608,6 +1199,50 @@ async fn cmd_db_disk_list(
             None => "-".to_string(),
         },
     });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+/// Run `omdb db rack info`.
+async fn cmd_db_rack_list(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct RackRow {
+        id: String,
+        initialized: bool,
+        tuf_base_url: String,
+        rack_subnet: String,
+    }
+
+    let ctx = || "listing racks".to_string();
+
+    let limit = fetch_opts.fetch_limit;
+    let rack_list = datastore
+        .rack_list(opctx, &first_page(limit))
+        .await
+        .context("listing racks")?;
+    check_limit(&rack_list, limit, ctx);
+
+    let rows = rack_list.into_iter().map(|rack| RackRow {
+        id: rack.id().to_string(),
+        initialized: rack.initialized,
+        tuf_base_url: rack.tuf_base_url.unwrap_or_else(|| "-".to_string()),
+        rack_subnet: rack
+            .rack_subnet
+            .map(|subnet| subnet.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+    });
+
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
@@ -700,7 +1335,7 @@ async fn cmd_db_disk_info(
             let my_sled_id = instance.sled_id().unwrap();
 
             let (_, my_sled) = LookupPath::new(opctx, datastore)
-                .sled_id(my_sled_id)
+                .sled_id(my_sled_id.into_untyped_uuid())
                 .fetch()
                 .await
                 .context("failed to look up sled")?;
@@ -779,6 +1414,38 @@ async fn cmd_db_disk_info(
 
     println!("{}", table);
 
+    get_and_display_vcr(disk.volume_id, datastore).await?;
+    Ok(())
+}
+
+// Given a UUID, search the database for a volume with that ID
+// If found, attempt to parse the .data field into a VolumeConstructionRequest
+// and display it if successful.
+async fn get_and_display_vcr(
+    volume_id: Uuid,
+    datastore: &DataStore,
+) -> Result<(), anyhow::Error> {
+    // Get the VCR from the volume and display selected parts.
+    use db::schema::volume::dsl as volume_dsl;
+    let volumes = volume_dsl::volume
+        .filter(volume_dsl::id.eq(volume_id))
+        .limit(1)
+        .select(Volume::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("loading requested volume")?;
+
+    for v in volumes {
+        match serde_json::from_str(&v.data()) {
+            Ok(vcr) => {
+                println!("\nVCR from volume ID {volume_id}");
+                print_vcr(vcr, 0);
+            }
+            Err(e) => {
+                println!("Volume had invalid VCR in data field: {e}");
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1021,17 +1688,69 @@ async fn cmd_db_disk_physical(
     Ok(())
 }
 
-// SERVICES
-
 #[derive(Tabled)]
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-struct ServiceInstanceRow {
-    #[tabled(rename = "SERVICE")]
-    kind: String,
-    instance_id: Uuid,
-    addr: String,
-    sled_serial: String,
+struct PhysicalDiskRow {
+    id: Uuid,
+    serial: String,
+    vendor: String,
+    model: String,
+    sled_id: Uuid,
+    policy: PhysicalDiskPolicy,
+    state: PhysicalDiskState,
 }
+
+impl From<PhysicalDisk> for PhysicalDiskRow {
+    fn from(d: PhysicalDisk) -> Self {
+        PhysicalDiskRow {
+            id: d.id(),
+            serial: d.serial.clone(),
+            vendor: d.vendor.clone(),
+            model: d.model.clone(),
+            sled_id: d.sled_id,
+            policy: d.disk_policy.into(),
+            state: d.disk_state.into(),
+        }
+    }
+}
+
+/// Run `omdb db physical-disks`.
+async fn cmd_db_physical_disks(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &PhysicalDisksArgs,
+) -> Result<(), anyhow::Error> {
+    let limit = fetch_opts.fetch_limit;
+    let filter = match args.filter {
+        Some(filter) => filter,
+        None => {
+            eprintln!(
+                "note: listing all in-service disks \
+                 (use -F to filter, e.g. -F in-service)"
+            );
+            DiskFilter::InService
+        }
+    };
+
+    let sleds = datastore
+        .physical_disk_list(&opctx, &first_page(limit), filter)
+        .await
+        .context("listing physical disks")?;
+    check_limit(&sleds, limit, || String::from("listing physical disks"));
+
+    let rows = sleds.into_iter().map(|s| PhysicalDiskRow::from(s));
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(1, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+// SERVICES
 
 // Snapshots
 fn format_snapshot(state: &SnapshotState) -> impl Display {
@@ -1131,8 +1850,10 @@ async fn cmd_db_snapshot_info(
         .context("loading requested snapshot")?;
 
     let mut dest_volume_ids = Vec::new();
+    let mut source_volume_ids = Vec::new();
     let rows = snapshots.into_iter().map(|snapshot| {
         dest_volume_ids.push(snapshot.destination_volume_id);
+        source_volume_ids.push(snapshot.volume_id);
         SnapshotRow::from(snapshot)
     });
     if rows.len() == 0 {
@@ -1146,6 +1867,10 @@ async fn cmd_db_snapshot_info(
 
     println!("{}", table);
 
+    println!("SOURCE VOLUME VCR:");
+    for vol in source_volume_ids {
+        get_and_display_vcr(vol, datastore).await?;
+    }
     for vol_id in dest_volume_ids {
         // Get the dataset backing this volume.
         let regions = datastore.get_allocated_regions(vol_id).await?;
@@ -1180,57 +1905,56 @@ async fn cmd_db_snapshot_info(
             .with(tabled::settings::Padding::new(0, 1, 0, 0))
             .to_string();
 
+        println!("DESTINATION REGION INFO:");
         println!("{}", table);
+        println!("DESTINATION VOLUME VCR:");
+        get_and_display_vcr(vol_id, datastore).await?;
     }
 
     Ok(())
 }
 
-/// Run `omdb db services list-instances`.
-async fn cmd_db_services_list_instances(
-    opctx: &OpContext,
+// Volumes
+/// Run `omdb db volume list`.
+async fn cmd_db_volume_list(
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
 ) -> Result<(), anyhow::Error> {
-    let limit = fetch_opts.fetch_limit;
-    let sled_list = datastore
-        .sled_list(&opctx, &first_page(limit))
-        .await
-        .context("listing sleds")?;
-    check_limit(&sled_list, limit, || String::from("listing sleds"));
-
-    let sleds: BTreeMap<Uuid, Sled> =
-        sled_list.into_iter().map(|s| (s.id(), s)).collect();
-
-    let mut rows = vec![];
-
-    for service_kind in ServiceKind::iter() {
-        let context =
-            || format!("listing instances of kind {:?}", service_kind);
-        let instances = datastore
-            .services_list_kind(&opctx, service_kind, &first_page(limit))
-            .await
-            .with_context(&context)?;
-        check_limit(&instances, limit, &context);
-
-        rows.extend(instances.into_iter().map(|instance| {
-            let addr =
-                std::net::SocketAddrV6::new(*instance.ip, *instance.port, 0, 0)
-                    .to_string();
-
-            ServiceInstanceRow {
-                kind: format!("{:?}", service_kind),
-                instance_id: instance.id(),
-                addr,
-                sled_serial: sleds
-                    .get(&instance.sled_id)
-                    .map(|s| s.serial_number())
-                    .unwrap_or("unknown")
-                    .to_string(),
-            }
-        }));
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct VolumeRow {
+        id: String,
+        created: String,
+        modified: String,
+        deleted: String,
     }
 
+    let ctx = || "listing volumes".to_string();
+
+    use db::schema::volume::dsl;
+    let mut query = dsl::volume.into_boxed();
+    if !fetch_opts.include_deleted {
+        query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    let volumes = query
+        .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
+        .select(Volume::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("loading volumes")?;
+
+    check_limit(&volumes, fetch_opts.fetch_limit, ctx);
+
+    let rows = volumes.into_iter().map(|volume| VolumeRow {
+        id: volume.id().to_string(),
+        created: volume.time_created().to_string(),
+        modified: volume.time_modified().to_string(),
+        deleted: match volume.time_deleted {
+            Some(time) => time.to_string(),
+            None => "NULL".to_string(),
+        },
+    });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
@@ -1241,73 +1965,802 @@ async fn cmd_db_services_list_instances(
     Ok(())
 }
 
-// SLEDS
-
-#[derive(Tabled)]
-#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-struct ServiceInstanceSledRow {
-    #[tabled(rename = "SERVICE")]
-    kind: String,
-    instance_id: Uuid,
-    addr: String,
-}
-
-/// Run `omdb db services list-by-sled`.
-async fn cmd_db_services_list_by_sled(
-    opctx: &OpContext,
+/// Run `omdb db volume info <UUID>`.
+async fn cmd_db_volume_info(
     datastore: &DataStore,
-    fetch_opts: &DbFetchOptions,
+    args: &VolumeInfoArgs,
 ) -> Result<(), anyhow::Error> {
-    let limit = fetch_opts.fetch_limit;
-    let sled_list = datastore
-        .sled_list(&opctx, &first_page(limit))
-        .await
-        .context("listing sleds")?;
-    check_limit(&sled_list, limit, || String::from("listing sleds"));
-
-    let sleds: BTreeMap<Uuid, Sled> =
-        sled_list.into_iter().map(|s| (s.id(), s)).collect();
-    let mut services_by_sled: BTreeMap<Uuid, Vec<ServiceInstanceSledRow>> =
-        BTreeMap::new();
-
-    for service_kind in ServiceKind::iter() {
-        let context =
-            || format!("listing instances of kind {:?}", service_kind);
-        let instances = datastore
-            .services_list_kind(&opctx, service_kind, &first_page(limit))
-            .await
-            .with_context(&context)?;
-        check_limit(&instances, limit, &context);
-
-        for i in instances {
-            let addr =
-                std::net::SocketAddrV6::new(*i.ip, *i.port, 0, 0).to_string();
-            let sled_instances =
-                services_by_sled.entry(i.sled_id).or_insert_with(Vec::new);
-            sled_instances.push(ServiceInstanceSledRow {
-                kind: format!("{:?}", service_kind),
-                instance_id: i.id(),
-                addr,
-            })
-        }
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct VolumeRow {
+        id: String,
+        created: String,
+        modified: String,
+        deleted: String,
     }
 
-    for (sled_id, instances) in services_by_sled {
-        println!(
-            "sled: {} (id {})\n",
-            sleds.get(&sled_id).map(|s| s.serial_number()).unwrap_or("unknown"),
-            sled_id,
-        );
-        let table = tabled::Table::new(instances)
-            .with(tabled::settings::Style::empty())
-            .with(tabled::settings::Padding::new(0, 1, 0, 0))
-            .to_string();
-        println!("{}", textwrap::indent(&table.to_string(), "  "));
-        println!("");
+    use db::schema::volume::dsl as volume_dsl;
+
+    let volumes = volume_dsl::volume
+        .filter(volume_dsl::id.eq(args.uuid))
+        .limit(1)
+        .select(Volume::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("loading requested volume")?;
+
+    let mut vcrs = Vec::new();
+    let rows = volumes.into_iter().map(|volume| {
+        match serde_json::from_str(&volume.data()) {
+            Ok(vcr) => {
+                vcrs.push(vcr);
+            }
+            Err(e) => {
+                println!("Volume had invalid VCR in data field: {e}");
+            }
+        }
+
+        VolumeRow {
+            id: volume.id().to_string(),
+            created: volume.time_created().to_string(),
+            modified: volume.time_modified().to_string(),
+            deleted: match volume.time_deleted {
+                Some(time) => time.to_string(),
+                None => "NULL".to_string(),
+            },
+        }
+    });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    for vcr in vcrs {
+        print_vcr(vcr, 0);
+    }
+    Ok(())
+}
+
+// Print the fields that I want to see of a VolumeConstructionRequests
+// This will call itself on all sub_volumes and read_only_parents it finds.
+// We use the pad variable to indicate how much indent we want to display
+// information at.  Each time we recurse into another VCR layer, we increase
+// the amount of indention.
+fn print_vcr(vcr: VolumeConstructionRequest, pad: usize) {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct VCRVolume {
+        id: String,
+        bs: String,
+        sub_volumes: usize,
+        read_only_parent: bool,
+    }
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct VCRRegion {
+        id: String,
+        bs: String,
+        bpe: u64,
+        ec: u32,
+        gen: u64,
+        read_only: bool,
+    }
+
+    let indent = " ".repeat(pad);
+    match vcr {
+        VolumeConstructionRequest::Volume {
+            id,
+            block_size,
+            sub_volumes,
+            read_only_parent,
+        } => {
+            let row = VCRVolume {
+                id: id.to_string(),
+                bs: block_size.to_string(),
+                sub_volumes: sub_volumes.len(),
+                read_only_parent: read_only_parent.is_some(),
+            };
+            let table = tabled::Table::new(&[row])
+                .with(tabled::settings::Style::empty())
+                .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                .to_string();
+
+            // Shift the entire table over our indent amount.
+            let indented_table: String = table
+                .lines()
+                .map(|line| format!("{}{}", indent, line))
+                .collect::<Vec<String>>()
+                .join("\n");
+            println!("{}\n", indented_table);
+
+            for (index, sv) in sub_volumes.iter().enumerate() {
+                println!("{indent}SUB VOLUME {index}");
+                print_vcr(sv.clone(), pad + 4);
+                println!("");
+            }
+
+            if let Some(rop) = read_only_parent {
+                println!("{indent}READ ONLY PARENT:");
+                print_vcr(*rop, pad + 4);
+            }
+        }
+        VolumeConstructionRequest::Region {
+            block_size,
+            blocks_per_extent,
+            extent_count,
+            gen,
+            opts,
+        } => {
+            let row = VCRRegion {
+                id: opts.id.to_string(),
+                bs: block_size.to_string(),
+                bpe: blocks_per_extent,
+                ec: extent_count,
+                gen,
+                read_only: opts.read_only,
+            };
+            let table = tabled::Table::new(&[row])
+                .with(tabled::settings::Style::empty())
+                .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                .to_string();
+
+            // Shift the entire table over our indent amount.
+            let indented_table: String = table
+                .lines()
+                .map(|line| format!("{}{}", indent, line))
+                .collect::<Vec<String>>()
+                .join("\n");
+            println!("{}", indented_table);
+            for target in opts.target {
+                println!("{indent}{target}");
+            }
+        }
+        _ => {
+            println!("{indent}Unsupported volume type");
+        }
+    }
+}
+
+/// List all regions still missing ports
+async fn cmd_db_region_missing_porst(
+    opctx: &OpContext,
+    datastore: &DataStore,
+) -> Result<(), anyhow::Error> {
+    let regions: Vec<Region> = datastore.regions_missing_ports(opctx).await?;
+
+    for region in regions {
+        println!("{:?}", region.id());
     }
 
     Ok(())
 }
+
+/// List all regions
+async fn cmd_db_region_list(
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &RegionListArgs,
+) -> Result<(), anyhow::Error> {
+    use db::schema::region::dsl;
+
+    let regions: Vec<Region> = paginated(
+        dsl::region,
+        dsl::id,
+        &first_page::<dsl::id>(fetch_opts.fetch_limit),
+    )
+    .select(Region::as_select())
+    .load_async(&*datastore.pool_connection_for_tests().await?)
+    .await?;
+
+    check_limit(&regions, fetch_opts.fetch_limit, || {
+        String::from("listing regions")
+    });
+
+    if args.id_only {
+        for region in regions {
+            println!("{}", region.id());
+        }
+    } else {
+        #[derive(Tabled)]
+        struct RegionRow {
+            id: Uuid,
+            dataset_id: Uuid,
+            volume_id: Uuid,
+            block_size: i64,
+            blocks_per_extent: u64,
+            extent_count: u64,
+            read_only: bool,
+        }
+
+        let rows: Vec<_> = regions
+            .into_iter()
+            .map(|region: Region| RegionRow {
+                id: region.id(),
+                dataset_id: region.dataset_id(),
+                volume_id: region.volume_id(),
+                block_size: region.block_size().into(),
+                blocks_per_extent: region.blocks_per_extent(),
+                extent_count: region.extent_count(),
+                read_only: region.read_only(),
+            })
+            .collect();
+
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::psql())
+            .to_string();
+
+        println!("{}", table);
+    }
+
+    Ok(())
+}
+
+/// Find what is using a region
+async fn cmd_db_region_used_by(
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &RegionUsedByArgs,
+) -> Result<(), anyhow::Error> {
+    use db::schema::region::dsl;
+
+    let regions: Vec<Region> = paginated(
+        dsl::region,
+        dsl::id,
+        &first_page::<dsl::id>(fetch_opts.fetch_limit),
+    )
+    .filter(dsl::id.eq_any(args.region_id.clone()))
+    .select(Region::as_select())
+    .load_async(&*datastore.pool_connection_for_tests().await?)
+    .await?;
+
+    check_limit(&regions, fetch_opts.fetch_limit, || {
+        String::from("listing regions")
+    });
+
+    let volumes: Vec<Uuid> = regions.iter().map(|x| x.volume_id()).collect();
+
+    let disks_used: Vec<Disk> = {
+        let volumes = volumes.clone();
+        datastore
+            .pool_connection_for_tests()
+            .await?
+            .transaction_async(|conn| async move {
+                use db::schema::disk::dsl;
+
+                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+                paginated(
+                    dsl::disk,
+                    dsl::id,
+                    &first_page::<dsl::id>(fetch_opts.fetch_limit),
+                )
+                .filter(dsl::volume_id.eq_any(volumes))
+                .select(Disk::as_select())
+                .load_async(&conn)
+                .await
+            })
+            .await?
+    };
+
+    check_limit(&disks_used, fetch_opts.fetch_limit, || {
+        String::from("listing disks used")
+    });
+
+    let snapshots_used: Vec<Snapshot> = {
+        let volumes = volumes.clone();
+        datastore
+            .pool_connection_for_tests()
+            .await?
+            .transaction_async(|conn| async move {
+                use db::schema::snapshot::dsl;
+
+                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+                paginated(
+                    dsl::snapshot,
+                    dsl::id,
+                    &first_page::<dsl::id>(fetch_opts.fetch_limit),
+                )
+                .filter(
+                    dsl::volume_id
+                        .eq_any(volumes.clone())
+                        .or(dsl::destination_volume_id.eq_any(volumes.clone())),
+                )
+                .select(Snapshot::as_select())
+                .load_async(&conn)
+                .await
+            })
+            .await?
+    };
+
+    check_limit(&snapshots_used, fetch_opts.fetch_limit, || {
+        String::from("listing snapshots used")
+    });
+
+    let images_used: Vec<Image> = {
+        let volumes = volumes.clone();
+        datastore
+            .pool_connection_for_tests()
+            .await?
+            .transaction_async(|conn| async move {
+                use db::schema::image::dsl;
+
+                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+                paginated(
+                    dsl::image,
+                    dsl::id,
+                    &first_page::<dsl::id>(fetch_opts.fetch_limit),
+                )
+                .filter(dsl::volume_id.eq_any(volumes))
+                .select(Image::as_select())
+                .load_async(&conn)
+                .await
+            })
+            .await?
+    };
+
+    check_limit(&images_used, fetch_opts.fetch_limit, || {
+        String::from("listing images used")
+    });
+
+    #[derive(Tabled)]
+    struct RegionRow {
+        id: Uuid,
+        volume_id: Uuid,
+        usage_type: String,
+        usage_id: String,
+        usage_name: String,
+        deleted: bool,
+    }
+
+    let rows: Vec<_> = regions
+        .into_iter()
+        .map(|region: Region| {
+            if let Some(image) =
+                images_used.iter().find(|x| x.volume_id == region.volume_id())
+            {
+                RegionRow {
+                    id: region.id(),
+                    volume_id: region.volume_id(),
+
+                    usage_type: String::from("image"),
+                    usage_id: image.id().to_string(),
+                    usage_name: image.name().to_string(),
+                    deleted: image.time_deleted().is_some(),
+                }
+            } else if let Some(snapshot) = snapshots_used
+                .iter()
+                .find(|x| x.volume_id == region.volume_id())
+            {
+                RegionRow {
+                    id: region.id(),
+                    volume_id: region.volume_id(),
+
+                    usage_type: String::from("snapshot"),
+                    usage_id: snapshot.id().to_string(),
+                    usage_name: snapshot.name().to_string(),
+                    deleted: snapshot.time_deleted().is_some(),
+                }
+            } else if let Some(snapshot) = snapshots_used
+                .iter()
+                .find(|x| x.destination_volume_id == region.volume_id())
+            {
+                RegionRow {
+                    id: region.id(),
+                    volume_id: region.volume_id(),
+
+                    usage_type: String::from("snapshot dest"),
+                    usage_id: snapshot.id().to_string(),
+                    usage_name: snapshot.name().to_string(),
+                    deleted: snapshot.time_deleted().is_some(),
+                }
+            } else if let Some(disk) =
+                disks_used.iter().find(|x| x.volume_id == region.volume_id())
+            {
+                RegionRow {
+                    id: region.id(),
+                    volume_id: region.volume_id(),
+
+                    usage_type: String::from("disk"),
+                    usage_id: disk.id().to_string(),
+                    usage_name: disk.name().to_string(),
+                    deleted: disk.time_deleted().is_some(),
+                }
+            } else {
+                RegionRow {
+                    id: region.id(),
+                    volume_id: region.volume_id(),
+
+                    usage_type: String::from("unknown!"),
+                    usage_id: String::from(""),
+                    usage_name: String::from(""),
+                    deleted: false,
+                }
+            }
+        })
+        .collect();
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::psql())
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+/// Find deleted volume regions
+async fn cmd_db_region_find_deleted(
+    datastore: &DataStore,
+) -> Result<(), anyhow::Error> {
+    let datasets_regions_volumes =
+        datastore.find_deleted_volume_regions().await?;
+
+    #[derive(Tabled)]
+    struct Row {
+        dataset_id: Uuid,
+        region_id: Uuid,
+        region_snapshot_id: String,
+        volume_id: Uuid,
+    }
+
+    let rows: Vec<Row> = datasets_regions_volumes
+        .into_iter()
+        .map(|row| {
+            let (dataset, region, region_snapshot, volume) = row;
+
+            Row {
+                dataset_id: dataset.id(),
+                region_id: region.id(),
+                region_snapshot_id: if let Some(region_snapshot) =
+                    region_snapshot
+                {
+                    region_snapshot.snapshot_id.to_string()
+                } else {
+                    String::from("")
+                },
+                volume_id: volume.id(),
+            }
+        })
+        .collect();
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::psql())
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+/// List all region replacement requests
+async fn cmd_db_region_replacement_list(
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &RegionReplacementListArgs,
+) -> Result<(), anyhow::Error> {
+    let ctx = || "listing region replacement requests".to_string();
+    let limit = fetch_opts.fetch_limit;
+
+    let requests: Vec<RegionReplacement> = {
+        let conn = datastore.pool_connection_for_tests().await?;
+
+        use db::schema::region_replacement::dsl;
+
+        match (args.state, args.after) {
+            (Some(state), Some(after)) => {
+                dsl::region_replacement
+                    .filter(dsl::replacement_state.eq(state))
+                    .filter(dsl::request_time.gt(after))
+                    .limit(i64::from(u32::from(limit)))
+                    .select(RegionReplacement::as_select())
+                    .get_results_async(&*conn)
+                    .await?
+            }
+
+            (Some(state), None) => {
+                dsl::region_replacement
+                    .filter(dsl::replacement_state.eq(state))
+                    .limit(i64::from(u32::from(limit)))
+                    .select(RegionReplacement::as_select())
+                    .get_results_async(&*conn)
+                    .await?
+            }
+
+            (None, Some(after)) => {
+                dsl::region_replacement
+                    .filter(dsl::request_time.gt(after))
+                    .limit(i64::from(u32::from(limit)))
+                    .select(RegionReplacement::as_select())
+                    .get_results_async(&*conn)
+                    .await?
+            }
+
+            (None, None) => {
+                dsl::region_replacement
+                    .limit(i64::from(u32::from(limit)))
+                    .select(RegionReplacement::as_select())
+                    .get_results_async(&*conn)
+                    .await?
+            }
+        }
+    };
+
+    check_limit(&requests, limit, ctx);
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct Row {
+        pub id: Uuid,
+        pub request_time: DateTime<Utc>,
+        pub replacement_state: String,
+    }
+
+    let mut rows = Vec::with_capacity(requests.len());
+
+    for request in requests {
+        rows.push(Row {
+            id: request.id,
+            request_time: request.request_time,
+            replacement_state: format!("{:?}", request.replacement_state),
+        });
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .with(tabled::settings::Panel::header("Region replacement requests"))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+/// Display all non-complete region replacements
+async fn cmd_db_region_replacement_status(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+) -> Result<(), anyhow::Error> {
+    let ctx = || "listing region replacement requests".to_string();
+    let limit = fetch_opts.fetch_limit;
+
+    let requests: Vec<RegionReplacement> = {
+        let conn = datastore.pool_connection_for_tests().await?;
+
+        use db::schema::region_replacement::dsl;
+
+        dsl::region_replacement
+            .filter(dsl::replacement_state.ne(RegionReplacementState::Complete))
+            .limit(i64::from(u32::from(limit)))
+            .select(RegionReplacement::as_select())
+            .get_results_async(&*conn)
+            .await?
+    };
+
+    check_limit(&requests, limit, ctx);
+
+    for request in requests {
+        println!("{}:", request.id);
+        println!();
+
+        println!("      started: {}", request.request_time);
+        println!("        state: {:?}", request.replacement_state);
+        println!("old region id: {}", request.old_region_id);
+        println!("new region id: {:?}", request.new_region_id);
+        println!();
+
+        if let Some(new_region_id) = request.new_region_id {
+            // Find the most recent upstairs repair notification where the
+            // downstairs being repaired is a "new" region id. This will give us
+            // the most recent repair id.
+            let maybe_repair: Option<UpstairsRepairNotification> = datastore
+                .most_recent_started_repair_notification(opctx, new_region_id)
+                .await?;
+
+            if let Some(repair) = maybe_repair {
+                let maybe_repair_progress: Option<UpstairsRepairProgress> =
+                    datastore
+                        .most_recent_repair_progress(
+                            opctx,
+                            repair.repair_id.into(),
+                        )
+                        .await?;
+
+                if let Some(repair_progress) = maybe_repair_progress {
+                    let bar = ProgressBar::with_draw_target(
+                        Some(repair_progress.total_items as u64),
+                        ProgressDrawTarget::stdout(),
+                    )
+                    .with_style(ProgressStyle::with_template(
+                        "progress:\t{wide_bar:.green} [{pos:>7}/{len:>7}]",
+                    )?)
+                    .with_position(repair_progress.current_item as u64);
+
+                    bar.abandon();
+
+                    println!();
+                }
+            }
+        }
+
+        println!();
+    }
+
+    Ok(())
+}
+
+/// Show details for a single region replacement
+async fn cmd_db_region_replacement_info(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &RegionReplacementInfoArgs,
+) -> Result<(), anyhow::Error> {
+    let request = datastore
+        .get_region_replacement_request_by_id(opctx, args.replacement_id)
+        .await?;
+
+    // Show details
+    println!("      started: {}", request.request_time);
+    println!("        state: {:?}", request.replacement_state);
+    println!("old region id: {}", request.old_region_id);
+    println!("new region id: {:?}", request.new_region_id);
+    println!();
+
+    if let Some(new_region_id) = request.new_region_id {
+        // Find all related notifications
+        let notifications: Vec<UpstairsRepairNotification> = datastore
+            .repair_notifications_for_region(opctx, new_region_id)
+            .await?;
+
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct Row {
+            pub time: DateTime<Utc>,
+
+            pub repair_id: String,
+            pub repair_type: String,
+
+            pub upstairs_id: String,
+            pub session_id: String,
+
+            pub notification_type: String,
+        }
+
+        let mut rows = Vec::with_capacity(notifications.len());
+
+        for notification in &notifications {
+            rows.push(Row {
+                time: notification.time,
+                repair_id: notification.repair_id.to_string(),
+                repair_type: format!("{:?}", notification.repair_type),
+                upstairs_id: notification.upstairs_id.to_string(),
+                session_id: notification.session_id.to_string(),
+                notification_type: format!(
+                    "{:?}",
+                    notification.notification_type
+                ),
+            });
+        }
+
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .with(tabled::settings::Panel::header("Repair notifications"))
+            .to_string();
+
+        println!("{}", table);
+
+        println!();
+
+        // Use the most recent notification to get the most recent repair ID,
+        // and use that to search for progress.
+
+        let maybe_repair: Option<UpstairsRepairNotification> = datastore
+            .most_recent_started_repair_notification(opctx, new_region_id)
+            .await?;
+
+        if let Some(repair) = maybe_repair {
+            let maybe_repair_progress: Option<UpstairsRepairProgress> =
+                datastore
+                    .most_recent_repair_progress(opctx, repair.repair_id.into())
+                    .await?;
+
+            if let Some(repair_progress) = maybe_repair_progress {
+                let bar = ProgressBar::with_draw_target(
+                    Some(repair_progress.total_items as u64),
+                    ProgressDrawTarget::stdout(),
+                )
+                .with_style(ProgressStyle::with_template(
+                    "progress:\t{wide_bar:.green} [{pos:>7}/{len:>7}]",
+                )?)
+                .with_position(repair_progress.current_item as u64);
+
+                bar.abandon();
+
+                println!();
+            }
+        }
+
+        // Find the steps that the driver saga has committed to the DB.
+
+        let steps: Vec<RegionReplacementStep> = datastore
+            .region_replacement_request_steps(opctx, args.replacement_id)
+            .await?;
+
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct StepRow {
+            pub time: DateTime<Utc>,
+            pub step_type: String,
+            pub details: String,
+        }
+
+        let mut rows = Vec::with_capacity(steps.len());
+
+        for step in steps {
+            rows.push(StepRow {
+                time: step.step_time,
+                step_type: format!("{:?}", step.step_type),
+                details: match step.step_type {
+                    RegionReplacementStepType::Propolis => {
+                        format!(
+                            "instance {:?} vmm {:?}",
+                            step.step_associated_instance_id,
+                            step.step_associated_vmm_id,
+                        )
+                    }
+
+                    RegionReplacementStepType::Pantry => {
+                        format!(
+                            "address {:?}:{:?} job {:?}",
+                            step.step_associated_pantry_ip,
+                            step.step_associated_pantry_port,
+                            step.step_associated_pantry_job_id,
+                        )
+                    }
+                },
+            });
+        }
+
+        println!();
+
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .with(tabled::settings::Panel::header("Repair steps"))
+            .to_string();
+
+        println!("{}", table);
+    }
+
+    Ok(())
+}
+
+/// Manually request a region replacement
+async fn cmd_db_region_replacement_request(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &RegionReplacementRequestArgs,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let region = datastore.get_region(args.region_id).await?;
+
+    let request_id = datastore
+        .create_region_replacement_request_for_region(opctx, &region)
+        .await?;
+
+    println!("region replacement {request_id} created");
+
+    Ok(())
+}
+
+// SLEDS
 
 #[derive(Tabled)]
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -1315,6 +2768,8 @@ struct SledRow {
     serial: String,
     ip: String,
     role: &'static str,
+    policy: SledPolicy,
+    state: SledState,
     id: Uuid,
 }
 
@@ -1325,6 +2780,8 @@ impl From<Sled> for SledRow {
             serial: s.serial_number().to_string(),
             ip: s.address().to_string(),
             role: if s.is_scrimlet() { "scrimlet" } else { "-" },
+            policy: s.policy(),
+            state: s.state().into(),
         }
     }
 }
@@ -1334,10 +2791,22 @@ async fn cmd_db_sleds(
     opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
+    args: &SledsArgs,
 ) -> Result<(), anyhow::Error> {
     let limit = fetch_opts.fetch_limit;
+    let filter = match args.filter {
+        Some(filter) => filter,
+        None => {
+            eprintln!(
+                "note: listing all commissioned sleds \
+                 (use -F to filter, e.g. -F in-service)"
+            );
+            SledFilter::Commissioned
+        }
+    };
+
     let sleds = datastore
-        .sled_list(&opctx, &first_page(limit))
+        .sled_list(&opctx, &first_page(limit), filter)
         .await
         .context("listing sleds")?;
     check_limit(&sleds, limit, || String::from("listing sleds"));
@@ -1345,7 +2814,7 @@ async fn cmd_db_sleds(
     let rows = sleds.into_iter().map(|s| SledRow::from(s));
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
-        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .with(tabled::settings::Padding::new(1, 1, 0, 0))
         .to_string();
 
     println!("{}", table);
@@ -1369,6 +2838,7 @@ async fn cmd_db_instances(
     opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
+    running: bool,
 ) -> Result<(), anyhow::Error> {
     use db::schema::instance::dsl;
     use db::schema::vmm::dsl as vmm_dsl;
@@ -1399,7 +2869,7 @@ async fn cmd_db_instances(
     check_limit(&instances, limit, ctx);
 
     let mut rows = Vec::new();
-    let mut h_to_s: HashMap<Uuid, String> = HashMap::new();
+    let mut h_to_s: HashMap<SledUuid, String> = HashMap::new();
 
     for i in instances {
         let host_serial = if i.vmm().is_some() {
@@ -1407,7 +2877,7 @@ async fn cmd_db_instances(
                 h_to_s.entry(i.sled_id().unwrap())
             {
                 let (_, my_sled) = LookupPath::new(opctx, datastore)
-                    .sled_id(i.sled_id().unwrap())
+                    .sled_id(i.sled_id().unwrap().into_untyped_uuid())
                     .fetch()
                     .await
                     .context("failed to look up sled")?;
@@ -1421,6 +2891,10 @@ async fn cmd_db_instances(
         } else {
             "-".to_string()
         };
+
+        if running && i.effective_state() != InstanceState::Running {
+            continue;
+        }
 
         let cir = CustomerInstanceRow {
             id: i.instance().id().to_string(),
@@ -1681,31 +3155,74 @@ async fn cmd_db_eips(
         }
     }
 
-    #[derive(Tabled)]
     enum Owner {
-        Instance { project: String, name: String },
-        Service { kind: String },
+        Instance {
+            id: Uuid,
+            project: String,
+            name: String,
+        },
+        Service {
+            id: Uuid,
+            kind: String,
+            disposition: Option<BlueprintZoneDisposition>,
+        },
+        Project {
+            id: Uuid,
+            name: String,
+        },
         None,
     }
 
-    impl Display for Owner {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    impl Owner {
+        fn kind(&self) -> &'static str {
             match self {
-                Self::Instance { project, name } => {
-                    write!(f, "Instance {project}/{name}")
+                Owner::Instance { .. } => "instance",
+                Owner::Service { .. } => "service",
+                Owner::Project { .. } => "project",
+                Owner::None => "none",
+            }
+        }
+
+        fn id(&self) -> String {
+            match self {
+                Owner::Instance { id, .. }
+                | Owner::Service { id, .. }
+                | Owner::Project { id, .. } => id.to_string(),
+                Owner::None => "none".to_string(),
+            }
+        }
+
+        fn name(&self) -> String {
+            match self {
+                Self::Instance { project, name, .. } => {
+                    format!("{project}/{name}")
                 }
-                Self::Service { kind } => write!(f, "Service {kind}"),
-                Self::None => write!(f, "None"),
+                Self::Service { kind, .. } => kind.to_string(),
+                Self::Project { name, .. } => name.to_string(),
+                Self::None => "none".to_string(),
+            }
+        }
+
+        fn disposition(&self) -> Option<BlueprintZoneDisposition> {
+            match self {
+                Self::Service { disposition, .. } => *disposition,
+                _ => None,
             }
         }
     }
 
     #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct IpRow {
         ip: ipnetwork::IpNetwork,
         ports: PortRange,
-        kind: String,
-        owner: Owner,
+        kind: IpKind,
+        state: IpAttachState,
+        owner_kind: &'static str,
+        owner_id: String,
+        owner_name: String,
+        #[tabled(display_with = "display_option_blank")]
+        owner_disposition: Option<BlueprintZoneDisposition>,
     }
 
     if verbose {
@@ -1719,66 +3236,77 @@ async fn cmd_db_eips(
 
     let mut rows = Vec::new();
 
+    let (_, current_target_blueprint) = datastore
+        .blueprint_target_get_current_full(opctx)
+        .await
+        .context("loading current target blueprint")?;
+
     for ip in &ips {
         let owner = if let Some(owner_id) = ip.parent_id {
             if ip.is_service {
-                let service = match LookupPath::new(opctx, datastore)
-                    .service_id(owner_id)
-                    .fetch()
-                    .await
+                let (kind, disposition) = match lookup_service_info(
+                    owner_id,
+                    &current_target_blueprint,
+                )
+                .await?
                 {
-                    Ok(instance) => instance,
-                    Err(e) => {
-                        eprintln!(
-                            "error looking up service with id {owner_id}: {e}"
-                        );
-                        continue;
+                    Some(info) => (
+                        format!("{:?}", info.service_kind),
+                        Some(info.disposition),
+                    ),
+                    None => {
+                        ("UNKNOWN (service ID not found)".to_string(), None)
                     }
                 };
-                Owner::Service { kind: format!("{:?}", service.1.kind) }
+                Owner::Service { id: owner_id, kind, disposition }
             } else {
-                use db::schema::instance::dsl as instance_dsl;
-                let instance = match instance_dsl::instance
-                    .filter(instance_dsl::id.eq(owner_id))
-                    .limit(1)
-                    .select(Instance::as_select())
-                    .load_async(&*datastore.pool_connection_for_tests().await?)
-                    .await
-                    .context("loading requested instance")?
-                    .pop()
-                {
-                    Some(instance) => instance,
-                    None => {
-                        eprintln!("instance with id {owner_id} not found");
-                        continue;
-                    }
-                };
+                let instance =
+                    match lookup_instance(datastore, owner_id).await? {
+                        Some(instance) => instance,
+                        None => {
+                            eprintln!("instance with id {owner_id} not found");
+                            continue;
+                        }
+                    };
 
-                use db::schema::project::dsl as project_dsl;
-                let project = match project_dsl::project
-                    .filter(project_dsl::id.eq(instance.project_id))
-                    .limit(1)
-                    .select(Project::as_select())
-                    .load_async(&*datastore.pool_connection_for_tests().await?)
-                    .await
-                    .context("loading requested project")?
-                    .pop()
-                {
-                    Some(instance) => instance,
-                    None => {
-                        eprintln!(
-                            "project with id {} not found",
-                            instance.project_id
-                        );
-                        continue;
-                    }
-                };
+                let project =
+                    match lookup_project(datastore, instance.project_id).await?
+                    {
+                        Some(project) => project,
+                        None => {
+                            eprintln!(
+                                "project with id {} not found",
+                                instance.project_id
+                            );
+                            continue;
+                        }
+                    };
 
                 Owner::Instance {
+                    id: owner_id,
                     project: project.name().to_string(),
                     name: instance.name().to_string(),
                 }
             }
+        } else if let Some(project_id) = ip.project_id {
+            use db::schema::project::dsl as project_dsl;
+            let project = match project_dsl::project
+                .filter(project_dsl::id.eq(project_id))
+                .limit(1)
+                .select(Project::as_select())
+                .load_async(&*datastore.pool_connection_for_tests().await?)
+                .await
+                .context("loading requested project")?
+                .pop()
+            {
+                Some(project) => project,
+                None => {
+                    eprintln!("project with id {} not found", project_id);
+                    continue;
+                }
+            };
+
+            Owner::Project { id: project_id, name: project.name().to_string() }
         } else {
             Owner::None
         };
@@ -1789,8 +3317,12 @@ async fn cmd_db_eips(
                 first: ip.first_port.into(),
                 last: ip.last_port.into(),
             },
-            kind: format!("{:?}", ip.kind),
-            owner,
+            state: ip.state,
+            kind: ip.kind,
+            owner_kind: owner.kind(),
+            owner_id: owner.id(),
+            owner_name: owner.name(),
+            owner_disposition: owner.disposition(),
         };
         rows.push(row);
     }
@@ -1804,6 +3336,386 @@ async fn cmd_db_eips(
 
     Ok(())
 }
+
+async fn cmd_db_network_list_vnics(
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    verbose: bool,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct NicRow {
+        ip: IpNetwork,
+        mac: MacAddr,
+        slot: u8,
+        primary: bool,
+        kind: &'static str,
+        subnet: String,
+        parent_id: Uuid,
+        parent_name: String,
+    }
+    use db::schema::network_interface::dsl;
+    let mut query = dsl::network_interface.into_boxed();
+    if !fetch_opts.include_deleted {
+        query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    let nics: Vec<NetworkInterface> = query
+        .select(NetworkInterface::as_select())
+        .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
+        .get_results_async(&*datastore.pool_connection_for_tests().await?)
+        .await?;
+
+    check_limit(&nics, fetch_opts.fetch_limit, || {
+        String::from("listing network interfaces")
+    });
+
+    if verbose {
+        for nic in &nics {
+            if verbose {
+                println!("{nic:#?}");
+            }
+        }
+        return Ok(());
+    }
+
+    let mut rows = Vec::new();
+
+    for nic in &nics {
+        let (kind, parent_name) = match nic.kind {
+            NetworkInterfaceKind::Instance => {
+                match lookup_instance(datastore, nic.parent_id).await? {
+                    Some(instance) => {
+                        match lookup_project(datastore, instance.project_id)
+                            .await?
+                        {
+                            Some(project) => (
+                                "instance",
+                                format!(
+                                    "{}/{}",
+                                    project.name(),
+                                    instance.name()
+                                ),
+                            ),
+                            None => {
+                                eprintln!(
+                                    "project with id {} not found",
+                                    instance.project_id
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                    None => {
+                        ("instance?", "parent instance not found".to_string())
+                    }
+                }
+            }
+            NetworkInterfaceKind::Probe => {
+                match lookup_probe(datastore, nic.parent_id).await? {
+                    Some(probe) => {
+                        match lookup_project(datastore, probe.project_id)
+                            .await?
+                        {
+                            Some(project) => (
+                                "probe",
+                                format!("{}/{}", project.name(), probe.name()),
+                            ),
+                            None => {
+                                eprintln!(
+                                    "project with id {} not found",
+                                    probe.project_id
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                    None => ("probe?", "parent probe not found".to_string()),
+                }
+            }
+            NetworkInterfaceKind::Service => {
+                // We create service NICs named after the service, so we can use
+                // the nic name instead of looking up the service.
+                ("service", nic.name().to_string())
+            }
+        };
+
+        let subnet = {
+            use db::schema::vpc_subnet::dsl;
+            let subnet = match dsl::vpc_subnet
+                .filter(dsl::id.eq(nic.subnet_id))
+                .limit(1)
+                .select(VpcSubnet::as_select())
+                .load_async(&*datastore.pool_connection_for_tests().await?)
+                .await
+                .context("loading requested subnet")?
+                .pop()
+            {
+                Some(subnet) => subnet,
+                None => {
+                    eprintln!("subnet with id {} not found", nic.subnet_id);
+                    continue;
+                }
+            };
+
+            if nic.ip.is_ipv4() {
+                subnet.ipv4_block.to_string()
+            } else {
+                subnet.ipv6_block.to_string()
+            }
+        };
+
+        let row = NicRow {
+            ip: nic.ip,
+            mac: *nic.mac,
+            slot: *nic.slot,
+            primary: nic.primary,
+            kind,
+            subnet,
+            parent_id: nic.parent_id,
+            parent_name,
+        };
+        rows.push(row);
+    }
+
+    rows.sort_by(|a, b| a.ip.cmp(&b.ip));
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+// REGION SNAPSHOT REPLACEMENTS
+
+/// List all region snapshot replacement requests
+async fn cmd_db_region_snapshot_replacement_list(
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &RegionSnapshotReplacementListArgs,
+) -> Result<(), anyhow::Error> {
+    let ctx = || "listing region snapshot replacement requests".to_string();
+    let limit = fetch_opts.fetch_limit;
+
+    let requests: Vec<RegionSnapshotReplacement> = {
+        let conn = datastore.pool_connection_for_tests().await?;
+
+        use db::schema::region_snapshot_replacement::dsl;
+
+        match (args.state, args.after) {
+            (Some(state), Some(after)) => {
+                dsl::region_snapshot_replacement
+                    .filter(dsl::replacement_state.eq(state))
+                    .filter(dsl::request_time.gt(after))
+                    .limit(i64::from(u32::from(limit)))
+                    .select(RegionSnapshotReplacement::as_select())
+                    .get_results_async(&*conn)
+                    .await?
+            }
+
+            (Some(state), None) => {
+                dsl::region_snapshot_replacement
+                    .filter(dsl::replacement_state.eq(state))
+                    .limit(i64::from(u32::from(limit)))
+                    .select(RegionSnapshotReplacement::as_select())
+                    .get_results_async(&*conn)
+                    .await?
+            }
+
+            (None, Some(after)) => {
+                dsl::region_snapshot_replacement
+                    .filter(dsl::request_time.gt(after))
+                    .limit(i64::from(u32::from(limit)))
+                    .select(RegionSnapshotReplacement::as_select())
+                    .get_results_async(&*conn)
+                    .await?
+            }
+
+            (None, None) => {
+                dsl::region_snapshot_replacement
+                    .limit(i64::from(u32::from(limit)))
+                    .select(RegionSnapshotReplacement::as_select())
+                    .get_results_async(&*conn)
+                    .await?
+            }
+        }
+    };
+
+    check_limit(&requests, limit, ctx);
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct Row {
+        pub id: Uuid,
+        pub request_time: DateTime<Utc>,
+        pub replacement_state: String,
+    }
+
+    let mut rows = Vec::with_capacity(requests.len());
+
+    for request in requests {
+        rows.push(Row {
+            id: request.id,
+            request_time: request.request_time,
+            replacement_state: format!("{:?}", request.replacement_state),
+        });
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .with(tabled::settings::Panel::header(
+            "Region snapshot replacement requests",
+        ))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+/// Display all non-complete region snapshot replacements
+async fn cmd_db_region_snapshot_replacement_status(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+) -> Result<(), anyhow::Error> {
+    let ctx = || "listing region snapshot replacement requests".to_string();
+    let limit = fetch_opts.fetch_limit;
+
+    let requests: Vec<RegionSnapshotReplacement> = {
+        let conn = datastore.pool_connection_for_tests().await?;
+
+        use db::schema::region_snapshot_replacement::dsl;
+
+        dsl::region_snapshot_replacement
+            .filter(
+                dsl::replacement_state
+                    .ne(RegionSnapshotReplacementState::Complete),
+            )
+            .limit(i64::from(u32::from(limit)))
+            .select(RegionSnapshotReplacement::as_select())
+            .get_results_async(&*conn)
+            .await?
+    };
+
+    check_limit(&requests, limit, ctx);
+
+    for request in requests {
+        let steps_left = datastore
+            .in_progress_region_snapshot_replacement_steps(opctx, request.id)
+            .await?;
+
+        println!("{}:", request.id);
+        println!();
+
+        println!("                    started: {}", request.request_time);
+        println!(
+            "                      state: {:?}",
+            request.replacement_state
+        );
+        println!(
+            "            region snapshot: {} {} {}",
+            request.old_dataset_id,
+            request.old_region_id,
+            request.old_snapshot_id,
+        );
+        println!("              new region id: {:?}", request.new_region_id);
+        println!("     in-progress steps left: {:?}", steps_left);
+        println!();
+    }
+
+    Ok(())
+}
+
+/// Show details for a single region snapshot replacement
+async fn cmd_db_region_snapshot_replacement_info(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &RegionSnapshotReplacementInfoArgs,
+) -> Result<(), anyhow::Error> {
+    let request = datastore
+        .get_region_snapshot_replacement_request_by_id(
+            opctx,
+            args.replacement_id,
+        )
+        .await?;
+
+    // Show details
+    let steps_left = datastore
+        .in_progress_region_snapshot_replacement_steps(opctx, request.id)
+        .await?;
+
+    println!("{}:", request.id);
+    println!();
+
+    println!("                    started: {}", request.request_time);
+    println!("                      state: {:?}", request.replacement_state);
+    println!(
+        "            region snapshot: {} {} {}",
+        request.old_dataset_id, request.old_region_id, request.old_snapshot_id,
+    );
+    println!("              new region id: {:?}", request.new_region_id);
+    println!("     in-progress steps left: {:?}", steps_left);
+    println!();
+
+    Ok(())
+}
+
+/// Manually request a region snapshot replacement
+async fn cmd_db_region_snapshot_replacement_request(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &RegionSnapshotReplacementRequestArgs,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let Some(region_snapshot) = datastore
+        .region_snapshot_get(args.dataset_id, args.region_id, args.snapshot_id)
+        .await?
+    else {
+        bail!("region snapshot not found!");
+    };
+
+    let request =
+        RegionSnapshotReplacement::for_region_snapshot(&region_snapshot);
+    let request_id = request.id;
+
+    // If this function indirectly uses
+    // `insert_region_snapshot_replacement_request`, there could be an authz
+    // related `ObjectNotFound` due to the opctx being for the privileged test
+    // user. Lookup the snapshot here, and directly use
+    // `insert_snapshot_replacement_request_with_volume_id` instead.
+
+    let db_snapshots = {
+        use db::schema::snapshot::dsl;
+        let conn = datastore.pool_connection_for_tests().await?;
+        dsl::snapshot
+            .filter(dsl::id.eq(args.snapshot_id))
+            .limit(1)
+            .select(Snapshot::as_select())
+            .load_async(&*conn)
+            .await
+            .context("loading requested snapshot")?
+    };
+
+    assert_eq!(db_snapshots.len(), 1);
+
+    datastore
+        .insert_region_snapshot_replacement_request_with_volume_id(
+            opctx,
+            request,
+            db_snapshots[0].volume_id,
+        )
+        .await?;
+
+    println!("region snapshot replacement {request_id} created");
+
+    Ok(())
+}
+
+// VALIDATION
 
 /// Validate the `volume_references` column of the region snapshots table
 async fn cmd_db_validate_volume_references(
@@ -1990,7 +3902,12 @@ async fn cmd_db_validate_region_snapshots(
         use crucible_agent_client::types::State;
         use crucible_agent_client::Client as CrucibleAgentClient;
 
-        let url = format!("http://{}", dataset.address());
+        let Some(dataset_addr) = dataset.address() else {
+            eprintln!("Dataset {} missing an IP address", dataset.id());
+            continue;
+        };
+
+        let url = format!("http://{}", dataset_addr);
         let client = CrucibleAgentClient::new(&url);
 
         let actual_region_snapshots = client
@@ -2051,7 +3968,7 @@ async fn cmd_db_validate_region_snapshots(
                                     dataset_id: region_snapshot.dataset_id,
                                     region_id: region_snapshot.region_id,
                                     snapshot_id: region_snapshot.snapshot_id,
-                                    dataset_addr: dataset.address(),
+                                    dataset_addr,
                                     error: String::from(
                                         "region snapshot was deleted, please remove its record",
                                     ),
@@ -2066,7 +3983,7 @@ async fn cmd_db_validate_region_snapshots(
                                     dataset_id: region_snapshot.dataset_id,
                                     region_id: region_snapshot.region_id,
                                     snapshot_id: region_snapshot.snapshot_id,
-                                    dataset_addr: dataset.address(),
+                                    dataset_addr,
                                     error: String::from(
                                         "NEXUS BUG: region snapshot was deleted, but the higher level snapshot was not!",
                                     ),
@@ -2095,7 +4012,7 @@ async fn cmd_db_validate_region_snapshots(
                                 dataset_id: region_snapshot.dataset_id,
                                 region_id: region_snapshot.region_id,
                                 snapshot_id: region_snapshot.snapshot_id,
-                                dataset_addr: dataset.address(),
+                                dataset_addr,
                                 error: format!(
                                     "AGENT BUG: region snapshot was deleted but has a running snapshot in state {:?}!",
                                     running_snapshot.state,
@@ -2145,7 +4062,12 @@ async fn cmd_db_validate_region_snapshots(
         use crucible_agent_client::types::State;
         use crucible_agent_client::Client as CrucibleAgentClient;
 
-        let url = format!("http://{}", dataset.address());
+        let Some(dataset_addr) = dataset.address() else {
+            eprintln!("Dataset {} missing an IP address", dataset.id());
+            continue;
+        };
+
+        let url = format!("http://{}", dataset_addr);
         let client = CrucibleAgentClient::new(&url);
 
         let actual_region_snapshots = client
@@ -2163,7 +4085,7 @@ async fn cmd_db_validate_region_snapshots(
                     dataset_id: dataset.id(),
                     region_id: region.id(),
                     snapshot_id,
-                    dataset_addr: dataset.address(),
+                    dataset_addr,
                     error: String::from(
                         "Nexus does not know about this snapshot!",
                     ),
@@ -2188,7 +4110,7 @@ async fn cmd_db_validate_region_snapshots(
                             dataset_id: dataset.id(),
                             region_id: region.id(),
                             snapshot_id,
-                            dataset_addr: dataset.address(),
+                            dataset_addr,
                             error: String::from(
                                 "Nexus does not know about this running snapshot!"
                             ),
@@ -2288,10 +4210,12 @@ async fn cmd_db_inventory(
                 opctx,
                 datastore,
                 id,
-                limit,
                 long_string_formatter,
             )
             .await
+        }
+        InventoryCommands::PhysicalDisks(args) => {
+            cmd_db_inventory_physical_disks(&conn, limit, args).await
         }
         InventoryCommands::RotPages => {
             cmd_db_inventory_rot_pages(&conn, limit).await
@@ -2377,6 +4301,63 @@ async fn cmd_db_inventory_cabooses(
     Ok(())
 }
 
+async fn cmd_db_inventory_physical_disks(
+    conn: &DataStoreConnection<'_>,
+    limit: NonZeroU32,
+    args: InvPhysicalDisksArgs,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct DiskRow {
+        inv_collection_id: Uuid,
+        sled_id: Uuid,
+        slot: i64,
+        vendor: String,
+        model: String,
+        serial: String,
+        variant: String,
+    }
+
+    use db::schema::inv_physical_disk::dsl;
+    let mut query = dsl::inv_physical_disk.into_boxed();
+    query = query.limit(i64::from(u32::from(limit)));
+
+    if let Some(collection_id) = args.collection_id {
+        query = query.filter(
+            dsl::inv_collection_id.eq(collection_id.into_untyped_uuid()),
+        );
+    }
+
+    if let Some(sled_id) = args.sled_id {
+        query = query.filter(dsl::sled_id.eq(sled_id.into_untyped_uuid()));
+    }
+
+    let disks = query
+        .select(InvPhysicalDisk::as_select())
+        .load_async(&**conn)
+        .await
+        .context("loading physical disks")?;
+
+    let rows = disks.into_iter().map(|disk| DiskRow {
+        inv_collection_id: disk.inv_collection_id.into_untyped_uuid(),
+        sled_id: disk.sled_id.into_untyped_uuid(),
+        slot: disk.slot,
+        vendor: disk.vendor,
+        model: disk.model.clone(),
+        serial: disk.serial.clone(),
+        variant: format!("{:?}", disk.variant),
+    });
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
 async fn cmd_db_inventory_rot_pages(
     conn: &DataStoreConnection<'_>,
     limit: NonZeroU32,
@@ -2419,7 +4400,7 @@ async fn cmd_db_inventory_collections_list(
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct CollectionRow {
-        id: Uuid,
+        id: CollectionUuid,
         started: String,
         took: String,
         nsps: i64,
@@ -2468,7 +4449,7 @@ async fn cmd_db_inventory_collections_list(
                 .num_milliseconds()
         );
         rows.push(CollectionRow {
-            id: collection.id,
+            id: collection.id.into(),
             started: humantime::format_rfc3339_seconds(
                 collection.time_started.into(),
             )
@@ -2492,17 +4473,13 @@ async fn cmd_db_inventory_collections_list(
 async fn cmd_db_inventory_collections_show(
     opctx: &OpContext,
     datastore: &DataStore,
-    id: Uuid,
-    limit: NonZeroU32,
+    id: CollectionUuid,
     long_string_formatter: LongStringFormatter,
 ) -> Result<(), anyhow::Error> {
-    let (collection, incomplete) = datastore
-        .inventory_collection_read_best_effort(opctx, id, limit)
+    let collection = datastore
+        .inventory_collection_read(opctx, id)
         .await
         .context("reading collection")?;
-    if incomplete {
-        limit_error(limit, || "loading collection");
-    }
 
     inv_collection_print(&collection).await?;
     let nerrors = inv_collection_print_errors(&collection).await?;
@@ -2783,7 +4760,11 @@ fn inv_collection_print_sleds(collection: &Collection) {
 
             println!("    ZONES FOUND");
             for z in &zones.zones.zones {
-                println!("      zone {} (type {})", z.id, z.zone_type.label());
+                println!(
+                    "      zone {} (type {})",
+                    z.id,
+                    z.zone_type.kind().report_str()
+                );
             }
         } else {
             println!("  warning: no zone information found");
@@ -2827,4 +4808,205 @@ impl LongStringFormatter {
         // wide, so return it as-is
         s.into()
     }
+}
+
+// Reconfigurator
+
+/// Packages up database state that's used as input to the Reconfigurator
+/// planner into a file so that it can be loaded into `reconfigurator-cli`
+async fn cmd_db_reconfigurator_save(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    reconfig_save_args: &ReconfiguratorSaveArgs,
+) -> Result<(), anyhow::Error> {
+    // See Nexus::blueprint_planning_context().
+    eprint!("assembling reconfigurator state ... ");
+    let state = nexus_reconfigurator_preparation::reconfigurator_state_load(
+        opctx, datastore,
+    )
+    .await?;
+    eprintln!("done");
+
+    let output_path = &reconfig_save_args.output_file;
+    let file = std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&output_path)
+        .with_context(|| format!("open {:?}", output_path))?;
+    serde_json::to_writer_pretty(&file, &state)
+        .with_context(|| format!("write {:?}", output_path))?;
+    eprintln!("wrote {}", output_path);
+    Ok(())
+}
+
+// Migrations
+
+async fn cmd_db_migrations_list(
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &MigrationsListArgs,
+) -> Result<(), anyhow::Error> {
+    use db::model::Migration;
+    use db::model::MigrationState;
+    use db::schema::migration::dsl;
+    use omicron_common::api::internal::nexus;
+
+    let mut state_filters = Vec::new();
+    if args.completed {
+        state_filters.push(MigrationState(nexus::MigrationState::Completed));
+    }
+    if args.failed {
+        state_filters.push(MigrationState(nexus::MigrationState::Failed));
+    }
+    if args.in_progress {
+        state_filters.push(MigrationState(nexus::MigrationState::InProgress));
+    }
+    if args.pending {
+        state_filters.push(MigrationState(nexus::MigrationState::Pending));
+    }
+
+    let mut query = dsl::migration.into_boxed();
+
+    if !fetch_opts.include_deleted {
+        query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    if !state_filters.is_empty() {
+        query = query.filter(
+            dsl::source_state
+                .eq_any(state_filters.clone())
+                .or(dsl::target_state.eq_any(state_filters)),
+        );
+    }
+
+    if !args.instance_ids.is_empty() {
+        query =
+            query.filter(dsl::instance_id.eq_any(args.instance_ids.clone()));
+    }
+
+    let migrations = query
+        .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
+        .order_by(dsl::time_created)
+        // This is just to prove to CRDB that it can use the
+        // migrations-by-time-created index, it doesn't actually do anything.
+        .filter(dsl::time_created.gt(chrono::DateTime::UNIX_EPOCH))
+        .select(Migration::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("listing migrations")?;
+
+    check_limit(&migrations, fetch_opts.fetch_limit, || "listing migrations");
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct Vmms {
+        src_state: MigrationState,
+        tgt_state: MigrationState,
+        src_vmm: Uuid,
+        tgt_vmm: Uuid,
+    }
+
+    impl From<&'_ Migration> for Vmms {
+        fn from(
+            &Migration {
+                source_propolis_id,
+                target_propolis_id,
+                source_state,
+                target_state,
+                ..
+            }: &Migration,
+        ) -> Self {
+            Self {
+                src_state: source_state,
+                tgt_state: target_state,
+                src_vmm: source_propolis_id,
+                tgt_vmm: target_propolis_id,
+            }
+        }
+    }
+
+    let table = if args.verbose {
+        // If verbose mode is enabled, include the migration's ID as well as the
+        // source and target updated timestamps.
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct VerboseMigrationRow {
+            created: chrono::DateTime<Utc>,
+            id: Uuid,
+            instance: Uuid,
+            #[tabled(inline)]
+            vmms: Vmms,
+            #[tabled(display_with = "display_option_blank")]
+            src_updated: Option<chrono::DateTime<Utc>>,
+            #[tabled(display_with = "display_option_blank")]
+            tgt_updated: Option<chrono::DateTime<Utc>>,
+            #[tabled(display_with = "display_option_blank")]
+            deleted: Option<chrono::DateTime<Utc>>,
+        }
+
+        let rows = migrations.into_iter().map(|m| VerboseMigrationRow {
+            id: m.id,
+            instance: m.instance_id,
+            vmms: Vmms::from(&m),
+            src_updated: m.time_source_updated,
+            tgt_updated: m.time_target_updated,
+            created: m.time_created,
+            deleted: m.time_deleted,
+        });
+
+        tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string()
+    } else if args.instance_ids.len() == 1 {
+        // If only the migrations for a single instance are shown, we omit the
+        // instance ID row for conciseness sake.
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct SingleInstanceMigrationRow {
+            created: chrono::DateTime<Utc>,
+            #[tabled(inline)]
+            vmms: Vmms,
+        }
+        let rows = migrations.into_iter().map(|m| SingleInstanceMigrationRow {
+            created: m.time_created,
+            vmms: Vmms::from(&m),
+        });
+
+        tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string()
+    } else {
+        // Otherwise, the default format includes the instance ID, but omits
+        // most of the timestamps for brevity.
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct MigrationRow {
+            created: chrono::DateTime<Utc>,
+            instance: Uuid,
+            #[tabled(inline)]
+            vmms: Vmms,
+        }
+
+        let rows = migrations.into_iter().map(|m| MigrationRow {
+            created: m.time_created,
+            instance: m.instance_id,
+            vmms: Vmms::from(&m),
+        });
+
+        tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string()
+    };
+
+    println!("{table}");
+
+    Ok(())
+}
+
+// Display an empty cell for an Option<T> if it's None.
+fn display_option_blank<T: Display>(opt: &Option<T>) -> String {
+    opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "".to_string())
 }

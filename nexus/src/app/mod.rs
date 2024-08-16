@@ -5,16 +5,22 @@
 //! Nexus, the service that operates much of the control plane in an Oxide fleet
 
 use self::external_endpoints::NexusCertResolver;
+use self::saga::SagaExecutor;
+use crate::app::background::BackgroundTasksData;
+use crate::app::background::SagaRecoveryHelpers;
 use crate::app::oximeter::LazyTimeseriesClient;
-use crate::config;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
-use crate::saga_interface::SagaContext;
 use crate::DropshotServer;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
 use internal_dns::ServiceName;
+use nexus_config::NexusConfig;
+use nexus_config::RegionAllocationStrategy;
+use nexus_config::Tunables;
+use nexus_config::UpdatesConfig;
+use nexus_db_model::AllSchemaVersions;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -24,19 +30,26 @@ use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::SwitchLocation;
-use omicron_common::nexus_config::RegionAllocationStrategy;
+use oximeter_producer::Server as ProducerServer;
 use slog::Logger;
 use std::collections::HashMap;
+use std::net::SocketAddrV6;
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
+use std::sync::OnceLock;
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
 // by resource.
 mod address_lot;
+mod allow_list;
 pub(crate) mod background;
+mod bfd;
 mod bgp;
 mod certificate;
+mod crucible;
+mod deployment;
 mod device_auth;
 mod disk;
 mod external_dns;
@@ -49,7 +62,8 @@ mod instance_network;
 mod ip_pool;
 mod metrics;
 mod network_interface;
-mod oximeter;
+pub(crate) mod oximeter;
+mod probe;
 mod project;
 mod quota;
 mod rack;
@@ -59,6 +73,7 @@ mod silo;
 mod sled;
 mod sled_instance;
 mod snapshot;
+mod ssh_key;
 mod switch;
 mod switch_interface;
 mod switch_port;
@@ -77,16 +92,18 @@ pub(crate) mod sagas;
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.
 
+pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
-
-pub(crate) const MAX_NICS_PER_INSTANCE: usize = 8;
+use sagas::demo::CompletingDemoSagas;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
 //      ephemeral (so bounded in saga by design).
 //      The value here is arbitrary, but we need *a* limit for the instance
 //      create saga to have a bounded DAG. We might want to only enforce
 //      this during instance create (rather than live attach) in future.
-pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize = 32;
+pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize =
+    nexus_db_queries::db::queries::external_ip::MAX_EXTERNAL_IPS_PER_INSTANCE
+        as usize;
 pub(crate) const MAX_EPHEMERAL_IPS_PER_INSTANCE: usize = 1;
 
 pub const MAX_VCPU_PER_INSTANCE: u16 = 64;
@@ -96,6 +113,9 @@ pub const MAX_MEMORY_BYTES_PER_INSTANCE: u64 = 256 * (1 << 30); // 256 GiB
 
 pub const MIN_DISK_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
 pub const MAX_DISK_SIZE_BYTES: u64 = 1023 * (1 << 30); // 1023 GiB
+
+/// This value is aribtrary
+pub const MAX_SSH_KEYS_PER_INSTANCE: u32 = 100;
 
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
@@ -114,11 +134,8 @@ pub struct Nexus {
     /// handle to global authz information
     authz: Arc<authz::Authz>,
 
-    /// saga execution coordinator
-    sec_client: Arc<steno::SecClient>,
-
-    /// Task representing completion of recovered Sagas
-    recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
+    /// saga execution coordinator (SEC)
+    sagas: Arc<SagaExecutor>,
 
     /// External dropshot servers
     external_server: std::sync::Mutex<Option<DropshotServer>>,
@@ -133,14 +150,25 @@ pub struct Nexus {
     /// Status of background task to populate database
     populate_status: tokio::sync::watch::Receiver<PopulateStatus>,
 
+    /// The metric producer server from which oximeter collects metric data.
+    producer_server: std::sync::Mutex<Option<ProducerServer>>,
+
+    /// Reusable `reqwest::Client`, to be cloned and used with the Progenitor-
+    /// generated `Client::new_with_client`.
+    ///
+    /// (This does not need to be in an `Arc` because `reqwest::Client` uses
+    /// `Arc` internally.)
+    reqwest_client: reqwest::Client,
+
     /// Client to the timeseries database.
     timeseries_client: LazyTimeseriesClient,
 
     /// Contents of the trusted root role for the TUF repository.
-    updates_config: Option<config::UpdatesConfig>,
+    #[allow(dead_code)]
+    updates_config: Option<UpdatesConfig>,
 
     /// The tunable parameters from a configuration file
-    tunables: config::Tunables,
+    tunables: Tunables,
 
     /// Operational context used for Instance allocation
     opctx_alloc: OpContext,
@@ -168,17 +196,17 @@ pub struct Nexus {
     // https://github.com/oxidecomputer/omicron/issues/3732
     external_dns_servers: Vec<IpAddr>,
 
-    /// Mapping of SwitchLocations to their respective Dendrite Clients
-    dpd_clients: HashMap<SwitchLocation, Arc<dpd_client::Client>>,
+    /// Background task driver
+    background_tasks_driver: OnceLock<background::Driver>,
 
-    /// Map switch location to maghemite admin clients.
-    mg_clients: HashMap<SwitchLocation, Arc<mg_admin_client::Client>>,
-
-    /// Background tasks
+    /// Handles to various specific tasks
     background_tasks: background::BackgroundTasks,
 
     /// Default Crucible region allocation strategy
     default_region_allocation_strategy: RegionAllocationStrategy,
+
+    /// List of demo sagas awaiting a request to complete them
+    demo_sagas: Arc<std::sync::Mutex<sagas::demo::CompletingDemoSagas>>,
 }
 
 impl Nexus {
@@ -190,19 +218,22 @@ impl Nexus {
         resolver: internal_dns::resolver::Resolver,
         pool: db::Pool,
         producer_registry: &ProducerRegistry,
-        config: &config::Config,
+        config: &NexusConfig,
         authz: Arc<authz::Authz>,
     ) -> Result<Arc<Nexus>, String> {
         let pool = Arc::new(pool);
+        let all_versions = config
+            .pkg
+            .schema
+            .as_ref()
+            .map(|s| AllSchemaVersions::load(&s.schema_dir))
+            .transpose()
+            .map_err(|error| format!("{error:#}"))?;
         let db_datastore = Arc::new(
-            db::DataStore::new(
-                &log,
-                Arc::clone(&pool),
-                config.pkg.schema.as_ref(),
-            )
-            .await?,
+            db::DataStore::new(&log, Arc::clone(&pool), all_versions.as_ref())
+                .await?,
         );
-        db_datastore.register_producers(&producer_registry);
+        db_datastore.register_producers(producer_registry);
 
         let my_sec_id = db::SecId::from(config.deployment.id);
         let sec_store = Arc::new(db::CockroachDbSecStore::new(
@@ -210,12 +241,43 @@ impl Nexus {
             Arc::clone(&db_datastore),
             log.new(o!("component" => "SecStore")),
         )) as Arc<dyn steno::SecStore>;
+
         let sec_client = Arc::new(steno::sec(
             log.new(o!(
                 "component" => "SEC",
                 "sec_id" => my_sec_id.to_string()
             )),
             sec_store,
+        ));
+
+        // It's a bit of a red flag to use an unbounded channel.
+        //
+        // This particular channel is used to send a Uuid from the saga executor
+        // to the saga recovery background task each time a saga is started.
+        //
+        // The usual argument for keeping a channel bounded is to ensure
+        // backpressure.  But we don't really want that here.  These items don't
+        // represent meaningful work for the saga recovery task, such that if it
+        // were somehow processing these slowly, we'd want to slow down the saga
+        // dispatch process.  Under normal conditions, we'd expect this queue to
+        // grow as we dispatch new sagas until the saga recovery task runs, at
+        // which point the queue will quickly be drained.  The only way this
+        // could really grow without bound is if the saga recovery task gets
+        // completely wedged and stops receiving these messages altogether.  In
+        // this case, the maximum size this queue could grow over time is the
+        // number of sagas we can launch in that time.  That's not ever likely
+        // to be a significant amount of memory.
+        //
+        // We could put our money where our mouth is: pick a sufficiently large
+        // bound and panic if we reach it.  But "sufficiently large" depends on
+        // the saga creation rate and the period of the saga recovery background
+        // task.  If someone changed the config, they'd have to remember to
+        // update this here.  This doesn't seem worth it.
+        let (saga_create_tx, saga_recovery_rx) = mpsc::unbounded_channel();
+        let sagas = Arc::new(SagaExecutor::new(
+            Arc::clone(&sec_client),
+            log.new(o!("component" => "SagaExecutor")),
+            saga_create_tx,
         ));
 
         let client_state = dpd_client::ClientState {
@@ -245,8 +307,10 @@ impl Nexus {
             dpd_clients.insert(*location, Arc::new(dpd_client));
         }
         for (location, config) in &config.pkg.mgd {
-            let mg_client = mg_admin_client::Client::new(&log, config.address)
-                .map_err(|e| format!("mg admin client: {e}"))?;
+            let mg_client = mg_admin_client::Client::new(
+                &format!("http://{}", config.address),
+                log.clone(),
+            );
             mg_clients.insert(*location, Arc::new(mg_client));
         }
         if config.pkg.dendrite.is_empty() {
@@ -302,10 +366,15 @@ impl Nexus {
                         for (location, addr) in &mappings {
                             let port = MGD_PORT;
                             let mgd_client = mg_admin_client::Client::new(
-                                &log,
-                                std::net::SocketAddr::new((*addr).into(), port),
-                            )
-                            .map_err(|e| format!("mg admin client: {e}"))?;
+                                &format!(
+                                    "http://{}",
+                                    &std::net::SocketAddr::new(
+                                        (*addr).into(),
+                                        port,
+                                    )
+                                ),
+                                log.clone(),
+                            );
                             mg_clients.insert(*location, Arc::new(mgd_client));
                         }
                         break;
@@ -318,6 +387,12 @@ impl Nexus {
                 }
             }
         }
+
+        let reqwest_client = reqwest::ClientBuilder::new()
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map_err(|e| e.to_string())?;
 
         // Connect to clickhouse - but do so lazily.
         // Clickhouse may not be executing when Nexus starts.
@@ -336,7 +411,7 @@ impl Nexus {
             log.new(o!("component" => "DataLoader")),
             Arc::clone(&authz),
             authn::Context::internal_db_init(),
-            Arc::clone(&db_datastore),
+            Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
 
         let populate_args = PopulateArgs::new(rack_id);
@@ -350,16 +425,11 @@ impl Nexus {
             log.new(o!("component" => "BackgroundTasks")),
             Arc::clone(&authz),
             authn::Context::internal_api(),
-            Arc::clone(&db_datastore),
+            Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
-        let background_tasks = background::BackgroundTasks::start(
-            &background_ctx,
-            Arc::clone(&db_datastore),
-            &config.pkg.background_tasks,
-            &dpd_clients,
-            config.deployment.id,
-            resolver.clone(),
-        );
+
+        let (background_tasks_initializer, background_tasks) =
+            background::BackgroundTasksInitializer::new();
 
         let external_resolver = {
             if config.deployment.external_dns_servers.is_empty() {
@@ -376,12 +446,13 @@ impl Nexus {
             log: log.new(o!()),
             db_datastore: Arc::clone(&db_datastore),
             authz: Arc::clone(&authz),
-            sec_client: Arc::clone(&sec_client),
-            recovery_task: std::sync::Mutex::new(None),
+            sagas,
             external_server: std::sync::Mutex::new(None),
             techport_external_server: std::sync::Mutex::new(None),
             internal_server: std::sync::Mutex::new(None),
+            producer_server: std::sync::Mutex::new(None),
             populate_status,
+            reqwest_client,
             timeseries_client,
             updates_config: config.pkg.updates.clone(),
             tunables: config.pkg.tunables.clone(),
@@ -389,96 +460,114 @@ impl Nexus {
                 log.new(o!("component" => "InstanceAllocator")),
                 Arc::clone(&authz),
                 authn::Context::internal_read(),
-                Arc::clone(&db_datastore),
+                Arc::clone(&db_datastore)
+                    as Arc<dyn nexus_auth::storage::Storage>,
             ),
             opctx_external_authn: OpContext::for_background(
                 log.new(o!("component" => "ExternalAuthn")),
                 Arc::clone(&authz),
                 authn::Context::external_authn(),
-                Arc::clone(&db_datastore),
+                Arc::clone(&db_datastore)
+                    as Arc<dyn nexus_auth::storage::Storage>,
             ),
             samael_max_issue_delay: std::sync::Mutex::new(None),
-            internal_resolver: resolver,
+            internal_resolver: resolver.clone(),
             external_resolver,
             external_dns_servers: config
                 .deployment
                 .external_dns_servers
                 .clone(),
-            dpd_clients,
-            mg_clients,
+            background_tasks_driver: OnceLock::new(),
             background_tasks,
             default_region_allocation_strategy: config
                 .pkg
                 .default_region_allocation_strategy
                 .clone(),
+            demo_sagas: Arc::new(std::sync::Mutex::new(
+                CompletingDemoSagas::new(),
+            )),
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
         let nexus = Arc::new(nexus);
-        let bootstore_opctx = OpContext::for_background(
-            log.new(o!("component" => "Bootstore")),
-            Arc::clone(&authz),
-            authn::Context::internal_api(),
-            Arc::clone(&db_datastore),
-        );
-        let opctx = OpContext::for_background(
+        nexus.sagas.set_nexus(nexus.clone());
+        let saga_recovery_opctx = OpContext::for_background(
             log.new(o!("component" => "SagaRecoverer")),
             Arc::clone(&authz),
             authn::Context::internal_saga_recovery(),
-            Arc::clone(&db_datastore),
-        );
-        let saga_logger = nexus.log.new(o!("saga_type" => "recovery"));
-        let recovery_task = db::recover(
-            opctx,
-            my_sec_id,
-            Arc::new(Arc::new(SagaContext::new(
-                Arc::clone(&nexus),
-                saga_logger,
-                Arc::clone(&authz),
-            ))),
-            db_datastore,
-            Arc::clone(&sec_client),
-            sagas::ACTION_REGISTRY.clone(),
+            Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
 
-        *nexus.recovery_task.lock().unwrap() = Some(recovery_task);
-
-        // Kick all background tasks once the populate step finishes.  Among
-        // other things, the populate step installs role assignments for
-        // internal identities that are used by the background tasks.  If we
-        // don't do this here, those tasks might fail spuriously on startup and
-        // not be retried for a while.
+        // Wait to start background tasks until after the populate step
+        // finishes.  Among other things, the populate step installs role
+        // assignments for internal identities that are used by the background
+        // tasks.  If we don't do this here, those tasks would fail spuriously
+        // on startup and not be retried for a while.
         let task_nexus = nexus.clone();
         let task_log = nexus.log.clone();
+        let task_registry = producer_registry.clone();
+        let task_config = config.clone();
         tokio::spawn(async move {
             match task_nexus.wait_for_populate().await {
                 Ok(_) => {
-                    info!(
-                        task_log,
-                        "populate complete; activating background tasks"
-                    );
-                    for task in task_nexus.background_tasks.driver.tasks() {
-                        task_nexus.background_tasks.driver.activate(task);
-                    }
-                    if let Err(e) = task_nexus
-                        .initial_bootstore_sync(&bootstore_opctx)
-                        .await
-                    {
-                        error!(task_log, "failed to run bootstore sync: {e}");
-                    }
+                    info!(task_log, "populate complete");
                 }
                 Err(_) => {
                     error!(task_log, "populate failed");
                 }
+            };
+
+            // That said, even if the populate step fails, we may as well try to
+            // start the background tasks so that whatever can work will work.
+            info!(task_log, "activating background tasks");
+
+            let driver = background_tasks_initializer.start(
+                &task_nexus.background_tasks,
+                BackgroundTasksData {
+                    opctx: background_ctx,
+                    datastore: db_datastore,
+                    config: task_config.pkg.background_tasks,
+                    rack_id,
+                    nexus_id: task_config.deployment.id,
+                    resolver,
+                    saga_starter: task_nexus.sagas.clone(),
+                    producer_registry: task_registry,
+
+                    saga_recovery: SagaRecoveryHelpers {
+                        recovery_opctx: saga_recovery_opctx,
+                        maker: task_nexus.clone(),
+                        sec_client: sec_client.clone(),
+                        registry: sagas::ACTION_REGISTRY.clone(),
+                        sagas_started_rx: saga_recovery_rx,
+                    },
+                },
+            );
+
+            if let Err(_) = task_nexus.background_tasks_driver.set(driver) {
+                panic!("multiple initialization of background_tasks_driver");
             }
         });
 
         Ok(nexus)
     }
 
+    /// Return the ID for this Nexus instance.
+    pub fn id(&self) -> &Uuid {
+        &self.id
+    }
+
+    /// Return the rack ID for this Nexus instance.
+    pub fn rack_id(&self) -> Uuid {
+        self.rack_id
+    }
+
     /// Return the tunable configuration parameters, e.g. for use in tests.
-    pub fn tunables(&self) -> &config::Tunables {
+    pub fn tunables(&self) -> &Tunables {
         &self.tunables
+    }
+
+    pub fn authz(&self) -> &Arc<authz::Authz> {
+        &self.authz
     }
 
     pub(crate) async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
@@ -512,10 +601,6 @@ impl Nexus {
         }
 
         let mut rustls_cfg = rustls::ServerConfig::builder()
-            .with_safe_default_cipher_suites()
-            .with_safe_default_kx_groups()
-            .with_safe_default_protocol_versions()
-            .unwrap()
             .with_no_client_auth()
             .with_cert_resolver(Arc::new(NexusCertResolver::new(
                 self.log.new(o!("component" => "NexusCertResolver")),
@@ -525,12 +610,19 @@ impl Nexus {
         Some(rustls_cfg)
     }
 
+    // Called to trigger inventory collection.
+    pub(crate) fn activate_inventory_collection(&self) {
+        self.background_tasks
+            .activate(&self.background_tasks.task_inventory_collection);
+    }
+
     // Called to hand off management of external servers to Nexus.
     pub(crate) async fn set_servers(
         &self,
         external_server: DropshotServer,
         techport_external_server: DropshotServer,
         internal_server: DropshotServer,
+        producer_server: ProducerServer,
     ) {
         // If any servers already exist, close them.
         let _ = self.close_servers().await;
@@ -542,9 +634,13 @@ impl Nexus {
             .unwrap()
             .replace(techport_external_server);
         self.internal_server.lock().unwrap().replace(internal_server);
+        self.producer_server.lock().unwrap().replace(producer_server);
     }
 
     pub(crate) async fn close_servers(&self) -> Result<(), String> {
+        // NOTE: All these take the lock and swap out of the option immediately,
+        // because they are synchronous mutexes, which cannot be held across the
+        // await point these `close()` methods expose.
         let external_server = self.external_server.lock().unwrap().take();
         if let Some(server) = external_server {
             server.close().await?;
@@ -557,6 +653,10 @@ impl Nexus {
         let internal_server = self.internal_server.lock().unwrap().take();
         if let Some(server) = internal_server {
             server.close().await?;
+        }
+        let producer_server = self.producer_server.lock().unwrap().take();
+        if let Some(server) = producer_server {
+            server.close().await.map_err(|e| e.to_string())?;
         }
         Ok(())
     }
@@ -588,6 +688,16 @@ impl Nexus {
             .map(|server| server.local_addr())
     }
 
+    pub(crate) async fn get_techport_server_address(
+        &self,
+    ) -> Option<std::net::SocketAddr> {
+        self.techport_external_server
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|server| server.local_addr())
+    }
+
     pub(crate) async fn get_internal_server_address(
         &self,
     ) -> Option<std::net::SocketAddr> {
@@ -609,7 +719,8 @@ impl Nexus {
             self.log.new(o!("component" => "ServiceBalancer")),
             Arc::clone(&self.authz),
             authn::Context::internal_service_balancer(),
-            Arc::clone(&self.db_datastore),
+            Arc::clone(&self.db_datastore)
+                as Arc<dyn nexus_auth::storage::Storage>,
         )
     }
 
@@ -619,7 +730,8 @@ impl Nexus {
             self.log.new(o!("component" => "InternalApi")),
             Arc::clone(&self.authz),
             authn::Context::internal_api(),
-            Arc::clone(&self.db_datastore),
+            Arc::clone(&self.db_datastore)
+                as Arc<dyn nexus_auth::storage::Storage>,
         )
     }
 
@@ -818,8 +930,47 @@ impl Nexus {
         *mid
     }
 
-    pub(crate) async fn resolver(&self) -> internal_dns::resolver::Resolver {
-        self.internal_resolver.clone()
+    pub fn resolver(&self) -> &internal_dns::resolver::Resolver {
+        &self.internal_resolver
+    }
+
+    pub(crate) async fn dpd_clients(
+        &self,
+    ) -> Result<HashMap<SwitchLocation, dpd_client::Client>, String> {
+        let resolver = self.resolver();
+        dpd_clients(resolver, &self.log).await
+    }
+
+    pub(crate) async fn mg_clients(
+        &self,
+    ) -> Result<HashMap<SwitchLocation, mg_admin_client::Client>, String> {
+        let resolver = self.resolver();
+        let mappings =
+            switch_zone_address_mappings(resolver, &self.log).await?;
+        let mut clients: Vec<(SwitchLocation, mg_admin_client::Client)> =
+            vec![];
+        for (location, addr) in &mappings {
+            let port = MGD_PORT;
+            let socketaddr =
+                std::net::SocketAddr::V6(SocketAddrV6::new(*addr, port, 0, 0));
+            let client = mg_admin_client::Client::new(
+                format!("http://{}", socketaddr).as_str(),
+                self.log.clone(),
+            );
+            clients.push((*location, client));
+        }
+        Ok(clients.into_iter().collect::<HashMap<_, _>>())
+    }
+
+    pub(crate) fn demo_sagas(
+        &self,
+    ) -> Result<std::sync::MutexGuard<CompletingDemoSagas>, Error> {
+        self.demo_sagas.lock().map_err(|error| {
+            Error::internal_error(&format!(
+                "failed to acquire demo_sagas lock: {:#}",
+                error
+            ))
+        })
     }
 }
 
@@ -837,6 +988,50 @@ pub enum Unimpl {
     #[allow(unused)]
     Public,
     ProtectedLookup(Error),
+}
+
+pub(crate) async fn dpd_clients(
+    resolver: &internal_dns::resolver::Resolver,
+    log: &slog::Logger,
+) -> Result<HashMap<SwitchLocation, dpd_client::Client>, String> {
+    let mappings = switch_zone_address_mappings(resolver, log).await?;
+    let clients: HashMap<SwitchLocation, dpd_client::Client> = mappings
+        .iter()
+        .map(|(location, addr)| {
+            let port = DENDRITE_PORT;
+
+            let client_state = dpd_client::ClientState {
+                tag: String::from("nexus"),
+                log: log.new(o!(
+                    "component" => "DpdClient"
+                )),
+            };
+
+            let dpd_client = dpd_client::Client::new(
+                &format!("http://[{addr}]:{port}"),
+                client_state,
+            );
+            (*location, dpd_client)
+        })
+        .collect();
+    Ok(clients)
+}
+
+async fn switch_zone_address_mappings(
+    resolver: &internal_dns::resolver::Resolver,
+    log: &slog::Logger,
+) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
+    let switch_zone_addresses = match resolver
+        .lookup_all_ipv6(ServiceName::Dendrite)
+        .await
+    {
+        Ok(addrs) => addrs,
+        Err(e) => {
+            error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
+            return Err(e.to_string());
+        }
+    };
+    Ok(map_switch_zone_addrs(&log, switch_zone_addresses).await)
 }
 
 // TODO: #3596 Allow updating of Nexus from `handoff_to_nexus()`

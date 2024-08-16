@@ -15,8 +15,5 @@ impl_enum_type!(
     pub enum SledResourceKind;
 
     // Enum values
-    Dataset => b"dataset"
-    Service => b"service"
     Instance => b"instance"
-    Reserved => b"reserved"
 );

@@ -2,13 +2,20 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::disk::{
-    DiskPaths, DiskVariant, Partition, PooledDiskError, UnparsedDisk,
-};
-use crate::{Baseboard, SledMode};
+use crate::disk::{DiskPaths, Partition, PooledDiskError, UnparsedDisk};
+use crate::SledMode;
+use omicron_common::disk::{DiskIdentity, DiskVariant};
+use omicron_uuid_kinds::ZpoolUuid;
+use sled_hardware_types::Baseboard;
 use slog::Logger;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use tokio::sync::broadcast;
+
+#[derive(Debug, thiserror::Error)]
+pub enum NvmeFormattingError {
+    #[error("NVMe formatting is unsupported on this platform")]
+    UnsupportedPlatform,
+}
 
 /// An unimplemented, stub representation of the underlying hardware.
 ///
@@ -22,7 +29,11 @@ use tokio::sync::broadcast;
 pub struct HardwareManager {}
 
 impl HardwareManager {
-    pub fn new(_log: &Logger, _sled_mode: SledMode) -> Result<Self, String> {
+    pub fn new(
+        _log: &Logger,
+        _sled_mode: SledMode,
+        _nongimlet_observed_disks: Vec<UnparsedDisk>,
+    ) -> Result<Self, String> {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 
@@ -38,7 +49,7 @@ impl HardwareManager {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 
-    pub fn disks(&self) -> HashSet<UnparsedDisk> {
+    pub fn disks(&self) -> HashMap<DiskIdentity, UnparsedDisk> {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 
@@ -59,6 +70,8 @@ pub fn ensure_partition_layout(
     _log: &Logger,
     _paths: &DiskPaths,
     _variant: DiskVariant,
+    _identity: &DiskIdentity,
+    _zpool_id: Option<ZpoolUuid>,
 ) -> Result<Vec<Partition>, PooledDiskError> {
     unimplemented!("Accessing hardware unsupported on non-illumos");
 }

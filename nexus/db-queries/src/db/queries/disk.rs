@@ -46,11 +46,12 @@ struct NextDiskSlot {
 
 impl NextDiskSlot {
     fn new(instance_id: Uuid) -> Self {
-        let generator = DefaultShiftGenerator {
-            base: 0,
-            max_shift: i64::try_from(MAX_DISKS_PER_INSTANCE).unwrap(),
-            min_shift: 0,
-        };
+        let generator = DefaultShiftGenerator::new(
+            0,
+            i64::try_from(MAX_DISKS_PER_INSTANCE).unwrap(),
+            0,
+        )
+        .expect("invalid min/max shift");
         Self { inner: NextItem::new_scoped(generator, instance_id) }
     }
 }

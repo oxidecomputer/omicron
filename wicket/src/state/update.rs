@@ -4,6 +4,7 @@
 
 use anyhow::Result;
 use ratatui::style::Style;
+use wicket_common::rack_update::{ClearUpdateStateOptions, StartUpdateOptions};
 use wicket_common::update_events::{
     EventReport, ProgressEventKind, StepEventKind, UpdateComponent,
     UpdateStepId,
@@ -18,9 +19,7 @@ use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::fmt::Display;
-use wicketd_client::types::{
-    ArtifactId, ClearUpdateStateOptions, SemverVersion, StartUpdateOptions,
-};
+use wicketd_client::types::{ArtifactId, SemverVersion};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RackUpdateState {
@@ -46,6 +45,7 @@ impl RackUpdateState {
                             *id,
                             vec![
                                 UpdateComponent::Rot,
+                                UpdateComponent::RotBootloader,
                                 UpdateComponent::Sp,
                                 UpdateComponent::Host,
                             ],
@@ -55,14 +55,22 @@ impl RackUpdateState {
                         *id,
                         UpdateItem::new(
                             *id,
-                            vec![UpdateComponent::Rot, UpdateComponent::Sp],
+                            vec![
+                                UpdateComponent::Rot,
+                                UpdateComponent::RotBootloader,
+                                UpdateComponent::Sp,
+                            ],
                         ),
                     ),
                     ComponentId::Psc(_) => (
                         *id,
                         UpdateItem::new(
                             *id,
-                            vec![UpdateComponent::Rot, UpdateComponent::Sp],
+                            vec![
+                                UpdateComponent::Rot,
+                                UpdateComponent::RotBootloader,
+                                UpdateComponent::Sp,
+                            ],
                         ),
                     ),
                 })
@@ -250,12 +258,15 @@ impl UpdateItem {
                 }
                 | StepEventKind::StepCompleted { step, outcome, .. } => {
                     if step.info.is_last_step_in_component() {
-                        // The RoT and SP components each have two steps in
-                        // them. If the second step ("Updating RoT/SP") is
+                        // The RoT (and bootloader) and SP components each
+                        // have two steps in them. If the second step
+                        // ("Updating RoT Bootloader/RoT/SP") is
                         // skipped, then treat the component as skipped.
                         if matches!(
                             step.info.component,
-                            UpdateComponent::Sp | UpdateComponent::Rot
+                            UpdateComponent::Sp
+                                | UpdateComponent::Rot
+                                | UpdateComponent::RotBootloader
                         ) {
                             assert_eq!(
                                 step.info.id,
@@ -333,6 +344,7 @@ impl UpdateItem {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
 pub enum UpdateState {
     NotStarted,
     Starting,
@@ -428,6 +440,7 @@ fn update_component_state(
 #[allow(unused)]
 pub fn update_component_title(component: UpdateComponent) -> &'static str {
     match component {
+        UpdateComponent::RotBootloader => "ROT_BOOTLOADER",
         UpdateComponent::Rot => "ROT",
         UpdateComponent::Sp => "SP",
         UpdateComponent::Host => "HOST",
@@ -435,6 +448,7 @@ pub fn update_component_title(component: UpdateComponent) -> &'static str {
 }
 
 pub struct CreateStartUpdateOptions {
+    pub(crate) force_update_rot_bootloader: bool,
     pub(crate) force_update_rot: bool,
     pub(crate) force_update_sp: bool,
 }
@@ -453,7 +467,9 @@ impl CreateStartUpdateOptions {
                             as a u64",
                 )
             });
-
+        let test_simulate_rot_bootloader_result = get_update_simulated_result(
+            "WICKET_UPDATE_TEST_SIMULATE_ROT_BOOTLOADER_RESULT",
+        )?;
         let test_simulate_rot_result = get_update_simulated_result(
             "WICKET_UPDATE_TEST_SIMULATE_ROT_RESULT",
         )?;
@@ -464,8 +480,10 @@ impl CreateStartUpdateOptions {
         Ok(StartUpdateOptions {
             test_error,
             test_step_seconds,
+            test_simulate_rot_bootloader_result,
             test_simulate_rot_result,
             test_simulate_sp_result,
+            skip_rot_bootloader_version_check: self.force_update_rot_bootloader,
             skip_rot_version_check: self.force_update_rot,
             skip_sp_version_check: self.force_update_sp,
         })

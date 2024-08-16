@@ -4,9 +4,13 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 ipnetwork.workspace = true
 once_cell.workspace = true
+oxnet.workspace = true
 rand.workspace = true
 serde_json.workspace = true
 

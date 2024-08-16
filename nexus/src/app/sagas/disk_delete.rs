@@ -201,12 +201,12 @@ pub(crate) mod test {
     pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx.nexus.datastore().clone(),
+            cptestctx.server.server_context().nexus.datastore().clone(),
         )
     }
 
     async fn create_disk(cptestctx: &ControlPlaneTestContext) -> Disk {
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
 
         let project_selector = params::ProjectSelector {
@@ -232,11 +232,11 @@ pub(crate) mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_id = create_project(client, PROJECT_NAME).await.identity.id;
         let disk = create_disk(&cptestctx).await;
 
-        // Build the saga DAG with the provided test parameters
+        // Build the saga DAG with the provided test parameters and run it.
         let opctx = test_opctx(&cptestctx);
         let params = Params {
             serialized_authn: Serialized::for_opctx(&opctx),
@@ -244,11 +244,7 @@ pub(crate) mod test {
             disk_id: disk.id(),
             volume_id: disk.volume_id,
         };
-        let dag = create_saga_dag::<SagaDiskDelete>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-
-        // Actually run the saga
-        nexus.run_saga(runnable_saga).await.unwrap();
+        nexus.sagas.saga_execute::<SagaDiskDelete>(params).await.unwrap();
     }
 
     #[nexus_test(server = crate::Server)]
@@ -258,7 +254,7 @@ pub(crate) mod test {
         let test = DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_id = create_project(client, PROJECT_NAME).await.identity.id;
         let disk = create_disk(&cptestctx).await;
 

@@ -4,8 +4,6 @@
 
 //! Facilities for working with the Omicron database
 
-pub(crate) mod alias;
-pub(crate) mod cast_uuid_as_bytea;
 // This is not intended to be public, but this is necessary to use it from
 // doctests
 pub mod collection_attach;
@@ -19,8 +17,8 @@ mod cte_utils;
 pub mod datastore;
 pub(crate) mod error;
 mod explain;
-pub mod fixed_data;
 pub mod lookup;
+mod on_conflict_ext;
 // Public for doctests.
 pub mod pagination;
 mod pool;
@@ -28,15 +26,19 @@ mod pool_connection;
 // This is marked public because the error types are used elsewhere, e.g., in
 // sagas.
 pub mod queries;
-mod saga_recovery;
+mod raw_query_builder;
 mod sec_store;
-pub mod subquery;
 pub(crate) mod true_or_cast_error;
 mod update_and_check;
 
-#[cfg(test)]
-mod test_utils;
+/// Batch statement to disable full table scans.
+// This is `pub` so tests that don't go through our connection pool can disable
+// full table scans the same way pooled connections do.
+pub use pool_connection::DISALLOW_FULL_TABLE_SCAN_SQL;
 
+pub mod test_utils;
+
+pub use nexus_db_fixed_data as fixed_data;
 pub use nexus_db_model as model;
 use nexus_db_model::saga_types;
 pub use nexus_db_model::schema;
@@ -44,8 +46,8 @@ pub use nexus_db_model::schema;
 pub use crate::db::error::TransactionError;
 pub use config::Config;
 pub use datastore::DataStore;
+pub use on_conflict_ext::IncompleteOnConflictExt;
 pub use pool::{DbConnection, Pool};
-pub use saga_recovery::{recover, CompletionTask, RecoveryTask};
 pub use saga_types::SecId;
 pub use sec_store::CockroachDbSecStore;
 

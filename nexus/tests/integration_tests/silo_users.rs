@@ -7,7 +7,7 @@ use http::{method::Method, StatusCode};
 use nexus_db_queries::authn::USER_TEST_UNPRIVILEGED;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::fixed_data::silo::SILO_ID;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO_ID;
 use nexus_test_utils::assert_same_items;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
@@ -26,10 +26,10 @@ type ControlPlaneTestContext =
 #[nexus_test]
 async fn test_silo_group_users(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let opctx = OpContext::for_tests(
         cptestctx.logctx.log.new(o!()),
-        cptestctx.server.apictx().nexus.datastore().clone(),
+        cptestctx.server.server_context().nexus.datastore().clone(),
     );
 
     // we start out with the two default users
@@ -44,8 +44,11 @@ async fn test_silo_group_users(cptestctx: &ControlPlaneTestContext) {
         objects_list_page_authz::<views::User>(client, &"/v1/groups").await;
     assert_eq!(groups.items.len(), 0);
 
-    let authz_silo =
-        authz::Silo::new(authz::FLEET, *SILO_ID, LookupType::ById(*SILO_ID));
+    let authz_silo = authz::Silo::new(
+        authz::FLEET,
+        *DEFAULT_SILO_ID,
+        LookupType::ById(*DEFAULT_SILO_ID),
+    );
 
     // create a group
     let group_name = "group1".to_string();

@@ -109,7 +109,7 @@ fn test_nexus_openapi() {
         .expect("stdout was not valid OpenAPI");
     assert_eq!(spec.openapi, "3.0.3");
     assert_eq!(spec.info.title, "Oxide Region API");
-    assert_eq!(spec.info.version, "0.0.1");
+    assert_eq!(spec.info.version, "20240821.0");
 
     // Spot check a couple of items.
     assert!(!spec.paths.paths.is_empty());
@@ -179,20 +179,4 @@ fn test_nexus_openapi() {
     // When this fails, verify that operations on which you're adding,
     // renaming, or changing the tags are what you intend.
     assert_contents("tests/output/nexus_tags.txt", &tags);
-}
-
-#[test]
-fn test_nexus_openapi_internal() {
-    let (stdout_text, _) = run_command_with_arg("--openapi-internal");
-    let spec: OpenAPI = serde_json::from_str(&stdout_text)
-        .expect("stdout was not valid OpenAPI");
-
-    // Check for lint errors.
-    let errors = openapi_lint::validate(&spec);
-    assert!(errors.is_empty(), "{}", errors.join("\n\n"));
-
-    // Confirm that the output hasn't changed. It's expected that we'll change
-    // this file as the API evolves, but pay attention to the diffs to ensure
-    // that the changes match your expectations.
-    assert_contents("../openapi/nexus-internal.json", &stdout_text);
 }

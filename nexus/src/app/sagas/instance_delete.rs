@@ -102,6 +102,7 @@ async fn sid_delete_network_interfaces(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
+    let nexus = osagactx.nexus();
     let params = sagactx.saga_params::<Params>()?;
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
@@ -112,6 +113,7 @@ async fn sid_delete_network_interfaces(
         .instance_delete_all_network_interfaces(&opctx, &params.authz_instance)
         .await
         .map_err(ActionError::action_failed)?;
+    nexus.background_tasks.activate(&nexus.background_tasks.task_v2p_manager);
     Ok(())
 }
 
@@ -210,7 +212,7 @@ mod test {
         instance_id: Uuid,
     ) -> Params {
         let opctx = test_opctx(&cptestctx);
-        let datastore = cptestctx.server.apictx().nexus.datastore();
+        let datastore = cptestctx.server.server_context().nexus.datastore();
 
         let (.., authz_instance, instance) =
             LookupPath::new(&opctx, &datastore)
@@ -235,12 +237,13 @@ mod test {
             },
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
-            hostname: String::from("inst"),
+            hostname: "inst".parse().unwrap(),
             user_data: vec![],
+            ssh_public_keys: Some(Vec::new()),
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![params::ExternalIpCreate::Ephemeral {
-                pool_name: None,
+                pool: None,
             }],
             disks: vec![params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },
@@ -252,7 +255,7 @@ mod test {
     pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx().nexus.datastore().clone(),
+            cptestctx.server.server_context().nexus.datastore().clone(),
         )
     }
 
@@ -262,25 +265,20 @@ mod test {
     ) {
         DiskTest::new(cptestctx).await;
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         create_org_project_and_disk(&client).await;
 
-        // Build the saga DAG with the provided test parameters
-        let dag = create_saga_dag::<SagaInstanceDelete>(
-            new_test_params(
-                &cptestctx,
-                create_instance(&cptestctx, new_instance_create_params())
-                    .await
-                    .id(),
-            )
-            .await,
+        // Build the saga DAG with the provided test parameters and run it.
+        let params = new_test_params(
+            &cptestctx,
+            create_instance(&cptestctx, new_instance_create_params())
+                .await
+                .id(),
         )
-        .unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-
-        // Actually run the saga
+        .await;
         nexus
-            .run_saga(runnable_saga)
+            .sagas
+            .saga_execute::<SagaInstanceDelete>(params)
             .await
             .expect("Saga should have succeeded");
     }
@@ -289,7 +287,7 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
         params: params::InstanceCreate,
     ) -> db::model::Instance {
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
 
         let project_selector = params::ProjectSelector {
@@ -303,7 +301,8 @@ mod test {
             .await
             .unwrap();
 
-        let datastore = cptestctx.server.apictx().nexus.datastore().clone();
+        let datastore =
+            cptestctx.server.server_context().nexus.datastore().clone();
         let (.., db_instance) = LookupPath::new(&opctx, &datastore)
             .instance_id(instance_state.instance().id())
             .fetch()
@@ -320,7 +319,7 @@ mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters

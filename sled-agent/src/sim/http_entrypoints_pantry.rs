@@ -5,8 +5,9 @@
 //! HTTP entrypoint functions for simulating the crucible pantry API.
 
 use dropshot::{
-    endpoint, ApiDescription, HttpError, HttpResponseDeleted, HttpResponseOk,
-    HttpResponseUpdatedNoContent, Path as TypedPath, RequestContext, TypedBody,
+    endpoint, ApiDescription, ApiDescriptionRegisterError, HttpError,
+    HttpResponseDeleted, HttpResponseOk, HttpResponseUpdatedNoContent,
+    Path as TypedPath, RequestContext, TypedBody,
 };
 use propolis_client::types::VolumeConstructionRequest;
 use schemars::JsonSchema;
@@ -21,7 +22,7 @@ type CruciblePantryApiDescription = ApiDescription<Arc<Pantry>>;
 pub fn api() -> CruciblePantryApiDescription {
     fn register_endpoints(
         api: &mut CruciblePantryApiDescription,
-    ) -> Result<(), String> {
+    ) -> Result<(), ApiDescriptionRegisterError> {
         api.register(attach)?;
         api.register(is_job_finished)?;
         api.register(job_result_ok)?;
@@ -261,7 +262,7 @@ async fn scrub(
     Ok(HttpResponseOk(ScrubResponse { job_id }))
 }
 
-/// Flush and close a volume, removing it from the Pantry
+/// Deactivate a volume, removing it from the Pantry
 #[endpoint {
     method = DELETE,
     path = "/crucible/pantry/0/volume/{id}",
@@ -365,6 +366,15 @@ mod tests {
                     );
                 };
                 for (key, value) in map.iter() {
+                    // We intentionally skip the "description" key, provided
+                    // that the value is also a true String. This is mostly a
+                    // one-off for the udpate to Progenitor 0.5.0, which caused
+                    // this key to be added. But it's also pretty harmless,
+                    // since it's not possible to get this key-value combination
+                    // in a real JSON schema.
+                    if key == "description" && value.is_string() {
+                        continue;
+                    }
                     let new_path = format!("{path}/{key}");
                     let rhs_value = rhs_map.get(key).unwrap_or_else(|| {
                         panic!("Real API JSON missing key: \"{new_path}\"")

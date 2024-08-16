@@ -5,19 +5,20 @@
 //! Tests that EarlyNetworkConfig deserializes across versions.
 
 use std::net::Ipv4Addr;
+use std::str::FromStr;
 
 use bootstore::schemes::v0 as bootstore;
 use omicron_common::api::{
-    external::SwitchLocation,
+    external::{ImportExportPolicy, SwitchLocation},
     internal::shared::{
-        BgpConfig, BgpPeerConfig, PortConfigV1, PortFec, PortSpeed,
+        BgpConfig, BgpPeerConfig, PortConfigV2, PortFec, PortSpeed,
         RackNetworkConfig, RouteConfig,
     },
 };
-use omicron_sled_agent::bootstrap::early_networking::{
+use omicron_test_utils::dev::test_setup_log;
+use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
 };
-use omicron_test_utils::dev::test_setup_log;
 
 const BLOB_PATH: &str = "tests/data/early_network_blobs.txt";
 
@@ -48,8 +49,8 @@ fn early_network_blobs_deserialize() {
             });
 
         // Attempt to deserialize this blob.
-        let config = serde_json::from_str::<EarlyNetworkConfig>(blob_json)
-            .unwrap_or_else(|error| {
+        let config =
+            EarlyNetworkConfig::from_str(blob_json).unwrap_or_else(|error| {
                 panic!(
                     "error deserializing early_network_blobs.txt \
                     \"{blob_desc}\" (line {blob_lineno}): {error}",
@@ -113,17 +114,18 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfig) {
     let description = "2023-12-06 config";
     let config = EarlyNetworkConfig {
         generation: 20,
-        schema_version: 1,
+        schema_version: EarlyNetworkConfig::schema_version(),
         body: EarlyNetworkConfigBody {
             ntp_servers: vec!["ntp.example.com".to_owned()],
             rack_network_config: Some(RackNetworkConfig {
                 rack_subnet: "ff01::0/32".parse().unwrap(),
                 infra_ip_first: Ipv4Addr::new(127, 0, 0, 1),
                 infra_ip_last: Ipv4Addr::new(127, 1, 0, 1),
-                ports: vec![PortConfigV1 {
+                ports: vec![PortConfigV2 {
                     routes: vec![RouteConfig {
                         destination: "10.1.9.32/16".parse().unwrap(),
                         nexthop: "10.1.9.32".parse().unwrap(),
+                        vlan_id: None,
                     }],
                     addresses: vec!["2001:db8::/96".parse().unwrap()],
                     switch: SwitchLocation::Switch0,
@@ -139,13 +141,26 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfig) {
                         delay_open: None,
                         connect_retry: Some(30),
                         keepalive: Some(10),
+                        remote_asn: None,
+                        min_ttl: None,
+                        md5_auth_key: None,
+                        multi_exit_discriminator: None,
+                        communities: Vec::new(),
+                        local_pref: None,
+                        enforce_first_as: false,
+                        allowed_export: ImportExportPolicy::NoFiltering,
+                        allowed_import: ImportExportPolicy::NoFiltering,
+                        vlan_id: None,
                     }],
                     autoneg: true,
                 }],
                 bgp: vec![BgpConfig {
                     asn: 20000,
                     originate: vec!["192.168.0.0/24".parse().unwrap()],
+                    shaper: None,
+                    checker: None,
                 }],
+                bfd: vec![],
             }),
         },
     };

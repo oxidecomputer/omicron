@@ -11,17 +11,14 @@ use omicron_common::{
     address::Ipv6Subnet,
     cmd::{fatal, CmdError},
 };
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::PathBuf;
-use wicketd::{self, run_openapi, Config, Server, SmfConfigValues};
+use wicketd::{Config, Server, SmfConfigValues};
 
 #[derive(Debug, Parser)]
 #[clap(name = "wicketd", about = "See README.adoc for more information")]
 enum Args {
-    /// Print the external OpenAPI Spec document and exit
-    Openapi,
-
     /// Start a wicketd server
     Run {
         #[clap(name = "CONFIG_FILE_PATH", action)]
@@ -84,9 +81,6 @@ async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
 
     match args {
-        Args::Openapi => {
-            run_openapi().map_err(|err| CmdError::Failure(anyhow!(err)))
-        }
         Args::Run {
             config_file_path,
             address,
@@ -144,9 +138,8 @@ async fn do_run() -> Result<(), CmdError> {
                 .to_logger("wicketd")
                 .context("failed to initialize logger")
                 .map_err(CmdError::Failure)?;
-            let server = Server::start(log, args)
-                .await
-                .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+            let server =
+                Server::start(log, args).await.map_err(CmdError::Failure)?;
             server
                 .wait_for_finish()
                 .await

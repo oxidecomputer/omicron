@@ -7,44 +7,58 @@
 use super::collection::{PokeMode, SimCollection};
 use super::config::Config;
 use super::disk::SimDisk;
-use super::instance::SimInstance;
+use super::instance::{self, SimInstance};
 use super::storage::CrucibleData;
 use super::storage::Storage;
 use crate::nexus::NexusClient;
-use crate::params::{
-    DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
-    InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse, Inventory, OmicronZonesConfig, SledRole,
-};
 use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
 use anyhow::bail;
 use anyhow::Context;
-use dropshot::HttpServer;
+use dropshot::{HttpError, HttpServer};
 use futures::lock::Mutex;
-use illumos_utils::opte::params::{
-    DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
+use nexus_sled_agent_shared::inventory::{
+    Inventory, InventoryDisk, InventoryZpool, OmicronZonesConfig, SledRole,
 };
-use nexus_client::types::PhysicalDiskKind;
-use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
 };
 use omicron_common::api::internal::nexus::{
-    DiskRuntimeState, SledInstanceState,
+    DiskRuntimeState, MigrationRuntimeState, MigrationState, SledInstanceState,
 };
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, VmmRuntimeState,
 };
+use omicron_common::api::internal::shared::{
+    RackNetworkConfig, ResolvedVpcRoute, ResolvedVpcRouteSet,
+    ResolvedVpcRouteState, RouterId, RouterKind, RouterVersion,
+    VirtualNetworkInterfaceHost,
+};
+use omicron_common::disk::{
+    DiskIdentity, DiskVariant, DisksManagementResult,
+    OmicronPhysicalDisksConfig,
+};
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, ZpoolUuid};
+use oxnet::Ipv6Net;
 use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
 };
 use propolis_mock_server::Context as PropolisContext;
+use sled_agent_types::disk::DiskStateRequested;
+use sled_agent_types::early_networking::{
+    EarlyNetworkConfig, EarlyNetworkConfigBody,
+};
+use sled_agent_types::instance::{
+    InstanceExternalIpBody, InstanceHardware, InstanceMetadata,
+    InstancePutStateResponse, InstanceStateRequested,
+    InstanceUnregisterResponse,
+};
 use slog::Logger;
-use std::collections::HashMap;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
 /// Simulates management of the control plane on a sled
@@ -66,12 +80,17 @@ pub struct SledAgent {
     nexus_address: SocketAddr,
     pub nexus_client: Arc<NexusClient>,
     disk_id_to_region_ids: Mutex<HashMap<String, Vec<Uuid>>>,
-    pub v2p_mappings: Mutex<HashMap<Uuid, Vec<SetVirtualNetworkInterfaceHost>>>,
+    pub v2p_mappings: Mutex<HashSet<VirtualNetworkInterfaceHost>>,
     mock_propolis:
         Mutex<Option<(HttpServer<Arc<PropolisContext>>, PropolisClient)>>,
+    /// lists of external IPs assigned to instances
+    pub external_ips: Mutex<HashMap<Uuid, HashSet<InstanceExternalIpBody>>>,
+    pub vpc_routes: Mutex<HashMap<RouterId, RouteSet>>,
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
+    pub bootstore_network_config: Mutex<EarlyNetworkConfig>,
+    pub log: Logger,
 }
 
 fn extract_targets_from_volume_construction_request(
@@ -83,40 +102,33 @@ fn extract_targets_from_volume_construction_request(
     // flush.
 
     let mut res = vec![];
-    match vcr {
-        VolumeConstructionRequest::Volume {
-            id: _,
-            block_size: _,
-            sub_volumes,
-            read_only_parent: _,
-        } => {
-            for sub_volume in sub_volumes.iter() {
-                res.extend(extract_targets_from_volume_construction_request(
-                    sub_volume,
-                )?);
+    let mut parts: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
+    parts.push_back(&vcr);
+
+    while let Some(vcr_part) = parts.pop_front() {
+        match vcr_part {
+            VolumeConstructionRequest::Volume { sub_volumes, .. } => {
+                for sub_volume in sub_volumes {
+                    parts.push_back(sub_volume);
+                }
             }
-        }
 
-        VolumeConstructionRequest::Url { .. } => {
-            // noop
-        }
-
-        VolumeConstructionRequest::Region {
-            block_size: _,
-            blocks_per_extent: _,
-            extent_count: _,
-            opts,
-            gen: _,
-        } => {
-            for target in &opts.target {
-                res.push(SocketAddr::from_str(target)?);
+            VolumeConstructionRequest::Url { .. } => {
+                // noop
             }
-        }
 
-        VolumeConstructionRequest::File { .. } => {
-            // noop
+            VolumeConstructionRequest::Region { opts, .. } => {
+                for target in &opts.target {
+                    res.push(SocketAddr::from_str(&target)?);
+                }
+            }
+
+            VolumeConstructionRequest::File { .. } => {
+                // noop
+            }
         }
     }
+
     Ok(res)
 }
 
@@ -138,6 +150,23 @@ impl SledAgent {
         let disk_log = log.new(o!("kind" => "disks"));
         let storage_log = log.new(o!("kind" => "storage"));
 
+        let bootstore_network_config = Mutex::new(EarlyNetworkConfig {
+            generation: 0,
+            schema_version: 1,
+            body: EarlyNetworkConfigBody {
+                ntp_servers: Vec::new(),
+                rack_network_config: Some(RackNetworkConfig {
+                    rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
+                        .unwrap(),
+                    infra_ip_first: Ipv4Addr::UNSPECIFIED,
+                    infra_ip_last: Ipv4Addr::UNSPECIFIED,
+                    ports: Vec::new(),
+                    bgp: Vec::new(),
+                    bfd: Vec::new(),
+                }),
+            },
+        });
+
         Arc::new(SledAgent {
             id,
             ip: config.dropshot.bind_address.ip(),
@@ -153,7 +182,6 @@ impl SledAgent {
             )),
             storage: Mutex::new(Storage::new(
                 id,
-                Arc::clone(&nexus_client),
                 config.storage.ip,
                 storage_log,
             )),
@@ -161,7 +189,9 @@ impl SledAgent {
             nexus_address,
             nexus_client,
             disk_id_to_region_ids: Mutex::new(HashMap::new()),
-            v2p_mappings: Mutex::new(HashMap::new()),
+            v2p_mappings: Mutex::new(HashSet::new()),
+            external_ips: Mutex::new(HashMap::new()),
+            vpc_routes: Mutex::new(HashMap::new()),
             mock_propolis: Mutex::new(None),
             config: config.clone(),
             fake_zones: Mutex::new(OmicronZonesConfig {
@@ -169,6 +199,8 @@ impl SledAgent {
                 zones: vec![],
             }),
             instance_ensure_state_error: Mutex::new(None),
+            log,
+            bootstore_network_config,
         })
     }
 
@@ -231,11 +263,12 @@ impl SledAgent {
     /// (described by `target`).
     pub async fn instance_register(
         self: &Arc<Self>,
-        instance_id: Uuid,
-        propolis_id: Uuid,
+        instance_id: InstanceUuid,
+        propolis_id: PropolisUuid,
         hardware: InstanceHardware,
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
+        metadata: InstanceMetadata,
     ) -> Result<SledInstanceState, Error> {
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
@@ -248,7 +281,9 @@ impl SledAgent {
 
         for disk in &hardware.disks {
             let initial_state = DiskRuntimeState {
-                disk_state: DiskState::Attached(instance_id),
+                disk_state: DiskState::Attached(
+                    instance_id.into_untyped_uuid(),
+                ),
                 gen: omicron_common::api::external::Generation::new(),
                 time_updated: chrono::Utc::now(),
             };
@@ -263,7 +298,9 @@ impl SledAgent {
                 .sim_ensure(
                     &id,
                     initial_state,
-                    Some(DiskStateRequested::Attached(instance_id)),
+                    Some(DiskStateRequested::Attached(
+                        instance_id.into_untyped_uuid(),
+                    )),
                 )
                 .await?;
             self.disks
@@ -280,15 +317,38 @@ impl SledAgent {
         //      point to the correct address.
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
-            if !self.instances.contains_key(&instance_id).await {
+            if !self
+                .instances
+                .contains_key(&instance_id.into_untyped_uuid())
+                .await
+            {
+                let metadata = propolis_client::types::InstanceMetadata {
+                    project_id: metadata.project_id,
+                    silo_id: metadata.silo_id,
+                    sled_id: self.id,
+                    sled_model: self
+                        .config
+                        .hardware
+                        .baseboard
+                        .model()
+                        .to_string(),
+                    sled_revision: self.config.hardware.baseboard.revision(),
+                    sled_serial: self
+                        .config
+                        .hardware
+                        .baseboard
+                        .identifier()
+                        .to_string(),
+                };
                 let properties = propolis_client::types::InstanceProperties {
-                    id: propolis_id,
-                    name: hardware.properties.hostname.clone(),
+                    id: propolis_id.into_untyped_uuid(),
+                    name: hardware.properties.hostname.to_string(),
                     description: "sled-agent-sim created instance".to_string(),
                     image_id: Uuid::default(),
                     bootrom_id: Uuid::default(),
                     memory: hardware.properties.memory.to_whole_mebibytes(),
                     vcpus: hardware.properties.ncpus.0 as u8,
+                    metadata,
                 };
                 let body = propolis_client::types::InstanceEnsureRequest {
                     properties,
@@ -309,14 +369,24 @@ impl SledAgent {
             }
         }
 
+        let migration_in = instance_runtime.migration_id.map(|migration_id| {
+            MigrationRuntimeState {
+                migration_id,
+                state: MigrationState::Pending,
+                gen: Generation::new(),
+                time_updated: chrono::Utc::now(),
+            }
+        });
+
         let instance_run_time_state = self
             .instances
             .sim_ensure(
-                &instance_id,
+                &instance_id.into_untyped_uuid(),
                 SledInstanceState {
-                    instance_state: instance_runtime,
                     vmm_state: vmm_runtime,
                     propolis_id,
+                    migration_in,
+                    migration_out: None,
                 },
                 None,
             )
@@ -327,6 +397,18 @@ impl SledAgent {
             self.map_disk_ids_to_region_ids(&vcr).await?;
         }
 
+        let mut routes = self.vpc_routes.lock().await;
+        for nic in &hardware.nics {
+            let my_routers = [
+                RouterId { vni: nic.vni, kind: RouterKind::System },
+                RouterId { vni: nic.vni, kind: RouterKind::Custom(nic.subnet) },
+            ];
+
+            for router in my_routers {
+                routes.entry(router).or_default();
+            }
+        }
+
         Ok(instance_run_time_state)
     }
 
@@ -335,32 +417,33 @@ impl SledAgent {
     /// not notified.
     pub async fn instance_unregister(
         self: &Arc<Self>,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
     ) -> Result<InstanceUnregisterResponse, Error> {
-        let instance =
-            match self.instances.sim_get_cloned_object(&instance_id).await {
-                Ok(instance) => instance,
-                Err(Error::ObjectNotFound { .. }) => {
-                    return Ok(InstanceUnregisterResponse {
-                        updated_runtime: None,
-                    })
-                }
-                Err(e) => return Err(e),
-            };
+        let instance = match self
+            .instances
+            .sim_get_cloned_object(&instance_id.into_untyped_uuid())
+            .await
+        {
+            Ok(instance) => instance,
+            Err(Error::ObjectNotFound { .. }) => {
+                return Ok(InstanceUnregisterResponse { updated_runtime: None })
+            }
+            Err(e) => return Err(e),
+        };
 
         self.detach_disks_from_instance(instance_id).await?;
         let response = InstanceUnregisterResponse {
             updated_runtime: Some(instance.terminate()),
         };
 
-        self.instances.sim_force_remove(instance_id).await;
+        self.instances.sim_force_remove(instance_id.into_untyped_uuid()).await;
         Ok(response)
     }
 
     /// Asks the supplied instance to transition to the requested state.
     pub async fn instance_ensure_state(
         self: &Arc<Self>,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
         state: InstanceStateRequested,
     ) -> Result<InstancePutStateResponse, Error> {
         if let Some(e) = self.instance_ensure_state_error.lock().await.as_ref()
@@ -368,23 +451,26 @@ impl SledAgent {
             return Err(e.clone());
         }
 
-        let current =
-            match self.instances.sim_get_cloned_object(&instance_id).await {
-                Ok(i) => i.current().clone(),
-                Err(_) => match state {
-                    InstanceStateRequested::Stopped => {
-                        return Ok(InstancePutStateResponse {
-                            updated_runtime: None,
-                        });
-                    }
-                    _ => {
-                        return Err(Error::invalid_request(&format!(
-                            "instance {} not registered on sled",
-                            instance_id,
-                        )));
-                    }
-                },
-            };
+        let current = match self
+            .instances
+            .sim_get_cloned_object(&instance_id.into_untyped_uuid())
+            .await
+        {
+            Ok(i) => i.current().clone(),
+            Err(_) => match state {
+                InstanceStateRequested::Stopped => {
+                    return Ok(InstancePutStateResponse {
+                        updated_runtime: None,
+                    });
+                }
+                _ => {
+                    return Err(Error::invalid_request(&format!(
+                        "instance {} not registered on sled",
+                        instance_id,
+                    )));
+                }
+            },
+        };
 
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
@@ -395,7 +481,32 @@ impl SledAgent {
                     ));
                 }
                 InstanceStateRequested::Running => {
-                    propolis_client::types::InstanceStateRequested::Run
+                    let instances = self.instances.clone();
+                    let log = self.log.new(
+                        o!("component" => "SledAgent-insure_instance_state"),
+                    );
+                    tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_secs(10)).await;
+                        match instances
+                            .sim_ensure(
+                                &instance_id.into_untyped_uuid(),
+                                current,
+                                Some(state),
+                            )
+                            .await
+                        {
+                            Ok(state) => {
+                                let instance_state: nexus_client::types::SledInstanceState = state.into();
+                                info!(log, "sim_ensure success"; "instance_state" => #?instance_state);
+                            }
+                            Err(instance_put_error) => {
+                                error!(log, "sim_ensure failure"; "error" => #?instance_put_error);
+                            }
+                        }
+                    });
+                    return Ok(InstancePutStateResponse {
+                        updated_runtime: None,
+                    });
                 }
                 InstanceStateRequested::Stopped => {
                     propolis_client::types::InstanceStateRequested::Stop
@@ -411,7 +522,7 @@ impl SledAgent {
 
         let new_state = self
             .instances
-            .sim_ensure(&instance_id, current, Some(state))
+            .sim_ensure(&instance_id.into_untyped_uuid(), current, Some(state))
             .await?;
 
         // If this request will shut down the simulated instance, look for any
@@ -423,19 +534,53 @@ impl SledAgent {
         Ok(InstancePutStateResponse { updated_runtime: Some(new_state) })
     }
 
+    pub async fn instance_get_state(
+        &self,
+        instance_id: InstanceUuid,
+    ) -> Result<SledInstanceState, HttpError> {
+        let instance = self
+            .instances
+            .sim_get_cloned_object(&instance_id.into_untyped_uuid())
+            .await
+            .map_err(|_| {
+                crate::sled_agent::Error::Instance(
+                    crate::instance_manager::Error::NoSuchInstance(instance_id),
+                )
+            })?;
+        Ok(instance.current())
+    }
+
+    pub async fn instance_simulate_migration_source(
+        &self,
+        instance_id: InstanceUuid,
+        migration: instance::SimulateMigrationSource,
+    ) -> Result<(), HttpError> {
+        let instance = self
+            .instances
+            .sim_get_cloned_object(&instance_id.into_untyped_uuid())
+            .await
+            .map_err(|_| {
+                crate::sled_agent::Error::Instance(
+                    crate::instance_manager::Error::NoSuchInstance(instance_id),
+                )
+            })?;
+        instance.set_simulated_migration_source(migration);
+        Ok(())
+    }
+
     pub async fn set_instance_ensure_state_error(&self, error: Option<Error>) {
         *self.instance_ensure_state_error.lock().await = error;
     }
 
     async fn detach_disks_from_instance(
         &self,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
     ) -> Result<(), Error> {
         self.disks
             .sim_ensure_for_each_where(
                 |disk| match disk.current().disk_state {
                     DiskState::Attached(id) | DiskState::Attaching(id) => {
-                        id == instance_id
+                        id == instance_id.into_untyped_uuid()
                     }
                     _ => false,
                 },
@@ -444,18 +589,6 @@ impl SledAgent {
             .await?;
 
         Ok(())
-    }
-
-    pub async fn instance_put_migration_ids(
-        self: &Arc<Self>,
-        instance_id: Uuid,
-        old_runtime: &InstanceRuntimeState,
-        migration_ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<SledInstanceState, Error> {
-        let instance =
-            self.instances.sim_get_cloned_object(&instance_id).await?;
-
-        instance.put_migration_ids(old_runtime, migration_ids).await
     }
 
     /// Idempotently ensures that the given API Disk (described by `api_disk`)
@@ -482,8 +615,8 @@ impl SledAgent {
         self.disks.size().await
     }
 
-    pub async fn instance_poke(&self, id: Uuid) {
-        self.instances.sim_poke(id, PokeMode::Drain).await;
+    pub async fn instance_poke(&self, id: InstanceUuid, mode: PokeMode) {
+        self.instances.sim_poke(id.into_untyped_uuid(), mode).await;
     }
 
     pub async fn disk_poke(&self, id: Uuid) {
@@ -493,25 +626,32 @@ impl SledAgent {
     /// Adds a Physical Disk to the simulated sled agent.
     pub async fn create_external_physical_disk(
         &self,
-        vendor: String,
-        serial: String,
-        model: String,
+        id: Uuid,
+        identity: DiskIdentity,
     ) {
-        let variant = PhysicalDiskKind::U2;
+        let variant = DiskVariant::U2;
         self.storage
             .lock()
             .await
-            .insert_physical_disk(vendor, serial, model, variant)
+            .insert_physical_disk(id, identity, variant)
             .await;
     }
 
-    pub async fn get_zpools(&self) -> Vec<Uuid> {
+    pub async fn get_all_physical_disks(
+        &self,
+    ) -> Vec<nexus_client::types::PhysicalDiskPutRequest> {
+        self.storage.lock().await.get_all_physical_disks()
+    }
+
+    pub async fn get_zpools(
+        &self,
+    ) -> Vec<nexus_client::types::ZpoolPutRequest> {
         self.storage.lock().await.get_all_zpools()
     }
 
     pub async fn get_datasets(
         &self,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
     ) -> Vec<(Uuid, SocketAddr)> {
         self.storage.lock().await.get_all_datasets(zpool_id)
     }
@@ -519,23 +659,21 @@ impl SledAgent {
     /// Adds a Zpool to the simulated sled agent.
     pub async fn create_zpool(
         &self,
-        id: Uuid,
-        vendor: String,
-        serial: String,
-        model: String,
+        id: ZpoolUuid,
+        physical_disk_id: Uuid,
         size: u64,
     ) {
         self.storage
             .lock()
             .await
-            .insert_zpool(id, vendor, serial, model, size)
+            .insert_zpool(id, physical_disk_id, size)
             .await;
     }
 
     /// Adds a Crucible Dataset within a zpool.
     pub async fn create_crucible_dataset(
         &self,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         dataset_id: Uuid,
     ) -> SocketAddr {
         self.storage.lock().await.insert_dataset(zpool_id, dataset_id).await
@@ -544,7 +682,7 @@ impl SledAgent {
     /// Returns a crucible dataset within a particular zpool.
     pub async fn get_crucible_dataset(
         &self,
-        zpool_id: Uuid,
+        zpool_id: ZpoolUuid,
         dataset_id: Uuid,
     ) -> Arc<CrucibleData> {
         self.storage.lock().await.get_dataset(zpool_id, dataset_id).await
@@ -561,7 +699,7 @@ impl SledAgent {
     /// snapshot here.
     pub async fn instance_issue_disk_snapshot_request(
         &self,
-        _instance_id: Uuid,
+        _instance_id: InstanceUuid,
         disk_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
@@ -597,45 +735,93 @@ impl SledAgent {
 
     pub async fn set_virtual_nic_host(
         &self,
-        interface_id: Uuid,
-        mapping: &SetVirtualNetworkInterfaceHost,
+        mapping: &VirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         let mut v2p_mappings = self.v2p_mappings.lock().await;
-        let vec = v2p_mappings.entry(interface_id).or_default();
-        vec.push(mapping.clone());
+        v2p_mappings.insert(mapping.clone());
         Ok(())
     }
 
     pub async fn unset_virtual_nic_host(
         &self,
-        interface_id: Uuid,
-        mapping: &DeleteVirtualNetworkInterfaceHost,
+        mapping: &VirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         let mut v2p_mappings = self.v2p_mappings.lock().await;
-        let vec = v2p_mappings.entry(interface_id).or_default();
-        vec.retain(|x| {
-            x.virtual_ip != mapping.virtual_ip || x.vni != mapping.vni
-        });
+        v2p_mappings.remove(mapping);
+        Ok(())
+    }
 
-        // If the last entry was removed, remove the entire interface ID so that
-        // tests don't have to distinguish never-created entries from
-        // previously-extant-but-now-empty entries.
-        if vec.is_empty() {
-            v2p_mappings.remove(&interface_id);
+    pub async fn list_virtual_nics(
+        &self,
+    ) -> Result<Vec<VirtualNetworkInterfaceHost>, Error> {
+        let v2p_mappings = self.v2p_mappings.lock().await;
+        Ok(Vec::from_iter(v2p_mappings.clone()))
+    }
+
+    pub async fn instance_put_external_ip(
+        &self,
+        instance_id: InstanceUuid,
+        body_args: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        if !self.instances.contains_key(&instance_id.into_untyped_uuid()).await
+        {
+            return Err(Error::internal_error(
+                "can't alter IP state for nonexistent instance",
+            ));
         }
+
+        let mut eips = self.external_ips.lock().await;
+        let my_eips = eips.entry(instance_id.into_untyped_uuid()).or_default();
+
+        // High-level behaviour: this should always succeed UNLESS
+        // trying to add a double ephemeral.
+        if let InstanceExternalIpBody::Ephemeral(curr_ip) = &body_args {
+            if my_eips.iter().any(|v| {
+                if let InstanceExternalIpBody::Ephemeral(other_ip) = v {
+                    curr_ip != other_ip
+                } else {
+                    false
+                }
+            }) {
+                return Err(Error::invalid_request("cannot replace existing ephemeral IP without explicit removal"));
+            }
+        }
+
+        my_eips.insert(*body_args);
+
+        Ok(())
+    }
+
+    pub async fn instance_delete_external_ip(
+        &self,
+        instance_id: InstanceUuid,
+        body_args: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        if !self.instances.contains_key(&instance_id.into_untyped_uuid()).await
+        {
+            return Err(Error::internal_error(
+                "can't alter IP state for nonexistent instance",
+            ));
+        }
+
+        let mut eips = self.external_ips.lock().await;
+        let my_eips = eips.entry(instance_id.into_untyped_uuid()).or_default();
+
+        my_eips.remove(&body_args);
 
         Ok(())
     }
 
     /// Used for integration tests that require a component to talk to a
-    /// mocked propolis-server API.
-    // TODO: fix schemas so propolis-server's port isn't hardcoded in nexus
-    // such that we can run more than one of these.
-    // (this is only needed by test_instance_serial at present)
+    /// mocked propolis-server API. Returns the socket on which the dropshot
+    /// service is listening, which *must* be patched into Nexus with
+    /// `nexus_db_queries::db::datastore::vmm_overwrite_addr_for_test` after
+    /// the instance creation saga if functionality touching propolis-server
+    /// is to be tested (e.g. serial console connection).
     pub async fn start_local_mock_propolis_server(
         &self,
         log: &Logger,
-    ) -> Result<(), Error> {
+    ) -> Result<SocketAddr, Error> {
         let mut mock_lock = self.mock_propolis.lock().await;
         if mock_lock.is_some() {
             return Err(Error::ObjectAlreadyExists {
@@ -644,7 +830,7 @@ impl SledAgent {
             });
         }
         let propolis_bind_address =
-            SocketAddr::new(Ipv6Addr::LOCALHOST.into(), PROPOLIS_PORT);
+            SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0);
         let dropshot_config = dropshot::ConfigDropshot {
             bind_address: propolis_bind_address,
             ..Default::default()
@@ -665,25 +851,28 @@ impl SledAgent {
             Error::unavail(&format!("initializing propolis-server: {}", error))
         })?
         .start();
-        let client = propolis_client::Client::new(&format!(
-            "http://{}",
-            srv.local_addr()
-        ));
+        let addr = srv.local_addr();
+        let client = propolis_client::Client::new(&format!("http://{}", addr));
         *mock_lock = Some((srv, client));
-        Ok(())
+        Ok(addr)
     }
 
-    pub fn inventory(&self, addr: SocketAddr) -> anyhow::Result<Inventory> {
+    pub async fn inventory(
+        &self,
+        addr: SocketAddr,
+    ) -> anyhow::Result<Inventory> {
         let sled_agent_address = match addr {
             SocketAddr::V4(_) => {
                 bail!("sled_agent_ip must be v6 for inventory")
             }
             SocketAddr::V6(v6) => v6,
         };
+
+        let storage = self.storage.lock().await;
         Ok(Inventory {
             sled_id: self.id,
             sled_agent_address,
-            sled_role: SledRole::Gimlet,
+            sled_role: SledRole::Scrimlet,
             baseboard: self.config.hardware.baseboard.clone(),
             usable_hardware_threads: self.config.hardware.hardware_threads,
             usable_physical_ram: ByteCount::try_from(
@@ -694,7 +883,39 @@ impl SledAgent {
                 self.config.hardware.reservoir_ram,
             )
             .context("reservoir_size")?,
+            disks: storage
+                .physical_disks()
+                .values()
+                .map(|info| InventoryDisk {
+                    identity: info.identity.clone(),
+                    variant: info.variant,
+                    slot: info.slot,
+                })
+                .collect(),
+            zpools: storage
+                .zpools()
+                .iter()
+                .map(|(id, zpool)| {
+                    Ok(InventoryZpool {
+                        id: *id,
+                        total_size: ByteCount::try_from(zpool.total_size())?,
+                    })
+                })
+                .collect::<Result<Vec<_>, anyhow::Error>>()?,
         })
+    }
+
+    pub async fn omicron_physical_disks_list(
+        &self,
+    ) -> Result<OmicronPhysicalDisksConfig, HttpError> {
+        self.storage.lock().await.omicron_physical_disks_list().await
+    }
+
+    pub async fn omicron_physical_disks_ensure(
+        &self,
+        config: OmicronPhysicalDisksConfig,
+    ) -> Result<DisksManagementResult, HttpError> {
+        self.storage.lock().await.omicron_physical_disks_ensure(config).await
     }
 
     pub async fn omicron_zones_list(&self) -> OmicronZonesConfig {
@@ -707,4 +928,53 @@ impl SledAgent {
     ) {
         *self.fake_zones.lock().await = requested_zones;
     }
+
+    pub async fn drop_dataset(&self, zpool_id: ZpoolUuid, dataset_id: Uuid) {
+        self.storage.lock().await.drop_dataset(zpool_id, dataset_id)
+    }
+
+    pub async fn list_vpc_routes(&self) -> Vec<ResolvedVpcRouteState> {
+        let routes = self.vpc_routes.lock().await;
+        routes
+            .iter()
+            .map(|(k, v)| ResolvedVpcRouteState { id: *k, version: v.version })
+            .collect()
+    }
+
+    pub async fn set_vpc_routes(&self, new_routes: Vec<ResolvedVpcRouteSet>) {
+        let mut routes = self.vpc_routes.lock().await;
+        for new in new_routes {
+            // Disregard any route information for a subnet we don't have.
+            let Some(old) = routes.get(&new.id) else {
+                continue;
+            };
+
+            // We have to handle subnet router changes, as well as
+            // spurious updates from multiple Nexus instances.
+            // If there's a UUID match, only update if vers increased,
+            // otherwise take the update verbatim (including loss of version).
+            match (old.version, new.version) {
+                (Some(old_vers), Some(new_vers))
+                    if !old_vers.is_replaced_by(&new_vers) =>
+                {
+                    continue;
+                }
+                _ => {}
+            };
+
+            routes.insert(
+                new.id,
+                RouteSet { version: new.version, routes: new.routes },
+            );
+        }
+    }
+}
+
+/// Stored routes (and usage count) for a given VPC/subnet.
+//  NB: We aren't doing post count tracking here to unsubscribe
+//      from (VNI, subnet) pairs.
+#[derive(Debug, Clone, Default)]
+pub struct RouteSet {
+    pub version: Option<RouterVersion>,
+    pub routes: HashSet<ResolvedVpcRoute>,
 }

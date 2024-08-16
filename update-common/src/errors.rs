@@ -21,8 +21,20 @@ pub enum RepositoryError {
     #[error("error creating temporary directory")]
     TempDirCreate(#[source] std::io::Error),
 
+    #[error("error creating temporary file")]
+    TempFileCreate(#[source] std::io::Error),
+
+    #[error("error reading chunk off of input stream")]
+    ReadChunkFromStream(#[source] HttpError),
+
+    #[error("error writing to temporary file")]
+    TempFileWrite(#[source] std::io::Error),
+
+    #[error("error flushing temporary file")]
+    TempFileFlush(#[source] std::io::Error),
+
     #[error("error creating temporary file in {path}")]
-    TempFileCreate {
+    NamedTempFileCreate {
         path: Utf8PathBuf,
         #[source]
         error: std::io::Error,
@@ -41,7 +53,7 @@ pub enum RepositoryError {
     TargetHashRead {
         target: String,
         #[source]
-        error: tough::schema::Error,
+        error: Box<tough::schema::Error>,
     },
 
     #[error("target hash `{}` expected to be 32 bytes long, was {}", hex::encode(.0), .0.len())]
@@ -138,9 +150,20 @@ impl RepositoryError {
             // Errors we had that are unrelated to the contents of a repository
             // uploaded by a client.
             RepositoryError::TempDirCreate(_)
-            | RepositoryError::TempFileCreate { .. } => {
+            | RepositoryError::TempFileCreate(_)
+            | RepositoryError::TempFileWrite(_)
+            | RepositoryError::TempFileFlush(_)
+            | RepositoryError::NamedTempFileCreate { .. } => {
                 HttpError::for_unavail(None, message)
             }
+
+            // This error is bubbled up.
+            RepositoryError::ReadChunkFromStream(error) => HttpError {
+                status_code: error.status_code,
+                error_code: error.error_code.clone(),
+                external_message: error.external_message.clone(),
+                internal_message: error.internal_message.clone(),
+            },
 
             // Errors that are definitely caused by bad repository contents.
             RepositoryError::DuplicateArtifactKind(_)

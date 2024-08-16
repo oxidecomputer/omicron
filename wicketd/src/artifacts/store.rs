@@ -2,17 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::http_entrypoints::InstallableArtifacts;
-use dropshot::HttpError;
 use omicron_common::api::external::SemverVersion;
 use omicron_common::update::ArtifactHashId;
 use slog::Logger;
-use std::io;
 use std::sync::Arc;
 use std::sync::Mutex;
 use update_common::artifacts::ArtifactsWithPlan;
 use update_common::artifacts::ExtractedArtifactDataHandle;
 use update_common::artifacts::UpdatePlan;
+use wicketd_api::InstallableArtifacts;
 
 /// The artifact store for wicketd.
 ///
@@ -32,22 +30,12 @@ impl WicketdArtifactStore {
         Self { log, artifacts_with_plan: Default::default() }
     }
 
-    pub(crate) async fn put_repository<T>(
+    pub(crate) fn set_artifacts_with_plan(
         &self,
-        data: T,
-    ) -> Result<(), HttpError>
-    where
-        T: io::Read + io::Seek + Send + 'static,
-    {
-        slog::debug!(self.log, "adding repository");
-
-        let log = self.log.clone();
-        let new_artifacts = ArtifactsWithPlan::from_zip(data, &log)
-            .await
-            .map_err(|error| error.to_http_error())?;
-        self.replace(new_artifacts);
-
-        Ok(())
+        artifacts_with_plan: ArtifactsWithPlan,
+    ) {
+        slog::debug!(self.log, "setting artifacts_with_plan");
+        self.replace(artifacts_with_plan);
     }
 
     pub(crate) fn system_version_and_artifact_ids(

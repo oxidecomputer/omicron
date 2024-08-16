@@ -429,7 +429,9 @@ impl DataStore {
         use db::schema::role_assignment::dsl;
         debug!(opctx.log, "attempting to create silo user role assignments");
         let count = diesel::insert_into(dsl::role_assignment)
-            .values(&*db::fixed_data::silo_user::ROLE_ASSIGNMENTS_PRIVILEGED)
+            .values(
+                &*nexus_db_fixed_data::silo_user::ROLE_ASSIGNMENTS_PRIVILEGED,
+            )
             .on_conflict((
                 dsl::identity_type,
                 dsl::identity_id,

@@ -5,40 +5,44 @@
 //! Network setup required to bring up the control plane
 
 use anyhow::{anyhow, Context};
-use bootstore::schemes::v0 as bootstore;
-use ddm_admin_client::{Client as DdmAdminClient, DdmError};
-use dpd_client::types::{Ipv6Entry, RouteSettingsV6};
 use dpd_client::types::{
-    LinkCreate, LinkId, LinkSettings, PortId, PortSettings, RouteSettingsV4,
+    LinkCreate, LinkId, LinkSettings, PortId, PortSettings,
 };
 use dpd_client::Client as DpdClient;
 use futures::future;
 use gateway_client::Client as MgsClient;
+use http::StatusCode;
 use internal_dns::resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
-use ipnetwork::{IpNetwork, Ipv6Network};
-use mg_admin_client::types::{ApplyRequest, BgpPeerConfig, Prefix4};
+use mg_admin_client::types::BfdPeerConfig as MgBfdPeerConfig;
+use mg_admin_client::types::BgpPeerConfig as MgBgpPeerConfig;
+use mg_admin_client::types::ImportExportPolicy as MgImportExportPolicy;
+use mg_admin_client::types::{
+    AddStaticRoute4Request, ApplyRequest, CheckerSource, Prefix, Prefix4,
+    Prefix6, ShaperSource, StaticRoute4, StaticRoute4List,
+};
 use mg_admin_client::Client as MgdClient;
-use omicron_common::address::{Ipv6Subnet, MGD_PORT, MGS_PORT};
-use omicron_common::address::{DDMD_PORT, DENDRITE_PORT};
+use omicron_common::address::DENDRITE_PORT;
+use omicron_common::address::{MGD_PORT, MGS_PORT};
+use omicron_common::api::external::{BfdMode, ImportExportPolicy};
 use omicron_common::api::internal::shared::{
-    BgpConfig, PortConfigV1, PortFec, PortSpeed, RackNetworkConfig,
-    RackNetworkConfigV1, SwitchLocation, UplinkConfig,
+    BgpConfig, PortConfig, PortFec, PortSpeed, RackNetworkConfig,
+    SwitchLocation,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_local, BackoffError, ExponentialBackoff,
     ExponentialBackoffBuilder,
 };
 use omicron_common::OMICRON_DPD_TAG;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use omicron_ddm_admin_client::DdmError;
+use oxnet::IpNet;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
 use std::time::{Duration, Instant};
 use thiserror::Error;
+use tokio::time::sleep;
 
-static BOUNDARY_SERVICES_ADDR: &str = "fd00:99::1";
 const BGP_SESSION_RESOLUTION: u64 = 100;
 
 /// Errors that can occur during early network setup
@@ -61,6 +65,9 @@ pub enum EarlyNetworkSetupError {
 
     #[error("BGP configuration error: {0}")]
     BgpConfigurationError(String),
+
+    #[error("BFD configuration error: {0}")]
+    BfdConfigurationError(String),
 
     #[error("MGD error: {0}")]
     MgdError(String),
@@ -354,7 +361,7 @@ impl<'a> EarlyNetworkSetup<'a> {
         &mut self,
         rack_network_config: &RackNetworkConfig,
         switch_zone_underlay_ip: Ipv6Addr,
-    ) -> Result<Vec<PortConfigV1>, EarlyNetworkSetupError> {
+    ) -> Result<Vec<PortConfig>, EarlyNetworkSetupError> {
         // First, we have to know which switch we are: ask MGS.
         info!(
             self.log,
@@ -421,59 +428,62 @@ impl<'a> EarlyNetworkSetup<'a> {
         // configure uplink for each requested uplink in configuration that
         // matches our switch_location
         for port_config in &our_ports {
-            let (ipv6_entry, dpd_port_settings, port_id) =
+            let (dpd_port_settings, port_id) =
                 self.build_port_config(port_config)?;
 
             self.wait_for_dendrite(&dpd).await;
 
             info!(
                 self.log,
-                "Configuring boundary services loopback address on switch";
-                "config" => #?ipv6_entry
-            );
-            dpd.loopback_ipv6_create(&ipv6_entry).await.map_err(|e| {
-                EarlyNetworkSetupError::Dendrite(format!(
-                    "unable to create inital switch loopback address: {e}"
-                ))
-            })?;
-
-            info!(
-                self.log,
                 "Configuring default uplink on switch";
                 "config" => #?dpd_port_settings
             );
-            dpd.port_settings_apply(
-                &port_id,
-                Some(OMICRON_DPD_TAG),
-                &dpd_port_settings,
-            )
-            .await
-            .map_err(|e| {
-                EarlyNetworkSetupError::Dendrite(format!(
-                    "unable to apply uplink port configuration: {e}"
-                ))
-            })?;
 
-            info!(self.log, "advertising boundary services loopback address");
-
-            let ddmd_addr =
-                SocketAddrV6::new(switch_zone_underlay_ip, DDMD_PORT, 0, 0);
-            let ddmd_client = DdmAdminClient::new(&self.log, ddmd_addr)?;
-            ddmd_client.advertise_prefix(Ipv6Subnet::new(ipv6_entry.addr));
+            loop {
+                match dpd
+                    .port_settings_apply(
+                        &port_id,
+                        Some(OMICRON_DPD_TAG),
+                        &dpd_port_settings,
+                    )
+                    .await
+                {
+                    Ok(_) => break Ok(()),
+                    Err(e) => {
+                        if let Some(StatusCode::SERVICE_UNAVAILABLE) =
+                            e.status()
+                        {
+                            warn!(
+                                self.log,
+                                "unable to apply uplink configuration, dendrite not available";
+                                "port_id" => ?port_id,
+                                "configuration" => ?dpd_port_settings,
+                            );
+                            sleep(Duration::from_secs(5)).await;
+                            continue;
+                        } else {
+                            break Err(EarlyNetworkSetupError::Dendrite(
+                                format!(
+                                "unable to apply uplink port configuration: {e}"
+                            ),
+                            ));
+                        }
+                    }
+                }
+            }?;
         }
 
         let mgd = MgdClient::new(
-            &self.log,
-            SocketAddrV6::new(switch_zone_underlay_ip, MGD_PORT, 0, 0).into(),
-        )
-        .map_err(|e| {
-            EarlyNetworkSetupError::MgdError(format!(
-                "initialize mgd client: {e}"
-            ))
-        })?;
+            &format!(
+                "http://{}",
+                &SocketAddrV6::new(switch_zone_underlay_ip, MGD_PORT, 0, 0)
+            ),
+            self.log.clone(),
+        );
 
         let mut config: Option<BgpConfig> = None;
-        let mut bgp_peer_configs = HashMap::<String, Vec<BgpPeerConfig>>::new();
+        let mut bgp_peer_configs =
+            HashMap::<String, Vec<MgBgpPeerConfig>>::new();
 
         // Iterate through ports and apply BGP config.
         for port in &our_ports {
@@ -502,7 +512,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     );
                 }
 
-                let bpc = BgpPeerConfig {
+                let bpc = MgBgpPeerConfig {
                     name: format!("{}", peer.addr),
                     host: format!("{}:179", peer.addr),
                     hold_time: peer.hold_time.unwrap_or(6),
@@ -512,6 +522,58 @@ impl<'a> EarlyNetworkSetup<'a> {
                     keepalive: peer.keepalive.unwrap_or(2),
                     resolution: BGP_SESSION_RESOLUTION,
                     passive: false,
+                    remote_asn: peer.remote_asn,
+                    min_ttl: peer.min_ttl,
+                    md5_auth_key: peer.md5_auth_key.clone(),
+                    multi_exit_discriminator: peer.multi_exit_discriminator,
+                    communities: peer.communities.clone(),
+                    local_pref: peer.local_pref,
+                    enforce_first_as: peer.enforce_first_as,
+                    allow_export: match &peer.allowed_export {
+                        ImportExportPolicy::NoFiltering => {
+                            MgImportExportPolicy::NoFiltering
+                        }
+                        ImportExportPolicy::Allow(list) => {
+                            MgImportExportPolicy::Allow(
+                                list.clone()
+                                    .iter()
+                                    .map(|x| match x {
+                                        IpNet::V4(p) => Prefix::V4(Prefix4 {
+                                            length: p.width(),
+                                            value: p.addr(),
+                                        }),
+                                        IpNet::V6(p) => Prefix::V6(Prefix6 {
+                                            length: p.width(),
+                                            value: p.addr(),
+                                        }),
+                                    })
+                                    .collect(),
+                            )
+                        }
+                    },
+                    allow_import: match &peer.allowed_import {
+                        ImportExportPolicy::NoFiltering => {
+                            MgImportExportPolicy::NoFiltering
+                        }
+                        ImportExportPolicy::Allow(list) => {
+                            MgImportExportPolicy::Allow(
+                                list.clone()
+                                    .iter()
+                                    .map(|x| match x {
+                                        IpNet::V4(p) => Prefix::V4(Prefix4 {
+                                            length: p.width(),
+                                            value: p.addr(),
+                                        }),
+                                        IpNet::V6(p) => Prefix::V6(Prefix6 {
+                                            length: p.width(),
+                                            value: p.addr(),
+                                        }),
+                                    })
+                                    .collect(),
+                            )
+                        }
+                    },
+                    vlan_id: peer.vlan_id,
                 };
                 match bgp_peer_configs.get_mut(&port.port) {
                     Some(peers) => {
@@ -526,26 +588,81 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         if !bgp_peer_configs.is_empty() {
             if let Some(config) = &config {
-                mgd.inner
-                    .bgp_apply(&ApplyRequest {
+                mgd.bgp_apply(&ApplyRequest {
+                    asn: config.asn,
+                    peers: bgp_peer_configs,
+                    shaper: config.shaper.as_ref().map(|x| ShaperSource {
+                        code: x.clone(),
                         asn: config.asn,
-                        peers: bgp_peer_configs,
-                        originate: config
-                            .originate
-                            .iter()
-                            .map(|x| Prefix4 {
-                                length: x.prefix(),
-                                value: x.ip(),
-                            })
-                            .collect(),
-                    })
-                    .await
-                    .map_err(|e| {
-                        EarlyNetworkSetupError::BgpConfigurationError(format!(
-                            "BGP peer configuration failed: {e}",
-                        ))
-                    })?;
+                    }),
+                    checker: config.checker.as_ref().map(|x| CheckerSource {
+                        code: x.clone(),
+                        asn: config.asn,
+                    }),
+                    originate: config
+                        .originate
+                        .iter()
+                        .map(|x| Prefix4 { length: x.width(), value: x.addr() })
+                        .collect(),
+                })
+                .await
+                .map_err(|e| {
+                    EarlyNetworkSetupError::BgpConfigurationError(format!(
+                        "BGP peer configuration failed: {e}",
+                    ))
+                })?;
             }
+        }
+
+        // Iterate through ports and apply static routing config.
+        let mut rq = AddStaticRoute4Request {
+            routes: StaticRoute4List { list: Vec::new() },
+        };
+        for port in &our_ports {
+            for r in &port.routes {
+                let nexthop = match r.nexthop {
+                    IpAddr::V4(v4) => v4,
+                    IpAddr::V6(_) => continue,
+                };
+                let prefix = match r.destination.addr() {
+                    IpAddr::V4(v4) => {
+                        Prefix4 { value: v4, length: r.destination.width() }
+                    }
+                    IpAddr::V6(_) => continue,
+                };
+                let vlan_id = r.vlan_id;
+                let sr = StaticRoute4 { nexthop, prefix, vlan_id };
+                rq.routes.list.push(sr);
+            }
+        }
+        mgd.static_add_v4_route(&rq).await.map_err(|e| {
+            EarlyNetworkSetupError::BgpConfigurationError(format!(
+                "static routing configuration failed: {e}",
+            ))
+        })?;
+
+        // BFD config
+        for spec in &rack_network_config.bfd {
+            if spec.switch != switch_location {
+                continue;
+            }
+            let cfg = MgBfdPeerConfig {
+                detection_threshold: spec.detection_threshold,
+                listen: spec.local.unwrap_or(Ipv4Addr::UNSPECIFIED.into()),
+                mode: match spec.mode {
+                    BfdMode::SingleHop => {
+                        mg_admin_client::types::SessionMode::SingleHop
+                    }
+                    BfdMode::MultiHop => {
+                        mg_admin_client::types::SessionMode::MultiHop
+                    }
+                },
+                peer: spec.remote,
+                required_rx: spec.required_rx,
+            };
+            mgd.add_bfd_peer(&cfg).await.map_err(|e| {
+                EarlyNetworkSetupError::BfdConfigurationError(e.to_string())
+            })?;
         }
 
         Ok(our_ports)
@@ -553,22 +670,10 @@ impl<'a> EarlyNetworkSetup<'a> {
 
     fn build_port_config(
         &self,
-        port_config: &PortConfigV1,
-    ) -> Result<(Ipv6Entry, PortSettings, PortId), EarlyNetworkSetupError> {
+        port_config: &PortConfig,
+    ) -> Result<(PortSettings, PortId), EarlyNetworkSetupError> {
         info!(self.log, "Building Port Configuration");
-        let ipv6_entry = Ipv6Entry {
-            addr: BOUNDARY_SERVICES_ADDR.parse().map_err(|e| {
-                EarlyNetworkSetupError::BadConfig(format!(
-                "failed to parse `BOUNDARY_SERVICES_ADDR` as `Ipv6Addr`: {e}"
-            ))
-            })?,
-            tag: OMICRON_DPD_TAG.into(),
-        };
-        let mut dpd_port_settings = PortSettings {
-            links: HashMap::new(),
-            v4_routes: HashMap::new(),
-            v6_routes: HashMap::new(),
-        };
+        let mut dpd_port_settings = PortSettings { links: HashMap::new() };
         let link_id = LinkId(0);
 
         let mut addrs = Vec::new();
@@ -576,7 +681,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             // TODO We're discarding the `uplink_cidr.prefix()` here and only using
             // the IP address; at some point we probably need to give the full CIDR
             // to dendrite?
-            addrs.push(a.ip());
+            addrs.push(a.addr());
         }
 
         let link_settings = LinkSettings {
@@ -600,26 +705,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             ))
         })?;
 
-        for r in &port_config.routes {
-            if let (IpNetwork::V4(dst), IpAddr::V4(nexthop)) =
-                (r.destination, r.nexthop)
-            {
-                dpd_port_settings.v4_routes.insert(
-                    dst.to_string(),
-                    vec![RouteSettingsV4 { link_id: link_id.0, nexthop }],
-                );
-            }
-            if let (IpNetwork::V6(dst), IpAddr::V6(nexthop)) =
-                (r.destination, r.nexthop)
-            {
-                dpd_port_settings.v6_routes.insert(
-                    dst.to_string(),
-                    vec![RouteSettingsV6 { link_id: link_id.0, nexthop }],
-                );
-            }
-        }
-
-        Ok((ipv6_entry, dpd_port_settings, port_id))
+        Ok((dpd_port_settings, port_id))
     }
 
     async fn wait_for_dendrite(&self, dpd: &DpdClient) {
@@ -661,181 +747,6 @@ fn retry_policy_switch_mapping() -> ExponentialBackoff {
         .build()
 }
 
-// The first production version of the `EarlyNetworkConfig`.
-//
-// If this version is in the bootstore than we need to convert it to
-// `EarlyNetworkConfigV1`.
-//
-// Once we do this for all customers that have initialized racks with the
-// old version we can go ahead and remove this type and its conversion code
-// altogether.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-struct EarlyNetworkConfigV0 {
-    // The current generation number of data as stored in CRDB.
-    // The initial generation is set during RSS time and then only mutated
-    // by Nexus.
-    pub generation: u64,
-
-    pub rack_subnet: Ipv6Addr,
-
-    /// The external NTP server addresses.
-    pub ntp_servers: Vec<String>,
-
-    // Rack network configuration as delivered from RSS and only existing at
-    // generation 1
-    pub rack_network_config: Option<RackNetworkConfigV0>,
-}
-
-/// Network configuration required to bring up the control plane
-///
-/// The fields in this structure are those from
-/// [`super::params::RackInitializeRequest`] necessary for use beyond RSS. This
-/// is just for the initial rack configuration and cold boot purposes. Updates
-/// come from Nexus.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct EarlyNetworkConfig {
-    // The current generation number of data as stored in CRDB.
-    // The initial generation is set during RSS time and then only mutated
-    // by Nexus.
-    pub generation: u64,
-
-    // Which version of the data structure do we have. This is to help with
-    // deserialization and conversion in future updates.
-    pub schema_version: u32,
-
-    // The actual configuration details
-    pub body: EarlyNetworkConfigBody,
-}
-
-impl EarlyNetworkConfig {
-    // Note: This currently only converts between v0 and v1 or deserializes v1 of
-    // `EarlyNetworkConfig`.
-    pub fn deserialize_bootstore_config(
-        log: &Logger,
-        config: &bootstore::NetworkConfig,
-    ) -> Result<Self, serde_json::Error> {
-        // Try to deserialize the latest version of the data structure (v1). If
-        // that succeeds we are done.
-        let v1_error =
-            match serde_json::from_slice::<EarlyNetworkConfig>(&config.blob) {
-                Ok(val) => return Ok(val),
-                Err(error) => {
-                    // Log this error and continue trying to deserialize older
-                    // versions.
-                    warn!(
-                        log,
-                        "Failed to deserialize EarlyNetworkConfig \
-                         as v1, trying next as v0: {}",
-                        error,
-                    );
-                    error
-                }
-            };
-
-        match serde_json::from_slice::<EarlyNetworkConfigV0>(&config.blob) {
-            Ok(val) => {
-                // Convert from v0 to v1
-                return Ok(EarlyNetworkConfig {
-                    generation: val.generation,
-                    schema_version: 1,
-                    body: EarlyNetworkConfigBody {
-                        ntp_servers: val.ntp_servers,
-                        rack_network_config: val.rack_network_config.map(
-                            |v0_config| {
-                                RackNetworkConfigV0::to_v1(
-                                    val.rack_subnet,
-                                    v0_config,
-                                )
-                            },
-                        ),
-                    },
-                });
-            }
-            Err(error) => {
-                // Log this error.
-                warn!(
-                    log,
-                    "Failed to deserialize EarlyNetworkConfig as v0: {}", error,
-                );
-            }
-        };
-
-        // Return the v1 error preferentially over the v0 error as it's more
-        // likely to be useful.
-        Err(v1_error)
-    }
-}
-
-/// This is the actual configuration of EarlyNetworking.
-///
-/// We nest it below the "header" of `generation` and `schema_version` so that
-/// we can perform partial deserialization of `EarlyNetworkConfig` to only read
-/// the header and defer deserialization of the body once we know the schema
-/// version. This is possible via the use of [`serde_json::value::RawValue`] in
-/// future (post-v1) deserialization paths.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct EarlyNetworkConfigBody {
-    /// The external NTP server addresses.
-    pub ntp_servers: Vec<String>,
-
-    // Rack network configuration as delivered from RSS or Nexus
-    pub rack_network_config: Option<RackNetworkConfig>,
-}
-
-impl From<EarlyNetworkConfig> for bootstore::NetworkConfig {
-    fn from(value: EarlyNetworkConfig) -> Self {
-        // Can this ever actually fail?
-        // We literally just deserialized the same data in RSS
-        let blob = serde_json::to_vec(&value).unwrap();
-
-        // Yes this is duplicated, but that seems fine.
-        let generation = value.generation;
-
-        bootstore::NetworkConfig { generation, blob }
-    }
-}
-
-/// Deprecated, use `RackNetworkConfig` instead. Cannot actually deprecate due to
-/// <https://github.com/serde-rs/serde/issues/2195>
-///
-/// Our first version of `RackNetworkConfig`. If this exists in the bootstore, we
-/// upgrade out of it into `RackNetworkConfigV1` or later versions if possible.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-pub struct RackNetworkConfigV0 {
-    // TODO: #3591 Consider making infra-ip ranges implicit for uplinks
-    /// First ip address to be used for configuring network infrastructure
-    pub infra_ip_first: Ipv4Addr,
-    /// Last ip address to be used for configuring network infrastructure
-    pub infra_ip_last: Ipv4Addr,
-    /// Uplinks for connecting the rack to external networks
-    pub uplinks: Vec<UplinkConfig>,
-}
-
-impl RackNetworkConfigV0 {
-    /// Convert from `RackNetworkConfigV0` to `RackNetworkConfigV1`
-    ///
-    /// We cannot use `From<RackNetworkConfigV0> for `RackNetworkConfigV1`
-    /// because the `rack_subnet` field does not exist in `RackNetworkConfigV0`
-    /// and must be passed in from the `EarlyNetworkConfigV0` struct which
-    /// contains the `RackNetworkConfivV0` struct.
-    pub fn to_v1(
-        rack_subnet: Ipv6Addr,
-        v0: RackNetworkConfigV0,
-    ) -> RackNetworkConfigV1 {
-        RackNetworkConfigV1 {
-            rack_subnet: Ipv6Network::new(rack_subnet, 56).unwrap(),
-            infra_ip_first: v0.infra_ip_first,
-            infra_ip_last: v0.infra_ip_last,
-            ports: v0
-                .uplinks
-                .into_iter()
-                .map(|uplink| PortConfigV1::from(uplink))
-                .collect(),
-            bgp: vec![],
-        }
-    }
-}
-
 // The following two conversion functions translate the speed and fec types used
 // in the internal API to the types used in the dpd-client API.  The conversion
 // is done here, rather than with "impl From" at the definition, to avoid a
@@ -859,79 +770,5 @@ fn convert_fec(fec: &PortFec) -> dpd_client::types::PortFec {
         PortFec::Firecode => dpd_client::types::PortFec::Firecode,
         PortFec::None => dpd_client::types::PortFec::None,
         PortFec::Rs => dpd_client::types::PortFec::Rs,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use omicron_common::api::internal::shared::RouteConfig;
-    use omicron_test_utils::dev::test_setup_log;
-
-    #[test]
-    fn serialized_early_network_config_v0_to_v1_conversion() {
-        let logctx = test_setup_log(
-            "serialized_early_network_config_v0_to_v1_conversion",
-        );
-        let v0 = EarlyNetworkConfigV0 {
-            generation: 1,
-            rack_subnet: Ipv6Addr::UNSPECIFIED,
-            ntp_servers: Vec::new(),
-            rack_network_config: Some(RackNetworkConfigV0 {
-                infra_ip_first: Ipv4Addr::UNSPECIFIED,
-                infra_ip_last: Ipv4Addr::UNSPECIFIED,
-                uplinks: vec![UplinkConfig {
-                    gateway_ip: Ipv4Addr::UNSPECIFIED,
-                    switch: SwitchLocation::Switch0,
-                    uplink_port: "Port0".to_string(),
-                    uplink_port_speed: PortSpeed::Speed100G,
-                    uplink_port_fec: PortFec::None,
-                    uplink_cidr: "192.168.0.1/16".parse().unwrap(),
-                    uplink_vid: None,
-                }],
-            }),
-        };
-
-        let v0_serialized = serde_json::to_vec(&v0).unwrap();
-        let bootstore_conf =
-            bootstore::NetworkConfig { generation: 1, blob: v0_serialized };
-
-        let v1 = EarlyNetworkConfig::deserialize_bootstore_config(
-            &logctx.log,
-            &bootstore_conf,
-        )
-        .unwrap();
-        let v0_rack_network_config = v0.rack_network_config.unwrap();
-        let uplink = v0_rack_network_config.uplinks[0].clone();
-        let expected = EarlyNetworkConfig {
-            generation: 1,
-            schema_version: 1,
-            body: EarlyNetworkConfigBody {
-                ntp_servers: v0.ntp_servers.clone(),
-                rack_network_config: Some(RackNetworkConfigV1 {
-                    rack_subnet: Ipv6Network::new(v0.rack_subnet, 56).unwrap(),
-                    infra_ip_first: v0_rack_network_config.infra_ip_first,
-                    infra_ip_last: v0_rack_network_config.infra_ip_last,
-                    ports: vec![PortConfigV1 {
-                        routes: vec![RouteConfig {
-                            destination: "0.0.0.0/0".parse().unwrap(),
-                            nexthop: uplink.gateway_ip.into(),
-                        }],
-                        addresses: vec![uplink.uplink_cidr.into()],
-                        switch: uplink.switch,
-                        port: uplink.uplink_port,
-                        uplink_port_speed: uplink.uplink_port_speed,
-                        uplink_port_fec: uplink.uplink_port_fec,
-                        autoneg: false,
-                        bgp_peers: vec![],
-                    }],
-                    bgp: vec![],
-                }),
-            },
-        };
-
-        assert_eq!(expected, v1);
-
-        logctx.cleanup_successful();
     }
 }

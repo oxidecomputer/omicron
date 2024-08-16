@@ -12,7 +12,7 @@ use clap::Parser;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
-use nexus_client::types as NexusTypes;
+use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::sim::RssArgs;
@@ -20,7 +20,7 @@ use omicron_sled_agent::sim::{
     run_standalone_server, Config, ConfigHardware, ConfigStorage, ConfigZpool,
     SimMode,
 };
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
@@ -122,26 +122,26 @@ async fn do_run() -> Result<(), CmdError> {
             args.sim_mode,
             Some(args.nexus_addr),
             Some(tmp.path()),
+            None,
         )
     };
 
-    let tls_certificate = match (args.rss_tls_cert, args.rss_tls_key) {
-        (None, None) => None,
-        (Some(cert_path), Some(key_path)) => {
-            let cert_bytes = std::fs::read_to_string(&cert_path)
-                .with_context(|| format!("read {:?}", &cert_path))
-                .map_err(CmdError::Failure)?;
-            let key_bytes = std::fs::read_to_string(&key_path)
-                .with_context(|| format!("read {:?}", &key_path))
-                .map_err(CmdError::Failure)?;
-            Some(NexusTypes::Certificate { cert: cert_bytes, key: key_bytes })
-        }
-        _ => {
-            return Err(CmdError::Usage(String::from(
+    let tls_certificate =
+        match (args.rss_tls_cert, args.rss_tls_key) {
+            (None, None) => None,
+            (Some(cert_path), Some(key_path)) => {
+                let cert_bytes = std::fs::read_to_string(&cert_path)
+                    .with_context(|| format!("read {:?}", &cert_path))
+                    .map_err(CmdError::Failure)?;
+                let key_bytes = std::fs::read_to_string(&key_path)
+                    .with_context(|| format!("read {:?}", &key_path))
+                    .map_err(CmdError::Failure)?;
+                Some(Certificate { cert: cert_bytes, key: key_bytes })
+            }
+            _ => return Err(CmdError::Usage(String::from(
                 "--rss-tls-key and --rss-tls-cert must be specified together",
-            )))
-        }
-    };
+            ))),
+        };
 
     let rss_args = RssArgs {
         nexus_external_addr: args.rss_nexus_external_addr,

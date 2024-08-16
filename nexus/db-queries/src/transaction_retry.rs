@@ -7,26 +7,15 @@
 use async_bb8_diesel::AsyncConnection;
 use chrono::Utc;
 use diesel::result::Error as DieselError;
-use oximeter::{types::Sample, Metric, MetricsError, Target};
+use oximeter::{types::Sample, MetricsError};
 use rand::{thread_rng, Rng};
+use slog::{info, warn, Logger};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-// Identifies "which" transaction is retrying
-#[derive(Debug, Clone, Target)]
-struct DatabaseTransaction {
-    name: String,
-}
-
-// Identifies that a retry has occurred, and track how long
-// the transaction took (either since starting, or since the last
-// retry failure was recorded).
-#[derive(Debug, Clone, Metric)]
-struct RetryData {
-    #[datum]
-    latency: f64,
-    attempt: u32,
-}
+oximeter::use_timeseries!("database-transaction.toml");
+use database_transaction::DatabaseTransaction;
+use database_transaction::RetryData;
 
 // Collects all transaction retry samples
 #[derive(Debug, Default, Clone)]
@@ -60,6 +49,10 @@ impl RetryHelperInner {
         Self { start: Utc::now(), attempts: 1 }
     }
 
+    fn has_retried(&self) -> bool {
+        self.attempts > 1
+    }
+
     fn tick(&mut self) -> Self {
         let start = self.start;
         let attempts = self.attempts;
@@ -74,6 +67,7 @@ impl RetryHelperInner {
 /// Helper utility for tracking retry attempts and latency.
 /// Intended to be used from within "transaction_async_with_retry".
 pub struct RetryHelper {
+    log: Logger,
     producer: Producer,
     name: &'static str,
     inner: Mutex<RetryHelperInner>,
@@ -86,8 +80,13 @@ const MAX_RETRY_ATTEMPTS: u32 = 10;
 impl RetryHelper {
     /// Creates a new RetryHelper, and starts a timer tracking the transaction
     /// duration.
-    pub(crate) fn new(producer: &Producer, name: &'static str) -> Self {
+    pub(crate) fn new(
+        log: &Logger,
+        producer: &Producer,
+        name: &'static str,
+    ) -> Self {
         Self {
+            log: log.new(o!("transaction" => name)),
             producer: producer.clone(),
             name,
             inner: Mutex::new(RetryHelperInner::new()),
@@ -107,7 +106,21 @@ impl RetryHelper {
             + Send
             + Sync,
     {
-        conn.transaction_async_with_retry(f, self.as_callback()).await
+        let slef = Arc::new(self);
+        let result = conn
+            .transaction_async_with_retry(f, slef.clone().as_callback())
+            .await;
+
+        let retry_info = slef.inner.lock().unwrap();
+        if retry_info.has_retried() {
+            info!(
+                slef.log,
+                "transaction completed";
+                "attempts" => retry_info.attempts,
+            );
+        }
+
+        result
     }
 
     // Called upon retryable transaction failure.
@@ -131,7 +144,7 @@ impl RetryHelper {
 
         let _ = self.producer.append(
             &DatabaseTransaction { name: self.name.into() },
-            &RetryData { latency, attempt },
+            &RetryData { datum: latency, attempt },
         );
 
         // This backoff is not exponential, but I'm not sure we actually want
@@ -143,6 +156,12 @@ impl RetryHelper {
             let mut rng = thread_rng();
             rng.gen_range(MIN_RETRY_BACKOFF..MAX_RETRY_BACKOFF)
         };
+
+        warn!(
+            self.log,
+            "Retryable transaction failure";
+            "retry_after (ms)" => duration.as_millis(),
+        );
         tokio::time::sleep(duration).await;
 
         // Now that we've finished sleeping, reset the timer and bump the number
@@ -151,14 +170,13 @@ impl RetryHelper {
         return inner.attempts < MAX_RETRY_ATTEMPTS;
     }
 
-    /// Converts this function to a retryable callback that can be used from
-    /// "transaction_async_with_retry".
-    pub(crate) fn as_callback(
-        self,
+    // Converts this function to a retryable callback that can be used from
+    // "transaction_async_with_retry".
+    fn as_callback(
+        self: Arc<Self>,
     ) -> impl Fn() -> futures::future::BoxFuture<'static, bool> {
-        let r = Arc::new(self);
         move || {
-            let r = r.clone();
+            let r = self.clone();
             Box::pin(async move { r.retry_callback().await })
         }
     }
@@ -240,7 +258,7 @@ impl<E: std::fmt::Debug> OptionalError<E> {
 mod test {
     use super::*;
 
-    use crate::db::datastore::datastore_test;
+    use crate::db::datastore::test_utils::datastore_test;
     use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
     use oximeter::types::FieldValue;
@@ -323,7 +341,9 @@ mod test {
             assert_eq!(
                 target_fields["name"].value,
                 FieldValue::String(
-                    "test_transaction_retry_produces_samples".to_string()
+                    "test_transaction_retry_produces_samples"
+                        .to_string()
+                        .into()
                 )
             );
 

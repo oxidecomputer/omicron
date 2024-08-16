@@ -4,16 +4,21 @@
 
 //! Utilities to manage running zones.
 
-use crate::addrobj::AddrObject;
+use crate::addrobj::{
+    AddrObject, DHCP_ADDROBJ_NAME, IPV4_STATIC_ADDROBJ_NAME,
+    IPV6_STATIC_ADDROBJ_NAME,
+};
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
-use crate::zone::{AddressRequest, IPADM, ZONE_PREFIX};
+use crate::zone::{AddressRequest, ZONE_PREFIX};
+use crate::zpool::{PathInPool, ZpoolName};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use ipnetwork::IpNetwork;
 use omicron_common::backoff;
+pub use oxlog::is_oxide_smf_log_file;
 use slog::{error, info, o, warn, Logger};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
@@ -44,7 +49,7 @@ pub enum ServiceError {
 pub struct RunCommandError {
     zone: String,
     #[source]
-    err: crate::ExecutionError,
+    pub err: crate::ExecutionError,
 }
 
 /// Errors returned from [`RunningZone::boot`].
@@ -98,60 +103,6 @@ pub enum EnsureAddressError {
     // TODO-remove(#2931): See comment in `ensure_address_for_port`
     #[error(transparent)]
     OpteGatewayConfig(#[from] RunCommandError),
-}
-
-/// Errors returned from [`RunningZone::get`].
-#[derive(thiserror::Error, Debug)]
-pub enum GetZoneError {
-    #[error("While looking up zones with prefix '{prefix}', could not get zones: {err}")]
-    GetZones {
-        prefix: String,
-        #[source]
-        err: crate::zone::AdmError,
-    },
-
-    #[error("Invalid Utf8 path: {0}")]
-    FromPathBuf(#[from] camino::FromPathBufError),
-
-    #[error("Zone with prefix '{prefix}' not found")]
-    NotFound { prefix: String },
-
-    #[error("Cannot get zone '{name}': it is in the {state:?} state instead of running")]
-    NotRunning { name: String, state: zone::State },
-
-    #[error(
-        "Cannot get zone '{name}': Failed to acquire control interface {err}"
-    )]
-    ControlInterface {
-        name: String,
-        #[source]
-        err: crate::zone::GetControlInterfaceError,
-    },
-
-    #[error("Cannot get zone '{name}': Failed to create addrobj: {err}")]
-    AddrObject {
-        name: String,
-        #[source]
-        err: crate::addrobj::ParseError,
-    },
-
-    #[error(
-        "Cannot get zone '{name}': Failed to ensure address exists: {err}"
-    )]
-    EnsureAddress {
-        name: String,
-        #[source]
-        err: crate::zone::EnsureAddressError,
-    },
-
-    #[error(
-        "Cannot get zone '{name}': Incorrect bootstrap interface access {err}"
-    )]
-    BootstrapInterface {
-        name: String,
-        #[source]
-        err: crate::zone::GetBootstrapInterfaceError,
-    },
 }
 
 #[cfg(target_os = "illumos")]
@@ -403,11 +354,36 @@ impl RunningZone {
 
     /// Returns the filesystem path to the zone's root in the GZ.
     pub fn root(&self) -> Utf8PathBuf {
-        self.inner.zonepath.join(Self::ROOT_FS_PATH)
+        self.inner.root()
     }
 
+    /// Returns the zpool on which the filesystem path has been placed.
+    pub fn root_zpool(&self) -> Option<&ZpoolName> {
+        self.inner.zonepath.pool.as_ref()
+    }
+
+    /// Return the name of a bootstrap VNIC in the zone, if any.
+    pub fn bootstrap_vnic_name(&self) -> Option<&str> {
+        self.inner.get_bootstrap_vnic_name()
+    }
+
+    /// Return the name of the control VNIC.
+    pub fn control_vnic_name(&self) -> &str {
+        self.inner.get_control_vnic_name()
+    }
+
+    /// Return the names of any OPTE ports in the zone.
+    pub fn opte_port_names(&self) -> impl Iterator<Item = &str> {
+        self.inner.opte_ports().map(|port| port.name())
+    }
+
+    /// Return the control IP address.
     pub fn control_interface(&self) -> AddrObject {
-        AddrObject::new(self.inner.get_control_vnic_name(), "omicron6").unwrap()
+        AddrObject::new(
+            self.inner.get_control_vnic_name(),
+            IPV6_STATIC_ADDROBJ_NAME,
+        )
+        .unwrap()
     }
 
     /// Runs a command within the Zone, return the output.
@@ -509,7 +485,7 @@ impl RunningZone {
     /// Note that the zone must already be configured to be booted.
     pub async fn boot(zone: InstalledZone) -> Result<Self, BootError> {
         // Boot the zone.
-        info!(zone.log, "Zone booting");
+        info!(zone.log, "Booting {} zone", zone.name);
 
         Zones::boot(&zone.name).await?;
 
@@ -527,61 +503,11 @@ impl RunningZone {
                 zone: zone.name.to_string(),
             })?;
 
-        // If the zone is self-assembling, then SMF service(s) inside the zone
-        // will be creating the listen address for the zone's service(s),
-        // setting the appropriate ifprop MTU, and so on. The idea behind
-        // self-assembling zones is that once they boot there should be *no*
-        // zlogin required.
-
-        // Use the zone ID in order to check if /var/svc/profile/site.xml
-        // exists.
         let id = Zones::id(&zone.name)
             .await?
             .ok_or_else(|| BootError::NoZoneId { zone: zone.name.clone() })?;
-        let site_profile_xml_exists =
-            std::path::Path::new(&zone.site_profile_xml_path()).exists();
 
         let running_zone = RunningZone { id: Some(id), inner: zone };
-
-        if !site_profile_xml_exists {
-            // If the zone is not self-assembling, make sure the control vnic
-            // has an IP MTU of 9000 inside the zone.
-            const CONTROL_VNIC_MTU: usize = 9000;
-            let vnic = running_zone.inner.control_vnic.name().to_string();
-
-            let commands = vec![
-                vec![
-                    IPADM.to_string(),
-                    "create-if".to_string(),
-                    "-t".to_string(),
-                    vnic.clone(),
-                ],
-                vec![
-                    IPADM.to_string(),
-                    "set-ifprop".to_string(),
-                    "-t".to_string(),
-                    "-p".to_string(),
-                    format!("mtu={}", CONTROL_VNIC_MTU),
-                    "-m".to_string(),
-                    "ipv4".to_string(),
-                    vnic.clone(),
-                ],
-                vec![
-                    IPADM.to_string(),
-                    "set-ifprop".to_string(),
-                    "-t".to_string(),
-                    "-p".to_string(),
-                    format!("mtu={}", CONTROL_VNIC_MTU),
-                    "-m".to_string(),
-                    "ipv6".to_string(),
-                    vnic,
-                ],
-            ];
-
-            for args in &commands {
-                running_zone.run_cmd(args)?;
-            }
-        }
 
         Ok(running_zone)
     }
@@ -591,10 +517,10 @@ impl RunningZone {
         addrtype: AddressRequest,
     ) -> Result<IpNetwork, EnsureAddressError> {
         let name = match addrtype {
-            AddressRequest::Dhcp => "omicron",
+            AddressRequest::Dhcp => DHCP_ADDROBJ_NAME,
             AddressRequest::Static(net) => match net.ip() {
-                std::net::IpAddr::V4(_) => "omicron4",
-                std::net::IpAddr::V6(_) => "omicron6",
+                std::net::IpAddr::V4(_) => IPV4_STATIC_ADDROBJ_NAME,
+                std::net::IpAddr::V6(_) => IPV6_STATIC_ADDROBJ_NAME,
             },
         };
         self.ensure_address_with_name(addrtype, name).await
@@ -622,7 +548,6 @@ impl RunningZone {
         &self,
         address: Ipv6Addr,
     ) -> Result<(), EnsureAddressError> {
-        info!(self.inner.log, "Adding bootstrap address");
         let vnic = self.inner.bootstrap_vnic.as_ref().ok_or_else(|| {
             EnsureAddressError::MissingBootstrapVnic {
                 address: address.to_string(),
@@ -656,15 +581,13 @@ impl RunningZone {
                 port_idx,
             }
         })?;
-        // TODO-remove(#2932): Switch to using port directly once vnic is no longer needed.
-        let addrobj =
-            AddrObject::new(port.vnic_name(), name).map_err(|err| {
-                EnsureAddressError::AddrObject {
-                    request: AddressRequest::Dhcp,
-                    zone: self.inner.name.clone(),
-                    err,
-                }
-            })?;
+        let addrobj = AddrObject::new(port.name(), name).map_err(|err| {
+            EnsureAddressError::AddrObject {
+                request: AddressRequest::Dhcp,
+                zone: self.inner.name.clone(),
+                err,
+            }
+        })?;
         let zone = Some(self.inner.name.as_ref());
         if let IpAddr::V4(gateway) = port.gateway().ip() {
             let addr =
@@ -683,7 +606,7 @@ impl RunningZone {
                 &private_ip.to_string(),
                 "-interface",
                 "-ifp",
-                port.vnic_name(),
+                port.name(),
             ])?;
             self.run_cmd(&[
                 "/usr/sbin/route",
@@ -784,7 +707,7 @@ impl RunningZone {
         gz_bootstrap_addr: Ipv6Addr,
         zone_vnic_name: &str,
     ) -> Result<(), RunCommandError> {
-        self.run_cmd([
+        let args = [
             "/usr/sbin/route",
             "add",
             "-inet6",
@@ -792,102 +715,14 @@ impl RunningZone {
             &gz_bootstrap_addr.to_string(),
             "-ifp",
             zone_vnic_name,
-        ])?;
+        ];
+        self.run_cmd(args)?;
         Ok(())
-    }
-
-    /// Looks up a running zone based on the `zone_prefix`, if one already exists.
-    ///
-    /// - If the zone was found, is running, and has a network interface, it is
-    /// returned.
-    /// - If the zone was not found `Error::NotFound` is returned.
-    /// - If the zone was found, but not running, `Error::NotRunning` is
-    /// returned.
-    /// - Other errors may be returned attempting to look up and accessing an
-    /// address on the zone.
-    pub async fn get(
-        log: &Logger,
-        vnic_allocator: &VnicAllocator<Etherstub>,
-        zone_prefix: &str,
-        addrtype: AddressRequest,
-    ) -> Result<Self, GetZoneError> {
-        let zone_info = Zones::get()
-            .await
-            .map_err(|err| GetZoneError::GetZones {
-                prefix: zone_prefix.to_string(),
-                err,
-            })?
-            .into_iter()
-            .find(|zone_info| zone_info.name().starts_with(&zone_prefix))
-            .ok_or_else(|| GetZoneError::NotFound {
-                prefix: zone_prefix.to_string(),
-            })?;
-
-        if zone_info.state() != zone::State::Running {
-            return Err(GetZoneError::NotRunning {
-                name: zone_info.name().to_string(),
-                state: zone_info.state(),
-            });
-        }
-
-        let zone_name = zone_info.name();
-        let vnic_name =
-            Zones::get_control_interface(zone_name).map_err(|err| {
-                GetZoneError::ControlInterface {
-                    name: zone_name.to_string(),
-                    err,
-                }
-            })?;
-        let addrobj = AddrObject::new_control(&vnic_name).map_err(|err| {
-            GetZoneError::AddrObject { name: zone_name.to_string(), err }
-        })?;
-        Zones::ensure_address(Some(zone_name), &addrobj, addrtype).map_err(
-            |err| GetZoneError::EnsureAddress {
-                name: zone_name.to_string(),
-                err,
-            },
-        )?;
-
-        let control_vnic = vnic_allocator
-            .wrap_existing(vnic_name)
-            .expect("Failed to wrap valid control VNIC");
-
-        // The bootstrap address for a running zone never changes,
-        // so there's no need to call `Zones::ensure_address`.
-        // Currently, only the switch zone has a bootstrap interface.
-        let bootstrap_vnic = Zones::get_bootstrap_interface(zone_name)
-            .map_err(|err| GetZoneError::BootstrapInterface {
-                name: zone_name.to_string(),
-                err,
-            })?
-            .map(|name| {
-                vnic_allocator
-                    .wrap_existing(name)
-                    .expect("Failed to wrap valid bootstrap VNIC")
-            });
-
-        Ok(Self {
-            id: zone_info.id().map(|x| {
-                x.try_into().expect("zoneid_t is expected to be an i32")
-            }),
-            inner: InstalledZone {
-                log: log.new(o!("zone" => zone_name.to_string())),
-                zonepath: zone_info.path().to_path_buf().try_into()?,
-                name: zone_name.to_string(),
-                control_vnic,
-                // TODO(https://github.com/oxidecomputer/omicron/issues/725)
-                //
-                // Re-initialize guest_vnic state by inspecting the zone.
-                opte_ports: vec![],
-                links: vec![],
-                bootstrap_vnic,
-            },
-        })
     }
 
     /// Return references to the OPTE ports for this zone.
     pub fn opte_ports(&self) -> impl Iterator<Item = &Port> {
-        self.inner.opte_ports.iter().map(|(port, _)| port)
+        self.inner.opte_ports()
     }
 
     /// Remove the OPTE ports on this zone from the port manager.
@@ -911,8 +746,14 @@ impl RunningZone {
         Ok(())
     }
 
+    /// Return a reference to the links for this zone.
     pub fn links(&self) -> &Vec<Link> {
-        &self.inner.links
+        &self.inner.links()
+    }
+
+    /// Return a mutable reference to the links for this zone.
+    pub fn links_mut(&mut self) -> &mut Vec<Link> {
+        &mut self.inner.links
     }
 
     /// Return the running processes associated with all the SMF services this
@@ -1074,7 +915,7 @@ pub struct InstalledZone {
     log: Logger,
 
     // Filesystem path of the zone
-    zonepath: Utf8PathBuf,
+    zonepath: PathInPool,
 
     // Name of the Zone.
     name: String,
@@ -1093,6 +934,9 @@ pub struct InstalledZone {
 }
 
 impl InstalledZone {
+    /// The path to the zone's root filesystem (i.e., `/`), within zonepath.
+    pub const ROOT_FS_PATH: &'static str = "root";
+
     /// Returns the name of a zone, based on the base zone name plus any unique
     /// identifying info.
     ///
@@ -1111,17 +955,24 @@ impl InstalledZone {
         zone_name
     }
 
+    /// Get the name of the bootstrap VNIC in the zone, if any.
+    pub fn get_bootstrap_vnic_name(&self) -> Option<&str> {
+        self.bootstrap_vnic.as_ref().map(|link| link.name())
+    }
+
+    /// Get the name of the control VNIC in the zone.
     pub fn get_control_vnic_name(&self) -> &str {
         self.control_vnic.name()
     }
 
+    /// Return the name of the zone itself.
     pub fn name(&self) -> &str {
         &self.name
     }
 
     /// Returns the filesystem path to the zonepath
     pub fn zonepath(&self) -> &Utf8Path {
-        &self.zonepath
+        &self.zonepath.path
     }
 
     pub fn site_profile_xml_path(&self) -> Utf8PathBuf {
@@ -1129,11 +980,26 @@ impl InstalledZone {
         path.push("root/var/svc/profile/site.xml");
         path
     }
+
+    /// Returns references to the OPTE ports for this zone.
+    pub fn opte_ports(&self) -> impl Iterator<Item = &Port> {
+        self.opte_ports.iter().map(|(port, _)| port)
+    }
+
+    /// Returns the filesystem path to the zone's root in the GZ.
+    pub fn root(&self) -> Utf8PathBuf {
+        self.zonepath.path.join(Self::ROOT_FS_PATH)
+    }
+
+    /// Return a reference to the links for this zone.
+    pub fn links(&self) -> &Vec<Link> {
+        &self.links
+    }
 }
 
 #[derive(Clone)]
 pub struct FakeZoneBuilderConfig {
-    temp_dir: Arc<Utf8TempDir>,
+    temp_dir: Arc<Utf8PathBuf>,
 }
 
 #[derive(Clone, Default)]
@@ -1151,10 +1017,14 @@ pub struct ZoneBuilderFactory {
 
 impl ZoneBuilderFactory {
     /// For use in unit tests that don't require actual zone creation to occur.
-    pub fn fake() -> Self {
+    pub fn fake(temp_dir: Option<&String>) -> Self {
+        let temp_dir = match temp_dir {
+            Some(dir) => Utf8PathBuf::from(dir),
+            None => Utf8TempDir::new().unwrap().into_path(),
+        };
         Self {
             fake_cfg: Some(FakeZoneBuilderConfig {
-                temp_dir: Arc::new(Utf8TempDir::new().unwrap()),
+                temp_dir: Arc::new(temp_dir),
             }),
         }
     }
@@ -1169,29 +1039,55 @@ impl ZoneBuilderFactory {
 /// Created by [ZoneBuilderFactory].
 #[derive(Default)]
 pub struct ZoneBuilder<'a> {
+    /// Logger to which status messages are written during zone installation.
     log: Option<Logger>,
+    /// Allocates the NIC used for control plane communication.
     underlay_vnic_allocator: Option<&'a VnicAllocator<Etherstub>>,
-    zone_root_path: Option<&'a Utf8Path>,
+    /// Filesystem path at which the installed zone will reside.
+    zone_root_path: Option<PathInPool>,
+    /// The directories that will be searched for the image tarball for the
+    /// provided zone type ([`Self::with_zone_type`]).
     zone_image_paths: Option<&'a [Utf8PathBuf]>,
+    /// The name of the type of zone being created (e.g. "propolis-server")
     zone_type: Option<&'a str>,
-    unique_name: Option<Uuid>, // actually optional
+    /// Unique ID of the instance of the zone being created. (optional)
+    // *actually* optional (in contrast to other fields that are `Option` for
+    // builder purposes - that is, skipping this field in the builder will
+    // still result in an `Ok(InstalledZone)` from `.install()`, rather than
+    // an `Err(InstallZoneError::IncompleteBuilder)`.
+    unique_name: Option<Uuid>,
+    /// ZFS datasets to be accessed from within the zone.
     datasets: Option<&'a [zone::Dataset]>,
+    /// Filesystems to mount within the zone.
     filesystems: Option<&'a [zone::Fs]>,
+    /// Additional network device names to add to the zone.
     data_links: Option<&'a [String]>,
+    /// Device nodes to pass through to the zone.
     devices: Option<&'a [zone::Device]>,
+    /// OPTE devices for the guest network interfaces.
     opte_ports: Option<Vec<(Port, PortTicket)>>,
-    bootstrap_vnic: Option<Link>, // actually optional
+    /// NIC to use for creating a bootstrap address on the switch zone.
+    // actually optional (as above)
+    bootstrap_vnic: Option<Link>,
+    /// Physical NICs possibly provisioned to the zone.
     links: Option<Vec<Link>>,
+    /// The maximum set of privileges any process in this zone can obtain.
     limit_priv: Option<Vec<String>>,
+    /// For unit tests only: if `Some`, then no actual zones will be installed
+    /// by this builder, and minimal facsimiles of them will be placed in
+    /// temporary directories according to the contents of the provided
+    /// `FakeZoneBuilderConfig`.
     fake_cfg: Option<FakeZoneBuilderConfig>,
 }
 
 impl<'a> ZoneBuilder<'a> {
+    /// Logger to which status messages are written during zone installation.
     pub fn with_log(mut self, log: Logger) -> Self {
         self.log = Some(log);
         self
     }
 
+    /// Allocates the NIC used for control plane communication.
     pub fn with_underlay_vnic_allocator(
         mut self,
         vnic_allocator: &'a VnicAllocator<Etherstub>,
@@ -1200,11 +1096,14 @@ impl<'a> ZoneBuilder<'a> {
         self
     }
 
-    pub fn with_zone_root_path(mut self, root_path: &'a Utf8Path) -> Self {
+    /// Filesystem path at which the installed zone will reside.
+    pub fn with_zone_root_path(mut self, root_path: PathInPool) -> Self {
         self.zone_root_path = Some(root_path);
         self
     }
 
+    /// The directories that will be searched for the image tarball for the
+    /// provided zone type ([`Self::with_zone_type`]).
     pub fn with_zone_image_paths(
         mut self,
         image_paths: &'a [Utf8PathBuf],
@@ -1213,56 +1112,68 @@ impl<'a> ZoneBuilder<'a> {
         self
     }
 
+    /// The name of the type of zone being created (e.g. "propolis-server")
     pub fn with_zone_type(mut self, zone_type: &'a str) -> Self {
         self.zone_type = Some(zone_type);
         self
     }
 
+    /// Unique ID of the instance of the zone being created. (optional)
     pub fn with_unique_name(mut self, uuid: Uuid) -> Self {
         self.unique_name = Some(uuid);
         self
     }
 
+    /// ZFS datasets to be accessed from within the zone.
     pub fn with_datasets(mut self, datasets: &'a [zone::Dataset]) -> Self {
         self.datasets = Some(datasets);
         self
     }
 
+    /// Filesystems to mount within the zone.
     pub fn with_filesystems(mut self, filesystems: &'a [zone::Fs]) -> Self {
         self.filesystems = Some(filesystems);
         self
     }
 
+    /// Additional network device names to add to the zone.
     pub fn with_data_links(mut self, links: &'a [String]) -> Self {
         self.data_links = Some(links);
         self
     }
 
+    /// Device nodes to pass through to the zone.
     pub fn with_devices(mut self, devices: &'a [zone::Device]) -> Self {
         self.devices = Some(devices);
         self
     }
 
+    /// OPTE devices for the guest network interfaces.
     pub fn with_opte_ports(mut self, ports: Vec<(Port, PortTicket)>) -> Self {
         self.opte_ports = Some(ports);
         self
     }
 
+    /// NIC to use for creating a bootstrap address on the switch zone.
+    /// (optional)
     pub fn with_bootstrap_vnic(mut self, vnic: Link) -> Self {
         self.bootstrap_vnic = Some(vnic);
         self
     }
 
+    /// Physical NICs possibly provisioned to the zone.
     pub fn with_links(mut self, links: Vec<Link>) -> Self {
         self.links = Some(links);
         self
     }
 
+    /// The maximum set of privileges any process in this zone can obtain.
     pub fn with_limit_priv(mut self, limit_priv: Vec<String>) -> Self {
         self.limit_priv = Some(limit_priv);
         self
     }
 
+    // (used in unit tests)
     fn fake_install(self) -> Result<InstalledZone, InstallZoneError> {
         let zone = self
             .zone_type
@@ -1274,14 +1185,17 @@ impl<'a> ZoneBuilder<'a> {
             .new_control(None)
             .map_err(move |err| InstallZoneError::CreateVnic { zone, err })?;
         let fake_cfg = self.fake_cfg.unwrap();
-        let temp_dir = fake_cfg.temp_dir.path().to_path_buf();
+        let temp_dir = fake_cfg.temp_dir;
         (|| {
             let full_zone_name = InstalledZone::get_zone_name(
                 self.zone_type?,
                 self.unique_name,
             );
-            let zonepath = temp_dir
-                .join(self.zone_root_path?.strip_prefix("/").unwrap())
+            let mut zonepath = self.zone_root_path?;
+            zonepath.path = temp_dir
+                .join(
+                    zonepath.path.strip_prefix("/").unwrap()
+                )
                 .join(&full_zone_name);
             let iz = InstalledZone {
                 log: self.log?,
@@ -1300,6 +1214,9 @@ impl<'a> ZoneBuilder<'a> {
         .ok_or(InstallZoneError::IncompleteBuilder)
     }
 
+    /// Create the zone with the provided parameters.
+    /// Returns `Err(InstallZoneError::IncompleteBuilder)` if a necessary
+    /// parameter was not provided.
     pub async fn install(self) -> Result<InstalledZone, InstallZoneError> {
         if self.fake_cfg.is_some() {
             return self.fake_install();
@@ -1308,7 +1225,7 @@ impl<'a> ZoneBuilder<'a> {
         let Self {
             log: Some(log),
             underlay_vnic_allocator: Some(underlay_vnic_allocator),
-            zone_root_path: Some(zone_root_path),
+            zone_root_path: Some(mut zone_root_path),
             zone_image_paths: Some(zone_image_paths),
             zone_type: Some(zone_type),
             unique_name,
@@ -1359,7 +1276,7 @@ impl<'a> ZoneBuilder<'a> {
 
         let mut net_device_names: Vec<String> = opte_ports
             .iter()
-            .map(|(port, _)| port.vnic_name().to_string())
+            .map(|(port, _)| port.name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
             .chain(bootstrap_vnic.as_ref().map(|vnic| vnic.name().to_string()))
             .chain(links.iter().map(|nic| nic.name().to_string()))
@@ -1372,6 +1289,7 @@ impl<'a> ZoneBuilder<'a> {
         net_device_names.sort();
         net_device_names.dedup();
 
+        zone_root_path.path = zone_root_path.path.join(&full_zone_name);
         Zones::install_omicron_zone(
             &log,
             &zone_root_path,
@@ -1392,7 +1310,7 @@ impl<'a> ZoneBuilder<'a> {
 
         Ok(InstalledZone {
             log: log.new(o!("zone" => full_zone_name.clone())),
-            zonepath: zone_root_path.join(&full_zone_name),
+            zonepath: zone_root_path,
             name: full_zone_name,
             control_vnic,
             bootstrap_vnic,
@@ -1411,24 +1329,8 @@ pub fn is_oxide_smf_service(fmri: impl AsRef<str>) -> bool {
     SMF_SERVICE_PREFIXES.iter().any(|prefix| fmri.starts_with(prefix))
 }
 
-/// Return true if the provided file name appears to be a valid log file for an
-/// Oxide-managed SMF service.
-///
-/// Note that this operates on the _file name_. Any leading path components will
-/// cause this check to return `false`.
-pub fn is_oxide_smf_log_file(filename: impl AsRef<str>) -> bool {
-    // Log files are named by the SMF services, with the `/` in the FMRI
-    // translated to a `-`.
-    const PREFIXES: [&str; 2] = ["oxide-", "system-illumos-"];
-    let filename = filename.as_ref();
-    PREFIXES
-        .iter()
-        .any(|prefix| filename.starts_with(prefix) && filename.contains(".log"))
-}
-
 #[cfg(test)]
 mod tests {
-    use super::is_oxide_smf_log_file;
     use super::is_oxide_smf_service;
 
     #[test]
@@ -1437,16 +1339,5 @@ mod tests {
         assert!(is_oxide_smf_service("svc:/system/illumos/blah:default"));
         assert!(!is_oxide_smf_service("svc:/system/blah:default"));
         assert!(!is_oxide_smf_service("svc:/not/oxide/blah:default"));
-    }
-
-    #[test]
-    fn test_is_oxide_smf_log_file() {
-        assert!(is_oxide_smf_log_file("oxide-blah:default.log"));
-        assert!(is_oxide_smf_log_file("oxide-blah:default.log.0"));
-        assert!(is_oxide_smf_log_file("oxide-blah:default.log.1111"));
-        assert!(is_oxide_smf_log_file("system-illumos-blah:default.log"));
-        assert!(is_oxide_smf_log_file("system-illumos-blah:default.log.0"));
-        assert!(!is_oxide_smf_log_file("not-oxide-blah:default.log"));
-        assert!(!is_oxide_smf_log_file("not-system-illumos-blah:default.log"));
     }
 }

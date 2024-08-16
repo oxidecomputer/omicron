@@ -10,6 +10,7 @@ use crate::schema::vpc_subnet;
 use crate::NetworkInterface;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
+use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
@@ -38,6 +39,7 @@ pub struct VpcSubnet {
     pub rcgen: Generation,
     pub ipv4_block: Ipv4Net,
     pub ipv6_block: Ipv6Net,
+    pub custom_router_id: Option<Uuid>,
 }
 
 impl VpcSubnet {
@@ -49,8 +51,8 @@ impl VpcSubnet {
         subnet_id: Uuid,
         vpc_id: Uuid,
         identity: external::IdentityMetadataCreateParams,
-        ipv4_block: external::Ipv4Net,
-        ipv6_block: external::Ipv6Net,
+        ipv4_block: oxnet::Ipv4Net,
+        ipv6_block: oxnet::Ipv6Net,
     ) -> Self {
         let identity = VpcSubnetIdentity::new(subnet_id, identity);
         Self {
@@ -59,6 +61,7 @@ impl VpcSubnet {
             rcgen: Generation::new(),
             ipv4_block: Ipv4Net(ipv4_block),
             ipv6_block: Ipv6Net(ipv6_block),
+            custom_router_id: None,
         }
     }
 
@@ -73,25 +76,25 @@ impl VpcSubnet {
         &self,
         addr: IpAddr,
     ) -> Result<(), external::Error> {
-        let subnet = match addr {
-            IpAddr::V4(addr) => {
-                if self.ipv4_block.check_requestable_addr(addr) {
-                    return Ok(());
-                }
-                ipnetwork::IpNetwork::V4(self.ipv4_block.0 .0)
-            }
-            IpAddr::V6(addr) => {
-                if self.ipv6_block.check_requestable_addr(addr) {
-                    return Ok(());
-                }
-                ipnetwork::IpNetwork::V6(self.ipv6_block.0 .0)
-            }
-        };
-        Err(external::Error::invalid_request(&format!(
-            "Address '{}' not in subnet '{}' or is reserved for rack services",
-            addr, subnet,
-        )))
+        match addr {
+            IpAddr::V4(addr) => self.ipv4_block.check_requestable_addr(addr),
+            IpAddr::V6(addr) => self.ipv6_block.check_requestable_addr(addr),
+        }
+        .map_err(|e| external::Error::invalid_request(e.to_string()))
     }
+}
+
+#[derive(thiserror::Error, Debug, PartialEq)]
+pub enum RequestAddressError {
+    #[error("{} is outside subnet {}", .0, .1)]
+    OutsideSubnet(IpAddr, ipnetwork::IpNetwork),
+    #[error(
+        "The first {} addresses of a subnet are reserved",
+        NUM_INITIAL_RESERVED_IP_ADDRESSES
+    )]
+    Reserved,
+    #[error("Cannot request a broadcast address")]
+    Broadcast,
 }
 
 impl From<VpcSubnet> for views::VpcSubnet {
@@ -101,6 +104,7 @@ impl From<VpcSubnet> for views::VpcSubnet {
             vpc_id: subnet.vpc_id,
             ipv4_block: subnet.ipv4_block.0,
             ipv6_block: subnet.ipv6_block.0,
+            custom_router_id: subnet.custom_router_id,
         }
     }
 }

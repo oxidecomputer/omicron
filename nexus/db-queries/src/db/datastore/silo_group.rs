@@ -8,13 +8,14 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::datastore::RunnableQuery;
+use crate::db::datastore::RunnableQueryNoReturn;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::model::SiloGroup;
 use crate::db::model::SiloGroupMembership;
 use crate::db::pagination::paginated;
+use crate::db::IncompleteOnConflictExt;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -34,16 +35,15 @@ impl DataStore {
         opctx: &OpContext,
         authz_silo: &authz::Silo,
         silo_group: SiloGroup,
-    ) -> Result<impl RunnableQuery<SiloGroup>, Error> {
+    ) -> Result<impl RunnableQueryNoReturn, Error> {
         opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
 
         use db::schema::silo_group::dsl;
         Ok(diesel::insert_into(dsl::silo_group)
             .values(silo_group)
             .on_conflict((dsl::silo_id, dsl::external_id))
-            .filter_target(dsl::time_deleted.is_null())
-            .do_nothing()
-            .returning(SiloGroup::as_returning()))
+            .as_partial_index()
+            .do_nothing())
     }
 
     pub async fn silo_group_ensure(

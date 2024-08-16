@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{Action, Cmd, Frame, State};
-use ratatui::layout::Rect;
+use crate::{Action, Cmd, State};
+use ratatui::{layout::Rect, Frame};
 
 /// A [`Control`] is the an item on a screen that can be selected and interacted with.
 /// Control's render [`ratatui::widgets::Widget`]s when drawn.

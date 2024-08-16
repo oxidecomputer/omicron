@@ -1,0 +1,40 @@
+[package]
+name = "nexus-metrics-producer-gc"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[build-dependencies]
+omicron-rpaths.workspace = true
+
+[dependencies]
+chrono.workspace = true
+futures.workspace = true
+nexus-db-queries.workspace = true
+omicron-common.workspace = true
+oximeter-client.workspace = true
+slog.workspace = true
+slog-error-chain.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+# See omicron-rpaths for more about the "pq-sys" dependency.  This is needed
+# because we use the database in the test suite, though it doesn't appear to
+# work to put the pq-sys dependency only in dev-dependencies.
+pq-sys = "*"
+
+omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+async-bb8-diesel.workspace = true
+diesel.workspace = true
+httptest.workspace = true
+ipnetwork.workspace = true
+nexus-db-model.workspace = true
+nexus-db-queries = { workspace = true, features = ["testing"] }
+nexus-test-utils.workspace = true
+nexus-types.workspace = true
+omicron-test-utils.workspace = true
+tokio.workspace = true

@@ -4,8 +4,8 @@
 
 //! Rack Setup Service
 
-/// Configuration files which automate input to RSS.
-pub mod config;
 mod plan;
 /// The main implementation of the RSS service.
 pub mod service;
+
+pub use plan::service::SledConfig;

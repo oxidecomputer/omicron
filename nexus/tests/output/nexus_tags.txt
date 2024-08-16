@@ -12,9 +12,12 @@ disk_view                                GET      /v1/disks/{disk}
 
 API operations found with tag "floating-ips"
 OPERATION ID                             METHOD   URL PATH
+floating_ip_attach                       POST     /v1/floating-ips/{floating_ip}/attach
 floating_ip_create                       POST     /v1/floating-ips
 floating_ip_delete                       DELETE   /v1/floating-ips/{floating_ip}
+floating_ip_detach                       POST     /v1/floating-ips/{floating_ip}/detach
 floating_ip_list                         GET      /v1/floating-ips
+floating_ip_update                       PUT      /v1/floating-ips/{floating_ip}
 floating_ip_view                         GET      /v1/floating-ips/{floating_ip}
 
 API operations found with tag "hidden"
@@ -23,6 +26,10 @@ device_access_token                      POST     /device/token
 device_auth_confirm                      POST     /device/confirm
 device_auth_request                      POST     /device/auth
 logout                                   POST     /v1/logout
+probe_create                             POST     /experimental/v1/probes
+probe_delete                             DELETE   /experimental/v1/probes/{probe}
+probe_list                               GET      /experimental/v1/probes
+probe_view                               GET      /experimental/v1/probes/{probe}
 
 API operations found with tag "images"
 OPERATION ID                             METHOD   URL PATH
@@ -40,9 +47,10 @@ instance_delete                          DELETE   /v1/instances/{instance}
 instance_disk_attach                     POST     /v1/instances/{instance}/disks/attach
 instance_disk_detach                     POST     /v1/instances/{instance}/disks/detach
 instance_disk_list                       GET      /v1/instances/{instance}/disks
+instance_ephemeral_ip_attach             POST     /v1/instances/{instance}/external-ips/ephemeral
+instance_ephemeral_ip_detach             DELETE   /v1/instances/{instance}/external-ips/ephemeral
 instance_external_ip_list                GET      /v1/instances/{instance}/external-ips
 instance_list                            GET      /v1/instances
-instance_migrate                         POST     /v1/instances/{instance}/migrate
 instance_network_interface_create        POST     /v1/network-interfaces
 instance_network_interface_delete        DELETE   /v1/network-interfaces/{interface}
 instance_network_interface_list          GET      /v1/network-interfaces
@@ -51,6 +59,7 @@ instance_network_interface_view          GET      /v1/network-interfaces/{interf
 instance_reboot                          POST     /v1/instances/{instance}/reboot
 instance_serial_console                  GET      /v1/instances/{instance}/serial-console
 instance_serial_console_stream           GET      /v1/instances/{instance}/serial-console/stream
+instance_ssh_public_key_list             GET      /v1/instances/{instance}/ssh-public-keys
 instance_start                           POST     /v1/instances/{instance}/start
 instance_stop                            POST     /v1/instances/{instance}/stop
 instance_view                            GET      /v1/instances/{instance}
@@ -63,6 +72,8 @@ login_saml                               POST     /login/{silo_name}/saml/{provi
 API operations found with tag "metrics"
 OPERATION ID                             METHOD   URL PATH
 silo_metric                              GET      /v1/metrics/{metric_name}
+timeseries_query                         POST     /v1/timeseries/query
+timeseries_schema_list                   GET      /v1/timeseries/schema
 
 API operations found with tag "policy"
 OPERATION ID                             METHOD   URL PATH
@@ -120,7 +131,9 @@ OPERATION ID                             METHOD   URL PATH
 networking_switch_port_apply_settings    POST     /v1/system/hardware/switch-port/{port}/settings
 networking_switch_port_clear_settings    DELETE   /v1/system/hardware/switch-port/{port}/settings
 networking_switch_port_list              GET      /v1/system/hardware/switch-port
+networking_switch_port_status            GET      /v1/system/hardware/switch-port/{port}/status
 physical_disk_list                       GET      /v1/system/hardware/disks
+physical_disk_view                       GET      /v1/system/hardware/disks/{disk_id}
 rack_list                                GET      /v1/system/hardware/racks
 rack_view                                GET      /v1/system/hardware/racks/{rack_id}
 sled_add                                 POST     /v1/system/hardware/sleds
@@ -128,7 +141,7 @@ sled_instance_list                       GET      /v1/system/hardware/sleds/{sle
 sled_list                                GET      /v1/system/hardware/sleds
 sled_list_uninitialized                  GET      /v1/system/hardware/sleds-uninitialized
 sled_physical_disk_list                  GET      /v1/system/hardware/sleds/{sled_id}/disks
-sled_set_provision_state                 PUT      /v1/system/hardware/sleds/{sled_id}/provision-state
+sled_set_provision_policy                PUT      /v1/system/hardware/sleds/{sled_id}/provision-policy
 sled_view                                GET      /v1/system/hardware/sleds/{sled_id}
 switch_list                              GET      /v1/system/hardware/switches
 switch_view                              GET      /v1/system/hardware/switches/{switch_id}
@@ -154,18 +167,25 @@ ip_pool_silo_list                        GET      /v1/system/ip-pools/{pool}/sil
 ip_pool_silo_unlink                      DELETE   /v1/system/ip-pools/{pool}/silos/{silo}
 ip_pool_silo_update                      PUT      /v1/system/ip-pools/{pool}/silos/{silo}
 ip_pool_update                           PUT      /v1/system/ip-pools/{pool}
+ip_pool_utilization_view                 GET      /v1/system/ip-pools/{pool}/utilization
 ip_pool_view                             GET      /v1/system/ip-pools/{pool}
 networking_address_lot_block_list        GET      /v1/system/networking/address-lot/{address_lot}/blocks
 networking_address_lot_create            POST     /v1/system/networking/address-lot
 networking_address_lot_delete            DELETE   /v1/system/networking/address-lot/{address_lot}
 networking_address_lot_list              GET      /v1/system/networking/address-lot
-networking_bgp_announce_set_create       POST     /v1/system/networking/bgp-announce
+networking_allow_list_update             PUT      /v1/system/networking/allow-list
+networking_allow_list_view               GET      /v1/system/networking/allow-list
+networking_bfd_disable                   POST     /v1/system/networking/bfd-disable
+networking_bfd_enable                    POST     /v1/system/networking/bfd-enable
+networking_bfd_status                    GET      /v1/system/networking/bfd-status
 networking_bgp_announce_set_delete       DELETE   /v1/system/networking/bgp-announce
 networking_bgp_announce_set_list         GET      /v1/system/networking/bgp-announce
+networking_bgp_announce_set_update       PUT      /v1/system/networking/bgp-announce
 networking_bgp_config_create             POST     /v1/system/networking/bgp
 networking_bgp_config_delete             DELETE   /v1/system/networking/bgp
 networking_bgp_config_list               GET      /v1/system/networking/bgp
 networking_bgp_imported_routes_ipv4      GET      /v1/system/networking/bgp-routes-ipv4
+networking_bgp_message_history           GET      /v1/system/networking/bgp-message-history
 networking_bgp_status                    GET      /v1/system/networking/bgp-status
 networking_loopback_address_create       POST     /v1/system/networking/loopback-address
 networking_loopback_address_delete       DELETE   /v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}
@@ -185,6 +205,7 @@ saml_identity_provider_view              GET      /v1/system/identity-providers/
 silo_create                              POST     /v1/system/silos
 silo_delete                              DELETE   /v1/system/silos/{silo}
 silo_identity_provider_list              GET      /v1/system/identity-providers
+silo_ip_pool_list                        GET      /v1/system/silos/{silo}/ip-pools
 silo_list                                GET      /v1/system/silos
 silo_policy_update                       PUT      /v1/system/silos/{silo}/policy
 silo_policy_view                         GET      /v1/system/silos/{silo}/policy
@@ -210,6 +231,16 @@ vpc_delete                               DELETE   /v1/vpcs/{vpc}
 vpc_firewall_rules_update                PUT      /v1/vpc-firewall-rules
 vpc_firewall_rules_view                  GET      /v1/vpc-firewall-rules
 vpc_list                                 GET      /v1/vpcs
+vpc_router_create                        POST     /v1/vpc-routers
+vpc_router_delete                        DELETE   /v1/vpc-routers/{router}
+vpc_router_list                          GET      /v1/vpc-routers
+vpc_router_route_create                  POST     /v1/vpc-router-routes
+vpc_router_route_delete                  DELETE   /v1/vpc-router-routes/{route}
+vpc_router_route_list                    GET      /v1/vpc-router-routes
+vpc_router_route_update                  PUT      /v1/vpc-router-routes/{route}
+vpc_router_route_view                    GET      /v1/vpc-router-routes/{route}
+vpc_router_update                        PUT      /v1/vpc-routers/{router}
+vpc_router_view                          GET      /v1/vpc-routers/{router}
 vpc_subnet_create                        POST     /v1/vpc-subnets
 vpc_subnet_delete                        DELETE   /v1/vpc-subnets/{subnet}
 vpc_subnet_list                          GET      /v1/vpc-subnets

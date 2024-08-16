@@ -7,6 +7,7 @@ use wicket_common::update_events::UpdateComponent;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ForceUpdateState {
+    pub force_update_rot_bootloader: bool,
     pub force_update_rot: bool,
     pub force_update_sp: bool,
     selected_component: UpdateComponent,
@@ -15,9 +16,10 @@ pub struct ForceUpdateState {
 impl Default for ForceUpdateState {
     fn default() -> Self {
         Self {
+            force_update_rot_bootloader: false,
             force_update_rot: false,
             force_update_sp: false,
-            selected_component: UpdateComponent::Rot,
+            selected_component: UpdateComponent::RotBootloader,
         }
     }
 }
@@ -28,20 +30,29 @@ impl ForceUpdateState {
     }
 
     pub fn next_component(&mut self) {
-        if self.selected_component == UpdateComponent::Rot {
-            self.selected_component = UpdateComponent::Sp;
-        } else {
-            self.selected_component = UpdateComponent::Rot;
-        }
+        self.selected_component = match self.selected_component {
+            UpdateComponent::RotBootloader => UpdateComponent::Rot,
+            UpdateComponent::Rot => UpdateComponent::Sp,
+            UpdateComponent::Sp => UpdateComponent::RotBootloader,
+            _ => unreachable!(),
+        };
     }
 
     pub fn prev_component(&mut self) {
-        // We only have 2 components; next/prev are both toggles.
-        self.next_component();
+        self.selected_component = match self.selected_component {
+            UpdateComponent::RotBootloader => UpdateComponent::Sp,
+            UpdateComponent::Rot => UpdateComponent::RotBootloader,
+            UpdateComponent::Sp => UpdateComponent::Rot,
+            _ => unreachable!(),
+        };
     }
 
     pub fn toggle(&mut self, component: UpdateComponent) {
         match component {
+            UpdateComponent::RotBootloader => {
+                self.force_update_rot_bootloader =
+                    !self.force_update_rot_bootloader
+            }
             UpdateComponent::Rot => {
                 self.force_update_rot = !self.force_update_rot;
             }

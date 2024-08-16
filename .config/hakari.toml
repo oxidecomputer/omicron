@@ -30,4 +30,13 @@ platforms = [
 exact-versions = true
 
 [traversal-excludes]
-workspace-members = ["xtask"]
+workspace-members = [
+    # Exclude xtask because it needs to be built quickly.
+    "xtask",
+    
+    # Exclude omicron-uuid-kinds because it is a no-std crate. Depending on the
+    # workspace-hack isn't too problematic because other projects pulling in
+    # omicron as a git dependency will only see an empty workspace-hack. But
+    # let's make this explicit.
+    "omicron-uuid-kinds",
+]

@@ -32,6 +32,7 @@ use crate::query::measurement_table_name;
 use crate::DatumType;
 use crate::Error as OxdbError;
 use crate::FieldType;
+use crate::QuerySummary;
 use crate::TimeseriesName;
 use crate::TimeseriesSchema;
 use indexmap::IndexSet;
@@ -40,6 +41,7 @@ use sqlparser::ast::BinaryOperator;
 use sqlparser::ast::Cte;
 use sqlparser::ast::Distinct;
 use sqlparser::ast::Expr;
+use sqlparser::ast::GroupByExpr;
 use sqlparser::ast::Ident;
 use sqlparser::ast::Join;
 use sqlparser::ast::JoinConstraint;
@@ -128,6 +130,31 @@ macro_rules! unsupported {
     ($msg:literal) => {
         Err(OxdbError::from(Error::UnsupportedSql($msg)))
     };
+}
+
+/// A tabular result from a SQL query against a timeseries.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct Table {
+    /// The name of each column in the result set.
+    pub column_names: Vec<String>,
+    /// The rows of the result set, one per column.
+    pub rows: Vec<Vec<serde_json::Value>>,
+}
+
+/// The full result of running a SQL query against a timeseries.
+#[derive(Clone, Debug)]
+pub struct QueryResult {
+    /// The query as written by the client.
+    pub original_query: String,
+    /// The rewritten query, run against the JOINed representation of the
+    /// timeseries.
+    ///
+    /// This is the query that is actually run in the database itself.
+    pub rewritten_query: String,
+    /// Summary of the resource usage of the query.
+    pub summary: QuerySummary,
+    /// The result of the query, with column names and rows.
+    pub table: Table,
 }
 
 /// A helper type to preprocess any ClickHouse-specific SQL, and present a
@@ -554,17 +581,18 @@ impl RestrictedQuery {
             from: vec![cte_from],
             lateral_views: vec![],
             selection: None,
-            group_by: vec![],
+            group_by: GroupByExpr::Expressions(vec![]),
             cluster_by: vec![],
             distribute_by: vec![],
             sort_by: vec![],
             having: None,
             named_window: vec![],
             qualify: None,
+            value_table_mode: None,
         };
         let mut query = Self::select_to_query(top_level_select);
         query.order_by = order_by;
-        Cte { alias, query, from: None }
+        Cte { alias, query, from: None, materialized: None }
     }
 
     // Create a SQL parser `Ident` with a the given name.
@@ -582,12 +610,31 @@ impl RestrictedQuery {
     // Return the required measurement columns for a specific datum type.
     //
     // Scalar measurements have only a timestamp and datum. Cumulative counters
-    // have those plus a start_time. And histograms have those plus the bins.
+    // have those plus a start_time. And histograms have those plus the bins,
+    // counts, min, max, sum of samples, sum of squares, and quantile arrays.
     fn datum_type_to_columns(
         datum_type: &DatumType,
     ) -> &'static [&'static str] {
         if datum_type.is_histogram() {
-            &["start_time", "timestamp", "bins", "counts"]
+            &[
+                "start_time",
+                "timestamp",
+                "bins",
+                "counts",
+                "min",
+                "max",
+                "sum_of_samples",
+                "squared_mean",
+                "p50_marker_heights",
+                "p50_marker_positions",
+                "p50_desired_marker_positions",
+                "p90_marker_heights",
+                "p90_marker_positions",
+                "p90_desired_marker_positions",
+                "p99_marker_heights",
+                "p99_marker_positions",
+                "p99_desired_marker_positions",
+            ]
         } else if datum_type.is_cumulative() {
             &["start_time", "timestamp", "datum"]
         } else {
@@ -601,9 +648,11 @@ impl RestrictedQuery {
             body: Box::new(SetExpr::Select(Box::new(select))),
             order_by: vec![],
             limit: None,
+            limit_by: vec![],
             offset: None,
             fetch: None,
             locks: vec![],
+            for_clause: None,
         })
     }
 
@@ -633,6 +682,8 @@ impl RestrictedQuery {
                 alias: None,
                 args: None,
                 with_hints: vec![],
+                version: None,
+                partitions: vec![],
             },
             joins: vec![],
         };
@@ -678,13 +729,14 @@ impl RestrictedQuery {
             from: vec![from],
             lateral_views: vec![],
             selection,
-            group_by: vec![],
+            group_by: GroupByExpr::Expressions(vec![]),
             cluster_by: vec![],
             distribute_by: vec![],
             sort_by: vec![],
             having: None,
             named_window: vec![],
             qualify: None,
+            value_table_mode: None,
         }
     }
 
@@ -714,6 +766,8 @@ impl RestrictedQuery {
                 alias: None,
                 args: None,
                 with_hints: vec![],
+                version: None,
+                partitions: vec![],
             },
             joins: vec![],
         };
@@ -746,13 +800,14 @@ impl RestrictedQuery {
             from: vec![from],
             lateral_views: vec![],
             selection,
-            group_by: vec![],
+            group_by: GroupByExpr::Expressions(vec![]),
             cluster_by: vec![],
             distribute_by: vec![],
             sort_by: vec![],
             having: None,
             named_window: vec![],
             qualify: None,
+            value_table_mode: None,
         }
     }
 

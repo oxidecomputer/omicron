@@ -5,12 +5,15 @@
 //! Interface for making API requests to a Sled Agent
 
 use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
 use std::convert::TryFrom;
 use uuid::Uuid;
 
 progenitor::generate_api!(
     spec = "../../openapi/sled-agent.json",
-    derives = [ schemars::JsonSchema, PartialEq ],
+    derives = [schemars::JsonSchema, PartialEq],
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
         slog::debug!(log, "client request";
@@ -22,50 +25,56 @@ progenitor::generate_api!(
     post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
         slog::debug!(log, "client response"; "result" => ?result);
     }),
-    //TODO trade the manual transformations later in this file for the
-    //     replace directives below?
+    patch = {
+        BfdPeerConfig = { derives = [Eq, Hash] },
+        BgpConfig = { derives = [Eq, Hash] },
+        BgpPeerConfig = { derives = [Eq, Hash] },
+        OmicronPhysicalDiskConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
+        PortConfigV2 = { derives = [Eq, Hash] },
+        RouteConfig = { derives = [Eq, Hash] },
+        UplinkAddressConfig = { derives = [Eq, Hash] },
+        VirtualNetworkInterfaceHost = { derives = [Eq, Hash] },
+    },
+    crates = {
+        "oxnet" = "0.1.0",
+    },
     replace = {
+        Baseboard = nexus_sled_agent_shared::inventory::Baseboard,
         ByteCount = omicron_common::api::external::ByteCount,
+        DiskIdentity = omicron_common::disk::DiskIdentity,
+        DiskVariant = omicron_common::disk::DiskVariant,
         Generation = omicron_common::api::external::Generation,
+        ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
+        Inventory = nexus_sled_agent_shared::inventory::Inventory,
+        InventoryDisk = nexus_sled_agent_shared::inventory::InventoryDisk,
+        InventoryZpool = nexus_sled_agent_shared::inventory::InventoryZpool,
+        MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
-        SwitchLocation = omicron_common::api::external::SwitchLocation,
-        Ipv6Network = ipnetwork::Ipv6Network,
-        IpNetwork = ipnetwork::IpNetwork,
+        NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
+        OmicronPhysicalDiskConfig = omicron_common::disk::OmicronPhysicalDiskConfig,
+        OmicronPhysicalDisksConfig = omicron_common::disk::OmicronPhysicalDisksConfig,
+        OmicronZoneConfig = nexus_sled_agent_shared::inventory::OmicronZoneConfig,
+        OmicronZoneDataset = nexus_sled_agent_shared::inventory::OmicronZoneDataset,
+        OmicronZoneType = nexus_sled_agent_shared::inventory::OmicronZoneType,
+        OmicronZonesConfig = nexus_sled_agent_shared::inventory::OmicronZonesConfig,
         PortFec = omicron_common::api::internal::shared::PortFec,
         PortSpeed = omicron_common::api::internal::shared::PortSpeed,
+        RouterId = omicron_common::api::internal::shared::RouterId,
+        ResolvedVpcRoute = omicron_common::api::internal::shared::ResolvedVpcRoute,
+        ResolvedVpcRouteSet = omicron_common::api::internal::shared::ResolvedVpcRouteSet,
+        RouterTarget = omicron_common::api::internal::shared::RouterTarget,
+        RouterVersion = omicron_common::api::internal::shared::RouterVersion,
+        SledRole = nexus_sled_agent_shared::inventory::SledRole,
+        SourceNatConfig = omicron_common::api::internal::shared::SourceNatConfig,
+        SwitchLocation = omicron_common::api::external::SwitchLocation,
+        TypedUuidForInstanceKind = omicron_uuid_kinds::InstanceUuid,
+        TypedUuidForPropolisKind = omicron_uuid_kinds::PropolisUuid,
+        TypedUuidForZpoolKind = omicron_uuid_kinds::ZpoolUuid,
+        Vni = omicron_common::api::external::Vni,
+        ZpoolKind = omicron_common::zpool_name::ZpoolKind,
+        ZpoolName = omicron_common::zpool_name::ZpoolName,
     }
 );
-
-// We cannot easily configure progenitor to derive `Eq` on all the client-
-// generated types because some have floats and other types that can't impl
-// `Eq`.  We impl it explicitly for a few types on which we need it.
-impl Eq for types::OmicronZonesConfig {}
-impl Eq for types::OmicronZoneConfig {}
-impl Eq for types::OmicronZoneType {}
-impl Eq for types::OmicronZoneDataset {}
-
-impl types::OmicronZoneType {
-    /// Human-readable label describing what kind of zone this is
-    ///
-    /// This is just use for testing and reporting.
-    pub fn label(&self) -> impl std::fmt::Display {
-        match self {
-            types::OmicronZoneType::BoundaryNtp { .. } => "boundary_ntp",
-            types::OmicronZoneType::Clickhouse { .. } => "clickhouse",
-            types::OmicronZoneType::ClickhouseKeeper { .. } => {
-                "clickhouse_keeper"
-            }
-            types::OmicronZoneType::CockroachDb { .. } => "cockroach_db",
-            types::OmicronZoneType::Crucible { .. } => "crucible",
-            types::OmicronZoneType::CruciblePantry { .. } => "crucible_pantry",
-            types::OmicronZoneType::ExternalDns { .. } => "external_dns",
-            types::OmicronZoneType::InternalDns { .. } => "internal_dns",
-            types::OmicronZoneType::InternalNtp { .. } => "internal_ntp",
-            types::OmicronZoneType::Nexus { .. } => "nexus",
-            types::OmicronZoneType::Oximeter { .. } => "oximeter",
-        }
-    }
-}
 
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {
@@ -89,22 +98,18 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
     }
 }
 
-impl From<omicron_common::api::external::InstanceState>
-    for types::InstanceState
-{
-    fn from(s: omicron_common::api::external::InstanceState) -> Self {
-        use omicron_common::api::external::InstanceState::*;
+impl From<omicron_common::api::internal::nexus::VmmState> for types::VmmState {
+    fn from(s: omicron_common::api::internal::nexus::VmmState) -> Self {
+        use omicron_common::api::internal::nexus::VmmState as Input;
         match s {
-            Creating => Self::Creating,
-            Starting => Self::Starting,
-            Running => Self::Running,
-            Stopping => Self::Stopping,
-            Stopped => Self::Stopped,
-            Rebooting => Self::Rebooting,
-            Migrating => Self::Migrating,
-            Repairing => Self::Repairing,
-            Failed => Self::Failed,
-            Destroyed => Self::Destroyed,
+            Input::Starting => types::VmmState::Starting,
+            Input::Running => types::VmmState::Running,
+            Input::Stopping => types::VmmState::Stopping,
+            Input::Stopped => types::VmmState::Stopped,
+            Input::Rebooting => types::VmmState::Rebooting,
+            Input::Migrating => types::VmmState::Migrating,
+            Input::Failed => types::VmmState::Failed,
+            Input::Destroyed => types::VmmState::Destroyed,
         }
     }
 }
@@ -131,6 +136,22 @@ impl From<types::InstanceRuntimeState>
     }
 }
 
+impl From<types::VmmState> for omicron_common::api::internal::nexus::VmmState {
+    fn from(s: types::VmmState) -> Self {
+        use omicron_common::api::internal::nexus::VmmState as Output;
+        match s {
+            types::VmmState::Starting => Output::Starting,
+            types::VmmState::Running => Output::Running,
+            types::VmmState::Stopping => Output::Stopping,
+            types::VmmState::Stopped => Output::Stopped,
+            types::VmmState::Rebooting => Output::Rebooting,
+            types::VmmState::Migrating => Output::Migrating,
+            types::VmmState::Failed => Output::Failed,
+            types::VmmState::Destroyed => Output::Destroyed,
+        }
+    }
+}
+
 impl From<types::VmmRuntimeState>
     for omicron_common::api::internal::nexus::VmmRuntimeState
 {
@@ -144,29 +165,37 @@ impl From<types::SledInstanceState>
 {
     fn from(s: types::SledInstanceState) -> Self {
         Self {
-            instance_state: s.instance_state.into(),
             propolis_id: s.propolis_id,
             vmm_state: s.vmm_state.into(),
+            migration_in: s.migration_in.map(Into::into),
+            migration_out: s.migration_out.map(Into::into),
         }
     }
 }
 
-impl From<types::InstanceState>
-    for omicron_common::api::external::InstanceState
+impl From<types::MigrationRuntimeState>
+    for omicron_common::api::internal::nexus::MigrationRuntimeState
 {
-    fn from(s: types::InstanceState) -> Self {
-        use types::InstanceState::*;
+    fn from(s: types::MigrationRuntimeState) -> Self {
+        Self {
+            migration_id: s.migration_id,
+            state: s.state.into(),
+            gen: s.gen,
+            time_updated: s.time_updated,
+        }
+    }
+}
+
+impl From<types::MigrationState>
+    for omicron_common::api::internal::nexus::MigrationState
+{
+    fn from(s: types::MigrationState) -> Self {
+        use omicron_common::api::internal::nexus::MigrationState as Output;
         match s {
-            Creating => Self::Creating,
-            Starting => Self::Starting,
-            Running => Self::Running,
-            Stopping => Self::Stopping,
-            Stopped => Self::Stopped,
-            Rebooting => Self::Rebooting,
-            Migrating => Self::Migrating,
-            Repairing => Self::Repairing,
-            Failed => Self::Failed,
-            Destroyed => Self::Destroyed,
+            types::MigrationState::Pending => Output::Pending,
+            types::MigrationState::InProgress => Output::InProgress,
+            types::MigrationState::Failed => Output::Failed,
+            types::MigrationState::Completed => Output::Completed,
         }
     }
 }
@@ -243,126 +272,6 @@ impl From<types::DiskState> for omicron_common::api::external::DiskState {
     }
 }
 
-impl From<omicron_common::api::external::Vni> for types::Vni {
-    fn from(v: omicron_common::api::external::Vni) -> Self {
-        Self(u32::from(v))
-    }
-}
-
-impl From<types::Vni> for omicron_common::api::external::Vni {
-    fn from(s: types::Vni) -> Self {
-        Self::try_from(s.0).unwrap()
-    }
-}
-
-impl From<omicron_common::api::external::MacAddr> for types::MacAddr {
-    fn from(s: omicron_common::api::external::MacAddr) -> Self {
-        Self::try_from(s.0.to_string())
-            .unwrap_or_else(|e| panic!("{}: {}", s.0, e))
-    }
-}
-
-impl From<types::MacAddr> for omicron_common::api::external::MacAddr {
-    fn from(s: types::MacAddr) -> Self {
-        s.parse().unwrap()
-    }
-}
-
-impl From<omicron_common::api::external::Ipv4Net> for types::Ipv4Net {
-    fn from(n: omicron_common::api::external::Ipv4Net) -> Self {
-        Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
-    }
-}
-
-impl From<omicron_common::api::external::Ipv6Net> for types::Ipv6Net {
-    fn from(n: omicron_common::api::external::Ipv6Net) -> Self {
-        Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
-    }
-}
-
-impl From<omicron_common::api::external::IpNet> for types::IpNet {
-    fn from(s: omicron_common::api::external::IpNet) -> Self {
-        use omicron_common::api::external::IpNet;
-        match s {
-            IpNet::V4(v4) => Self::V4(v4.into()),
-            IpNet::V6(v6) => Self::V6(v6.into()),
-        }
-    }
-}
-
-impl From<ipnetwork::Ipv4Network> for types::Ipv4Net {
-    fn from(n: ipnetwork::Ipv4Network) -> Self {
-        Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
-    }
-}
-
-impl From<types::Ipv4Net> for ipnetwork::Ipv4Network {
-    fn from(n: types::Ipv4Net) -> Self {
-        n.parse().unwrap()
-    }
-}
-
-impl From<ipnetwork::Ipv4Network> for types::Ipv4Network {
-    fn from(n: ipnetwork::Ipv4Network) -> Self {
-        Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
-    }
-}
-
-impl From<ipnetwork::Ipv6Network> for types::Ipv6Net {
-    fn from(n: ipnetwork::Ipv6Network) -> Self {
-        Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
-    }
-}
-
-impl From<types::Ipv6Net> for ipnetwork::Ipv6Network {
-    fn from(n: types::Ipv6Net) -> Self {
-        n.parse().unwrap()
-    }
-}
-
-impl From<ipnetwork::IpNetwork> for types::IpNet {
-    fn from(n: ipnetwork::IpNetwork) -> Self {
-        use ipnetwork::IpNetwork;
-        match n {
-            IpNetwork::V4(v4) => Self::V4(v4.into()),
-            IpNetwork::V6(v6) => Self::V6(v6.into()),
-        }
-    }
-}
-
-impl From<types::IpNet> for ipnetwork::IpNetwork {
-    fn from(n: types::IpNet) -> Self {
-        match n {
-            types::IpNet::V4(v4) => ipnetwork::IpNetwork::V4(v4.into()),
-            types::IpNet::V6(v6) => ipnetwork::IpNetwork::V6(v6.into()),
-        }
-    }
-}
-
-impl From<std::net::Ipv4Addr> for types::Ipv4Net {
-    fn from(n: std::net::Ipv4Addr) -> Self {
-        Self::try_from(format!("{n}/32"))
-            .unwrap_or_else(|e| panic!("{}: {}", n, e))
-    }
-}
-
-impl From<std::net::Ipv6Addr> for types::Ipv6Net {
-    fn from(n: std::net::Ipv6Addr) -> Self {
-        Self::try_from(format!("{n}/128"))
-            .unwrap_or_else(|e| panic!("{}: {}", n, e))
-    }
-}
-
-impl From<std::net::IpAddr> for types::IpNet {
-    fn from(s: std::net::IpAddr) -> Self {
-        use std::net::IpAddr;
-        match s {
-            IpAddr::V4(v4) => Self::V4(v4.into()),
-            IpAddr::V6(v6) => Self::V6(v6.into()),
-        }
-    }
-}
-
 impl From<omicron_common::api::external::L4PortRange> for types::L4PortRange {
     fn from(s: omicron_common::api::external::L4PortRange) -> Self {
         Self::try_from(s.to_string()).unwrap_or_else(|e| panic!("{}: {}", s, e))
@@ -400,6 +309,15 @@ impl From<omicron_common::api::internal::nexus::KnownArtifactKind>
         use omicron_common::api::internal::nexus::KnownArtifactKind;
 
         match s {
+            KnownArtifactKind::GimletRotBootloader => {
+                types::KnownArtifactKind::GimletRotBootloader
+            }
+            KnownArtifactKind::PscRotBootloader => {
+                types::KnownArtifactKind::PscRotBootloader
+            }
+            KnownArtifactKind::SwitchRotBootloader => {
+                types::KnownArtifactKind::SwitchRotBootloader
+            }
             KnownArtifactKind::GimletSp => types::KnownArtifactKind::GimletSp,
             KnownArtifactKind::GimletRot => types::KnownArtifactKind::GimletRot,
             KnownArtifactKind::Host => types::KnownArtifactKind::Host,
@@ -423,8 +341,8 @@ impl From<omicron_common::api::internal::nexus::HostIdentifier>
     fn from(s: omicron_common::api::internal::nexus::HostIdentifier) -> Self {
         use omicron_common::api::internal::nexus::HostIdentifier::*;
         match s {
-            Ip(net) => Self::Ip(net.into()),
-            Vpc(vni) => Self::Vpc(vni.into()),
+            Ip(net) => Self::Ip(net),
+            Vpc(vni) => Self::Vpc(vni),
         }
     }
 }
@@ -490,35 +408,38 @@ impl From<omicron_common::api::internal::shared::NetworkInterfaceKind>
         match s {
             Instance { id } => Self::Instance(id),
             Service { id } => Self::Service(id),
+            Probe { id } => Self::Probe(id),
         }
     }
 }
 
-impl From<omicron_common::api::internal::shared::NetworkInterface>
-    for types::NetworkInterface
+impl From<omicron_common::api::internal::shared::SledIdentifiers>
+    for types::SledIdentifiers
 {
     fn from(
-        s: omicron_common::api::internal::shared::NetworkInterface,
+        value: omicron_common::api::internal::shared::SledIdentifiers,
     ) -> Self {
         Self {
-            id: s.id,
-            kind: s.kind.into(),
-            name: s.name,
-            ip: s.ip,
-            mac: s.mac.into(),
-            subnet: s.subnet.into(),
-            vni: s.vni.into(),
-            primary: s.primary,
-            slot: s.slot,
+            model: value.model,
+            rack_id: value.rack_id,
+            revision: value.revision,
+            serial: value.serial,
+            sled_id: value.sled_id,
         }
     }
 }
 
-impl From<omicron_common::api::internal::shared::SourceNatConfig>
-    for types::SourceNatConfig
+impl From<types::SledIdentifiers>
+    for omicron_common::api::internal::shared::SledIdentifiers
 {
-    fn from(s: omicron_common::api::internal::shared::SourceNatConfig) -> Self {
-        Self { ip: s.ip, first_port: s.first_port, last_port: s.last_port }
+    fn from(value: types::SledIdentifiers) -> Self {
+        Self {
+            model: value.model,
+            rack_id: value.rack_id,
+            revision: value.revision,
+            serial: value.serial,
+            sled_id: value.sled_id,
+        }
     }
 }
 
@@ -526,12 +447,29 @@ impl From<omicron_common::api::internal::shared::SourceNatConfig>
 /// are bonus endpoints, not generated in the real client.
 #[async_trait]
 pub trait TestInterfaces {
+    async fn instance_single_step(&self, id: Uuid);
     async fn instance_finish_transition(&self, id: Uuid);
+    async fn instance_simulate_migration_source(
+        &self,
+        id: Uuid,
+        params: SimulateMigrationSource,
+    );
     async fn disk_finish_transition(&self, id: Uuid);
 }
 
 #[async_trait]
 impl TestInterfaces for Client {
+    async fn instance_single_step(&self, id: Uuid) {
+        let baseurl = self.baseurl();
+        let client = self.client();
+        let url = format!("{}/instances/{}/poke-single-step", baseurl, id);
+        client
+            .post(url)
+            .send()
+            .await
+            .expect("instance_single_step() failed unexpectedly");
+    }
+
     async fn instance_finish_transition(&self, id: Uuid) {
         let baseurl = self.baseurl();
         let client = self.client();
@@ -553,4 +491,46 @@ impl TestInterfaces for Client {
             .await
             .expect("disk_finish_transition() failed unexpectedly");
     }
+
+    async fn instance_simulate_migration_source(
+        &self,
+        id: Uuid,
+        params: SimulateMigrationSource,
+    ) {
+        let baseurl = self.baseurl();
+        let client = self.client();
+        let url = format!("{baseurl}/instances/{id}/sim-migration-source");
+        client
+            .post(url)
+            .json(&params)
+            .send()
+            .await
+            .expect("instance_simulate_migration_source() failed unexpectedly");
+    }
+}
+
+/// Parameters to the `/instances/{id}/sim-migration-source` test API.
+///
+/// This message type is not included in the OpenAPI spec, because this API
+/// exists only in test builds.
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SimulateMigrationSource {
+    /// The ID of the migration out of the instance's current active VMM.
+    pub migration_id: Uuid,
+    /// What migration result (success or failure) to simulate.
+    pub result: SimulatedMigrationResult,
+}
+
+/// The result of a simulated migration out from an instance's current active
+/// VMM.
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub enum SimulatedMigrationResult {
+    /// Simulate a successful migration out.
+    Success,
+    /// Simulate a failed migration out.
+    ///
+    /// # Note
+    ///
+    /// This is not currently implemented by the simulated sled-agent.
+    Failure,
 }

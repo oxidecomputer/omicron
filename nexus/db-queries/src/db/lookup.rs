@@ -17,11 +17,12 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use db_macros::lookup_resource;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use ipnetwork::IpNetwork;
-use nexus_db_model::KnownArtifactKind;
 use nexus_db_model::Name;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
+use omicron_uuid_kinds::TufRepoKind;
+use omicron_uuid_kinds::TypedUuid;
 use uuid::Uuid;
 
 /// Look up an API resource in the database
@@ -357,29 +358,14 @@ impl<'a> LookupPath<'a> {
         Zpool::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    /// Select a resource of type Service, identified by its id
-    pub fn service_id(self, id: Uuid) -> Service<'a> {
-        Service::PrimaryKey(Root { lookup_root: self }, id)
-    }
-
     /// Select a resource of type Switch, identified by its id
     pub fn switch_id(self, id: Uuid) -> Switch<'a> {
         Switch::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type PhysicalDisk, identified by its id
-    pub fn physical_disk(
-        self,
-        vendor: &str,
-        serial: &str,
-        model: &str,
-    ) -> PhysicalDisk<'a> {
-        PhysicalDisk::PrimaryKey(
-            Root { lookup_root: self },
-            vendor.to_string(),
-            serial.to_string(),
-            model.to_string(),
-        )
+    pub fn physical_disk(self, id: Uuid) -> PhysicalDisk<'a> {
+        PhysicalDisk::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     pub fn silo_image_id(self, id: Uuid) -> SiloImage<'a> {
@@ -431,25 +417,25 @@ impl<'a> LookupPath<'a> {
         )
     }
 
-    /// Select a resource of type UpdateArtifact, identified by its
-    /// `(name, version, kind)` tuple
-    pub fn update_artifact_tuple(
-        self,
-        name: &str,
-        version: db::model::SemverVersion,
-        kind: KnownArtifactKind,
-    ) -> UpdateArtifact<'a> {
-        UpdateArtifact::PrimaryKey(
-            Root { lookup_root: self },
-            name.to_string(),
-            version,
-            kind,
-        )
+    /// Select a resource of type TufRepo, identified by its UUID.
+    pub fn tuf_repo_id(self, id: TypedUuid<TufRepoKind>) -> TufRepo<'a> {
+        TufRepo::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    /// Select a resource of type UpdateDeployment, identified by its id
-    pub fn update_deployment_id(self, id: Uuid) -> UpdateDeployment<'a> {
-        UpdateDeployment::PrimaryKey(Root { lookup_root: self }, id)
+    /// Select a resource of type UpdateArtifact, identified by its
+    /// `(name, version, kind)` tuple
+    pub fn tuf_artifact_tuple(
+        self,
+        name: impl Into<String>,
+        version: db::model::SemverVersion,
+        kind: impl Into<String>,
+    ) -> TufArtifact<'a> {
+        TufArtifact::PrimaryKey(
+            Root { lookup_root: self },
+            name.into(),
+            version,
+            kind.into(),
+        )
     }
 
     /// Select a resource of type UserBuiltin, identified by its `name`
@@ -826,15 +812,6 @@ lookup_resource! {
 }
 
 lookup_resource! {
-    name = "Service",
-    ancestors = [],
-    children = [],
-    lookup_by_name = false,
-    soft_deletes = false,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
-}
-
-lookup_resource! {
     name = "Switch",
     ancestors = [],
     children = [],
@@ -849,15 +826,22 @@ lookup_resource! {
     children = [],
     lookup_by_name = false,
     soft_deletes = true,
-    primary_key_columns = [
-        { column_name = "vendor", rust_type = String },
-        { column_name = "serial", rust_type = String },
-        { column_name = "model", rust_type = String }
-    ]
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 lookup_resource! {
-    name = "UpdateArtifact",
+    name = "TufRepo",
+    ancestors = [],
+    // TODO: should this have TufArtifact as a child? This is a many-many
+    // relationship.
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [ { column_name = "id", uuid_kind = TufRepoKind } ]
+}
+
+lookup_resource! {
+    name = "TufArtifact",
     ancestors = [],
     children = [],
     lookup_by_name = false,
@@ -865,26 +849,8 @@ lookup_resource! {
     primary_key_columns = [
         { column_name = "name", rust_type = String },
         { column_name = "version", rust_type = db::model::SemverVersion },
-        { column_name = "kind", rust_type = KnownArtifactKind }
+        { column_name = "kind", rust_type = String },
     ]
-}
-
-lookup_resource! {
-    name = "SystemUpdate",
-    ancestors = [],
-    children = [],
-    lookup_by_name = false,
-    soft_deletes = false,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
-}
-
-lookup_resource! {
-    name = "UpdateDeployment",
-    ancestors = [],
-    children = [],
-    lookup_by_name = false,
-    soft_deletes = false,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 lookup_resource! {
@@ -956,9 +922,12 @@ mod test {
         let logctx = dev::test_setup_log("test_lookup");
         let mut db = test_setup_database(&logctx.log).await;
         let (_, datastore) =
-            crate::db::datastore::datastore_test(&logctx, &db).await;
-        let opctx =
-            OpContext::for_tests(logctx.log.new(o!()), Arc::clone(&datastore));
+            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
+                .await;
+        let opctx = OpContext::for_tests(
+            logctx.log.new(o!()),
+            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
+        );
         let project_name: Name = Name("my-project".parse().unwrap());
         let instance_name: Name = Name("my-instance".parse().unwrap());
 

@@ -85,7 +85,7 @@
     },
     "/baseboard": {
       "get": {
-        "summary": "Report the configured baseboard details",
+        "summary": "Report the configured baseboard details.",
         "operationId": "get_baseboard",
         "responses": {
           "200": {
@@ -214,8 +214,8 @@
     },
     "/inventory": {
       "get": {
-        "summary": "A status endpoint used to report high level information known to wicketd.",
-        "description": "This endpoint can be polled to see if there have been state changes in the system that are useful to report to wicket.\nWicket, and possibly other callers, will retrieve the changed information, with follow up calls.",
+        "summary": "A status endpoint used to report high level information known to",
+        "description": "wicketd.\n\nThis endpoint can be polled to see if there have been state changes in the system that are useful to report to wicket.\n\nWicket, and possibly other callers, will retrieve the changed information, with follow up calls.",
         "operationId": "get_inventory",
         "requestBody": {
           "content": {
@@ -274,8 +274,8 @@
     },
     "/preflight/uplink": {
       "get": {
-        "summary": "An endpoint to get the report for the most recent (or still running)",
-        "description": "preflight uplink check.",
+        "summary": "Get the report for the most recent (or still running) preflight uplink",
+        "description": "check.",
         "operationId": "get_preflight_uplink_report",
         "responses": {
           "200": {
@@ -283,7 +283,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EventReportForGenericSpec"
+                  "$ref": "#/components/schemas/EventReportForUplinkPreflightCheckSpec"
                 }
               }
             }
@@ -297,7 +297,7 @@
         }
       },
       "post": {
-        "summary": "An endpoint to start a preflight check for uplink configuration.",
+        "summary": "Start a preflight check for uplink configuration.",
         "operationId": "post_start_preflight_uplink_check",
         "requestBody": {
           "content": {
@@ -355,7 +355,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RackInitId"
+                  "$ref": "#/components/schemas/TypedUuidForRackInitKind"
                 }
               }
             }
@@ -377,7 +377,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RackResetId"
+                  "$ref": "#/components/schemas/TypedUuidForRackResetKind"
                 }
               }
             }
@@ -447,6 +447,85 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rack-setup/config/bgp/auth-key": {
+      "get": {
+        "summary": "Return information about BGP authentication keys, including checking",
+        "description": "validity of keys.\n\nProduces an error if the rack setup config wasn't set, or if any of the requested key IDs weren't found.",
+        "operationId": "get_bgp_auth_key_info",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetBgpAuthKeyParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetBgpAuthKeyInfoResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rack-setup/config/bgp/auth-key/{key_id}": {
+      "put": {
+        "summary": "Set the BGP authentication key for a particular key ID.",
+        "operationId": "put_bgp_auth_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/BgpAuthKeyId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutBgpAuthKeyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PutBgpAuthKeyResponse"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -558,7 +637,7 @@
     },
     "/reload-config": {
       "post": {
-        "summary": "An endpoint instructing wicketd to reload its SMF config properties.",
+        "summary": "Instruct wicketd to reload its SMF config properties.",
         "description": "The only expected client of this endpoint is `curl` from wicketd's SMF `refresh` method, but other clients hitting it is harmless.",
         "operationId": "post_reload_config",
         "responses": {
@@ -699,6 +778,48 @@
           "message"
         ]
       },
+      "AllowedSourceIps": {
+        "description": "Description of source IPs allowed to reach rack services.",
+        "oneOf": [
+          {
+            "description": "Allow traffic from any external IP address.",
+            "type": "object",
+            "properties": {
+              "allow": {
+                "type": "string",
+                "enum": [
+                  "any"
+                ]
+              }
+            },
+            "required": [
+              "allow"
+            ]
+          },
+          {
+            "description": "Restrict access to a specific set of source IP addresses or subnets.\n\nAll others are prevented from reaching rack services.",
+            "type": "object",
+            "properties": {
+              "allow": {
+                "type": "string",
+                "enum": [
+                  "list"
+                ]
+              },
+              "ips": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/IpNet"
+                }
+              }
+            },
+            "required": [
+              "allow",
+              "ips"
+            ]
+          }
+        ]
+      },
       "ArtifactHashId": {
         "description": "A hash-based identifier for an artifact.\n\nSome places, e.g. the installinator, request artifacts by hash rather than by name and version. This type indicates that.",
         "type": "object",
@@ -759,7 +880,8 @@
               },
               "revision": {
                 "type": "integer",
-                "format": "int64"
+                "format": "uint32",
+                "minimum": 0
               },
               "type": {
                 "type": "string",
@@ -813,6 +935,109 @@
           }
         ]
       },
+      "BgpAuthKey": {
+        "description": "Describes the actual authentication key to use with a BGP peer.\n\nCurrently, only TCP-MD5 authentication is supported.",
+        "oneOf": [
+          {
+            "description": "TCP-MD5 authentication.",
+            "type": "object",
+            "properties": {
+              "key": {
+                "description": "The pre-shared key.",
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "tcp_md5"
+                ]
+              }
+            },
+            "required": [
+              "key",
+              "kind"
+            ]
+          }
+        ]
+      },
+      "BgpAuthKeyId": {
+        "description": "The key identifier for authentication to use with a BGP peer.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Name"
+          }
+        ]
+      },
+      "BgpAuthKeyInfo": {
+        "description": "Describes insensitive information about a BGP authentication key.\n\nThis information is considered okay to display in the UI.",
+        "oneOf": [
+          {
+            "description": "TCP-MD5 authentication.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "tcp_md5"
+                ]
+              },
+              "sha256": {
+                "description": "A SHA-256 digest of the key.",
+                "type": "string",
+                "format": "hex string (32 bytes)"
+              }
+            },
+            "required": [
+              "kind",
+              "sha256"
+            ]
+          }
+        ]
+      },
+      "BgpAuthKeyStatus": {
+        "description": "The status of a BGP authentication key.\n\nThis is part of a wicketd response, but is returned here because our tooling turns BTreeMaps into HashMaps. So we use a `replace` directive instead.",
+        "oneOf": [
+          {
+            "description": "The key was specified but hasn't been set yet.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "unset"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "The key has been set.",
+            "type": "object",
+            "properties": {
+              "info": {
+                "description": "Information about the key.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/BgpAuthKeyInfo"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "set"
+                ]
+              }
+            },
+            "required": [
+              "info",
+              "status"
+            ]
+          }
+        ]
+      },
       "BgpConfig": {
         "type": "object",
         "properties": {
@@ -822,77 +1047,29 @@
             "format": "uint32",
             "minimum": 0
           },
+          "checker": {
+            "nullable": true,
+            "description": "Checker to apply to incoming messages.",
+            "default": null,
+            "type": "string"
+          },
           "originate": {
             "description": "The set of prefixes for the BGP router to originate.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Ipv4Network"
+              "$ref": "#/components/schemas/Ipv4Net"
             }
+          },
+          "shaper": {
+            "nullable": true,
+            "description": "Shaper to apply to outgoing messages.",
+            "default": null,
+            "type": "string"
           }
         },
         "required": [
           "asn",
           "originate"
-        ]
-      },
-      "BgpPeerConfig": {
-        "type": "object",
-        "properties": {
-          "addr": {
-            "description": "Address of the peer.",
-            "type": "string",
-            "format": "ipv4"
-          },
-          "asn": {
-            "description": "The autonomous sysetm number of the router the peer belongs to.",
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "connect_retry": {
-            "nullable": true,
-            "description": "The interval in seconds between peer connection retry attempts.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "delay_open": {
-            "nullable": true,
-            "description": "How long to delay sending open messages to a peer. In seconds.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "hold_time": {
-            "nullable": true,
-            "description": "How long to keep a session alive without a keepalive in seconds. Defaults to 6.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "idle_hold_time": {
-            "nullable": true,
-            "description": "How long to keep a peer in idle after a state machine reset in seconds.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "keepalive": {
-            "nullable": true,
-            "description": "The interval to send keepalive messages at.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "port": {
-            "description": "Switch port the peer is reachable on.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "addr",
-          "asn",
-          "port"
         ]
       },
       "BootstrapSledDescription": {
@@ -1090,8 +1267,17 @@
         ]
       },
       "CurrentRssUserConfigInsensitive": {
+        "description": "The subset of `RackInitializeRequest` that the user fills in as clear text (e.g., via an uploaded config file).",
         "type": "object",
         "properties": {
+          "allowed_source_ips": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AllowedSourceIps"
+              }
+            ]
+          },
           "bootstrap_sleds": {
             "type": "array",
             "items": {
@@ -1132,7 +1318,7 @@
             "nullable": true,
             "allOf": [
               {
-                "$ref": "#/components/schemas/RackNetworkConfigV1"
+                "$ref": "#/components/schemas/UserSpecifiedRackNetworkConfig"
               }
             ]
           }
@@ -1149,6 +1335,9 @@
       "CurrentRssUserConfigSensitive": {
         "type": "object",
         "properties": {
+          "bgp_auth_keys": {
+            "$ref": "#/components/schemas/GetBgpAuthKeyInfoResponse"
+          },
           "num_external_certificates": {
             "type": "integer",
             "format": "uint",
@@ -1159,6 +1348,7 @@
           }
         },
         "required": [
+          "bgp_auth_keys",
           "num_external_certificates",
           "recovery_silo_password_set"
         ]
@@ -1201,7 +1391,7 @@
           "request_id"
         ]
       },
-      "EventReportForGenericSpec": {
+      "EventReportForUplinkPreflightCheckSpec": {
         "description": "A report produced from an [`EventBuffer`](crate::EventBuffer).\n\nRemote reports can be passed into a [`StepContext`](crate::StepContext), in which case they show up as nested events.",
         "type": "object",
         "properties": {
@@ -1216,7 +1406,7 @@
             "description": "A list of progress events, or whether we're currently waiting for a progress event.\n\nCurrently, this produces one progress event for each top-level and nested event in progress.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ProgressEventForGenericSpec"
+              "$ref": "#/components/schemas/ProgressEventForUplinkPreflightCheckSpec"
             }
           },
           "root_execution_id": {
@@ -1229,7 +1419,7 @@
             "description": "A list of step events.\n\nStep events include success and failure events.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/StepEventForGenericSpec"
+              "$ref": "#/components/schemas/StepEventForUplinkPreflightCheckSpec"
             }
           }
         },
@@ -1322,11 +1512,43 @@
           }
         }
       },
+      "GetBgpAuthKeyInfoResponse": {
+        "description": "Returns information about BGP keys for rack network setup.\n\nThis is part of a wicketd response, but is returned here because our tooling turns BTreeMaps into HashMaps. So we use a `replace` directive instead.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "Information about the requested keys.\n\nNone indicates that the key ID has not been set yet. An error indicates that the key was not specified in the rack setup config.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BgpAuthKeyStatus"
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "GetBgpAuthKeyParams": {
+        "type": "object",
+        "properties": {
+          "check_valid": {
+            "description": "Checks that these keys are valid.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpAuthKeyId"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "check_valid"
+        ]
+      },
       "GetInventoryParams": {
         "type": "object",
         "properties": {
           "force_refresh": {
-            "description": "If true, refresh the state of these SPs from MGS prior to returning (instead of returning cached data).",
+            "description": "Refresh the state of these SPs from MGS prior to returning (instead of returning cached data).",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SpIdentifier"
@@ -1446,13 +1668,18 @@
           "installable"
         ]
       },
-      "IpNetwork": {
+      "IpNet": {
+        "x-rust-type": {
+          "crate": "oxnet",
+          "path": "oxnet::IpNet",
+          "version": "0.1.0"
+        },
         "oneOf": [
           {
             "title": "v4",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Ipv4Network"
+                "$ref": "#/components/schemas/Ipv4Net"
               }
             ]
           },
@@ -1460,7 +1687,7 @@
             "title": "v6",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Ipv6Network"
+                "$ref": "#/components/schemas/Ipv6Net"
               }
             ]
           }
@@ -1486,9 +1713,17 @@
           }
         ]
       },
-      "Ipv4Network": {
+      "Ipv4Net": {
+        "example": "192.168.1.0/24",
+        "title": "An IPv4 subnet",
+        "description": "An IPv4 subnet, including prefix and prefix length",
+        "x-rust-type": {
+          "crate": "oxnet",
+          "path": "oxnet::Ipv4Net",
+          "version": "0.1.0"
+        },
         "type": "string",
-        "pattern": "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\/(3[0-2]|[0-2]?[0-9])$"
+        "pattern": "^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([0-9]|1[0-9]|2[0-9]|3[0-2])$"
       },
       "Ipv4Range": {
         "description": "A non-decreasing IPv4 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
@@ -1508,9 +1743,17 @@
           "last"
         ]
       },
-      "Ipv6Network": {
+      "Ipv6Net": {
+        "example": "fd12:3456::/64",
+        "title": "An IPv6 subnet",
+        "description": "An IPv6 subnet, including prefix and subnet mask",
+        "x-rust-type": {
+          "crate": "oxnet",
+          "path": "oxnet::Ipv6Net",
+          "version": "0.1.0"
+        },
         "type": "string",
-        "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\")[/](12[0-8]|1[0-1][0-9]|[0-9]?[0-9])$"
+        "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
       },
       "Ipv6Range": {
         "description": "A non-decreasing IPv6 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
@@ -1530,78 +1773,18 @@
           "last"
         ]
       },
+      "Name": {
+        "title": "A name unique within the parent collection",
+        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
+        "type": "string",
+        "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
+        "minLength": 1,
+        "maxLength": 63
+      },
       "NewPasswordHash": {
         "title": "A password hash in PHC string format",
         "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
         "type": "string"
-      },
-      "PortConfigV1": {
-        "type": "object",
-        "properties": {
-          "addresses": {
-            "description": "This port's addresses.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/IpNetwork"
-            }
-          },
-          "autoneg": {
-            "description": "Whether or not to set autonegotiation",
-            "default": false,
-            "type": "boolean"
-          },
-          "bgp_peers": {
-            "description": "BGP peers on this port",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BgpPeerConfig"
-            }
-          },
-          "port": {
-            "description": "Nmae of the port this config applies to.",
-            "type": "string"
-          },
-          "routes": {
-            "description": "The set of routes associated with this port.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RouteConfig"
-            }
-          },
-          "switch": {
-            "description": "Switch the port belongs to.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchLocation"
-              }
-            ]
-          },
-          "uplink_port_fec": {
-            "description": "Port forward error correction type.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PortFec"
-              }
-            ]
-          },
-          "uplink_port_speed": {
-            "description": "Port speed.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PortSpeed"
-              }
-            ]
-          }
-        },
-        "required": [
-          "addresses",
-          "bgp_peers",
-          "port",
-          "routes",
-          "switch",
-          "uplink_port_fec",
-          "uplink_port_speed"
-        ]
       },
       "PortFec": {
         "description": "Switchport FEC options",
@@ -1628,7 +1811,7 @@
         ]
       },
       "PowerState": {
-        "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.",
+        "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"See RFD 81.\\n\\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.\", \"type\": \"string\", \"enum\": [ \"A0\", \"A1\", \"A2\" ] } ``` </details>",
         "type": "string",
         "enum": [
           "A0",
@@ -1682,6 +1865,42 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/ProgressEventKindForGenericSpec"
+              }
+            ]
+          },
+          "execution_id": {
+            "description": "The execution ID.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with `Self::from_generic` to deserialize generic metadata.",
+            "type": "string"
+          },
+          "total_elapsed": {
+            "description": "Total time elapsed since the start of execution.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "execution_id",
+          "spec",
+          "total_elapsed"
+        ]
+      },
+      "ProgressEventForUplinkPreflightCheckSpec": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "The kind of event this is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProgressEventKindForUplinkPreflightCheckSpec"
               }
             ]
           },
@@ -1932,6 +2151,193 @@
           }
         ]
       },
+      "ProgressEventKindForUplinkPreflightCheckSpec": {
+        "oneOf": [
+          {
+            "description": "The update engine is waiting for a progress message.\n\nThe update engine sends this message immediately after a [`StepEvent`] corresponding to a new step.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The attempt number currently being executed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "Total time elapsed since the start of the attempt.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_progress"
+                ]
+              },
+              "step": {
+                "description": "Information about the step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForUplinkPreflightCheckSpec"
+                  }
+                ]
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "step",
+              "step_elapsed"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The attempt number currently being executed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "Total time elapsed since the start of the attempt.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "progress"
+                ]
+              },
+              "metadata": {
+                "description": "Metadata that was returned with progress.",
+                "type": "string"
+              },
+              "progress": {
+                "nullable": true,
+                "description": "Current progress.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ProgressCounter"
+                  }
+                ]
+              },
+              "step": {
+                "description": "Information about the step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForUplinkPreflightCheckSpec"
+                  }
+                ]
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "metadata",
+              "step",
+              "step_elapsed"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The attempt number currently being executed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "The time it took for this attempt to complete.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "event": {
+                "description": "The event that occurred.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ProgressEventForGenericSpec"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "nested"
+                ]
+              },
+              "step": {
+                "description": "Information about the step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForUplinkPreflightCheckSpec"
+                  }
+                ]
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "attempt_elapsed",
+              "event",
+              "kind",
+              "step",
+              "step_elapsed"
+            ]
+          },
+          {
+            "description": "Future variants that might be unknown.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        ]
+      },
       "ProgressEventKindForWicketdEngineSpec": {
         "oneOf": [
           {
@@ -2118,6 +2524,28 @@
           }
         ]
       },
+      "PutBgpAuthKeyBody": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/BgpAuthKey"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      },
+      "PutBgpAuthKeyResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/SetBgpAuthKeyStatus"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
       "PutRssRecoveryUserPasswordHash": {
         "type": "object",
         "properties": {
@@ -2130,8 +2558,12 @@
         ]
       },
       "PutRssUserConfigInsensitive": {
+        "description": "The portion of `CurrentRssUserConfig` that can be posted in one shot; it is provided by the wicket user uploading a TOML file, currently.\n\nThis is the \"write\" version of [`CurrentRssUserConfigInsensitive`], with some different fields.",
         "type": "object",
         "properties": {
+          "allowed_source_ips": {
+            "$ref": "#/components/schemas/AllowedSourceIps"
+          },
           "bootstrap_sleds": {
             "description": "List of slot numbers only.\n\n`wicketd` will map this back to sleds with the correct `SpIdentifier` based on the `bootstrap_sleds` it provides in `CurrentRssUserConfigInsensitive`.",
             "type": "array",
@@ -2172,10 +2604,11 @@
             }
           },
           "rack_network_config": {
-            "$ref": "#/components/schemas/RackNetworkConfigV1"
+            "$ref": "#/components/schemas/UserSpecifiedRackNetworkConfig"
           }
         },
         "required": [
+          "allowed_source_ips",
           "bootstrap_sleds",
           "dns_servers",
           "external_dns_ips",
@@ -2185,58 +2618,14 @@
           "rack_network_config"
         ]
       },
-      "RackInitId": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "RackNetworkConfigV1": {
-        "description": "Initial network configuration",
-        "type": "object",
-        "properties": {
-          "bgp": {
-            "description": "BGP configurations for connecting the rack to external networks",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BgpConfig"
-            }
-          },
-          "infra_ip_first": {
-            "description": "First ip address to be used for configuring network infrastructure",
-            "type": "string",
-            "format": "ipv4"
-          },
-          "infra_ip_last": {
-            "description": "Last ip address to be used for configuring network infrastructure",
-            "type": "string",
-            "format": "ipv4"
-          },
-          "ports": {
-            "description": "Uplinks for connecting the rack to external networks",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PortConfigV1"
-            }
-          },
-          "rack_subnet": {
-            "$ref": "#/components/schemas/Ipv6Network"
-          }
-        },
-        "required": [
-          "bgp",
-          "infra_ip_first",
-          "infra_ip_last",
-          "ports",
-          "rack_subnet"
-        ]
-      },
       "RackOperationStatus": {
-        "description": "Current status of any rack-level operation being performed by this bootstrap agent.",
+        "description": "Current status of any rack-level operation being performed by this bootstrap agent.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Current status of any rack-level operation being performed by this bootstrap agent.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initializing\" ] } } }, { \"description\": \"`id` will be none if the rack was already initialized on startup.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"id\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_panicked\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"resetting\" ] } } }, { \"description\": \"`reset_id` will be None if the rack is in an uninitialized-on-startup, or Some if it is in an uninitialized state due to a reset operation completing.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"reset_id\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"uninitialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_panicked\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackInitId"
+                "$ref": "#/components/schemas/TypedUuidForRackInitKind"
               },
               "status": {
                 "type": "string",
@@ -2258,7 +2647,7 @@
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/RackInitId"
+                    "$ref": "#/components/schemas/TypedUuidForRackInitKind"
                   }
                 ]
               },
@@ -2277,7 +2666,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackInitId"
+                "$ref": "#/components/schemas/TypedUuidForRackInitKind"
               },
               "message": {
                 "type": "string"
@@ -2299,7 +2688,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackInitId"
+                "$ref": "#/components/schemas/TypedUuidForRackInitKind"
               },
               "status": {
                 "type": "string",
@@ -2317,7 +2706,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackResetId"
+                "$ref": "#/components/schemas/TypedUuidForRackResetKind"
               },
               "status": {
                 "type": "string",
@@ -2339,7 +2728,7 @@
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/RackResetId"
+                    "$ref": "#/components/schemas/TypedUuidForRackResetKind"
                   }
                 ]
               },
@@ -2358,7 +2747,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackResetId"
+                "$ref": "#/components/schemas/TypedUuidForRackResetKind"
               },
               "message": {
                 "type": "string"
@@ -2380,7 +2769,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/RackResetId"
+                "$ref": "#/components/schemas/TypedUuidForRackResetKind"
               },
               "status": {
                 "type": "string",
@@ -2396,10 +2785,6 @@
           }
         ]
       },
-      "RackResetId": {
-        "type": "string",
-        "format": "uuid"
-      },
       "RackV1Inventory": {
         "description": "The current state of the v1 Rack as known to wicketd",
         "type": "object",
@@ -2413,6 +2798,25 @@
         },
         "required": [
           "sps"
+        ]
+      },
+      "RotImageError": {
+        "description": "RotImageError\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"unchecked\", \"first_page_erased\", \"partially_programmed\", \"invalid_length\", \"header_not_programmed\", \"bootloader_too_small\", \"bad_magic\", \"header_image_size\", \"unaligned_length\", \"unsupported_type\", \"reset_vector_not_thumb2\", \"reset_vector\", \"signature\" ] } ``` </details>",
+        "type": "string",
+        "enum": [
+          "unchecked",
+          "first_page_erased",
+          "partially_programmed",
+          "invalid_length",
+          "header_not_programmed",
+          "bootloader_too_small",
+          "bad_magic",
+          "header_image_size",
+          "unaligned_length",
+          "unsupported_type",
+          "reset_vector_not_thumb2",
+          "reset_vector",
+          "signature"
         ]
       },
       "RotInventory": {
@@ -2437,6 +2841,22 @@
                 "$ref": "#/components/schemas/SpComponentCaboose"
               }
             ]
+          },
+          "caboose_stage0": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentCaboose"
+              }
+            ]
+          },
+          "caboose_stage0next": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentCaboose"
+              }
+            ]
           }
         },
         "required": [
@@ -2444,6 +2864,7 @@
         ]
       },
       "RotSlot": {
+        "description": "RotSlot\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"slot\" ], \"properties\": { \"slot\": { \"type\": \"string\", \"enum\": [ \"a\" ] } } }, { \"type\": \"object\", \"required\": [ \"slot\" ], \"properties\": { \"slot\": { \"type\": \"string\", \"enum\": [ \"b\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -2476,6 +2897,7 @@
         ]
       },
       "RotState": {
+        "description": "RotState\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"active\", \"persistent_boot_preference\", \"state\" ], \"properties\": { \"active\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"pending_persistent_boot_preference\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] }, \"persistent_boot_preference\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"slot_a_sha3_256_digest\": { \"type\": [ \"string\", \"null\" ] }, \"slot_b_sha3_256_digest\": { \"type\": [ \"string\", \"null\" ] }, \"state\": { \"type\": \"string\", \"enum\": [ \"v2\" ] }, \"transient_boot_preference\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } } }, { \"type\": \"object\", \"required\": [ \"message\", \"state\" ], \"properties\": { \"message\": { \"type\": \"string\" }, \"state\": { \"type\": \"string\", \"enum\": [ \"communication_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"active\", \"persistent_boot_preference\", \"slot_a_fwid\", \"slot_b_fwid\", \"stage0_fwid\", \"stage0next_fwid\", \"state\" ], \"properties\": { \"active\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"pending_persistent_boot_preference\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] }, \"persistent_boot_preference\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"slot_a_error\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] }, \"slot_a_fwid\": { \"type\": \"string\" }, \"slot_b_error\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] }, \"slot_b_fwid\": { \"type\": \"string\" }, \"stage0_error\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] }, \"stage0_fwid\": { \"type\": \"string\" }, \"stage0next_error\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] }, \"stage0next_fwid\": { \"type\": \"string\" }, \"state\": { \"type\": \"string\", \"enum\": [ \"v3\" ] }, \"transient_boot_preference\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -2505,7 +2927,7 @@
               "state": {
                 "type": "string",
                 "enum": [
-                  "enabled"
+                  "v2"
                 ]
               },
               "transient_boot_preference": {
@@ -2540,6 +2962,92 @@
               "message",
               "state"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "active": {
+                "$ref": "#/components/schemas/RotSlot"
+              },
+              "pending_persistent_boot_preference": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              },
+              "persistent_boot_preference": {
+                "$ref": "#/components/schemas/RotSlot"
+              },
+              "slot_a_error": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageError"
+                  }
+                ]
+              },
+              "slot_a_fwid": {
+                "type": "string"
+              },
+              "slot_b_error": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageError"
+                  }
+                ]
+              },
+              "slot_b_fwid": {
+                "type": "string"
+              },
+              "stage0_error": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageError"
+                  }
+                ]
+              },
+              "stage0_fwid": {
+                "type": "string"
+              },
+              "stage0next_error": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageError"
+                  }
+                ]
+              },
+              "stage0next_fwid": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "v3"
+                ]
+              },
+              "transient_boot_preference": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "active",
+              "persistent_boot_preference",
+              "slot_a_fwid",
+              "slot_b_fwid",
+              "stage0_fwid",
+              "stage0next_fwid",
+              "state"
+            ]
           }
         ]
       },
@@ -2550,7 +3058,7 @@
             "description": "The destination of the route.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/IpNetwork"
+                "$ref": "#/components/schemas/IpNet"
               }
             ]
           },
@@ -2558,6 +3066,14 @@
             "description": "The nexthop/gateway address.",
             "type": "string",
             "format": "ip"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id associated with this route.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
@@ -2569,7 +3085,33 @@
         "type": "string",
         "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
       },
+      "SetBgpAuthKeyStatus": {
+        "oneOf": [
+          {
+            "description": "The key was accepted and replaced an old key.",
+            "type": "string",
+            "enum": [
+              "replaced"
+            ]
+          },
+          {
+            "description": "The key was accepted, and is the same as the existing key.",
+            "type": "string",
+            "enum": [
+              "unchanged"
+            ]
+          },
+          {
+            "description": "The key was accepted and is new.",
+            "type": "string",
+            "enum": [
+              "added"
+            ]
+          }
+        ]
+      },
       "SpComponentCaboose": {
+        "description": "SpComponentCaboose\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"board\", \"git_commit\", \"name\", \"version\" ], \"properties\": { \"board\": { \"type\": \"string\" }, \"git_commit\": { \"type\": \"string\" }, \"name\": { \"type\": \"string\" }, \"version\": { \"type\": \"string\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "board": {
@@ -2593,7 +3135,7 @@
         ]
       },
       "SpComponentInfo": {
-        "description": "Overview of a single SP component.",
+        "description": "Overview of a single SP component.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Overview of a single SP component.\", \"type\": \"object\", \"required\": [ \"capabilities\", \"component\", \"description\", \"device\", \"presence\" ], \"properties\": { \"capabilities\": { \"description\": \"`capabilities` is a bitmask; interpret it via [`gateway_messages::DeviceCapabilities`].\", \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"component\": { \"description\": \"The unique identifier for this component.\", \"type\": \"string\" }, \"description\": { \"description\": \"A human-readable description of the component.\", \"type\": \"string\" }, \"device\": { \"description\": \"The name of the physical device.\", \"type\": \"string\" }, \"presence\": { \"description\": \"Whether or not the component is present, to the best of the SP's ability to judge.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/SpComponentPresence\" } ] }, \"serial_number\": { \"description\": \"The component's serial number, if it has one.\", \"type\": [ \"string\", \"null\" ] } } } ``` </details>",
         "type": "object",
         "properties": {
           "capabilities": {
@@ -2637,7 +3179,7 @@
         ]
       },
       "SpComponentPresence": {
-        "description": "Description of the presence or absence of a component.\n\nThe presence of some components may vary based on the power state of the sled (e.g., components that time out or appear unavailable if the sled is in A2 may become present when the sled moves to A0).",
+        "description": "Description of the presence or absence of a component.\n\nThe presence of some components may vary based on the power state of the sled (e.g., components that time out or appear unavailable if the sled is in A2 may become present when the sled moves to A0).\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Description of the presence or absence of a component.\\n\\nThe presence of some components may vary based on the power state of the sled (e.g., components that time out or appear unavailable if the sled is in A2 may become present when the sled moves to A0).\", \"oneOf\": [ { \"description\": \"The component is present.\", \"type\": \"string\", \"enum\": [ \"present\" ] }, { \"description\": \"The component is not present.\", \"type\": \"string\", \"enum\": [ \"not_present\" ] }, { \"description\": \"The component is present but in a failed or faulty state.\", \"type\": \"string\", \"enum\": [ \"failed\" ] }, { \"description\": \"The SP is unable to determine the presence of the component.\", \"type\": \"string\", \"enum\": [ \"unavailable\" ] }, { \"description\": \"The SP's attempt to determine the presence of the component timed out.\", \"type\": \"string\", \"enum\": [ \"timeout\" ] }, { \"description\": \"The SP's attempt to determine the presence of the component failed.\", \"type\": \"string\", \"enum\": [ \"error\" ] } ] } ``` </details>",
         "oneOf": [
           {
             "description": "The component is present.",
@@ -2684,6 +3226,7 @@
         ]
       },
       "SpIdentifier": {
+        "description": "SpIdentifier\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"slot\", \"type\" ], \"properties\": { \"slot\": { \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"type\": { \"$ref\": \"#/components/schemas/SpType\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "slot": {
@@ -2701,7 +3244,7 @@
         ]
       },
       "SpIgnition": {
-        "description": "State of an ignition target.\n\nTODO: Ignition returns much more information than we're reporting here: do we want to expand this?",
+        "description": "State of an ignition target.\n\nTODO: Ignition returns much more information than we're reporting here: do we want to expand this?\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"State of an ignition target.\\n\\nTODO: Ignition returns much more information than we're reporting here: do we want to expand this?\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"present\" ], \"properties\": { \"present\": { \"type\": \"string\", \"enum\": [ \"no\" ] } } }, { \"type\": \"object\", \"required\": [ \"ctrl_detect_0\", \"ctrl_detect_1\", \"flt_a2\", \"flt_a3\", \"flt_rot\", \"flt_sp\", \"id\", \"power\", \"present\" ], \"properties\": { \"ctrl_detect_0\": { \"type\": \"boolean\" }, \"ctrl_detect_1\": { \"type\": \"boolean\" }, \"flt_a2\": { \"type\": \"boolean\" }, \"flt_a3\": { \"type\": \"boolean\" }, \"flt_rot\": { \"type\": \"boolean\" }, \"flt_sp\": { \"type\": \"boolean\" }, \"id\": { \"$ref\": \"#/components/schemas/SpIgnitionSystemType\" }, \"power\": { \"type\": \"boolean\" }, \"present\": { \"type\": \"string\", \"enum\": [ \"yes\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -2766,7 +3309,7 @@
         ]
       },
       "SpIgnitionSystemType": {
-        "description": "TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?",
+        "description": "TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"gimlet\" ] } } }, { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"sidecar\" ] } } }, { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"psc\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"system_type\" ], \"properties\": { \"id\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 }, \"system_type\": { \"type\": \"string\", \"enum\": [ \"unknown\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -2892,6 +3435,7 @@
         ]
       },
       "SpState": {
+        "description": "SpState\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"base_mac_address\", \"hubris_archive_id\", \"model\", \"power_state\", \"revision\", \"rot\", \"serial_number\" ], \"properties\": { \"base_mac_address\": { \"type\": \"array\", \"items\": { \"type\": \"integer\", \"format\": \"uint8\", \"minimum\": 0.0 }, \"maxItems\": 6, \"minItems\": 6 }, \"hubris_archive_id\": { \"type\": \"string\" }, \"model\": { \"type\": \"string\" }, \"power_state\": { \"$ref\": \"#/components/schemas/PowerState\" }, \"revision\": { \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"rot\": { \"$ref\": \"#/components/schemas/RotState\" }, \"serial_number\": { \"type\": \"string\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "base_mac_address": {
@@ -2936,6 +3480,7 @@
         ]
       },
       "SpType": {
+        "description": "SpType\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"sled\", \"power\", \"switch\" ] } ``` </details>",
         "type": "string",
         "enum": [
           "sled",
@@ -2946,6 +3491,10 @@
       "StartUpdateOptions": {
         "type": "object",
         "properties": {
+          "skip_rot_bootloader_version_check": {
+            "description": "If true, skip the check on the current RoT version and always update it regardless of whether the update appears to be neeeded.",
+            "type": "boolean"
+          },
           "skip_rot_version_check": {
             "description": "If true, skip the check on the current RoT version and always update it regardless of whether the update appears to be neeeded.",
             "type": "boolean"
@@ -2960,6 +3509,15 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/UpdateTestError"
+              }
+            ]
+          },
+          "test_simulate_rot_bootloader_result": {
+            "nullable": true,
+            "description": "If passed in, simulates a result for the RoT Bootloader update.\n\nThis is used for testing.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateSimulatedResult"
               }
             ]
           },
@@ -2990,6 +3548,7 @@
           }
         },
         "required": [
+          "skip_rot_bootloader_version_check",
           "skip_rot_version_check",
           "skip_sp_version_check"
         ]
@@ -3037,6 +3596,25 @@
           "total_component_steps"
         ]
       },
+      "StepComponentSummaryForUplinkPreflightCheckSpec": {
+        "type": "object",
+        "properties": {
+          "component": {
+            "description": "The component.",
+            "type": "string"
+          },
+          "total_component_steps": {
+            "description": "The number of steps present in this component.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "component",
+          "total_component_steps"
+        ]
+      },
       "StepComponentSummaryForWicketdEngineSpec": {
         "type": "object",
         "properties": {
@@ -3068,6 +3646,49 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/StepEventKindForGenericSpec"
+              }
+            ]
+          },
+          "event_index": {
+            "description": "A monotonically increasing index for this `StepEvent`.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "execution_id": {
+            "description": "The execution ID.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used along with `Self::from_generic` to identify which specification to deserialize generic metadata against. For example:\n\n```rust,ignore if event.spec == \"MySpec\" { // event is likely generated from a MySpec engine. let event = Event::<MySpec>::from_generic(event)?; // ... } ```",
+            "type": "string"
+          },
+          "total_elapsed": {
+            "description": "Total time elapsed since the start of execution.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "event_index",
+          "execution_id",
+          "spec",
+          "total_elapsed"
+        ]
+      },
+      "StepEventForUplinkPreflightCheckSpec": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "The kind of event this is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StepEventKindForUplinkPreflightCheckSpec"
               }
             ]
           },
@@ -3593,6 +4214,492 @@
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
+                  }
+                ]
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "attempt_elapsed",
+              "event",
+              "kind",
+              "step",
+              "step_elapsed"
+            ]
+          },
+          {
+            "description": "Future variants that might be unknown.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        ]
+      },
+      "StepEventKindForUplinkPreflightCheckSpec": {
+        "oneOf": [
+          {
+            "description": "No steps were defined, and the executor exited without doing anything.\n\nThis is a terminal event: it is guaranteed that no more events will be seen after this one.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "no_steps_defined"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "description": "Execution was started.\n\nThis is an initial event -- it is always expected to be the first event received from the event stream.",
+            "type": "object",
+            "properties": {
+              "components": {
+                "description": "A list of components, along with the number of items each component has.",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/StepComponentSummaryForUplinkPreflightCheckSpec"
+                }
+              },
+              "first_step": {
+                "description": "Information about the first step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForUplinkPreflightCheckSpec"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "execution_started"
+                ]
+              },
+              "steps": {
+                "description": "The list of steps that will be executed.",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/StepInfoForUplinkPreflightCheckSpec"
+                }
+              }
+            },
+            "required": [
+              "components",
+              "first_step",
+              "kind",
+              "steps"
+            ]
+          },
+          {
+            "description": "Progress was reset along an attempt, and this attempt is going down a different path.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The current attempt number.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "The amount of time this attempt has taken so far.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "progress_reset"
+                ]
+              },
+              "message": {
+                "description": "A message assocaited with the reset.",
+                "type": "string"
+              },
+              "metadata": {
+                "description": "Progress-related metadata associated with this attempt.",
+                "type": "string"
+              },
+              "step": {
+                "description": "Information about the step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForUplinkPreflightCheckSpec"
+                  }
+                ]
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "message",
+              "metadata",
+              "step",
+              "step_elapsed"
+            ]
+          },
+          {
+            "description": "An attempt failed and this step is being retried.",
+            "type": "object",
+            "properties": {
+              "attempt_elapsed": {
+                "description": "The amount of time the previous attempt took.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "attempt_retry"
+                ]
+              },
+              "message": {
+                "description": "A message associated with the retry.",
+                "type": "string"
+              },
+              "next_attempt": {
+                "description": "The attempt number for the next attempt.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "step": {
+                "description": "Information about the step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForUplinkPreflightCheckSpec"
+                  }
+                ]
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "attempt_elapsed",
+              "kind",
+              "message",
+              "next_attempt",
+              "step",
+              "step_elapsed"
+            ]
+          },
+          {
+            "description": "A step is complete and the next step has been started.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The attempt number that completed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "The time it took for this attempt to complete.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "step_completed"
+                ]
+              },
+              "next_step": {
+                "description": "The next step that is being started.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForUplinkPreflightCheckSpec"
+                  }
+                ]
+              },
+              "outcome": {
+                "description": "The outcome of the step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepOutcomeForUplinkPreflightCheckSpec"
+                  }
+                ]
+              },
+              "step": {
+                "description": "Information about the step that just completed.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForUplinkPreflightCheckSpec"
+                  }
+                ]
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "next_step",
+              "outcome",
+              "step",
+              "step_elapsed"
+            ]
+          },
+          {
+            "description": "Execution is complete.\n\nThis is a terminal event: it is guaranteed that no more events will be seen after this one.",
+            "type": "object",
+            "properties": {
+              "attempt_elapsed": {
+                "description": "The time it took for this attempt to complete.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "execution_completed"
+                ]
+              },
+              "last_attempt": {
+                "description": "The attempt number that completed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "last_outcome": {
+                "description": "The outcome of the last step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepOutcomeForUplinkPreflightCheckSpec"
+                  }
+                ]
+              },
+              "last_step": {
+                "description": "Information about the last step that completed.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForUplinkPreflightCheckSpec"
+                  }
+                ]
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "attempt_elapsed",
+              "kind",
+              "last_attempt",
+              "last_outcome",
+              "last_step",
+              "step_elapsed"
+            ]
+          },
+          {
+            "description": "Execution failed.\n\nThis is a terminal event: it is guaranteed that no more events will be seen after this one.",
+            "type": "object",
+            "properties": {
+              "attempt_elapsed": {
+                "description": "The time it took for this attempt to complete.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "causes": {
+                "description": "A chain of causes associated with the failure.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "failed_step": {
+                "description": "Information about the step that failed.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForUplinkPreflightCheckSpec"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "execution_failed"
+                ]
+              },
+              "message": {
+                "description": "A message associated with the failure.",
+                "type": "string"
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "total_attempts": {
+                "description": "The total number of attempts that were performed before the step failed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "attempt_elapsed",
+              "causes",
+              "failed_step",
+              "kind",
+              "message",
+              "step_elapsed",
+              "total_attempts"
+            ]
+          },
+          {
+            "description": "Execution aborted by an external user.\n\nThis is a terminal event: it is guaranteed that no more events will be seen after this one.",
+            "type": "object",
+            "properties": {
+              "aborted_step": {
+                "description": "Information about the step that was running at the time execution was aborted.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForUplinkPreflightCheckSpec"
+                  }
+                ]
+              },
+              "attempt": {
+                "description": "The attempt that was running at the time the step was aborted.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "The time it took for this attempt to complete.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "execution_aborted"
+                ]
+              },
+              "message": {
+                "description": "A message associated with the abort.",
+                "type": "string"
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "aborted_step",
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "message",
+              "step_elapsed"
+            ]
+          },
+          {
+            "description": "A nested step event occurred.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The current attempt number.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "The time it took for this attempt to complete.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "event": {
+                "description": "The event that occurred.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepEventForGenericSpec"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "nested"
+                ]
+              },
+              "step": {
+                "description": "Information about the step that's occurring.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForUplinkPreflightCheckSpec"
                   }
                 ]
               },
@@ -4158,6 +5265,54 @@
           "total_component_steps"
         ]
       },
+      "StepInfoForUplinkPreflightCheckSpec": {
+        "description": "Serializable information about a step.",
+        "type": "object",
+        "properties": {
+          "component": {
+            "description": "The component that this step is part of.",
+            "type": "string"
+          },
+          "component_index": {
+            "description": "The index of the step within the component.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "description": {
+            "description": "The description for this step.",
+            "type": "string"
+          },
+          "id": {
+            "description": "An identifier for this step.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UplinkPreflightStepId"
+              }
+            ]
+          },
+          "index": {
+            "description": "The index of the step within all steps to be executed.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "total_component_steps": {
+            "description": "The total number of steps in this component.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "component",
+          "component_index",
+          "description",
+          "id",
+          "index",
+          "total_component_steps"
+        ]
+      },
       "StepInfoForWicketdEngineSpec": {
         "description": "Serializable information about a step.",
         "type": "object",
@@ -4225,6 +5380,31 @@
           "metadata": {
             "nullable": true,
             "description": "Additional metadata associated with this step."
+          }
+        },
+        "required": [
+          "info"
+        ]
+      },
+      "StepInfoWithMetadataForUplinkPreflightCheckSpec": {
+        "description": "Serializable information about a step.",
+        "type": "object",
+        "properties": {
+          "info": {
+            "description": "Information about this step.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StepInfoForUplinkPreflightCheckSpec"
+              }
+            ]
+          },
+          "metadata": {
+            "nullable": true,
+            "description": "Additional metadata associated with this step.",
+            "type": "string",
+            "enum": [
+              null
+            ]
           }
         },
         "required": [
@@ -4328,6 +5508,94 @@
           }
         ]
       },
+      "StepOutcomeForUplinkPreflightCheckSpec": {
+        "oneOf": [
+          {
+            "description": "The step completed successfully.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "success"
+                ]
+              },
+              "message": {
+                "nullable": true,
+                "description": "An optional message associated with this step.",
+                "type": "string"
+              },
+              "metadata": {
+                "nullable": true,
+                "description": "Optional completion metadata associated with the step.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "description": "The step completed with a warning.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "warning"
+                ]
+              },
+              "message": {
+                "description": "A warning message.",
+                "type": "string"
+              },
+              "metadata": {
+                "nullable": true,
+                "description": "Optional completion metadata associated with the step.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "message"
+            ]
+          },
+          {
+            "description": "The step was skipped with a message.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "skipped"
+                ]
+              },
+              "message": {
+                "description": "Message associated with the skip.",
+                "type": "string"
+              },
+              "metadata": {
+                "nullable": true,
+                "description": "Optional metadata associated with the skip.",
+                "type": "string",
+                "enum": [
+                  null
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "message"
+            ]
+          }
+        ]
+      },
       "StepOutcomeForWicketdEngineSpec": {
         "oneOf": [
           {
@@ -4404,27 +5672,30 @@
           }
         ]
       },
-      "SwitchLocation": {
-        "description": "Identifies switch physical location",
-        "oneOf": [
-          {
-            "description": "Switch in upper slot",
-            "type": "string",
-            "enum": [
-              "switch0"
-            ]
-          },
-          {
-            "description": "Switch in lower slot",
-            "type": "string",
-            "enum": [
-              "switch1"
-            ]
-          }
-        ]
+      "TypedUuidForRackInitKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForRackResetKind": {
+        "type": "string",
+        "format": "uuid"
       },
       "UpdateComponent": {
         "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "rot_bootloader"
+                ]
+              }
+            },
+            "required": [
+              "component"
+            ]
+          },
           {
             "type": "object",
             "properties": {
@@ -4511,6 +5782,20 @@
             "required": [
               "id",
               "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "interrogate_rot_bootloader"
+                ]
+              }
+            },
+            "required": [
+              "id"
             ]
           },
           {
@@ -4690,8 +5975,391 @@
           }
         ]
       },
+      "UplinkAddressConfig": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "$ref": "#/components/schemas/IpNet"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id (if any) associated with this address.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "address"
+        ]
+      },
+      "UplinkPreflightStepId": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "configure_switch"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "wait_for_l1_link"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "configure_address"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "configure_routing"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "check_external_dns_connectivity"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "check_external_ntp_connectivity"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "cleanup_routing"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "cleanup_address"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "cleanup_l1"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          }
+        ]
+      },
+      "UserSpecifiedBgpPeerConfig": {
+        "description": "User-specified version of [`BgpPeerConfig`].\n\nThis is similar to [`BgpPeerConfig`], except it doesn't have the sensitive `md5_auth_key` parameter, instead requiring that the user provide the key separately.\n\n[`BgpPeerConfig`]: omicron_common::api::internal::shared::BgpPeerConfig",
+        "type": "object",
+        "properties": {
+          "addr": {
+            "description": "Address of the peer.",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "allowed_export": {
+            "description": "Apply export policy to this peer with an allow list.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserSpecifiedImportExportPolicy"
+              }
+            ]
+          },
+          "allowed_import": {
+            "description": "Apply import policy to this peer with an allow list.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserSpecifiedImportExportPolicy"
+              }
+            ]
+          },
+          "asn": {
+            "description": "The autonomous sysetm number of the router the peer belongs to.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "auth_key_id": {
+            "nullable": true,
+            "description": "The key identifier for authentication to use with the peer.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BgpAuthKeyId"
+              }
+            ]
+          },
+          "communities": {
+            "description": "Include the provided communities in updates sent to the peer.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "connect_retry": {
+            "nullable": true,
+            "description": "The interval in seconds between peer connection retry attempts. Defaults to 3 seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "delay_open": {
+            "nullable": true,
+            "description": "How long to delay sending open messages to a peer in seconds. Defaults to 0.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "enforce_first_as": {
+            "description": "Enforce that the first AS in paths received from this peer is the peer's AS.",
+            "default": false,
+            "type": "boolean"
+          },
+          "hold_time": {
+            "nullable": true,
+            "description": "How long to keep a session alive without a keepalive in seconds. Defaults to 6 seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "idle_hold_time": {
+            "nullable": true,
+            "description": "How long to keep a peer in idle after a state machine reset in seconds. Defaults to 3 seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "keepalive": {
+            "nullable": true,
+            "description": "The interval to send keepalive messages at, in seconds. Defaults to 2 seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "Apply a local preference to routes received from this peer.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "min_ttl": {
+            "nullable": true,
+            "description": "Require messages from a peer have a minimum IP time to live field.",
+            "default": null,
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "multi_exit_discriminator": {
+            "nullable": true,
+            "description": "Apply the provided multi-exit discriminator (MED) updates sent to the peer.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "port": {
+            "description": "Switch port the peer is reachable on.",
+            "type": "string"
+          },
+          "remote_asn": {
+            "nullable": true,
+            "description": "Require that a peer has a specified ASN.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "Associate a VLAN ID with a BGP peer session.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "addr",
+          "asn",
+          "port"
+        ],
+        "additionalProperties": false
+      },
+      "UserSpecifiedImportExportPolicy": {
+        "nullable": true,
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/IpNet"
+        }
+      },
+      "UserSpecifiedPortConfig": {
+        "description": "User-specified version of [`PortConfigV2`].\n\nAll of [`PortConfigV2`] is user-specified. But we expect the port name to be a key, rather than a field as in [`PortConfigV2`]. So this has all of the fields other than the port name.\n\n[`PortConfigV2`]: omicron_common::api::internal::shared::PortConfigV2",
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UplinkAddressConfig"
+            }
+          },
+          "autoneg": {
+            "type": "boolean"
+          },
+          "bgp_peers": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserSpecifiedBgpPeerConfig"
+            }
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteConfig"
+            }
+          },
+          "uplink_port_fec": {
+            "$ref": "#/components/schemas/PortFec"
+          },
+          "uplink_port_speed": {
+            "$ref": "#/components/schemas/PortSpeed"
+          }
+        },
+        "required": [
+          "addresses",
+          "autoneg",
+          "routes",
+          "uplink_port_fec",
+          "uplink_port_speed"
+        ],
+        "additionalProperties": false
+      },
+      "UserSpecifiedRackNetworkConfig": {
+        "description": "User-specified parts of [`RackNetworkConfig`](omicron_common::api::internal::shared::RackNetworkConfig).",
+        "type": "object",
+        "properties": {
+          "bgp": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpConfig"
+            }
+          },
+          "infra_ip_first": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "infra_ip_last": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "switch0": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/UserSpecifiedPortConfig"
+            }
+          },
+          "switch1": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/UserSpecifiedPortConfig"
+            }
+          }
+        },
+        "required": [
+          "bgp",
+          "infra_ip_first",
+          "infra_ip_last",
+          "switch0",
+          "switch1"
+        ],
+        "additionalProperties": false
+      },
       "IgnitionCommand": {
-        "description": "Ignition command.",
+        "description": "Ignition command.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Ignition command.\", \"type\": \"string\", \"enum\": [ \"power_on\", \"power_off\", \"power_reset\" ] } ``` </details>",
         "type": "string",
         "enum": [
           "power_on",

@@ -11,15 +11,22 @@ use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
+use nexus_sled_agent_shared::inventory::Baseboard;
+use nexus_sled_agent_shared::inventory::Inventory;
+use nexus_sled_agent_shared::inventory::InventoryDisk;
+use nexus_sled_agent_shared::inventory::InventoryZpool;
+use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
+use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
-use nexus_types::inventory::OmicronZonesConfig;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use omicron_common::api::external::ByteCount;
+use omicron_common::disk::DiskVariant;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
-use uuid::Uuid;
 
 /// Returns an example Collection used for testing
 ///
@@ -48,7 +55,7 @@ pub fn representative() -> Representative {
                 model: String::from("model1"),
                 power_state: PowerState::A0,
                 revision: 0,
-                rot: RotState::Enabled {
+                rot: RotState::V2 {
                     active: RotSlot::A,
                     pending_persistent_boot_preference: None,
                     persistent_boot_preference: RotSlot::A,
@@ -73,7 +80,7 @@ pub fn representative() -> Representative {
                 model: String::from("model2"),
                 power_state: PowerState::A2,
                 revision: 1,
-                rot: RotState::Enabled {
+                rot: RotState::V2 {
                     active: RotSlot::B,
                     pending_persistent_boot_preference: Some(RotSlot::A),
                     persistent_boot_preference: RotSlot::A,
@@ -100,7 +107,7 @@ pub fn representative() -> Representative {
                 model: String::from("model3"),
                 power_state: PowerState::A1,
                 revision: 2,
-                rot: RotState::Enabled {
+                rot: RotState::V2 {
                     active: RotSlot::B,
                     pending_persistent_boot_preference: None,
                     persistent_boot_preference: RotSlot::A,
@@ -127,7 +134,7 @@ pub fn representative() -> Representative {
                 model: String::from("model4"),
                 power_state: PowerState::A2,
                 revision: 3,
-                rot: RotState::Enabled {
+                rot: RotState::V2 {
                     active: RotSlot::B,
                     pending_persistent_boot_preference: None,
                     persistent_boot_preference: RotSlot::A,
@@ -272,17 +279,62 @@ pub fn representative() -> Representative {
     // This first one will match "sled1_bb"'s baseboard information.
     let sled_agent_id_basic =
         "c5aec1df-b897-49e4-8085-ccd975f9b529".parse().unwrap();
+    // Add some disks to this first sled.
+    let disks = vec![
+        // Let's say we have one manufacturer for our M.2...
+        InventoryDisk {
+            identity: omicron_common::disk::DiskIdentity {
+                vendor: "macrohard".to_string(),
+                model: "box".to_string(),
+                serial: "XXIV".to_string(),
+            },
+            variant: DiskVariant::M2,
+            slot: 0,
+        },
+        // ... and a couple different vendors for our U.2s
+        InventoryDisk {
+            identity: omicron_common::disk::DiskIdentity {
+                vendor: "memetendo".to_string(),
+                model: "swatch".to_string(),
+                serial: "0001".to_string(),
+            },
+            variant: DiskVariant::U2,
+            slot: 1,
+        },
+        InventoryDisk {
+            identity: omicron_common::disk::DiskIdentity {
+                vendor: "memetendo".to_string(),
+                model: "swatch".to_string(),
+                serial: "0002".to_string(),
+            },
+            variant: DiskVariant::U2,
+            slot: 2,
+        },
+        InventoryDisk {
+            identity: omicron_common::disk::DiskIdentity {
+                vendor: "tony".to_string(),
+                model: "craystation".to_string(),
+                serial: "5".to_string(),
+            },
+            variant: DiskVariant::U2,
+            slot: 3,
+        },
+    ];
+    let zpools = vec![];
+
     builder
         .found_sled_inventory(
             "fake sled agent 1",
             sled_agent(
                 sled_agent_id_basic,
-                sled_agent_client::types::Baseboard::Gimlet {
+                Baseboard::Gimlet {
                     identifier: String::from("s1"),
                     model: String::from("model1"),
                     revision: 0,
                 },
-                sled_agent_client::types::SledRole::Gimlet,
+                SledRole::Gimlet,
+                disks,
+                zpools,
             ),
         )
         .unwrap();
@@ -301,12 +353,14 @@ pub fn representative() -> Representative {
             "fake sled agent 4",
             sled_agent(
                 sled_agent_id_extra,
-                sled_agent_client::types::Baseboard::Gimlet {
+                Baseboard::Gimlet {
                     identifier: sled4_bb.serial_number.clone(),
                     model: sled4_bb.part_number.clone(),
                     revision: 0,
                 },
-                sled_agent_client::types::SledRole::Scrimlet,
+                SledRole::Scrimlet,
+                vec![],
+                vec![],
             ),
         )
         .unwrap();
@@ -321,11 +375,13 @@ pub fn representative() -> Representative {
             "fake sled agent 5",
             sled_agent(
                 sled_agent_id_pc,
-                sled_agent_client::types::Baseboard::Pc {
+                Baseboard::Pc {
                     identifier: String::from("fellofftruck1"),
                     model: String::from("fellofftruck"),
                 },
-                sled_agent_client::types::SledRole::Gimlet,
+                SledRole::Gimlet,
+                vec![],
+                vec![],
             ),
         )
         .unwrap();
@@ -341,8 +397,10 @@ pub fn representative() -> Representative {
             "fake sled agent 6",
             sled_agent(
                 sled_agent_id_unknown,
-                sled_agent_client::types::Baseboard::Unknown,
-                sled_agent_client::types::SledRole::Gimlet,
+                Baseboard::Unknown,
+                SledRole::Gimlet,
+                vec![],
+                vec![],
             ),
         )
         .unwrap();
@@ -396,7 +454,19 @@ pub struct Representative {
     pub sleds: [Arc<BaseboardId>; 4],
     pub switch: Arc<BaseboardId>,
     pub psc: Arc<BaseboardId>,
-    pub sled_agents: [Uuid; 4],
+    pub sled_agents: [SledUuid; 4],
+}
+
+impl Representative {
+    pub fn new(
+        builder: CollectionBuilder,
+        sleds: [Arc<BaseboardId>; 4],
+        switch: Arc<BaseboardId>,
+        psc: Arc<BaseboardId>,
+        sled_agents: [SledUuid; 4],
+    ) -> Self {
+        Self { builder, sleds, switch, psc, sled_agents }
+    }
 }
 
 /// Returns an SP state that can be used to populate a collection for testing
@@ -407,7 +477,7 @@ pub fn sp_state(unique: &str) -> SpState {
         model: format!("model{}", unique),
         power_state: PowerState::A2,
         revision: 0,
-        rot: RotState::Enabled {
+        rot: RotState::V2 {
             active: RotSlot::A,
             pending_persistent_boot_preference: None,
             persistent_boot_preference: RotSlot::A,
@@ -436,17 +506,21 @@ pub fn rot_page(unique: &str) -> RotPage {
 }
 
 pub fn sled_agent(
-    sled_id: Uuid,
-    baseboard: sled_agent_client::types::Baseboard,
-    sled_role: sled_agent_client::types::SledRole,
-) -> sled_agent_client::types::Inventory {
-    sled_agent_client::types::Inventory {
+    sled_id: SledUuid,
+    baseboard: Baseboard,
+    sled_role: SledRole,
+    disks: Vec<InventoryDisk>,
+    zpools: Vec<InventoryZpool>,
+) -> Inventory {
+    Inventory {
         baseboard,
         reservoir_size: ByteCount::from(1024),
         sled_role,
         sled_agent_address: "[::1]:56792".parse().unwrap(),
-        sled_id,
+        sled_id: sled_id.into_untyped_uuid(),
         usable_hardware_threads: 10,
         usable_physical_ram: ByteCount::from(1024 * 1024),
+        disks,
+        zpools,
     }
 }

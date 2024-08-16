@@ -1,7 +1,7 @@
 use crate::helpers::generate_name;
 use anyhow::{anyhow, Context as _, Result};
 use chrono::Utc;
-use omicron_sled_agent::rack_setup::config::SetupServiceConfig;
+use hickory_resolver::error::ResolveErrorKind;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{Name, ProjectCreate};
 use oxide_client::CustomDnsResolver;
@@ -9,11 +9,11 @@ use oxide_client::{Client, ClientImagesExt, ClientProjectsExt, ClientVpcsExt};
 use reqwest::dns::Resolve;
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Url;
+use sled_agent_types::rack_init::RackInitializeRequest;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use trust_dns_resolver::error::ResolveErrorKind;
 use uuid::Uuid;
 
 const RSS_CONFIG_STR: &str = include_str!(concat!(
@@ -73,7 +73,7 @@ impl Context {
     }
 }
 
-fn rss_config() -> Result<SetupServiceConfig> {
+fn rss_config() -> Result<RackInitializeRequest> {
     let path = "/opt/oxide/sled-agent/pkg/config-rss.toml";
     let content =
         std::fs::read_to_string(&path).unwrap_or(RSS_CONFIG_STR.to_string());
@@ -81,7 +81,7 @@ fn rss_config() -> Result<SetupServiceConfig> {
         .with_context(|| "parsing config-rss as TOML".to_string())
 }
 
-fn nexus_external_dns_name(config: &SetupServiceConfig) -> String {
+fn nexus_external_dns_name(config: &RackInitializeRequest) -> String {
     format!(
         "{}.sys.{}",
         config.recovery_silo.silo_name.as_str(),
@@ -89,7 +89,7 @@ fn nexus_external_dns_name(config: &SetupServiceConfig) -> String {
     )
 }
 
-fn external_dns_addr(config: &SetupServiceConfig) -> Result<SocketAddr> {
+fn external_dns_addr(config: &RackInitializeRequest) -> Result<SocketAddr> {
     // From the RSS config, grab the first address from the configured services
     // IP pool as the DNS server's IP address.
     let dns_ip = config
@@ -138,7 +138,7 @@ pub async fn nexus_addr() -> Result<IpAddr> {
 }
 
 pub struct ClientParams {
-    rss_config: SetupServiceConfig,
+    rss_config: RackInitializeRequest,
     nexus_dns_name: String,
     resolver: Arc<CustomDnsResolver>,
     proto: &'static str,
@@ -224,7 +224,7 @@ impl ClientParams {
         let silo_name = config.recovery_silo.silo_name.as_str();
         let login_url = format!("{}/v1/login/{}/local", base_url, silo_name);
         let username: oxide_client::types::UserId =
-            config.recovery_silo.user_name.as_str().parse().map_err(|s| {
+            config.recovery_silo.user_name.as_ref().parse().map_err(|s| {
                 anyhow!("parsing configured recovery user name: {:?}", s)
             })?;
         // See the comment in the config file about this password.

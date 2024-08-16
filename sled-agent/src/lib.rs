@@ -7,8 +7,6 @@
 // We only use rustdoc for internal documentation, including private items, so
 // it's expected that we'll have links to private items in the docs.
 #![allow(rustdoc::private_intra_doc_links)]
-// Clippy's style lints are useful, but not worth running automatically.
-#![allow(clippy::style)]
 
 // Module for executing the simulated sled agent.
 pub mod sim;
@@ -30,16 +28,16 @@ mod long_running_tasks;
 mod metrics;
 mod nexus;
 pub mod params;
+mod probe_manager;
 mod profile;
 pub mod rack_setup;
 pub mod server;
 pub mod services;
-pub mod services_migration;
 mod sled_agent;
-mod smf_helper;
 mod storage_monitor;
 mod swap_device;
 mod updates;
+mod vmm_reservoir;
 mod zone_bundle;
 
 #[cfg(test)]

@@ -4,28 +4,57 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
-cfg-if.workspace = true
-chrono.workspace = true
-dropshot.workspace = true
-futures.workspace = true
+cfg-if = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
+dropshot = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
-oximeter.workspace = true
-slog.workspace = true
-tokio.workspace = true
-thiserror.workspace = true
-uuid.workspace = true
+hyper = { workspace = true, optional = true }
+kstat-rs = { workspace = true, optional = true }
+libc = { workspace = true, optional = true }
+oximeter = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+slog = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
 omicron-workspace-hack.workspace = true
 
 [features]
-default = ["http-instruments", "kstat"]
-http-instruments = ["http"]
-kstat = ["kstat-rs"]
+default = ["http-instruments", "datalink"]
+http-instruments = [
+    "dep:chrono",
+    "dep:dropshot",
+    "dep:futures",
+    "dep:http",
+    "dep:hyper",
+    "dep:oximeter",
+    "dep:schemars",
+    "dep:serde",
+    "dep:slog",
+    "dep:uuid"
+]
+kstat = [
+    "dep:cfg-if",
+    "dep:chrono",
+    "dep:futures",
+    "dep:kstat-rs",
+    "dep:libc",
+    "dep:oximeter",
+    "dep:slog",
+    "dep:tokio",
+    "dep:thiserror",
+    "dep:uuid"
+]
+datalink = ["kstat"]
 
 [dev-dependencies]
 rand.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
-
-[target.'cfg(target_os = "illumos")'.dependencies]
-kstat-rs = { workspace = true, optional = true }
+oximeter.workspace = true

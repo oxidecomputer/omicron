@@ -4,13 +4,16 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
 dropshot.workspace = true
+hickory-resolver.workspace = true
 internal-dns.workspace = true
 omicron-common.workspace = true
 slog.workspace = true
 tokio.workspace = true
-trust-dns-resolver.workspace = true
 omicron-workspace-hack.workspace = true

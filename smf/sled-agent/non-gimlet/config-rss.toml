@@ -4,14 +4,6 @@
 # Agent API.  See the `RackInitializeRequest` type in bootstrap-agent or its
 # OpenAPI spec (in openapi/bootstrap-agent.json in the root of this workspace).
 
-# The /56 subnet for this rack.  This subnet is internal to the rack and fully
-# managed by Omicron, so you can pick anything you want within the IPv6 Unique
-# Local Address (ULA) range.  The rack-specific /56 subnet also implies the
-# parent /48 AZ subnet.
-#              |............|    <- This /48 is the AZ Subnet
-#              |...............| <- This /56 is the Rack Subnet
-rack_subnet = "fd00:1122:3344:0100::"
-
 # Only include "our own sled" in the bootstrap network
 bootstrap_discovery.type = "only_ours"
 
@@ -88,7 +80,14 @@ last = "192.168.1.29"
 # Configuration to bring up Boundary Services and make Nexus reachable from the
 # outside.  See docs/how-to-run.adoc for more on what to put here.
 [rack_network_config]
-rack_subnet = "fd00:1122:3344:01::/56"
+# The /56 subnet for this rack.  This subnet is internal to the rack and fully
+# managed by Omicron, so you can pick anything you want within the IPv6 Unique
+# Local Address (ULA) range.  The rack-specific /56 subnet also implies the
+# parent /48 AZ subnet.
+#              |............|    <- This /48 is the AZ Subnet
+#              |...............| <- This /56 is the Rack Subnet
+rack_subnet = "fd00:1122:3344:0100::/56"
+
 # A range of IP addresses used by Boundary Services on the external network.  In
 # a real system, these would be addresses of the uplink ports on the Sidecar.
 # With softnpu, only one address is used.
@@ -103,7 +102,7 @@ bgp = []
 # Routes associated with this port.
 routes = [{nexthop = "192.168.1.199", destination = "0.0.0.0/0"}]
 # Addresses associated with this port.
-addresses = ["192.168.1.30/32"]
+addresses = [{address = "192.168.1.30/24"}]
 # Name of the uplink port.  This should always be "qsfp0" when using softnpu.
 port = "qsfp0"
 # The speed of this port.
@@ -118,6 +117,18 @@ autoneg = false
 switch = "switch0"
 # Neighbors we expect to peer with over BGP on this port.
 bgp_peers = []
+
+# An allowlist of source IPs that can make requests to user-facing services can
+# be specified here. It can be written as the string "any" ...
+[allowed_source_ips]
+allow = "any"
+
+# ... or as a list of IP subnets, like so:
+# allow = "list"
+# ips = ["10.0.0.1/32", "192.168.1.0/24"]
+#
+# Note that single IP addresses must include the netmask as well, so `/32` or
+# `/128`.
 
 # Configuration for the initial Silo, user, and password.
 #

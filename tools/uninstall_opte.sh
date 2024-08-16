@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Small tool to _uninstall_ OPTE and the xde kernel driver and ONU bits.
 #

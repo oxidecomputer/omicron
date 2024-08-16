@@ -18,10 +18,14 @@ progenitor::generate_api!(
         slog::debug!(log, "client response"; "result" => ?result);
     }),
     derives = [schemars::JsonSchema],
+    crates = {
+        "oxnet" = "0.1.0",
+    },
     replace = {
-        Ipv4Network = ipnetwork::Ipv4Network,
-        Ipv6Network = ipnetwork::Ipv6Network,
-        IpNetwork = ipnetwork::IpNetwork,
+        AllowedSourceIps = omicron_common::api::external::AllowedSourceIps,
+        ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
+        TypedUuidForRackInitKind = omicron_uuid_kinds::RackInitUuid,
+        TypedUuidForRackResetKind = omicron_uuid_kinds::RackResetUuid,
     }
 );
 
@@ -31,32 +35,36 @@ impl omicron_common::api::external::ClientError for types::Error {
     }
 }
 
-impl From<types::Baseboard> for sled_hardware::Baseboard {
+impl From<types::Baseboard> for sled_hardware_types::Baseboard {
     fn from(value: types::Baseboard) -> Self {
         match value {
             types::Baseboard::Gimlet { identifier, model, revision } => {
-                sled_hardware::Baseboard::new_gimlet(
+                sled_hardware_types::Baseboard::new_gimlet(
                     identifier, model, revision,
                 )
             }
-            types::Baseboard::Unknown => sled_hardware::Baseboard::unknown(),
+            types::Baseboard::Unknown => {
+                sled_hardware_types::Baseboard::unknown()
+            }
             types::Baseboard::Pc { identifier, model } => {
-                sled_hardware::Baseboard::new_pc(identifier, model)
+                sled_hardware_types::Baseboard::new_pc(identifier, model)
             }
         }
     }
 }
 
-impl From<sled_hardware::Baseboard> for types::Baseboard {
-    fn from(value: sled_hardware::Baseboard) -> Self {
+impl From<sled_hardware_types::Baseboard> for types::Baseboard {
+    fn from(value: sled_hardware_types::Baseboard) -> Self {
         match value {
-            sled_hardware::Baseboard::Gimlet {
+            sled_hardware_types::Baseboard::Gimlet {
                 identifier,
                 model,
                 revision,
             } => types::Baseboard::Gimlet { identifier, model, revision },
-            sled_hardware::Baseboard::Unknown => types::Baseboard::Unknown,
-            sled_hardware::Baseboard::Pc { identifier, model } => {
+            sled_hardware_types::Baseboard::Unknown => {
+                types::Baseboard::Unknown
+            }
+            sled_hardware_types::Baseboard::Pc { identifier, model } => {
                 types::Baseboard::Pc { identifier, model }
             }
         }

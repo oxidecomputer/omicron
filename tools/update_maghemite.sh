@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -o pipefail
 set -o errexit
@@ -8,6 +8,7 @@ SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 function usage {
     echo "usage: $0 [-c COMMIT] [-n]"
     echo
+    echo "  -b COMMIT   Ask to update Maghemite to HEAD on the named branch."
     echo "  -c COMMIT   Ask to update Maghemite to a specific commit."
     echo "              If this is unset, Github is queried."
     echo "  -n          Dry-run"
@@ -19,9 +20,7 @@ PACKAGES=(
   "mg-ddm"
   "mgd"
 )
-
 REPO="oxidecomputer/maghemite"
-
 . "$SOURCE_DIR/update_helpers.sh"
 
 function update_openapi {
@@ -66,8 +65,11 @@ function update_mgd {
 function main {
     TARGET_COMMIT=""
     DRY_RUN=""
-    while getopts "c:n" o; do
+    while getopts "b:c:n" o; do
       case "${o}" in
+        b)
+          TARGET_BRANCH="$OPTARG"
+          ;;
         c)
           TARGET_COMMIT="$OPTARG"
           ;;
@@ -80,12 +82,13 @@ function main {
       esac
     done
 
-    TARGET_COMMIT=$(get_latest_commit_from_gh "$REPO" "$TARGET_COMMIT")
+    if [[ -z "$TARGET_COMMIT" ]]; then
+	    TARGET_COMMIT=$(get_latest_commit_from_gh "$REPO" "$TARGET_BRANCH")
+    fi
     install_toml2json
-    do_update_packages "$TARGET_COMMIT" "$DRY_RUN" "$REPO" "${PACKAGES[@]}"
+    update_mgd "$TARGET_COMMIT" "$DRY_RUN"
     update_openapi "$TARGET_COMMIT" "$DRY_RUN" ddm
     update_openapi "$TARGET_COMMIT" "$DRY_RUN" mg
-    update_mgd "$TARGET_COMMIT" "$DRY_RUN"
     do_update_packages "$TARGET_COMMIT" "$DRY_RUN" "$REPO" "${PACKAGES[@]}"
 }
 

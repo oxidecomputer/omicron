@@ -9,12 +9,14 @@ use std::convert::From;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc::{self, Sender, UnboundedSender};
 use tokio::time::{interval, Duration, MissedTickBehavior};
-use wicket_common::rack_update::{SpIdentifier, SpType};
+use wicket_common::inventory::{SpIdentifier, SpType};
+use wicket_common::rack_update::{
+    AbortUpdateOptions, ClearUpdateStateOptions, StartUpdateOptions,
+};
 use wicket_common::WICKETD_TIMEOUT;
 use wicketd_client::types::{
-    AbortUpdateOptions, ClearUpdateStateOptions, ClearUpdateStateParams,
-    GetInventoryParams, GetInventoryResponse, GetLocationResponse,
-    IgnitionCommand, StartUpdateOptions, StartUpdateParams,
+    ClearUpdateStateParams, GetInventoryParams, GetInventoryResponse,
+    GetLocationResponse, IgnitionCommand, StartUpdateParams,
 };
 
 use crate::events::EventReportMap;
@@ -26,13 +28,13 @@ impl From<ComponentId> for SpIdentifier {
     fn from(id: ComponentId) -> Self {
         match id {
             ComponentId::Sled(i) => {
-                SpIdentifier { type_: SpType::Sled, slot: i as u32 }
+                SpIdentifier { type_: SpType::Sled, slot: u32::from(i) }
             }
             ComponentId::Psc(i) => {
-                SpIdentifier { type_: SpType::Power, slot: i as u32 }
+                SpIdentifier { type_: SpType::Power, slot: u32::from(i) }
             }
             ComponentId::Switch(i) => {
-                SpIdentifier { type_: SpType::Switch, slot: i as u32 }
+                SpIdentifier { type_: SpType::Switch, slot: u32::from(i) }
             }
         }
     }

@@ -5,9 +5,9 @@ use anyhow::{ensure, Context as _, Result};
 use async_trait::async_trait;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
-    ByteCount, DiskCreate, DiskSource, ExternalIpCreate, InstanceCpuCount,
-    InstanceCreate, InstanceDiskAttachment, InstanceNetworkInterfaceAttachment,
-    SshKeyCreate,
+    ByteCount, DiskCreate, DiskSource, ExternalIp, ExternalIpCreate,
+    InstanceCpuCount, InstanceCreate, InstanceDiskAttachment,
+    InstanceNetworkInterfaceAttachment, InstanceState, SshKeyCreate,
 };
 use oxide_client::{ClientDisksExt, ClientInstancesExt, ClientSessionExt};
 use russh::{ChannelMsg, Disconnect};
@@ -15,7 +15,6 @@ use russh_keys::key::{KeyPair, PublicKey};
 use russh_keys::PublicKeyBase64;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::sleep;
 
 #[tokio::test]
 async fn instance_launch() -> Result<()> {
@@ -26,10 +25,11 @@ async fn instance_launch() -> Result<()> {
         Arc::new(KeyPair::generate_ed25519().context("key generation failed")?);
     let public_key_str = format!("ssh-ed25519 {}", key.public_key_base64());
     eprintln!("create SSH key: {}", public_key_str);
+    let ssh_key_name = generate_name("key")?;
     ctx.client
         .current_user_ssh_key_create()
         .body(SshKeyCreate {
-            name: generate_name("key")?,
+            name: ssh_key_name.clone(),
             description: String::new(),
             public_key: public_key_str,
         })
@@ -63,15 +63,18 @@ async fn instance_launch() -> Result<()> {
         .body(InstanceCreate {
             name: generate_name("instance")?,
             description: String::new(),
-            hostname: "localshark".into(), // 🦈
+            hostname: "localshark".parse().unwrap(), // 🦈
             memory: ByteCount(1024 * 1024 * 1024),
             ncpus: InstanceCpuCount(2),
             disks: vec![InstanceDiskAttachment::Attach {
                 name: disk_name.clone(),
             }],
             network_interfaces: InstanceNetworkInterfaceAttachment::Default,
-            external_ips: vec![ExternalIpCreate::Ephemeral { pool_name: None }],
+            external_ips: vec![ExternalIpCreate::Ephemeral { pool: None }],
             user_data: String::new(),
+            ssh_public_keys: Some(vec![oxide_client::types::NameOrId::Name(
+                ssh_key_name.clone(),
+            )]),
             start: true,
         })
         .send()
@@ -87,7 +90,11 @@ async fn instance_launch() -> Result<()> {
         .items
         .first()
         .context("no external IPs")?
-        .ip;
+        .clone();
+
+    let ExternalIp::Ephemeral { ip: ip_addr } = ip_addr else {
+        anyhow::bail!("IP bound to instance was not ephemeral as required.")
+    };
     eprintln!("instance external IP: {}", ip_addr);
 
     // poll serial for login prompt, waiting 5 min max
@@ -97,6 +104,19 @@ async fn instance_launch() -> Result<()> {
         || async {
             type Error =
                 CondCheckError<oxide_client::Error<oxide_client::types::Error>>;
+
+            let instance_state = ctx
+                .client
+                .instance_view()
+                .project(ctx.project_name.clone())
+                .instance(instance.name.clone())
+                .send()
+                .await?
+                .run_state;
+
+            if instance_state == InstanceState::Starting {
+                return Err(Error::NotYet);
+            }
 
             let data = String::from_utf8_lossy(
                 &ctx.client
@@ -180,19 +200,49 @@ async fn instance_launch() -> Result<()> {
 
     // check that we saw it on the console
     eprintln!("waiting for serial console");
-    sleep(Duration::from_secs(5)).await;
-    let data = String::from_utf8_lossy(
-        &ctx.client
-            .instance_serial_console()
-            .project(ctx.project_name.clone())
-            .instance(instance.name.clone())
-            .most_recent(1024 * 1024)
-            .max_bytes(1024 * 1024)
-            .send()
-            .await?
-            .data,
+
+    let data = wait_for_condition(
+        || async {
+            type Error =
+                CondCheckError<oxide_client::Error<oxide_client::types::Error>>;
+
+            let instance_state = ctx
+                .client
+                .instance_view()
+                .project(ctx.project_name.clone())
+                .instance(instance.name.clone())
+                .send()
+                .await?
+                .run_state;
+
+            if instance_state == InstanceState::Starting {
+                return Err(Error::NotYet);
+            }
+
+            let data = String::from_utf8_lossy(
+                &ctx.client
+                    .instance_serial_console()
+                    .project(ctx.project_name.clone())
+                    .instance(instance.name.clone())
+                    .most_recent(1024 * 1024)
+                    .max_bytes(1024 * 1024)
+                    .send()
+                    .await
+                    .map_err(|_e| Error::NotYet)?
+                    .data,
+            )
+            .into_owned();
+            if data.contains("-----END SSH HOST KEY KEYS-----") {
+                Ok(data)
+            } else {
+                Err(Error::NotYet)
+            }
+        },
+        &Duration::from_secs(5),
+        &Duration::from_secs(300),
     )
-    .into_owned();
+    .await?;
+
     ensure!(
         data.contains("Hello, Oxide!"),
         "string not seen on console\n{}",
@@ -253,10 +303,9 @@ impl russh::client::Handler for SshClient {
     type Error = anyhow::Error;
 
     async fn check_server_key(
-        self,
+        &mut self,
         server_public_key: &PublicKey,
-    ) -> Result<(Self, bool), Self::Error> {
-        let b = &self.host_key == server_public_key;
-        Ok((self, b))
+    ) -> Result<bool, Self::Error> {
+        Ok(&self.host_key == server_public_key)
     }
 }

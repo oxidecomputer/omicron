@@ -5,8 +5,8 @@
 [console]
 # Directory for static assets. Absolute path or relative to CWD.
 static_dir = "/var/nexus/static"
-session_idle_timeout_minutes = 60
-session_absolute_timeout_minutes = 480
+session_idle_timeout_minutes = 480 # 8 hours
+session_absolute_timeout_minutes = 1440 # 24 hours
 
 [authn]
 schemes_external = ["session_cookie", "access_token"]
@@ -33,12 +33,14 @@ dns_external.period_secs_config = 60
 dns_external.period_secs_servers = 60
 dns_external.period_secs_propagation = 60
 dns_external.max_concurrent_server_updates = 5
+metrics_producer_gc.period_secs = 60
 # How frequently we check the list of stored TLS certificates.  This is
 # approximately an upper bound on how soon after updating the list of
 # certificates it will take _other_ Nexus instances to notice and stop serving
 # them (on a sunny day).
 external_endpoints.period_secs = 60
 nat_cleanup.period_secs = 30
+bfd_manager.period_secs = 30
 # How frequently to collect hardware/software inventory from the whole system
 # (even if we don't have reason to believe anything has changed).
 inventory.period_secs = 600
@@ -47,6 +49,24 @@ inventory.nkeep = 3
 # Disable inventory collection altogether (for emergencies)
 inventory.disable = false
 phantom_disks.period_secs = 30
+physical_disk_adoption.period_secs = 30
+decommissioned_disk_cleaner.period_secs = 60
+blueprints.period_secs_load = 10
+blueprints.period_secs_execute = 60
+blueprints.period_secs_collect_crdb_node_ids = 180
+sync_service_zone_nat.period_secs = 30
+switch_port_settings_manager.period_secs = 30
+region_replacement.period_secs = 30
+region_replacement_driver.period_secs = 10
+service_firewall_propagation.period_secs = 300
+v2p_mapping_propagation.period_secs = 30
+instance_watcher.period_secs = 30
+abandoned_vmm_reaper.period_secs = 60
+saga_recovery.period_secs = 600
+lookup_region_port.period_secs = 60
+instance_updater.period_secs = 30
+region_snapshot_replacement_start.period_secs = 30
+region_snapshot_replacement_garbage_collection.period_secs = 30
 
 [default_region_allocation_strategy]
 # by default, allocate without requirement for distinct sleds.

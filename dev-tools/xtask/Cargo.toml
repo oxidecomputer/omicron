@@ -4,9 +4,33 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
+# Please read before adding a new dependency!
+#
+# cargo xtask is used for many developer flows, and it is important for devx
+# that it be quick to build. If a particular task needs many dependencies,
+# consider moving it out into a binary crate and building that separately.
+# Additional binaries generally mean that you only pay for what you need.
+#
+# For example, xtask-downloader is a separate binary because it requires many
+# additional dependencies, like `reqwest`, `tar`, and `tokio`.
+#
+# The combinatorial explosion of features that would ordinarily happen is not
+# an issue for omicron due to the workspace-hack crate. (For build speed
+# reasons, `xtask` does *not* depend on `omicron-workspace-hack`. But the
+# downstream binaries do depend on it.)
 anyhow.workspace = true
 camino.workspace = true
-cargo_toml = "0.18"
-cargo_metadata = "0.18"
+cargo_toml = "0.20"
+cargo_metadata.workspace = true
 clap.workspace = true
+fs-err.workspace = true
+macaddr.workspace = true
+serde.workspace = true
+swrite.workspace = true
+tabled.workspace = true
+toml.workspace = true
+usdt.workspace = true

@@ -12,10 +12,10 @@ use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::FindPhysicalLinkError;
 use illumos_utils::dladm::PhysicalLink;
 use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
-use illumos_utils::zpool::ZpoolName;
 use omicron_common::vlan::VlanID;
 use serde::Deserialize;
 use sled_hardware::is_gimlet;
+use sled_hardware::UnparsedDisk;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -65,8 +65,12 @@ pub struct Config {
     pub swap_device_size_gb: Option<u32>,
     /// Optional VLAN ID to be used for tagging guest VNICs.
     pub vlan: Option<VlanID>,
-    /// Optional list of zpools to be used as "discovered disks".
-    pub zpools: Option<Vec<ZpoolName>>,
+    /// Optional list of virtual devices to be used as "discovered disks".
+    pub vdevs: Option<Vec<Utf8PathBuf>>,
+    /// Optional list of real devices to be injected as observed disks during
+    /// device polling.
+    #[serde(default)]
+    pub nongimlet_observed_disks: Option<Vec<UnparsedDisk>>,
     /// Optionally skip waiting for time synchronization
     pub skip_timesync: Option<bool>,
 
@@ -111,7 +115,7 @@ pub enum ConfigError {
     Parse {
         path: Utf8PathBuf,
         #[source]
-        err: toml::de::Error,
+        err: anyhow::Error,
     },
     #[error("Loading certificate: {0}")]
     Certificate(#[source] anyhow::Error),
@@ -126,8 +130,9 @@ impl Config {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(&path)
             .map_err(|err| ConfigError::Io { path: path.into(), err })?;
-        let config = toml::from_str(&contents)
-            .map_err(|err| ConfigError::Parse { path: path.into(), err })?;
+        let config = toml::from_str(&contents).map_err(|err| {
+            ConfigError::Parse { path: path.into(), err: err.into() }
+        })?;
         Ok(config)
     }
 

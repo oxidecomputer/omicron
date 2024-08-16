@@ -1,0 +1,112 @@
+:showtitle:
+:numbered:
+:toc: left
+
+= Adding or modifying SMF services
+
+== SMF services
+
+Go to the `smf/` directory, there you will find all current services or you create a new directory if you're working on a new service.
+
+Each directory can contain a myriad of files depending on the service, but only a `manifest.xml` file is necessary. This file contains the complete set of properties associated with the service instance.
+
+== Packaging
+
+To build the omicron package that will contain your new or edited service, you will need to modify the `package-manifest.toml` file.
+
+There are a few caveats when modifying or creating a new package.
+
+- When creating a rust binary as part of the service, the name of the omicron package _must_ be the same as the name of the rust package. The service name can be something different if you wish.
+
+omdb entry in `package-manifest.toml` :
+```toml
+[package.omicron-omdb]
+service_name = "omdb"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["omdb"]
+source.rust.release = true
+output.type = "zone"
+output.intermediate_only = true
+```
+
+omdb Cargo.toml file:
+```toml
+[package]
+name = "omicron-omdb"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+```
+
+- If a zone is created for this service, the service name _must_ be the same as the zone name. For example, the `oximeter` service is a composite package which depends on the `oximeter-collector` service. This means that even though the `oximeter-collector` package contains the `oximeter` binary, we _must_ name the composite package `oximeter` as this is the package that will be deployed to a zone.
+
+oximeter entry in `package-manifest.toml` :
+```toml
+[package.oximeter]
+service_name = "oximeter"
+only_for_targets.image = "standard"
+source.type = "composite"
+source.packages = [ "oximeter-collector.tar.gz", "zone-network-setup.tar.gz" ]
+output.type = "zone"
+
+[package.oximeter-collector]
+service_name = "oximeter-collector"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["oximeter", "clickhouse-schema-updater"]
+source.rust.release = true
+source.paths = [
+    { from = "smf/oximeter", to = "/var/svc/manifest/site/oximeter" },
+    { from = "oximeter/db/schema", to = "/opt/oxide/oximeter/schema" },
+]
+output.type = "zone"
+output.intermediate_only = true
+```
+
+== Sled agent services
+
+Service properties are values which can only be known at run-time. To make sure all of them are populated, you'll have to edit the `sled-agent/src/services.rs` file. This is where all of the omicron zones are built.
+
+If your service is new, it may look something like the following code. As you can see, the properties we are populating are the same as the ones on the service's manifest.xml file.
+
+`sled-agent/src/services.rs` file:
+```rust
+fn zone_network_setup_install(
+    info: &SledAgentInfo,
+    zone: &InstalledZone,
+    static_addr: &String,
+) -> Result<ServiceBuilder, Error> {
+    let datalink = zone.get_control_vnic_name();
+    let gateway = &info.underlay_address.to_string();
+
+    let mut config_builder = PropertyGroupBuilder::new("config");
+    config_builder = config_builder
+        .add_property("datalink", "astring", datalink)
+        .add_property("gateway", "astring", gateway)
+        .add_property("static_addr", "astring", static_addr);
+
+    Ok(ServiceBuilder::new("oxide/zone-network-setup")
+        .add_property_group(config_builder)
+        .add_instance(ServiceInstanceBuilder::new("default")))
+}
+```
+
+`smf/zone-network-setup/manifest.xml` file:
+```xml
+<...>
+  <exec_method type='method' name='start'
+    exec='/opt/oxide/zone-network-setup/bin/zone-networking -d %{config/datalink} -s %{config/static_addr} -g %{config/gateway}'
+    timeout_seconds='0' />
+  
+  <property_group name='startd' type='framework'>
+    <propval name='duration' type='astring' value='transient' />
+  </property_group>
+
+  <property_group name='config' type='application'>
+    <propval name='datalink' type='astring' value='unknown' />
+    <propval name='gateway' type='astring' value='unknown' />
+    <propval name='static_addr' type='astring' value='unknown' />
+  </property_group>
+<...>
+```

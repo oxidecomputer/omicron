@@ -14,8 +14,8 @@ use super::{ApiError, ApiOutput, Fsm, FsmConfig, RackUuid};
 use crate::trust_quorum::RackSecret;
 use camino::Utf8PathBuf;
 use derive_more::From;
-use sled_hardware::Baseboard;
-use slog::{debug, error, info, o, warn, Logger};
+use sled_hardware_types::Baseboard;
+use slog::{error, info, o, warn, Logger};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{SocketAddr, SocketAddrV6};
 use std::time::Duration;
@@ -52,14 +52,22 @@ pub enum NodeRequestError {
     Send,
 
     #[error(
-        "Network config update failed because it is out of date. Attempted
-        update generation: {attempted_update_generation}, current generation: 
+        "Network config update failed because it is out of date. Attempted \
+        update generation: {attempted_update_generation}, current generation: \
         {current_generation}"
     )]
     StaleNetworkConfig {
         attempted_update_generation: u64,
         current_generation: u64,
     },
+}
+
+impl From<NodeRequestError> for omicron_common::api::external::Error {
+    fn from(error: NodeRequestError) -> Self {
+        omicron_common::api::external::Error::internal_error(&format!(
+            "{error}"
+        ))
+    }
 }
 
 /// A request sent to the `Node` task from the `NodeHandle`
@@ -647,7 +655,7 @@ impl Node {
             .iter()
             .filter(|(id, _)| Some(*id) != excluded_peer)
         {
-            debug!(
+            info!(
                 self.log,
                 "Sending network config with generation {} to {id}",
                 network_config.generation
@@ -684,7 +692,7 @@ impl Node {
             if let Some(conn_handle) =
                 self.established_connections.get(&envelope.to)
             {
-                debug!(
+                info!(
                     self.log,
                     "Sending {:?} to {}", envelope.msg, envelope.to
                 );
@@ -924,6 +932,7 @@ impl Node {
                 self.fsm.on_disconnected(&peer_id);
             }
             ConnToMainMsgInner::Received { from, msg } => {
+                info!(self.log, "Received {msg:?} from {from}");
                 match self.fsm.handle_msg(Instant::now().into(), from, msg) {
                     Ok(None) => (),
                     Ok(Some(api_output)) => {

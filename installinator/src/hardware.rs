@@ -6,9 +6,10 @@ use anyhow::anyhow;
 use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
-use sled_hardware::DiskVariant;
+use omicron_common::disk::DiskVariant;
 use sled_hardware::HardwareManager;
 use sled_hardware::SledMode;
+use sled_storage::config::MountConfig;
 use sled_storage::disk::Disk;
 use sled_storage::disk::RawDisk;
 use slog::info;
@@ -24,13 +25,13 @@ impl Hardware {
             .context("failed to detect whether host is a gimlet")?;
         ensure!(is_gimlet, "hardware scan only supported on gimlets");
 
-        let hardware =
-            HardwareManager::new(log, SledMode::Auto).map_err(|err| {
+        let hardware = HardwareManager::new(log, SledMode::Auto, vec![])
+            .map_err(|err| {
                 anyhow!("failed to create HardwareManager: {err}")
             })?;
 
         let disks: Vec<RawDisk> =
-            hardware.disks().into_iter().map(|disk| disk.into()).collect();
+            hardware.disks().into_values().map(|disk| disk.into()).collect();
 
         info!(
             log, "found gimlet hardware";
@@ -49,9 +50,15 @@ impl Hardware {
                     );
                 }
                 DiskVariant::M2 => {
-                    let disk = Disk::new(log, disk, None)
-                        .await
-                        .context("failed to instantiate Disk handle for M.2")?;
+                    let disk = Disk::new(
+                        log,
+                        &MountConfig::default(),
+                        disk,
+                        None,
+                        None,
+                    )
+                    .await
+                    .context("failed to instantiate Disk handle for M.2")?;
                     m2_disks.push(disk);
                 }
             }

@@ -7,7 +7,7 @@
 use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{de::DeserializeOwned, Serialize};
-use slog::{debug, info, warn, Logger};
+use slog::{debug, error, info, warn, Logger};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -127,7 +127,7 @@ impl<T: Ledgerable> Ledger<T> {
         let mut one_successful_write = false;
         for path in self.paths.iter() {
             if let Err(e) = self.atomic_write(&path).await {
-                warn!(self.log, "Failed to write to {}: {e}", path);
+                warn!(self.log, "Failed to write ledger"; "path" => ?path, "err" => ?e);
                 failed_paths.push((path.to_path_buf(), e));
             } else {
                 one_successful_write = true;
@@ -135,6 +135,7 @@ impl<T: Ledgerable> Ledger<T> {
         }
 
         if !one_successful_write {
+            error!(self.log, "No successful writes to ledger");
             return Err(Error::FailedToWrite { failed_paths });
         }
         Ok(())
@@ -310,7 +311,7 @@ mod test {
         let log = &logctx.log;
 
         // Create the ledger, initialize contents.
-        let config_dirs = vec![
+        let config_dirs = [
             camino_tempfile::Utf8TempDir::new().unwrap(),
             camino_tempfile::Utf8TempDir::new().unwrap(),
         ];

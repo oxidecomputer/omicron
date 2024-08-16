@@ -6,6 +6,7 @@
 
 use super::dns::DnsVersionUpdateBuilder;
 use super::DataStore;
+use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
@@ -14,18 +15,20 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::retryable;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
-use crate::db::fixed_data::silo::{DEFAULT_SILO, INTERNAL_SILO};
 use crate::db::identity::Resource;
 use crate::db::model::CollectionTypeProvisioned;
+use crate::db::model::IpPoolResourceType;
 use crate::db::model::Name;
 use crate::db::model::Silo;
 use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
+use crate::db::pagination::Paginator;
 use crate::db::pool::DbConnection;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_fixed_data::silo::{DEFAULT_SILO, INTERNAL_SILO};
 use nexus_db_model::Certificate;
 use nexus_db_model::ServiceKind;
 use nexus_db_model::SiloQuotas;
@@ -44,6 +47,7 @@ use ref_cast::RefCast;
 use uuid::Uuid;
 
 /// Filter a "silo_list" query based on silos' discoverability
+#[derive(Debug, Clone, Copy)]
 pub enum Discoverability {
     /// Show all Silos
     All,
@@ -249,7 +253,7 @@ impl DataStore {
                 .await?;
 
                 if let Some(query) = silo_admin_group_ensure_query {
-                    query.get_result_async(&conn).await?;
+                    query.execute_async(&conn).await?;
                 }
 
                 if let Some(queries) = silo_admin_group_role_assignment_queries
@@ -281,7 +285,8 @@ impl DataStore {
                         .await?;
                 }
 
-                self.dns_update(nexus_opctx, &conn, dns_update).await?;
+                self.dns_update_incremental(nexus_opctx, &conn, dns_update)
+                    .await?;
 
                 self.silo_quotas_create(
                     &conn,
@@ -347,6 +352,34 @@ impl DataStore {
             .load_async::<Silo>(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List all Silos, making as many queries as needed to get them all
+    ///
+    /// This should generally not be used in API handlers or other
+    /// latency-sensitive contexts, but it can make sense in saga actions or
+    /// background tasks.
+    pub async fn silo_list_all_batched(
+        &self,
+        opctx: &OpContext,
+        discoverability: Discoverability,
+    ) -> ListResultVec<Silo> {
+        opctx.check_complex_operations_allowed()?;
+        let mut all_silos = Vec::new();
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .silos_list(
+                    opctx,
+                    &PaginatedBy::Id(p.current_pagparams()),
+                    discoverability,
+                )
+                .await?;
+            paginator =
+                p.found_batch(&batch, &|s: &nexus_db_model::Silo| s.id());
+            all_silos.extend(batch);
+        }
+        Ok(all_silos)
     }
 
     pub async fn silo_delete(
@@ -419,7 +452,7 @@ impl DataStore {
             )
             .await?;
 
-            self.dns_update(dns_opctx, &conn, dns_update).await?;
+            self.dns_update_incremental(dns_opctx, &conn, dns_update).await?;
 
             info!(opctx.log, "deleted silo {}", id);
 
@@ -546,6 +579,23 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         debug!(opctx.log, "deleted {} silo IdPs for silo {}", updated_rows, id);
+
+        // delete IP pool links (not IP pools, just the links)
+        use db::schema::ip_pool_resource;
+
+        let updated_rows = diesel::delete(ip_pool_resource::table)
+            .filter(ip_pool_resource::resource_id.eq(id))
+            .filter(
+                ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
+            )
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        debug!(
+            opctx.log,
+            "deleted {} IP pool links for silo {}", updated_rows, id
+        );
 
         Ok(())
     }

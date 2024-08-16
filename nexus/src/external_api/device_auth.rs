@@ -12,7 +12,7 @@
 use super::console_api::console_index_or_login_redirect;
 use super::views::DeviceAccessTokenGrant;
 use crate::app::external_endpoints::authority_for_request;
-use crate::ServerContext;
+use crate::ApiContext;
 use dropshot::{
     endpoint, HttpError, HttpResponseUpdatedNoContent, RequestContext,
     TypedBody,
@@ -23,7 +23,6 @@ use nexus_db_queries::db::model::DeviceAccessToken;
 use omicron_common::api::external::InternalContext;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use uuid::Uuid;
 
 // Token granting à la RFC 8628 (OAuth 2.0 Device Authorization Grant)
@@ -64,11 +63,11 @@ pub struct DeviceAuthRequest {
     tags = ["hidden"], // "token"
 }]
 pub(crate) async fn device_auth_request(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     params: TypedBody<DeviceAuthRequest>,
 ) -> Result<Response<Body>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
+    let nexus = &apictx.context.nexus;
     let params = params.into_inner();
     let handler = async {
         let opctx = nexus.opctx_external_authn();
@@ -93,9 +92,11 @@ pub(crate) async fn device_auth_request(
             &model.into_response(rqctx.server.using_tls(), host),
         )
     };
-    // TODO: instrumentation doesn't work because we use `Response<Body>`
-    //apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-    handler.await
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -116,7 +117,7 @@ pub struct DeviceAuthVerify {
     unpublished = true,
 }]
 pub(crate) async fn device_auth_verify(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
 ) -> Result<Response<Body>, HttpError> {
     console_index_or_login_redirect(rqctx).await
 }
@@ -127,7 +128,7 @@ pub(crate) async fn device_auth_verify(
     unpublished = true,
 }]
 pub(crate) async fn device_auth_success(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
 ) -> Result<Response<Body>, HttpError> {
     console_index_or_login_redirect(rqctx).await
 }
@@ -143,11 +144,11 @@ pub(crate) async fn device_auth_success(
     tags = ["hidden"], // "token"
 }]
 pub(crate) async fn device_auth_confirm(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     params: TypedBody<DeviceAuthVerify>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
+    let nexus = &apictx.context.nexus;
     let params = params.into_inner();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
@@ -163,7 +164,11 @@ pub(crate) async fn device_auth_confirm(
             .await?;
         Ok(HttpResponseUpdatedNoContent())
     };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -192,11 +197,11 @@ pub enum DeviceAccessTokenResponse {
     tags = ["hidden"], // "token"
 }]
 pub(crate) async fn device_access_token(
-    rqctx: RequestContext<Arc<ServerContext>>,
+    rqctx: RequestContext<ApiContext>,
     params: TypedBody<DeviceAccessTokenRequest>,
 ) -> Result<Response<Body>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
+    let nexus = &apictx.context.nexus;
     let params = params.into_inner();
     let handler = async {
         // RFC 8628 §3.4
@@ -247,7 +252,9 @@ pub(crate) async fn device_access_token(
             ),
         }
     };
-    // TODO: instrumentation doesn't work because we use `Response<Body>`
-    //apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-    handler.await
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
 }

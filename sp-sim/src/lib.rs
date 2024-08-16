@@ -5,7 +5,6 @@
 pub mod config;
 mod gimlet;
 mod helpers;
-mod rot;
 mod server;
 mod sidecar;
 mod update;
@@ -14,21 +13,20 @@ pub use anyhow::Result;
 use async_trait::async_trait;
 pub use config::Config;
 use gateway_messages::SpPort;
+use gateway_types::component::SpState;
 pub use gimlet::Gimlet;
+pub use gimlet::SimSpHandledRequest;
 pub use gimlet::SIM_GIMLET_BOARD;
 pub use server::logger;
 pub use sidecar::Sidecar;
 pub use sidecar::SIM_SIDECAR_BOARD;
 pub use slog::Logger;
-pub use sprockets_rot::common::msgs::RotRequestV1;
-pub use sprockets_rot::common::msgs::RotResponseV1;
-use sprockets_rot::common::Ed25519PublicKey;
-pub use sprockets_rot::RotSprocketError;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 
 pub const SIM_ROT_BOARD: &str = "SimRot";
+pub const SIM_ROT_STAGE0_BOARD: &str = "SimRotStage0";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Responsiveness {
@@ -39,10 +37,7 @@ pub enum Responsiveness {
 #[async_trait]
 pub trait SimulatedSp {
     /// Serial number.
-    async fn state(&self) -> omicron_gateway::http_entrypoints::SpState;
-
-    /// Public key for the manufacturing cert used to sign this SP's RoT certs.
-    fn manufacturing_public_key(&self) -> Ed25519PublicKey;
+    async fn state(&self) -> SpState;
 
     /// Listening UDP address of the given port of this simulated SP, if it was
     /// configured to listen.
@@ -51,12 +46,6 @@ pub trait SimulatedSp {
     /// Simulate the SP being unresponsive, in which it ignores all incoming
     /// messages.
     async fn set_responsiveness(&self, r: Responsiveness);
-
-    /// Send a request to the (simulated) RoT.
-    fn rot_request(
-        &self,
-        request: RotRequestV1,
-    ) -> Result<RotResponseV1, RotSprocketError>;
 
     /// Get the last completed update delivered to this simulated SP.
     ///

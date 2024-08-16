@@ -24,6 +24,8 @@ use serde::{Deserialize, Serialize};
     Serialize,
     Deserialize,
     PartialEq,
+    Eq,
+    Hash,
     Display,
 )]
 #[diesel(sql_type = sql_types::Text)]

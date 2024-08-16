@@ -5,12 +5,12 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use illumos_utils::fstyp::Fstyp;
 use illumos_utils::zpool::Zpool;
-use illumos_utils::zpool::ZpoolKind;
-use illumos_utils::zpool::ZpoolName;
-use omicron_common::disk::DiskIdentity;
+use omicron_common::disk::{DiskIdentity, DiskVariant};
+use omicron_common::zpool_name::ZpoolName;
+use omicron_uuid_kinds::ZpoolUuid;
+use serde::{Deserialize, Serialize};
 use slog::Logger;
 use slog::{info, warn};
-use uuid::Uuid;
 
 cfg_if::cfg_if! {
     if #[cfg(target_os = "illumos")] {
@@ -30,6 +30,14 @@ pub enum PooledDiskError {
     BadPartitionLayout { path: Utf8PathBuf, why: String },
     #[error("Requested partition {partition:?} not found on device {path}")]
     NotFound { path: Utf8PathBuf, partition: Partition },
+    #[error("Zpool UUID required to format this disk")]
+    MissingZpoolUuid,
+    #[error("Observed Zpool with unexpected UUID (saw: {observed}, expected: {expected})")]
+    UnexpectedUuid { expected: ZpoolUuid, observed: ZpoolUuid },
+    #[error("Unexpected disk variant")]
+    UnexpectedVariant,
+    #[error("Zpool does not exist")]
+    ZpoolDoesNotExist,
     #[error(transparent)]
     ZpoolCreate(#[from] illumos_utils::zpool::CreateError),
     #[error("Cannot import zpool: {0}")]
@@ -38,6 +46,8 @@ pub enum PooledDiskError {
     CannotFormatMissingDevPath { path: Utf8PathBuf },
     #[error("Formatting M.2 devices is not yet implemented")]
     CannotFormatM2NotImplemented,
+    #[error(transparent)]
+    NvmeFormatAndResize(#[from] NvmeFormattingError),
 }
 
 /// A partition (or 'slice') of a disk.
@@ -54,7 +64,9 @@ pub enum Partition {
     ZfsPool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize, Serialize,
+)]
 pub struct DiskPaths {
     // Full path to the disk under "/devices".
     // Should NOT end with a ":partition_letter".
@@ -65,7 +77,11 @@ pub struct DiskPaths {
 
 impl DiskPaths {
     // Returns the "illumos letter-indexed path" for a device.
-    fn partition_path(&self, index: usize, raw: bool) -> Option<Utf8PathBuf> {
+    pub fn partition_path(
+        &self,
+        index: usize,
+        raw: bool,
+    ) -> Option<Utf8PathBuf> {
         let index = u8::try_from(index).ok()?;
 
         let path = &self.devfs_path;
@@ -115,23 +131,73 @@ impl DiskPaths {
     }
 }
 
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize, Serialize,
+)]
+pub struct DiskFirmware {
+    active_slot: u8,
+    next_active_slot: Option<u8>,
+    slot1_read_only: bool,
+    // NB: This vec is 0 indexed while active_slot and next_active_slot are
+    // referring to "slots" in terms of the NVMe spec which defines slots 1-7.
+    // If the active_slot is 1, then it will be slot_firmware_versions[0] in the
+    // vector.
+    slot_firmware_versions: Vec<Option<String>>,
+}
+
+impl DiskFirmware {
+    pub fn active_slot(&self) -> u8 {
+        self.active_slot
+    }
+
+    pub fn next_active_slot(&self) -> Option<u8> {
+        self.next_active_slot
+    }
+
+    pub fn slot1_read_only(&self) -> bool {
+        self.slot1_read_only
+    }
+
+    pub fn slots(&self) -> &[Option<String>] {
+        self.slot_firmware_versions.as_slice()
+    }
+}
+
+impl DiskFirmware {
+    pub fn new(
+        active_slot: u8,
+        next_active_slot: Option<u8>,
+        slot1_read_only: bool,
+        slots: Vec<Option<String>>,
+    ) -> Self {
+        Self {
+            active_slot,
+            next_active_slot,
+            slot1_read_only,
+            slot_firmware_versions: slots,
+        }
+    }
+}
+
 /// A disk which has been observed by monitoring hardware.
 ///
 /// No guarantees are made about the partitions which exist within this disk.
 /// This exists as a distinct entity from `Disk` in `sled-storage` because it
 /// may be desirable to monitor for hardware in one context, and conform disks
 /// to partition layouts in a different context.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize, Serialize,
+)]
 pub struct UnparsedDisk {
     paths: DiskPaths,
     slot: i64,
     variant: DiskVariant,
     identity: DiskIdentity,
     is_boot_disk: bool,
+    firmware: DiskFirmware,
 }
 
 impl UnparsedDisk {
-    #[allow(dead_code)]
     pub fn new(
         devfs_path: Utf8PathBuf,
         dev_path: Option<Utf8PathBuf>,
@@ -139,6 +205,7 @@ impl UnparsedDisk {
         variant: DiskVariant,
         identity: DiskIdentity,
         is_boot_disk: bool,
+        firmware: DiskFirmware,
     ) -> Self {
         Self {
             paths: DiskPaths { devfs_path, dev_path },
@@ -146,7 +213,12 @@ impl UnparsedDisk {
             variant,
             identity,
             is_boot_disk,
+            firmware,
         }
+    }
+
+    pub fn paths(&self) -> &DiskPaths {
+        &self.paths
     }
 
     pub fn devfs_path(&self) -> &Utf8PathBuf {
@@ -163,6 +235,14 @@ impl UnparsedDisk {
 
     pub fn is_boot_disk(&self) -> bool {
         self.is_boot_disk
+    }
+
+    pub fn slot(&self) -> i64 {
+        self.slot
+    }
+
+    pub fn firmware(&self) -> &DiskFirmware {
+        &self.firmware
     }
 }
 
@@ -186,6 +266,7 @@ pub struct PooledDisk {
     // This embeds the assumtion that there is exactly one parsed zpool per
     // disk.
     pub zpool_name: ZpoolName,
+    pub firmware: DiskFirmware,
 }
 
 impl PooledDisk {
@@ -193,12 +274,15 @@ impl PooledDisk {
     pub fn new(
         log: &Logger,
         unparsed_disk: UnparsedDisk,
+        zpool_id: Option<ZpoolUuid>,
     ) -> Result<Self, PooledDiskError> {
         let paths = &unparsed_disk.paths;
         let variant = unparsed_disk.variant;
+        let identity = &unparsed_disk.identity;
         // Ensure the GPT has the right format. This does not necessarily
         // mean that the partitions are populated with the data we need.
-        let partitions = ensure_partition_layout(&log, &paths, variant)?;
+        let partitions =
+            ensure_partition_layout(&log, &paths, variant, identity, zpool_id)?;
 
         // Find the path to the zpool which exists on this disk.
         //
@@ -210,9 +294,10 @@ impl PooledDisk {
             false,
         )?;
 
-        let zpool_name = Self::ensure_zpool_exists(log, variant, &zpool_path)?;
-        Self::ensure_zpool_imported(log, &zpool_name)?;
-        Self::ensure_zpool_failmode_is_continue(log, &zpool_name)?;
+        let zpool_name =
+            ensure_zpool_exists(log, variant, &zpool_path, zpool_id)?;
+        ensure_zpool_imported(log, &zpool_name)?;
+        ensure_zpool_failmode_is_continue(log, &zpool_name)?;
 
         Ok(Self {
             paths: unparsed_disk.paths,
@@ -222,97 +307,119 @@ impl PooledDisk {
             is_boot_disk: unparsed_disk.is_boot_disk,
             partitions,
             zpool_name,
+            firmware: unparsed_disk.firmware,
         })
     }
+}
 
-    fn ensure_zpool_exists(
-        log: &Logger,
-        variant: DiskVariant,
-        zpool_path: &Utf8Path,
-    ) -> Result<ZpoolName, PooledDiskError> {
-        let zpool_name = match Fstyp::get_zpool(&zpool_path) {
-            Ok(zpool_name) => zpool_name,
-            Err(_) => {
-                // What happened here?
-                // - We saw that a GPT exists for this Disk (or we didn't, and
-                // made our own).
-                // - However, this particular partition does not appear to have
-                // a zpool.
-                //
-                // This can happen in situations where "zpool create"
-                // initialized a zpool, and "zpool destroy" removes the zpool
-                // but still leaves the partition table untouched.
-                //
-                // To remedy: Let's enforce that the partition exists.
-                info!(
-                    log,
-                    "GPT exists without Zpool: formatting zpool at {}",
-                    zpool_path,
-                );
-                // If a zpool does not already exist, create one.
-                let zpool_name = match variant {
-                    DiskVariant::M2 => ZpoolName::new_internal(Uuid::new_v4()),
-                    DiskVariant::U2 => ZpoolName::new_external(Uuid::new_v4()),
-                };
-                Zpool::create(&zpool_name, &zpool_path)?;
-                zpool_name
+/// Checks if the zpool exists, but makes no modifications,
+/// and does not attempt to import the zpool.
+pub fn check_if_zpool_exists(
+    zpool_path: &Utf8Path,
+) -> Result<ZpoolName, PooledDiskError> {
+    let zpool_name = match Fstyp::get_zpool(&zpool_path) {
+        Ok(zpool_name) => zpool_name,
+        Err(_) => return Err(PooledDiskError::ZpoolDoesNotExist),
+    };
+    Ok(zpool_name)
+}
+
+pub fn ensure_zpool_exists(
+    log: &Logger,
+    variant: DiskVariant,
+    zpool_path: &Utf8Path,
+    zpool_id: Option<ZpoolUuid>,
+) -> Result<ZpoolName, PooledDiskError> {
+    let zpool_name = match Fstyp::get_zpool(&zpool_path) {
+        Ok(zpool_name) => {
+            if let Some(expected) = zpool_id {
+                info!(log, "Checking that UUID in storage matches request"; "expected" => ?expected);
+                let observed = zpool_name.id();
+                if expected != observed {
+                    warn!(log, "Zpool UUID mismatch"; "expected" => ?expected, "observed" => ?observed);
+                    return Err(PooledDiskError::UnexpectedUuid {
+                        expected,
+                        observed,
+                    });
+                }
             }
-        };
-        Zpool::import(&zpool_name).map_err(|e| {
-            warn!(log, "Failed to import zpool {zpool_name}: {e}");
-            PooledDiskError::ZpoolImport(e)
-        })?;
-
-        Ok(zpool_name)
-    }
-
-    fn ensure_zpool_imported(
-        log: &Logger,
-        zpool_name: &ZpoolName,
-    ) -> Result<(), PooledDiskError> {
-        Zpool::import(&zpool_name).map_err(|e| {
-            warn!(log, "Failed to import zpool {zpool_name}: {e}");
-            PooledDiskError::ZpoolImport(e)
-        })?;
-        Ok(())
-    }
-
-    fn ensure_zpool_failmode_is_continue(
-        log: &Logger,
-        zpool_name: &ZpoolName,
-    ) -> Result<(), PooledDiskError> {
-        // Ensure failmode is set to `continue`. See
-        // https://github.com/oxidecomputer/omicron/issues/2766 for details. The
-        // short version is, each pool is only backed by one vdev. There is no
-        // recovery if one starts breaking, so if connectivity to one dies it's
-        // actively harmful to try to wait for it to come back; we'll be waiting
-        // forever and get stuck. We'd rather get the errors so we can deal with
-        // them ourselves.
-        Zpool::set_failmode_continue(&zpool_name).map_err(|e| {
-            warn!(
-                log,
-                "Failed to set failmode=continue on zpool {zpool_name}: {e}"
-            );
-            PooledDiskError::ZpoolImport(e)
-        })?;
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[allow(dead_code)]
-pub enum DiskVariant {
-    U2,
-    M2,
-}
-
-impl From<ZpoolKind> for DiskVariant {
-    fn from(kind: ZpoolKind) -> DiskVariant {
-        match kind {
-            ZpoolKind::External => DiskVariant::U2,
-            ZpoolKind::Internal => DiskVariant::M2,
+            zpool_name
         }
-    }
+        Err(_) => {
+            // What happened here?
+            // - We saw that a GPT exists for this Disk (or we didn't, and
+            // made our own).
+            // - However, this particular partition does not appear to have
+            // a zpool.
+            //
+            // This can happen in situations where "zpool create"
+            // initialized a zpool, and "zpool destroy" removes the zpool
+            // but still leaves the partition table untouched.
+            //
+            // To remedy: Let's enforce that the partition exists.
+            info!(
+                log,
+                "GPT exists without Zpool: formatting zpool at {}", zpool_path,
+            );
+            let id = match zpool_id {
+                Some(id) => {
+                    info!(log, "Formatting zpool with requested ID"; "id" => ?id);
+                    id
+                }
+                None => {
+                    let id = ZpoolUuid::new_v4();
+                    info!(log, "Formatting zpool with generated ID"; "id" => ?id);
+                    id
+                }
+            };
+
+            // If a zpool does not already exist, create one.
+            let zpool_name = match variant {
+                DiskVariant::M2 => ZpoolName::new_internal(id),
+                DiskVariant::U2 => ZpoolName::new_external(id),
+            };
+            Zpool::create(&zpool_name, &zpool_path)?;
+            zpool_name
+        }
+    };
+    Zpool::import(&zpool_name).map_err(|e| {
+        warn!(log, "Failed to import zpool {zpool_name}: {e}");
+        PooledDiskError::ZpoolImport(e)
+    })?;
+
+    Ok(zpool_name)
+}
+
+pub fn ensure_zpool_imported(
+    log: &Logger,
+    zpool_name: &ZpoolName,
+) -> Result<(), PooledDiskError> {
+    Zpool::import(&zpool_name).map_err(|e| {
+        warn!(log, "Failed to import zpool {zpool_name}: {e}");
+        PooledDiskError::ZpoolImport(e)
+    })?;
+    Ok(())
+}
+
+pub fn ensure_zpool_failmode_is_continue(
+    log: &Logger,
+    zpool_name: &ZpoolName,
+) -> Result<(), PooledDiskError> {
+    // Ensure failmode is set to `continue`. See
+    // https://github.com/oxidecomputer/omicron/issues/2766 for details. The
+    // short version is, each pool is only backed by one vdev. There is no
+    // recovery if one starts breaking, so if connectivity to one dies it's
+    // actively harmful to try to wait for it to come back; we'll be waiting
+    // forever and get stuck. We'd rather get the errors so we can deal with
+    // them ourselves.
+    Zpool::set_failmode_continue(&zpool_name).map_err(|e| {
+        warn!(
+            log,
+            "Failed to set failmode=continue on zpool {zpool_name}: {e}"
+        );
+        PooledDiskError::ZpoolImport(e)
+    })?;
+    Ok(())
 }
 
 #[cfg(test)]

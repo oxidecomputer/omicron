@@ -22,7 +22,7 @@ use tokio::sync::mpsc::{
     unbounded_channel, UnboundedReceiver, UnboundedSender,
 };
 use tokio::time::{interval, Duration};
-use wicketd_client::types::AbortUpdateOptions;
+use wicket_common::rack_update::AbortUpdateOptions;
 
 use crate::events::EventReportMap;
 use crate::helpers::get_update_test_error;
@@ -34,7 +34,6 @@ use crate::{Action, Cmd, Event, KeyHandler, Recorder, State, TICK_INTERVAL};
 
 // We can avoid a bunch of unnecessary type parameters by picking them ahead of time.
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
-pub type Frame<'a> = ratatui::Frame<'a, CrosstermBackend<Stdout>>;
 
 const MAX_RECORDED_EVENTS: usize = 10000;
 
@@ -76,7 +75,7 @@ impl RunnerCore {
     /// Resize and draw the initial screen before handling `Event`s
     pub fn init_screen(&mut self) -> anyhow::Result<()> {
         // Size the initial screen
-        let rect = self.terminal.get_frame().size();
+        let rect = self.terminal.get_frame().area();
         self.screen.resize(&mut self.state, rect.width, rect.height);
 
         // Draw the initial screen
@@ -177,6 +176,10 @@ impl RunnerCore {
             Action::StartUpdate(component_id) => {
                 if let Some(wicketd) = wicketd {
                     let options = CreateStartUpdateOptions {
+                        force_update_rot_bootloader: self
+                            .state
+                            .force_update_state
+                            .force_update_rot_bootloader,
                         force_update_rot: self
                             .state
                             .force_update_state

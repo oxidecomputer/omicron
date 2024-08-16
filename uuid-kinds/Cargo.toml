@@ -1,0 +1,24 @@
+[package]
+name = "omicron-uuid-kinds"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+# The dependencies and features are written so as to make it easy for no-std
+# code to import omicron-uuid-kinds. All the features below are turned on
+# within omicron.
+
+[dependencies]
+newtype-uuid.workspace = true
+schemars = { workspace = true, optional = true }
+paste.workspace = true
+
+[features]
+default = ["std"]
+serde = ["newtype-uuid/serde"]
+schemars08 = ["newtype-uuid/schemars08", "schemars", "std"]
+std = ["newtype-uuid/std"]
+uuid-v4 = ["newtype-uuid/v4"]

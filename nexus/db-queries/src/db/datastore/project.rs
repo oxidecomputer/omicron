@@ -13,8 +13,6 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::fixed_data::project::SERVICES_PROJECT;
-use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
 use crate::db::identity::Resource;
 use crate::db::model::CollectionTypeProvisioned;
 use crate::db::model::Name;
@@ -27,6 +25,8 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_fixed_data::project::SERVICES_PROJECT;
+use nexus_db_fixed_data::silo::INTERNAL_SILO_ID;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -221,6 +221,7 @@ impl DataStore {
 
     generate_fn_to_ensure_none_in_project!(instance, name, String);
     generate_fn_to_ensure_none_in_project!(disk, name, String);
+    generate_fn_to_ensure_none_in_project!(floating_ip, name, String);
     generate_fn_to_ensure_none_in_project!(project_image, name, String);
     generate_fn_to_ensure_none_in_project!(snapshot, name, String);
     generate_fn_to_ensure_none_in_project!(vpc, name, String);
@@ -237,6 +238,7 @@ impl DataStore {
         // Verify that child resources do not exist.
         self.ensure_no_instances_in_project(opctx, authz_project).await?;
         self.ensure_no_disks_in_project(opctx, authz_project).await?;
+        self.ensure_no_floating_ips_in_project(opctx, authz_project).await?;
         self.ensure_no_project_images_in_project(opctx, authz_project).await?;
         self.ensure_no_snapshots_in_project(opctx, authz_project).await?;
         self.ensure_no_vpcs_in_project(opctx, authz_project).await?;

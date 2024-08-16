@@ -86,6 +86,12 @@
         "url": "http://docs.oxide.computer/api/vpcs"
       }
     },
+    "system/probes": {
+      "description": "Probes for testing network connectivity",
+      "external_docs": {
+        "url": "http://docs.oxide.computer/api/probes"
+      }
+    },
     "system/status": {
       "description": "Endpoints related to system health",
       "external_docs": {

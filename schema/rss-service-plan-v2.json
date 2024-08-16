@@ -19,6 +19,7 @@
   },
   "definitions": {
     "DnsConfigParams": {
+      "description": "DnsConfigParams\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"generation\", \"time_created\", \"zones\" ], \"properties\": { \"generation\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"time_created\": { \"type\": \"string\", \"format\": \"date-time\" }, \"zones\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/DnsConfigZone\" } } } } ``` </details>",
       "type": "object",
       "required": [
         "generation",
@@ -44,6 +45,7 @@
       }
     },
     "DnsConfigZone": {
+      "description": "DnsConfigZone\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"records\", \"zone_name\" ], \"properties\": { \"records\": { \"type\": \"object\", \"additionalProperties\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/DnsRecord\" } } }, \"zone_name\": { \"type\": \"string\" } } } ``` </details>",
       "type": "object",
       "required": [
         "records",
@@ -65,6 +67,7 @@
       }
     },
     "DnsRecord": {
+      "description": "DnsRecord\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"data\", \"type\" ], \"properties\": { \"data\": { \"type\": \"string\", \"format\": \"ipv4\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"A\" ] } } }, { \"type\": \"object\", \"required\": [ \"data\", \"type\" ], \"properties\": { \"data\": { \"type\": \"string\", \"format\": \"ipv6\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"AAAA\" ] } } }, { \"type\": \"object\", \"required\": [ \"data\", \"type\" ], \"properties\": { \"data\": { \"$ref\": \"#/components/schemas/Srv\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"SRV\" ] } } } ] } ``` </details>",
       "oneOf": [
         {
           "type": "object",
@@ -175,7 +178,7 @@
     },
     "Name": {
       "title": "A name unique within the parent collection",
-      "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
+      "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
       "type": "string",
       "maxLength": 63,
       "minLength": 1,
@@ -268,6 +271,26 @@
               "type": "string",
               "enum": [
                 "service"
+              ]
+            }
+          }
+        },
+        {
+          "description": "A vNIC associated with a probe",
+          "type": "object",
+          "required": [
+            "id",
+            "type"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "probe"
               ]
             }
           }
@@ -701,6 +724,7 @@
       }
     },
     "Srv": {
+      "description": "Srv\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"port\", \"prio\", \"target\", \"weight\" ], \"properties\": { \"port\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 }, \"prio\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 }, \"target\": { \"type\": \"string\" }, \"weight\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 } } } ``` </details>",
       "type": "object",
       "required": [
         "port",

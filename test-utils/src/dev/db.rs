@@ -8,7 +8,7 @@ use crate::dev::poll;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
-use omicron_common::postgres_config::PostgresConfigWithUrl;
+use nexus_config::PostgresConfigWithUrl;
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
@@ -21,6 +21,7 @@ use std::time::Duration;
 use tempfile::tempdir;
 use tempfile::TempDir;
 use thiserror::Error;
+use tokio::io::AsyncWriteExt;
 use tokio_postgres::config::Host;
 use tokio_postgres::config::SslMode;
 
@@ -497,6 +498,15 @@ pub enum CockroachStartError {
     )]
     TimedOut { pid: u32, time_waited: Duration },
 
+    #[error("failed to write input to cockroachdb")]
+    FailedToWrite(#[source] std::io::Error),
+
+    #[error("failed to await cockroachdb completing")]
+    FailedToWait(#[source] std::io::Error),
+
+    #[error("Invalid cockroachdb output")]
+    InvalidOutput(#[from] std::string::FromUtf8Error),
+
     #[error("unknown error waiting for cockroach to start")]
     Unknown {
         #[source]
@@ -640,12 +650,56 @@ impl Drop for CockroachInstance {
                 // Do NOT clean up the temporary directory in this case.
                 let path = temp_dir.into_path();
                 eprintln!(
-                    "WARN: temporary directory leaked: {}",
-                    path.display()
+                    "WARN: temporary directory leaked: {path:?}\n\
+                     \tIf you would like to access the database for debugging, run the following:\n\n\
+                     \t# Run the database\n\
+                     \tcargo xtask db-dev run --no-populate --store-dir {data_path:?}\n\
+                     \t# Access the database. Note the port may change if you run multiple databases.\n\
+                     \tcockroach sql --host=localhost:32221 --insecure",
+                     data_path = path.join("data"),
                 );
             }
         }
     }
+}
+
+/// Uses cockroachdb to run the "sqlfmt" command.
+pub async fn format_sql(input: &str) -> Result<String, CockroachStartError> {
+    let mut cmd = tokio::process::Command::new(COCKROACHDB_BIN);
+    let mut child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .args(&[
+            "sqlfmt",
+            "--tab-width",
+            "2",
+            "--use-spaces",
+            "true",
+            "--print-width",
+            "100",
+        ])
+        .spawn()
+        .map_err(|source| CockroachStartError::BadCmd {
+            cmd: COCKROACHDB_BIN.to_string(),
+            source,
+        })?;
+    let stdin = child.stdin.as_mut().unwrap();
+    stdin
+        .write_all(input.as_bytes())
+        .await
+        .map_err(CockroachStartError::FailedToWrite)?;
+    let output = child
+        .wait_with_output()
+        .await
+        .map_err(CockroachStartError::FailedToWait)?;
+
+    if !output.status.success() {
+        return Err(CockroachStartError::Exited {
+            exit_code: output.status.code().unwrap_or_else(|| -1),
+        });
+    }
+
+    Ok(String::from_utf8(output.stdout)?)
 }
 
 /// Verify that CockroachDB has the correct version
@@ -819,7 +873,7 @@ fn make_pg_config(
 
     let unsupported_values =
         check_unsupported.into_iter().flatten().collect::<Vec<&'static str>>();
-    if unsupported_values.len() > 0 {
+    if !unsupported_values.is_empty() {
         bail!(
             "unsupported PostgreSQL listen URL \
             (did not expect any of these fields: {}): {:?}",

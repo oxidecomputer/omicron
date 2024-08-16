@@ -5,6 +5,7 @@
 //! [`DataStore`] methods on [`IpPool`]s.
 
 use super::DataStore;
+use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
@@ -25,6 +26,7 @@ use crate::db::model::IpPoolResourceType;
 use crate::db::model::IpPoolUpdate;
 use crate::db::model::Name;
 use crate::db::pagination::paginated;
+use crate::db::pagination::Paginator;
 use crate::db::pool::DbConnection;
 use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
 use crate::db::TransactionError;
@@ -48,6 +50,16 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
 use uuid::Uuid;
+
+pub struct IpsAllocated {
+    pub ipv4: i64,
+    pub ipv6: i64,
+}
+
+pub struct IpsCapacity {
+    pub ipv4: u32,
+    pub ipv6: u128,
+}
 
 impl DataStore {
     /// List IP Pools
@@ -74,47 +86,6 @@ impl DataStore {
         .filter(ip_pool::name.ne(SERVICE_IP_POOL_NAME))
         .filter(ip_pool::time_deleted.is_null())
         .select(IpPool::as_select())
-        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
-    /// List IP pools linked to the current silo
-    pub async fn silo_ip_pools_list(
-        &self,
-        opctx: &OpContext,
-        pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<db::model::IpPool> {
-        use db::schema::ip_pool;
-        use db::schema::ip_pool_resource;
-
-        // From the developer user's point of view, we treat IP pools linked to
-        // their silo as silo resources, so they can list them if they can list
-        // silo children
-        let authz_silo =
-            opctx.authn.silo_required().internal_context("listing IP pools")?;
-        opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
-
-        let silo_id = authz_silo.id();
-
-        match pagparams {
-            PaginatedBy::Id(pagparams) => {
-                paginated(ip_pool::table, ip_pool::id, pagparams)
-            }
-            PaginatedBy::Name(pagparams) => paginated(
-                ip_pool::table,
-                ip_pool::name,
-                &pagparams.map_name(|n| Name::ref_cast(n)),
-            ),
-        }
-        .inner_join(ip_pool_resource::table)
-        .filter(
-            ip_pool_resource::resource_type
-                .eq(IpPoolResourceType::Silo)
-                .and(ip_pool_resource::resource_id.eq(silo_id)),
-        )
-        .filter(ip_pool::time_deleted.is_null())
-        .select(db::model::IpPool::as_select())
         .get_results_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -175,12 +146,8 @@ impl DataStore {
         //     .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
         //     .await?;
 
-        // join ip_pool to ip_pool_resource and filter
-
-        // used in both success and error outcomes
-        let lookup_type = LookupType::ByCompositeId(
-            "Default pool for current silo".to_string(),
-        );
+        let lookup_type =
+            LookupType::ByOther("default IP pool for current silo".to_string());
 
         ip_pool::table
             .inner_join(ip_pool_resource::table)
@@ -202,9 +169,6 @@ impl DataStore {
             )
             .await
             .map_err(|e| {
-                // janky to do this manually, but this is an unusual kind of
-                // lookup in that it is by (silo_id, is_default=true), which is
-                // arguably a composite ID.
                 public_error_from_diesel_lookup(
                     e,
                     ResourceType::IpPool,
@@ -265,38 +229,21 @@ impl DataStore {
         use db::schema::ip_pool_resource;
         opctx.authorize(authz::Action::Delete, authz_pool).await?;
 
+        let conn = self.pool_connection_authorized(opctx).await?;
+
         // Verify there are no IP ranges still in this pool
         let range = ip_pool_range::dsl::ip_pool_range
             .filter(ip_pool_range::dsl::ip_pool_id.eq(authz_pool.id()))
             .filter(ip_pool_range::dsl::time_deleted.is_null())
             .select(ip_pool_range::dsl::id)
             .limit(1)
-            .first_async::<Uuid>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+            .first_async::<Uuid>(&*conn)
             .await
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         if range.is_some() {
             return Err(Error::invalid_request(
                 "IP Pool cannot be deleted while it contains IP ranges",
-            ));
-        }
-
-        // Verify there are no linked silos
-        let silo_link = ip_pool_resource::table
-            .filter(ip_pool_resource::ip_pool_id.eq(authz_pool.id()))
-            .select(ip_pool_resource::resource_id)
-            .limit(1)
-            .first_async::<Uuid>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        if silo_link.is_some() {
-            return Err(Error::invalid_request(
-                "IP Pool cannot be deleted while it is linked to a silo",
             ));
         }
 
@@ -309,7 +256,7 @@ impl DataStore {
             .filter(dsl::id.eq(authz_pool.id()))
             .filter(dsl::rcgen.eq(db_pool.rcgen))
             .set(dsl::time_deleted.eq(now))
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .execute_async(&*conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel(
@@ -323,6 +270,18 @@ impl DataStore {
                 "deletion failed due to concurrent modification",
             ));
         }
+
+        // Rather than treating outstanding links as a blocker for pool delete,
+        // just delete them. If we've gotten this far, we know there are no
+        // ranges in the pool, which means it can't be in use.
+
+        // delete any links from this pool to any other resources (silos)
+        diesel::delete(ip_pool_resource::table)
+            .filter(ip_pool_resource::ip_pool_id.eq(authz_pool.id()))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
         Ok(())
     }
 
@@ -375,6 +334,86 @@ impl DataStore {
             })
     }
 
+    pub async fn ip_pool_allocated_count(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+    ) -> Result<IpsAllocated, Error> {
+        opctx.authorize(authz::Action::Read, authz_pool).await?;
+
+        use db::schema::external_ip;
+        use diesel::dsl::sql;
+        use diesel::sql_types::BigInt;
+
+        let (ipv4, ipv6) = external_ip::table
+            .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
+            .filter(external_ip::time_deleted.is_null())
+            // need to do distinct IP because SNAT IPs are shared between
+            // multiple instances, and each gets its own row in the table
+            .select((
+                sql::<BigInt>(
+                    "count(distinct ip) FILTER (WHERE family(ip) = 4)",
+                ),
+                sql::<BigInt>(
+                    "count(distinct ip) FILTER (WHERE family(ip) = 6)",
+                ),
+            ))
+            .first_async::<(i64, i64)>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(IpsAllocated { ipv4, ipv6 })
+    }
+
+    pub async fn ip_pool_total_capacity(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+    ) -> Result<IpsCapacity, Error> {
+        opctx.authorize(authz::Action::Read, authz_pool).await?;
+        opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
+
+        use db::schema::ip_pool_range;
+
+        let ranges = ip_pool_range::table
+            .filter(ip_pool_range::ip_pool_id.eq(authz_pool.id()))
+            .filter(ip_pool_range::time_deleted.is_null())
+            .select(IpPoolRange::as_select())
+            // This is a rare unpaginated DB query, which means we are
+            // vulnerable to a resource exhaustion attack in which someone
+            // creates a very large number of ranges in order to make this
+            // query slow. In order to mitigate that, we limit the query to the
+            // (current) max allowed page size, effectively making this query
+            // exactly as vulnerable as if it were paginated. If there are more
+            // than 10,000 ranges in a pool, we will undercount, but I have a
+            // hard time seeing that as a practical problem.
+            .limit(10000)
+            .get_results_async::<IpPoolRange>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_pool),
+                )
+            })?;
+
+        let mut ipv4: u32 = 0;
+        let mut ipv6: u128 = 0;
+
+        for range in &ranges {
+            let r = IpRange::from(range);
+            match r {
+                IpRange::V4(r) => ipv4 += r.len(),
+                IpRange::V6(r) => ipv6 += r.len(),
+            }
+        }
+        Ok(IpsCapacity { ipv4, ipv6 })
+    }
+
     pub async fn ip_pool_silo_list(
         &self,
         opctx: &OpContext,
@@ -383,19 +422,54 @@ impl DataStore {
     ) -> ListResultVec<IpPoolResource> {
         use db::schema::ip_pool;
         use db::schema::ip_pool_resource;
+        use db::schema::silo;
 
         paginated(
             ip_pool_resource::table,
-            ip_pool_resource::ip_pool_id,
+            ip_pool_resource::resource_id,
             pagparams,
         )
         .inner_join(ip_pool::table)
+        .inner_join(silo::table.on(silo::id.eq(ip_pool_resource::resource_id)))
         .filter(ip_pool::id.eq(authz_pool.id()))
         .filter(ip_pool::time_deleted.is_null())
+        .filter(silo::time_deleted.is_null())
+        .filter(silo::discoverable.eq(true))
         .select(IpPoolResource::as_select())
         .load_async::<IpPoolResource>(
             &*self.pool_connection_authorized(opctx).await?,
         )
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Returns (IpPool, IpPoolResource) so we can know in the calling code
+    /// whether the pool is default for the silo
+    pub async fn silo_ip_pool_list(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<(IpPool, IpPoolResource)> {
+        use db::schema::ip_pool;
+        use db::schema::ip_pool_resource;
+
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(ip_pool::table, ip_pool::id, pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                ip_pool::table,
+                ip_pool::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .inner_join(ip_pool_resource::table)
+        .filter(ip_pool_resource::resource_id.eq(authz_silo.id()))
+        .filter(ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo))
+        .filter(ip_pool::time_deleted.is_null())
+        .select(<(IpPool, IpPoolResource)>::as_select())
+        .load_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
@@ -687,6 +761,33 @@ impl DataStore {
             })
     }
 
+    /// List all IP pool ranges for a given pool, making as many queries as
+    /// needed to get them all
+    ///
+    /// This should generally not be used in API handlers or other
+    /// latency-sensitive contexts, but it can make sense in saga actions or
+    /// background tasks.
+    pub async fn ip_pool_list_ranges_batched(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+    ) -> ListResultVec<IpPoolRange> {
+        opctx.check_complex_operations_allowed()?;
+        let mut ip_ranges = Vec::new();
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .ip_pool_list_ranges(opctx, &authz_pool, &p.current_pagparams())
+                .await?;
+            // The use of `last_address` here assumes `paginator` is sorting
+            // in Ascending order (which it does - see the implementation of
+            // `current_pagparams()`).
+            paginator = p.found_batch(&batch, &|r| r.last_address);
+            ip_ranges.extend(batch);
+        }
+        Ok(ip_ranges)
+    }
+
     pub async fn ip_pool_add_range(
         &self,
         opctx: &OpContext,
@@ -834,11 +935,15 @@ mod test {
     use std::num::NonZeroU32;
 
     use crate::authz;
-    use crate::db::datastore::datastore_test;
-    use crate::db::model::{IpPool, IpPoolResource, IpPoolResourceType};
+    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::model::{
+        IpPool, IpPoolResource, IpPoolResourceType, Project,
+    };
     use assert_matches::assert_matches;
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::external_api::params;
     use nexus_types::identity::Resource;
+    use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
     use omicron_common::api::external::http_pagination::PaginatedBy;
     use omicron_common::api::external::{
         DataPageParams, Error, IdentityMetadataCreateParams, LookupType,
@@ -867,8 +972,11 @@ mod test {
             .await
             .expect("Should list IP pools");
         assert_eq!(all_pools.len(), 0);
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
         let silo_pools = datastore
-            .silo_ip_pools_list(&opctx, &pagbyid)
+            .silo_ip_pool_list(&opctx, &authz_silo, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 0);
@@ -893,7 +1001,7 @@ mod test {
             .expect("Should list IP pools");
         assert_eq!(all_pools.len(), 1);
         let silo_pools = datastore
-            .silo_ip_pools_list(&opctx, &pagbyid)
+            .silo_ip_pool_list(&opctx, &authz_silo, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 0);
@@ -929,11 +1037,12 @@ mod test {
 
         // now it shows up in the silo list
         let silo_pools = datastore
-            .silo_ip_pools_list(&opctx, &pagbyid)
+            .silo_ip_pool_list(&opctx, &authz_silo, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 1);
-        assert_eq!(silo_pools[0].id(), pool1_for_silo.id());
+        assert_eq!(silo_pools[0].0.id(), pool1_for_silo.id());
+        assert_eq!(silo_pools[0].1.is_default, false);
 
         // linking an already linked silo errors due to PK conflict
         let err = datastore
@@ -998,7 +1107,7 @@ mod test {
 
         // and silo pools list is empty again
         let silo_pools = datastore
-            .silo_ip_pools_list(&opctx, &pagbyid)
+            .silo_ip_pool_list(&opctx, &authz_silo, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 0);
@@ -1056,6 +1165,157 @@ mod test {
         let is_internal =
             datastore.ip_pool_is_internal(&opctx, &authz_other_pool).await;
         assert_eq!(is_internal, Ok(false));
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ip_pool_utilization() {
+        let logctx = dev::test_setup_log("test_ip_utilization");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+        let project = Project::new(
+            authz_silo.id(),
+            params::ProjectCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "my-project".parse().unwrap(),
+                    description: "".to_string(),
+                },
+            },
+        );
+        let (.., project) =
+            datastore.project_create(&opctx, project).await.unwrap();
+
+        // create an IP pool for the silo, add a range to it, and link it to the silo
+        let identity = IdentityMetadataCreateParams {
+            name: "my-pool".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let pool = datastore
+            .ip_pool_create(&opctx, IpPool::new(&identity))
+            .await
+            .expect("Failed to create IP pool");
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            pool.id(),
+            LookupType::ById(pool.id()),
+        );
+
+        // capacity of zero because there are no ranges
+        let max_ips = datastore
+            .ip_pool_total_capacity(&opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(max_ips.ipv4, 0);
+        assert_eq!(max_ips.ipv6, 0);
+
+        let range = IpRange::V4(
+            Ipv4Range::new(
+                std::net::Ipv4Addr::new(10, 0, 0, 1),
+                std::net::Ipv4Addr::new(10, 0, 0, 5),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &range)
+            .await
+            .expect("Could not add range");
+
+        // now it has a capacity of 5 because we added the range
+        let max_ips = datastore
+            .ip_pool_total_capacity(&opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(max_ips.ipv4, 5);
+        assert_eq!(max_ips.ipv6, 0);
+
+        let link = IpPoolResource {
+            ip_pool_id: pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: authz_silo.id(),
+            is_default: true,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, link)
+            .await
+            .expect("Could not link pool to silo");
+
+        let ip_count = datastore
+            .ip_pool_allocated_count(&opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(ip_count.ipv4, 0);
+        assert_eq!(ip_count.ipv6, 0);
+
+        let identity = IdentityMetadataCreateParams {
+            name: "my-ip".parse().unwrap(),
+            description: "".to_string(),
+        };
+        let ip = datastore
+            .allocate_floating_ip(&opctx, project.id(), identity, None, None)
+            .await
+            .expect("Could not allocate floating IP");
+        assert_eq!(ip.ip.to_string(), "10.0.0.1/32");
+
+        let ip_count = datastore
+            .ip_pool_allocated_count(&opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(ip_count.ipv4, 1);
+        assert_eq!(ip_count.ipv6, 0);
+
+        // allocating one has nothing to do with total capacity
+        let max_ips = datastore
+            .ip_pool_total_capacity(&opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(max_ips.ipv4, 5);
+        assert_eq!(max_ips.ipv6, 0);
+
+        let ipv6_range = IpRange::V6(
+            Ipv6Range::new(
+                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
+                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 1, 20),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &ipv6_range)
+            .await
+            .expect("Could not add range");
+
+        // now test with additional v6 range
+        let max_ips = datastore
+            .ip_pool_total_capacity(&opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(max_ips.ipv4, 5);
+        assert_eq!(max_ips.ipv6, 11 + 65536);
+
+        // add a giant range for fun
+        let ipv6_range = IpRange::V6(
+            Ipv6Range::new(
+                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 1, 21),
+                std::net::Ipv6Addr::new(
+                    0xfd00, 0, 0, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
+                ),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &ipv6_range)
+            .await
+            .expect("Could not add range");
+
+        let max_ips = datastore
+            .ip_pool_total_capacity(&opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(max_ips.ipv4, 5);
+        assert_eq!(max_ips.ipv6, 1208925819614629174706166);
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

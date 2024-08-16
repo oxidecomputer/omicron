@@ -29,7 +29,7 @@ jobs:
     steps:
 
       # Checkout both the target and integration branches
-      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           token: ${{ inputs.reflector_access_token }}
           fetch-depth: 0
@@ -55,7 +55,7 @@ jobs:
         run: |
           . ./tools/reflector/helpers.sh
 
-          PATHS=("tools/maghemite_ddm_openapi_version" "tools/maghemite_mg_openapi_version" "tools/maghemite_mgd_checksums")
+          PATHS=("tools/maghemite_ddm_openapi_version" "tools/maghemite_mg_openapi_version" "tools/maghemite_mgd_checksums" "package-manifest.toml")
           CHANGES=()
           commit $TARGET_BRANCH $INT_BRANCH ${{ inputs.reflector_user_id }} PATHS CHANGES
 

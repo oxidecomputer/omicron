@@ -4,52 +4,71 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [build-dependencies]
 omicron-rpaths.workspace = true
 
 [dependencies]
 anyhow.workspace = true
 async-bb8-diesel.workspace = true
+camino.workspace = true
 chrono.workspace = true
 clap.workspace = true
+crossterm.workspace = true
 crucible-agent-client.workspace = true
+csv.workspace = true
 diesel.workspace = true
 dropshot.workspace = true
+dyn-clone.workspace = true
 futures.workspace = true
 gateway-client.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true
 humantime.workspace = true
 internal-dns.workspace = true
+itertools.workspace = true
 nexus-client.workspace = true
+nexus-config.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
+nexus-reconfigurator-preparation.workspace = true
+nexus-saga-recovery.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
 oximeter-client.workspace = true
+oximeter-db = { workspace = true, default-features = false, features = [ "oxql" ] }
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
+ratatui.workspace = true
+reedline.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sled-agent-client.workspace = true
 slog.workspace = true
+slog-error-chain.workspace = true
 strum.workspace = true
 tabled.workspace = true
 textwrap.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 unicode-width.workspace = true
+url.workspace = true
 uuid.workspace = true
 ipnetwork.workspace = true
 omicron-workspace-hack.workspace = true
-nexus-test-utils.workspace = true
+multimap.workspace = true
+indicatif.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
+nexus-test-utils.workspace = true
 nexus-test-utils-macros.workspace = true
 omicron-nexus.workspace = true
 omicron-test-utils.workspace = true
-regex.workspace = true
 subprocess.workspace = true
+camino-tempfile.workspace = true
 
 # Disable doc builds by default for our binaries to work around issue
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.

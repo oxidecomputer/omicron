@@ -20,6 +20,7 @@ use crate::db::model::SnapshotState;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
+use crate::db::IncompleteOnConflictExt;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -30,6 +31,7 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
@@ -69,7 +71,7 @@ impl DataStore {
                     // As written below,
                     //
                     //    .on_conflict((dsl::project_id, dsl::name))
-                    //    .filter_target(dsl::time_deleted.is_null())
+                    //    .as_partial_index()
                     //    .do_update()
                     //    .set(dsl::time_modified.eq(dsl::time_modified))
                     //
@@ -79,7 +81,7 @@ impl DataStore {
                     // (marked with >>):
                     //
                     //    .on_conflict((dsl::project_id, dsl::name))
-                    //    .filter_target(dsl::time_deleted.is_null())
+                    //    .as_partial_index()
                     //    .do_update()
                     //    .set(dsl::time_modified.eq(dsl::time_modified))
                     // >> .filter(dsl::id.eq(snapshot.id()))
@@ -118,7 +120,7 @@ impl DataStore {
                         diesel::insert_into(dsl::snapshot)
                             .values(snapshot)
                             .on_conflict((dsl::project_id, dsl::name))
-                            .filter_target(dsl::time_deleted.is_null())
+                            .as_partial_index()
                             .do_update()
                             .set(dsl::time_modified.eq(dsl::time_modified)),
                     )
@@ -302,5 +304,22 @@ impl DataStore {
                 }
             }
         }
+    }
+
+    pub async fn find_snapshot_by_destination_volume_id(
+        &self,
+        opctx: &OpContext,
+        volume_id: Uuid,
+    ) -> LookupResult<Option<Snapshot>> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use db::schema::snapshot::dsl;
+        dsl::snapshot
+            .filter(dsl::destination_volume_id.eq(volume_id))
+            .select(Snapshot::as_select())
+            .first_async(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

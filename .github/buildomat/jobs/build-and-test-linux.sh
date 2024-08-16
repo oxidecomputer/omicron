@@ -3,9 +3,10 @@
 #: name = "build-and-test (ubuntu-22.04)"
 #: variety = "basic"
 #: target = "ubuntu-22.04"
-#: rust_toolchain = "1.72.1"
+#: rust_toolchain = true
 #: output_rules = [
-#:	"%/var/tmp/omicron_tmp/*",
+#:	"%/work/*",
+#:	"%/var/tmp/omicron_tmp/**/*",
 #:	"!/var/tmp/omicron_tmp/crdb-base*",
 #:	"!/var/tmp/omicron_tmp/rustc*",
 #: ]

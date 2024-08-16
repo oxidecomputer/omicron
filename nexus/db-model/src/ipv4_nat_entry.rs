@@ -1,15 +1,16 @@
-use std::net::{Ipv4Addr, Ipv6Addr};
-
 use super::MacAddr;
-use crate::{schema::ipv4_nat_entry, Ipv4Net, Ipv6Net, SqlU16, Vni};
+use crate::{
+    schema::ipv4_nat_changes, schema::ipv4_nat_entry, Ipv4Net, Ipv6Net, SqlU16,
+    Vni,
+};
 use chrono::{DateTime, Utc};
-use omicron_common::api::external;
-use schemars::JsonSchema;
+use nexus_types::internal_api::views::Ipv4NatEntryView;
+use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
 
 /// Values used to create an Ipv4NatEntry
-#[derive(Insertable, Debug, Clone)]
+#[derive(Insertable, Debug, Clone, Eq, PartialEq)]
 #[diesel(table_name = ipv4_nat_entry)]
 pub struct Ipv4NatValues {
     pub external_address: Ipv4Net,
@@ -21,7 +22,7 @@ pub struct Ipv4NatValues {
 }
 
 /// Database representation of an Ipv4 NAT Entry.
-#[derive(Queryable, Debug, Clone, Selectable)]
+#[derive(Queryable, Debug, Clone, Selectable, Serialize, Deserialize)]
 #[diesel(table_name = ipv4_nat_entry)]
 pub struct Ipv4NatEntry {
     pub id: Uuid,
@@ -47,35 +48,31 @@ impl Ipv4NatEntry {
     }
 }
 
-/// NAT Record
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-pub struct Ipv4NatEntryView {
-    pub external_address: Ipv4Addr,
-    pub first_port: u16,
-    pub last_port: u16,
-    pub sled_address: Ipv6Addr,
-    pub vni: external::Vni,
-    pub mac: external::MacAddr,
-    pub gen: i64,
+/// Summary of changes to ipv4 nat entries.
+#[derive(Queryable, Debug, Clone, Selectable, Serialize, Deserialize)]
+#[diesel(table_name = ipv4_nat_changes)]
+pub struct Ipv4NatChange {
+    pub external_address: Ipv4Net,
+    pub first_port: SqlU16,
+    pub last_port: SqlU16,
+    pub sled_address: Ipv6Net,
+    pub vni: Vni,
+    pub mac: MacAddr,
+    pub version: i64,
     pub deleted: bool,
 }
 
-impl From<Ipv4NatEntry> for Ipv4NatEntryView {
-    fn from(value: Ipv4NatEntry) -> Self {
-        let (gen, deleted) = match value.version_removed {
-            Some(gen) => (gen, true),
-            None => (value.version_added, false),
-        };
-
+impl From<Ipv4NatChange> for Ipv4NatEntryView {
+    fn from(value: Ipv4NatChange) -> Self {
         Self {
-            external_address: value.external_address.ip(),
-            first_port: value.first_port(),
-            last_port: value.last_port(),
-            sled_address: value.sled_address.ip(),
+            external_address: value.external_address.addr(),
+            first_port: value.first_port.into(),
+            last_port: value.last_port.into(),
+            sled_address: value.sled_address.addr(),
             vni: value.vni.0,
             mac: *value.mac,
-            gen,
-            deleted,
+            gen: value.version,
+            deleted: value.deleted,
         }
     }
 }

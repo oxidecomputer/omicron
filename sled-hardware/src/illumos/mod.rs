@@ -2,13 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{
-    Baseboard, DendriteAsic, DiskVariant, HardwareUpdate, SledMode,
-    UnparsedDisk,
-};
+use crate::DiskFirmware;
+use crate::{DendriteAsic, HardwareUpdate, SledMode, UnparsedDisk};
 use camino::Utf8PathBuf;
+use gethostname::gethostname;
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
-use omicron_common::disk::DiskIdentity;
+use libnvme::{controller::Controller, Nvme};
+use omicron_common::disk::{DiskIdentity, DiskVariant};
+use sled_hardware_types::Baseboard;
 use slog::debug;
 use slog::error;
 use slog::info;
@@ -25,7 +26,7 @@ mod gpt;
 mod partitions;
 mod sysconf;
 
-pub use partitions::ensure_partition_layout;
+pub use partitions::{ensure_partition_layout, NvmeFormattingError};
 
 #[derive(thiserror::Error, Debug)]
 enum Error {
@@ -55,6 +56,24 @@ enum Error {
 
     #[error("Failed to issue request to sysconf: {0}")]
     SysconfError(#[from] sysconf::Error),
+
+    #[error("Node {node} missing device instance")]
+    MissingNvmeDevinfoInstance { node: String },
+
+    #[error("Failed to init nvme handle: {0}")]
+    NvmeHandleInit(#[from] libnvme::NvmeInitError),
+
+    #[error("libnvme error: {0}")]
+    Nvme(#[from] libnvme::NvmeError),
+
+    #[error("libnvme controller error: {0}")]
+    NvmeController(#[from] libnvme::controller::NvmeControllerError),
+
+    #[error("Unable to grab NVMe Controller lock")]
+    NvmeControllerLocked,
+
+    #[error("Failed to get NVMe Controller's firmware log page: {0}")]
+    FirmwareLogPage(#[from] libnvme::firmware::FirmwareLogPageError),
 }
 
 const GIMLET_ROOT_NODE_NAME: &str = "Oxide,Gimlet";
@@ -104,7 +123,7 @@ impl TryFrom<i64> for BootStorageUnit {
 // A snapshot of information about the underlying hardware
 struct HardwareSnapshot {
     tofino: TofinoSnapshot,
-    disks: HashSet<UnparsedDisk>,
+    disks: HashMap<DiskIdentity, UnparsedDisk>,
     baseboard: Baseboard,
 }
 
@@ -141,7 +160,7 @@ impl HardwareSnapshot {
         let baseboard = Baseboard::new_gimlet(
             string_from_property(&properties[0])?,
             string_from_property(&properties[1])?,
-            i64_from_property(&properties[2])?,
+            u32_from_property(&properties[2])?,
         );
         let boot_storage_unit =
             BootStorageUnit::try_from(i64_from_property(&properties[3])?)?;
@@ -150,7 +169,7 @@ impl HardwareSnapshot {
         let tofino = get_tofino_snapshot(log, &mut device_info);
 
         // Monitor for block devices.
-        let mut disks = HashSet::new();
+        let mut disks = HashMap::new();
         let mut node_walker = device_info.walk_driver("blkdev");
         while let Some(node) =
             node_walker.next().transpose().map_err(Error::DevInfo)?
@@ -183,7 +202,7 @@ enum TofinoView {
 // which services are currently executing.
 struct HardwareView {
     tofino: TofinoView,
-    disks: HashSet<UnparsedDisk>,
+    disks: HashMap<DiskIdentity, UnparsedDisk>,
     baseboard: Option<Baseboard>,
     online_processor_count: u32,
     usable_physical_ram_bytes: u64,
@@ -198,7 +217,7 @@ impl HardwareView {
     fn new() -> Result<Self, Error> {
         Ok(Self {
             tofino: TofinoView::Real(TofinoSnapshot::new()),
-            disks: HashSet::new(),
+            disks: HashMap::new(),
             baseboard: None,
             online_processor_count: sysconf::online_processor_count()?,
             usable_physical_ram_bytes: sysconf::usable_physical_ram_bytes()?,
@@ -208,7 +227,7 @@ impl HardwareView {
     fn new_stub_tofino(active: bool) -> Result<Self, Error> {
         Ok(Self {
             tofino: TofinoView::Stub { active },
-            disks: HashSet::new(),
+            disks: HashMap::new(),
             baseboard: None,
             online_processor_count: sysconf::online_processor_count()?,
             usable_physical_ram_bytes: sysconf::usable_physical_ram_bytes()?,
@@ -249,20 +268,41 @@ impl HardwareView {
         polled_hw: &HardwareSnapshot,
         updates: &mut Vec<HardwareUpdate>,
     ) {
-        // In old set, not in new set.
-        let removed = self.disks.difference(&polled_hw.disks);
-        // In new set, not in old set.
-        let added = polled_hw.disks.difference(&self.disks);
+        let mut added = Vec::new();
+        let mut removed = Vec::new();
+        let mut updated = Vec::new();
+
+        // Find new or updated disks.
+        for (key, value) in &polled_hw.disks {
+            match self.disks.get(&key) {
+                Some(found) => {
+                    if value != found {
+                        updated.push(value.clone());
+                    }
+                }
+                None => added.push(value.clone()),
+            }
+        }
+
+        // Find disks which have been removed.
+        for (key, value) in &self.disks {
+            if !polled_hw.disks.contains_key(key) {
+                removed.push(value.clone());
+            }
+        }
 
         use HardwareUpdate::*;
         for disk in removed {
-            updates.push(DiskRemoved(disk.clone()));
+            updates.push(DiskRemoved(disk));
         }
         for disk in added {
-            updates.push(DiskAdded(disk.clone()));
+            updates.push(DiskAdded(disk));
+        }
+        for disk in updated {
+            updates.push(DiskUpdated(disk));
         }
 
-        self.disks = polled_hw.disks.clone();
+        self.disks.clone_from(&polled_hw.disks);
     }
 }
 
@@ -370,6 +410,21 @@ fn get_parent_node<'a>(
     Ok(parent)
 }
 
+/// Convert a property to a `u32` if possible, passing through an `i64`.
+///
+/// Returns an error if either:
+///
+/// - The actual devinfo property isn't an integer type.
+/// - The value does not fit in a `u32`.
+fn u32_from_property(prop: &Property<'_>) -> Result<u32, Error> {
+    i64_from_property(prop).and_then(|val| {
+        u32::try_from(val).map_err(|_| Error::UnexpectedPropertyType {
+            name: prop.name(),
+            ty: "u32".to_string(),
+        })
+    })
+}
+
 fn i64_from_property(prop: &Property<'_>) -> Result<i64, Error> {
     prop.as_i64().ok_or_else(|| Error::UnexpectedPropertyType {
         name: prop.name(),
@@ -423,7 +478,7 @@ fn find_properties<'a, const N: usize>(
 
 fn poll_blkdev_node(
     log: &Logger,
-    disks: &mut HashSet<UnparsedDisk>,
+    disks: &mut HashMap<DiskIdentity, UnparsedDisk>,
     node: Node<'_>,
     boot_storage_unit: BootStorageUnit,
 ) -> Result<(), Error> {
@@ -458,6 +513,13 @@ fn poll_blkdev_node(
 
     // We expect that the parent of the "blkdev" node is an "nvme" driver.
     let nvme_node = get_parent_node(&node, "nvme")?;
+    // Importantly we grab the NVMe instance and not the blkdev instance.
+    // Eventually we should switch the logic here to search for nvme instances
+    // and confirm that we only have one blkdev sibling:
+    // https://github.com/oxidecomputer/omicron/issues/5241
+    let nvme_instance = nvme_node
+        .instance()
+        .ok_or(Error::MissingNvmeDevinfoInstance { node: node.node_name() })?;
 
     let vendor_id =
         i64_from_property(&find_properties(&nvme_node, ["vendor-id"])?[0])?;
@@ -491,15 +553,42 @@ fn poll_blkdev_node(
         return Err(Error::UnrecognizedSlot { slot });
     };
 
+    let nvme = Nvme::new()?;
+    let controller = Controller::init_by_instance(&nvme, nvme_instance)?;
+    let controller_lock = match controller.try_read_lock() {
+        libnvme::controller::TryLockResult::Ok(locked) => locked,
+        // We should only hit this if something in the system has locked the
+        // controller in question for writing.
+        libnvme::controller::TryLockResult::Locked(_) => {
+            warn!(
+                log,
+                "NVMe Controller is already locked so we will try again
+                in the next hardware snapshot"
+            );
+            return Err(Error::NvmeControllerLocked);
+        }
+        libnvme::controller::TryLockResult::Err(err) => {
+            return Err(Error::from(err))
+        }
+    };
+    let firmware_log_page = controller_lock.get_firmware_log_page()?;
+    let firmware = DiskFirmware::new(
+        firmware_log_page.active_slot,
+        firmware_log_page.next_active_slot,
+        firmware_log_page.slot1_is_read_only,
+        firmware_log_page.slot_iter().map(|s| s.map(str::to_string)).collect(),
+    );
+
     let disk = UnparsedDisk::new(
         Utf8PathBuf::from(&devfs_path),
         dev_path,
         slot,
         variant,
-        device_id,
+        device_id.clone(),
         slot_is_boot_disk(slot, boot_storage_unit),
+        firmware.clone(),
     );
-    disks.insert(disk);
+    disks.insert(device_id, disk);
     Ok(())
 }
 
@@ -508,6 +597,7 @@ fn poll_blkdev_node(
 fn poll_device_tree(
     log: &Logger,
     inner: &Arc<Mutex<HardwareView>>,
+    nongimlet_observed_disks: &[UnparsedDisk],
     tx: &broadcast::Sender<HardwareUpdate>,
 ) -> Result<(), Error> {
     // Construct a view of hardware by walking the device tree.
@@ -516,26 +606,39 @@ fn poll_device_tree(
 
         Err(e) => {
             if let Error::NotAGimlet(root_node) = &e {
+                let mut inner = inner.lock().unwrap();
+
                 if root_node.as_str() == "i86pc" {
                     // If on i86pc, generate some baseboard information before
                     // returning this error. Each sled agent has to be uniquely
                     // identified for multiple non-gimlets to work.
-                    {
-                        let mut inner = inner.lock().unwrap();
+                    if inner.baseboard.is_none() {
+                        let pc_baseboard = Baseboard::new_pc(
+                            gethostname().into_string().unwrap_or_else(|_| {
+                                Uuid::new_v4().simple().to_string()
+                            }),
+                            root_node.clone(),
+                        );
 
-                        if inner.baseboard.is_none() {
-                            let pc_baseboard = Baseboard::new_pc(
-                                Uuid::new_v4().simple().to_string(),
-                                root_node.clone(),
-                            );
+                        info!(
+                            log,
+                            "Generated i86pc baseboard {:?}", pc_baseboard
+                        );
 
-                            info!(
-                                log,
-                                "Generated i86pc baseboard {:?}", pc_baseboard
-                            );
+                        inner.baseboard = Some(pc_baseboard);
+                    }
+                }
 
-                            inner.baseboard = Some(pc_baseboard);
-                        }
+                // For platforms that don't support the HardwareSnapshot
+                // functionality, sled-agent can be supplied a fixed list of
+                // UnparsedDisks. Add those to the HardwareSnapshot here if they
+                // are missing (which they will be for non-gimlets).
+                for observed_disk in nongimlet_observed_disks {
+                    let identity = observed_disk.identity();
+                    if !inner.disks.contains_key(identity) {
+                        inner
+                            .disks
+                            .insert(identity.clone(), observed_disk.clone());
                     }
                 }
             }
@@ -569,10 +672,11 @@ fn poll_device_tree(
 async fn hardware_tracking_task(
     log: Logger,
     inner: Arc<Mutex<HardwareView>>,
+    nongimlet_observed_disks: Vec<UnparsedDisk>,
     tx: broadcast::Sender<HardwareUpdate>,
 ) {
     loop {
-        match poll_device_tree(&log, &inner, &tx) {
+        match poll_device_tree(&log, &inner, &nongimlet_observed_disks, &tx) {
             // We've already warned about `NotAGimlet` by this point,
             // so let's not spam the logs.
             Ok(_) | Err(Error::NotAGimlet(_)) => (),
@@ -601,7 +705,13 @@ impl HardwareManager {
     ///
     /// Arguments:
     /// - `sled_mode`: The sled's mode of operation (auto detect or force gimlet/scrimlet).
-    pub fn new(log: &Logger, sled_mode: SledMode) -> Result<Self, String> {
+    /// - `nongimlet_observed_disks`: For non-gimlets, inject these disks into
+    ///    HardwareSnapshot objects.
+    pub fn new(
+        log: &Logger,
+        sled_mode: SledMode,
+        nongimlet_observed_disks: Vec<UnparsedDisk>,
+    ) -> Result<Self, String> {
         let log = log.new(o!("component" => "HardwareManager"));
         info!(log, "Creating HardwareManager");
 
@@ -647,7 +757,7 @@ impl HardwareManager {
         // This mitigates issues where the Sled Agent could try to propagate
         // an "empty" view of hardware to other consumers before the first
         // query.
-        match poll_device_tree(&log, &inner, &tx) {
+        match poll_device_tree(&log, &inner, &nongimlet_observed_disks, &tx) {
             Ok(_) => (),
             // Allow non-gimlet devices to proceed with a "null" view of
             // hardware, otherwise they won't be able to start.
@@ -663,7 +773,8 @@ impl HardwareManager {
         let inner2 = inner.clone();
         let tx2 = tx.clone();
         tokio::task::spawn(async move {
-            hardware_tracking_task(log2, inner2, tx2).await
+            hardware_tracking_task(log2, inner2, nongimlet_observed_disks, tx2)
+                .await
         });
 
         Ok(Self { log, inner, tx })
@@ -687,7 +798,7 @@ impl HardwareManager {
         self.inner.lock().unwrap().usable_physical_ram_bytes
     }
 
-    pub fn disks(&self) -> HashSet<UnparsedDisk> {
+    pub fn disks(&self) -> HashMap<DiskIdentity, UnparsedDisk> {
         self.inner.lock().unwrap().disks.clone()
     }
 

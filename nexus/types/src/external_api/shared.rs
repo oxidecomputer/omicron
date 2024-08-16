@@ -4,6 +4,10 @@
 
 //! Types that are used as both views and params
 
+use std::net::IpAddr;
+
+use omicron_common::api::external::Name;
+use omicron_common::api::internal::shared::NetworkInterface;
 use parse_display::FromStr;
 use schemars::JsonSchema;
 use serde::de::Error as _;
@@ -14,6 +18,7 @@ use strum::EnumIter;
 use uuid::Uuid;
 
 pub use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
+pub use omicron_common::api::external::BfdMode;
 
 /// Maximum number of role assignments allowed on any one resource
 // Today's implementation assumes a relatively small number of role assignments
@@ -221,7 +226,9 @@ pub enum ServiceUsingCertificate {
 }
 
 /// The kind of an external IP address for an instance
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[derive(
+    Debug, Clone, Copy, Deserialize, Eq, Serialize, JsonSchema, PartialEq,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum IpKind {
     Ephemeral,
@@ -260,7 +267,7 @@ pub enum UpdateableComponentType {
 pub struct Baseboard {
     pub serial: String,
     pub part: String,
-    pub revision: i64,
+    pub revision: u32,
 }
 
 /// A sled that has not been added to an initialized rack yet
@@ -279,6 +286,87 @@ pub struct UninitializedSled {
     pub baseboard: Baseboard,
     pub rack_id: Uuid,
     pub cubby: u16,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum BfdState {
+    /// A stable down state. Non-responsive to incoming messages.
+    AdminDown = 0,
+
+    /// The initial state.
+    Down = 1,
+
+    /// The peer has detected a remote peer in the down state.
+    Init = 2,
+
+    /// The peer has detected a remote peer in the up or init state while in the
+    /// init state.
+    Up = 3,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+)]
+pub struct BfdStatus {
+    pub peer: IpAddr,
+    pub state: BfdState,
+    pub switch: Name,
+    pub local: Option<IpAddr>,
+    pub detection_threshold: u8,
+    pub required_rx: u64,
+    pub mode: BfdMode,
+}
+
+/// Opaque object representing link state. The contents of this object are not
+/// yet stable.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SwitchLinkState {
+    link: serde_json::Value,
+    monitors: Option<serde_json::Value>,
+}
+
+impl SwitchLinkState {
+    pub fn new(
+        link: serde_json::Value,
+        monitors: Option<serde_json::Value>,
+    ) -> Self {
+        Self { link, monitors }
+    }
+}
+
+impl JsonSchema for SwitchLinkState {
+    fn json_schema(
+        gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        let obj = schemars::schema::Schema::Object(
+            schemars::schema::SchemaObject::default(),
+        );
+        gen.definitions_mut().insert(Self::schema_name(), obj.clone());
+        obj
+    }
+
+    fn schema_name() -> String {
+        "SwitchLinkState".to_owned()
+    }
 }
 
 #[cfg(test)]
@@ -324,4 +412,29 @@ mod test {
             "invalid length 65, expected a list of at most 64 role assignments"
         );
     }
+}
+
+#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
+pub struct ProbeInfo {
+    pub id: Uuid,
+    pub name: Name,
+    pub sled: Uuid,
+    pub external_ips: Vec<ProbeExternalIp>,
+    pub interface: NetworkInterface,
+}
+
+#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
+pub struct ProbeExternalIp {
+    pub ip: IpAddr,
+    pub first_port: u16,
+    pub last_port: u16,
+    pub kind: ProbeExternalIpKind,
+}
+
+#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProbeExternalIpKind {
+    Snat,
+    Floating,
+    Ephemeral,
 }

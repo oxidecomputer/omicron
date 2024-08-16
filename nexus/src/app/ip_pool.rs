@@ -20,12 +20,14 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
+use std::matches;
 use uuid::Uuid;
 
 /// Helper to make it easier to 404 on attempts to manipulate internal pools
@@ -74,12 +76,20 @@ impl super::Nexus {
     }
 
     /// List IP pools in current silo
-    pub(crate) async fn silo_ip_pools_list(
+    pub(crate) async fn current_silo_ip_pool_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<db::model::IpPool> {
-        self.db_datastore.silo_ip_pools_list(opctx, pagparams).await
+    ) -> ListResultVec<(db::model::IpPool, db::model::IpPoolResource)> {
+        let authz_silo =
+            opctx.authn.silo_required().internal_context("listing IP pools")?;
+
+        // From the developer user's point of view, we treat IP pools linked to
+        // their silo as silo resources, so they can list them if they can list
+        // silo children
+        opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
+
+        self.db_datastore.silo_ip_pool_list(opctx, &authz_silo, pagparams).await
     }
 
     // Look up pool by name or ID, but only return it if it's linked to the
@@ -88,19 +98,31 @@ impl super::Nexus {
         &'a self,
         opctx: &'a OpContext,
         pool: &'a NameOrId,
-    ) -> LookupResult<db::model::IpPool> {
-        let (authz_pool, pool) =
-            self.ip_pool_lookup(opctx, pool)?.fetch().await?;
+    ) -> LookupResult<(db::model::IpPool, db::model::IpPoolResource)> {
+        let (authz_pool, pool) = self
+            .ip_pool_lookup(opctx, pool)?
+            // TODO-robustness: https://github.com/oxidecomputer/omicron/issues/3995
+            // Checking CreateChild works because it is the permission for
+            // allocating IPs from a pool, which any authenticated user has.
+            // But what we really want to say is that any authenticated user
+            // has actual Read permission on any IP pool linked to their silo.
+            // Instead we are backing into this with the next line: never fail
+            // this auth check as long as you're authed, then 404 if unlinked.
+            // This is not a correctness issue per se because the logic as-is is
+            // correct. The main problem is that it is fiddly to get right and
+            // has to be done manually each time.
+            .fetch_for(authz::Action::CreateChild)
+            .await?;
 
         // 404 if no link is found in the current silo
         let link = self.db_datastore.ip_pool_fetch_link(opctx, pool.id()).await;
-        if link.is_err() {
-            return Err(authz_pool.not_found());
+        match link {
+            Ok(link) => Ok((pool, link)),
+            Err(_) => Err(authz_pool.not_found()),
         }
-
-        Ok(pool)
     }
 
+    /// List silos for a given pool
     pub(crate) async fn ip_pool_silo_list(
         &self,
         opctx: &OpContext,
@@ -109,17 +131,42 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::IpPoolResource> {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::ListChildren).await?;
+
+        // check ability to list silos in general
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
         self.db_datastore.ip_pool_silo_list(opctx, &authz_pool, pagparams).await
+    }
+
+    // List pools for a given silo
+    pub(crate) async fn silo_ip_pool_list(
+        &self,
+        opctx: &OpContext,
+        silo_lookup: &lookup::Silo<'_>,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<(db::model::IpPool, db::model::IpPoolResource)> {
+        let (.., authz_silo) =
+            silo_lookup.lookup_for(authz::Action::Read).await?;
+        // check ability to list pools in general
+        opctx
+            .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
+            .await?;
+        self.db_datastore.silo_ip_pool_list(opctx, &authz_silo, pagparams).await
     }
 
     pub(crate) async fn ip_pool_link_silo(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        silo_link: &params::IpPoolSiloLink,
+        silo_link: &params::IpPoolLinkSilo,
     ) -> CreateResult<db::model::IpPoolResource> {
         let (authz_pool,) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
+
+        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
+            return Err(not_found_from_lookup(pool_lookup));
+        }
+
         let (authz_silo,) = self
             .silo_lookup(&opctx, silo_link.silo.clone())?
             .lookup_for(authz::Action::Modify)
@@ -145,6 +192,11 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
+
+        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
+            return Err(not_found_from_lookup(pool_lookup));
+        }
+
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Modify).await?;
 
@@ -162,6 +214,11 @@ impl super::Nexus {
     ) -> CreateResult<db::model::IpPoolResource> {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
+
+        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
+            return Err(not_found_from_lookup(pool_lookup));
+        }
+
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Modify).await?;
 
@@ -191,9 +248,7 @@ impl super::Nexus {
         let (.., authz_pool, db_pool) =
             pool_lookup.fetch_for(authz::Action::Delete).await?;
 
-        let is_internal =
-            self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await?;
-        if is_internal {
+        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
@@ -209,9 +264,7 @@ impl super::Nexus {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
 
-        let is_internal =
-            self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await?;
-        if is_internal {
+        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
@@ -229,9 +282,7 @@ impl super::Nexus {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::ListChildren).await?;
 
-        let is_internal =
-            self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await?;
-        if is_internal {
+        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
@@ -249,11 +300,23 @@ impl super::Nexus {
         let (.., authz_pool, _db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
 
-        let is_internal =
-            self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await?;
-        if is_internal {
+        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
             return Err(not_found_from_lookup(pool_lookup));
         }
+
+        // Disallow V6 ranges until IPv6 is fully supported by the networking
+        // subsystem. Instead of changing the API to reflect that (making this
+        // endpoint inconsistent with the rest) and changing it back when we
+        // add support, we accept them at the API layer and error here. It
+        // would be nice if we could do it in the datastore layer, but we'd
+        // have no way of creating IPv6 ranges for the purpose of testing IP
+        // pool utilization.
+        if matches!(range, IpRange::V6(_)) {
+            return Err(Error::invalid_request(
+                "IPv6 ranges are not allowed yet",
+            ));
+        }
+
         self.db_datastore.ip_pool_add_range(opctx, &authz_pool, range).await
     }
 
@@ -266,10 +329,7 @@ impl super::Nexus {
         let (.., authz_pool, _db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
 
-        let is_internal =
-            self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await?;
-
-        if is_internal {
+        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
@@ -313,6 +373,18 @@ impl super::Nexus {
         let (authz_pool, ..) =
             self.db_datastore.ip_pools_service_lookup(opctx).await?;
         opctx.authorize(authz::Action::Modify, &authz_pool).await?;
+        // Disallow V6 ranges until IPv6 is fully supported by the networking
+        // subsystem. Instead of changing the API to reflect that (making this
+        // endpoint inconsistent with the rest) and changing it back when we
+        // add support, we accept them at the API layer and error here. It
+        // would be nice if we could do it in the datastore layer, but we'd
+        // have no way of creating IPv6 ranges for the purpose of testing IP
+        // pool utilization.
+        if matches!(range, IpRange::V6(_)) {
+            return Err(Error::invalid_request(
+                "IPv6 ranges are not allowed yet",
+            ));
+        }
         self.db_datastore.ip_pool_add_range(opctx, &authz_pool, range).await
     }
 

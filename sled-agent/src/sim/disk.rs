@@ -5,10 +5,8 @@
 //! Simulated sled agent implementation
 
 use crate::nexus::NexusClient;
-use crate::params::DiskStateRequested;
 use crate::sim::simulatable::Simulatable;
 use async_trait::async_trait;
-use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use omicron_common::api::external::DiskState;
@@ -21,6 +19,7 @@ use omicron_common::api::internal::nexus::ProducerKind;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use propolis_client::types::DiskAttachmentState as PropolisDiskState;
+use sled_agent_types::disk::DiskStateRequested;
 use std::net::{Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
@@ -146,7 +145,7 @@ mod producers {
 /// See `Simulatable` for how this works.
 pub struct SimDisk {
     state: DiskStates,
-    producer: Option<oximeter_producer::Server>,
+    producer: Option<ProducerServer>,
 }
 
 // "producer" doesn't implement Debug, so we can't derive it on SimDisk.
@@ -171,23 +170,18 @@ impl SimDisk {
             id,
             kind: ProducerKind::SledAgent,
             address: producer_address,
-            base_route: "/collect".to_string(),
             interval: Duration::from_millis(200),
         };
         let config = oximeter_producer::Config {
             server_info,
-            registration_address: nexus_address,
-            dropshot: ConfigDropshot {
-                bind_address: producer_address,
-                ..Default::default()
-            },
+            registration_address: Some(nexus_address),
+            request_body_max_bytes: 2048,
             log: LogConfig::Config(ConfigLogging::StderrTerminal {
                 level: ConfigLoggingLevel::Error,
             }),
         };
         let server =
-            ProducerServer::start(&config).await.map_err(|e| e.to_string())?;
-
+            ProducerServer::start(&config).map_err(|e| e.to_string())?;
         let producer = producers::DiskProducer::new(id);
         server
             .registry()

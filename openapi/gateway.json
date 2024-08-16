@@ -87,7 +87,7 @@
     "/ignition/{type}/{slot}/{command}": {
       "post": {
         "summary": "Send an ignition command targeting a specific SP.",
-        "description": "This endpoint can be used to transition a target between A2 and A3 (via power-on / power-off) or reset it.\nThe management network traffic caused by requests to this endpoint is between this MGS instance and its local ignition controller, _not_ the SP targeted by the command.",
+        "description": "This endpoint can be used to transition a target between A2 and A3 (via power-on / power-off) or reset it.\n\nThe management network traffic caused by requests to this endpoint is between this MGS instance and its local ignition controller, _not_ the SP targeted by the command.",
         "operationId": "ignition_command",
         "parameters": [
           {
@@ -134,7 +134,7 @@
     "/local/all-sp-ids": {
       "get": {
         "summary": "Get the complete list of SP identifiers this MGS instance is configured to",
-        "description": "find and communicate with.\nNote that unlike most MGS endpoints, this endpoint does not send any communication on the management network.",
+        "description": "find and communicate with.\n\nNote that unlike most MGS endpoints, this endpoint does not send any communication on the management network.",
         "operationId": "sp_all_ids",
         "responses": {
           "200": {
@@ -188,7 +188,7 @@
     "/recovery/host-phase2": {
       "post": {
         "summary": "Upload a host phase2 image that can be served to recovering hosts via the",
-        "description": "host/SP control uart.\nMGS caches this image in memory and is limited to a small, fixed number of images (potentially 1). Uploading a new image may evict the least-recently-requested image if our cache is already full.",
+        "description": "host/SP control uart.\n\nMGS caches this image in memory and is limited to a small, fixed number of images (potentially 1). Uploading a new image may evict the least-recently-requested image if our cache is already full.",
         "operationId": "recovery_host_phase2_upload",
         "requestBody": {
           "content": {
@@ -762,10 +762,74 @@
         }
       }
     },
+    "/sp/{type}/{slot}/component/{component}/rot-boot-info": {
+      "get": {
+        "summary": "Read the RoT boot state from a root of trust",
+        "description": "This endpoint is only valid for the `rot` component.",
+        "operationId": "sp_rot_boot_info",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetRotBootInfoParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RotState"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sp/{type}/{slot}/component/{component}/serial-console/attach": {
       "get": {
-        "summary": "Upgrade into a websocket connection attached to the given SP component's",
-        "description": "serial console.",
+        "summary": "Upgrade into a websocket connection attached to the given SP",
+        "description": "component's serial console.",
         "operationId": "sp_component_serial_console_attach",
         "parameters": [
           {
@@ -811,8 +875,8 @@
     },
     "/sp/{type}/{slot}/component/{component}/serial-console/detach": {
       "post": {
-        "summary": "Detach the websocket connection attached to the given SP component's serial",
-        "description": "console, if such a connection exists.",
+        "summary": "Detach the websocket connection attached to the given SP component's",
+        "description": "serial console, if such a connection exists.",
         "operationId": "sp_component_serial_console_detach",
         "parameters": [
           {
@@ -859,7 +923,7 @@
     "/sp/{type}/{slot}/component/{component}/update": {
       "post": {
         "summary": "Update an SP component",
-        "description": "Update a component of an SP according to its specific update mechanism. This interface is generic for all component types, but resolves to a mechanism specific to the given component type. This may fail for a variety of reasons including the update bundle being invalid or improperly specified or due to an error originating from the SP itself.\nNote that not all components may be updated; components without known update mechanisms will return an error without any inspection of the update bundle.\nUpdating the SP itself is done via the component name `sp`.",
+        "description": "Update a component of an SP according to its specific update mechanism. This interface is generic for all component types, but resolves to a mechanism specific to the given component type. This may fail for a variety of reasons including the update bundle being invalid or improperly specified or due to an error originating from the SP itself.\n\nNote that not all components may be updated; components without known update mechanisms will return an error without any inspection of the update bundle.\n\nUpdating the SP itself is done via the component name `sp`.",
         "operationId": "sp_component_update",
         "parameters": [
           {
@@ -938,7 +1002,7 @@
     "/sp/{type}/{slot}/component/{component}/update-abort": {
       "post": {
         "summary": "Abort any in-progress update an SP component",
-        "description": "Aborting an update to the SP itself is done via the component name `sp`.\nOn a successful return, the update corresponding to the given UUID will no longer be in progress (either aborted or applied).",
+        "description": "Aborting an update to the SP itself is done via the component name `sp`.\n\nOn a successful return, the update corresponding to the given UUID will no longer be in progress (either aborted or applied).",
         "operationId": "sp_component_update_abort",
         "parameters": [
           {
@@ -1300,6 +1364,62 @@
         }
       }
     },
+    "/sp/{type}/{slot}/sensor/{sensor_id}/value": {
+      "get": {
+        "summary": "Read the current value of a sensor by ID",
+        "description": "Sensor IDs come from the host topo tree.",
+        "operationId": "sp_sensor_read_value",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sensor_id",
+            "description": "ID for the sensor on the SP.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpSensorReading"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sp/{type}/{slot}/startup-options": {
       "get": {
         "summary": "Get host startup options for a sled",
@@ -1441,6 +1561,19 @@
         },
         "required": [
           "slot"
+        ]
+      },
+      "GetRotBootInfoParams": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "version"
         ]
       },
       "HostPhase2Progress": {
@@ -2260,6 +2393,24 @@
           "base64_data"
         ]
       },
+      "RotImageError": {
+        "type": "string",
+        "enum": [
+          "unchecked",
+          "first_page_erased",
+          "partially_programmed",
+          "invalid_length",
+          "header_not_programmed",
+          "bootloader_too_small",
+          "bad_magic",
+          "header_image_size",
+          "unaligned_length",
+          "unsupported_type",
+          "reset_vector_not_thumb2",
+          "reset_vector",
+          "signature"
+        ]
+      },
       "RotSlot": {
         "oneOf": [
           {
@@ -2322,7 +2473,7 @@
               "state": {
                 "type": "string",
                 "enum": [
-                  "enabled"
+                  "v2"
                 ]
               },
               "transient_boot_preference": {
@@ -2355,6 +2506,92 @@
             },
             "required": [
               "message",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "active": {
+                "$ref": "#/components/schemas/RotSlot"
+              },
+              "pending_persistent_boot_preference": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              },
+              "persistent_boot_preference": {
+                "$ref": "#/components/schemas/RotSlot"
+              },
+              "slot_a_error": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageError"
+                  }
+                ]
+              },
+              "slot_a_fwid": {
+                "type": "string"
+              },
+              "slot_b_error": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageError"
+                  }
+                ]
+              },
+              "slot_b_fwid": {
+                "type": "string"
+              },
+              "stage0_error": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageError"
+                  }
+                ]
+              },
+              "stage0_fwid": {
+                "type": "string"
+              },
+              "stage0next_error": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageError"
+                  }
+                ]
+              },
+              "stage0next_fwid": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "v3"
+                ]
+              },
+              "transient_boot_preference": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "active",
+              "persistent_boot_preference",
+              "slot_a_fwid",
+              "slot_b_fwid",
+              "stage0_fwid",
+              "stage0next_fwid",
               "state"
             ]
           }
@@ -2784,6 +3021,124 @@
             "required": [
               "id",
               "system_type"
+            ]
+          }
+        ]
+      },
+      "SpSensorReading": {
+        "description": "Result of reading an SP sensor.",
+        "type": "object",
+        "properties": {
+          "result": {
+            "description": "Value (or error) from the sensor.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpSensorReadingResult"
+              }
+            ]
+          },
+          "timestamp": {
+            "description": "SP-centric timestamp of when `result` was recorded from this sensor.\n\nCurrently this value represents \"milliseconds since the last SP boot\" and is primarily useful as a delta between sensors on this SP (assuming no reboot in between). The meaning could change with future SP releases.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "result",
+          "timestamp"
+        ]
+      },
+      "SpSensorReadingResult": {
+        "description": "Single reading (or error) from an SP sensor.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "success"
+                ]
+              },
+              "value": {
+                "type": "number",
+                "format": "float"
+              }
+            },
+            "required": [
+              "kind",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "device_off"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "device_error"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "device_not_present"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "device_unavailable"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "device_timeout"
+                ]
+              }
+            },
+            "required": [
+              "kind"
             ]
           }
         ]

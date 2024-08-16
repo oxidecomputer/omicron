@@ -1,0 +1,68 @@
+> sled-list
+ID NZPOOLS SUBNET 
+
+> inventory-list
+ID NERRORS TIME_DONE 
+
+> blueprint-list
+ID 
+
+> 
+
+> sled-show ..........<REDACTED_UUID>...........
+error: no sled with id ..........<REDACTED_UUID>...........
+
+> sled-add ..........<REDACTED_UUID>...........
+added sled
+
+> sled-list
+ID                                   NZPOOLS SUBNET                  
+..........<REDACTED_UUID>........... 10      fd00:1122:3344:101::/64 
+
+> sled-show ..........<REDACTED_UUID>...........
+sled ..........<REDACTED_UUID>...........
+subnet fd00:1122:3344:101::/64
+zpools (10):
+    ..........<REDACTED_UUID>........... (zpool)
+    ↳ SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
+    ..........<REDACTED_UUID>........... (zpool)
+    ↳ SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
+    ..........<REDACTED_UUID>........... (zpool)
+    ↳ SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
+    ..........<REDACTED_UUID>........... (zpool)
+    ↳ SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
+    ..........<REDACTED_UUID>........... (zpool)
+    ↳ SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
+    ..........<REDACTED_UUID>........... (zpool)
+    ↳ SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
+    ..........<REDACTED_UUID>........... (zpool)
+    ↳ SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
+    ..........<REDACTED_UUID>........... (zpool)
+    ↳ SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
+    ..........<REDACTED_UUID>........... (zpool)
+    ↳ SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
+    ..........<REDACTED_UUID>........... (zpool)
+    ↳ SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
+
+
+> sled-add ..........<REDACTED_UUID>...........
+added sled
+
+> sled-add ..........<REDACTED_UUID>...........
+added sled
+
+> sled-list
+ID                                   NZPOOLS SUBNET                  
+..........<REDACTED_UUID>........... 10      fd00:1122:3344:103::/64 
+..........<REDACTED_UUID>........... 10      fd00:1122:3344:102::/64 
+..........<REDACTED_UUID>........... 10      fd00:1122:3344:101::/64 
+
+> 
+
+> inventory-generate
+generated inventory collection ..........<REDACTED_UUID>........... from configured sleds
+
+> inventory-list
+ID                                   NERRORS TIME_DONE                
+..........<REDACTED_UUID>........... 0       <REDACTED     TIMESTAMP> 
+

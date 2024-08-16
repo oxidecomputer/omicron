@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [build-dependencies]
 omicron-rpaths.workspace = true
 
@@ -11,51 +14,59 @@ omicron-rpaths.workspace = true
 anyhow.workspace = true
 async-bb8-diesel.workspace = true
 async-trait.workspace = true
-base64.workspace = true
 bb8.workspace = true
 camino.workspace = true
 chrono.workspace = true
-cookie.workspace = true
+const_format.workspace = true
 diesel.workspace = true
 diesel-dtrace.workspace = true
 dropshot.workspace = true
 futures.workspace = true
-headers.workspace = true
-http.workspace = true
-hyper.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true
-newtype_derive.workspace = true
 once_cell.workspace = true
-openssl.workspace = true
-oso.workspace = true
+oxnet.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 rand.workspace = true
 ref-cast.workspace = true
-samael.workspace = true
+schemars.workspace = true
+semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-serde_urlencoded.workspace = true
 serde_with.workspace = true
 sled-agent-client.workspace = true
 slog.workspace = true
+slog-error-chain.workspace = true
 static_assertions.workspace = true
 steno.workspace = true
+strum.workspace = true
+swrite.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = [ "full" ] }
+tokio = { workspace = true, features = ["full"] }
 uuid.workspace = true
 usdt.workspace = true
 
-authz-macros.workspace = true
 db-macros.workspace = true
+nexus-auth.workspace = true
+nexus-config.workspace = true
+nexus-db-fixed-data.workspace = true
 nexus-db-model.workspace = true
+nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
+omicron-uuid-kinds.workspace = true
 oximeter.workspace = true
 omicron-workspace-hack.workspace = true
+
+# only enabled during tests or via the `testing` feature
+omicron-test-utils = { workspace = true, optional = true }
+
+[features]
+# Enable to export `datastore_test`
+testing = ["omicron-test-utils"]
 
 [dev-dependencies]
 assert_matches.workspace = true
@@ -63,19 +74,22 @@ camino-tempfile.workspace = true
 expectorate.workspace = true
 hyper-rustls.workspace = true
 gateway-client.workspace = true
+illumos-utils.workspace = true
 internal-dns.workspace = true
 itertools.workspace = true
 nexus-inventory.workspace = true
+nexus-reconfigurator-planning.workspace = true
 nexus-test-utils.workspace = true
 omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
 openapiv3.workspace = true
+oso.workspace = true
 pem.workspace = true
 petgraph.workspace = true
+predicates.workspace = true
 pretty_assertions.workspace = true
 rcgen.workspace = true
 regex.workspace = true
 rustls.workspace = true
-strum.workspace = true
 subprocess.workspace = true
 term.workspace = true

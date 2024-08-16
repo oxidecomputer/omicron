@@ -23,7 +23,9 @@ pub mod opte;
 pub mod route;
 pub mod running_zone;
 pub mod scf;
+pub mod smf_helper;
 pub mod svc;
+pub mod svcadm;
 pub mod vmm_reservoir;
 pub mod zfs;
 pub mod zone;
@@ -35,8 +37,8 @@ pub const PFEXEC: &str = "/usr/bin/pfexec";
 pub struct CommandFailureInfo {
     command: String,
     status: std::process::ExitStatus,
-    stdout: String,
-    stderr: String,
+    pub stdout: String,
+    pub stderr: String,
 }
 
 impl std::fmt::Display for CommandFailureInfo {
@@ -61,6 +63,9 @@ pub enum ExecutionError {
 
     #[error("Failed to manipulate process contract: {err}")]
     ContractFailure { err: std::io::Error },
+
+    #[error("Failed to parse command output")]
+    ParseFailure(String),
 
     #[error("Zone is not running")]
     NotRunning,

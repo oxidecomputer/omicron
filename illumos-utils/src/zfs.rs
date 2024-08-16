@@ -5,7 +5,7 @@
 //! Utilities for poking at ZFS.
 
 use crate::{execute, PFEXEC};
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use omicron_common::disk::DiskIdentity;
 use std::fmt;
 
@@ -28,8 +28,6 @@ pub const ZFS: &str = "/usr/sbin/zfs";
 /// the keys and recreate the files on demand when creating and mounting
 /// encrypted filesystems. We then zero them and unlink them.
 pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
-// Use /tmp so we don't have to worry about running tests with pfexec
-pub const TEST_KEYPATH_ROOT: &str = "/tmp";
 
 /// Error returned by [`Zfs::list_datasets`].
 #[derive(thiserror::Error, Debug)]
@@ -108,12 +106,13 @@ enum GetValueErrorRaw {
     MissingValue,
 }
 
-/// Error returned by [`Zfs::get_oxide_value`].
+/// Error returned by [`Zfs::get_oxide_value`] or [`Zfs::get_value`].
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to get value '{name}' from filesystem {filesystem}: {err}")]
+#[error("Failed to get value '{name}' from filesystem {filesystem}")]
 pub struct GetValueError {
     filesystem: String,
     name: String,
+    #[source]
     err: GetValueErrorRaw,
 }
 
@@ -167,25 +166,32 @@ impl fmt::Display for Keypath {
     }
 }
 
-#[cfg(not(feature = "tmp_keypath"))]
-impl From<&DiskIdentity> for Keypath {
-    fn from(id: &DiskIdentity) -> Self {
-        build_keypath(id, KEYPATH_ROOT)
-    }
-}
+impl Keypath {
+    /// Constructs a Keypath for the specified disk within the supplied root
+    /// directory.
+    ///
+    /// By supplying "root", tests can override the location where these paths
+    /// are stored to non-global locations.
+    pub fn new<P: AsRef<Utf8Path>>(id: &DiskIdentity, root: &P) -> Keypath {
+        let keypath_root = Utf8PathBuf::from(KEYPATH_ROOT);
+        let mut keypath = keypath_root.as_path();
+        let keypath_directory = loop {
+            match keypath.strip_prefix("/") {
+                Ok(stripped) => keypath = stripped,
+                Err(_) => break root.as_ref().join(keypath),
+            }
+        };
+        std::fs::create_dir_all(&keypath_directory)
+            .expect("Cannot ensure directory for keys");
 
-#[cfg(feature = "tmp_keypath")]
-impl From<&DiskIdentity> for Keypath {
-    fn from(id: &DiskIdentity) -> Self {
-        build_keypath(id, TEST_KEYPATH_ROOT)
+        let filename = format!(
+            "{}-{}-{}-zfs-aes-256-gcm.key",
+            id.vendor, id.serial, id.model
+        );
+        let path: Utf8PathBuf =
+            [keypath_directory.as_str(), &filename].iter().collect();
+        Keypath(path)
     }
-}
-
-fn build_keypath(id: &DiskIdentity, root: &str) -> Keypath {
-    let filename =
-        format!("{}-{}-{}-zfs-aes-256-gcm.key", id.vendor, id.serial, id.model);
-    let path: Utf8PathBuf = [root, &filename].iter().collect();
-    Keypath(path)
 }
 
 #[derive(Debug)]
@@ -331,6 +337,20 @@ impl Zfs {
             err: err.into(),
         })?;
 
+        // We ensure that the currently running process has the ability to
+        // act on the underlying mountpoint.
+        if !zoned {
+            let mut command = std::process::Command::new(PFEXEC);
+            let user = whoami::username();
+            let mount = format!("{mountpoint}");
+            let cmd = command.args(["chown", "-R", &user, &mount]);
+            execute(cmd).map_err(|err| EnsureFilesystemError {
+                name: name.to_string(),
+                mountpoint: mountpoint.clone(),
+                err: err.into(),
+            })?;
+        }
+
         if let Some(SizeDetails { quota, compression }) = size_details {
             // Apply any quota and compression mode.
             Self::apply_properties(name, &mountpoint, quota, compression)?;
@@ -464,28 +484,13 @@ impl Zfs {
         Zfs::get_value(filesystem_name, &format!("oxide:{}", name))
     }
 
+    /// Calls "zfs get" with a single value
     pub fn get_value(
         filesystem_name: &str,
         name: &str,
     ) -> Result<String, GetValueError> {
-        let mut command = std::process::Command::new(PFEXEC);
-        let cmd =
-            command.args(&[ZFS, "get", "-Ho", "value", &name, filesystem_name]);
-        let output = execute(cmd).map_err(|err| GetValueError {
-            filesystem: filesystem_name.to_string(),
-            name: name.to_string(),
-            err: err.into(),
-        })?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let value = stdout.trim();
-        if value == "-" {
-            return Err(GetValueError {
-                filesystem: filesystem_name.to_string(),
-                name: name.to_string(),
-                err: GetValueErrorRaw::MissingValue,
-            });
-        }
-        Ok(value.to_string())
+        let [value] = Self::get_values(filesystem_name, &[name])?;
+        Ok(value)
     }
 
     /// List all extant snapshots.
@@ -549,6 +554,43 @@ impl Zfs {
     }
 }
 
+// These methods don't work with mockall, so they exist in a separate impl block
+impl Zfs {
+    /// Calls "zfs get" to acquire multiple values
+    pub fn get_values<const N: usize>(
+        filesystem_name: &str,
+        names: &[&str; N],
+    ) -> Result<[String; N], GetValueError> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        let all_names =
+            names.into_iter().map(|n| *n).collect::<Vec<&str>>().join(",");
+        cmd.args(&[ZFS, "get", "-Ho", "value", &all_names, filesystem_name]);
+        let output = execute(&mut cmd).map_err(|err| GetValueError {
+            filesystem: filesystem_name.to_string(),
+            name: format!("{:?}", names),
+            err: err.into(),
+        })?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let values = stdout.trim();
+
+        const EMPTY_STRING: String = String::new();
+        let mut result: [String; N] = [EMPTY_STRING; N];
+
+        for (i, value) in values.lines().enumerate() {
+            let value = value.trim();
+            if value == "-" {
+                return Err(GetValueError {
+                    filesystem: filesystem_name.to_string(),
+                    name: names[i].to_string(),
+                    err: GetValueErrorRaw::MissingValue,
+                });
+            }
+            result[i] = value.to_string();
+        }
+        Ok(result)
+    }
+}
+
 /// A read-only snapshot of a ZFS filesystem.
 #[derive(Clone, Debug)]
 pub struct Snapshot {
@@ -580,7 +622,8 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
     // This includes cockroachdb, clickhouse, and crucible datasets.
     let zpools = crate::zpool::Zpool::list()?;
     for pool in &zpools {
-        let internal = pool.kind() == crate::zpool::ZpoolKind::Internal;
+        let internal =
+            pool.kind() == omicron_common::zpool_name::ZpoolKind::Internal;
         let pool = pool.to_string();
         for dataset in &Zfs::list_datasets(&pool)? {
             // Avoid erasing crashdump, backing data and swap datasets on

@@ -27,6 +27,8 @@ pub use builder::CollectionBuilder;
 pub use builder::CollectorBug;
 pub use builder::InventoryError;
 
+pub use builder::now_db_precision;
+
 pub use collector::Collector;
 
 pub use sled_agent_enumerator::SledAgentEnumerator;

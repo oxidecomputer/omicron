@@ -1,8 +1,5 @@
 [toolchain]
-# NOTE: This toolchain is also specified in various jobs in
-# .github/buildomat/jobs/.  If you update it here, update those files too.
-#
 # We choose a specific toolchain (rather than "stable") for repeatability.  The
 # intent is to keep this up-to-date with recently-released stable Rust.
-channel = "1.74.1"
+channel = "1.80.1"
 profile = "default"

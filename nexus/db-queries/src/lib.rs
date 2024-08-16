@@ -4,22 +4,24 @@
 
 //! Facilities for working with the Omicron database
 
-pub mod authn;
-pub mod authz;
-pub mod context;
+pub use nexus_auth::authn;
+pub use nexus_auth::authz;
+pub use nexus_auth::context;
+
 pub mod db;
 pub mod provisioning;
 pub mod transaction_retry;
 
+#[cfg(test)]
+mod policy_test;
+
 #[macro_use]
 extern crate slog;
-#[macro_use]
-extern crate newtype_derive;
 #[cfg(test)]
 #[macro_use]
 extern crate diesel;
 
-#[usdt::provider(provider = "nexus__db__queries")]
+#[usdt::provider(provider = "nexus_db_queries")]
 mod probes {
     // Fires before we start a search over a range for a VNI.
     //

@@ -1,0 +1,182 @@
+///Selects a resource of type Sled (or any of its children, using the functions on this struct) for lookup or fetch
+pub enum Sled<'a> {
+    /// An error occurred while selecting the resource
+    ///
+    /// This error will be returned by any lookup/fetch attempts.
+    Error(Root<'a>, Error),
+    /// We're looking for a resource with the given primary key
+    ///
+    /// This has no parent container -- a by-id lookup is always global
+    PrimaryKey(
+        Root<'a>,
+        ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::SledKind>,
+    ),
+}
+impl<'a> Sled<'a> {
+    /// Fetch the record corresponding to the selected resource
+    ///
+    /// This is equivalent to `fetch_for(authz::Action::Read)`.
+    pub async fn fetch(&self) -> LookupResult<(authz::Sled, nexus_db_model::Sled)> {
+        self.fetch_for(authz::Action::Read).await
+    }
+    /// Turn the Result<T, E> of [`fetch`] into a Result<Option<T>, E>.
+    pub async fn optional_fetch(
+        &self,
+    ) -> LookupResult<Option<(authz::Sled, nexus_db_model::Sled)>> {
+        self.optional_fetch_for(authz::Action::Read).await
+    }
+    /// Fetch the record corresponding to the selected resource and
+    /// check whether the caller is allowed to do the specified `action`
+    ///
+    /// The return value is a tuple that also includes the `authz`
+    /// objects for all resources along the path to this one (i.e., all
+    /// parent resources) and the authz object for this resource itself.
+    /// These objects are useful for identifying those resources by
+    /// id, for doing other authz checks, or for looking up related
+    /// objects.
+    pub async fn fetch_for(
+        &self,
+        action: authz::Action,
+    ) -> LookupResult<(authz::Sled, nexus_db_model::Sled)> {
+        let lookup = self.lookup_root();
+        let opctx = &lookup.opctx;
+        let datastore = &lookup.datastore;
+        match &self {
+            Sled::Error(_, error) => Err(error.clone()),
+            Sled::PrimaryKey(_, v0) => {
+                Self::fetch_by_id_for(opctx, datastore, v0, action).await
+            }
+        }
+    }
+    /// Turn the Result<T, E> of [`fetch_for`] into a Result<Option<T>, E>.
+    pub async fn optional_fetch_for(
+        &self,
+        action: authz::Action,
+    ) -> LookupResult<Option<(authz::Sled, nexus_db_model::Sled)>> {
+        let result = self.fetch_for(action).await;
+        match result {
+            Err(Error::ObjectNotFound { type_name: _, lookup_type: _ }) => Ok(None),
+            _ => Ok(Some(result?)),
+        }
+    }
+    /// Fetch an `authz` object for the selected resource and check
+    /// whether the caller is allowed to do the specified `action`
+    ///
+    /// The return value is a tuple that also includes the `authz`
+    /// objects for all resources along the path to this one (i.e., all
+    /// parent resources) and the authz object for this resource itself.
+    /// These objects are useful for identifying those resources by
+    /// id, for doing other authz checks, or for looking up related
+    /// objects.
+    pub async fn lookup_for(
+        &self,
+        action: authz::Action,
+    ) -> LookupResult<(authz::Sled,)> {
+        let lookup = self.lookup_root();
+        let opctx = &lookup.opctx;
+        let (authz_sled,) = self.lookup().await?;
+        opctx.authorize(action, &authz_sled).await?;
+        Ok((authz_sled,))
+    }
+    /// Turn the Result<T, E> of [`lookup_for`] into a Result<Option<T>, E>.
+    pub async fn optional_lookup_for(
+        &self,
+        action: authz::Action,
+    ) -> LookupResult<Option<(authz::Sled,)>> {
+        let result = self.lookup_for(action).await;
+        match result {
+            Err(Error::ObjectNotFound { type_name: _, lookup_type: _ }) => Ok(None),
+            _ => Ok(Some(result?)),
+        }
+    }
+    /// Fetch the "authz" objects for the selected resource and all its
+    /// parents
+    ///
+    /// This function does not check whether the caller has permission
+    /// to read this information.  That's why it's not `pub`.  Outside
+    /// this module, you want `lookup_for(authz::Action)`.
+    async fn lookup(&self) -> LookupResult<(authz::Sled,)> {
+        let lookup = self.lookup_root();
+        let opctx = &lookup.opctx;
+        let datastore = &lookup.datastore;
+        match &self {
+            Sled::Error(_, error) => Err(error.clone()),
+            Sled::PrimaryKey(_, v0) => {
+                let (authz_sled, _) = Self::lookup_by_id_no_authz(opctx, datastore, v0)
+                    .await?;
+                Ok((authz_sled,))
+            }
+        }
+    }
+    /// Build the `authz` object for this resource
+    fn make_authz(
+        authz_parent: &authz::Fleet,
+        db_row: &nexus_db_model::Sled,
+        lookup_type: LookupType,
+    ) -> authz::Sled {
+        authz::Sled::with_primary_key(authz_parent.clone(), db_row.id(), lookup_type)
+    }
+    /// Getting the [`LookupPath`] for this lookup
+    ///
+    /// This is used when we actually query the database.  At that
+    /// point, we need the `OpContext` and `DataStore` that are being
+    /// used for this lookup.
+    fn lookup_root(&self) -> &LookupPath<'a> {
+        match &self {
+            Sled::Error(root, ..) => root.lookup_root(),
+            Sled::PrimaryKey(root, ..) => root.lookup_root(),
+        }
+    }
+    /// Fetch the database row for a resource by doing a lookup by id
+    ///
+    /// This function checks whether the caller has permissions to read
+    /// the requested data.  However, it's not intended to be used
+    /// outside this module.  See `fetch_for(authz::Action)`.
+    async fn fetch_by_id_for(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        v0: &::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::SledKind>,
+        action: authz::Action,
+    ) -> LookupResult<(authz::Sled, nexus_db_model::Sled)> {
+        let (authz_sled, db_row) = Self::lookup_by_id_no_authz(opctx, datastore, v0)
+            .await?;
+        opctx.authorize(action, &authz_sled).await?;
+        Ok((authz_sled, db_row))
+    }
+    /// Lowest-level function for looking up a resource in the database
+    /// by id
+    ///
+    /// This function does not check whether the caller has permission
+    /// to read this information.  That's why it's not `pub`.  Outside
+    /// this module, you want `fetch()` or `lookup_for(authz::Action)`.
+    async fn lookup_by_id_no_authz(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        v0: &::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::SledKind>,
+    ) -> LookupResult<(authz::Sled, nexus_db_model::Sled)> {
+        use db::schema::sled::dsl;
+        let db_row = dsl::sled
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(::nexus_db_model::to_db_typed_uuid(v0.clone())))
+            .select(nexus_db_model::Sled::as_select())
+            .get_result_async(&*datastore.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Sled,
+                        LookupType::ById(
+                            ::omicron_uuid_kinds::GenericUuid::into_untyped_uuid(*v0),
+                        ),
+                    ),
+                )
+            })?;
+        let authz_sled = Self::make_authz(
+            &&authz::FLEET,
+            &db_row,
+            LookupType::ById(::omicron_uuid_kinds::GenericUuid::into_untyped_uuid(*v0)),
+        );
+        Ok((authz_sled, db_row))
+    }
+}
