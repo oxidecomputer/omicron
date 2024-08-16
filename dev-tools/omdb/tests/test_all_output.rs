@@ -510,16 +510,18 @@ async fn do_run_extra<F>(
     write!(output, "=============================================\n").unwrap();
 }
 
-// OMDB environment variables can affect even the help output provided by clap.
-// See clap-rs/clap#5673 for an example.  This can cause spurious test failures.
-// Clear all the OMDB-related variables from the current process so that all
-// child processes don't have them.
+// We're testing behavior that can be affected by OMDB-related environment
+// variables.  Clear all of them from the current process so that all child
+// processes don't have them.  OMDB environment variables can affect even the
+// help output provided by clap.  See clap-rs/clap#5673 for an example.
 fn clear_omdb_env() {
-    // Rust documents that this is not safe to do in a multi-threaded process
-    // outside of Windows.  We cannot be sure that we are single-threaded,
-    // and we won't be if we're run with `cargo test`.  But we will be
-    // single-threaded in `cargo nextest` (the officially supported runner).
-    // And these interfaces are also safe on illumos anyway.
+    // Rust documents that it's not safe to manipulate the environment in a
+    // multi-threaded process outside of Windows because it's possible that
+    // other threads are reading or writing the environment and most systems do
+    // not support this.  On illumos, the underlying interfaces are broadly
+    // thread-safe.  Further, Omicron only supports running tests under `cargo
+    // nextest`, in which case there are no threads running concurrently here
+    // that may be reading or modifying the environment.
     for (env_var, _) in std::env::vars().filter(|(k, _)| k.starts_with("OMDB_"))
     {
         eprintln!("removing {:?} from environment", env_var);
