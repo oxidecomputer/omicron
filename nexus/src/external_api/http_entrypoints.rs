@@ -6386,7 +6386,7 @@ async fn timeseries_schema_list(
 async fn timeseries_query(
     rqctx: RequestContext<ApiContext>,
     body: TypedBody<params::TimeseriesQuery>,
-) -> Result<HttpResponseOk<Vec<oximeter_db::oxql::Table>>, HttpError> {
+) -> Result<HttpResponseOk<Vec<oxql_types::Table>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
