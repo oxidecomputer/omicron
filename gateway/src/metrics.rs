@@ -210,15 +210,23 @@ impl Poller {
                 let understanding = sps_as_i_understand_them
                     .entry(spid)
                     .or_insert_with(|| {
-                        slog::debug!(&self.log, "found a new little friend!"; "sp" => ?spid);
+                        slog::debug!(
+                            &self.log,
+                            "found a new little friend!";
+                            "sp_slot" => ?spid.slot,
+                            "chassis_type" => ?spid.typ,
+                        );
                         Arc::new(SpPoller {
                             spid,
                             rack_id,
                             apictx: self.apictx.clone(),
-                            log: self.log.new(slog::o!("slot" => spid.slot, "sp_type" => format!("{:?}", spid.typ))),
+                            log: self.log.new(slog::o!(
+                                "sp_slot" => spid.slot,
+                                "chassis_type" => format!("{:?}", spid.typ),
+                            )),
                             my_understanding: Mutex::new(Default::default()),
                         })
-                })
+                    })
                     .clone();
                 tasks.spawn(understanding.clone().poll_sp());
             }
@@ -332,13 +340,14 @@ impl SpPoller {
                         SpType::Switch => Cow::Borrowed("switch"),
                         SpType::Power => Cow::Borrowed("power"),
                     },
+                    slot: self.spid.slot as u32,
                     component: Cow::Owned(component_name.to_string()),
                     device: Cow::Owned(dev.device),
                     model: Cow::Owned(model.clone()),
                     revision,
                     serial: Cow::Owned(serial.clone()),
                     rack_id: self.rack_id,
-                    firmware_id: Cow::Owned(hubris_archive_id.clone()),
+                    hubris_archive_id: Cow::Owned(hubris_archive_id.clone()),
                 };
                 devices.push((dev.component, target))
             }

@@ -7,11 +7,12 @@ authz_scope = "fleet"
 versions = [
     { version = 1, fields = [
         "rack_id",
+        "slot",
         "chassis_type",
         "serial",
         "model",
         "revision",
-        "firmware_id",
+        "hubris_archive_id",
         "component",
         "device",
     ]}
@@ -20,6 +21,12 @@ versions = [
 [fields.rack_id]
 type = "uuid"
 description = "ID of the rack on which this measurement was recorded."
+
+[fields.slot]
+type = "u32"
+description = """
+The cubby number or switch slot of the service processor reporting the \
+measurement"""
 
 [fields.model]
 type = "string"
@@ -33,9 +40,11 @@ description = "Revision number of the sled, switch, or power shelf"
 type = "string"
 description = "Serial number of the sled, switch, or power shelf"
 
-[fields.firmware_id]
+[fields.hubris_archive_id]
 type = "string"
-description = "Hubris archive ID of the service processor when the measurement was recorded."
+description = """
+Hubris firmware archive ID of the service processor when the measurement \
+was recorded."""
 
 [fields.chassis_type]
 type = "string"
