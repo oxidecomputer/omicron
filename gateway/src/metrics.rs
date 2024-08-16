@@ -182,6 +182,14 @@ impl Metrics {
     }
 }
 
+impl Drop for Metrics {
+    fn drop(&mut self) {
+        // Clean up our children on drop.
+        self.manager.abort();
+        self.poller.abort();
+    }
+}
+
 impl oximeter::Producer for Producer {
     fn produce(
         &mut self,
