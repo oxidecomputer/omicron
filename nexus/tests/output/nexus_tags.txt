@@ -51,7 +51,6 @@ instance_ephemeral_ip_attach             POST     /v1/instances/{instance}/exter
 instance_ephemeral_ip_detach             DELETE   /v1/instances/{instance}/external-ips/ephemeral
 instance_external_ip_list                GET      /v1/instances/{instance}/external-ips
 instance_list                            GET      /v1/instances
-instance_migrate                         POST     /v1/instances/{instance}/migrate
 instance_network_interface_create        POST     /v1/network-interfaces
 instance_network_interface_delete        DELETE   /v1/network-interfaces/{interface}
 instance_network_interface_list          GET      /v1/network-interfaces
