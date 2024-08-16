@@ -464,6 +464,8 @@ pub trait Producer: Send + Sync + std::fmt::Debug + 'static {
 
 #[cfg(test)]
 mod tests {
+    use oximeter_macro_impl::{Metric, Target};
+
     use crate::types;
     use crate::{
         Datum, DatumType, FieldType, FieldValue, Metric, MetricsError,

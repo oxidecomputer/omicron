@@ -1,5 +1,5 @@
 [package]
-name = "oximeter-impl"
+name = "oximeter-types"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
@@ -11,22 +11,13 @@ workspace = true
 bytes = { workspace = true, features = [ "serde" ] }
 chrono.workspace = true
 float-ord.workspace = true
-heck.workspace = true
 num.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
-oximeter-macro-impl.workspace = true
-prettyplease.workspace = true
-proc-macro2.workspace = true
-quote.workspace = true
 regex.workspace = true
 schemars = { workspace = true, features = [ "uuid1", "bytes", "chrono" ] }
 serde.workspace = true
-serde_json.workspace = true
-slog-error-chain.workspace = true
 strum.workspace = true
-syn.workspace = true
-toml.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 
@@ -34,6 +25,7 @@ uuid.workspace = true
 approx.workspace = true
 # For benchmark
 criterion.workspace = true
+oximeter-macro-impl.workspace = true
 rand = { workspace = true, features = ["std_rng"] }
 rand_distr.workspace = true
 rstest.workspace = true
