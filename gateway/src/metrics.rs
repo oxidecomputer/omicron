@@ -5,6 +5,7 @@ use crate::management_switch::SpIdentifier;
 use crate::management_switch::SpType;
 use crate::ServerContext;
 use anyhow::Context;
+use clap::Parser;
 use gateway_messages::measurement::MeasurementKind;
 use gateway_messages::ComponentDetails;
 use gateway_messages::DeviceCapabilities;
@@ -39,6 +40,26 @@ pub struct Metrics {
     poller: JoinHandle<anyhow::Result<()>>,
 }
 
+/// CLI arguments for configuring metrics.
+#[derive(Copy, Clone, Debug, clap::Parser)]
+#[clap(next_help_heading = "SP Metrics Development Configuration")]
+pub struct Args {
+    /// Override the Nexus address used to register the SP metrics Oximeter
+    /// producer. This is intended for use in development and testing.
+    ///
+    /// If this argument is not present, Nexus is discovered through DNS.
+    #[clap(long = "dev-nexus-address")]
+    nexus_address: Option<SocketAddr>,
+
+    /// Allow the metrics producer endpoint to bind on loopback.
+    ///
+    /// This should be disabled in production, as Nexus will not be able to
+    /// reach the loopback interface, but is necessary for local development and
+    /// test purposes.
+    #[clap(long = "dev-metrics-bind-loopback")]
+    bind_loopback: bool,
+}
+
 /// Actually polls SP sensor readings
 struct Poller {
     samples: Arc<Mutex<Vec<Vec<Sample>>>>,
@@ -47,10 +68,11 @@ struct Poller {
 }
 
 /// Manages a metrics server and stuff.
-struct Manager {
+struct ServerManager {
     log: slog::Logger,
     addrs: watch::Receiver<Vec<SocketAddrV6>>,
     registry: ProducerRegistry,
+    args: Args,
 }
 
 struct SpPoller {
@@ -84,10 +106,11 @@ const METRIC_REQUEST_MAX_SIZE: usize = 10 * 1024 * 1024;
 impl Metrics {
     pub fn new(
         log: &slog::Logger,
-        MgsArguments { id, rack_id, addresses, .. }: &MgsArguments,
+        args: &MgsArguments,
         apictx: Arc<ServerContext>,
     ) -> anyhow::Result<Self> {
-        let registry = ProducerRegistry::with_id(*id);
+        let &MgsArguments { id, rack_id, ref addresses, metrics_args } = args;
+        let registry = ProducerRegistry::with_id(id);
         let samples = Arc::new(Mutex::new(Vec::new()));
 
         registry
@@ -100,7 +123,7 @@ impl Metrics {
         // the rack ID being set...we might want to change other code to use a
         // similar approach in the future.
         let (rack_id_tx, rack_id_rx) = oneshot::channel();
-        let rack_id_tx = if let Some(rack_id) = *rack_id {
+        let rack_id_tx = if let Some(rack_id) = rack_id {
             rack_id_tx.send(rack_id).expect(
                 "we just created the channel; it therefore will not be \
                      closed",
@@ -121,10 +144,11 @@ impl Metrics {
         let (addrs_tx, addrs_rx) =
             tokio::sync::watch::channel(addresses.clone());
         let manager = tokio::spawn(
-            Manager {
+            ServerManager {
                 log: log.new(slog::o!("component" => "producer-server")),
                 addrs: addrs_rx,
                 registry,
+                cfg: metrics_args,
             }
             .run(),
         );
@@ -428,8 +452,16 @@ impl SpPoller {
     }
 }
 
-impl Manager {
+impl ServerManager {
     async fn run(mut self) -> anyhow::Result<()> {
+        if self.args.nexus_address.is_some() || self.args.bind_loopback {
+            slog::warn!(
+                &self.log,
+                "using development metrics configuration overrides!";
+                "nexus_address" => ?self.args.nexus_address,
+                "bind_loopback" => self.args.bind_loopback,
+            );
+        }
         let mut current_server: Option<oximeter_producer::Server> = None;
         loop {
             let current_ip = current_server.as_ref().map(|s| s.address().ip());
@@ -437,9 +469,9 @@ impl Manager {
             for addr in self.addrs.borrow_and_update().iter() {
                 let &ip = addr.ip();
                 // Don't bind the metrics endpoint on ::1
-                // if ip.is_loopback() {
-                //     continue;
-                // }
+                if ip.is_loopback() && !self.args.bind_loopback {
+                    continue;
+                }
                 // If our current address is contained in the new addresses,
                 // no need to rebind.
                 if current_ip == Some(IpAddr::V6(ip)) {
@@ -461,12 +493,6 @@ impl Manager {
                     // Listen on any available socket, using the provided underlay IP.
                     let address = SocketAddr::new(ip.into(), 0);
 
-                    // Discover Nexus via DNS
-
-                    // TODO(eliza) HARDCODED DEMO ADDRESS LOL
-                    let registration_address =
-                        Some("[::1]:12221".parse().unwrap());
-
                     let server_info = ProducerEndpoint {
                         id: self.registry.producer_id(),
                         kind: ProducerKind::ManagementGateway,
@@ -475,7 +501,7 @@ impl Manager {
                     };
                     let config = oximeter_producer::Config {
                         server_info,
-                        registration_address,
+                        registration_address: self.args.nexus_address,
                         request_body_max_bytes: METRIC_REQUEST_MAX_SIZE,
                         log: oximeter_producer::LogConfig::Logger(
                             self.log.clone(),

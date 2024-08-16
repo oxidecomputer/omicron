@@ -6,7 +6,7 @@ mod config;
 mod context;
 mod error;
 mod management_switch;
-mod metrics;
+pub mod metrics;
 mod serial_console;
 
 pub mod http_entrypoints; // TODO pub only for testing - is this right?
@@ -49,6 +49,7 @@ pub struct MgsArguments {
     pub id: Uuid,
     pub addresses: Vec<SocketAddrV6>,
     pub rack_id: Option<Uuid>,
+    pub metrics_args: metrics::Args,
 }
 
 type HttpServer = dropshot::HttpServer<Arc<ServerContext>>;

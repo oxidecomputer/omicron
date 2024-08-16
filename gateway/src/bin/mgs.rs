@@ -47,6 +47,9 @@ enum Args {
             required_unless_present = "id_and_address_from_smf"
         )]
         address: Option<SocketAddrV6>,
+
+        #[clap(flatten)]
+        metrics_args: omicron_gateway::metrics::Args,
     },
 }
 
@@ -73,6 +76,7 @@ async fn do_run() -> Result<(), CmdError> {
             id_and_address_from_smf,
             id,
             address,
+            metrics_args,
         } => {
             let config = Config::from_file(&config_file_path)
                 .map_err(anyhow::Error::new)
@@ -92,7 +96,7 @@ async fn do_run() -> Result<(), CmdError> {
                 // `id_and_address_from_smf` is false, so we can safely unwrap.
                 (id.unwrap(), vec![address.unwrap()], rack_id)
             };
-            let args = MgsArguments { id, addresses, rack_id };
+            let args = MgsArguments { id, addresses, rack_id, metrics_args };
             let mut server = start_server(config, args)
                 .await
                 .map_err(|e| CmdError::Failure(anyhow!(e)))?;
