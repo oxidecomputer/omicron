@@ -36,7 +36,10 @@ enum MgsDevCmd {
 }
 
 #[derive(Clone, Debug, Args)]
-struct MgsRunArgs {}
+struct MgsRunArgs {
+    #[clap(flatten)]
+    mgs_metrics_args: gateway_test_utils::setup::MgsMetricsArgs,
+}
 
 impl MgsRunArgs {
     async fn exec(&self) -> Result<(), anyhow::Error> {
@@ -46,11 +49,13 @@ impl MgsRunArgs {
         let mut signal_stream = signals.fuse();
 
         println!("mgs-dev: setting up MGS ... ");
-        let gwtestctx = gateway_test_utils::setup::test_setup(
-            "mgs-dev",
-            gateway_messages::SpPort::One,
-        )
-        .await;
+        let gwtestctx =
+            gateway_test_utils::setup::test_setup_with_metrics_args(
+                "mgs-dev",
+                gateway_messages::SpPort::One,
+                self.mgs_metrics_args,
+            )
+            .await;
         println!("mgs-dev: MGS is running.");
 
         let addr = gwtestctx.client.bind_address;

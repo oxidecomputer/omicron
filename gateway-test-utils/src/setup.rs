@@ -75,6 +75,23 @@ pub async fn test_setup(
     .await
 }
 
+pub async fn test_setup_with_metrics_args(
+    test_name: &str,
+    sp_port: SpPort,
+    metrics_args: MgsMetricsArgs,
+) -> GatewayTestContext {
+    let (server_config, sp_sim_config) = load_test_config();
+    test_setup_with_config(
+        test_name,
+        sp_port,
+        server_config,
+        &sp_sim_config,
+        None,
+        metrics_args,
+    )
+    .await
+}
+
 fn expected_location(
     config: &omicron_gateway::Config,
     sp_port: SpPort,
