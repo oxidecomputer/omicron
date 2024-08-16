@@ -232,9 +232,6 @@ impl BackgroundTask for RegionSnapshotReplacementDetector {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
-            let log = &opctx.log;
-            info!(&log, "region snapshot replacement start task started");
-
             let mut status = RegionSnapshotReplacementStartStatus::default();
 
             self.create_requests_for_region_snapshots_on_expunged_disks(
@@ -248,8 +245,6 @@ impl BackgroundTask for RegionSnapshotReplacementDetector {
                 &mut status,
             )
             .await;
-
-            info!(&log, "region snapshot replacement start task done");
 
             json!(status)
         }
