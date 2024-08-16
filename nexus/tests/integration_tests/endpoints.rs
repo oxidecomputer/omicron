@@ -359,12 +359,6 @@ pub static DEMO_INSTANCE_REBOOT_URL: Lazy<String> = Lazy::new(|| {
         *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
     )
 });
-pub static DEMO_INSTANCE_MIGRATE_URL: Lazy<String> = Lazy::new(|| {
-    format!(
-        "/v1/instances/{}/migrate?{}",
-        *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
-    )
-});
 pub static DEMO_INSTANCE_SERIAL_URL: Lazy<String> = Lazy::new(|| {
     format!(
         "/v1/instances/{}/serial-console?{}",
@@ -1821,18 +1815,6 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(serde_json::Value::Null)
-            ],
-        },
-        VerifyEndpoint {
-            url: &DEMO_INSTANCE_MIGRATE_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(serde_json::to_value(
-                    params::InstanceMigrate {
-                        dst_sled_id: uuid::Uuid::new_v4(),
-                    }
-                ).unwrap()),
             ],
         },
         VerifyEndpoint {

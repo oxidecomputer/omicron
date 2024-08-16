@@ -153,6 +153,9 @@ source.type = "composite"
 source.packages = [
   "clickhouse_svc.tar.gz",
   "internal-dns-cli.tar.gz",
+  # TODO: This package is for solely for testing purposes.
+  # Remove once replicated clickhouse is up and running.
+  "omicron-clickhouse-admin.tar.gz",
   "zone-setup.tar.gz",
   "zone-network-install.tar.gz"
 ]
@@ -179,6 +182,7 @@ source.type = "composite"
 source.packages = [
   "clickhouse_keeper_svc.tar.gz",
   "internal-dns-cli.tar.gz",
+  "omicron-clickhouse-admin.tar.gz",
   "zone-setup.tar.gz",
   "zone-network-install.tar.gz"
 ]
@@ -197,6 +201,18 @@ source.paths = [
 output.type = "zone"
 output.intermediate_only = true
 setup_hint = "Run `cargo xtask download clickhouse` to download the necessary binaries"
+
+[package.omicron-clickhouse-admin]
+service_name = "clickhouse-admin"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["clickhouse-admin"]
+source.rust.release = true
+source.paths = [
+  { from = "smf/clickhouse-admin", to = "/var/svc/manifest/site/clickhouse-admin" },
+]
+output.type = "zone"
+output.intermediate_only = true
 
 [package.cockroachdb]
 service_name = "cockroachdb"
@@ -660,8 +676,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "9811438cc91c6ec4e8a8ca12479c920bb25fec81"
-source.sha256 = "4b09ea6d89af353fd4240a3cfde8655c555f6f42e05c6fc4a4e32724f86bb749"
+source.commit = "21b16567f28e103f145cd18d53fac6958429c4ff"
+source.sha256 = "3771671f0069b33143774e560eb258db99253dba9b78fa3ca974f02a8e1145b4"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -687,8 +703,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "9811438cc91c6ec4e8a8ca12479c920bb25fec81"
-source.sha256 = "224ff076a3031d5b913e40084a48fce7bdd08e8ef1abd1ab74df0058963bb3b2"
+source.commit = "21b16567f28e103f145cd18d53fac6958429c4ff"
+source.sha256 = "ad02632713a57fe8c5371316320309e1fad52f0ce2f7e6f768859aa94dfbb1d9"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -707,8 +723,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "9811438cc91c6ec4e8a8ca12479c920bb25fec81"
-source.sha256 = "66b04128c41ad9cd26ca3746d51fff5d295ca65f48e7aabee616026934cc8d5e"
+source.commit = "21b16567f28e103f145cd18d53fac6958429c4ff"
+source.sha256 = "23bca3873cdb0441cd18c0cf071b86d49755be06837479661876ac95d2f10f27"
 output.type = "zone"
 output.intermediate_only = true
 

@@ -2276,62 +2276,6 @@
         }
       }
     },
-    "/v1/instances/{instance}/migrate": {
-      "post": {
-        "tags": [
-          "instances"
-        ],
-        "summary": "Migrate an instance",
-        "operationId": "instance_migrate",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "path",
-            "name": "instance",
-            "description": "Name or ID of the instance",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstanceMigrate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Instance"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v1/instances/{instance}/reboot": {
       "post": {
         "tags": [
@@ -15271,19 +15215,6 @@
           }
         ]
       },
-      "InstanceMigrate": {
-        "description": "Migration parameters for an `Instance`",
-        "type": "object",
-        "properties": {
-          "dst_sled_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "dst_sled_id"
-        ]
-      },
       "InstanceNetworkInterface": {
         "description": "An `InstanceNetworkInterface` represents a virtual network interface device attached to an instance.",
         "type": "object",
@@ -19805,7 +19736,10 @@
               "count",
               "bytes",
               "seconds",
-              "nanoseconds"
+              "nanoseconds",
+              "volts",
+              "amps",
+              "degrees_celcius"
             ]
           },
           {
@@ -19813,6 +19747,13 @@
             "type": "string",
             "enum": [
               "none"
+            ]
+          },
+          {
+            "description": "Rotations per minute.",
+            "type": "string",
+            "enum": [
+              "rpm"
             ]
           }
         ]

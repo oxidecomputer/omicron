@@ -275,6 +275,9 @@ pub fn blueprint_internal_dns_config(
             BlueprintZoneType::ClickhouseKeeper(
                 blueprint_zone_type::ClickhouseKeeper { address, .. },
             ) => (ServiceName::ClickhouseKeeper, address.port()),
+            BlueprintZoneType::ClickhouseServer(
+                blueprint_zone_type::ClickhouseServer { address, .. },
+            ) => (ServiceName::ClickhouseServer, address.port()),
             BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb { address, .. },
             ) => (ServiceName::Cockroach, address.port()),
@@ -499,13 +502,13 @@ mod test {
     use omicron_common::address::get_switch_zone_address;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
-    use omicron_common::address::BOUNDARY_NTP_REDUNDANCY;
-    use omicron_common::address::COCKROACHDB_REDUNDANCY;
-    use omicron_common::address::NEXUS_REDUNDANCY;
     use omicron_common::address::RACK_PREFIX;
     use omicron_common::address::SLED_PREFIX;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
+    use omicron_common::policy::COCKROACHDB_REDUNDANCY;
+    use omicron_common::policy::NEXUS_REDUNDANCY;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::ExternalIpUuid;

@@ -69,10 +69,9 @@ use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
 };
-use crate::bootstrap::params::StartSledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::nexus::d2n_params;
-use crate::params::{OmicronZoneTypeExt, TimeSync};
+use crate::params::OmicronZoneTypeExt;
 use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
 };
@@ -120,6 +119,8 @@ use sled_agent_types::early_networking::{
 use sled_agent_types::rack_init::{
     BootstrapAddressDiscovery, RackInitializeRequest as Config,
 };
+use sled_agent_types::sled::StartSledAgentRequest;
+use sled_agent_types::time_sync::TimeSync;
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_storage::dataset::CONFIG_DATASET;
 use sled_storage::manager::StorageHandle;

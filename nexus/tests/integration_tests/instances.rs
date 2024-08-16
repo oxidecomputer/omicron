@@ -48,6 +48,7 @@ use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::views::SshKey;
 use nexus_types::external_api::{params, views};
 use nexus_types::identity::Resource;
+use nexus_types::internal_api::params::InstanceMigrateRequest;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
@@ -737,6 +738,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     }
 
     let client = &cptestctx.external_client;
+    let internal_client = &cptestctx.internal_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let instance_name = "bird-ecology";
@@ -791,10 +793,10 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     };
 
     let migrate_url =
-        format!("/v1/instances/{}/migrate", &instance_id.to_string());
+        format!("/instances/{}/migrate", &instance_id.to_string());
     let instance = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &migrate_url)
-            .body(Some(&params::InstanceMigrate {
+        RequestBuilder::new(internal_client, Method::POST, &migrate_url)
+            .body(Some(&InstanceMigrateRequest {
                 dst_sled_id: dst_sled_id.into_untyped_uuid(),
             }))
             .expect_status(Some(StatusCode::OK)),
@@ -907,6 +909,7 @@ async fn test_instance_migrate_v2p_and_routes(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
+    let internal_client = &cptestctx.internal_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
@@ -997,10 +1000,10 @@ async fn test_instance_migrate_v2p_and_routes(
 
     // Kick off migration and simulate its completion on the target.
     let migrate_url =
-        format!("/v1/instances/{}/migrate", &instance_id.to_string());
+        format!("/instances/{}/migrate", &instance_id.to_string());
     let _ = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &migrate_url)
-            .body(Some(&params::InstanceMigrate {
+        RequestBuilder::new(internal_client, Method::POST, &migrate_url)
+            .body(Some(&InstanceMigrateRequest {
                 dst_sled_id: dst_sled_id.into_untyped_uuid(),
             }))
             .expect_status(Some(StatusCode::OK)),
@@ -1293,6 +1296,7 @@ async fn test_instance_metrics_with_migration(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
+    let internal_client = &cptestctx.internal_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let instance_name = "bird-ecology";
@@ -1381,10 +1385,10 @@ async fn test_instance_metrics_with_migration(
     };
 
     let migrate_url =
-        format!("/v1/instances/{}/migrate", &instance_id.to_string());
+        format!("/instances/{}/migrate", &instance_id.to_string());
     let _ = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &migrate_url)
-            .body(Some(&params::InstanceMigrate {
+        RequestBuilder::new(internal_client, Method::POST, &migrate_url)
+            .body(Some(&InstanceMigrateRequest {
                 dst_sled_id: dst_sled_id.into_untyped_uuid(),
             }))
             .expect_status(Some(StatusCode::OK)),

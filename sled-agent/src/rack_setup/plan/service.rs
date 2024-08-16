@@ -4,7 +4,6 @@
 
 //! Plan generation for "where should services be initialized".
 
-use crate::bootstrap::params::StartSledAgentRequest;
 use camino::Utf8PathBuf;
 use dns_service_client::types::DnsConfigParams;
 use illumos_utils::zpool::ZpoolName;
@@ -15,10 +14,8 @@ use nexus_sled_agent_shared::inventory::{
 };
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
-    BOUNDARY_NTP_REDUNDANCY, COCKROACHDB_REDUNDANCY, DENDRITE_PORT,
-    DNS_HTTP_PORT, DNS_PORT, DNS_REDUNDANCY, MAX_DNS_REDUNDANCY, MGD_PORT,
-    MGS_PORT, NEXUS_REDUNDANCY, NTP_PORT, NUM_SOURCE_NAT_PORTS,
-    RSS_RESERVED_ADDRESSES, SLED_PREFIX,
+    DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, MGD_PORT, MGS_PORT, NTP_PORT,
+    NUM_SOURCE_NAT_PORTS, RSS_RESERVED_ADDRESSES, SLED_PREFIX,
 };
 use omicron_common::api::external::{Generation, MacAddr, Vni};
 use omicron_common::api::internal::shared::{
@@ -32,6 +29,10 @@ use omicron_common::disk::{
     DiskVariant, OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
+use omicron_common::policy::{
+    BOUNDARY_NTP_REDUNDANCY, COCKROACHDB_REDUNDANCY, DNS_REDUNDANCY,
+    MAX_DNS_REDUNDANCY, NEXUS_REDUNDANCY,
+};
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, SledUuid, ZpoolUuid};
 use rand::prelude::SliceRandom;
 use schemars::JsonSchema;
@@ -40,6 +41,7 @@ use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
 };
 use sled_agent_types::rack_init::RackInitializeRequest as Config;
+use sled_agent_types::sled::StartSledAgentRequest;
 use sled_storage::dataset::{DatasetName, DatasetType, CONFIG_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
@@ -54,11 +56,15 @@ use uuid::Uuid;
 const OXIMETER_COUNT: usize = 1;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Clickhouse.
-// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Set to 2 once we enable replicated ClickHouse
+// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Use
+// omicron_common::policy::CLICKHOUSE_SERVER_REDUNDANCY once we enable
+// replicated ClickHouse
 const CLICKHOUSE_COUNT: usize = 1;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Clickhouse keeper.
-// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Set to 3 once we enable replicated ClickHouse
+// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Use
+// omicron_common::policy::CLICKHOUSE_KEEPER_REDUNDANCY once we enable
+// replicated ClickHouse
 const CLICKHOUSE_KEEPER_COUNT: usize = 0;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
 // when Nexus provisions Crucible.

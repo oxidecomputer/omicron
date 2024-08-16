@@ -20,6 +20,7 @@ impl_enum_type!(
     Cockroach => b"cockroach"
     Clickhouse => b"clickhouse"
     ClickhouseKeeper => b"clickhouse_keeper"
+    ClickhouseServer => b"clickhouse_server"
     ExternalDns => b"external_dns"
     InternalDns => b"internal_dns"
 );
@@ -34,6 +35,9 @@ impl From<internal::shared::DatasetKind> for DatasetKind {
             }
             internal::shared::DatasetKind::ClickhouseKeeper => {
                 DatasetKind::ClickhouseKeeper
+            }
+            internal::shared::DatasetKind::ClickhouseServer => {
+                DatasetKind::ClickhouseServer
             }
             internal::shared::DatasetKind::ExternalDns => {
                 DatasetKind::ExternalDns

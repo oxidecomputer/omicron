@@ -397,7 +397,7 @@
         ]
       },
       "M2Slot": {
-        "description": "An M.2 slot that was written.",
+        "description": "Describes an M.2 slot, often in the context of writing a system image to it.",
         "type": "string",
         "enum": [
           "A",
