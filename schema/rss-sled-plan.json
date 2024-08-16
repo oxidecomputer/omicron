@@ -894,6 +894,16 @@
             }
           ]
         },
+        "local_pref": {
+          "description": "The local preference associated with this route.",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
         "nexthop": {
           "description": "The nexthop/gateway address.",
           "type": "string",

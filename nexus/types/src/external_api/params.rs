@@ -1581,6 +1581,10 @@ pub struct Route {
 
     /// VLAN id the gateway is reachable over.
     pub vid: Option<u16>,
+
+    /// Local preference for route. Higher preference indictes precedence
+    /// within and across protocols.
+    pub local_pref: Option<u32>,
 }
 
 /// Select a BGP config by a name or id.

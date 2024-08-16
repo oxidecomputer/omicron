@@ -95,7 +95,7 @@ rsa = { version = "0.9.6", features = ["serde", "sha2"] }
 schemars = { version = "0.8.21", features = ["bytes", "chrono", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.23", features = ["serde"] }
-serde = { version = "1.0.207", features = ["alloc", "derive", "rc"] }
+serde = { version = "1.0.208", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.125", features = ["raw_value", "unbounded_depth"] }
 sha1 = { version = "0.10.6", features = ["oid"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
@@ -202,7 +202,7 @@ rsa = { version = "0.9.6", features = ["serde", "sha2"] }
 schemars = { version = "0.8.21", features = ["bytes", "chrono", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.23", features = ["serde"] }
-serde = { version = "1.0.207", features = ["alloc", "derive", "rc"] }
+serde = { version = "1.0.208", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.125", features = ["raw_value", "unbounded_depth"] }
 sha1 = { version = "0.10.6", features = ["oid"] }
 sha2 = { version = "0.10.8", features = ["oid"] }

@@ -128,7 +128,8 @@
             {
               "destination": "0.0.0.0/0",
               "nexthop": "172.20.15.33",
-              "vlan_id": null
+              "vlan_id": null,
+              "local_pref": null
             }
           ],
           "addresses": [
@@ -149,7 +150,8 @@
             {
               "destination": "0.0.0.0/0",
               "nexthop": "172.20.15.33",
-              "vlan_id": null
+              "vlan_id": null,
+              "local_pref": null
             }
           ],
           "addresses": [
