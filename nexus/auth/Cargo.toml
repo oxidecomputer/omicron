@@ -37,6 +37,7 @@ tokio = { workspace = true, features = ["full"] }
 uuid.workspace = true
 
 authz-macros.workspace = true
+nexus-auth-types.workspace = true
 nexus-db-fixed-data.workspace = true
 nexus-db-model.workspace = true
 nexus-types.workspace = true

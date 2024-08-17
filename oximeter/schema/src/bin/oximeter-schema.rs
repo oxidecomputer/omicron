@@ -9,7 +9,7 @@
 use anyhow::Context as _;
 use clap::Parser;
 use clap::Subcommand;
-use oximeter::schema::ir::TimeseriesDefinition;
+use oximeter_schema::ir::TimeseriesDefinition;
 use std::num::NonZeroU8;
 use std::path::PathBuf;
 
@@ -56,7 +56,7 @@ fn main() -> anyhow::Result<()> {
             println!("{def:#?}");
         }
         Cmd::Schema { timeseries, version } => {
-            let schema = oximeter_impl::schema::ir::load_schema(&contents)?;
+            let schema = oximeter_schema::ir::load_schema(&contents)?;
             match (timeseries, version) {
                 (None, None) => {
                     for each in schema.into_iter() {
@@ -87,7 +87,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Cmd::Emit => {
-            let code = oximeter::schema::codegen::use_timeseries(&contents)?;
+            let code = oximeter_schema::codegen::use_timeseries(&contents)?;
             let formatted =
                 prettyplease::unparse(&syn::parse_file(&format!("{code}"))?);
             println!("{formatted}");

@@ -10,13 +10,13 @@ use chrono::DateTime;
 use chrono::Utc;
 
 use crate::oxql::ast::ident::Ident;
-use crate::oxql::point::DataType;
-use crate::oxql::point::MetricType;
-use crate::oxql::point::ValueArray;
-use crate::oxql::Error;
-use crate::oxql::Table;
-use crate::oxql::Timeseries;
-use crate::TimeseriesKey;
+use anyhow::Error;
+use oxql_types::point::DataType;
+use oxql_types::point::MetricType;
+use oxql_types::point::ValueArray;
+use oxql_types::Table;
+use oxql_types::Timeseries;
+use oxql_types::TimeseriesKey;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 
@@ -98,7 +98,7 @@ impl GroupBy {
                             ValueArray::Double(new_values),
                             ValueArray::Double(existing_values),
                         ) => {
-                            let new_timestamps = &dropped.points.timestamps;
+                            let new_timestamps = dropped.points.timestamps();
 
                             // We will be merging the new data with the
                             // existing, but borrow-checking limits the degree
@@ -106,7 +106,7 @@ impl GroupBy {
                             // entry in the output table. Instead, aggregate
                             // everything into a copy of the expected data.
                             let mut timestamps =
-                                existing.points.timestamps.clone();
+                                existing.points.timestamps().to_owned();
                             let mut values = existing_values.clone();
 
                             // Merge in the new values, so long as they actually
@@ -152,10 +152,7 @@ impl GroupBy {
 
                             // Replace the existing output timeseries's
                             // timestamps and data arrays.
-                            std::mem::swap(
-                                &mut existing.points.timestamps,
-                                &mut timestamps,
-                            );
+                            existing.points.set_timestamps(timestamps);
                             existing
                                 .points
                                 .values_mut(0)
@@ -166,7 +163,7 @@ impl GroupBy {
                             ValueArray::Integer(new_values),
                             ValueArray::Integer(existing_values),
                         ) => {
-                            let new_timestamps = &dropped.points.timestamps;
+                            let new_timestamps = dropped.points.timestamps();
 
                             // We will be merging the new data with the
                             // existing, but borrow-checking limits the degree
@@ -174,7 +171,7 @@ impl GroupBy {
                             // entry in the output table. Instead, aggregate
                             // everything into a copy of the expected data.
                             let mut timestamps =
-                                existing.points.timestamps.clone();
+                                existing.points.timestamps().to_owned();
                             let mut values = existing_values.clone();
 
                             // Merge in the new values, so long as they actually
@@ -220,10 +217,7 @@ impl GroupBy {
 
                             // Replace the existing output timeseries's
                             // timestamps and data arrays.
-                            std::mem::swap(
-                                &mut existing.points.timestamps,
-                                &mut timestamps,
-                            );
+                            existing.points.set_timestamps(timestamps);
                             existing
                                 .points
                                 .values_mut(0)
@@ -286,14 +280,15 @@ impl GroupBy {
                     else {
                         unreachable!();
                     };
-                    let new_timestamps = &new_points.timestamps;
+                    let new_timestamps = new_points.timestamps();
 
                     // We will be merging the new data with the
                     // existing, but borrow-checking limits the degree
                     // to which we can easily do this on the `existing`
                     // entry in the output table. Instead, aggregate
                     // everything into a copy of the expected data.
-                    let mut timestamps = existing.points.timestamps.clone();
+                    let mut timestamps =
+                        existing.points.timestamps().to_owned();
                     let mut values = existing
                         .points
                         .values(0)
@@ -360,10 +355,7 @@ impl GroupBy {
 
                     // Replace the existing output timeseries's
                     // timestamps and data arrays.
-                    std::mem::swap(
-                        &mut existing.points.timestamps,
-                        &mut timestamps,
-                    );
+                    existing.points.set_timestamps(timestamps);
                     existing
                         .points
                         .values_mut(0)
@@ -388,7 +380,7 @@ impl GroupBy {
                     // _zero_ for any where the values are none.
                     let counts = new_timeseries
                         .points
-                        .timestamps
+                        .timestamps()
                         .iter()
                         .zip(values)
                         .map(|(timestamp, maybe_value)| {
@@ -434,16 +426,16 @@ pub enum Reducer {
 #[cfg(test)]
 mod tests {
     use super::{GroupBy, Reducer};
-    use crate::oxql::{
-        ast::{
-            ident::Ident,
-            table_ops::align::{Align, AlignmentMethod},
-        },
-        point::{DataType, MetricType, ValueArray},
-        Table, Timeseries,
+    use crate::oxql::ast::{
+        ident::Ident,
+        table_ops::align::{Align, AlignmentMethod},
     };
     use chrono::{DateTime, Utc};
     use oximeter::FieldValue;
+    use oxql_types::{
+        point::{DataType, MetricType, ValueArray},
+        Table, Timeseries,
+    };
     use std::{collections::BTreeMap, time::Duration};
 
     // Which timeseries the second data point is missing from.
@@ -495,8 +487,8 @@ mod tests {
                 MetricType::Gauge,
             )
             .unwrap();
-            ts0.points.start_times = None;
-            ts0.points.timestamps.clone_from(&timestamps);
+            ts0.points.clear_start_times();
+            ts0.points.set_timestamps(timestamps.clone());
             *ts0.points.values_mut(0).unwrap() = ValueArray::Double(vec![
                 Some(1.0),
                 if matches!(
@@ -527,7 +519,7 @@ mod tests {
                 MetricType::Gauge,
             )
             .unwrap();
-            ts1.points.start_times = None;
+            ts1.points.clear_start_times();
 
             // Non-overlapping in this test setup means that we just shift one
             // value from this array backward in time by one additional second.
@@ -538,7 +530,7 @@ mod tests {
             //
             // When reducing, t0 is never changed, and t1-t2 are always reduced
             // together, if the values are present.
-            ts1.points.timestamps = if cfg.overlapping_times {
+            let new_timestamps = if cfg.overlapping_times {
                 timestamps.clone()
             } else {
                 let mut new_timestamps = timestamps.clone();
@@ -546,6 +538,7 @@ mod tests {
                 timestamps.insert(0, new_timestamps[0]);
                 new_timestamps
             };
+            ts1.points.set_timestamps(new_timestamps);
             *ts1.points.values_mut(0).unwrap() = ValueArray::Double(vec![
                 Some(2.0),
                 if matches!(cfg.missing_value, MissingValue::Both) {
@@ -604,11 +597,13 @@ mod tests {
             let points = &grouped_timeseries.points;
             assert_eq!(points.dimensionality(), 1, "Points should still be 1D");
             assert_eq!(
-                points.start_times, None,
+                points.start_times(),
+                None,
                 "Points should not have start times"
             );
             assert_eq!(
-                points.timestamps, test.timestamps,
+                points.timestamps(),
+                test.timestamps,
                 "Points do not have correct timestamps"
             );
 

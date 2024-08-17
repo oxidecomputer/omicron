@@ -10,7 +10,6 @@ use clickward::{
 use dropshot::test_util::log_prefix_for_test;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::test_setup_log;
-use oximeter::test_util;
 use oximeter_db::{Client, DbWrite, OxqlResult, Sample, TestDbWrite};
 use slog::{debug, info, Logger};
 use std::collections::BTreeSet;
@@ -199,7 +198,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     // Let's write some samples to our first replica and wait for them to show
     // up on replica 2.
     let start = tokio::time::Instant::now();
-    let samples = test_util::generate_test_samples(
+    let samples = oximeter_test_utils::generate_test_samples(
         input.n_projects,
         input.n_instances,
         input.n_cpus,
@@ -261,7 +260,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     info!(log, "successfully stopped server 1");
 
     // Generate some new samples and insert them at replica3
-    let samples = test_util::generate_test_samples(
+    let samples = oximeter_test_utils::generate_test_samples(
         input.n_projects,
         input.n_instances,
         input.n_cpus,
@@ -298,7 +297,7 @@ async fn test_cluster() -> anyhow::Result<()> {
         .expect("failed to get samples from client1");
 
     // We still have a quorum (2 of 3 keepers), so we should be able to insert
-    let samples = test_util::generate_test_samples(
+    let samples = oximeter_test_utils::generate_test_samples(
         input.n_projects,
         input.n_instances,
         input.n_cpus,
@@ -321,7 +320,7 @@ async fn test_cluster() -> anyhow::Result<()> {
         .expect("failed to get samples from client1");
 
     info!(log, "Attempting to insert samples without keeper quorum");
-    let samples = test_util::generate_test_samples(
+    let samples = oximeter_test_utils::generate_test_samples(
         input.n_projects,
         input.n_instances,
         input.n_cpus,
@@ -350,7 +349,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     )
     .await
     .expect("failed to sync keepers");
-    let samples = test_util::generate_test_samples(
+    let samples = oximeter_test_utils::generate_test_samples(
         input.n_projects,
         input.n_instances,
         input.n_cpus,
@@ -370,7 +369,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     )
     .await
     .expect("failed to sync keepers");
-    let samples = test_util::generate_test_samples(
+    let samples = oximeter_test_utils::generate_test_samples(
         input.n_projects,
         input.n_instances,
         input.n_cpus,

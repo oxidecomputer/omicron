@@ -10,7 +10,7 @@ use indent_write::fmt::IndentWriter;
 use owo_colors::{OwoColorize, Style};
 use similar::{ChangeTag, DiffableStr, TextDiff};
 
-use crate::spec::{ApiSpec, DocumentSummary};
+use crate::spec::{ApiSpec, ApiSpecFile, DocumentSummary};
 
 #[derive(Debug, Args)]
 #[clap(next_help_heading = "Global options")]
@@ -123,6 +123,21 @@ pub(crate) fn display_api_spec(spec: &ApiSpec, styles: &Styles) -> String {
     )
 }
 
+pub(crate) fn display_api_spec_file(
+    spec: &ApiSpec,
+    spec_file: ApiSpecFile<'_>,
+    styles: &Styles,
+) -> String {
+    match spec_file {
+        ApiSpecFile::Openapi => {
+            format!("OpenAPI document {}", spec.filename.style(styles.filename))
+        }
+        ApiSpecFile::Extra(path) => {
+            format!("Extra file {}", path.style(styles.filename))
+        }
+    }
+}
+
 pub(crate) fn display_summary(
     summary: &DocumentSummary,
     styles: &Styles,
@@ -202,8 +217,9 @@ pub(crate) mod headers {
     pub(crate) static GENERATING: &str = "Generating";
 
     pub(crate) static UP_TO_DATE: &str = "Up-to-date";
-    pub(crate) static STALE: &str = "Stale";
-    pub(crate) static MISSING: &str = "Missing";
+    pub(crate) static OUT_OF_DATE: &str = "Out-of-date";
+    pub(crate) static STALE: &str = "-> Stale";
+    pub(crate) static MISSING: &str = "-> Missing";
 
     pub(crate) static UPDATED: &str = "Updated";
     pub(crate) static UNCHANGED: &str = "Unchanged";
@@ -211,22 +227,38 @@ pub(crate) mod headers {
     pub(crate) static SUCCESS: &str = "Success";
     pub(crate) static FAILURE: &str = "Failure";
 
-    pub(crate) fn continued_indent(count_width: usize) -> String {
+    fn count_section_width(count_width: usize) -> usize {
         // Status strings are of the form:
         //
         //    Generated [ 1/12] api.json: 1 path, 1 schema
+        //             ^^^^^^^^^
         //
-        // So the continued indent is:
-        //
-        // HEADER_WIDTH for the status string
-        // + (count_width * 2) for current and total counts
+        // So the width of the count section is:
+        // (count_width * 2) for current and total counts
         // + 3 for '[/]'
         // + 2 for spaces on either side.
-        " ".repeat(HEADER_WIDTH + count_width * 2 + 3 + 2)
+        count_width * 2 + 3 + 2
+    }
+
+    pub(crate) fn count_section_indent(count_width: usize) -> String {
+        " ".repeat(count_section_width(count_width))
+    }
+
+    pub(crate) fn continued_indent(count_width: usize) -> String {
+        // HEADER_WIDTH for the status string + count_section_width
+        " ".repeat(HEADER_WIDTH + count_section_width(count_width))
     }
 }
 
 pub(crate) mod plural {
+    pub(crate) fn files(count: usize) -> &'static str {
+        if count == 1 {
+            "file"
+        } else {
+            "files"
+        }
+    }
+
     pub(crate) fn documents(count: usize) -> &'static str {
         if count == 1 {
             "document"
