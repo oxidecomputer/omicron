@@ -77,12 +77,14 @@ members = [
     "oximeter/api",
     "oximeter/collector",
     "oximeter/db",
-    "oximeter/impl",
     "oximeter/instruments",
     "oximeter/oximeter-macro-impl",
     "oximeter/oximeter",
     "oximeter/producer",
+    "oximeter/schema",
+    "oximeter/test-utils",
     "oximeter/timeseries-macro",
+    "oximeter/types",
     "package",
     "passwords",
     "rpaths",
@@ -191,12 +193,14 @@ default-members = [
     "oximeter/api",
     "oximeter/collector",
     "oximeter/db",
-    "oximeter/impl",
     "oximeter/instruments",
     "oximeter/oximeter-macro-impl",
     "oximeter/oximeter",
     "oximeter/producer",
+    "oximeter/schema",
+    "oximeter/test-utils",
     "oximeter/timeseries-macro",
+    "oximeter/types",
     "package",
     "passwords",
     "rpaths",
@@ -459,11 +463,13 @@ oximeter-api = { path = "oximeter/api" }
 oximeter-client = { path = "clients/oximeter-client" }
 oximeter-db = { path = "oximeter/db/", default-features = false }
 oximeter-collector = { path = "oximeter/collector" }
-oximeter-impl = { path = "oximeter/impl" }
 oximeter-instruments = { path = "oximeter/instruments" }
 oximeter-macro-impl = { path = "oximeter/oximeter-macro-impl" }
 oximeter-producer = { path = "oximeter/producer" }
+oximeter-schema = { path = "oximeter/schema" }
+oximeter-test-utils = { path = "oximeter/test-utils" }
 oximeter-timeseries-macro = { path = "oximeter/timeseries-macro" }
+oximeter-types = { path = "oximeter/types" }
 p256 = "0.13"
 parse-display = "0.10.0"
 partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }

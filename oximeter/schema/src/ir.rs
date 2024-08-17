@@ -11,17 +11,17 @@
 //! inspected or used to generate code that contains the equivalent Rust types
 //! and trait implementations.
 
-use crate::schema::AuthzScope;
-use crate::schema::DatumType;
-use crate::schema::FieldSource;
-use crate::schema::FieldType;
-use crate::schema::TimeseriesDescription;
-use crate::schema::Units;
-use crate::FieldSchema;
-use crate::MetricsError;
-use crate::TimeseriesName;
-use crate::TimeseriesSchema;
 use chrono::Utc;
+use oximeter_types::AuthzScope;
+use oximeter_types::DatumType;
+use oximeter_types::FieldSchema;
+use oximeter_types::FieldSource;
+use oximeter_types::FieldType;
+use oximeter_types::MetricsError;
+use oximeter_types::TimeseriesDescription;
+use oximeter_types::TimeseriesName;
+use oximeter_types::TimeseriesSchema;
+use oximeter_types::Units;
 use serde::Deserialize;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;

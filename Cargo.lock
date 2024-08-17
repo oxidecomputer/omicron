@@ -6821,9 +6821,10 @@ dependencies = [
  "chrono",
  "clap",
  "omicron-workspace-hack",
- "oximeter-impl",
  "oximeter-macro-impl",
+ "oximeter-schema",
  "oximeter-timeseries-macro",
+ "oximeter-types",
  "prettyplease",
  "syn 2.0.74",
  "toml 0.8.19",
@@ -6925,6 +6926,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "oximeter",
+ "oximeter-test-utils",
  "peg",
  "reedline",
  "regex",
@@ -6945,39 +6947,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "usdt",
- "uuid",
-]
-
-[[package]]
-name = "oximeter-impl"
-version = "0.1.0"
-dependencies = [
- "approx",
- "bytes",
- "chrono",
- "criterion",
- "float-ord",
- "heck 0.5.0",
- "num",
- "omicron-common",
- "omicron-workspace-hack",
- "oximeter-macro-impl",
- "prettyplease",
- "proc-macro2",
- "quote",
- "rand",
- "rand_distr",
- "regex",
- "rstest",
- "schemars",
- "serde",
- "serde_json",
- "slog-error-chain",
- "strum",
- "syn 2.0.74",
- "thiserror",
- "toml 0.8.19",
- "trybuild",
  "uuid",
 ]
 
@@ -7042,14 +7011,72 @@ dependencies = [
 ]
 
 [[package]]
+name = "oximeter-schema"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "heck 0.5.0",
+ "omicron-workspace-hack",
+ "oximeter-types",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "schemars",
+ "serde",
+ "slog-error-chain",
+ "syn 2.0.74",
+ "toml 0.8.19",
+]
+
+[[package]]
+name = "oximeter-test-utils"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "omicron-workspace-hack",
+ "oximeter-macro-impl",
+ "oximeter-types",
+ "uuid",
+]
+
+[[package]]
 name = "oximeter-timeseries-macro"
 version = "0.1.0"
 dependencies = [
  "omicron-workspace-hack",
- "oximeter-impl",
+ "oximeter-schema",
+ "oximeter-types",
  "proc-macro2",
  "quote",
  "syn 2.0.74",
+]
+
+[[package]]
+name = "oximeter-types"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "bytes",
+ "chrono",
+ "criterion",
+ "float-ord",
+ "num",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "oximeter-macro-impl",
+ "rand",
+ "rand_distr",
+ "regex",
+ "rstest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "strum",
+ "thiserror",
+ "trybuild",
+ "uuid",
 ]
 
 [[package]]
