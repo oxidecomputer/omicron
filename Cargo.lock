@@ -4917,6 +4917,7 @@ dependencies = [
  "http 0.2.12",
  "hyper 0.14.30",
  "newtype_derive",
+ "nexus-auth-types",
  "nexus-db-fixed-data",
  "nexus-db-model",
  "nexus-types",
@@ -4937,6 +4938,19 @@ dependencies = [
  "thiserror",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "nexus-auth-types"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "cookie 0.18.1",
+ "dropshot",
+ "http 0.2.12",
+ "newtype_derive",
+ "omicron-workspace-hack",
 ]
 
 [[package]]
@@ -6039,6 +6053,7 @@ dependencies = [
  "macaddr",
  "mg-admin-client",
  "nexus-auth",
+ "nexus-auth-types",
  "nexus-client",
  "nexus-config",
  "nexus-db-model",

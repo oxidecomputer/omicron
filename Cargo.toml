@@ -56,6 +56,7 @@ members = [
     "nexus-sled-agent-shared",
     "nexus/authz-macros",
     "nexus/auth",
+    "nexus/auth-types",
     "nexus/db-fixed-data",
     "nexus/db-macros",
     "nexus/db-model",
@@ -170,6 +171,7 @@ default-members = [
     "nexus-sled-agent-shared",
     "nexus/authz-macros",
     "nexus/auth",
+    "nexus/auth-types",
     "nexus/db-fixed-data",
     "nexus/db-macros",
     "nexus/db-model",
@@ -404,6 +406,7 @@ mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "2
 ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "220dd026e83142b83bd93123f465a64dd4600201" }
 multimap = "0.10.0"
 nexus-auth = { path = "nexus/auth" }
+nexus-auth-types = { path = "nexus/auth-types" }
 nexus-client = { path = "clients/nexus-client" }
 nexus-config = { path = "nexus-config" }
 nexus-db-fixed-data = { path = "nexus/db-fixed-data" }

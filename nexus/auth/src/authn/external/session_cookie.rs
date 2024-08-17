@@ -4,7 +4,6 @@
 
 //! authn scheme for console that looks up cookie values in a session table
 
-use super::cookies::parse_cookies;
 use super::{HttpAuthnScheme, Reason, SchemeResult};
 use crate::authn;
 use crate::authn::{Actor, Details};
@@ -13,6 +12,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use dropshot::HttpError;
 use http::HeaderValue;
+use nexus_auth_types::authn::cookies::parse_cookies;
 use slog::debug;
 use uuid::Uuid;
 

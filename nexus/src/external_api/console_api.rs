@@ -31,16 +31,14 @@ use dropshot::{
 };
 use http::{header, HeaderName, HeaderValue, Response, StatusCode, Uri};
 use hyper::Body;
+use nexus_auth_types::authn::cookies::Cookies;
 use nexus_db_model::AuthenticationMode;
 use nexus_db_queries::authn::silos::IdentityProviderType;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::{
-    authn::external::{
-        cookies::Cookies,
-        session_cookie::{
-            clear_session_cookie_header_value, session_cookie_header_value,
-            SessionStore, SESSION_COOKIE_COOKIE_NAME,
-        },
+    authn::external::session_cookie::{
+        clear_session_cookie_header_value, session_cookie_header_value,
+        SessionStore, SESSION_COOKIE_COOKIE_NAME,
     },
     db::identity::Asset,
 };
