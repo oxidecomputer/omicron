@@ -40,10 +40,7 @@ use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
-use nexus_types::external_api::{
-    shared::{BfdStatus, ProbeInfo},
-    views::OxqlQueryResult,
-};
+use nexus_types::external_api::shared::{BfdStatus, ProbeInfo};
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
@@ -6389,7 +6386,7 @@ async fn timeseries_schema_list(
 async fn timeseries_query(
     rqctx: RequestContext<ApiContext>,
     body: TypedBody<params::TimeseriesQuery>,
-) -> Result<HttpResponseOk<OxqlQueryResult>, HttpError> {
+) -> Result<HttpResponseOk<views::OxqlQueryResult>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
@@ -6398,7 +6395,7 @@ async fn timeseries_query(
         nexus
             .timeseries_query(&opctx, &query)
             .await
-            .map(|tables| HttpResponseOk(OxqlQueryResult { tables }))
+            .map(|tables| HttpResponseOk(views::OxqlQueryResult { tables }))
             .map_err(HttpError::from)
     };
     apictx
