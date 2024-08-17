@@ -10,13 +10,9 @@ use peg::error::ParseError as PegError;
 use peg::str::LineCol;
 
 pub mod ast;
-pub mod point;
 pub mod query;
-pub mod table;
 
 pub use self::query::Query;
-pub use self::table::Table;
-pub use self::table::Timeseries;
 pub use anyhow::Error;
 
 /// Format a PEG parsing error into a nice anyhow error.

@@ -31,6 +31,7 @@ members = [
     "dev-tools/omicron-dev",
     "dev-tools/omicron-dev-lib",
     "dev-tools/openapi-manager",
+    "dev-tools/openapi-manager/types",
     "dev-tools/oxlog",
     "dev-tools/reconfigurator-cli",
     "dev-tools/releng",
@@ -56,6 +57,7 @@ members = [
     "nexus-sled-agent-shared",
     "nexus/authz-macros",
     "nexus/auth",
+    "nexus/auth-types",
     "nexus/db-fixed-data",
     "nexus/db-macros",
     "nexus/db-model",
@@ -77,12 +79,15 @@ members = [
     "oximeter/api",
     "oximeter/collector",
     "oximeter/db",
-    "oximeter/impl",
     "oximeter/instruments",
     "oximeter/oximeter-macro-impl",
     "oximeter/oximeter",
+    "oximeter/oxql-types",
     "oximeter/producer",
+    "oximeter/schema",
+    "oximeter/test-utils",
     "oximeter/timeseries-macro",
+    "oximeter/types",
     "package",
     "passwords",
     "rpaths",
@@ -142,6 +147,7 @@ default-members = [
     "dev-tools/omicron-dev",
     "dev-tools/omicron-dev-lib",
     "dev-tools/openapi-manager",
+    "dev-tools/openapi-manager/types",
     "dev-tools/oxlog",
     "dev-tools/reconfigurator-cli",
     "dev-tools/releng",
@@ -170,6 +176,7 @@ default-members = [
     "nexus-sled-agent-shared",
     "nexus/authz-macros",
     "nexus/auth",
+    "nexus/auth-types",
     "nexus/db-fixed-data",
     "nexus/db-macros",
     "nexus/db-model",
@@ -191,12 +198,15 @@ default-members = [
     "oximeter/api",
     "oximeter/collector",
     "oximeter/db",
-    "oximeter/impl",
     "oximeter/instruments",
     "oximeter/oximeter-macro-impl",
     "oximeter/oximeter",
+    "oximeter/oxql-types",
     "oximeter/producer",
+    "oximeter/schema",
+    "oximeter/test-utils",
     "oximeter/timeseries-macro",
+    "oximeter/types",
     "package",
     "passwords",
     "rpaths",
@@ -404,6 +414,7 @@ mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "2
 ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "220dd026e83142b83bd93123f465a64dd4600201" }
 multimap = "0.10.0"
 nexus-auth = { path = "nexus/auth" }
+nexus-auth-types = { path = "nexus/auth-types" }
 nexus-client = { path = "clients/nexus-client" }
 nexus-config = { path = "nexus-config" }
 nexus-db-fixed-data = { path = "nexus/db-fixed-data" }
@@ -447,6 +458,7 @@ oxlog = { path = "dev-tools/oxlog" }
 oxnet = { git = "https://github.com/oxidecomputer/oxnet" }
 once_cell = "1.19.0"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
+openapi-manager-types = { path = "dev-tools/openapi-manager/types" }
 openapiv3 = "2.0.0"
 # must match samael's crate!
 openssl = "0.10"
@@ -459,11 +471,14 @@ oximeter-api = { path = "oximeter/api" }
 oximeter-client = { path = "clients/oximeter-client" }
 oximeter-db = { path = "oximeter/db/", default-features = false }
 oximeter-collector = { path = "oximeter/collector" }
-oximeter-impl = { path = "oximeter/impl" }
 oximeter-instruments = { path = "oximeter/instruments" }
 oximeter-macro-impl = { path = "oximeter/oximeter-macro-impl" }
 oximeter-producer = { path = "oximeter/producer" }
+oximeter-schema = { path = "oximeter/schema" }
+oximeter-test-utils = { path = "oximeter/test-utils" }
 oximeter-timeseries-macro = { path = "oximeter/timeseries-macro" }
+oximeter-types = { path = "oximeter/types" }
+oxql-types = { path = "oximeter/oxql-types" }
 p256 = "0.13"
 parse-display = "0.10.0"
 partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }

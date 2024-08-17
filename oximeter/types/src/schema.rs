@@ -6,9 +6,6 @@
 
 //! Tools for working with schema for fields and timeseries.
 
-pub mod codegen;
-pub mod ir;
-
 use crate::types::DatumType;
 use crate::types::FieldType;
 use crate::types::MetricsError;
@@ -402,7 +399,6 @@ pub enum AuthzScope {
 mod tests {
     use super::*;
     use std::convert::TryFrom;
-    use uuid::Uuid;
 
     #[test]
     fn test_timeseries_name() {
@@ -424,127 +420,6 @@ mod tests {
         assert!(TimeseriesName::try_from("a:").is_err());
         assert!(TimeseriesName::try_from("123").is_err());
         assert!(TimeseriesName::try_from("x.a:b").is_err());
-    }
-
-    #[derive(Target)]
-    struct MyTarget {
-        id: Uuid,
-        name: String,
-    }
-
-    const ID: Uuid = uuid::uuid!("ca565ef4-65dc-4ab0-8622-7be43ed72105");
-
-    impl Default for MyTarget {
-        fn default() -> Self {
-            Self { id: ID, name: String::from("name") }
-        }
-    }
-
-    #[derive(Metric)]
-    struct MyMetric {
-        happy: bool,
-        datum: u64,
-    }
-
-    impl Default for MyMetric {
-        fn default() -> Self {
-            Self { happy: true, datum: 0 }
-        }
-    }
-
-    #[test]
-    fn test_timeseries_schema_from_parts() {
-        let target = MyTarget::default();
-        let metric = MyMetric::default();
-        let schema = TimeseriesSchema::new(&target, &metric).unwrap();
-
-        assert_eq!(schema.timeseries_name, "my_target:my_metric");
-        let f = schema.schema_for_field("id").unwrap();
-        assert_eq!(f.name, "id");
-        assert_eq!(f.field_type, FieldType::Uuid);
-        assert_eq!(f.source, FieldSource::Target);
-
-        let f = schema.schema_for_field("name").unwrap();
-        assert_eq!(f.name, "name");
-        assert_eq!(f.field_type, FieldType::String);
-        assert_eq!(f.source, FieldSource::Target);
-
-        let f = schema.schema_for_field("happy").unwrap();
-        assert_eq!(f.name, "happy");
-        assert_eq!(f.field_type, FieldType::Bool);
-        assert_eq!(f.source, FieldSource::Metric);
-        assert_eq!(schema.datum_type, DatumType::U64);
-    }
-
-    #[test]
-    fn test_timeseries_schema_from_sample() {
-        let target = MyTarget::default();
-        let metric = MyMetric::default();
-        let sample = Sample::new(&target, &metric).unwrap();
-        let schema = TimeseriesSchema::new(&target, &metric).unwrap();
-        let schema_from_sample = TimeseriesSchema::from(&sample);
-        assert_eq!(schema, schema_from_sample);
-    }
-
-    // Test that we correctly order field across a target and metric.
-    //
-    // In an earlier commit, we switched from storing fields in an unordered Vec
-    // to using a BTree{Map,Set} to ensure ordering by name. However, the
-    // `TimeseriesSchema` type stored all its fields by chaining the sorted
-    // fields from the target and metric, without then sorting _across_ them.
-    //
-    // This was exacerbated by the error reporting, where we did in fact sort
-    // all fields across the target and metric, making it difficult to tell how
-    // the derived schema was different, if at all.
-    //
-    // This test generates a sample with a schema where the target and metric
-    // fields are sorted within them, but not across them. We check that the
-    // derived schema are actually equal, which means we've imposed that
-    // ordering when deriving the schema.
-    #[test]
-    fn test_schema_field_ordering_across_target_metric() {
-        let target_field = FieldSchema {
-            name: String::from("later"),
-            field_type: FieldType::U64,
-            source: FieldSource::Target,
-            description: String::new(),
-        };
-        let metric_field = FieldSchema {
-            name: String::from("earlier"),
-            field_type: FieldType::U64,
-            source: FieldSource::Metric,
-            description: String::new(),
-        };
-        let timeseries_name: TimeseriesName = "foo:bar".parse().unwrap();
-        let datum_type = DatumType::U64;
-        let field_schema =
-            [target_field.clone(), metric_field.clone()].into_iter().collect();
-        let expected_schema = TimeseriesSchema {
-            timeseries_name,
-            description: Default::default(),
-            field_schema,
-            datum_type,
-            version: default_schema_version(),
-            authz_scope: AuthzScope::Fleet,
-            units: Units::Count,
-            created: Utc::now(),
-        };
-
-        #[derive(oximeter::Target)]
-        struct Foo {
-            later: u64,
-        }
-        #[derive(oximeter::Metric)]
-        struct Bar {
-            earlier: u64,
-            datum: u64,
-        }
-
-        let target = Foo { later: 1 };
-        let metric = Bar { earlier: 2, datum: 10 };
-        let sample = Sample::new(&target, &metric).unwrap();
-        let derived_schema = TimeseriesSchema::from(&sample);
-        assert_eq!(derived_schema, expected_schema);
     }
 
     #[test]

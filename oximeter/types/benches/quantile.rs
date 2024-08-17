@@ -8,7 +8,7 @@
 // Copyright 2024 Oxide Computer Company
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use oximeter_impl::Quantile;
+use oximeter_types::Quantile;
 use rand_distr::{Distribution, Normal};
 
 /// Emulates baseline code in a Python implementation of the P²

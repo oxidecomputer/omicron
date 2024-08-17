@@ -13,7 +13,6 @@ use slog::trace;
 use std::borrow::Borrow;
 use uuid::Uuid;
 
-pub mod cookies;
 pub mod session_cookie;
 pub mod spoof;
 pub mod token;
