@@ -6,18 +6,18 @@
 
 //! Generate Rust types and code from oximeter schema definitions.
 
-use crate::schema::ir::find_schema_version;
-use crate::schema::ir::load_schema;
-use crate::schema::AuthzScope;
-use crate::schema::FieldSource;
-use crate::schema::Units;
-use crate::DatumType;
-use crate::FieldSchema;
-use crate::FieldType;
-use crate::MetricsError;
-use crate::TimeseriesSchema;
+use crate::ir::find_schema_version;
+use crate::ir::load_schema;
 use chrono::prelude::DateTime;
 use chrono::prelude::Utc;
+use oximeter_types::AuthzScope;
+use oximeter_types::DatumType;
+use oximeter_types::FieldSchema;
+use oximeter_types::FieldSource;
+use oximeter_types::FieldType;
+use oximeter_types::MetricsError;
+use oximeter_types::TimeseriesSchema;
+use oximeter_types::Units;
 use proc_macro2::TokenStream;
 use quote::quote;
 
@@ -34,7 +34,7 @@ pub fn use_timeseries(contents: &str) -> Result<TokenStream, MetricsError> {
     let latest = find_schema_version(schema.iter().cloned(), None);
     let mod_name = quote::format_ident!("{}", latest[0].target_name());
     let types = emit_schema_types(latest);
-    let func = emit_schema_function(schema.into_iter());
+    let func = emit_schema_function(schema.iter());
     Ok(quote! {
         pub mod #mod_name {
             #types
@@ -43,9 +43,10 @@ pub fn use_timeseries(contents: &str) -> Result<TokenStream, MetricsError> {
     })
 }
 
-fn emit_schema_function(
-    list: impl Iterator<Item = TimeseriesSchema>,
+fn emit_schema_function<'a>(
+    list: impl Iterator<Item = &'a TimeseriesSchema>,
 ) -> TokenStream {
+    let list = list.map(quote_timeseries_schema);
     quote! {
         pub fn timeseries_schema() -> Vec<::oximeter::schema::TimeseriesSchema> {
             vec![
@@ -310,66 +311,63 @@ fn emit_one(source: FieldSource, schema: &TimeseriesSchema) -> TokenStream {
 // This is used so that we can emit a function that will return the same data as
 // we parse from the TOML file with the timeseries definition, as a way to
 // export the definitions without needing that actual file at runtime.
-impl quote::ToTokens for DatumType {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let toks = match self {
-            DatumType::Bool => quote! { ::oximeter::DatumType::Bool },
-            DatumType::I8 => quote! { ::oximeter::DatumType::I8 },
-            DatumType::U8 => quote! { ::oximeter::DatumType::U8 },
-            DatumType::I16 => quote! { ::oximeter::DatumType::I16 },
-            DatumType::U16 => quote! { ::oximeter::DatumType::U16 },
-            DatumType::I32 => quote! { ::oximeter::DatumType::I32 },
-            DatumType::U32 => quote! { ::oximeter::DatumType::U32 },
-            DatumType::I64 => quote! { ::oximeter::DatumType::I64 },
-            DatumType::U64 => quote! { ::oximeter::DatumType::U64 },
-            DatumType::F32 => quote! { ::oximeter::DatumType::F32 },
-            DatumType::F64 => quote! { ::oximeter::DatumType::F64 },
-            DatumType::String => quote! { ::oximeter::DatumType::String },
-            DatumType::Bytes => quote! { ::oximeter::DatumType::Bytes },
-            DatumType::CumulativeI64 => {
-                quote! { ::oximeter::DatumType::CumulativeI64 }
-            }
-            DatumType::CumulativeU64 => {
-                quote! { ::oximeter::DatumType::CumulativeU64 }
-            }
-            DatumType::CumulativeF32 => {
-                quote! { ::oximeter::DatumType::CumulativeF32 }
-            }
-            DatumType::CumulativeF64 => {
-                quote! { ::oximeter::DatumType::CumulativeF64 }
-            }
-            DatumType::HistogramI8 => {
-                quote! { ::oximeter::DatumType::HistogramI8 }
-            }
-            DatumType::HistogramU8 => {
-                quote! { ::oximeter::DatumType::HistogramU8 }
-            }
-            DatumType::HistogramI16 => {
-                quote! { ::oximeter::DatumType::HistogramI16 }
-            }
-            DatumType::HistogramU16 => {
-                quote! { ::oximeter::DatumType::HistogramU16 }
-            }
-            DatumType::HistogramI32 => {
-                quote! { ::oximeter::DatumType::HistogramI32 }
-            }
-            DatumType::HistogramU32 => {
-                quote! { ::oximeter::DatumType::HistogramU32 }
-            }
-            DatumType::HistogramI64 => {
-                quote! { ::oximeter::DatumType::HistogramI64 }
-            }
-            DatumType::HistogramU64 => {
-                quote! { ::oximeter::DatumType::HistogramU64 }
-            }
-            DatumType::HistogramF32 => {
-                quote! { ::oximeter::DatumType::HistogramF32 }
-            }
-            DatumType::HistogramF64 => {
-                quote! { ::oximeter::DatumType::HistogramF64 }
-            }
-        };
-        toks.to_tokens(tokens);
+fn quote_datum_type(datum_type: DatumType) -> TokenStream {
+    match datum_type {
+        DatumType::Bool => quote! { ::oximeter::DatumType::Bool },
+        DatumType::I8 => quote! { ::oximeter::DatumType::I8 },
+        DatumType::U8 => quote! { ::oximeter::DatumType::U8 },
+        DatumType::I16 => quote! { ::oximeter::DatumType::I16 },
+        DatumType::U16 => quote! { ::oximeter::DatumType::U16 },
+        DatumType::I32 => quote! { ::oximeter::DatumType::I32 },
+        DatumType::U32 => quote! { ::oximeter::DatumType::U32 },
+        DatumType::I64 => quote! { ::oximeter::DatumType::I64 },
+        DatumType::U64 => quote! { ::oximeter::DatumType::U64 },
+        DatumType::F32 => quote! { ::oximeter::DatumType::F32 },
+        DatumType::F64 => quote! { ::oximeter::DatumType::F64 },
+        DatumType::String => quote! { ::oximeter::DatumType::String },
+        DatumType::Bytes => quote! { ::oximeter::DatumType::Bytes },
+        DatumType::CumulativeI64 => {
+            quote! { ::oximeter::DatumType::CumulativeI64 }
+        }
+        DatumType::CumulativeU64 => {
+            quote! { ::oximeter::DatumType::CumulativeU64 }
+        }
+        DatumType::CumulativeF32 => {
+            quote! { ::oximeter::DatumType::CumulativeF32 }
+        }
+        DatumType::CumulativeF64 => {
+            quote! { ::oximeter::DatumType::CumulativeF64 }
+        }
+        DatumType::HistogramI8 => {
+            quote! { ::oximeter::DatumType::HistogramI8 }
+        }
+        DatumType::HistogramU8 => {
+            quote! { ::oximeter::DatumType::HistogramU8 }
+        }
+        DatumType::HistogramI16 => {
+            quote! { ::oximeter::DatumType::HistogramI16 }
+        }
+        DatumType::HistogramU16 => {
+            quote! { ::oximeter::DatumType::HistogramU16 }
+        }
+        DatumType::HistogramI32 => {
+            quote! { ::oximeter::DatumType::HistogramI32 }
+        }
+        DatumType::HistogramU32 => {
+            quote! { ::oximeter::DatumType::HistogramU32 }
+        }
+        DatumType::HistogramI64 => {
+            quote! { ::oximeter::DatumType::HistogramI64 }
+        }
+        DatumType::HistogramU64 => {
+            quote! { ::oximeter::DatumType::HistogramU64 }
+        }
+        DatumType::HistogramF32 => {
+            quote! { ::oximeter::DatumType::HistogramF32 }
+        }
+        DatumType::HistogramF64 => {
+            quote! { ::oximeter::DatumType::HistogramF64 }
+        }
     }
 }
 
@@ -452,55 +450,46 @@ fn emit_rust_type_for_field(field_type: FieldType) -> TokenStream {
     }
 }
 
-impl quote::ToTokens for FieldSource {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let toks = match self {
-            FieldSource::Target => {
-                quote! { ::oximeter::schema::FieldSource::Target }
-            }
-            FieldSource::Metric => {
-                quote! { ::oximeter::schema::FieldSource::Metric }
-            }
-        };
-        toks.to_tokens(tokens);
+fn quote_field_source(source: FieldSource) -> TokenStream {
+    match source {
+        FieldSource::Target => {
+            quote! { ::oximeter::schema::FieldSource::Target }
+        }
+        FieldSource::Metric => {
+            quote! { ::oximeter::schema::FieldSource::Metric }
+        }
     }
 }
 
-impl quote::ToTokens for FieldType {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let toks = match self {
-            FieldType::String => quote! { ::oximeter::FieldType::String },
-            FieldType::I8 => quote! { ::oximeter::FieldType::I8 },
-            FieldType::U8 => quote! { ::oximeter::FieldType::U8 },
-            FieldType::I16 => quote! { ::oximeter::FieldType::I16 },
-            FieldType::U16 => quote! { ::oximeter::FieldType::U16 },
-            FieldType::I32 => quote! { ::oximeter::FieldType::I32 },
-            FieldType::U32 => quote! { ::oximeter::FieldType::U32 },
-            FieldType::I64 => quote! { ::oximeter::FieldType::I64 },
-            FieldType::U64 => quote! { ::oximeter::FieldType::U64 },
-            FieldType::IpAddr => quote! { ::oximeter::FieldType::IpAddr },
-            FieldType::Uuid => quote! { ::oximeter::FieldType::Uuid },
-            FieldType::Bool => quote! { ::oximeter::FieldType::Bool },
-        };
-        toks.to_tokens(tokens);
+fn quote_field_type(field_type: FieldType) -> TokenStream {
+    match field_type {
+        FieldType::String => quote! { ::oximeter::FieldType::String },
+        FieldType::I8 => quote! { ::oximeter::FieldType::I8 },
+        FieldType::U8 => quote! { ::oximeter::FieldType::U8 },
+        FieldType::I16 => quote! { ::oximeter::FieldType::I16 },
+        FieldType::U16 => quote! { ::oximeter::FieldType::U16 },
+        FieldType::I32 => quote! { ::oximeter::FieldType::I32 },
+        FieldType::U32 => quote! { ::oximeter::FieldType::U32 },
+        FieldType::I64 => quote! { ::oximeter::FieldType::I64 },
+        FieldType::U64 => quote! { ::oximeter::FieldType::U64 },
+        FieldType::IpAddr => quote! { ::oximeter::FieldType::IpAddr },
+        FieldType::Uuid => quote! { ::oximeter::FieldType::Uuid },
+        FieldType::Bool => quote! { ::oximeter::FieldType::Bool },
     }
 }
 
-impl quote::ToTokens for AuthzScope {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let toks = match self {
-            AuthzScope::Fleet => {
-                quote! { ::oximeter::schema::AuthzScope::Fleet }
-            }
-            AuthzScope::Silo => quote! { ::oximeter::schema::AuthzScope::Silo },
-            AuthzScope::Project => {
-                quote! { ::oximeter::schema::AuthzScope::Project }
-            }
-            AuthzScope::ViewableToAll => {
-                quote! { ::oximeter::schema::AuthzScope::ViewableToAll }
-            }
-        };
-        toks.to_tokens(tokens);
+fn quote_authz_scope(authz_scope: AuthzScope) -> TokenStream {
+    match authz_scope {
+        AuthzScope::Fleet => {
+            quote! { ::oximeter::schema::AuthzScope::Fleet }
+        }
+        AuthzScope::Silo => quote! { ::oximeter::schema::AuthzScope::Silo },
+        AuthzScope::Project => {
+            quote! { ::oximeter::schema::AuthzScope::Project }
+        }
+        AuthzScope::ViewableToAll => {
+            quote! { ::oximeter::schema::AuthzScope::ViewableToAll }
+        }
     }
 }
 
@@ -512,85 +501,79 @@ fn quote_creation_time(created: DateTime<Utc>) -> TokenStream {
     }
 }
 
-impl quote::ToTokens for Units {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let toks = match self {
-            Units::None => quote! { ::oximeter::schema::Units::None },
-            Units::Count => quote! { ::oximeter::schema::Units::Count },
-            Units::Bytes => quote! { ::oximeter::schema::Units::Bytes },
-            Units::Seconds => quote! { ::oximeter::schema::Units::Seconds },
-            Units::Nanoseconds => {
-                quote! { ::oximeter::schema::Units::Nanoseconds }
-            }
-            Units::Amps => quote! { ::oximeter::schema::Units::Amps },
-            Units::Volts => quote! { ::oximeter::schema::Units::Volts },
-            Units::DegreesCelcius => {
-                quote! { ::oximeter::schema::Units::DegreesCelcius }
-            }
-            Units::Rpm => quote! { ::oximeter::schema::Units::Rpm  },
-        };
-        toks.to_tokens(tokens);
+fn quote_units(units: Units) -> TokenStream {
+    match units {
+        Units::None => quote! { ::oximeter::schema::Units::None },
+        Units::Count => quote! { ::oximeter::schema::Units::Count },
+        Units::Bytes => quote! { ::oximeter::schema::Units::Bytes },
+        Units::Seconds => quote! { ::oximeter::schema::Units::Seconds },
+        Units::Nanoseconds => {
+            quote! { ::oximeter::schema::Units::Nanoseconds }
+        }
+        Units::Amps => quote! { ::oximeter::schema::Units::Amps },
+        Units::Volts => quote! { ::oximeter::schema::Units::Volts },
+        Units::DegreesCelcius => {
+            quote! { ::oximeter::schema::Units::DegreesCelcius }
+        }
+        Units::Rpm => quote! { ::oximeter::schema::Units::Rpm },
     }
 }
 
-impl quote::ToTokens for FieldSchema {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let name = self.name.as_str();
-        let field_type = self.field_type;
-        let source = self.source;
-        let description = self.description.as_str();
-        let toks = quote! {
-            ::oximeter::FieldSchema {
-                name: String::from(#name),
-                field_type: #field_type,
-                source: #source,
-                description: String::from(#description),
-            }
-        };
-        toks.to_tokens(tokens);
+fn quote_field_schema(field_schema: &FieldSchema) -> TokenStream {
+    let name = field_schema.name.as_str();
+    let field_type = quote_field_type(field_schema.field_type);
+    let source = quote_field_source(field_schema.source);
+    let description = field_schema.description.as_str();
+    quote! {
+        ::oximeter::FieldSchema {
+            name: String::from(#name),
+            field_type: #field_type,
+            source: #source,
+            description: String::from(#description),
+        }
     }
 }
 
-impl quote::ToTokens for TimeseriesSchema {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let field_schema = &self.field_schema;
-        let timeseries_name = self.timeseries_name.to_string();
-        let target_description = self.description.target.as_str();
-        let metric_description = self.description.metric.as_str();
-        let authz_scope = self.authz_scope;
-        let units = self.units;
-        let datum_type = self.datum_type;
-        let ver = self.version.get();
-        let version = quote! { ::core::num::NonZeroU8::new(#ver).unwrap() };
-        let created = quote_creation_time(self.created);
-        let toks = quote! {
-            ::oximeter::schema::TimeseriesSchema {
-                timeseries_name:
-                    <::oximeter::TimeseriesName as ::std::convert::TryFrom<&str>>::try_from(
-                        #timeseries_name
-                    ).unwrap(),
-                description: ::oximeter::schema::TimeseriesDescription {
-                    target: String::from(#target_description),
-                    metric: String::from(#metric_description),
-                },
-                authz_scope: #authz_scope,
-                units: #units,
-                field_schema: ::std::collections::BTreeSet::from([
-                    #(#field_schema),*
-                ]),
-                datum_type: #datum_type,
-                version: #version,
-                created: #created,
-            }
-        };
-        toks.to_tokens(tokens);
+fn quote_timeseries_schema(
+    timeseries_schema: &TimeseriesSchema,
+) -> TokenStream {
+    let field_schema =
+        timeseries_schema.field_schema.iter().map(quote_field_schema);
+    let timeseries_name = timeseries_schema.timeseries_name.to_string();
+    let target_description = timeseries_schema.description.target.as_str();
+    let metric_description = timeseries_schema.description.metric.as_str();
+    let authz_scope = quote_authz_scope(timeseries_schema.authz_scope);
+    let units = quote_units(timeseries_schema.units);
+    let datum_type = quote_datum_type(timeseries_schema.datum_type);
+    let ver = timeseries_schema.version.get();
+    let version = quote! { ::core::num::NonZeroU8::new(#ver).unwrap() };
+    let created = quote_creation_time(timeseries_schema.created);
+    quote! {
+        ::oximeter::schema::TimeseriesSchema {
+            timeseries_name:
+                <::oximeter::TimeseriesName as ::std::convert::TryFrom<&str>>::try_from(
+                    #timeseries_name
+                ).unwrap(),
+            description: ::oximeter::schema::TimeseriesDescription {
+                target: String::from(#target_description),
+                metric: String::from(#metric_description),
+            },
+            authz_scope: #authz_scope,
+            units: #units,
+            field_schema: ::std::collections::BTreeSet::from([
+                #(#field_schema),*
+            ]),
+            datum_type: #datum_type,
+            version: #version,
+            created: #created,
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::TimeseriesDescription;
+    use oximeter_types::TimeseriesDescription;
     use std::{collections::BTreeSet, num::NonZeroU8};
 
     #[test]

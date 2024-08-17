@@ -89,6 +89,7 @@ expectorate.workspace = true
 indexmap.workspace = true
 itertools.workspace = true
 omicron-test-utils.workspace = true
+oximeter-test-utils.workspace = true
 slog-dtrace.workspace = true
 sqlformat.workspace = true
 sqlparser.workspace = true
