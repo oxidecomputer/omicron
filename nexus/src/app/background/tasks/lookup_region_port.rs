@@ -53,7 +53,6 @@ impl BackgroundTask for LookupRegionPort {
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
             let log = &opctx.log;
-            info!(&log, "lookup region port task started");
 
             let mut status = LookupRegionPortStatus::default();
 
@@ -146,8 +145,6 @@ impl BackgroundTask for LookupRegionPort {
                     }
                 }
             }
-
-            info!(&log, "lookup region port task done");
 
             json!(status)
         }

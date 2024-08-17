@@ -8,10 +8,13 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
+anyhow.workspace = true
 chrono.workspace = true
+clap.workspace = true
 heck.workspace = true
 omicron-workspace-hack.workspace = true
 oximeter-types.workspace = true
+prettyplease.workspace = true
 proc-macro2.workspace = true
 quote.workspace = true
 schemars.workspace = true

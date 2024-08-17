@@ -7014,10 +7014,13 @@ dependencies = [
 name = "oximeter-schema"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "chrono",
+ "clap",
  "heck 0.5.0",
  "omicron-workspace-hack",
  "oximeter-types",
+ "prettyplease",
  "proc-macro2",
  "quote",
  "schemars",
