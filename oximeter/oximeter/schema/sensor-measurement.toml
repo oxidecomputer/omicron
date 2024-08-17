@@ -158,3 +158,13 @@ datum_type = "cumulative_u64"
 versions = [
     { added_in = 1, fields = ["name", "error", "sensor_kind"]}
 ]
+
+[[metrics]]
+name = "poll_error_count"
+description = """
+Cumulative count of errors encountered whilst polling a component's sensors."""
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = ["error"] }
+]

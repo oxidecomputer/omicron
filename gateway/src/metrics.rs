@@ -79,16 +79,19 @@ struct PollerManager {
 struct SpPoller {
     apictx: Arc<ServerContext>,
     spid: SpIdentifier,
-    devices: HashMap<SpComponent, PollerDevice>,
+    components: HashMap<SpComponent, ComponentMetrics>,
     log: slog::Logger,
     rack_id: Uuid,
     mgs_id: Uuid,
     sample_tx: broadcast::Sender<Vec<Sample>>,
 }
 
-struct PollerDevice {
+struct ComponentMetrics {
     target: component::Component,
+    /// Counts of errors reported by sensors on this component.
     sensor_errors: HashMap<SensorErrorKey, Cumulative<u64>>,
+    /// Counts of errors that occurred whilst polling the d
+    poll_errors: HashMap<&'static str, Cumulative<u64>>,
 }
 
 #[derive(Eq, PartialEq, Hash)]
@@ -366,7 +369,7 @@ impl PollerManager {
                         "sp_slot" => spid.slot,
                         "chassis_type" => format!("{:?}", spid.typ),
                     )),
-                    devices: HashMap::new(),
+                    components: HashMap::new(),
                     sample_tx: self.sample_tx.clone(),
                 };
                 let poller_handle = self.tasks.spawn(poller.run(POLL_INTERVAL));
@@ -430,8 +433,8 @@ impl SpPoller {
 
                 // Clear out any previously-known devices, and preallocate capacity
                 // for all the new ones.
-                self.devices.clear();
-                self.devices.reserve(inv_devices.len());
+                self.components.clear();
+                self.components.reserve(inv_devices.len());
 
                 // Reimplement this ourselves because we don't really care about
                 // reading the RoT state at present. This is unfortunately copied
@@ -511,7 +514,7 @@ impl SpPoller {
                             hubris_archive_id.clone(),
                         ),
                     };
-                    match self.devices.entry(dev.component) {
+                    match self.components.entry(dev.component) {
                         // Found a new device!
                         hash_map::Entry::Vacant(entry) => {
                             slog::debug!(
@@ -519,9 +522,10 @@ impl SpPoller {
                                 "discovered a new component!";
                                 "component" => ?dev.component,
                             );
-                            entry.insert(PollerDevice {
+                            entry.insert(ComponentMetrics {
                                 target,
                                 sensor_errors: HashMap::new(),
+                                poll_errors: HashMap::new(),
                             });
                         }
                         // We previously had a known device for this thing, but
@@ -532,12 +536,13 @@ impl SpPoller {
                         {
                             slog::trace!(
                                 &self.log,
-                                "target has changed, resetting cumulative metrics for component.";
+                                "target has changed, resetting cumulative metrics for component";
                                 "component" => ?dev.component,
                             );
-                            entry.insert(PollerDevice {
+                            entry.insert(ComponentMetrics {
                                 target,
                                 sensor_errors: HashMap::new(),
+                                poll_errors: HashMap::new(),
                             });
                         }
 
@@ -549,8 +554,9 @@ impl SpPoller {
                 known_state = Some(current_state);
             }
 
-            let mut samples = Vec::with_capacity(self.devices.len());
-            for (c, PollerDevice { target, sensor_errors }) in &mut self.devices
+            let mut samples = Vec::with_capacity(self.components.len());
+            for (c, ComponentMetrics { target, sensor_errors, poll_errors }) in
+                &mut self.components
             {
                 let details = match sp.component_details(*c).await {
                     Ok(deets) => deets,
