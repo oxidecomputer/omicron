@@ -8026,11 +8026,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_Table",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Table"
-                  }
+                  "$ref": "#/components/schemas/OxqlQueryResult"
                 }
               }
             }
@@ -16499,6 +16495,22 @@
               "type"
             ]
           }
+        ]
+      },
+      "OxqlQueryResult": {
+        "description": "The result of a successful OxQL query.",
+        "type": "object",
+        "properties": {
+          "tables": {
+            "description": "Tables resulting from the query, each containing timeseries.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Table"
+            }
+          }
+        },
+        "required": [
+          "tables"
         ]
       },
       "Password": {

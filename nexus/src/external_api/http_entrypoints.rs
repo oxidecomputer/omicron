@@ -6375,6 +6375,13 @@ async fn timeseries_schema_list(
 
 // TODO: can we link to an OxQL reference? Do we have one? Can we even do links?
 
+/// The result of a successful OxQL query.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct OxqlQueryResult {
+    /// Tables resulting from the query, each containing timeseries.
+    pub tables: Vec<oximeter_db::oxql::Table>,
+}
+
 /// Run timeseries query
 ///
 /// Queries are written in OxQL.
@@ -6386,7 +6393,7 @@ async fn timeseries_schema_list(
 async fn timeseries_query(
     rqctx: RequestContext<ApiContext>,
     body: TypedBody<params::TimeseriesQuery>,
-) -> Result<HttpResponseOk<Vec<oxql_types::Table>>, HttpError> {
+) -> Result<HttpResponseOk<OxqlQueryResult>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
@@ -6395,7 +6402,7 @@ async fn timeseries_query(
         nexus
             .timeseries_query(&opctx, &query)
             .await
-            .map(HttpResponseOk)
+            .map(|tables| HttpResponseOk(OxqlQueryResult { tables }))
             .map_err(HttpError::from)
     };
     apictx
