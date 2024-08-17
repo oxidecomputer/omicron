@@ -498,6 +498,12 @@ pub struct Rack {
 
 // SLEDS
 
+/// The unique ID of a sled.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct SledId {
+    pub id: Uuid,
+}
+
 /// An operator's view of a Sled.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Sled {

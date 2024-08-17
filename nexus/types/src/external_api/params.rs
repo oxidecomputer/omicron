@@ -8,6 +8,7 @@
 use crate::external_api::shared;
 use base64::Engine;
 use chrono::{DateTime, Utc};
+use http::Uri;
 use omicron_common::api::external::{
     AddressLotKind, AllowedSourceIps, BfdMode, BgpPeer, ByteCount, Hostname,
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
@@ -16,6 +17,7 @@ use omicron_common::api::external::{
 };
 use omicron_common::disk::DiskVariant;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
+use parse_display::Display;
 use schemars::JsonSchema;
 use serde::{
     de::{self, Visitor},
@@ -83,11 +85,13 @@ path_param!(IpPoolPath, pool, "IP pool");
 path_param!(SshKeyPath, ssh_key, "SSH key");
 path_param!(AddressLotPath, address_lot, "address lot");
 path_param!(ProbePath, probe, "probe");
+path_param!(CertificatePath, certificate, "certificate");
 
 id_path_param!(GroupPath, group_id, "group");
 
 // TODO: The hardware resources should be represented by its UUID or a hardware
 // ID that can be used to deterministically generate the UUID.
+id_path_param!(RackPath, rack_id, "rack");
 id_path_param!(SledPath, sled_id, "sled");
 id_path_param!(SwitchPath, switch_id, "switch");
 id_path_param!(PhysicalDiskPath, disk_id, "physical disk");
@@ -139,6 +143,13 @@ impl From<Name> for SiloSelector {
 pub struct OptionalSiloSelector {
     /// Name or ID of the silo
     pub silo: Option<NameOrId>,
+}
+
+/// Path parameters for Silo User requests
+#[derive(Deserialize, JsonSchema)]
+pub struct UserParam {
+    /// The user's internal ID
+    pub user_id: Uuid,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -1241,6 +1252,24 @@ pub struct RouterRouteUpdate {
 
 // DISKS
 
+#[derive(Display, Serialize, Deserialize, JsonSchema)]
+#[display(style = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum DiskMetricName {
+    Activated,
+    Flush,
+    Read,
+    ReadBytes,
+    Write,
+    WriteBytes,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct DiskMetricsPath {
+    pub disk: NameOrId,
+    pub metric: DiskMetricName,
+}
+
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 #[serde(try_from = "u32")] // invoke the try_from validation routine below
 pub struct BlockSize(pub u32);
@@ -1419,6 +1448,23 @@ pub struct LoopbackAddressCreate {
     /// Address is an anycast address.
     /// This allows the address to be assigned to multiple locations simultaneously.
     pub anycast: bool,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct LoopbackAddressPath {
+    /// The rack to use when selecting the loopback address.
+    pub rack_id: Uuid,
+
+    /// The switch location to use when selecting the loopback address.
+    pub switch_location: Name,
+
+    /// The IP address and subnet mask to use when selecting the loopback
+    /// address.
+    pub address: IpAddr,
+
+    /// The IP address and subnet mask to use when selecting the loopback
+    /// address.
+    pub subnet_mask: u8,
 }
 
 /// Parameters for creating a port settings group.
@@ -1873,6 +1919,20 @@ pub struct SshKeyCreate {
 
 // METRICS
 
+#[derive(Display, Deserialize, JsonSchema)]
+#[display(style = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum SystemMetricName {
+    VirtualDiskSpaceProvisioned,
+    CpusProvisioned,
+    RamProvisioned,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SystemMetricsPathParam {
+    pub metric_name: SystemMetricName,
+}
+
 /// Query parameters common to resource metrics endpoints.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ResourceMetrics {
@@ -1933,4 +1993,99 @@ pub struct TimeseriesQuery {
 pub struct AllowListUpdate {
     /// The new list of allowed source IPs.
     pub allowed_ips: AllowedSourceIps,
+}
+
+// Roles
+
+// Roles have their own pagination scheme because they do not use the usual "id"
+// or "name" types.  For more, see the comment in dbinit.sql.
+#[derive(Deserialize, JsonSchema, Serialize)]
+pub struct RolePage {
+    pub last_seen: String,
+}
+
+/// Path parameters for global (system) role requests
+#[derive(Deserialize, JsonSchema)]
+pub struct RolePathParam {
+    /// The built-in role's unique name.
+    pub role_name: String,
+}
+
+// Console API
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RestPathParam {
+    pub path: Vec<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct LoginToProviderPathParam {
+    pub silo_name: Name,
+    pub provider_name: Name,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct LoginUrlQuery {
+    pub redirect_uri: Option<RelativeUri>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct LoginPathParam {
+    pub silo_name: Name,
+}
+
+/// This is meant as a security feature. We want to ensure we never redirect to
+/// a URI on a different host.
+#[derive(Serialize, Deserialize, Debug, JsonSchema, Clone, Display)]
+#[serde(try_from = "String")]
+#[display("{0}")]
+pub struct RelativeUri(String);
+
+impl FromStr for RelativeUri {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::try_from(s.to_string())
+    }
+}
+
+impl TryFrom<Uri> for RelativeUri {
+    type Error = String;
+
+    fn try_from(uri: Uri) -> Result<Self, Self::Error> {
+        if uri.host().is_none() && uri.scheme().is_none() {
+            Ok(Self(uri.to_string()))
+        } else {
+            Err(format!("\"{}\" is not a relative URI", uri))
+        }
+    }
+}
+
+impl TryFrom<String> for RelativeUri {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse::<Uri>()
+            .map_err(|_| format!("\"{}\" is not a relative URI", s))
+            .and_then(|uri| Self::try_from(uri))
+    }
+}
+
+// Device auth
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct DeviceAuthRequest {
+    pub client_id: Uuid,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct DeviceAuthVerify {
+    pub user_code: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct DeviceAccessTokenRequest {
+    pub grant_type: String,
+    pub device_code: String,
+    pub client_id: Uuid,
 }

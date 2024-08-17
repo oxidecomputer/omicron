@@ -9,6 +9,7 @@ use atomicwrites::AtomicFile;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::{ApiDescription, ApiDescriptionBuildErrors, StubContext};
 use fs_err as fs;
+use openapi_manager_types::{ValidationBackend, ValidationContext};
 use openapiv3::OpenAPI;
 
 /// All APIs managed by openapi-manager.
@@ -79,6 +80,16 @@ pub fn all_apis() -> Vec<ApiSpec> {
             extra_validation: None,
         },
         ApiSpec {
+            title: "Oxide Region API",
+            version: "20240821.0",
+            description: "API for interacting with the Oxide control plane",
+            boundary: ApiBoundary::External,
+            api_description:
+                nexus_external_api::nexus_external_api_mod::stub_api_description,
+            filename: "nexus.json",
+            extra_validation: Some(nexus_external_api::validate_api),
+        },
+        ApiSpec {
             title: "Nexus internal API",
             version: "0.0.1",
             description: "Nexus internal API",
@@ -143,47 +154,64 @@ pub struct ApiSpec {
     pub filename: &'static str,
 
     /// Extra validation to perform on the OpenAPI spec, if any.
-    pub extra_validation: Option<fn(&OpenAPI) -> anyhow::Result<()>>,
+    pub extra_validation: Option<fn(&OpenAPI, ValidationContext<'_>)>,
 }
 
 impl ApiSpec {
     pub(crate) fn overwrite(
         &self,
-        dir: &Utf8Path,
-    ) -> Result<(OverwriteStatus, DocumentSummary)> {
+        env: &Environment,
+    ) -> Result<SpecOverwriteStatus> {
         let contents = self.to_json_bytes()?;
 
-        let summary = self
+        let (summary, validation_result) = self
             .validate_json(&contents)
             .context("OpenAPI document validation failed")?;
 
-        let full_path = dir.join(&self.filename);
-        let status = overwrite_file(&full_path, &contents)?;
+        let full_path = env.openapi_dir.join(&self.filename);
+        let openapi_doc_status = overwrite_file(&full_path, &contents)?;
 
-        Ok((status, summary))
+        let extra_files = validation_result
+            .extra_files
+            .into_iter()
+            .map(|(path, contents)| {
+                let full_path = env.workspace_root.join(&path);
+                let status = overwrite_file(&full_path, &contents)?;
+                Ok((path, status))
+            })
+            .collect::<Result<_>>()?;
+
+        Ok(SpecOverwriteStatus {
+            summary,
+            openapi_doc: openapi_doc_status,
+            extra_files,
+        })
     }
 
-    pub(crate) fn check(&self, dir: &Utf8Path) -> Result<CheckStatus> {
+    pub(crate) fn check(&self, env: &Environment) -> Result<SpecCheckStatus> {
         let contents = self.to_json_bytes()?;
-        let summary = self
+        let (summary, validation_result) = self
             .validate_json(&contents)
             .context("OpenAPI document validation failed")?;
 
-        let full_path = dir.join(&self.filename);
-        let existing_contents =
-            read_opt(&full_path).context("failed to read contents on disk")?;
+        let full_path = env.openapi_dir.join(&self.filename);
+        let openapi_doc_status = check_file(full_path, contents)?;
 
-        match existing_contents {
-            Some(existing_contents) if existing_contents == contents => {
-                Ok(CheckStatus::Ok(summary))
-            }
-            Some(existing_contents) => Ok(CheckStatus::Stale {
-                full_path,
-                actual: existing_contents,
-                expected: contents,
-            }),
-            None => Ok(CheckStatus::Missing),
-        }
+        let extra_files = validation_result
+            .extra_files
+            .into_iter()
+            .map(|(path, contents)| {
+                let full_path = env.workspace_root.join(&path);
+                let status = check_file(full_path, contents)?;
+                Ok((path, status))
+            })
+            .collect::<Result<_>>()?;
+
+        Ok(SpecCheckStatus {
+            summary,
+            openapi_doc: openapi_doc_status,
+            extra_files,
+        })
     }
 
     pub(crate) fn to_openapi_doc(&self) -> Result<OpenAPI> {
@@ -216,7 +244,10 @@ impl ApiSpec {
         Ok(contents)
     }
 
-    fn validate_json(&self, contents: &[u8]) -> Result<DocumentSummary> {
+    fn validate_json(
+        &self,
+        contents: &[u8],
+    ) -> Result<(DocumentSummary, ValidationResult)> {
         let openapi_doc = contents_to_openapi(contents)
             .context("JSON returned by ApiDescription is not valid OpenAPI")?;
 
@@ -231,11 +262,51 @@ impl ApiSpec {
             return Err(anyhow::anyhow!("{}", errors.join("\n\n")));
         }
 
-        if let Some(extra_validation) = self.extra_validation {
-            extra_validation(&openapi_doc)?;
-        }
+        let extra_files = if let Some(extra_validation) = self.extra_validation
+        {
+            let mut validation_context =
+                ValidationContextImpl { errors: Vec::new(), files: Vec::new() };
+            extra_validation(
+                &openapi_doc,
+                ValidationContext::new(&mut validation_context),
+            );
 
-        Ok(DocumentSummary::new(&openapi_doc))
+            if !validation_context.errors.is_empty() {
+                return Err(anyhow::anyhow!(
+                    "OpenAPI document extended validation failed:\n{}",
+                    validation_context
+                        .errors
+                        .iter()
+                        .map(|e| e.to_string())
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                ));
+            }
+
+            validation_context.files
+        } else {
+            Vec::new()
+        };
+
+        Ok((
+            DocumentSummary::new(&openapi_doc),
+            ValidationResult { extra_files },
+        ))
+    }
+}
+
+struct ValidationContextImpl {
+    errors: Vec<anyhow::Error>,
+    files: Vec<(Utf8PathBuf, Vec<u8>)>,
+}
+
+impl ValidationBackend for ValidationContextImpl {
+    fn report_error(&mut self, error: anyhow::Error) {
+        self.errors.push(error);
+    }
+
+    fn record_file_contents(&mut self, path: Utf8PathBuf, contents: Vec<u8>) {
+        self.files.push((path, contents));
     }
 }
 
@@ -262,6 +333,32 @@ impl fmt::Display for ApiBoundary {
 
 #[derive(Debug)]
 #[must_use]
+pub(crate) struct SpecOverwriteStatus {
+    pub(crate) summary: DocumentSummary,
+    openapi_doc: OverwriteStatus,
+    extra_files: Vec<(Utf8PathBuf, OverwriteStatus)>,
+}
+
+impl SpecOverwriteStatus {
+    pub(crate) fn updated_count(&self) -> usize {
+        self.iter()
+            .filter(|(_, status)| matches!(status, OverwriteStatus::Updated))
+            .count()
+    }
+
+    fn iter(
+        &self,
+    ) -> impl Iterator<Item = (ApiSpecFile<'_>, &OverwriteStatus)> {
+        std::iter::once((ApiSpecFile::Openapi, &self.openapi_doc)).chain(
+            self.extra_files.iter().map(|(file_name, status)| {
+                (ApiSpecFile::Extra(file_name), status)
+            }),
+        )
+    }
+}
+
+#[derive(Debug)]
+#[must_use]
 pub(crate) enum OverwriteStatus {
     Updated,
     Unchanged,
@@ -269,8 +366,54 @@ pub(crate) enum OverwriteStatus {
 
 #[derive(Debug)]
 #[must_use]
+pub(crate) struct SpecCheckStatus {
+    pub(crate) summary: DocumentSummary,
+    pub(crate) openapi_doc: CheckStatus,
+    pub(crate) extra_files: Vec<(Utf8PathBuf, CheckStatus)>,
+}
+
+impl SpecCheckStatus {
+    pub(crate) fn total_errors(&self) -> usize {
+        self.iter_errors().count()
+    }
+
+    pub(crate) fn extra_files_len(&self) -> usize {
+        self.extra_files.len()
+    }
+
+    pub(crate) fn iter_errors(
+        &self,
+    ) -> impl Iterator<Item = (ApiSpecFile<'_>, &CheckError)> {
+        std::iter::once((ApiSpecFile::Openapi, &self.openapi_doc))
+            .chain(self.extra_files.iter().map(|(file_name, status)| {
+                (ApiSpecFile::Extra(file_name), status)
+            }))
+            .filter_map(|(spec_file, status)| {
+                if let CheckStatus::Error(e) = status {
+                    Some((spec_file, e))
+                } else {
+                    None
+                }
+            })
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ApiSpecFile<'a> {
+    Openapi,
+    Extra(&'a Utf8Path),
+}
+
+#[derive(Debug)]
+#[must_use]
 pub(crate) enum CheckStatus {
-    Ok(DocumentSummary),
+    Ok,
+    Error(CheckError),
+}
+
+#[derive(Debug)]
+#[must_use]
+pub(crate) enum CheckError {
     Stale { full_path: Utf8PathBuf, actual: Vec<u8>, expected: Vec<u8> },
     Missing,
 }
@@ -295,31 +438,45 @@ impl DocumentSummary {
     }
 }
 
-pub(crate) fn openapi_dir(dir: Option<Utf8PathBuf>) -> Result<Utf8PathBuf> {
-    match dir {
-        Some(dir) => Ok(dir.canonicalize_utf8().with_context(|| {
-            format!("failed to canonicalize directory: {}", dir)
-        })?),
-        None => find_openapi_dir().context("failed to find openapi directory"),
-    }
+#[derive(Debug)]
+#[must_use]
+struct ValidationResult {
+    // Extra files recorded by the validation context.
+    extra_files: Vec<(Utf8PathBuf, Vec<u8>)>,
 }
 
-pub(crate) fn find_openapi_dir() -> Result<Utf8PathBuf> {
-    let mut root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    // This crate is two levels down from the root of omicron, so go up twice.
-    root.pop();
-    root.pop();
+pub(crate) struct Environment {
+    pub(crate) workspace_root: Utf8PathBuf,
+    pub(crate) openapi_dir: Utf8PathBuf,
+}
 
-    root.push("openapi");
-    let root = root.canonicalize_utf8().with_context(|| {
-        format!("failed to canonicalize openapi directory: {}", root)
-    })?;
+impl Environment {
+    pub(crate) fn new(openapi_dir: Option<Utf8PathBuf>) -> Result<Self> {
+        let mut root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        // This crate is two levels down from the root of omicron, so go up twice.
+        root.pop();
+        root.pop();
 
-    if !root.is_dir() {
-        anyhow::bail!("openapi root is not a directory: {}", root);
+        let workspace_root = root.canonicalize_utf8().with_context(|| {
+            format!("failed to canonicalize workspace root: {}", root)
+        })?;
+
+        let openapi_dir =
+            openapi_dir.unwrap_or_else(|| workspace_root.join("openapi"));
+        let openapi_dir =
+            openapi_dir.canonicalize_utf8().with_context(|| {
+                format!(
+                    "failed to canonicalize openapi directory: {}",
+                    openapi_dir
+                )
+            })?;
+
+        if !openapi_dir.is_dir() {
+            anyhow::bail!("openapi root is not a directory: {}", root);
+        }
+
+        Ok(Self { workspace_root, openapi_dir })
     }
-
-    Ok(root)
 }
 
 /// Overwrite a file with new contents, if the contents are different.
@@ -342,6 +499,27 @@ fn overwrite_file(path: &Utf8Path, contents: &[u8]) -> Result<OverwriteStatus> {
         .with_context(|| format!("failed to write to `{}`", path))?;
 
     Ok(OverwriteStatus::Updated)
+}
+
+/// Check a file against expected contents.
+fn check_file(
+    full_path: Utf8PathBuf,
+    contents: Vec<u8>,
+) -> Result<CheckStatus> {
+    let existing_contents =
+        read_opt(&full_path).context("failed to read contents on disk")?;
+
+    match existing_contents {
+        Some(existing_contents) if existing_contents == contents => {
+            Ok(CheckStatus::Ok)
+        }
+        Some(existing_contents) => Ok(CheckStatus::Error(CheckError::Stale {
+            full_path,
+            actual: existing_contents,
+            expected: contents,
+        })),
+        None => Ok(CheckStatus::Error(CheckError::Missing)),
+    }
 }
 
 fn read_opt(path: &Utf8Path) -> std::io::Result<Option<Vec<u8>>> {

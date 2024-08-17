@@ -4,7 +4,6 @@
 
 //! Metrics
 
-use crate::external_api::http_entrypoints::SystemMetricName;
 use crate::external_api::params::ResourceMetrics;
 use dropshot::PaginationParams;
 use nexus_db_queries::authz;
@@ -12,10 +11,10 @@ use nexus_db_queries::{
     context::OpContext,
     db::{fixed_data::FLEET_ID, lookup},
 };
+use nexus_external_api::TimeseriesSchemaPaginationParams;
+use nexus_types::external_api::params::SystemMetricName;
 use omicron_common::api::external::{Error, InternalContext};
-use oximeter_db::{
-    oxql, Measurement, TimeseriesSchema, TimeseriesSchemaPaginationParams,
-};
+use oximeter_db::{Measurement, TimeseriesSchema};
 use std::num::NonZeroU32;
 
 impl super::Nexus {
@@ -138,7 +137,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         query: impl AsRef<str>,
-    ) -> Result<Vec<oxql::Table>, Error> {
+    ) -> Result<Vec<oxql_types::Table>, Error> {
         // Must be a fleet user to list timeseries schema.
         //
         // TODO-security: We need to figure out how to implement proper security

@@ -1,0 +1,19 @@
+[package]
+name = "nexus-external-api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow.workspace = true
+dropshot.workspace = true
+http.workspace = true
+hyper.workspace = true
+ipnetwork.workspace = true
+nexus-auth-types.workspace = true
+nexus-types.workspace = true
+omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
+openapiv3.workspace = true
+openapi-manager-types.workspace = true
+oximeter-types.workspace = true
+oxql-types.workspace = true

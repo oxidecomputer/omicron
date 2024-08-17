@@ -25,37 +25,33 @@ use crate::context::ApiContext;
 use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::{
-    endpoint, http_response_found, http_response_see_other, HttpError,
-    HttpResponseFound, HttpResponseHeaders, HttpResponseSeeOther,
-    HttpResponseUpdatedNoContent, Path, Query, RequestContext,
+    http_response_found, http_response_see_other, HttpError, HttpResponseFound,
+    HttpResponseHeaders, HttpResponseSeeOther, HttpResponseUpdatedNoContent,
+    Path, Query, RequestContext,
 };
-use http::{header, HeaderName, HeaderValue, Response, StatusCode, Uri};
+use http::{header, HeaderName, HeaderValue, Response, StatusCode};
 use hyper::Body;
+use nexus_auth_types::authn::cookies::Cookies;
 use nexus_db_model::AuthenticationMode;
 use nexus_db_queries::authn::silos::IdentityProviderType;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::{
-    authn::external::{
-        cookies::Cookies,
-        session_cookie::{
-            clear_session_cookie_header_value, session_cookie_header_value,
-            SessionStore, SESSION_COOKIE_COOKIE_NAME,
-        },
+    authn::external::session_cookie::{
+        clear_session_cookie_header_value, session_cookie_header_value,
+        SessionStore, SESSION_COOKIE_COOKIE_NAME,
     },
     db::identity::Asset,
 };
-use nexus_types::external_api::params;
+use nexus_types::external_api::params::{self, RelativeUri};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{DataPageParams, Error, NameOrId};
 use once_cell::sync::Lazy;
-use parse_display::Display;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_urlencoded;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
-use std::str::FromStr;
 use tokio::fs::File;
 use tokio_util::codec::{BytesCodec, FramedRead};
 
@@ -196,12 +192,6 @@ use tokio_util::codec::{BytesCodec, FramedRead};
 //
 //   /logout/{silo_name}/{provider_name}
 
-#[derive(Deserialize, JsonSchema)]
-pub struct LoginToProviderPathParam {
-    pub silo_name: nexus_db_queries::db::model::Name,
-    pub provider_name: nexus_db_queries::db::model::Name,
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RelayState {
     pub redirect_uri: Option<RelativeUri>,
@@ -230,36 +220,18 @@ impl RelayState {
     }
 }
 
-/// SAML login console page (just a link to the IdP)
-#[endpoint {
-   method = GET,
-   path = "/login/{silo_name}/saml/{provider_name}",
-   tags = ["login"],
-   unpublished = true,
-}]
 pub(crate) async fn login_saml_begin(
     rqctx: RequestContext<ApiContext>,
-    _path_params: Path<LoginToProviderPathParam>,
-    _query_params: Query<LoginUrlQuery>,
+    _path_params: Path<params::LoginToProviderPathParam>,
+    _query_params: Query<params::LoginUrlQuery>,
 ) -> Result<Response<Body>, HttpError> {
     serve_console_index(rqctx).await
 }
 
-/// Get a redirect straight to the IdP
-///
-/// Console uses this to avoid having to ask the API anything about the IdP. It
-/// already knows the IdP name from the path, so it can just link to this path
-/// and rely on Nexus to redirect to the actual IdP.
-#[endpoint {
-   method = GET,
-   path = "/login/{silo_name}/saml/{provider_name}/redirect",
-   tags = ["login"],
-   unpublished = true,
-}]
 pub(crate) async fn login_saml_redirect(
     rqctx: RequestContext<ApiContext>,
-    path_params: Path<LoginToProviderPathParam>,
-    query_params: Query<LoginUrlQuery>,
+    path_params: Path<params::LoginToProviderPathParam>,
+    query_params: Query<params::LoginUrlQuery>,
 ) -> Result<HttpResponseFound, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -274,8 +246,8 @@ pub(crate) async fn login_saml_redirect(
             .datastore()
             .identity_provider_lookup(
                 &opctx,
-                &path_params.silo_name,
-                &path_params.provider_name,
+                &path_params.silo_name.into(),
+                &path_params.provider_name.into(),
             )
             .await?;
 
@@ -310,15 +282,9 @@ pub(crate) async fn login_saml_redirect(
         .await
 }
 
-/// Authenticate a user via SAML
-#[endpoint {
-   method = POST,
-   path = "/login/{silo_name}/saml/{provider_name}",
-   tags = ["login"],
-}]
 pub(crate) async fn login_saml(
     rqctx: RequestContext<ApiContext>,
-    path_params: Path<LoginToProviderPathParam>,
+    path_params: Path<params::LoginToProviderPathParam>,
     body_bytes: dropshot::UntypedBody,
 ) -> Result<HttpResponseSeeOther, HttpError> {
     let apictx = rqctx.context();
@@ -335,8 +301,8 @@ pub(crate) async fn login_saml(
             .datastore()
             .identity_provider_lookup(
                 &opctx,
-                &path_params.silo_name,
-                &path_params.provider_name,
+                &path_params.silo_name.into(),
+                &path_params.provider_name.into(),
             )
             .await?;
 
@@ -397,21 +363,10 @@ pub(crate) async fn login_saml(
         .await
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct LoginPathParam {
-    pub silo_name: nexus_db_queries::db::model::Name,
-}
-
-#[endpoint {
-   method = GET,
-   path = "/login/{silo_name}/local",
-   tags = ["login"],
-   unpublished = true,
-}]
 pub(crate) async fn login_local_begin(
     rqctx: RequestContext<ApiContext>,
-    _path_params: Path<LoginPathParam>,
-    _query_params: Query<LoginUrlQuery>,
+    _path_params: Path<params::LoginPathParam>,
+    _query_params: Query<params::LoginUrlQuery>,
 ) -> Result<Response<Body>, HttpError> {
     // TODO: figure out why instrumenting doesn't work
     // let apictx = rqctx.context();
@@ -420,15 +375,9 @@ pub(crate) async fn login_local_begin(
     serve_console_index(rqctx).await
 }
 
-/// Authenticate a user via username and password
-#[endpoint {
-   method = POST,
-   path = "/v1/login/{silo_name}/local",
-   tags = ["login"],
-}]
 pub(crate) async fn login_local(
     rqctx: RequestContext<ApiContext>,
-    path_params: Path<LoginPathParam>,
+    path_params: Path<params::LoginPathParam>,
     credentials: dropshot::TypedBody<params::UsernamePasswordCredentials>,
 ) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
     let apictx = rqctx.context();
@@ -487,13 +436,6 @@ async fn create_session(
     Ok(session)
 }
 
-/// Log user out of web console by deleting session on client and server
-#[endpoint {
-   // important for security that this be a POST despite the empty req body
-   method = POST,
-   path = "/v1/logout",
-   tags = ["hidden"],
-}]
 pub(crate) async fn logout(
     rqctx: RequestContext<ApiContext>,
     cookies: Cookies,
@@ -539,53 +481,6 @@ pub(crate) async fn logout(
         .external_latencies
         .instrument_dropshot_handler(&rqctx, handler)
         .await
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct RestPathParam {
-    path: Vec<String>,
-}
-
-/// This is meant as a security feature. We want to ensure we never redirect to
-/// a URI on a different host.
-#[derive(Serialize, Deserialize, Debug, JsonSchema, Clone, Display)]
-#[serde(try_from = "String")]
-#[display("{0}")]
-pub struct RelativeUri(String);
-
-impl FromStr for RelativeUri {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::try_from(s.to_string())
-    }
-}
-
-impl TryFrom<Uri> for RelativeUri {
-    type Error = String;
-
-    fn try_from(uri: Uri) -> Result<Self, Self::Error> {
-        if uri.host().is_none() && uri.scheme().is_none() {
-            Ok(Self(uri.to_string()))
-        } else {
-            Err(format!("\"{}\" is not a relative URI", uri))
-        }
-    }
-}
-
-impl TryFrom<String> for RelativeUri {
-    type Error = String;
-
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        s.parse::<Uri>()
-            .map_err(|_| format!("\"{}\" is not a relative URI", s))
-            .and_then(|uri| Self::try_from(uri))
-    }
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct LoginUrlQuery {
-    redirect_uri: Option<RelativeUri>,
 }
 
 /// Generate URI to the appropriate login form for this Silo. Optional
@@ -644,7 +539,7 @@ async fn get_login_url(
 
     // Stick redirect_url into the state param and URL encode it so it can be
     // used as a query string. We assume it's not already encoded.
-    let query_data = LoginUrlQuery { redirect_uri };
+    let query_data = params::LoginUrlQuery { redirect_uri };
 
     Ok(match serde_urlencoded::to_string(query_data) {
         // only put the ? in front if there's something there
@@ -654,15 +549,9 @@ async fn get_login_url(
     })
 }
 
-/// Redirect to a login page for the current Silo (if that can be determined)
-#[endpoint {
-   method = GET,
-   path = "/login",
-   unpublished = true,
-}]
 pub(crate) async fn login_begin(
     rqctx: RequestContext<ApiContext>,
-    query_params: Query<LoginUrlQuery>,
+    query_params: Query<params::LoginUrlQuery>,
 ) -> Result<HttpResponseFound, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -696,7 +585,11 @@ pub(crate) async fn console_index_or_login_redirect(
         .request
         .uri()
         .path_and_query()
-        .map(|p| RelativeUri(p.to_string()));
+        .map(|p| p.to_string().parse::<RelativeUri>())
+        .transpose()
+        .map_err(|e| {
+            HttpError::for_internal_error(format!("parsing URI: {}", e))
+        })?;
     let login_url = get_login_url(&rqctx, redirect_uri).await?;
 
     Ok(Response::builder()
@@ -711,8 +604,7 @@ pub(crate) async fn console_index_or_login_redirect(
 // to manually define more specific routes.
 
 macro_rules! console_page {
-    ($name:ident, $path:literal) => {
-        #[endpoint { method = GET, path = $path, unpublished = true, }]
+    ($name:ident) => {
         pub(crate) async fn $name(
             rqctx: RequestContext<ApiContext>,
         ) -> Result<Response<Body>, HttpError> {
@@ -723,26 +615,25 @@ macro_rules! console_page {
 
 // only difference is the _path_params arg
 macro_rules! console_page_wildcard {
-    ($name:ident, $path:literal) => {
-        #[endpoint { method = GET, path = $path, unpublished = true, }]
+    ($name:ident) => {
         pub(crate) async fn $name(
             rqctx: RequestContext<ApiContext>,
-            _path_params: Path<RestPathParam>,
+            _path_params: Path<params::RestPathParam>,
         ) -> Result<Response<Body>, HttpError> {
             console_index_or_login_redirect(rqctx).await
         }
     };
 }
 
-console_page_wildcard!(console_projects, "/projects/{path:.*}");
-console_page_wildcard!(console_settings_page, "/settings/{path:.*}");
-console_page_wildcard!(console_system_page, "/system/{path:.*}");
-console_page_wildcard!(console_lookup, "/lookup/{path:.*}");
-console_page!(console_root, "/");
-console_page!(console_projects_new, "/projects-new");
-console_page!(console_silo_images, "/images");
-console_page!(console_silo_utilization, "/utilization");
-console_page!(console_silo_access, "/access");
+console_page_wildcard!(console_projects);
+console_page_wildcard!(console_settings_page);
+console_page_wildcard!(console_system_page);
+console_page_wildcard!(console_lookup);
+console_page!(console_root);
+console_page!(console_projects_new);
+console_page!(console_silo_images);
+console_page!(console_silo_utilization);
+console_page!(console_silo_access);
 
 /// Check if `gzip` is listed in the request's `Accept-Encoding` header.
 fn accept_gz(header_value: &str) -> bool {
@@ -865,20 +756,9 @@ async fn serve_static(
     Ok(resp.body(body)?)
 }
 
-/// Serve a static asset from `<static_dir>/assets` via [`serve_static`]. Cache
-/// in browser for a year because assets have content hash in filename.
-///
-/// Note that Dropshot protects us from directory traversal attacks (e.g.
-/// `/assets/../../../etc/passwd`). This is tested in the `console_api`
-/// integration tests.
-#[endpoint {
-   method = GET,
-   path = "/assets/{path:.*}",
-   unpublished = true,
-}]
 pub(crate) async fn asset(
     rqctx: RequestContext<ApiContext>,
-    path_params: Path<RestPathParam>,
+    path_params: Path<params::RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
     // asset URLs contain hashes, so cache for 1 year
     const CACHE_CONTROL: HeaderValue =

@@ -10,8 +10,6 @@ use crate::query::StringFieldSelector;
 use anyhow::Context as _;
 use chrono::DateTime;
 use chrono::Utc;
-use dropshot::EmptyScanParams;
-use dropshot::PaginationParams;
 pub use oximeter::schema::FieldSchema;
 pub use oximeter::schema::FieldSource;
 pub use oximeter::schema::TimeseriesName;
@@ -21,6 +19,7 @@ pub use oximeter::Field;
 pub use oximeter::FieldType;
 pub use oximeter::Measurement;
 pub use oximeter::Sample;
+use oxql_types::TimeseriesKey;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -234,10 +233,6 @@ impl From<FieldSource> for DbFieldSource {
     }
 }
 
-/// Type used to paginate request to list timeseries schema.
-pub type TimeseriesSchemaPaginationParams =
-    PaginationParams<EmptyScanParams, TimeseriesName>;
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TimeseriesScanParams {
     pub timeseries_name: TimeseriesName,
@@ -266,8 +261,6 @@ pub async fn make_client(
         .context("Failed to initialize timeseries database")?;
     Ok(client)
 }
-
-pub(crate) type TimeseriesKey = u64;
 
 // TODO-cleanup: Add the timeseries version in to the computation of the key.
 // This will require a full drop of the database, since we're changing the

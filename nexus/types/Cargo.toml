@@ -9,12 +9,13 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+base64.workspace = true
 chrono.workspace = true
 clap.workspace = true
-base64.workspace = true
 derive-where.workspace = true
 derive_more.workspace = true
 futures.workspace = true
+http.workspace = true
 humantime.workspace = true
 ipnetwork.workspace = true
 omicron-uuid-kinds.workspace = true
