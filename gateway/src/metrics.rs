@@ -1,14 +1,18 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
+use crate::error::CommunicationError;
+use crate::error::SpCommsError;
 use crate::management_switch::SpIdentifier;
 use crate::management_switch::SpType;
+use crate::MgsArguments;
 use crate::ServerContext;
 use anyhow::Context;
 use gateway_messages::measurement::MeasurementError;
 use gateway_messages::measurement::MeasurementKind;
 use gateway_messages::ComponentDetails;
 use gateway_messages::DeviceCapabilities;
+use gateway_sp_comms::SingleSp;
 use gateway_sp_comms::SpComponent;
 use gateway_sp_comms::VersionedSpState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
@@ -30,8 +34,6 @@ use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
-
-use crate::MgsArguments;
 
 oximeter::use_timeseries!("sensor-measurement.toml");
 
@@ -69,7 +71,7 @@ struct PollerManager {
     apictx: Arc<ServerContext>,
     mgs_id: Uuid,
     /// Poller tasks
-    tasks: tokio::task::JoinSet<anyhow::Result<()>>,
+    tasks: tokio::task::JoinSet<Result<(), SpCommsError>>,
     /// The manager doesn't actually produce samples, but it needs to be able to
     /// clone a sender for every poller task it spawns.
     sample_tx: broadcast::Sender<Vec<Sample>>,
@@ -77,8 +79,8 @@ struct PollerManager {
 
 /// Polls sensor readings from an individual SP.
 struct SpPoller {
-    apictx: Arc<ServerContext>,
     spid: SpIdentifier,
+    known_state: Option<VersionedSpState>,
     components: HashMap<SpComponent, ComponentMetrics>,
     log: slog::Logger,
     rack_id: Uuid,
@@ -364,15 +366,17 @@ impl PollerManager {
                     spid,
                     rack_id,
                     mgs_id: self.mgs_id,
-                    apictx: self.apictx.clone(),
                     log: self.log.new(slog::o!(
                         "sp_slot" => spid.slot,
                         "chassis_type" => format!("{:?}", spid.typ),
                     )),
                     components: HashMap::new(),
+                    known_state: None,
                     sample_tx: self.sample_tx.clone(),
                 };
-                let poller_handle = self.tasks.spawn(poller.run(POLL_INTERVAL));
+                let poller_handle = self
+                    .tasks
+                    .spawn(poller.run(POLL_INTERVAL, self.apictx.clone()));
                 let _prev_poller = known_sps.insert(spid, poller_handle);
                 debug_assert!(
                     _prev_poller.map(|p| p.is_finished()).unwrap_or(true),
@@ -382,17 +386,27 @@ impl PollerManager {
             }
 
             // All pollers started! Now wait to see if any of them have died...
-            let mut err = self.tasks.join_next().await;
-            while let Some(Ok(Err(error))) = err {
-                // TODO(eliza): actually handle errors polling a SP
-                // nicely...
-                slog::error!(
-                    &self.log,
-                    "something bad happened  while polling a SP...";
-                    "error" => %error,
-                );
+            let mut joined = self.tasks.join_next().await;
+            while let Some(result) = joined {
+                if let Err(e) = result {
+                    if cfg!(debug_assertions) {
+                        unreachable!(
+                            "we compile with `panic=\"abort\"`, so a spawned task \
+                             panicking should abort the whole process..."
+                        );
+                    } else {
+                        slog::error!(
+                            &self.log,
+                            "a spawned SP poller task panicked! this should \
+                             never happen: we compile with `panic=\"abort\"`, so \
+                             a spawned task panicking should abort the whole \
+                             process...";
+                            "error" => %e,
+                        );
+                    }
+                }
                 // drain any remaining errors
-                err = self.tasks.try_join_next();
+                joined = self.tasks.try_join_next();
             }
         }
     }
@@ -407,289 +421,336 @@ impl Drop for PollerManager {
 }
 
 impl SpPoller {
-    async fn run(mut self, poll_interval: Duration) -> anyhow::Result<()> {
-        let switch = &self.apictx.mgmt_switch;
-        let sp = switch.sp(self.spid)?;
+    async fn run(
+        mut self,
+        poll_interval: Duration,
+        apictx: Arc<ServerContext>,
+    ) -> Result<(), SpCommsError> {
         let mut interval = tokio::time::interval(poll_interval);
-        let mut known_state = None;
+        let switch = &apictx.mgmt_switch;
+        let sp = switch.sp(self.spid)?;
 
         loop {
             interval.tick().await;
             slog::trace!(&self.log, "interval elapsed, polling SP...");
 
-            // Check if the SP's state has changed. If it has, we need to make sure
-            // we still know what all of its sensors are.
-            let current_state = sp.state().await?;
-            if Some(&current_state) != known_state.as_ref() {
-                // The SP's state appears to have changed. Time to make sure our
-                // understanding of its devices and identity is up to date!
-                slog::debug!(
-                    &self.log,
-                    "our little friend seems to have changed in some kind of way";
-                    "current_state" => ?current_state,
-                    "known_state" => ?known_state,
-                );
-                let inv_devices = sp.inventory().await?.devices;
-
-                // Clear out any previously-known devices, and preallocate capacity
-                // for all the new ones.
-                self.components.clear();
-                self.components.reserve(inv_devices.len());
-
-                // Reimplement this ourselves because we don't really care about
-                // reading the RoT state at present. This is unfortunately copied
-                // from `gateway_messages`.
-                fn stringify_byte_string(bytes: &[u8]) -> String {
-                    // We expect serial and model numbers to be ASCII and 0-padded: find the first 0
-                    // byte and convert to a string. If that fails, hexlify the entire slice.
-                    let first_zero = bytes
-                        .iter()
-                        .position(|&b| b == 0)
-                        .unwrap_or(bytes.len());
-
-                    std::str::from_utf8(&bytes[..first_zero])
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|_err| hex::encode(bytes))
+            match self.poll(sp).await {
+                // No sense cluttering the ringbuffer with empty vecs...
+                Ok(samples) if samples.is_empty() => {
+                    slog::trace!(&self.log, "polled SP, no samples returned"; "num_samples" => 0usize);
                 }
-                let (model, serial, hubris_archive_id, revision) =
-                    match current_state {
-                        VersionedSpState::V1(ref v) => (
-                            stringify_byte_string(&v.model),
-                            stringify_byte_string(&v.serial_number[..]),
-                            hex::encode(v.hubris_archive_id),
-                            v.revision,
-                        ),
-                        VersionedSpState::V2(ref v) => (
-                            stringify_byte_string(&v.model),
-                            stringify_byte_string(&v.serial_number[..]),
-                            hex::encode(v.hubris_archive_id),
-                            v.revision,
-                        ),
-                        VersionedSpState::V3(ref v) => (
-                            stringify_byte_string(&v.model),
-                            stringify_byte_string(&v.serial_number[..]),
-                            hex::encode(v.hubris_archive_id),
-                            v.revision,
-                        ),
-                    };
-                for dev in inv_devices {
-                    // Skip devices which have nothing interesting for us.
-                    if !dev
-                        .capabilities
-                        .contains(DeviceCapabilities::HAS_MEASUREMENT_CHANNELS)
-                    {
-                        continue;
-                    }
-                    let component_name = match dev.component.as_str() {
-                        Some(c) => c,
-                        None => {
-                            // These are supposed to always be strings. But, if we
-                            // see one that's not a string, bail instead of panicking.
-                            slog::error!(
-                                &self.log,
-                                "a SP component ID was not a string! this isn't supposed to happen!";
-                                "device" => ?dev,
-                            );
-                            anyhow::bail!("a SP component ID was not stringy!");
-                        }
-                    };
-                    // TODO(eliza): i hate having to clone all these strings for
-                    // every device on the SP...it would be cool if Oximeter let us
-                    // reference count them...
-                    let target = component::Component {
-                        chassis_type: match self.spid.typ {
-                            SpType::Sled => Cow::Borrowed("sled"),
-                            SpType::Switch => Cow::Borrowed("switch"),
-                            SpType::Power => Cow::Borrowed("power"),
-                        },
-                        slot: self.spid.slot as u32,
-                        component: Cow::Owned(component_name.to_string()),
-                        device: Cow::Owned(dev.device),
-                        model: Cow::Owned(model.clone()),
-                        revision,
-                        serial: Cow::Owned(serial.clone()),
-                        rack_id: self.rack_id,
-                        gateway_id: self.mgs_id,
-                        hubris_archive_id: Cow::Owned(
-                            hubris_archive_id.clone(),
-                        ),
-                    };
-                    match self.components.entry(dev.component) {
-                        // Found a new device!
-                        hash_map::Entry::Vacant(entry) => {
-                            slog::debug!(
-                                &self.log,
-                                "discovered a new component!";
-                                "component" => ?dev.component,
-                            );
-                            entry.insert(ComponentMetrics {
-                                target,
-                                sensor_errors: HashMap::new(),
-                                poll_errors: HashMap::new(),
-                            });
-                        }
-                        // We previously had a known device for this thing, but
-                        // the metrics target has changed, so we should reset
-                        // its cumulative metrics.
-                        hash_map::Entry::Occupied(mut entry)
-                            if entry.get().target != target =>
-                        {
-                            slog::trace!(
-                                &self.log,
-                                "target has changed, resetting cumulative metrics for component";
-                                "component" => ?dev.component,
-                            );
-                            entry.insert(ComponentMetrics {
-                                target,
-                                sensor_errors: HashMap::new(),
-                                poll_errors: HashMap::new(),
-                            });
-                        }
+                Ok(samples) => {
+                    slog::trace!(&self.log, "polled SP successfully"; "num_samples" => samples.len());
 
-                        // The target for this device hasn't changed, don't reset it.
-                        hash_map::Entry::Occupied(_) => {}
-                    }
-                }
-
-                known_state = Some(current_state);
-            }
-
-            let mut samples = Vec::with_capacity(self.components.len());
-            for (c, ComponentMetrics { target, sensor_errors, poll_errors }) in
-                &mut self.components
-            {
-                let details = match sp.component_details(*c).await {
-                    Ok(deets) => deets,
-                    Err(error) => {
-                        slog::warn!(
+                    if let Err(_) = self.sample_tx.send(samples) {
+                        slog::info!(
                             &self.log,
-                            "failed to read details on SP component";
-                            "sp_component" => %c,
-                            "error" => %error,
+                            "all sample receiver handles have been dropped! \
+                             presumably we are shutting down...";
                         );
-                        // TODO(eliza): we should increment a metric here...
-                        continue;
+                        return Ok(());
                     }
-                };
-                if details.entries.is_empty() {
+                }
+                Err(CommunicationError::NoSpDiscovered) => {
+                    slog::info!(
+                        &self.log,
+                        "our SP seems to no longer be present; giving up."
+                    );
+                    return Ok(());
+                }
+                Err(error) => {
                     slog::warn!(
                         &self.log,
-                        "a component which claimed to have measurement channels \
-                         had empty details. this seems weird...";
-                        "sp_component" => %c,
+                        "failed to poll SP, will try again momentarily...";
+                        "error" => %error,
                     );
+                    // TODO(eliza): we should probably have a metric for failed
+                    // SP polls.
                 }
-                for d in details.entries {
-                    let ComponentDetails::Measurement(m) = d else {
-                        // If the component details are switch port details rather
-                        // than measurement channels, ignore it for now.
-                        continue;
-                    };
-                    let name = Cow::Owned(m.name);
-                    let sample = match (m.value, m.kind) {
-                        (Ok(datum), MeasurementKind::Temperature) => {
-                            Sample::new(
-                                target,
-                                &component::Temperature { name, datum },
-                            )
-                        }
-                        (Ok(datum), MeasurementKind::Current) => Sample::new(
-                            target,
-                            &component::Current { name, datum },
-                        ),
-                        (Ok(datum), MeasurementKind::Voltage) => Sample::new(
-                            target,
-                            &component::Voltage { name, datum },
-                        ),
-                        (Ok(datum), MeasurementKind::Power) => Sample::new(
-                            target,
-                            &component::Power { name, datum },
-                        ),
-                        (Ok(datum), MeasurementKind::InputCurrent) => {
-                            Sample::new(
-                                target,
-                                &component::InputCurrent { name, datum },
-                            )
-                        }
-                        (Ok(datum), MeasurementKind::InputVoltage) => {
-                            Sample::new(
-                                target,
-                                &component::InputVoltage { name, datum },
-                            )
-                        }
-                        (Ok(datum), MeasurementKind::Speed) => Sample::new(
-                            target,
-                            &component::FanSpeed { name, datum },
-                        ),
-                        (Err(e), kind) => {
-                            let kind = match kind {
-                                MeasurementKind::Temperature => "temperature",
-                                MeasurementKind::Current => "current",
-                                MeasurementKind::Voltage => "voltage",
-                                MeasurementKind::Power => "power",
-                                MeasurementKind::InputCurrent => {
-                                    "input_current"
-                                }
-                                MeasurementKind::InputVoltage => {
-                                    "input_voltage"
-                                }
-                                MeasurementKind::Speed => "fan_speed",
-                            };
-                            let error = match e {
-                                MeasurementError::InvalidSensor => {
-                                    "invalid_sensor"
-                                }
-                                MeasurementError::NoReading => "no_reading",
-                                MeasurementError::NotPresent => "not_present",
-                                MeasurementError::DeviceError => "device_error",
-                                MeasurementError::DeviceUnavailable => {
-                                    "device_unavailable"
-                                }
-                                MeasurementError::DeviceTimeout => {
-                                    "device_timeout"
-                                }
-                                MeasurementError::DeviceOff => "device_off",
-                            };
-                            let datum = sensor_errors
-                                .entry(SensorErrorKey {
-                                    name: name.clone(),
-                                    kind,
-                                    error,
-                                })
-                                .or_insert(Cumulative::new(0));
-                            // TODO(eliza): perhaps we should treat this as
-                            // "level-triggered" and only increment the counter
-                            // when the sensor has *changed* to an errored
-                            // state after we have seen at least one good
-                            // measurement from it since the last time the error
-                            // was observed?
-                            datum.increment();
-                            Sample::new(
-                                target,
-                                &component::SensorErrorCount {
-                                    error: Cow::Borrowed(error),
-                                    name,
-                                    datum: *datum,
-                                    sensor_kind: Cow::Borrowed(kind),
-                                },
-                            )
-                        }
-                    }?;
-                    samples.push(sample);
-                }
-            }
-            // No sense cluttering the ringbuffer with empty vecs...
-            if samples.is_empty() {
-                continue;
-            }
-            if let Err(_) = self.sample_tx.send(samples) {
-                slog::info!(
-                    &self.log,
-                    "all sample receiver handles have been dropped! presumably we are shutting down...";
-                );
-                return Ok(());
             }
         }
+    }
+
+    async fn poll(
+        &mut self,
+        sp: &SingleSp,
+    ) -> Result<Vec<Sample>, CommunicationError> {
+        // Check if the SP's state has changed. If it has, we need to make sure
+        // we still know what all of its sensors are.
+        let current_state = sp.state().await?;
+        if Some(&current_state) != self.known_state.as_ref() {
+            // The SP's state appears to have changed. Time to make sure our
+            // understanding of its devices and identity is up to date!
+            slog::debug!(
+                &self.log,
+                "our little friend seems to have changed in some kind of way";
+                "current_state" => ?current_state,
+                "known_state" => ?self.known_state,
+            );
+            let inv_devices = sp.inventory().await?.devices;
+
+            // Clear out any previously-known devices, and preallocate capacity
+            // for all the new ones.
+            self.components.clear();
+            self.components.reserve(inv_devices.len());
+
+            // Reimplement this ourselves because we don't really care about
+            // reading the RoT state at present. This is unfortunately copied
+            // from `gateway_messages`.
+            fn stringify_byte_string(bytes: &[u8]) -> String {
+                // We expect serial and model numbers to be ASCII and 0-padded: find the first 0
+                // byte and convert to a string. If that fails, hexlify the entire slice.
+                let first_zero =
+                    bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+
+                std::str::from_utf8(&bytes[..first_zero])
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|_err| hex::encode(bytes))
+            }
+            let (model, serial, hubris_archive_id, revision) =
+                match current_state {
+                    VersionedSpState::V1(ref v) => (
+                        stringify_byte_string(&v.model),
+                        stringify_byte_string(&v.serial_number[..]),
+                        hex::encode(v.hubris_archive_id),
+                        v.revision,
+                    ),
+                    VersionedSpState::V2(ref v) => (
+                        stringify_byte_string(&v.model),
+                        stringify_byte_string(&v.serial_number[..]),
+                        hex::encode(v.hubris_archive_id),
+                        v.revision,
+                    ),
+                    VersionedSpState::V3(ref v) => (
+                        stringify_byte_string(&v.model),
+                        stringify_byte_string(&v.serial_number[..]),
+                        hex::encode(v.hubris_archive_id),
+                        v.revision,
+                    ),
+                };
+            for dev in inv_devices {
+                // Skip devices which have nothing interesting for us.
+                if !dev
+                    .capabilities
+                    .contains(DeviceCapabilities::HAS_MEASUREMENT_CHANNELS)
+                {
+                    continue;
+                }
+                let component = match dev.component.as_str() {
+                    Some(c) => Cow::Owned(c.to_string()),
+                    None => {
+                        // These are supposed to always be strings. But, if we
+                        // see one that's not a string, fall back to the hex
+                        // representation rather than  panicking.
+                        let hex = hex::encode(dev.component.id);
+                        slog::warn!(
+                            &self.log,
+                            "a SP component ID was not a string! this isn't \
+                             supposed to happen!";
+                            "component" => %hex,
+                            "device" => ?dev,
+                        );
+                        Cow::Owned(hex)
+                    }
+                };
+                // TODO(eliza): i hate having to clone all these strings for
+                // every device on the SP...it would be cool if Oximeter let us
+                // reference count them...
+                let target = component::Component {
+                    chassis_type: Cow::Borrowed(match self.spid.typ {
+                        SpType::Sled => "sled",
+                        SpType::Switch => "switch",
+                        SpType::Power => "power",
+                    }),
+                    slot: self.spid.slot as u32,
+                    component,
+                    device: Cow::Owned(dev.device),
+                    model: Cow::Owned(model.clone()),
+                    revision,
+                    serial: Cow::Owned(serial.clone()),
+                    rack_id: self.rack_id,
+                    gateway_id: self.mgs_id,
+                    hubris_archive_id: Cow::Owned(hubris_archive_id.clone()),
+                };
+                match self.components.entry(dev.component) {
+                    // Found a new device!
+                    hash_map::Entry::Vacant(entry) => {
+                        slog::debug!(
+                            &self.log,
+                            "discovered a new component!";
+                            "component" => ?dev.component,
+                            "device" => ?target.device,
+                        );
+                        entry.insert(ComponentMetrics {
+                            target,
+                            sensor_errors: HashMap::new(),
+                            poll_errors: HashMap::new(),
+                        });
+                    }
+                    // We previously had a known device for this thing, but
+                    // the metrics target has changed, so we should reset
+                    // its cumulative metrics.
+                    hash_map::Entry::Occupied(mut entry)
+                        if entry.get().target != target =>
+                    {
+                        slog::trace!(
+                            &self.log,
+                            "target has changed, resetting cumulative metrics \
+                             for component";
+                            "component" => ?dev.component,
+                        );
+                        entry.insert(ComponentMetrics {
+                            target,
+                            sensor_errors: HashMap::new(),
+                            poll_errors: HashMap::new(),
+                        });
+                    }
+
+                    // The target for this device hasn't changed, don't reset it.
+                    hash_map::Entry::Occupied(_) => {}
+                }
+            }
+
+            self.known_state = Some(current_state);
+        }
+
+        let mut samples = Vec::with_capacity(self.components.len());
+        for (c, metrics) in &mut self.components {
+            // Metrics samples *should* always be well-formed. If we ever emit a
+            // messed up one, this is a programmer error, and therefore  should
+            // fail in test, but should probably *not* take down the whole
+            // management gateway in a real-life rack, especially because it's
+            // probably going to happen again if we were to get restarted.
+            const BAD_SAMPLE: &str =
+                "we emitted a bad metrics sample! this should never happen";
+            macro_rules! try_sample {
+                ($sample:expr) => {
+                    match $sample {
+                        Ok(sample) => samples.push(sample),
+
+                        Err(err) => {
+                            slog::error!(
+                                &self.log,
+                                "{BAD_SAMPLE}!";
+                                "error" => %err,
+                            );
+                            #[cfg(debug_assertions)]
+                            unreachable!("{BAD_SAMPLE}: {err}");
+                        }
+                    }
+                }
+            }
+            let details = match sp.component_details(*c).await {
+                Ok(deets) => deets,
+                // SP seems gone!
+                Err(CommunicationError::NoSpDiscovered) => {
+                    return Err(CommunicationError::NoSpDiscovered)
+                }
+                Err(error) => {
+                    slog::warn!(
+                        &self.log,
+                        "failed to read details on SP component";
+                        "sp_component" => %c,
+                        "error" => %error,
+                    );
+                    try_sample!(metrics.poll_error(comms_error_str(error)));
+                    continue;
+                }
+            };
+            if details.entries.is_empty() {
+                slog::warn!(
+                    &self.log,
+                    "a component which claimed to have measurement channels \
+                     had empty details. this seems weird...";
+                    "sp_component" => %c,
+                );
+                try_sample!(metrics.poll_error("no_measurement_channels"));
+                continue;
+            }
+            let ComponentMetrics { sensor_errors, target, .. } = metrics;
+            for d in details.entries {
+                let ComponentDetails::Measurement(m) = d else {
+                    // If the component details are switch port details rather
+                    // than measurement channels, ignore it for now.
+                    continue;
+                };
+                let name = Cow::Owned(m.name);
+                let sample = match (m.value, m.kind) {
+                    (Ok(datum), MeasurementKind::Temperature) => Sample::new(
+                        target,
+                        &component::Temperature { name, datum },
+                    ),
+                    (Ok(datum), MeasurementKind::Current) => {
+                        Sample::new(target, &component::Current { name, datum })
+                    }
+                    (Ok(datum), MeasurementKind::Voltage) => {
+                        Sample::new(target, &component::Voltage { name, datum })
+                    }
+                    (Ok(datum), MeasurementKind::Power) => {
+                        Sample::new(target, &component::Power { name, datum })
+                    }
+                    (Ok(datum), MeasurementKind::InputCurrent) => Sample::new(
+                        target,
+                        &component::InputCurrent { name, datum },
+                    ),
+                    (Ok(datum), MeasurementKind::InputVoltage) => Sample::new(
+                        target,
+                        &component::InputVoltage { name, datum },
+                    ),
+                    (Ok(datum), MeasurementKind::Speed) => Sample::new(
+                        target,
+                        &component::FanSpeed { name, datum },
+                    ),
+                    (Err(e), kind) => {
+                        let kind = match kind {
+                            MeasurementKind::Temperature => "temperature",
+                            MeasurementKind::Current => "current",
+                            MeasurementKind::Voltage => "voltage",
+                            MeasurementKind::Power => "power",
+                            MeasurementKind::InputCurrent => "input_current",
+                            MeasurementKind::InputVoltage => "input_voltage",
+                            MeasurementKind::Speed => "fan_speed",
+                        };
+                        let error = match e {
+                            MeasurementError::InvalidSensor => "invalid_sensor",
+                            MeasurementError::NoReading => "no_reading",
+                            MeasurementError::NotPresent => "not_present",
+                            MeasurementError::DeviceError => "device_error",
+                            MeasurementError::DeviceUnavailable => {
+                                "device_unavailable"
+                            }
+                            MeasurementError::DeviceTimeout => "device_timeout",
+                            MeasurementError::DeviceOff => "device_off",
+                        };
+                        let datum = sensor_errors
+                            .entry(SensorErrorKey {
+                                name: name.clone(),
+                                kind,
+                                error,
+                            })
+                            .or_insert(Cumulative::new(0));
+                        // TODO(eliza): perhaps we should treat this as
+                        // "level-triggered" and only increment the counter
+                        // when the sensor has *changed* to an errored
+                        // state after we have seen at least one good
+                        // measurement from it since the last time the error
+                        // was observed?
+                        datum.increment();
+                        Sample::new(
+                            target,
+                            &component::SensorErrorCount {
+                                error: Cow::Borrowed(error),
+                                name,
+                                datum: *datum,
+                                sensor_kind: Cow::Borrowed(kind),
+                            },
+                        )
+                    }
+                };
+                try_sample!(sample);
+            }
+        }
+        Ok(samples)
     }
 }
 
@@ -782,6 +843,65 @@ impl ServerManager {
 
             // Wait for a subsequent address change.
             self.addrs.changed().await?;
+        }
+    }
+}
+
+impl ComponentMetrics {
+    fn poll_error(
+        &mut self,
+        error_str: &'static str,
+    ) -> Result<Sample, MetricsError> {
+        let datum = self
+            .poll_errors
+            .entry(error_str)
+            .or_insert_with(|| Cumulative::new(0));
+        datum.increment();
+        Sample::new(
+            &self.target,
+            &component::PollErrorCount {
+                error: Cow::Borrowed(error_str),
+                datum: *datum,
+            },
+        )
+    }
+}
+
+fn comms_error_str(error: CommunicationError) -> &'static str {
+    // TODO(eliza): a bunch of these probably can't be returned by the specific
+    // operations we try to do. It could be good to make the methods this code
+    // calls return a smaller enum of just the errors it might actually
+    // encounter? Figure this out later.
+    match error {
+        CommunicationError::NoSpDiscovered => "no_sp_discovered",
+        CommunicationError::InterfaceError(_) => "interface",
+        CommunicationError::ScopeIdChangingFrequently { .. } => {
+            "scope_id_changing_frequently"
+        }
+        CommunicationError::JoinMulticast { .. } => "join_multicast",
+        CommunicationError::UdpSendTo { .. } => "udp_send_to",
+        CommunicationError::UdpRecv(_) => "udp_recv",
+        CommunicationError::Deserialize { .. } => "deserialize",
+        CommunicationError::ExhaustedNumAttempts(_) => "exhausted_num_attempts",
+        CommunicationError::BadResponseType { .. } => "bad_response_type",
+        CommunicationError::SpError { .. } => "sp_error",
+        CommunicationError::BogusSerialConsoleState { .. } => {
+            "bogus_serial_console_state"
+        }
+        CommunicationError::VersionMismatch { .. } => {
+            "protocol_version_mismatch"
+        }
+        CommunicationError::TlvDeserialize { .. } => "tlv_deserialize",
+        CommunicationError::TlvDecode(_) => "tlv_decode",
+        CommunicationError::TlvPagination { .. } => "tlv_pagination",
+        CommunicationError::IpccKeyLookupValueTooLarge => {
+            "ipcc_key_lookup_value_too_large"
+        }
+        CommunicationError::UnexpectedTrailingData(_) => {
+            "unexpected_trailing_data"
+        }
+        CommunicationError::BadTrailingDataSize { .. } => {
+            "bad_trailing_data_size"
         }
     }
 }
