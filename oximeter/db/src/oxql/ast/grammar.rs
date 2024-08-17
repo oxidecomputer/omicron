@@ -279,7 +279,26 @@ peg::parser! {
         pub rule string_literal() -> Literal
             = s:string_literal_impl() { Literal::String(s) }
 
-        pub(super) rule integer_literal_impl() -> i128
+        pub(super) rule hex_integer_literal_impl() -> i128
+            = n:$("-"? "0x" ['0'..='9' | 'a'..='f' | 'A'..='F']+ !['.'])
+        {?
+            let Some((maybe_sign, digits)) = n.split_once("0x") else {
+                return Err("hex literals should start with '0x'");
+            };
+            let sign = if maybe_sign == "-" { -1 } else { 1 };
+            let Ok(x) = i128::from_str_radix(digits, 16) else {
+                return Err("invalid hex literal");
+            };
+            if x < i128::from(i64::MIN) {
+                Err("negative overflow")
+            } else if x > i128::from(u64::MAX) {
+                Err("positive overflow")
+            } else {
+                Ok(sign * x)
+            }
+        }
+
+        pub(super) rule dec_integer_literal_impl() -> i128
             = n:$("-"? ['0'..='9']+ !['e' | 'E' | '.'])
         {?
             let Ok(x) = n.parse() else {
@@ -293,6 +312,9 @@ peg::parser! {
                 Ok(x)
             }
         }
+
+        pub(super) rule integer_literal_impl() -> i128
+            = hex_integer_literal_impl() / dec_integer_literal_impl()
 
         /// Parse integer literals.
         pub rule integer_literal() -> Literal
@@ -747,11 +769,22 @@ mod tests {
     fn test_integer_literal() {
         assert_eq!(query_parser::integer_literal_impl("1").unwrap(), 1);
         assert_eq!(query_parser::integer_literal_impl("-1").unwrap(), -1);
-        assert_eq!(query_parser::integer_literal_impl("-1").unwrap(), -1);
 
         assert!(query_parser::integer_literal_impl("-1.0").is_err());
         assert!(query_parser::integer_literal_impl("-1.").is_err());
         assert!(query_parser::integer_literal_impl("1e3").is_err());
+    }
+
+    #[test]
+    fn test_hex_integer_literal() {
+        assert_eq!(query_parser::integer_literal_impl("0x1").unwrap(), 1);
+        assert_eq!(query_parser::integer_literal_impl("-0x1").unwrap(), -1);
+        assert_eq!(query_parser::integer_literal_impl("-0xa").unwrap(), -0xa);
+        assert_eq!(query_parser::integer_literal_impl("0xfeed").unwrap(), 0xfeed);
+        assert_eq!(query_parser::integer_literal_impl("0xFEED").unwrap(), 0xfeed);
+
+        assert!(query_parser::integer_literal_impl("-0x1.0").is_err());
+        assert!(query_parser::integer_literal_impl("-0x1.").is_err());
     }
 
     #[test]
