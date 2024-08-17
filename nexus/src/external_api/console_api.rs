@@ -756,6 +756,12 @@ async fn serve_static(
     Ok(resp.body(body)?)
 }
 
+/// Serve a static asset from `<static_dir>/assets` via [`serve_static`]. Cache
+/// in browser for a year because assets have content hash in filename.
+///
+/// Note that Dropshot protects us from directory traversal attacks (e.g.
+/// `/assets/../../../etc/passwd`). This is tested in the `console_api`
+/// integration tests
 pub(crate) async fn asset(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::RestPathParam>,

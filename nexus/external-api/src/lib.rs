@@ -2814,12 +2814,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<Response<Body>, HttpError>;
 
-    /// Serve a static asset from `<static_dir>/assets` via [`serve_static`]. Cache
-    /// in browser for a year because assets have content hash in filename.
-    ///
-    /// Note that Dropshot protects us from directory traversal attacks (e.g.
-    /// `/assets/../../../etc/passwd`). This is tested in the `console_api`
-    /// integration tests.
+    /// Serve a static asset
     #[endpoint {
         method = GET,
         path = "/assets/{path:.*}",
