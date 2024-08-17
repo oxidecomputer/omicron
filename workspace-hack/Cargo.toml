@@ -112,6 +112,7 @@ tokio-postgres = { version = "0.7.11", features = ["with-chrono-0_4", "with-serd
 tokio-stream = { version = "0.1.15", features = ["net"] }
 tokio-util = { version = "0.7.11", features = ["codec", "io-util"] }
 toml = { version = "0.7.8" }
+toml_datetime = { version = "0.6.8", default-features = false, features = ["serde"] }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.20", features = ["serde"] }
 tracing = { version = "0.1.40", features = ["log"] }
 unicode-bidi = { version = "0.3.15" }
@@ -221,6 +222,7 @@ tokio-postgres = { version = "0.7.11", features = ["with-chrono-0_4", "with-serd
 tokio-stream = { version = "0.1.15", features = ["net"] }
 tokio-util = { version = "0.7.11", features = ["codec", "io-util"] }
 toml = { version = "0.7.8" }
+toml_datetime = { version = "0.6.8", default-features = false, features = ["serde"] }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.20", features = ["serde"] }
 tracing = { version = "0.1.40", features = ["log"] }
 unicode-bidi = { version = "0.3.15" }
@@ -285,7 +287,6 @@ nix = { version = "0.28.0", features = ["feature", "fs", "ioctl", "poll", "signa
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
 signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
-toml_datetime = { version = "0.6.8", default-features = false, features = ["serde"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 
 [target.x86_64-unknown-illumos.build-dependencies]
@@ -295,7 +296,6 @@ nix = { version = "0.28.0", features = ["feature", "fs", "ioctl", "poll", "signa
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
 signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
-toml_datetime = { version = "0.6.8", default-features = false, features = ["serde"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 
 ### END HAKARI SECTION
