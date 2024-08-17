@@ -40,7 +40,10 @@ use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
-use nexus_types::external_api::shared::{BfdStatus, ProbeInfo};
+use nexus_types::external_api::{
+    shared::{BfdStatus, ProbeInfo},
+    views::OxqlQueryResult,
+};
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
@@ -6374,13 +6377,6 @@ async fn timeseries_schema_list(
 }
 
 // TODO: can we link to an OxQL reference? Do we have one? Can we even do links?
-
-/// The result of a successful OxQL query.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct OxqlQueryResult {
-    /// Tables resulting from the query, each containing timeseries.
-    pub tables: Vec<oximeter_db::oxql::Table>,
-}
 
 /// Run timeseries query
 ///

@@ -971,3 +971,12 @@ pub struct AllowList {
     /// The allowlist of IPs or subnets.
     pub allowed_ips: ExternalAllowedSourceIps,
 }
+
+// OxQL QUERIES
+
+/// The result of a successful OxQL query.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct OxqlQueryResult {
+    /// Tables resulting from the query, each containing timeseries.
+    pub tables: Vec<oximeter_db::oxql::Table>,
+}

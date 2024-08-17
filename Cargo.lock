@@ -5460,6 +5460,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "openssl",
+ "oximeter-db",
  "oxnet",
  "parse-display",
  "proptest",
