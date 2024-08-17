@@ -129,12 +129,6 @@ impl BackgroundTask for RegionSnapshotReplacementGarbageCollect {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         async move {
-            let log = &opctx.log;
-            info!(
-                &log,
-                "region snapshot replacement garbage collect task started",
-            );
-
             let mut status =
                 RegionSnapshotReplacementGarbageCollectStatus::default();
 
@@ -143,11 +137,6 @@ impl BackgroundTask for RegionSnapshotReplacementGarbageCollect {
                 &mut status,
             )
             .await;
-
-            info!(
-                &log,
-                "region snapshot replacement garbage collect task done"
-            );
 
             json!(status)
         }
