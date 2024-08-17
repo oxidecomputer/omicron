@@ -6504,6 +6504,7 @@ dependencies = [
  "postgres-types",
  "predicates",
  "proc-macro2",
+ "quote",
  "regex",
  "regex-automata 0.4.6",
  "regex-syntax 0.8.4",
@@ -6630,6 +6631,7 @@ dependencies = [
  "nexus-internal-api",
  "omicron-workspace-hack",
  "openapi-lint",
+ "openapi-manager-types",
  "openapiv3",
  "owo-colors",
  "oximeter-api",
@@ -6638,6 +6640,15 @@ dependencies = [
  "sled-agent-api",
  "supports-color",
  "wicketd-api",
+]
+
+[[package]]
+name = "openapi-manager-types"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "omicron-workspace-hack",
 ]
 
 [[package]]
