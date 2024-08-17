@@ -10,7 +10,7 @@ use clap::{Args, Parser, Subcommand};
 
 use crate::{
     check::check_impl, generate::generate_impl, list::list_impl,
-    output::OutputOpts, spec::openapi_dir,
+    output::OutputOpts, spec::Environment,
 };
 
 /// Manage OpenAPI specifications.
@@ -73,7 +73,7 @@ pub struct GenerateArgs {
 
 impl GenerateArgs {
     fn exec(self, output: &OutputOpts) -> anyhow::Result<ExitCode> {
-        let dir = openapi_dir(self.dir)?;
+        let dir = Environment::new(self.dir)?;
         Ok(generate_impl(&dir, output)?.to_exit_code())
     }
 }
@@ -87,8 +87,8 @@ pub struct CheckArgs {
 
 impl CheckArgs {
     fn exec(self, output: &OutputOpts) -> anyhow::Result<ExitCode> {
-        let dir = openapi_dir(self.dir)?;
-        Ok(check_impl(&dir, output)?.to_exit_code())
+        let env = Environment::new(self.dir)?;
+        Ok(check_impl(&env, output)?.to_exit_code())
     }
 }
 

@@ -21,6 +21,7 @@ pub use oximeter::Field;
 pub use oximeter::FieldType;
 pub use oximeter::Measurement;
 pub use oximeter::Sample;
+use oxql_types::TimeseriesKey;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -266,8 +267,6 @@ pub async fn make_client(
         .context("Failed to initialize timeseries database")?;
     Ok(client)
 }
-
-pub(crate) type TimeseriesKey = u64;
 
 // TODO-cleanup: Add the timeseries version in to the computation of the key.
 // This will require a full drop of the database, since we're changing the

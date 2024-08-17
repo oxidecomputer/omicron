@@ -284,7 +284,7 @@ async fn test_timeseries_schema_list(
 pub async fn timeseries_query(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
     query: impl ToString,
-) -> Vec<oximeter_db::oxql::Table> {
+) -> Vec<oxql_types::Table> {
     // first, make sure the latest timeseries have been collected.
     cptestctx.oximeter.force_collect().await;
 
@@ -429,11 +429,11 @@ async fn test_instance_watcher_metrics(
 
     #[track_caller]
     fn count_state(
-        table: &oximeter_db::oxql::Table,
+        table: &oxql_types::Table,
         instance_id: InstanceUuid,
         state: &'static str,
     ) -> i64 {
-        use oximeter_db::oxql::point::ValueArray;
+        use oxql_types::point::ValueArray;
         let uuid = FieldValue::Uuid(instance_id.into_untyped_uuid());
         let state = FieldValue::String(state.into());
         let mut timeserieses = table.timeseries().filter(|ts| {
