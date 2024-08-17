@@ -13,11 +13,13 @@ use gateway_sp_comms::SpComponent;
 use gateway_sp_comms::VersionedSpState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
+use oximeter::types::Cumulative;
 use oximeter::types::ProducerRegistry;
 use oximeter::types::Sample;
 use oximeter::MetricsError;
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::hash_map;
+use std::collections::hash_map::HashMap;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -77,11 +79,23 @@ struct PollerManager {
 struct SpPoller {
     apictx: Arc<ServerContext>,
     spid: SpIdentifier,
-    devices: Vec<(SpComponent, component::Component)>,
+    devices: HashMap<SpComponent, PollerDevice>,
     log: slog::Logger,
     rack_id: Uuid,
     mgs_id: Uuid,
     sample_tx: broadcast::Sender<Vec<Sample>>,
+}
+
+struct PollerDevice {
+    target: component::Component,
+    sensor_errors: HashMap<SensorErrorKey, Cumulative<u64>>,
+}
+
+#[derive(Eq, PartialEq, Hash)]
+struct SensorErrorKey {
+    name: Cow<'static, str>,
+    kind: &'static str,
+    error: &'static str,
 }
 
 /// Manages a metrics server and stuff.
@@ -352,7 +366,7 @@ impl PollerManager {
                         "sp_slot" => spid.slot,
                         "chassis_type" => format!("{:?}", spid.typ),
                     )),
-                    devices: Vec::new(),
+                    devices: HashMap::new(),
                     sample_tx: self.sample_tx.clone(),
                 };
                 let poller_handle = self.tasks.spawn(poller.run(POLL_INTERVAL));
@@ -395,6 +409,7 @@ impl SpPoller {
         let sp = switch.sp(self.spid)?;
         let mut interval = tokio::time::interval(poll_interval);
         let mut known_state = None;
+
         loop {
             interval.tick().await;
             slog::trace!(&self.log, "interval elapsed, polling SP...");
@@ -496,14 +511,47 @@ impl SpPoller {
                             hubris_archive_id.clone(),
                         ),
                     };
-                    self.devices.push((dev.component, target))
+                    match self.devices.entry(dev.component) {
+                        // Found a new device!
+                        hash_map::Entry::Vacant(entry) => {
+                            slog::debug!(
+                                &self.log,
+                                "discovered a new component!";
+                                "component" => ?dev.component,
+                            );
+                            entry.insert(PollerDevice {
+                                target,
+                                sensor_errors: HashMap::new(),
+                            });
+                        }
+                        // We previously had a known device for this thing, but
+                        // the metrics target has changed, so we should reset
+                        // its cumulative metrics.
+                        hash_map::Entry::Occupied(mut entry)
+                            if entry.get().target != target =>
+                        {
+                            slog::trace!(
+                                &self.log,
+                                "target has changed, resetting cumulative metrics for component.";
+                                "component" => ?dev.component,
+                            );
+                            entry.insert(PollerDevice {
+                                target,
+                                sensor_errors: HashMap::new(),
+                            });
+                        }
+
+                        // The target for this device hasn't changed, don't reset it.
+                        hash_map::Entry::Occupied(_) => {}
+                    }
                 }
 
                 known_state = Some(current_state);
             }
 
             let mut samples = Vec::with_capacity(self.devices.len());
-            for (c, target) in &self.devices {
+            for (c, PollerDevice { target, sensor_errors }) in &mut self.devices
+            {
                 let details = match sp.component_details(*c).await {
                     Ok(deets) => deets,
                     Err(error) => {
@@ -568,7 +616,7 @@ impl SpPoller {
                             &component::FanSpeed { name, datum },
                         ),
                         (Err(e), kind) => {
-                            let sensor_kind = match kind {
+                            let kind = match kind {
                                 MeasurementKind::Temperature => "temperature",
                                 MeasurementKind::Current => "current",
                                 MeasurementKind::Voltage => "voltage",
@@ -596,13 +644,27 @@ impl SpPoller {
                                 }
                                 MeasurementError::DeviceOff => "device_off",
                             };
+                            let datum = sensor_errors
+                                .entry(SensorErrorKey {
+                                    name: name.clone(),
+                                    kind,
+                                    error,
+                                })
+                                .or_insert(Cumulative::new(0));
+                            // TODO(eliza): perhaps we should treat this as
+                            // "level-triggered" and only increment the counter
+                            // when the sensor has *changed* to an errored
+                            // state after we have seen at least one good
+                            // measurement from it since the last time the error
+                            // was observed?
+                            datum.increment();
                             Sample::new(
                                 target,
                                 &component::SensorErrorCount {
                                     error: Cow::Borrowed(error),
                                     name,
-                                    datum: oximeter::types::Cumulative::new(1),
-                                    sensor_kind: Cow::Borrowed(sensor_kind),
+                                    datum: *datum,
+                                    sensor_kind: Cow::Borrowed(kind),
                                 },
                             )
                         }
