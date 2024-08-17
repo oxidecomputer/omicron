@@ -11,9 +11,9 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use dropshot::PaginationOrder;
+use oximeter::schema::TimeseriesKey;
 use oximeter::types::{DatumType, FieldType, FieldValue};
 use oximeter::{Metric, Target};
-use oxql_types::TimeseriesKey;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

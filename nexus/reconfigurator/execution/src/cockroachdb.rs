@@ -39,6 +39,7 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::CockroachDbClusterVersion;
     use std::sync::Arc;
+    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -101,7 +102,7 @@ mod test {
             datastore,
             resolver,
             &blueprint,
-            "test-suite",
+            Uuid::new_v4(),
             &overrides,
         )
         .await
