@@ -780,8 +780,14 @@ mod tests {
         assert_eq!(query_parser::integer_literal_impl("0x1").unwrap(), 1);
         assert_eq!(query_parser::integer_literal_impl("-0x1").unwrap(), -1);
         assert_eq!(query_parser::integer_literal_impl("-0xa").unwrap(), -0xa);
-        assert_eq!(query_parser::integer_literal_impl("0xfeed").unwrap(), 0xfeed);
-        assert_eq!(query_parser::integer_literal_impl("0xFEED").unwrap(), 0xfeed);
+        assert_eq!(
+            query_parser::integer_literal_impl("0xfeed").unwrap(),
+            0xfeed
+        );
+        assert_eq!(
+            query_parser::integer_literal_impl("0xFEED").unwrap(),
+            0xfeed
+        );
 
         assert!(query_parser::integer_literal_impl("-0x1.0").is_err());
         assert!(query_parser::integer_literal_impl("-0x1.").is_err());
