@@ -6077,6 +6077,7 @@ dependencies = [
  "oximeter-instruments",
  "oximeter-producer",
  "oxnet",
+ "oxql-types",
  "parse-display",
  "paste",
  "pem",
@@ -6926,6 +6927,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oximeter",
  "oximeter-test-utils",
+ "oxql-types",
  "peg",
  "reedline",
  "regex",
@@ -7100,6 +7102,20 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "oxql-types"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "highway",
+ "num",
+ "omicron-workspace-hack",
+ "oximeter-types",
+ "schemars",
+ "serde",
 ]
 
 [[package]]

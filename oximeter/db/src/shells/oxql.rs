@@ -7,9 +7,10 @@
 // Copyright 2024 Oxide Computer
 
 use super::{list_timeseries, prepare_columns};
-use crate::{make_client, oxql::Table, Client, OxqlResult};
+use crate::{make_client, Client, OxqlResult};
 use clap::Args;
 use crossterm::style::Stylize;
+use oxql_types::Table;
 use reedline::DefaultPrompt;
 use reedline::DefaultPromptSegment;
 use reedline::Reedline;

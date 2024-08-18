@@ -20131,10 +20131,20 @@
         "type": "object",
         "properties": {
           "metric_type": {
-            "$ref": "#/components/schemas/MetricType"
+            "description": "The type of this metric.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MetricType"
+              }
+            ]
           },
           "values": {
-            "$ref": "#/components/schemas/ValueArray"
+            "description": "The data values.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ValueArray"
+              }
+            ]
           }
         },
         "required": [
