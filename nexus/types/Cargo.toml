@@ -19,7 +19,7 @@ humantime.workspace = true
 ipnetwork.workspace = true
 omicron-uuid-kinds.workspace = true
 openssl.workspace = true
-oximeter-db = { workspace = true, features = ["oxql"] }
+oxql-types.workspace = true
 oxnet.workspace = true
 parse-display.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
