@@ -6386,7 +6386,7 @@ async fn timeseries_schema_list(
 async fn timeseries_query(
     rqctx: RequestContext<ApiContext>,
     body: TypedBody<params::TimeseriesQuery>,
-) -> Result<HttpResponseOk<Vec<oxql_types::Table>>, HttpError> {
+) -> Result<HttpResponseOk<views::OxqlQueryResult>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
@@ -6395,7 +6395,7 @@ async fn timeseries_query(
         nexus
             .timeseries_query(&opctx, &query)
             .await
-            .map(HttpResponseOk)
+            .map(|tables| HttpResponseOk(views::OxqlQueryResult { tables }))
             .map_err(HttpError::from)
     };
     apictx

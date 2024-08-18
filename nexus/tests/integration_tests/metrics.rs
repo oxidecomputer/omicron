@@ -19,6 +19,7 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::views::OxqlQueryResult;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use oximeter::types::Datum;
@@ -307,12 +308,14 @@ pub async fn timeseries_query(
     .unwrap_or_else(|e| {
         panic!("timeseries query failed: {e:?}\nquery: {query}")
     });
-    rsp.parsed_body().unwrap_or_else(|e| {
-        panic!(
-            "could not parse timeseries query response: {e:?}\n\
+    rsp.parsed_body::<OxqlQueryResult>()
+        .unwrap_or_else(|e| {
+            panic!(
+                "could not parse timeseries query response: {e:?}\n\
             query: {query}\nresponse: {rsp:#?}"
-        );
-    })
+            );
+        })
+        .tables
 }
 
 #[nexus_test]

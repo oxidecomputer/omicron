@@ -5461,6 +5461,7 @@ dependencies = [
  "omicron-workspace-hack",
  "openssl",
  "oxnet",
+ "oxql-types",
  "parse-display",
  "proptest",
  "schemars",
