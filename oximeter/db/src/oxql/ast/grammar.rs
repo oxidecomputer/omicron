@@ -280,29 +280,26 @@ peg::parser! {
             = s:string_literal_impl() { Literal::String(s) }
 
         pub(super) rule hex_integer_literal_impl() -> i128
-            = n:$("-"? "0x" ['0'..='9' | 'a'..='f' | 'A'..='F']+ !['.'])
+            = n:$("0x" ['0'..='9' | 'a'..='f' | 'A'..='F']+ !['.'])
         {?
             let Some((maybe_sign, digits)) = n.split_once("0x") else {
                 return Err("hex literals should start with '0x'");
             };
-            let sign = if maybe_sign == "-" { -1 } else { 1 };
-            let Ok(x) = i128::from_str_radix(digits, 16) else {
-                return Err("invalid hex literal");
-            };
-            if x < i128::from(i64::MIN) {
-                Err("negative overflow")
-            } else if x > i128::from(u64::MAX) {
-                Err("positive overflow")
-            } else {
-                Ok(sign * x)
-            }
+            i128::from_str_radix(digits, 16).map_err(|_| "invalid hex literal")
         }
 
         pub(super) rule dec_integer_literal_impl() -> i128
-            = n:$("-"? ['0'..='9']+ !['e' | 'E' | '.'])
+            = n:$(['0'..='9']+ !['e' | 'E' | '.'])
         {?
-            let Ok(x) = n.parse() else {
-                return Err("integer literal");
+            n.parse().map_err(|_| "integer literal")
+        }
+
+        pub(super) rule integer_literal_impl() -> i128
+            = maybe_sign:$("-"?) n:(hex_integer_literal_impl() / dec_integer_literal_impl())
+        {?
+            let sign = if maybe_sign == "-" { -1 } else { 1 };
+            let Some(x) = n.checked_mul(sign) else {
+                return Err("negative overflow");
             };
             if x < i128::from(i64::MIN) {
                 Err("negative overflow")
@@ -312,9 +309,6 @@ peg::parser! {
                 Ok(x)
             }
         }
-
-        pub(super) rule integer_literal_impl() -> i128
-            = hex_integer_literal_impl() / dec_integer_literal_impl()
 
         /// Parse integer literals.
         pub rule integer_literal() -> Literal
@@ -788,6 +782,12 @@ mod tests {
             query_parser::integer_literal_impl("0xFEED").unwrap(),
             0xfeed
         );
+
+        // Out of range in either direction
+        assert!(query_parser::integer_literal_impl("0xFFFFFFFFFFFFFFFFFFFF")
+            .is_err());
+        assert!(query_parser::integer_literal_impl("-0xFFFFFFFFFFFFFFFFFFFF")
+            .is_err());
 
         assert!(query_parser::integer_literal_impl("-0x1.0").is_err());
         assert!(query_parser::integer_literal_impl("-0x1.").is_err());
