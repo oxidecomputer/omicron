@@ -4720,6 +4720,7 @@ dependencies = [
  "gateway-messages",
  "gateway-test-utils",
  "libc",
+ "omicron-gateway",
  "omicron-workspace-hack",
  "signal-hook-tokio",
  "tokio",

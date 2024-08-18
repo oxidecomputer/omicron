@@ -49,7 +49,6 @@ pub struct MgsArguments {
     pub id: Uuid,
     pub addresses: Vec<SocketAddrV6>,
     pub rack_id: Option<Uuid>,
-    pub metrics_args: metrics::Args,
 }
 
 type HttpServer = dropshot::HttpServer<Arc<ServerContext>>;
@@ -155,10 +154,11 @@ impl Server {
         let mut http_servers = HashMap::with_capacity(args.addresses.len());
         let all_servers_shutdown = FuturesUnordered::new();
 
-        let metrics = metrics::Metrics::new(&log, &args, apictx.clone())
-            .map_err(|err| {
-                format!("failed to  initialize metrics subsystem: {err}")
-            })?;
+        let metrics =
+            metrics::Metrics::new(&log, &args, config.metrics, apictx.clone())
+                .map_err(|err| {
+                    format!("failed to initialize metrics subsystem: {err}")
+                })?;
 
         for addr in args.addresses {
             start_dropshot_server(

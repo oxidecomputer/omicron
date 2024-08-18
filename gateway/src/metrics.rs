@@ -17,6 +17,7 @@ use gateway_sp_comms::SpComponent;
 use gateway_sp_comms::VersionedSpState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
+use omicron_common::backoff;
 use oximeter::types::Cumulative;
 use oximeter::types::ProducerRegistry;
 use oximeter::types::Sample;
@@ -37,32 +38,48 @@ use uuid::Uuid;
 
 oximeter::use_timeseries!("sensor-measurement.toml");
 
-/// Handle to the metrics task.
+/// Handle to the metrics tasks.
 pub struct Metrics {
     addrs_tx: watch::Sender<Vec<SocketAddrV6>>,
     rack_id_tx: Option<oneshot::Sender<Uuid>>,
-    manager: JoinHandle<anyhow::Result<()>>,
-    poller: JoinHandle<anyhow::Result<()>>,
+    server: JoinHandle<anyhow::Result<()>>,
+    pollers: JoinHandle<anyhow::Result<()>>,
 }
 
-/// CLI arguments for configuring metrics.
-#[derive(Copy, Clone, Debug, Default, clap::Parser)]
-#[clap(next_help_heading = "SP Metrics Development Configuration")]
-pub struct Args {
+/// Configuration for metrics.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct MetricsConfig {
+    /// Collection interval to request from Oximeter, in seconds.
+    ///
+    /// This is the frequency with which Oximeter will collect samples the
+    /// metrics producer endpoint, *not* the frequency with which sensor
+    /// measurements are polled from service processors.
+    oximeter_collection_interval_secs: usize,
+
+    /// The interval at which service processors are polled for sensor readings,
+    /// in milliseconds
+    sp_poll_interval_ms: usize,
+
+    /// Configuration settings for testing and development use.
+    pub dev: Option<DevConfig>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DevConfig {
     /// Override the Nexus address used to register the SP metrics Oximeter
     /// producer. This is intended for use in development and testing.
     ///
     /// If this argument is not present, Nexus is discovered through DNS.
-    #[clap(long = "dev-nexus-address")]
-    nexus_address: Option<SocketAddr>,
+    pub nexus_address: Option<SocketAddr>,
 
     /// Allow the metrics producer endpoint to bind on loopback.
     ///
     /// This should be disabled in production, as Nexus will not be able to
     /// reach the loopback interface, but is necessary for local development and
     /// test purposes.
-    #[clap(long = "dev-metrics-bind-loopback")]
-    bind_loopback: bool,
+    pub bind_loopback: bool,
 }
 
 /// Manages SP pollers, making sure that every SP has a poller task.
@@ -75,6 +92,7 @@ struct PollerManager {
     /// The manager doesn't actually produce samples, but it needs to be able to
     /// clone a sender for every poller task it spawns.
     sample_tx: broadcast::Sender<Vec<Sample>>,
+    poll_interval: Duration,
 }
 
 /// Polls sensor readings from an individual SP.
@@ -92,7 +110,8 @@ struct ComponentMetrics {
     target: component::Component,
     /// Counts of errors reported by sensors on this component.
     sensor_errors: HashMap<SensorErrorKey, Cumulative<u64>>,
-    /// Counts of errors that occurred whilst polling the d
+    /// Counts of errors that occurred whilst polling the SP for measurements
+    /// from this component.
     poll_errors: HashMap<&'static str, Cumulative<u64>>,
 }
 
@@ -108,19 +127,19 @@ struct ServerManager {
     log: slog::Logger,
     addrs: watch::Receiver<Vec<SocketAddrV6>>,
     registry: ProducerRegistry,
-    args: Args,
+    cfg: MetricsConfig,
 }
 
 #[derive(Debug)]
-struct Producer(broadcast::Receiver<Vec<Sample>>);
-
-/// The interval on which we ask `oximeter` to poll us for metric data.
-// N.B.: I picked this pretty arbitrarily...
-const METRIC_COLLECTION_INTERVAL: Duration = Duration::from_secs(10);
-
-/// The interval at which we poll sensor readings from SPs. Bryan wants to try
-/// 1Hz and see if the SP can handle it.
-const POLL_INTERVAL: Duration = Duration::from_secs(1);
+struct Producer {
+    /// Receiver for samples produced by SP pollers.
+    sample_rx: broadcast::Receiver<Vec<Sample>>,
+    /// Logging context.
+    ///
+    /// We stick this on the producer because we would like to be able to log
+    /// when stale samples are dropped.
+    log: slog::Logger,
+}
 
 /// The maximum Dropshot request size for the metrics server.
 const METRIC_REQUEST_MAX_SIZE: usize = 10 * 1024 * 1024;
@@ -143,34 +162,14 @@ const NORMAL_NUMBER_OF_SPS: usize =
     + 2 // two power shelves, someday.
     ;
 
-/// Number of sample vectors from individual SPs to buffer.
-const SAMPLE_CHANNEL_CAPACITY: usize = {
-    // Roughly how many times will we poll SPs for each metrics collection
-    // interval?
-    let polls_per_metrics_interval = (METRIC_COLLECTION_INTERVAL.as_secs()
-        / POLL_INTERVAL.as_secs())
-        as usize;
-    // How many sample collection intervals do we want to allow to elapse before
-    // we start putting stuff on the floor?
-    //
-    // Let's say 16. Chosen totally arbitrarily but seems reasonable-ish.
-    let sloppiness = 16;
-    let capacity =
-        NORMAL_NUMBER_OF_SPS * polls_per_metrics_interval * sloppiness;
-    // Finally, the buffer capacity will probably be allocated in a power of two
-    // anyway, so let's make sure our thing is a power of two so we don't waste
-    // the allocation we're gonna get anyway.
-    capacity.next_power_of_two()
-};
-
 impl Metrics {
     pub fn new(
         log: &slog::Logger,
         args: &MgsArguments,
+        cfg: MetricsConfig,
         apictx: Arc<ServerContext>,
     ) -> anyhow::Result<Self> {
-        let &MgsArguments { id, rack_id, ref addresses, metrics_args } = args;
-        let registry = ProducerRegistry::with_id(id);
+        let &MgsArguments { id, rack_id, ref addresses } = args;
 
         // Create a channel for the SP poller tasks to send samples to the
         // Oximeter producer endpoint.
@@ -183,12 +182,9 @@ impl Metrics {
         // is what we want, as we would prefer a full buffer to result in
         // clobbering the oldest measurements, rather than leaving the newest
         // ones on the floor.
+        let max_buffered_sample_chunks = cfg.sample_channel_capacity();
         let (sample_tx, sample_rx) =
-            broadcast::channel(SAMPLE_CHANNEL_CAPACITY);
-
-        registry
-            .register_producer(Producer(sample_rx))
-            .context("failed to register metrics producer")?;
+            broadcast::channel(max_buffered_sample_chunks);
 
         // Using a channel for this is, admittedly, a bit of an end-run around
         // the `OnceLock` on the `ServerContext` that *also* stores the rack ID,
@@ -205,29 +201,44 @@ impl Metrics {
         } else {
             Some(rack_id_tx)
         };
-        let poller = tokio::spawn(
-            PollerManager {
-                sample_tx,
-                apictx,
-                tasks: tokio::task::JoinSet::new(),
-                log: log.new(slog::o!("component" => "sensor-poller")),
-                mgs_id: id,
-            }
-            .run(rack_id_rx),
-        );
+        let pollers = {
+            let log = log.new(slog::o!("component" => "sensor-poller"));
+            let poll_interval =
+                Duration::from_millis(cfg.sp_poll_interval_ms as u64);
+            slog::info!(
+                &log,
+                "SP sensor metrics configured";
+                "poll_interval" => ?poll_interval,
+                "max_buffered_sample_chunks" => max_buffered_sample_chunks,
+            );
+
+            tokio::spawn(
+                PollerManager {
+                    sample_tx,
+                    apictx,
+                    poll_interval,
+                    tasks: tokio::task::JoinSet::new(),
+                    log,
+                    mgs_id: id,
+                }
+                .run(rack_id_rx),
+            )
+        };
 
         let (addrs_tx, addrs_rx) =
             tokio::sync::watch::channel(addresses.clone());
-        let manager = tokio::spawn(
-            ServerManager {
-                log: log.new(slog::o!("component" => "producer-server")),
-                addrs: addrs_rx,
-                registry,
-                args: metrics_args,
-            }
-            .run(),
-        );
-        Ok(Self { addrs_tx, rack_id_tx, manager, poller })
+        let server = {
+            let log = log.new(slog::o!("component" => "producer-server"));
+            let registry = ProducerRegistry::with_id(id);
+            registry
+                .register_producer(Producer { sample_rx, log: log.clone() })
+                .context("failed to register metrics producer")?;
+
+            tokio::spawn(
+                ServerManager { log, addrs: addrs_rx, registry, cfg }.run(),
+            )
+        };
+        Ok(Self { addrs_tx, rack_id_tx, server, pollers })
     }
 
     pub fn set_rack_id(&mut self, rack_id: Uuid) {
@@ -261,8 +272,40 @@ impl Metrics {
 impl Drop for Metrics {
     fn drop(&mut self) {
         // Clean up our children on drop.
-        self.manager.abort();
-        self.poller.abort();
+        self.server.abort();
+        self.pollers.abort();
+    }
+}
+
+impl MetricsConfig {
+    fn oximeter_collection_interval(&self) -> Duration {
+        Duration::from_secs(self.oximeter_collection_interval_secs as u64)
+    }
+
+    /// Returns the number of sample chunks from individual SPs to buffer.
+    fn sample_channel_capacity(&self) -> usize {
+        // Roughly how many times will we poll SPs for each metrics collection
+        // interval?
+        let polls_per_metrics_interval = {
+            let collection_interval_ms: usize = self
+                .oximeter_collection_interval()
+                .as_millis()
+                .try_into()
+                .expect("your oximeter collection interval is way too big...");
+            collection_interval_ms / self.sp_poll_interval_ms
+        };
+
+        // How many sample collection intervals do we want to allow to elapse before
+        // we start putting stuff on the floor?
+        //
+        // Let's say 16. Chosen totally arbitrarily but seems reasonable-ish.
+        let sloppiness = 16;
+        let capacity =
+            NORMAL_NUMBER_OF_SPS * polls_per_metrics_interval * sloppiness;
+        // Finally, the buffer capacity will probably be allocated in a power of two
+        // anyway, so let's make sure our thing is a power of two so we don't waste
+        // the allocation we're gonna get anyway.
+        capacity.next_power_of_two()
     }
 }
 
@@ -278,17 +321,52 @@ impl oximeter::Producer for Producer {
         // `resubscribe` function creates a receiver at the current *tail* of
         // the ringbuffer, so it won't see any samples produced *before* now.
         // Which  is the opposite of what we want!
-        let mut samples = Vec::with_capacity(self.0.len());
+        let mut samples = Vec::with_capacity(self.sample_rx.len());
+        // Because we recieve the individual samples in a `Vec` of all samples
+        // produced by a poller, let's also sum the length of each of those
+        // `Vec`s here, so we can log it later.
+        let mut total_samples = 0;
+        // Also, track whether any sample chunks were dropped off the end of the
+        // ring buffer.
+        let mut dropped_chunks = 0;
+
         use broadcast::error::TryRecvError;
         loop {
-            match self.0.try_recv() {
-                Ok(sample_chunk) => samples.push(sample_chunk),
+            match self.sample_rx.try_recv() {
+                Ok(sample_chunk) => {
+                    total_samples += sample_chunk.len();
+                    samples.push(sample_chunk)
+                }
                 // This error indicates that an old ringbuffer entry was
                 // overwritten. That's fine, just get the next one.
-                Err(TryRecvError::Lagged(_)) => continue,
+                Err(TryRecvError::Lagged(dropped)) => {
+                    dropped_chunks += dropped;
+                }
                 // We've drained all currently available samples! We're done here!
-                Err(TryRecvError::Empty) | Err(TryRecvError::Closed) => break,
+                Err(TryRecvError::Empty) => break,
+                // This should only happen when shutting down.
+                Err(TryRecvError::Closed) => {
+                    slog::debug!(&self.log, "sample producer channel closed");
+                    break;
+                }
             }
+        }
+
+        if dropped_chunks > 0 {
+            slog::info!(
+                &self.log,
+                "produced metric samples. some old sample chunks were dropped!";
+                "samples" => total_samples,
+                "sample_chunks" => samples.len(),
+                "dropped_chunks" => dropped_chunks,
+            );
+        } else {
+            slog::debug!(
+                &self.log,
+                "produced metric samples";
+                "samples" => total_samples,
+                "sample_chunks" => samples.len(),
+            );
         }
 
         // There you go, that's all I've got.
@@ -308,35 +386,71 @@ impl PollerManager {
             "rack ID sender has gone away...we must be shutting down",
         )?;
 
-        let mut poll_interval = tokio::time::interval(POLL_INTERVAL);
         let mut known_sps: HashMap<SpIdentifier, tokio::task::AbortHandle> =
             HashMap::with_capacity(NORMAL_NUMBER_OF_SPS);
         // Wait for SP discovery to complete, if it hasn't already.
         // TODO(eliza): presently, we busy-poll here. It would be nicer to
         // replace the `OnceLock<Result<LocationMap, ...>` in `ManagementSwitch`
         // with a `tokio::sync::watch`
-        while !switch.is_discovery_complete() {
-            poll_interval.tick().await;
-        }
+        backoff::retry_notify_ext(
+            backoff::retry_policy_local(),
+            || async {
+                if switch.is_discovery_complete() {
+                    Ok(())
+                } else {
+                    Err(backoff::BackoffError::transient(()))
+                }
+            },
+            |_, _, elapsed| {
+                let secs = elapsed.as_secs();
+                if secs < 30 {
+                    slog::debug!(
+                        &self.log,
+                        "waiting for SP discovery to complete...";
+                        "elapsed" => ?elapsed,
+                    );
+                } else if secs < 180 {
+                    slog::info!(
+                        &self.log,
+                        "still waiting for SP discovery to complete...";
+                        "elapsed" => ?elapsed,
+                    )
+                } else {
+                    slog::warn!(
+                        &self.log,
+                        "we have been waiting for SP discovery to complete \
+                         for a pretty long time!";
+                        "elapsed" => ?elapsed,
+                    )
+                }
+            },
+        )
+        .await
+        .expect("we should never return a fatal error here");
 
         slog::info!(
             &self.log,
-            "SP discovery complete! starting to poll sensors..."
+            "starting to polling SP sensor data every {:?}", self.poll_interval;
         );
 
         loop {
-            let sps = match switch.all_sps() {
-                Ok(sps) => sps,
-                Err(e) => {
+            let sps = backoff::retry_notify_ext(
+                backoff::retry_policy_internal_service(),
+                || async {
+                    switch.all_sps().map_err(backoff::BackoffError::transient)
+                },
+                |error, attempts, elapsed| {
                     slog::warn!(
                         &self.log,
-                        "failed to enumerate service processors! will try again in a bit";
-                        "error" => %e,
-                    );
-                    poll_interval.tick().await;
-                    continue;
-                }
-            };
+                        "failed to list SPs! we'll try again in a little bit.";
+                        "error" => error,
+                        "elapsed" => ?elapsed,
+                        "attempts" => attempts,
+                    )
+                },
+            )
+            .await
+            .expect("we never return a permanent error here");
 
             for (spid, _) in sps {
                 // Do we know about this li'l guy already?
@@ -376,7 +490,7 @@ impl PollerManager {
                 };
                 let poller_handle = self
                     .tasks
-                    .spawn(poller.run(POLL_INTERVAL, self.apictx.clone()));
+                    .spawn(poller.run(self.poll_interval, self.apictx.clone()));
                 let _prev_poller = known_sps.insert(spid, poller_handle);
                 debug_assert!(
                     _prev_poller.map(|p| p.is_finished()).unwrap_or(true),
@@ -756,14 +870,21 @@ impl SpPoller {
 
 impl ServerManager {
     async fn run(mut self) -> anyhow::Result<()> {
-        if self.args.nexus_address.is_some() || self.args.bind_loopback {
-            slog::warn!(
-                &self.log,
-                "using development metrics configuration overrides!";
-                "nexus_address" => ?self.args.nexus_address,
-                "bind_loopback" => self.args.bind_loopback,
-            );
-        }
+        let (registration_address, bind_loopback) =
+            if let Some(ref dev) = self.cfg.dev {
+                slog::warn!(
+                    &self.log,
+                    "using development metrics configuration overrides!";
+                    "nexus_address" => ?dev.nexus_address,
+                    "bind_loopback" => dev.bind_loopback,
+                );
+                (dev.nexus_address, dev.bind_loopback)
+            } else {
+                (None, false)
+            };
+        let interval = self.cfg.oximeter_collection_interval();
+        let id = self.registry.producer_id();
+
         let mut current_server: Option<oximeter_producer::Server> = None;
         loop {
             let current_ip = current_server.as_ref().map(|s| s.address().ip());
@@ -771,7 +892,7 @@ impl ServerManager {
             for addr in self.addrs.borrow_and_update().iter() {
                 let &ip = addr.ip();
                 // Don't bind the metrics endpoint on ::1
-                if ip.is_loopback() && !self.args.bind_loopback {
+                if ip.is_loopback() && !bind_loopback {
                     continue;
                 }
                 // If our current address is contained in the new addresses,
@@ -785,25 +906,27 @@ impl ServerManager {
             }
 
             if let Some(ip) = new_ip {
-                slog::info!(
+                slog::debug!(
                     &self.log,
                     "rebinding producer server on new IP";
                     "new_ip" => ?ip,
                     "current_ip" => ?current_ip,
+                    "collection_interval" => ?interval,
+                    "producer_id" => ?id,
                 );
                 let server = {
                     // Listen on any available socket, using the provided underlay IP.
                     let address = SocketAddr::new(ip.into(), 0);
 
                     let server_info = ProducerEndpoint {
-                        id: self.registry.producer_id(),
+                        id,
                         kind: ProducerKind::ManagementGateway,
                         address,
-                        interval: METRIC_COLLECTION_INTERVAL,
+                        interval,
                     };
                     let config = oximeter_producer::Config {
                         server_info,
-                        registration_address: self.args.nexus_address,
+                        registration_address,
                         request_body_max_bytes: METRIC_REQUEST_MAX_SIZE,
                         log: oximeter_producer::LogConfig::Logger(
                             self.log.clone(),
@@ -819,6 +942,8 @@ impl ServerManager {
                 slog::info!(
                     &self.log,
                     "bound metrics producer server";
+                    "collection_interval" => ?interval,
+                    "producer_id" => ?id,
                     "address" => %server.address(),
                 );
 
