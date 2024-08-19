@@ -23,6 +23,7 @@ use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
+use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
@@ -69,6 +70,7 @@ use std::net::SocketAddrV6;
 use thiserror::Error;
 use typed_rng::TypedUuidRng;
 use typed_rng::UuidRng;
+use uuid::Uuid;
 
 use super::external_networking::BuilderExternalNetworking;
 use super::external_networking::ExternalNetworkingChoice;
@@ -259,6 +261,9 @@ impl<'a> BlueprintBuilder<'a> {
             .copied()
             .map(|sled_id| (sled_id, SledState::Active))
             .collect();
+        let cluster_name = format!("cluster-{}", Uuid::new_v4());
+        let clickhouse_cluster_config =
+            ClickhouseClusterConfig::new(cluster_name, &blueprint_zones);
         Blueprint {
             id: rng.blueprint_rng.next(),
             blueprint_zones,
@@ -270,6 +275,7 @@ impl<'a> BlueprintBuilder<'a> {
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
+            clickhouse_cluster_config,
             time_created: now_db_precision(),
             creator: creator.to_owned(),
             comment: format!("starting blueprint with {num_sleds} empty sleds"),
@@ -360,6 +366,12 @@ impl<'a> BlueprintBuilder<'a> {
         let blueprint_disks = self
             .disks
             .into_disks_map(self.input.all_sled_ids(SledFilter::InService));
+
+        let clickhouse_cluster_config = ClickhouseClusterConfig::new_based_on(
+            &self.log,
+            &self.parent_blueprint.clickhouse_cluster_config,
+            &blueprint_zones,
+        );
         Blueprint {
             id: self.rng.blueprint_rng.next(),
             blueprint_zones,
@@ -375,6 +387,7 @@ impl<'a> BlueprintBuilder<'a> {
                 .clone(),
             cockroachdb_setting_preserve_downgrade: self
                 .cockroachdb_setting_preserve_downgrade,
+            clickhouse_cluster_config,
             time_created: now_db_precision(),
             creator: self.creator,
             comment: self
@@ -954,7 +967,7 @@ impl<'a> BlueprintBuilder<'a> {
             let underlay_ip = self.sled_alloc_ip(sled_id)?;
             let pool_name =
                 self.sled_select_zpool(sled_id, ZoneKind::ClickhouseServer)?;
-            let port = omicron_common::address::CLICKHOUSE_PORT;
+            let port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
             let address = SocketAddrV6::new(underlay_ip, port, 0, 0);
             let zone_type = BlueprintZoneType::ClickhouseServer(
                 blueprint_zone_type::ClickhouseServer {

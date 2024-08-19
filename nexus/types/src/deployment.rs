@@ -42,11 +42,13 @@ use uuid::Uuid;
 
 mod blueprint_diff;
 mod blueprint_display;
+mod clickhouse;
 mod network_resources;
 mod planning_input;
 mod tri_map;
 mod zone_type;
 
+pub use clickhouse::ClickhouseClusterConfig;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
 pub use network_resources::OmicronZoneExternalFloatingIp;
@@ -161,6 +163,10 @@ pub struct Blueprint {
 
     /// Whether to set `cluster.preserve_downgrade_option` and what to set it to
     pub cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
+
+    /// Configuration for Clickhouse Clusters derived from the parent blueprint
+    /// and current blueprint zones
+    pub clickhouse_cluster_config: ClickhouseClusterConfig,
 
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,

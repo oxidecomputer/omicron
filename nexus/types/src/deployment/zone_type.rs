@@ -125,6 +125,42 @@ impl BlueprintZoneType {
         }
     }
 
+    /// Identifies whether this is a ClickhouseServer zone
+    pub fn is_clickhouse_server(&self) -> bool {
+        match self {
+            BlueprintZoneType::ClickhouseServer(_) => true,
+            BlueprintZoneType::BoundaryNtp(_)
+            | BlueprintZoneType::Crucible(_)
+            | BlueprintZoneType::Clickhouse(_)
+            | BlueprintZoneType::ClickhouseKeeper(_)
+            | BlueprintZoneType::CockroachDb(_)
+            | BlueprintZoneType::CruciblePantry(_)
+            | BlueprintZoneType::ExternalDns(_)
+            | BlueprintZoneType::InternalDns(_)
+            | BlueprintZoneType::InternalNtp(_)
+            | BlueprintZoneType::Nexus(_)
+            | BlueprintZoneType::Oximeter(_) => false,
+        }
+    }
+
+    /// Identifies whether this is a ClickhouseKeeper zone
+    pub fn is_clickhouse_keeper(&self) -> bool {
+        match self {
+            BlueprintZoneType::ClickhouseKeeper(_) => true,
+            BlueprintZoneType::BoundaryNtp(_)
+            | BlueprintZoneType::Crucible(_)
+            | BlueprintZoneType::Clickhouse(_)
+            | BlueprintZoneType::ClickhouseServer(_)
+            | BlueprintZoneType::CockroachDb(_)
+            | BlueprintZoneType::CruciblePantry(_)
+            | BlueprintZoneType::ExternalDns(_)
+            | BlueprintZoneType::InternalDns(_)
+            | BlueprintZoneType::InternalNtp(_)
+            | BlueprintZoneType::Nexus(_)
+            | BlueprintZoneType::Oximeter(_) => false,
+        }
+    }
+
     /// Returns the durable dataset associated with this zone, if any exists.
     pub fn durable_dataset(&self) -> Option<DurableDataset<'_>> {
         let (dataset, kind, &address) = match self {
