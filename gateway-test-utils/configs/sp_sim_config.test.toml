@@ -156,14 +156,6 @@ serial_console = "[::1]:0"
 
 
 [[simulated_sps.gimlet.components]]
-id = "sp3-host-cpu"
-device = "sp3-host-cpu"
-description = "FAKE host cpu"
-capabilities = 0
-presence = "Present"
-# serial_console = "[::1]:0"
-
-[[simulated_sps.gimlet.components]]
 id = "dev-0"
 device = "tmp117"
 description = "FAKE temperature sensor"
