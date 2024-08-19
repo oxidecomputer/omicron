@@ -8026,11 +8026,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_Table",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Table"
-                  }
+                  "$ref": "#/components/schemas/OxqlQueryResult"
                 }
               }
             }
@@ -16501,6 +16497,22 @@
           }
         ]
       },
+      "OxqlQueryResult": {
+        "description": "The result of a successful OxQL query.",
+        "type": "object",
+        "properties": {
+          "tables": {
+            "description": "Tables resulting from the query, each containing timeseries.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Table"
+            }
+          }
+        },
+        "required": [
+          "tables"
+        ]
+      },
       "Password": {
         "title": "A password used to authenticate a user",
         "description": "Passwords may be subject to additional constraints.",
@@ -20131,10 +20143,20 @@
         "type": "object",
         "properties": {
           "metric_type": {
-            "$ref": "#/components/schemas/MetricType"
+            "description": "The type of this metric.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MetricType"
+              }
+            ]
           },
           "values": {
-            "$ref": "#/components/schemas/ValueArray"
+            "description": "The data values.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ValueArray"
+              }
+            ]
           }
         },
         "required": [

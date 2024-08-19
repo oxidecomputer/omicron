@@ -31,7 +31,6 @@ use dropshot::{
 };
 use http::{header, HeaderName, HeaderValue, Response, StatusCode, Uri};
 use hyper::Body;
-use nexus_auth_types::authn::cookies::Cookies;
 use nexus_db_model::AuthenticationMode;
 use nexus_db_queries::authn::silos::IdentityProviderType;
 use nexus_db_queries::context::OpContext;
@@ -42,6 +41,7 @@ use nexus_db_queries::{
     },
     db::identity::Asset,
 };
+use nexus_types::authn::cookies::Cookies;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
