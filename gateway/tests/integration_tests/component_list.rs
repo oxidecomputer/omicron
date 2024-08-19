@@ -57,7 +57,62 @@ async fn component_list() {
                 capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
                     .bits(),
                 presence: SpComponentPresence::Failed,
-            }
+            },
+            SpComponentInfo {
+                component: "dev-1".to_string(),
+                device: "tmp117".to_string(),
+                serial_number: None,
+                description: "FAKE Southeast temperature sensor".to_string(),
+                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "dev-6".to_string(),
+                device: "at24csw080".to_string(),
+                serial_number: None,
+                description: "FAKE U.2 Sharkfin A VPD".to_string(),
+                capabilities: 0,
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "dev-7".to_string(),
+                device: "max5970".to_string(),
+                serial_number: None,
+                description: "FAKE U.2 Sharkfin A hot swap controller"
+                    .to_string(),
+                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "dev-8".to_string(),
+                device: "nvme_bmc".to_string(),
+                serial_number: None,
+                description: "FAKE U.2 A NVMe Basic Management Command"
+                    .to_string(),
+                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "dev-39".to_string(),
+                device: "tmp451".to_string(),
+                serial_number: None,
+                description: "FAKE T6 temperature sensor".to_string(),
+                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "dev-53".to_string(),
+                device: "max31790".to_string(),
+                serial_number: None,
+                description: "FAKE Fan controller".to_string(),
+                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
         ]
     );
 
