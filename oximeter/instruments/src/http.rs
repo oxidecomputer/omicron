@@ -12,7 +12,8 @@ use http::StatusCode;
 use oximeter::{
     histogram::Histogram, histogram::Record, MetricsError, Producer, Sample,
 };
-use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash as _, Hasher};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -56,6 +57,17 @@ impl RequestLatencyHistogram {
             Histogram::span_decades(start_decade, end_decade)?,
         ))
     }
+
+    /// Return a key used to ID this histogram.
+    ///
+    /// This is a quick way to look up the histogram tracking any particular
+    /// request and response.
+    fn key_for(operation_id: &str, status_code: StatusCode) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        operation_id.hash(&mut hasher);
+        status_code.hash(&mut hasher);
+        hasher.finish()
+    }
 }
 
 /// The `LatencyTracker` is an [`oximeter::Producer`] that tracks the latencies of requests for an
@@ -69,8 +81,19 @@ impl RequestLatencyHistogram {
 /// The `LatencyTracker` can be used to produce metric data collected by `oximeter`.
 #[derive(Debug, Clone)]
 pub struct LatencyTracker {
+    /// The HTTP service target for which we're tracking request histograms.
     pub service: HttpService,
-    latencies: Arc<Mutex<BTreeMap<String, RequestLatencyHistogram>>>,
+    /// The latency histogram for each request.
+    ///
+    /// The map here use a hash of the request fields (operation and status
+    /// code) as the key to each histogram. It's a bit redundant to then store
+    /// that in a hashmap, but this lets us avoid creating a new
+    /// `RequestLatencyHistogram` when handling a request that we already have
+    /// one for. Instead, we use this key to get the existing entry.
+    latencies: Arc<Mutex<HashMap<u64, RequestLatencyHistogram>>>,
+    /// The histogram used to track each request.
+    ///
+    /// We store it here to clone as we see new requests.
     histogram: Histogram<f64>,
 }
 
@@ -81,7 +104,7 @@ impl LatencyTracker {
     pub fn new(service: HttpService, histogram: Histogram<f64>) -> Self {
         Self {
             service,
-            latencies: Arc::new(Mutex::new(BTreeMap::new())),
+            latencies: Arc::new(Mutex::new(HashMap::new())),
             histogram,
         }
     }
@@ -110,7 +133,7 @@ impl LatencyTracker {
         status_code: StatusCode,
         latency: Duration,
     ) -> Result<(), MetricsError> {
-        let key = operation_id.to_string();
+        let key = RequestLatencyHistogram::key_for(operation_id, status_code);
         let mut latencies = self.latencies.lock().unwrap();
         let entry = latencies.entry(key).or_insert_with(|| {
             RequestLatencyHistogram::new(
@@ -197,16 +220,24 @@ mod tests {
             HttpService { name: "my-service".into(), id: ID.parse().unwrap() };
         let hist = Histogram::new(&[0.0, 1.0]).unwrap();
         let tracker = LatencyTracker::new(service, hist);
-        let status_code = StatusCode::OK;
+        let status_code0 = StatusCode::OK;
+        let status_code1 = StatusCode::NOT_FOUND;
         let operation_id = "some_operation_id";
         tracker
-            .update(operation_id, status_code, Duration::from_secs_f64(0.5))
+            .update(operation_id, status_code0, Duration::from_secs_f64(0.5))
             .unwrap();
-
-        let actual_hist =
-            tracker.latencies.lock().unwrap()[operation_id].datum.clone();
-        assert_eq!(actual_hist.n_samples(), 1);
-        let bins = actual_hist.iter().collect::<Vec<_>>();
-        assert_eq!(bins[1].count, 1);
+        tracker
+            .update(operation_id, status_code1, Duration::from_secs_f64(0.5))
+            .unwrap();
+        let key0 = RequestLatencyHistogram::key_for(operation_id, status_code0);
+        let key1 = RequestLatencyHistogram::key_for(operation_id, status_code1);
+        let latencies = tracker.latencies.lock().unwrap();
+        assert_eq!(latencies.len(), 2);
+        for key in [key0, key1] {
+            let actual_hist = &latencies[&key].datum;
+            assert_eq!(actual_hist.n_samples(), 1);
+            let bins = actual_hist.iter().collect::<Vec<_>>();
+            assert_eq!(bins[1].count, 1);
+        }
     }
 }
