@@ -280,6 +280,13 @@ pub enum CockroachDbPreserveDowngrade {
 }
 
 impl CockroachDbPreserveDowngrade {
+    pub fn is_set(self) -> bool {
+        match self {
+            CockroachDbPreserveDowngrade::Set(_) => true,
+            _ => false,
+        }
+    }
+
     pub fn from_optional_string(
         value: &Option<String>,
     ) -> Result<Self, parse_display::ParseError> {
@@ -904,11 +911,15 @@ mod tests {
             cockroachdb_version
         );
 
-        // In the next "tick" release, this version will be stored in a
-        // different file.
+        let prev_cockroachdb_version =
+            include_str!("../../../../tools/prev_cockroachdb_version")
+                .trim_start_matches('v')
+                .rsplit_once('.')
+                .unwrap()
+                .0;
         assert_eq!(
             CockroachDbClusterVersion::POLICY.to_string(),
-            cockroachdb_version
+            prev_cockroachdb_version
         );
     }
 }

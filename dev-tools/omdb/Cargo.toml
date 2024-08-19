@@ -62,13 +62,14 @@ multimap.workspace = true
 indicatif.workspace = true
 
 [dev-dependencies]
+camino-tempfile.workspace = true
 expectorate.workspace = true
+http.workspace = true
 nexus-test-utils.workspace = true
 nexus-test-utils-macros.workspace = true
 omicron-nexus.workspace = true
 omicron-test-utils.workspace = true
 subprocess.workspace = true
-camino-tempfile.workspace = true
 
 # Disable doc builds by default for our binaries to work around issue
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.
