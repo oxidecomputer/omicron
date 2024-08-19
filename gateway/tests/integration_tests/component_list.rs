@@ -62,6 +62,15 @@ async fn component_list() {
                 component: "dev-1".to_string(),
                 device: "tmp117".to_string(),
                 serial_number: None,
+                description: "FAKE temperature sensor".to_string(),
+                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "dev-2".to_string(),
+                device: "tmp117".to_string(),
+                serial_number: None,
                 description: "FAKE Southeast temperature sensor".to_string(),
                 capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
                     .bits(),
