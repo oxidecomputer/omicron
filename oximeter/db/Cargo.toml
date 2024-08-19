@@ -24,6 +24,7 @@ num.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
 oximeter.workspace = true
+oxql-types.workspace = true
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true

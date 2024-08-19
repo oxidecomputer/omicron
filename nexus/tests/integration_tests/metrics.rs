@@ -19,6 +19,7 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::views::OxqlQueryResult;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use oximeter::types::Datum;
@@ -284,7 +285,7 @@ async fn test_timeseries_schema_list(
 pub async fn timeseries_query(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
     query: impl ToString,
-) -> Vec<oximeter_db::oxql::Table> {
+) -> Vec<oxql_types::Table> {
     // first, make sure the latest timeseries have been collected.
     cptestctx.oximeter.force_collect().await;
 
@@ -307,12 +308,14 @@ pub async fn timeseries_query(
     .unwrap_or_else(|e| {
         panic!("timeseries query failed: {e:?}\nquery: {query}")
     });
-    rsp.parsed_body().unwrap_or_else(|e| {
-        panic!(
-            "could not parse timeseries query response: {e:?}\n\
+    rsp.parsed_body::<OxqlQueryResult>()
+        .unwrap_or_else(|e| {
+            panic!(
+                "could not parse timeseries query response: {e:?}\n\
             query: {query}\nresponse: {rsp:#?}"
-        );
-    })
+            );
+        })
+        .tables
 }
 
 #[nexus_test]
@@ -429,11 +432,11 @@ async fn test_instance_watcher_metrics(
 
     #[track_caller]
     fn count_state(
-        table: &oximeter_db::oxql::Table,
+        table: &oxql_types::Table,
         instance_id: InstanceUuid,
         state: &'static str,
     ) -> i64 {
-        use oximeter_db::oxql::point::ValueArray;
+        use oxql_types::point::ValueArray;
         let uuid = FieldValue::Uuid(instance_id.into_untyped_uuid());
         let state = FieldValue::String(state.into());
         let mut timeserieses = table.timeseries().filter(|ts| {

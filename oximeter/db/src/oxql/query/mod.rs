@@ -23,7 +23,6 @@ use crate::oxql::Error;
 use crate::TimeseriesName;
 use chrono::DateTime;
 use chrono::Utc;
-use std::time::Duration;
 
 /// A parsed OxQL query.
 #[derive(Clone, Debug, PartialEq)]
@@ -389,15 +388,6 @@ fn restrict_filter_idents(
             }
         }
     }
-}
-
-/// Describes the time alignment for an OxQL query.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Alignment {
-    /// The end time of the query, which the temporal reference point.
-    pub end_time: DateTime<Utc>,
-    /// The alignment period, the interval on which values are produced.
-    pub period: Duration,
 }
 
 #[cfg(test)]

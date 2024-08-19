@@ -6,14 +6,16 @@
 
 // Copyright 2024 Oxide Computer Company
 
-use super::point::DataType;
-use super::point::MetricType;
-use super::point::Points;
-use super::query::Alignment;
-use super::Error;
-use crate::TimeseriesKey;
+use crate::point::DataType;
+use crate::point::MetricType;
+use crate::point::Points;
+use crate::point::ValueArray;
+use crate::point::Values;
+use crate::Alignment;
+use anyhow::Error;
 use highway::HighwayHasher;
-use oximeter::FieldValue;
+use oximeter_types::schema::TimeseriesKey;
+use oximeter_types::FieldValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -67,10 +69,20 @@ impl Timeseries {
         hasher.finish()
     }
 
+    /// Return the alignment of this timeseries, if any.
+    pub fn alignment(&self) -> Option<Alignment> {
+        self.alignment
+    }
+
+    /// Set the alignment of this timeseries.
+    pub fn set_alignment(&mut self, alignment: Alignment) {
+        self.alignment = Some(alignment);
+    }
+
     /// Return a copy of the timeseries, keeping only the provided fields.
     ///
     /// An error is returned if the timeseries does not contain those fields.
-    pub(crate) fn copy_with_fields(
+    pub fn copy_with_fields(
         &self,
         kept_fields: &[&str],
     ) -> Result<Self, Error> {
@@ -84,6 +96,20 @@ impl Timeseries {
         Ok(Self {
             fields,
             points: self.points.clone(),
+            alignment: self.alignment,
+        })
+    }
+
+    /// Return a copy of the timeseries, keeping only the provided points.
+    ///
+    /// Returns `None` if `kept_points` is empty.
+    pub fn copy_with_points(&self, kept_points: Points) -> Option<Self> {
+        if kept_points.is_empty() {
+            return None;
+        }
+        Some(Self {
+            fields: self.fields.clone(),
+            points: kept_points,
             alignment: self.alignment,
         })
     }
@@ -125,13 +151,56 @@ impl Timeseries {
     /// This returns an error if the points cannot be so cast, or the
     /// dimensionality of the types requested differs from the dimensionality of
     /// the points themselves.
-    pub(crate) fn cast(&self, types: &[DataType]) -> Result<Timeseries, Error> {
+    pub fn cast(&self, types: &[DataType]) -> Result<Timeseries, Error> {
         let fields = self.fields.clone();
         Ok(Self {
             fields,
             points: self.points.cast(types)?,
             alignment: self.alignment,
         })
+    }
+
+    /// Return a new timeseries, with the points limited to the provided range.
+    pub fn limit(&self, start: usize, end: usize) -> Self {
+        let input_points = &self.points;
+
+        // Slice the various data arrays.
+        let start_times =
+            input_points.start_times().map(|s| s[start..end].to_vec());
+        let timestamps = input_points.timestamps()[start..end].to_vec();
+        let values = input_points
+            .values
+            .iter()
+            .map(|vals| {
+                let values = match &vals.values {
+                    ValueArray::Integer(inner) => {
+                        ValueArray::Integer(inner[start..end].to_vec())
+                    }
+                    ValueArray::Double(inner) => {
+                        ValueArray::Double(inner[start..end].to_vec())
+                    }
+                    ValueArray::Boolean(inner) => {
+                        ValueArray::Boolean(inner[start..end].to_vec())
+                    }
+                    ValueArray::String(inner) => {
+                        ValueArray::String(inner[start..end].to_vec())
+                    }
+                    ValueArray::IntegerDistribution(inner) => {
+                        ValueArray::IntegerDistribution(
+                            inner[start..end].to_vec(),
+                        )
+                    }
+                    ValueArray::DoubleDistribution(inner) => {
+                        ValueArray::DoubleDistribution(
+                            inner[start..end].to_vec(),
+                        )
+                    }
+                };
+                Values { values, metric_type: vals.metric_type }
+            })
+            .collect();
+        let points = Points::new(start_times, timestamps, values);
+        Self { fields: self.fields.clone(), points, alignment: self.alignment }
     }
 }
 
@@ -146,7 +215,7 @@ pub struct Table {
     //
     // This starts as the name of the timeseries schema the data is derived
     // from, but can be modified as operations are done.
-    pub(super) name: String,
+    pub name: String,
     // The set of timeseries in the table, ordered by key.
     timeseries: BTreeMap<TimeseriesKey, Timeseries>,
 }

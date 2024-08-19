@@ -6,15 +6,15 @@
 
 // Copyright 2024 Oxide Computer Company
 
-use super::Error;
 use anyhow::Context;
+use anyhow::Error;
 use chrono::DateTime;
 use chrono::Utc;
 use num::ToPrimitive;
-use oximeter::traits::HistogramSupport;
-use oximeter::DatumType;
-use oximeter::Measurement;
-use oximeter::Quantile;
+use oximeter_types::traits::HistogramSupport;
+use oximeter_types::DatumType;
+use oximeter_types::Measurement;
+use oximeter_types::Quantile;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -131,32 +131,32 @@ impl CumulativeDatum {
     // not cumulative.
     fn from_cumulative(meas: &Measurement) -> Result<Self, Error> {
         let datum = match meas.datum() {
-            oximeter::Datum::CumulativeI64(val) => {
+            oximeter_types::Datum::CumulativeI64(val) => {
                 CumulativeDatum::Integer(val.value())
             }
-            oximeter::Datum::CumulativeU64(val) => {
+            oximeter_types::Datum::CumulativeU64(val) => {
                 let int = val
                     .value()
                     .try_into()
                     .context("Overflow converting u64 to i64")?;
                 CumulativeDatum::Integer(int)
             }
-            oximeter::Datum::CumulativeF32(val) => {
+            oximeter_types::Datum::CumulativeF32(val) => {
                 CumulativeDatum::Double(val.value().into())
             }
-            oximeter::Datum::CumulativeF64(val) => {
+            oximeter_types::Datum::CumulativeF64(val) => {
                 CumulativeDatum::Double(val.value())
             }
-            oximeter::Datum::HistogramI8(hist) => hist.into(),
-            oximeter::Datum::HistogramU8(hist) => hist.into(),
-            oximeter::Datum::HistogramI16(hist) => hist.into(),
-            oximeter::Datum::HistogramU16(hist) => hist.into(),
-            oximeter::Datum::HistogramI32(hist) => hist.into(),
-            oximeter::Datum::HistogramU32(hist) => hist.into(),
-            oximeter::Datum::HistogramI64(hist) => hist.into(),
-            oximeter::Datum::HistogramU64(hist) => hist.try_into()?,
-            oximeter::Datum::HistogramF32(hist) => hist.into(),
-            oximeter::Datum::HistogramF64(hist) => hist.into(),
+            oximeter_types::Datum::HistogramI8(hist) => hist.into(),
+            oximeter_types::Datum::HistogramU8(hist) => hist.into(),
+            oximeter_types::Datum::HistogramI16(hist) => hist.into(),
+            oximeter_types::Datum::HistogramU16(hist) => hist.into(),
+            oximeter_types::Datum::HistogramI32(hist) => hist.into(),
+            oximeter_types::Datum::HistogramU32(hist) => hist.into(),
+            oximeter_types::Datum::HistogramI64(hist) => hist.into(),
+            oximeter_types::Datum::HistogramU64(hist) => hist.try_into()?,
+            oximeter_types::Datum::HistogramF32(hist) => hist.into(),
+            oximeter_types::Datum::HistogramF64(hist) => hist.into(),
             other => anyhow::bail!(
                 "Input datum of type {} is not cumulative",
                 other.datum_type(),
@@ -169,10 +169,10 @@ impl CumulativeDatum {
 /// A single list of values, for one dimension of a timeseries.
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 pub struct Values {
-    // The data values.
-    pub(super) values: ValueArray,
-    // The type of this metric.
-    pub(super) metric_type: MetricType,
+    /// The data values.
+    pub values: ValueArray,
+    /// The type of this metric.
+    pub metric_type: MetricType,
 }
 
 impl Values {
@@ -285,14 +285,23 @@ impl<'a> fmt::Display for Datum<'a> {
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 pub struct Points {
     // The start time points for cumulative or delta metrics.
-    pub(super) start_times: Option<Vec<DateTime<Utc>>>,
+    pub(crate) start_times: Option<Vec<DateTime<Utc>>>,
     // The timestamp of each value.
-    pub(super) timestamps: Vec<DateTime<Utc>>,
+    pub(crate) timestamps: Vec<DateTime<Utc>>,
     // The array of data values, one for each dimension.
-    pub(super) values: Vec<Values>,
+    pub(crate) values: Vec<Values>,
 }
 
 impl Points {
+    /// Construct a new `Points` with the provided data.
+    pub fn new(
+        start_times: Option<Vec<DateTime<Utc>>>,
+        timestamps: Vec<DateTime<Utc>>,
+        values: Vec<Values>,
+    ) -> Self {
+        Self { start_times, timestamps, values }
+    }
+
     /// Construct an empty array of points to hold data of the provided type.
     pub fn empty(data_type: DataType, metric_type: MetricType) -> Self {
         Self::with_capacity(
@@ -303,8 +312,28 @@ impl Points {
         .unwrap()
     }
 
-    // Return a mutable reference to the value array of the specified dimension, if any.
-    pub(super) fn values_mut(&mut self, dim: usize) -> Option<&mut ValueArray> {
+    /// Return the start times of the points, if any.
+    pub fn start_times(&self) -> Option<&[DateTime<Utc>]> {
+        self.start_times.as_deref()
+    }
+
+    /// Clear the start times of the points.
+    pub fn clear_start_times(&mut self) {
+        self.start_times = None;
+    }
+
+    /// Return the timestamps of the points.
+    pub fn timestamps(&self) -> &[DateTime<Utc>] {
+        &self.timestamps
+    }
+
+    pub fn set_timestamps(&mut self, timestamps: Vec<DateTime<Utc>>) {
+        self.timestamps = timestamps;
+    }
+
+    /// Return a mutable reference to the value array of the specified
+    /// dimension, if any.
+    pub fn values_mut(&mut self, dim: usize) -> Option<&mut ValueArray> {
         self.values.get_mut(dim).map(|val| &mut val.values)
     }
 
@@ -563,8 +592,8 @@ impl Points {
         })
     }
 
-    // Filter points in self to those where `to_keep` is true.
-    pub(crate) fn filter(&self, to_keep: Vec<bool>) -> Result<Points, Error> {
+    /// Filter points in self to those where `to_keep` is true.
+    pub fn filter(&self, to_keep: Vec<bool>) -> Result<Points, Error> {
         anyhow::ensure!(
             to_keep.len() == self.len(),
             "Filter array must be the same length as self",
@@ -646,8 +675,8 @@ impl Points {
         Ok(out)
     }
 
-    // Return a new set of points, with the values casted to the provided types.
-    pub(crate) fn cast(&self, types: &[DataType]) -> Result<Self, Error> {
+    /// Return a new set of points, with the values casted to the provided types.
+    pub fn cast(&self, types: &[DataType]) -> Result<Self, Error> {
         anyhow::ensure!(
             types.len() == self.dimensionality(),
             "Cannot cast to {} types, the data has dimensionality {}",
@@ -863,9 +892,101 @@ impl Points {
         Ok(Self { start_times, timestamps, values: new_values })
     }
 
+    /// Given two arrays of points, stack them together at matching timepoints.
+    ///
+    /// For time points in either which do not have a corresponding point in
+    /// the other, the entire time point is elided.
+    pub fn inner_join(&self, right: &Points) -> Result<Points, Error> {
+        // Create an output array with roughly the right capacity, and double the
+        // number of dimensions. We're trying to stack output value arrays together
+        // along the dimension axis.
+        let data_types =
+            self.data_types().chain(right.data_types()).collect::<Vec<_>>();
+        let metric_types =
+            self.metric_types().chain(right.metric_types()).collect::<Vec<_>>();
+        let mut out = Points::with_capacity(
+            self.len().max(right.len()),
+            data_types.iter().copied(),
+            metric_types.iter().copied(),
+        )?;
+
+        // Iterate through each array until one is exhausted. We're only inserting
+        // values from both arrays where the timestamps actually match, since this
+        // is an inner join. We may want to insert missing values where timestamps
+        // do not match on either side, when we support an outer join of some kind.
+        let n_left_dim = self.dimensionality();
+        let mut left_ix = 0;
+        let mut right_ix = 0;
+        while left_ix < self.len() && right_ix < right.len() {
+            let left_timestamp = self.timestamps()[left_ix];
+            let right_timestamp = right.timestamps()[right_ix];
+            if left_timestamp == right_timestamp {
+                out.timestamps.push(left_timestamp);
+                push_concrete_values(
+                    &mut out.values[..n_left_dim],
+                    &self.values,
+                    left_ix,
+                );
+                push_concrete_values(
+                    &mut out.values[n_left_dim..],
+                    &right.values,
+                    right_ix,
+                );
+                left_ix += 1;
+                right_ix += 1;
+            } else if left_timestamp < right_timestamp {
+                left_ix += 1;
+            } else {
+                right_ix += 1;
+            }
+        }
+        Ok(out)
+    }
+
     /// Return true if self contains no data points.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+}
+
+// Push the `i`th value from each dimension of `from` onto `to`.
+fn push_concrete_values(to: &mut [Values], from: &[Values], i: usize) {
+    assert_eq!(to.len(), from.len());
+    for (output, input) in to.iter_mut().zip(from.iter()) {
+        let input_array = &input.values;
+        let output_array = &mut output.values;
+        assert_eq!(input_array.data_type(), output_array.data_type());
+        if let Ok(ints) = input_array.as_integer() {
+            output_array.as_integer_mut().unwrap().push(ints[i]);
+            continue;
+        }
+        if let Ok(doubles) = input_array.as_double() {
+            output_array.as_double_mut().unwrap().push(doubles[i]);
+            continue;
+        }
+        if let Ok(bools) = input_array.as_boolean() {
+            output_array.as_boolean_mut().unwrap().push(bools[i]);
+            continue;
+        }
+        if let Ok(strings) = input_array.as_string() {
+            output_array.as_string_mut().unwrap().push(strings[i].clone());
+            continue;
+        }
+        if let Ok(dists) = input_array.as_integer_distribution() {
+            output_array
+                .as_integer_distribution_mut()
+                .unwrap()
+                .push(dists[i].clone());
+            continue;
+        }
+        if let Ok(dists) = input_array.as_double_distribution() {
+            output_array
+                .as_double_distribution_mut()
+                .unwrap()
+                .push(dists[i].clone());
+            continue;
+        }
+        unreachable!();
     }
 }
 
@@ -900,8 +1021,8 @@ impl ValueArray {
         }
     }
 
-    // Return the data type in self.
-    pub(super) fn data_type(&self) -> DataType {
+    /// Return the data type in self.
+    pub fn data_type(&self) -> DataType {
         match self {
             ValueArray::Integer(_) => DataType::Integer,
             ValueArray::Double(_) => DataType::Double,
@@ -947,10 +1068,8 @@ impl ValueArray {
         Ok(inner)
     }
 
-    // Access the inner array of integers, if possible.
-    pub(super) fn as_integer_mut(
-        &mut self,
-    ) -> Result<&mut Vec<Option<i64>>, Error> {
+    /// Access the inner array of integers, if possible.
+    pub fn as_integer_mut(&mut self) -> Result<&mut Vec<Option<i64>>, Error> {
         let ValueArray::Integer(inner) = self else {
             anyhow::bail!(
                 "Cannot access value array as integer type, it has type {}",
@@ -1107,91 +1226,97 @@ impl ValueArray {
     // Push a value directly from a datum, without modification.
     fn push_value_from_datum(
         &mut self,
-        datum: &oximeter::Datum,
+        datum: &oximeter_types::Datum,
     ) -> Result<(), Error> {
         match datum {
-            oximeter::Datum::Bool(b) => self.as_boolean_mut()?.push(Some(*b)),
-            oximeter::Datum::I8(i) => {
+            oximeter_types::Datum::Bool(b) => {
+                self.as_boolean_mut()?.push(Some(*b))
+            }
+            oximeter_types::Datum::I8(i) => {
                 self.as_integer_mut()?.push(Some(i64::from(*i)))
             }
-            oximeter::Datum::U8(i) => {
+            oximeter_types::Datum::U8(i) => {
                 self.as_integer_mut()?.push(Some(i64::from(*i)))
             }
-            oximeter::Datum::I16(i) => {
+            oximeter_types::Datum::I16(i) => {
                 self.as_integer_mut()?.push(Some(i64::from(*i)))
             }
-            oximeter::Datum::U16(i) => {
+            oximeter_types::Datum::U16(i) => {
                 self.as_integer_mut()?.push(Some(i64::from(*i)))
             }
-            oximeter::Datum::I32(i) => {
+            oximeter_types::Datum::I32(i) => {
                 self.as_integer_mut()?.push(Some(i64::from(*i)))
             }
-            oximeter::Datum::U32(i) => {
+            oximeter_types::Datum::U32(i) => {
                 self.as_integer_mut()?.push(Some(i64::from(*i)))
             }
-            oximeter::Datum::I64(i) => self.as_integer_mut()?.push(Some(*i)),
-            oximeter::Datum::U64(i) => {
+            oximeter_types::Datum::I64(i) => {
+                self.as_integer_mut()?.push(Some(*i))
+            }
+            oximeter_types::Datum::U64(i) => {
                 let i =
                     i.to_i64().context("Failed to convert u64 datum to i64")?;
                 self.as_integer_mut()?.push(Some(i));
             }
-            oximeter::Datum::F32(f) => {
+            oximeter_types::Datum::F32(f) => {
                 self.as_double_mut()?.push(Some(f64::from(*f)))
             }
-            oximeter::Datum::F64(f) => self.as_double_mut()?.push(Some(*f)),
-            oximeter::Datum::String(s) => {
+            oximeter_types::Datum::F64(f) => {
+                self.as_double_mut()?.push(Some(*f))
+            }
+            oximeter_types::Datum::String(s) => {
                 self.as_string_mut()?.push(Some(s.clone()))
             }
-            oximeter::Datum::Bytes(_) => {
+            oximeter_types::Datum::Bytes(_) => {
                 anyhow::bail!("Bytes data types are not yet supported")
             }
-            oximeter::Datum::CumulativeI64(c) => {
+            oximeter_types::Datum::CumulativeI64(c) => {
                 self.as_integer_mut()?.push(Some(c.value()))
             }
-            oximeter::Datum::CumulativeU64(c) => {
+            oximeter_types::Datum::CumulativeU64(c) => {
                 let c = c
                     .value()
                     .to_i64()
                     .context("Failed to convert u64 datum to i64")?;
                 self.as_integer_mut()?.push(Some(c));
             }
-            oximeter::Datum::CumulativeF32(c) => {
+            oximeter_types::Datum::CumulativeF32(c) => {
                 self.as_double_mut()?.push(Some(f64::from(c.value())))
             }
-            oximeter::Datum::CumulativeF64(c) => {
+            oximeter_types::Datum::CumulativeF64(c) => {
                 self.as_double_mut()?.push(Some(c.value()))
             }
-            oximeter::Datum::HistogramI8(h) => self
+            oximeter_types::Datum::HistogramI8(h) => self
                 .as_integer_distribution_mut()?
                 .push(Some(Distribution::from(h))),
-            oximeter::Datum::HistogramU8(h) => self
+            oximeter_types::Datum::HistogramU8(h) => self
                 .as_integer_distribution_mut()?
                 .push(Some(Distribution::from(h))),
-            oximeter::Datum::HistogramI16(h) => self
+            oximeter_types::Datum::HistogramI16(h) => self
                 .as_integer_distribution_mut()?
                 .push(Some(Distribution::from(h))),
-            oximeter::Datum::HistogramU16(h) => self
+            oximeter_types::Datum::HistogramU16(h) => self
                 .as_integer_distribution_mut()?
                 .push(Some(Distribution::from(h))),
-            oximeter::Datum::HistogramI32(h) => self
+            oximeter_types::Datum::HistogramI32(h) => self
                 .as_integer_distribution_mut()?
                 .push(Some(Distribution::from(h))),
-            oximeter::Datum::HistogramU32(h) => self
+            oximeter_types::Datum::HistogramU32(h) => self
                 .as_integer_distribution_mut()?
                 .push(Some(Distribution::from(h))),
-            oximeter::Datum::HistogramI64(h) => self
+            oximeter_types::Datum::HistogramI64(h) => self
                 .as_integer_distribution_mut()?
                 .push(Some(Distribution::from(h))),
-            oximeter::Datum::HistogramU64(h) => self
+            oximeter_types::Datum::HistogramU64(h) => self
                 .as_integer_distribution_mut()?
                 .push(Some(Distribution::try_from(h)?)),
-            oximeter::Datum::HistogramF32(h) => self
+            oximeter_types::Datum::HistogramF32(h) => self
                 .as_double_distribution_mut()?
                 .push(Some(Distribution::from(h))),
-            oximeter::Datum::HistogramF64(h) => self
+            oximeter_types::Datum::HistogramF64(h) => self
                 .as_double_distribution_mut()?
                 .push(Some(Distribution::from(h))),
-            oximeter::Datum::Missing(missing) => {
+            oximeter_types::Datum::Missing(missing) => {
                 self.push_missing(missing.datum_type())?
             }
         }
@@ -1216,7 +1341,7 @@ impl ValueArray {
     fn push_diff_from_last_to_datum(
         &mut self,
         last_datum: &Option<CumulativeDatum>,
-        new_datum: &oximeter::Datum,
+        new_datum: &oximeter_types::Datum,
         data_type: DataType,
     ) -> Result<(), Error> {
         match (last_datum.as_ref(), new_datum.is_missing()) {
@@ -1253,49 +1378,49 @@ impl ValueArray {
                 match (last_datum, new_datum) {
                     (
                         CumulativeDatum::Integer(last),
-                        oximeter::Datum::I8(new),
+                        oximeter_types::Datum::I8(new),
                     ) => {
                         let new = i64::from(*new);
                         self.as_integer_mut()?.push(Some(new - last));
                     }
                     (
                         CumulativeDatum::Integer(last),
-                        oximeter::Datum::U8(new),
+                        oximeter_types::Datum::U8(new),
                     ) => {
                         let new = i64::from(*new);
                         self.as_integer_mut()?.push(Some(new - last));
                     }
                     (
                         CumulativeDatum::Integer(last),
-                        oximeter::Datum::I16(new),
+                        oximeter_types::Datum::I16(new),
                     ) => {
                         let new = i64::from(*new);
                         self.as_integer_mut()?.push(Some(new - last));
                     }
                     (
                         CumulativeDatum::Integer(last),
-                        oximeter::Datum::U16(new),
+                        oximeter_types::Datum::U16(new),
                     ) => {
                         let new = i64::from(*new);
                         self.as_integer_mut()?.push(Some(new - last));
                     }
                     (
                         CumulativeDatum::Integer(last),
-                        oximeter::Datum::I32(new),
+                        oximeter_types::Datum::I32(new),
                     ) => {
                         let new = i64::from(*new);
                         self.as_integer_mut()?.push(Some(new - last));
                     }
                     (
                         CumulativeDatum::Integer(last),
-                        oximeter::Datum::U32(new),
+                        oximeter_types::Datum::U32(new),
                     ) => {
                         let new = i64::from(*new);
                         self.as_integer_mut()?.push(Some(new - last));
                     }
                     (
                         CumulativeDatum::Integer(last),
-                        oximeter::Datum::I64(new),
+                        oximeter_types::Datum::I64(new),
                     ) => {
                         let diff = new
                             .checked_sub(*last)
@@ -1304,7 +1429,7 @@ impl ValueArray {
                     }
                     (
                         CumulativeDatum::Integer(last),
-                        oximeter::Datum::U64(new),
+                        oximeter_types::Datum::U64(new),
                     ) => {
                         let new = new
                             .to_i64()
@@ -1316,20 +1441,20 @@ impl ValueArray {
                     }
                     (
                         CumulativeDatum::Double(last),
-                        oximeter::Datum::F32(new),
+                        oximeter_types::Datum::F32(new),
                     ) => {
                         self.as_double_mut()?
                             .push(Some(f64::from(*new) - last));
                     }
                     (
                         CumulativeDatum::Double(last),
-                        oximeter::Datum::F64(new),
+                        oximeter_types::Datum::F64(new),
                     ) => {
                         self.as_double_mut()?.push(Some(new - last));
                     }
                     (
                         CumulativeDatum::Integer(last),
-                        oximeter::Datum::CumulativeI64(new),
+                        oximeter_types::Datum::CumulativeI64(new),
                     ) => {
                         let new = new.value();
                         let diff = new
@@ -1339,7 +1464,7 @@ impl ValueArray {
                     }
                     (
                         CumulativeDatum::Integer(last),
-                        oximeter::Datum::CumulativeU64(new),
+                        oximeter_types::Datum::CumulativeU64(new),
                     ) => {
                         let new = new
                             .value()
@@ -1352,20 +1477,20 @@ impl ValueArray {
                     }
                     (
                         CumulativeDatum::Double(last),
-                        oximeter::Datum::CumulativeF32(new),
+                        oximeter_types::Datum::CumulativeF32(new),
                     ) => {
                         self.as_double_mut()?
                             .push(Some(f64::from(new.value()) - last));
                     }
                     (
                         CumulativeDatum::Double(last),
-                        oximeter::Datum::CumulativeF64(new),
+                        oximeter_types::Datum::CumulativeF64(new),
                     ) => {
                         self.as_double_mut()?.push(Some(new.value() - last));
                     }
                     (
                         CumulativeDatum::IntegerDistribution(last),
-                        oximeter::Datum::HistogramI8(new),
+                        oximeter_types::Datum::HistogramI8(new),
                     ) => {
                         let new = Distribution::from(new);
                         self.as_integer_distribution_mut()?
@@ -1373,7 +1498,7 @@ impl ValueArray {
                     }
                     (
                         CumulativeDatum::IntegerDistribution(last),
-                        oximeter::Datum::HistogramU8(new),
+                        oximeter_types::Datum::HistogramU8(new),
                     ) => {
                         let new = Distribution::from(new);
                         self.as_integer_distribution_mut()?
@@ -1381,7 +1506,7 @@ impl ValueArray {
                     }
                     (
                         CumulativeDatum::IntegerDistribution(last),
-                        oximeter::Datum::HistogramI16(new),
+                        oximeter_types::Datum::HistogramI16(new),
                     ) => {
                         let new = Distribution::from(new);
                         self.as_integer_distribution_mut()?
@@ -1389,7 +1514,7 @@ impl ValueArray {
                     }
                     (
                         CumulativeDatum::IntegerDistribution(last),
-                        oximeter::Datum::HistogramU16(new),
+                        oximeter_types::Datum::HistogramU16(new),
                     ) => {
                         let new = Distribution::from(new);
                         self.as_integer_distribution_mut()?
@@ -1397,7 +1522,7 @@ impl ValueArray {
                     }
                     (
                         CumulativeDatum::IntegerDistribution(last),
-                        oximeter::Datum::HistogramI32(new),
+                        oximeter_types::Datum::HistogramI32(new),
                     ) => {
                         let new = Distribution::from(new);
                         self.as_integer_distribution_mut()?
@@ -1405,7 +1530,7 @@ impl ValueArray {
                     }
                     (
                         CumulativeDatum::IntegerDistribution(last),
-                        oximeter::Datum::HistogramU32(new),
+                        oximeter_types::Datum::HistogramU32(new),
                     ) => {
                         let new = Distribution::from(new);
                         self.as_integer_distribution_mut()?
@@ -1413,7 +1538,7 @@ impl ValueArray {
                     }
                     (
                         CumulativeDatum::IntegerDistribution(last),
-                        oximeter::Datum::HistogramI64(new),
+                        oximeter_types::Datum::HistogramI64(new),
                     ) => {
                         let new = Distribution::from(new);
                         self.as_integer_distribution_mut()?
@@ -1421,7 +1546,7 @@ impl ValueArray {
                     }
                     (
                         CumulativeDatum::IntegerDistribution(last),
-                        oximeter::Datum::HistogramU64(new),
+                        oximeter_types::Datum::HistogramU64(new),
                     ) => {
                         let new = Distribution::try_from(new)?;
                         self.as_integer_distribution_mut()?
@@ -1429,7 +1554,7 @@ impl ValueArray {
                     }
                     (
                         CumulativeDatum::DoubleDistribution(last),
-                        oximeter::Datum::HistogramF32(new),
+                        oximeter_types::Datum::HistogramF32(new),
                     ) => {
                         let new = Distribution::<f64>::from(new);
                         self.as_double_distribution_mut()?
@@ -1437,7 +1562,7 @@ impl ValueArray {
                     }
                     (
                         CumulativeDatum::DoubleDistribution(last),
-                        oximeter::Datum::HistogramF64(new),
+                        oximeter_types::Datum::HistogramF64(new),
                     ) => {
                         let new = Distribution::<f64>::from(new);
                         self.as_double_distribution_mut()?
@@ -1486,8 +1611,8 @@ impl ValueArray {
         }
     }
 
-    // Swap the value in self with other, asserting they're the same type.
-    pub(crate) fn swap(&mut self, mut values: ValueArray) {
+    /// Swap the value in self with other, asserting they're the same type.
+    pub fn swap(&mut self, mut values: ValueArray) {
         use std::mem::swap;
         match (self, &mut values) {
             (ValueArray::Integer(x), ValueArray::Integer(y)) => swap(x, y),
@@ -1733,8 +1858,10 @@ where
 
 macro_rules! i64_dist_from {
     ($t:ty) => {
-        impl From<&oximeter::histogram::Histogram<$t>> for Distribution<i64> {
-            fn from(hist: &oximeter::histogram::Histogram<$t>) -> Self {
+        impl From<&oximeter_types::histogram::Histogram<$t>>
+            for Distribution<i64>
+        {
+            fn from(hist: &oximeter_types::histogram::Histogram<$t>) -> Self {
                 let (bins, counts) = hist.bins_and_counts();
                 Self {
                     bins: bins.into_iter().map(i64::from).collect(),
@@ -1750,8 +1877,10 @@ macro_rules! i64_dist_from {
             }
         }
 
-        impl From<&oximeter::histogram::Histogram<$t>> for CumulativeDatum {
-            fn from(hist: &oximeter::histogram::Histogram<$t>) -> Self {
+        impl From<&oximeter_types::histogram::Histogram<$t>>
+            for CumulativeDatum
+        {
+            fn from(hist: &oximeter_types::histogram::Histogram<$t>) -> Self {
                 CumulativeDatum::IntegerDistribution(hist.into())
             }
         }
@@ -1766,10 +1895,10 @@ i64_dist_from!(i32);
 i64_dist_from!(u32);
 i64_dist_from!(i64);
 
-impl TryFrom<&oximeter::histogram::Histogram<u64>> for Distribution<i64> {
+impl TryFrom<&oximeter_types::histogram::Histogram<u64>> for Distribution<i64> {
     type Error = Error;
     fn try_from(
-        hist: &oximeter::histogram::Histogram<u64>,
+        hist: &oximeter_types::histogram::Histogram<u64>,
     ) -> Result<Self, Self::Error> {
         let (bins, counts) = hist.bins_and_counts();
         let bins = bins
@@ -1791,10 +1920,10 @@ impl TryFrom<&oximeter::histogram::Histogram<u64>> for Distribution<i64> {
     }
 }
 
-impl TryFrom<&oximeter::histogram::Histogram<u64>> for CumulativeDatum {
+impl TryFrom<&oximeter_types::histogram::Histogram<u64>> for CumulativeDatum {
     type Error = Error;
     fn try_from(
-        hist: &oximeter::histogram::Histogram<u64>,
+        hist: &oximeter_types::histogram::Histogram<u64>,
     ) -> Result<Self, Self::Error> {
         hist.try_into().map(CumulativeDatum::IntegerDistribution)
     }
@@ -1802,8 +1931,10 @@ impl TryFrom<&oximeter::histogram::Histogram<u64>> for CumulativeDatum {
 
 macro_rules! f64_dist_from {
     ($t:ty) => {
-        impl From<&oximeter::histogram::Histogram<$t>> for Distribution<f64> {
-            fn from(hist: &oximeter::histogram::Histogram<$t>) -> Self {
+        impl From<&oximeter_types::histogram::Histogram<$t>>
+            for Distribution<f64>
+        {
+            fn from(hist: &oximeter_types::histogram::Histogram<$t>) -> Self {
                 let (bins, counts) = hist.bins_and_counts();
                 Self {
                     bins: bins.into_iter().map(f64::from).collect(),
@@ -1819,8 +1950,10 @@ macro_rules! f64_dist_from {
             }
         }
 
-        impl From<&oximeter::histogram::Histogram<$t>> for CumulativeDatum {
-            fn from(hist: &oximeter::histogram::Histogram<$t>) -> Self {
+        impl From<&oximeter_types::histogram::Histogram<$t>>
+            for CumulativeDatum
+        {
+            fn from(hist: &oximeter_types::histogram::Histogram<$t>) -> Self {
                 CumulativeDatum::DoubleDistribution(hist.into())
             }
         }
@@ -1833,9 +1966,9 @@ f64_dist_from!(f64);
 #[cfg(test)]
 mod tests {
     use super::{Distribution, MetricType, Points, Values};
-    use crate::oxql::point::{DataType, ValueArray};
+    use crate::point::{push_concrete_values, DataType, Datum, ValueArray};
     use chrono::{DateTime, Utc};
-    use oximeter::{
+    use oximeter_types::{
         histogram::Record, types::Cumulative, Measurement, Quantile,
     };
     use std::time::Duration;
@@ -1939,12 +2072,12 @@ mod tests {
         let now = Utc::now();
         let current1 = now + Duration::from_secs(1);
         let mut hist1 =
-            oximeter::histogram::Histogram::new(&[0i64, 10, 20]).unwrap();
+            oximeter_types::histogram::Histogram::new(&[0i64, 10, 20]).unwrap();
         hist1.sample(1).unwrap();
         hist1.set_start_time(current1);
         let current2 = now + Duration::from_secs(2);
         let mut hist2 =
-            oximeter::histogram::Histogram::new(&[0i64, 10, 20]).unwrap();
+            oximeter_types::histogram::Histogram::new(&[0i64, 10, 20]).unwrap();
         hist2.sample(5).unwrap();
         hist2.sample(10).unwrap();
         hist2.sample(15).unwrap();
@@ -2272,5 +2405,177 @@ mod tests {
         assert!(points
             .cast(&[DataType::DoubleDistribution, DataType::DoubleDistribution])
             .is_err());
+    }
+
+    #[test]
+    fn test_push_concrete_values() {
+        let mut points = Points::with_capacity(
+            2,
+            [DataType::Integer, DataType::Double].into_iter(),
+            [MetricType::Gauge, MetricType::Gauge].into_iter(),
+        )
+        .unwrap();
+
+        // Push a concrete value for the integer dimension
+        let from_ints = vec![Values {
+            values: ValueArray::Integer(vec![Some(1)]),
+            metric_type: MetricType::Gauge,
+        }];
+        push_concrete_values(&mut points.values[..1], &from_ints, 0);
+
+        // And another for the double dimension.
+        let from_doubles = vec![Values {
+            values: ValueArray::Double(vec![Some(2.0)]),
+            metric_type: MetricType::Gauge,
+        }];
+        push_concrete_values(&mut points.values[1..], &from_doubles, 0);
+
+        assert_eq!(
+            points.dimensionality(),
+            2,
+            "Points should have 2 dimensions",
+        );
+        let ints = points.values[0].values.as_integer().unwrap();
+        assert_eq!(
+            ints.len(),
+            1,
+            "Should have pushed one point in the first dimension"
+        );
+        assert_eq!(
+            ints[0],
+            Some(1),
+            "Should have pushed 1 onto the first dimension"
+        );
+        let doubles = points.values[1].values.as_double().unwrap();
+        assert_eq!(
+            doubles.len(),
+            1,
+            "Should have pushed one point in the second dimension"
+        );
+        assert_eq!(
+            doubles[0],
+            Some(2.0),
+            "Should have pushed 2.0 onto the second dimension"
+        );
+    }
+
+    #[test]
+    fn test_join_point_arrays() {
+        let now = Utc::now();
+
+        // Create a set of integer points to join with.
+        //
+        // This will have two timestamps, one of which will match the points
+        // below that are merged in.
+        let int_points = Points {
+            start_times: None,
+            timestamps: vec![
+                now - Duration::from_secs(3),
+                now - Duration::from_secs(2),
+                now,
+            ],
+            values: vec![Values {
+                values: ValueArray::Integer(vec![Some(1), Some(2), Some(3)]),
+                metric_type: MetricType::Gauge,
+            }],
+        };
+
+        // Create an additional set of double points.
+        //
+        // This also has two timepoints, one of which matches with the above,
+        // and one of which does not.
+        let double_points = Points {
+            start_times: None,
+            timestamps: vec![
+                now - Duration::from_secs(3),
+                now - Duration::from_secs(1),
+                now,
+            ],
+            values: vec![Values {
+                values: ValueArray::Double(vec![
+                    Some(4.0),
+                    Some(5.0),
+                    Some(6.0),
+                ]),
+                metric_type: MetricType::Gauge,
+            }],
+        };
+
+        // Merge the arrays.
+        let merged = int_points.inner_join(&double_points).unwrap();
+
+        // Basic checks that we merged in the right values and have the right
+        // types and dimensions.
+        assert_eq!(
+            merged.dimensionality(),
+            2,
+            "Should have appended the dimensions from each input array"
+        );
+        assert_eq!(merged.len(), 2, "Should have merged two common points",);
+        assert_eq!(
+            merged.data_types().collect::<Vec<_>>(),
+            &[DataType::Integer, DataType::Double],
+            "Should have combined the data types of the input arrays"
+        );
+        assert_eq!(
+            merged.metric_types().collect::<Vec<_>>(),
+            &[MetricType::Gauge, MetricType::Gauge],
+            "Should have combined the metric types of the input arrays"
+        );
+
+        // Check the actual values of the array.
+        let mut points = merged.iter_points();
+
+        // The first and last timepoint overlapped between the two arrays, so we
+        // should have both of them as concrete samples.
+        let pt = points.next().unwrap();
+        assert_eq!(pt.start_time, None, "Gauges don't have a start time");
+        assert_eq!(
+            *pt.timestamp, int_points.timestamps[0],
+            "Should have taken the first input timestamp from both arrays",
+        );
+        assert_eq!(
+            *pt.timestamp, double_points.timestamps[0],
+            "Should have taken the first input timestamp from both arrays",
+        );
+        let values = pt.values;
+        assert_eq!(values.len(), 2, "Should have 2 dimensions");
+        assert_eq!(
+            &values[0],
+            &(Datum::Integer(Some(&1)), MetricType::Gauge),
+            "Should have pulled value from first integer array."
+        );
+        assert_eq!(
+            &values[1],
+            &(Datum::Double(Some(&4.0)), MetricType::Gauge),
+            "Should have pulled value from second double array."
+        );
+
+        // And the next point
+        let pt = points.next().unwrap();
+        assert_eq!(pt.start_time, None, "Gauges don't have a start time");
+        assert_eq!(
+            *pt.timestamp, int_points.timestamps[2],
+            "Should have taken the input timestamp from both arrays",
+        );
+        assert_eq!(
+            *pt.timestamp, double_points.timestamps[2],
+            "Should have taken the input timestamp from both arrays",
+        );
+        let values = pt.values;
+        assert_eq!(values.len(), 2, "Should have 2 dimensions");
+        assert_eq!(
+            &values[0],
+            &(Datum::Integer(Some(&3)), MetricType::Gauge),
+            "Should have pulled value from first integer array."
+        );
+        assert_eq!(
+            &values[1],
+            &(Datum::Double(Some(&6.0)), MetricType::Gauge),
+            "Should have pulled value from second double array."
+        );
+
+        // And there should be no other values.
+        assert!(points.next().is_none(), "There should be no more points");
     }
 }
