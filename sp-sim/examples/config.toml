@@ -31,7 +31,7 @@ description = "FAKE Southwest temperature sensor"
 capabilities = 2
 presence = "Present"
 sensors = [
-    { name = "Southwest", kind = "Temperature", sensor_id = 0, last_data.value = 41.7890625, last_data.timestamp = 1234 },
+    { name = "Southwest", kind = "Temperature", last_data.value = 41.7890625, last_data.timestamp = 1234 },
 ]
 
 [[simulated_sps.gimlet]]
@@ -56,7 +56,7 @@ description = "FAKE Southwest temperature sensor"
 capabilities = 2
 presence = "Present"
 sensors = [
-    { name = "Southwest", kind = "Temperature", sensor_id = 0, last_data.value = 41.7890625, last_data.timestamp = 1234 },
+    { name = "Southwest", kind = "Temperature", last_data.value = 41.7890625, last_data.timestamp = 1234 },
 ]
 
 

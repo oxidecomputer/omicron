@@ -21,8 +21,7 @@ use std::collections::HashMap;
 
 pub(crate) struct Sensors {
     by_component: HashMap<SpComponent, Vec<u32>>,
-
-    sensors: HashMap<u32, Sensor>,
+    sensors: Vec<Sensor>,
 }
 
 #[derive(Debug)]
@@ -35,7 +34,6 @@ struct Sensor {
 pub struct SensorDef {
     pub name: String,
     pub kind: MeasurementKind,
-    pub sensor_id: u32,
 }
 
 // TODO(eliza): note that currently, we just hardcode these in
@@ -104,7 +102,7 @@ impl Sensors {
     pub(crate) fn from_component_configs<'a>(
         cfgs: impl IntoIterator<Item = &'a SpComponentConfig>,
     ) -> Self {
-        let mut sensors = HashMap::new();
+        let mut sensors = Vec::new();
         let mut by_component = HashMap::new();
         for cfg in cfgs {
             if cfg.sensors.is_empty() {
@@ -122,19 +120,11 @@ impl Sensors {
 
             let mut ids = Vec::with_capacity(cfg.sensors.len());
             for sensor in &cfg.sensors {
-                let sensor_id = sensor.def.sensor_id;
-                let prev = sensors.insert(
-                    sensor_id,
-                    Sensor {
-                        def: sensor.def.clone(),
-                        state: sensor.state.clone(),
-                    },
-                );
-                assert!(
-                    prev.is_none(),
-                    "invalid config: sensor ID {sensor_id} already exists!\n
-                     previous sensor: {prev:#?}\nnew sensor: {sensor:#?}"
-                );
+                let sensor_id = sensors.len() as u32;
+                sensors.push(Sensor {
+                    def: sensor.def.clone(),
+                    state: sensor.state.clone(),
+                });
                 ids.push(sensor_id)
             }
 
@@ -150,8 +140,8 @@ impl Sensors {
         component: &SpComponent,
         index: BoundsChecked,
     ) -> Option<&'sensors Sensor> {
-        let id = self.by_component.get(component)?.get(index.0 as usize)?;
-        self.sensors.get(id)
+        let &id = self.by_component.get(component)?.get(index.0 as usize)?;
+        self.sensors.get(id as usize)
     }
 
     pub(crate) fn num_component_details(
@@ -201,7 +191,8 @@ impl Sensors {
         &self,
         SensorRequest { id, kind }: SensorRequest,
     ) -> Result<SensorResponse, SensorError> {
-        let sensor = self.sensors.get(&id).ok_or(SensorError::InvalidSensor)?;
+        let sensor =
+            self.sensors.get(id as usize).ok_or(SensorError::InvalidSensor)?;
         match kind {
             SensorRequestKind::LastReading => {
                 Ok(SensorResponse::LastReading(sensor.state.last_reading()))
