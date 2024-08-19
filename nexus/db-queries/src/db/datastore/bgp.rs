@@ -478,6 +478,9 @@ impl DataStore {
             })
     }
 
+    // TODO: it seems this logic actually performs a find OR create for an announce set, and then replaces its child announcements.
+    // This might be changed in omicron#6016 to an api that creates an announce set then allows adding / removal of announcements
+    // to match how our other APIs work.
     pub async fn bgp_update_announce_set(
         &self,
         opctx: &OpContext,
@@ -548,11 +551,15 @@ impl DataStore {
             })
             .await
             .map_err(|e| {
-                error!(opctx.log, "database error: {e:#?}");
+                let msg = "bgp_update_announce_set failed";
+                error!(opctx.log, "{msg}"; "error" => ?e);
                 public_error_from_diesel(e, ErrorHandler::Server)
             })
     }
 
+    // TODO: it seems this logic actually performs a create OR update of an announce set and its child announcements
+    // (for example, it will add missing announcements). This might be changed in omicron#6016 to an api that creates an announce set
+    // then allows adding / removal of announcements to match how our other APIs work.
     pub async fn bgp_create_announce_set(
         &self,
         opctx: &OpContext,
@@ -634,7 +641,8 @@ impl DataStore {
             })
             .await
             .map_err(|e| {
-                error!(opctx.log, "database error: {e:#?}");
+                let msg = "bgp_create_announce_set failed";
+                error!(opctx.log, "{msg}"; "error" => ?e);
                 public_error_from_diesel(e, ErrorHandler::Server)
             })
     }
@@ -651,11 +659,6 @@ impl DataStore {
         use db::schema::bgp_config;
         use db::schema::bgp_config::dsl as bgp_config_dsl;
 
-        #[derive(Debug)]
-        enum BgpAnnounceSetDeleteError {
-            AnnounceSetInUse,
-        }
-
         let conn = self.pool_connection_authorized(opctx).await?;
         let name_or_id = sel.name_or_id.clone();
 
@@ -666,18 +669,56 @@ impl DataStore {
                 let name_or_id = name_or_id.clone();
                 async move {
                     let id: Uuid = match name_or_id {
+                        NameOrId::Id(id) => announce_set_dsl::bgp_announce_set
+                            .filter(bgp_announce_set::time_deleted.is_null())
+                            .filter(bgp_announce_set::id.eq(id))
+                            .select(bgp_announce_set::id)
+                            .limit(1)
+                            .first_async::<Uuid>(&conn)
+                            .await
+                            .map_err(|e| {
+                                let msg = "failed to lookup announce set by id";
+                                error!(opctx.log, "{msg}"; "error" => ?e);
+
+                                match e {
+                                    diesel::result::Error::NotFound => err
+                                        .bail(Error::not_found_by_id(
+                                            ResourceType::BgpConfig,
+                                            &id,
+                                        )),
+                                    _ => err.bail(Error::internal_error(msg)),
+                                }
+                            }),
                         NameOrId::Name(name) => {
                             announce_set_dsl::bgp_announce_set
+                                .filter(
+                                    bgp_announce_set::time_deleted.is_null(),
+                                )
                                 .filter(
                                     bgp_announce_set::name.eq(name.to_string()),
                                 )
                                 .select(bgp_announce_set::id)
                                 .limit(1)
                                 .first_async::<Uuid>(&conn)
-                                .await?
+                                .await
+                                .map_err(|e| {
+                                    let msg =
+                                        "failed to lookup announce set by name";
+                                    error!(opctx.log, "{msg}"; "error" => ?e);
+
+                                    match e {
+                                        diesel::result::Error::NotFound => err
+                                            .bail(Error::not_found_by_name(
+                                                ResourceType::BgpConfig,
+                                                &name,
+                                            )),
+                                        _ => {
+                                            err.bail(Error::internal_error(msg))
+                                        }
+                                    }
+                                })
                         }
-                        NameOrId::Id(id) => id,
-                    };
+                    }?;
 
                     let count = bgp_config_dsl::bgp_config
                         .filter(bgp_config::bgp_announce_set_id.eq(id))
@@ -686,9 +727,9 @@ impl DataStore {
                         .await?;
 
                     if count > 0 {
-                        return Err(err.bail(
-                            BgpAnnounceSetDeleteError::AnnounceSetInUse,
-                        ));
+                        return Err(
+                            err.bail(Error::conflict("announce set in use"))
+                        );
                     }
 
                     diesel::update(announce_set_dsl::bgp_announce_set)
@@ -707,17 +748,13 @@ impl DataStore {
             })
             .await
             .map_err(|e| {
+                let msg = "bgp_delete_announce_set failed";
                 if let Some(err) = err.take() {
-                    match err {
-                        BgpAnnounceSetDeleteError::AnnounceSetInUse => {
-                            Error::invalid_request("BGP announce set in use")
-                        }
-                    }
+                    error!(opctx.log, "{msg}"; "error" => ?err);
+                    err
                 } else {
-                    {
-                        error!(opctx.log, "database error: {e:#?}");
-                        public_error_from_diesel(e, ErrorHandler::Server)
-                    }
+                    error!(opctx.log, "{msg}"; "error" => ?e);
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })
     }
@@ -737,7 +774,8 @@ impl DataStore {
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                error!(opctx.log, "database error: {e:#?}");
+                let msg = "bgp_peer_configs failed";
+                error!(opctx.log, "{msg}"; "error" => ?e);
                 public_error_from_diesel(e, ErrorHandler::Server)
             })?;
 
@@ -760,7 +798,8 @@ impl DataStore {
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
-                error!(opctx.log, "database error: {e:#?}");
+                let msg = "communities_for_peer failed";
+                error!(opctx.log, "{msg}"; "error" => ?e);
                 public_error_from_diesel(e, ErrorHandler::Server)
             })?;
 
@@ -780,41 +819,62 @@ impl DataStore {
         use db::schema::switch_port_settings_bgp_peer_config_allow_export::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let result = self
-            .transaction_retry_wrapper("bgp_allow_export_for_peer")
-            .transaction(&conn, |conn| async move {
-                let active = peer_dsl::switch_port_settings_bgp_peer_config
-                    .filter(db_peer::port_settings_id.eq(port_settings_id))
-                    .filter(db_peer::addr.eq(addr))
-                    .select(db_peer::allow_export_list_active)
-                    .limit(1)
-                    .first_async::<bool>(&conn)
-                    .await?;
+        let err = OptionalError::new();
+        self.transaction_retry_wrapper("bgp_allow_export_for_peer")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    let active = peer_dsl::switch_port_settings_bgp_peer_config
+                        .filter(db_peer::port_settings_id.eq(port_settings_id))
+                        .filter(db_peer::addr.eq(addr))
+                        .select(db_peer::allow_export_list_active)
+                        .limit(1)
+                        .first_async::<bool>(&conn)
+                        .await
+                        .map_err(|e| {
+                            let msg = "failed to lookup export settings for peer";
+                            error!(opctx.log, "{msg}"; "error" => ?e);
 
-                if !active {
-                    return Ok(None);
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    let not_found_msg = format!("peer with {addr} not found for port settings {port_settings_id}");
+                                    err.bail(Error::non_resourcetype_not_found(not_found_msg))
+                                },
+                                _ => err.bail(Error::internal_error(msg)),
+                            }
+                        })?;
+
+                    if !active {
+                        return Ok(None);
+                    }
+
+                    let list =
+                        dsl::switch_port_settings_bgp_peer_config_allow_export
+                            .filter(
+                                db_allow::port_settings_id.eq(port_settings_id),
+                            )
+                            .filter(
+                                db_allow::interface_name
+                                    .eq(interface_name.to_owned()),
+                            )
+                            .filter(db_allow::addr.eq(addr))
+                            .load_async(&conn)
+                            .await?;
+
+                    Ok(Some(list))
                 }
-
-                let list =
-                    dsl::switch_port_settings_bgp_peer_config_allow_export
-                        .filter(db_allow::port_settings_id.eq(port_settings_id))
-                        .filter(
-                            db_allow::interface_name
-                                .eq(interface_name.to_owned()),
-                        )
-                        .filter(db_allow::addr.eq(addr))
-                        .load_async(&conn)
-                        .await?;
-
-                Ok(Some(list))
             })
             .await
             .map_err(|e| {
-                error!(opctx.log, "database error: {e:#?}");
-                public_error_from_diesel(e, ErrorHandler::Server)
-            })?;
-
-        Ok(result)
+                let msg = "allow_export_for_peer failed";
+                if let Some(err) = err.take() {
+                    error!(opctx.log, "{msg}"; "error" => ?err);
+                    err
+                } else {
+                    error!(opctx.log, "{msg}"; "error" => ?e);
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
     }
 
     pub async fn allow_import_for_peer(
@@ -831,8 +891,8 @@ impl DataStore {
 
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
-        let result = self
-            .transaction_retry_wrapper("bgp_allow_export_for_peer")
+        self
+            .transaction_retry_wrapper("bgp_allow_import_for_peer")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
@@ -862,31 +922,30 @@ impl DataStore {
 
                     let list =
                         dsl::switch_port_settings_bgp_peer_config_allow_import
-                            .filter(
-                                db_allow::port_settings_id.eq(port_settings_id),
-                            )
-                            .filter(
-                                db_allow::interface_name
-                                    .eq(interface_name.to_owned()),
-                            )
-                            .filter(db_allow::addr.eq(addr))
-                            .load_async(&conn)
-                            .await?;
+                        .filter(
+                            db_allow::port_settings_id.eq(port_settings_id),
+                        )
+                        .filter(
+                            db_allow::interface_name
+                                .eq(interface_name.to_owned()),
+                        )
+                        .filter(db_allow::addr.eq(addr))
+                        .load_async(&conn)
+                        .await?;
 
                     Ok(Some(list))
                 }
             })
             .await
             .map_err(|e| {
-                error!(opctx.log, "allow_import_for_peer failed"; "error" => ?e);
+                let msg = "allow_import_for_peer failed";
                 if let Some(err) = err.take() {
-                   err
+                    error!(opctx.log, "{msg}"; "error" => ?err);
+                    err
                 } else {
-                    error!(opctx.log, "database error: {e:#?}");
+                    error!(opctx.log, "{msg}"; "error" => ?e);
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
-            })?;
-
-        Ok(result)
+            })
     }
 }
