@@ -1628,7 +1628,7 @@ impl ServiceManager {
                 };
 
                 let listen_addr = *underlay_address;
-                let listen_port = &CLICKHOUSE_PORT.to_string();
+                let listen_port = CLICKHOUSE_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),

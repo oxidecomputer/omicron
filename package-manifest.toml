@@ -148,6 +148,7 @@ output.type = "zone"
 output.intermediate_only = true
 
 [package.clickhouse]
+# This service runs a single-node ClickHouse server.
 service_name = "clickhouse"
 only_for_targets.image = "standard"
 source.type = "composite"
@@ -176,6 +177,9 @@ output.intermediate_only = true
 setup_hint = "Run `cargo xtask download clickhouse` to download the necessary binaries"
 
 [package.clickhouse_server]
+# This service runs a server for a replicated ClickHouse cluster.
+# It is complimentary to the clickhouse_keeper service.
+# One cannot be run without the other.
 service_name = "clickhouse_server"
 only_for_targets.image = "standard"
 source.type = "composite"
@@ -203,6 +207,9 @@ output.intermediate_only = true
 setup_hint = "Run `cargo xtask download clickhouse` to download the necessary binaries"
 
 [package.clickhouse_keeper]
+# This service runs a keeper for a replicated ClickHouse cluster.
+# It is complimentary to the clickhouse_server service.
+# One cannot be run without the other.
 service_name = "clickhouse_keeper"
 only_for_targets.image = "standard"
 source.type = "composite"

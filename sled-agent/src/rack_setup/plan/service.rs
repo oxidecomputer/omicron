@@ -649,8 +649,8 @@ impl Plan {
             };
             let id = OmicronZoneUuid::new_v4();
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
-            // TODO: Should this be a different port in case we want to have single node
-            // and replicated running side by side for some weird reason?
+            // TODO: This may need to be a different port if/when to have single node
+            // and replicated running side by side as per stage 1 of RFD 468.
             let port = omicron_common::address::CLICKHOUSE_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
             dns_builder

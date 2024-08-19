@@ -51,9 +51,9 @@ enum Args {
         address: SocketAddrV6,
 
         // TODO (https://github.com/oxidecomputer/omicron/issues/4148): This flag
-        // should be removed once single node functionality is removed.
+        // should be removed if single node functionality is removed.
         /// Is `oximeter` connecting to a replicated ClickHouse cluster
-        #[clap(short, long, num_args = 0, action)]
+        #[clap(short, long)]
         replicated: bool,
     },
 
@@ -105,12 +105,6 @@ enum Args {
         /// The log-level.
         #[arg(long, default_value_t = Level::Info, value_parser = parse_log_level)]
         log_level: Level,
-
-        // TODO (https://github.com/oxidecomputer/omicron/issues/4148): This flag
-        // should be removed once single node functionality is removed.
-        /// Is `oximeter` connecting to a replicated ClickHouse cluster
-        #[clap(short, long, num_args = 0, action)]
-        replicated: bool,
     },
 
     /// Print the fake Nexus's standalone API.
@@ -142,20 +136,13 @@ async fn do_run() -> Result<(), CmdError> {
                 .context("Failed to create oximeter")
                 .map_err(CmdError::Failure)
         }
-        Args::Standalone {
-            id,
-            address,
-            nexus,
-            clickhouse,
-            log_level,
-            replicated,
-        } => {
+        Args::Standalone { id, address, nexus, clickhouse, log_level } => {
             // Start the standalone Nexus server, for registration of both the
             // collector and producers.
             let nexus_server = StandaloneNexus::new(nexus.into(), log_level)
                 .context("Failed to create nexus")
                 .map_err(CmdError::Failure)?;
-            let args = OximeterArguments { id, address, replicated };
+            let args = OximeterArguments { id, address, replicated: false };
             Oximeter::new_standalone(
                 nexus_server.log(),
                 &args,

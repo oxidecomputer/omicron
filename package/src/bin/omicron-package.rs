@@ -277,9 +277,7 @@ async fn do_target(
                 machine.clone(),
                 switch.clone(),
                 rack_topology.clone(),
-                clickhouse_topology
-                    .clone()
-                    .expect("clickhouse topology should never be NONE"),
+                clickhouse_topology.clone(),
             )?;
 
             let path = get_single_target(&target_dir, name).await?;

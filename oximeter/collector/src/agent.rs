@@ -396,15 +396,16 @@ impl OximeterAgent {
         let db_address = if let Some(address) = db_config.address {
             address
         } else if replicated {
-            SocketAddr::new(
-                resolver.lookup_ip(ServiceName::ClickhouseServer).await?,
-                CLICKHOUSE_PORT,
-            )
+            let mut address = resolver
+                .lookup_socket_v6(ServiceName::ClickhouseServer)
+                .await?;
+            address.set_port(CLICKHOUSE_PORT);
+            SocketAddr::V6(address)
         } else {
-            SocketAddr::new(
-                resolver.lookup_ip(ServiceName::Clickhouse).await?,
-                CLICKHOUSE_PORT,
-            )
+            let mut address =
+                resolver.lookup_socket_v6(ServiceName::Clickhouse).await?;
+            address.set_port(CLICKHOUSE_PORT);
+            SocketAddr::V6(address)
         };
 
         // Determine the version of the database.

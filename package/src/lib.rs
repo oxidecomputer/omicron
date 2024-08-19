@@ -82,7 +82,7 @@ pub enum TargetCommand {
         ///
         /// Replicated cluster configuration is an experimental feature to be
         /// used only for testing.
-        clickhouse_topology: Option<crate::target::ClickhouseTopology>,
+        clickhouse_topology: crate::target::ClickhouseTopology,
     },
     /// List all existing targets
     List,

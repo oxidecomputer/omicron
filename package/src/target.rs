@@ -62,7 +62,7 @@ pub enum RackTopology {
     SingleSled,
 }
 
-/// Topology of the sleds within the rack.
+/// Topology of the ClickHouse installation within the rack.
 #[derive(Clone, Debug, strum::EnumString, strum::Display, ValueEnum)]
 #[strum(serialize_all = "kebab-case")]
 #[clap(rename_all = "kebab-case")]
