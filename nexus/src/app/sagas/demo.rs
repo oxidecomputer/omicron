@@ -73,7 +73,7 @@ impl CompletingDemoSagas {
     }
 
     pub fn complete(&mut self, id: DemoSagaUuid) -> Result<(), Error> {
-        let sem = self.sagas.remove(&id).ok_or_else(|| {
+        let sem = self.sagas.get_mut(&id).ok_or_else(|| {
             Error::non_resourcetype_not_found(format!(
                 "demo saga with demo saga id {:?}",
                 id
@@ -159,10 +159,15 @@ mod test {
         // - demo saga starts and waits for completion (subscribe)
         // - complete demo saga
         let demo_saga_id = DemoSagaUuid::new_v4();
+        println!("demo saga: {demo_saga_id}");
         hub.preregister(demo_saga_id);
+        println!("demo saga: {demo_saga_id} preregistered");
         let subscribe = hub.subscribe(demo_saga_id);
+        println!("demo saga: {demo_saga_id} subscribed");
         assert!(hub.complete(demo_saga_id).is_ok());
+        println!("demo saga: {demo_saga_id} marked completed");
         subscribe.await.unwrap();
+        println!("demo saga: {demo_saga_id} done");
 
         // It's also possible that the completion request arrives before the
         // saga started waiting.  In that case, the sequence is:
@@ -173,23 +178,34 @@ mod test {
         //
         // This should work, too, with no errors.
         let demo_saga_id = DemoSagaUuid::new_v4();
+        println!("demo saga: {demo_saga_id}");
         hub.preregister(demo_saga_id);
+        println!("demo saga: {demo_saga_id} preregistered");
         assert!(hub.complete(demo_saga_id).is_ok());
+        println!("demo saga: {demo_saga_id} marked completed");
         let subscribe = hub.subscribe(demo_saga_id);
+        println!("demo saga: {demo_saga_id} subscribed");
         subscribe.await.unwrap();
+        println!("demo saga: {demo_saga_id} done");
 
         // It's also possible to have no preregistration at all.  This happens
         // if the demo saga was recovered.  That's fine, too, but then it will
         // only work if the completion arrives after the saga starts waiting.
         let demo_saga_id = DemoSagaUuid::new_v4();
+        println!("demo saga: {demo_saga_id}");
         let subscribe = hub.subscribe(demo_saga_id);
+        println!("demo saga: {demo_saga_id} subscribed");
         assert!(hub.complete(demo_saga_id).is_ok());
+        println!("demo saga: {demo_saga_id} marked completed");
         subscribe.await.unwrap();
+        println!("demo saga: {demo_saga_id} done");
 
         // If there's no preregistration and we get a completion request, then
         // that request should fail.
         let demo_saga_id = DemoSagaUuid::new_v4();
+        println!("demo saga: {demo_saga_id}");
         let error = hub.complete(demo_saga_id).unwrap_err();
         assert_matches!(error, Error::NotFound { .. });
+        println!("demo saga: {demo_saga_id} complete error: {:#}", error);
     }
 }
