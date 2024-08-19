@@ -130,7 +130,7 @@ impl Sensors {
 
             let component = SpComponent::try_from(cfg.id.as_str()).unwrap();
             let prev = by_component.insert(component, ids);
-            assert!(prev.is_none(), "component ID collision!");
+            assert!(prev.is_none(), "component ID {component} already exists!");
         }
         Self { sensors, by_component }
     }
