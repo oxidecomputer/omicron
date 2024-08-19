@@ -141,9 +141,16 @@ SP DETAILS: type "Sled" slot 0
 
     COMPONENTS
 
-        NAME         DESCRIPTION             DEVICE          PRESENCE SERIAL 
-        sp3-host-cpu FAKE host cpu           sp3-host-cpu    Present  None   
-        dev-0        FAKE temperature sensor fake-tmp-sensor Failed   None   
+        NAME         DESCRIPTION                              DEVICE          PRESENCE SERIAL 
+        sp3-host-cpu FAKE host cpu                            sp3-host-cpu    Present  None   
+        dev-0        FAKE temperature sensor                  fake-tmp-sensor Failed   None   
+        dev-1        FAKE temperature sensor                  tmp117          Present  None   
+        dev-2        FAKE Southeast temperature sensor        tmp117          Present  None   
+        dev-6        FAKE U.2 Sharkfin A VPD                  at24csw080      Present  None   
+        dev-7        FAKE U.2 Sharkfin A hot swap controller  max5970         Present  None   
+        dev-8        FAKE U.2 A NVMe Basic Management Command nvme_bmc        Present  None   
+        dev-39       FAKE T6 temperature sensor               tmp451          Present  None   
+        dev-53       FAKE Fan controller                      max31790        Present  None   
 
     CABOOSES: none found
 
@@ -167,8 +174,17 @@ SP DETAILS: type "Sled" slot 1
 
     COMPONENTS
 
-        NAME         DESCRIPTION   DEVICE       PRESENCE SERIAL 
-        sp3-host-cpu FAKE host cpu sp3-host-cpu Present  None   
+        NAME         DESCRIPTION                              DEVICE       PRESENCE SERIAL 
+        sp3-host-cpu FAKE host cpu                            sp3-host-cpu Present  None   
+        sp3-host-cpu FAKE host cpu                            sp3-host-cpu Present  None   
+        dev-0        FAKE temperature sensor                  tmp117       Present  None   
+        dev-1        FAKE temperature sensor                  tmp117       Present  None   
+        dev-2        FAKE Southeast temperature sensor        tmp117       Present  None   
+        dev-6        FAKE U.2 Sharkfin A VPD                  at24csw080   Present  None   
+        dev-7        FAKE U.2 Sharkfin A hot swap controller  max5970      Present  None   
+        dev-8        FAKE U.2 A NVMe Basic Management Command nvme_bmc     Present  None   
+        dev-39       FAKE T6 temperature sensor               tmp451       Present  None   
+        dev-53       FAKE Fan controller                      max31790     Present  None   
 
     CABOOSES: none found
 
