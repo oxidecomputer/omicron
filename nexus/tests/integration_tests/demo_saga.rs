@@ -44,7 +44,33 @@ async fn test_demo_saga(cptestctx: &ControlPlaneTestContext) {
     // have completed after that.  And then we've made the test suite take that
     // much longer.   But we can at least make sure that completing the saga
     // does cause it to finish.
-    nexus_client.saga_demo_complete(&demo_saga.demo_saga_id).await.unwrap();
+    //
+    // Note that `saga_demo_complete` will not succeed until the saga has gotten
+    // far enough through execution that it has registered itself as waiting for
+    // a completion message.  As a result, we have to keep trying until this
+    // works.  But it shouldn't take long -- the saga only has one action and
+    // this is all that it does.
+    wait_for_condition(
+        || async {
+            nexus_client
+                .saga_demo_complete(&demo_saga.demo_saga_id)
+                .await
+                .map_err(|err| {
+                    if let Some(status) = err.status() {
+                        if status == http::StatusCode::NOT_FOUND {
+                            eprintln!("transient 404 -- will try again");
+                            return CondCheckError::NotYet;
+                        }
+                    }
+
+                    CondCheckError::Failed(err)
+                })
+        },
+        &std::time::Duration::from_millis(20),
+        &std::time::Duration::from_secs(10),
+    )
+    .await
+    .unwrap();
 
     // Completion is not synchronous -- that just unblocked the saga.  So we
     // need to poll a bit to wait for it to actually finish.
