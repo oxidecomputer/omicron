@@ -388,7 +388,36 @@ impl DataStore {
         })
     }
 
-    pub async fn bgp_announce_list(
+    pub async fn bgp_announce_set_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<BgpAnnounceSet> {
+        use db::schema::bgp_announce_set::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::bgp_announce_set, dsl::id, &pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::bgp_announce_set,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .select(BgpAnnounceSet::as_select())
+        .load_async(&*conn)
+        .await
+        .map_err(|e| {
+            error!(opctx.log, "bgp_announce_set_list failed"; "error" => ?e);
+            public_error_from_diesel(e, ErrorHandler::Server)
+        })
+    }
+
+    pub async fn bgp_announcement_list(
         &self,
         opctx: &OpContext,
         sel: &params::BgpAnnounceSetSelector,

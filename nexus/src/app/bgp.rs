@@ -68,13 +68,13 @@ impl super::Nexus {
         Ok(result)
     }
 
-    pub async fn bgp_announce_list(
+    pub async fn bgp_announce_set_list(
         &self,
         opctx: &OpContext,
-        sel: &params::BgpAnnounceSetSelector,
-    ) -> ListResultVec<BgpAnnouncement> {
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<BgpAnnounceSet> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        self.db_datastore.bgp_announce_list(opctx, sel).await
+        self.db_datastore.bgp_announce_set_list(opctx, pagparams).await
     }
 
     pub async fn bgp_delete_announce_set(
@@ -86,6 +86,15 @@ impl super::Nexus {
         let result =
             self.db_datastore.bgp_delete_announce_set(opctx, sel).await?;
         Ok(result)
+    }
+
+    pub async fn bgp_announcement_list(
+        &self,
+        opctx: &OpContext,
+        sel: &params::BgpAnnounceSetSelector,
+    ) -> ListResultVec<BgpAnnouncement> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore.bgp_announcement_list(opctx, sel).await
     }
 
     pub async fn bgp_peer_status(
