@@ -504,126 +504,158 @@ TTL toDateTime(timestamp) + INTERVAL 30 DAY;
  * timeseries name and then key, since it would improve lookups where one
  * already has the key. Realistically though, these tables are quite small and
  * so performance benefits will be low in absolute terms.
+ *
+ * TTL: We use a materialized column to expire old field table records. This
+ * column is generated automatically by the database whenever a new row is
+ * inserted. It cannot be inserted directly, nor is it returned in a `SELECT *`
+ * query. Since these tables are `ReplacingMergeTree`s, that means the last
+ * record will remain during a deduplication, which will have the last
+ * timestamp. ClickHouse will then expire old data for us, similar to the
+ * measurement tables.
  */
 CREATE TABLE IF NOT EXISTS oximeter.fields_bool
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value UInt8
+    field_value UInt8,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_i8
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value Int8
+    field_value Int8,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_u8
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value UInt8
+    field_value UInt8,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_i16
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value Int16
+    field_value Int16,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_u16
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value UInt16
+    field_value UInt16,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_i32
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value Int32
+    field_value Int32,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_u32
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value UInt32
+    field_value UInt32,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_i64
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value Int64
+    field_value Int64,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_u64
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value UInt64
+    field_value UInt64,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_ipaddr
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value IPv6
+    field_value IPv6,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_string
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value String
+    field_value String,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_uuid
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value UUID
+    field_value UUID,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 /* The timeseries schema table stores the extracted schema for the samples
  * oximeter collects.
