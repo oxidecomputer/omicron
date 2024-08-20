@@ -133,8 +133,9 @@ impl ClickhouseClusterConfig {
         //
         // All keepers are new so start numbering the ids from 1
         let mut keepers = BTreeMap::new();
-        let max_used_keeper_id = raft_servers.len() as u64;
+        let mut max_used_keeper_id = 0;
         for kz in keeper_zones {
+            max_used_keeper_id += 1;
             let keeper_config = KeeperConfig {
                 logger: LogConfig {
                     level: LogLevel::Trace,
@@ -145,7 +146,7 @@ impl ClickhouseClusterConfig {
                 },
                 listen_host: kz.underlay_address.to_string(),
                 tcp_port: CLICKHOUSE_KEEPER_PORT,
-                server_id: KeeperId(max_used_server_id),
+                server_id: KeeperId(max_used_keeper_id),
                 log_storage_path: base_dir.join("coordination").join("log"),
                 snapshot_storage_path: base_dir
                     .join("coordination")
@@ -212,45 +213,32 @@ mod tests {
     use crate::deployment::blueprint_zone_type;
     use crate::deployment::BlueprintZoneType;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+    use omicron_common::address::CRUCIBLE_PANTRY_PORT;
     use omicron_common::api::external::Generation;
     use std::collections::BTreeSet;
     use std::net::{Ipv6Addr, SocketAddrV6};
 
-    /// Create a few in service `ClickhouseKeeper` and `ClickhouseServer` zones.
-    pub fn gen_in_service_clickhouse_zones(
+    /// Generate a bunch of blueprint zones for an initial blueprint
+    /// This acts like RSS and therefore all zones should be `InService`.
+    pub fn gen_initial_blueprint_zones(
     ) -> BTreeMap<SledUuid, BlueprintZonesConfig> {
         (0..3u64)
             .map(|i| {
                 let mut zones = vec![];
 
+                // The keeper zone is always the first one, for testing simplicity
+                let keeper_underlay_address =
+                    Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, i as u16 + 1);
                 let sled_id = SledUuid::new_v4();
                 let keeper_zone = BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: OmicronZoneUuid::new_v4(),
-                    underlay_address: Ipv6Addr::new(
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        i as u16 + 1,
-                    ),
+                    underlay_address: keeper_underlay_address,
                     filesystem_pool: None,
                     zone_type: BlueprintZoneType::ClickhouseKeeper(
                         blueprint_zone_type::ClickhouseKeeper {
                             address: SocketAddrV6::new(
-                                Ipv6Addr::new(
-                                    0,
-                                    0,
-                                    0,
-                                    0,
-                                    0,
-                                    0,
-                                    0,
-                                    i as u16 + 1,
-                                ),
+                                keeper_underlay_address,
                                 CLICKHOUSE_KEEPER_PORT,
                                 0,
                                 0,
@@ -263,38 +251,25 @@ mod tests {
                         },
                     ),
                 };
-                // Each sled getgs a keeper zone
+                // Each sled gets a keeper zone
                 zones.push(keeper_zone);
 
-                // Only 2 sleds get clickhouse server zones
+                // The clickhouse server zone is always the second one for
+                // testing simplicity.
+                //
+                // Only 2 sleds get clickhouse server zones.
                 if i <= 1 {
+                    let server_underlay_address =
+                        Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, i as u16 + 10);
                     let server_zone = BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: OmicronZoneUuid::new_v4(),
-                        underlay_address: Ipv6Addr::new(
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            i as u16 + 10,
-                        ),
+                        underlay_address: server_underlay_address,
                         filesystem_pool: None,
                         zone_type: BlueprintZoneType::ClickhouseServer(
                             blueprint_zone_type::ClickhouseServer {
                                 address: SocketAddrV6::new(
-                                    Ipv6Addr::new(
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        i as u16 + 10,
-                                    ),
+                                    server_underlay_address,
                                     CLICKHOUSE_HTTP_PORT,
                                     0,
                                     0,
@@ -313,6 +288,35 @@ mod tests {
                     zones.push(server_zone);
                 }
 
+                // Throw in a Crucible for good measure
+                //
+                // Crucible zones should be ignored by the clickhouse config
+                // generation code.
+                let crucible_underlay_address =
+                    Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, i as u16 + 20);
+                let crucible_zone = BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id: OmicronZoneUuid::new_v4(),
+                    underlay_address: crucible_underlay_address,
+                    filesystem_pool: None,
+                    zone_type: BlueprintZoneType::Crucible(
+                        blueprint_zone_type::Crucible {
+                            address: SocketAddrV6::new(
+                                crucible_underlay_address,
+                                CRUCIBLE_PANTRY_PORT,
+                                0,
+                                0,
+                            ),
+                            dataset: OmicronZoneDataset {
+                                pool_name: format!("oxp_{}", Uuid::new_v4())
+                                    .parse()
+                                    .expect("bad name"),
+                            },
+                        },
+                    ),
+                };
+                zones.push(crucible_zone);
+
                 (
                     sled_id,
                     BlueprintZonesConfig {
@@ -327,7 +331,7 @@ mod tests {
     #[test]
     fn test_new_clickhouse_cluster_config() {
         let cluster_name = "test-cluster".to_string();
-        let all_blueprint_zones = gen_in_service_clickhouse_zones();
+        let all_blueprint_zones = gen_initial_blueprint_zones();
         let config = ClickhouseClusterConfig::new(
             cluster_name.clone(),
             &all_blueprint_zones,
@@ -342,6 +346,7 @@ mod tests {
 
         // Ensure we have 3 valid keeper configs
         for zones_config in all_blueprint_zones.values() {
+            // Keeper zones are always first
             let keeper_bp_zone_config = zones_config.zones.first().unwrap();
             let keeper_config =
                 config.keepers.get(&keeper_bp_zone_config.id).unwrap();
@@ -354,11 +359,18 @@ mod tests {
         }
 
         // Ensure that we have 2 valid clickhouse server configs
+        let mut found_server_zones = 0;
         for zones_config in all_blueprint_zones.values() {
-            let Some(server_bp_zone_config) = zones_config.zones.get(1) else {
-                // We only have 2 clickhouse server configs
+            let Some(server_bp_zone_config) = zones_config
+                .zones
+                .iter()
+                .find(|z| z.zone_type.is_clickhouse_server())
+            else {
+                // We only have clickhouse server zones on 2 out of 3 sleds.
                 continue;
             };
+            found_server_zones += 1;
+
             let server_config =
                 config.servers.get(&server_bp_zone_config.id).unwrap();
             assert!(server_bp_zone_config.zone_type.is_clickhouse_server());
@@ -370,6 +382,50 @@ mod tests {
             assert_eq!(server_config.keepers.nodes.len(), 3);
         }
 
-        // TODO: Verify some properties about the configs such as distinct ids, etc..
+        // Ensure we generated configurations for both clickhouse server zones
+        assert_eq!(found_server_zones, 2);
+
+        // All keepers and servers should have unique IDs
+        let expected_keeper_ids: BTreeSet<_> =
+            [1, 2, 3].into_iter().map(KeeperId).collect();
+        let expected_server_ids: BTreeSet<_> =
+            [1, 2].into_iter().map(ServerId).collect();
+
+        let keeper_ids: BTreeSet<_> =
+            config.keepers.values().map(|c| c.server_id).collect();
+        let server_ids: BTreeSet<_> =
+            config.servers.values().map(|c| c.macros.replica).collect();
+
+        assert_eq!(expected_keeper_ids, keeper_ids);
+        assert_eq!(expected_server_ids, server_ids);
+
+        // All servers should have the same `remote_servers` and `keepers`
+        // configurations
+        let mut checker = None;
+        for replica_config in config.servers.values() {
+            match checker {
+                None => checker = Some(replica_config),
+                Some(checker) => {
+                    assert_eq!(
+                        checker.remote_servers,
+                        replica_config.remote_servers
+                    );
+                    assert_eq!(checker.keepers, replica_config.keepers);
+                }
+            }
+        }
+
+        // All Keepers should have the same `raft_config`
+        let mut checker = None;
+        for keeper_config in config.keepers.values() {
+            match checker {
+                None => {
+                    checker = Some(keeper_config);
+                }
+                Some(checker) => {
+                    assert_eq!(checker.raft_config, keeper_config.raft_config);
+                }
+            }
+        }
     }
 }
