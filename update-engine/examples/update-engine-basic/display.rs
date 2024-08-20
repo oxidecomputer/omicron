@@ -29,10 +29,10 @@ use crate::{
 /// An example that displays an event stream on the command line.
 pub(crate) fn make_displayer(
     log: &slog::Logger,
+    receiver: mpsc::Receiver<Event>,
     display_style: DisplayStyle,
     prefix: Option<String>,
-) -> (JoinHandle<Result<()>>, mpsc::Sender<Event>) {
-    let (sender, receiver) = mpsc::channel(512);
+) -> JoinHandle<Result<()>> {
     let log = log.clone();
     let join_handle =
         match display_style {
@@ -47,7 +47,7 @@ pub(crate) fn make_displayer(
             }),
         };
 
-    (join_handle, sender)
+    join_handle
 }
 
 async fn display_line(

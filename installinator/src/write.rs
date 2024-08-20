@@ -1075,12 +1075,6 @@ mod tests {
             (SharedTransport(Arc::clone(&inner)), SharedTransport(inner))
         };
 
-        let (event_sender, event_receiver) = tokio::sync::mpsc::channel(512);
-
-        let receiver_handle = tokio::spawn(async move {
-            ReceiverStream::new(event_receiver).collect::<Vec<_>>().await
-        });
-
         // Create a `WriteDestination` that points to our tempdir paths.
         let mut drives = BTreeMap::new();
 
@@ -1116,7 +1110,12 @@ mod tests {
             destination,
         );
 
-        let engine = UpdateEngine::new(&logctx.log, event_sender);
+        let (engine, event_receiver) = UpdateEngine::new(&logctx.log);
+
+        let receiver_handle = tokio::spawn(async move {
+            ReceiverStream::new(event_receiver).collect::<Vec<_>>().await
+        });
+
         let log = logctx.log.clone();
         engine
             .new_step(
