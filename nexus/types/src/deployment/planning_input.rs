@@ -911,15 +911,11 @@ mod tests {
             cockroachdb_version
         );
 
-        let prev_cockroachdb_version =
-            include_str!("../../../../tools/prev_cockroachdb_version")
-                .trim_start_matches('v')
-                .rsplit_once('.')
-                .unwrap()
-                .0;
+        // In the next "tick" release, this version will be stored in a
+        // different file.
         assert_eq!(
             CockroachDbClusterVersion::POLICY.to_string(),
-            prev_cockroachdb_version
+            cockroachdb_version
         );
     }
 }

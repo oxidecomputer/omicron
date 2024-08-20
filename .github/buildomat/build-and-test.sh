@@ -84,23 +84,6 @@ banner test
 ptime -m timeout 2h cargo nextest run --profile ci --locked --verbose
 
 #
-# If upgraded CockroachDB clusters are running on a different cluster version
-# than newly-initialized ones, run database-related tests from the older cluster
-# version.
-#
-if cmp tools/cockroachdb_version tools/prev_cockroachdb_version; then
-    # files are the same
-    true
-else
-    # if return code is > 1, cmp failed
-    [[ $? -gt 1 ]] && exit 2
-    # otherwise, files differ
-    cargo xtask download cockroach-prev
-    CRDB_SEED_USE_PREV=yes ptime -m timeout 1h cargo nextest run --profile ci --locked --verbose \
-        --filter-expr 'rdeps(nexus-test-utils) - package(omicron-dev)'
-fi
-
-#
 # https://github.com/nextest-rs/nextest/issues/16
 #
 banner doctest

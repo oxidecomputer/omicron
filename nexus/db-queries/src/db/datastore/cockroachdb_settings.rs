@@ -159,8 +159,8 @@ mod test {
             // This is the expected value while running tests normally.
             assert_eq!(version, CockroachDbClusterVersion::NEWLY_INITIALIZED);
         } else if settings.preserve_downgrade == version.to_string() {
-            // This is the expected value if we are running under
-            // `CRDB_SEED_USE_PREV=yes`.
+            // This is the expected value if the cluster was created on a
+            // previous version and `cluster.preserve_downgrade_option` was set.
             assert_eq!(version, CockroachDbClusterVersion::POLICY);
         } else {
             panic!(

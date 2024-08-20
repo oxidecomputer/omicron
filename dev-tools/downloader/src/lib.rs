@@ -26,7 +26,6 @@ use strum::IntoEnumIterator;
 use tar::Archive;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
-use tokio::sync::Mutex;
 
 const BUILDOMAT_URL: &'static str =
     "https://buildomat.eng.oxide.computer/public/file";
@@ -60,9 +59,6 @@ enum Target {
 
     /// CockroachDB binary
     Cockroach,
-
-    /// CockroachDB binary (previous major version)
-    CockroachPrev,
 
     /// Web console assets
     Console,
@@ -140,8 +136,7 @@ pub async fn run_cmd(args: DownloadArgs) -> Result<()> {
                     }
                     Target::CargoHack => downloader.download_cargo_hack().await,
                     Target::Clickhouse => downloader.download_clickhouse().await,
-                    Target::Cockroach => downloader.download_cockroach("").await,
-                    Target::CockroachPrev => downloader.download_cockroach("prev_").await,
+                    Target::Cockroach => downloader.download_cockroach().await,
                     Target::Console => downloader.download_console().await,
                     Target::DendriteOpenapi => {
                         downloader.download_dendrite_openapi().await
@@ -571,23 +566,20 @@ impl<'a> Downloader<'a> {
         Ok(())
     }
 
-    async fn download_cockroach(&self, prefix: &str) -> Result<()> {
+    async fn download_cockroach(&self) -> Result<()> {
         let os = os_name()?;
 
         let download_dir = self.output_dir.join("downloads");
-        let destination_dir =
-            self.output_dir.join(format!("{prefix}cockroachdb"));
+        let destination_dir = self.output_dir.join("cockroachdb");
 
-        let checksums_path =
-            self.versions_dir.join(format!("{prefix}cockroachdb_checksums"));
+        let checksums_path = self.versions_dir.join("cockroachdb_checksums");
         let [checksum] = get_values_from_file(
             [&format!("CIDL_SHA256_{}", os.env_name())],
             &checksums_path,
         )
         .await?;
 
-        let versions_path =
-            self.versions_dir.join(format!("{prefix}cockroachdb_version"));
+        let versions_path = self.versions_dir.join("cockroachdb_version");
         let version = tokio::fs::read_to_string(&versions_path)
             .await
             .context("Failed to read version from {versions_path}")?;
@@ -613,11 +605,6 @@ impl<'a> Downloader<'a> {
 
         let tarball_path = download_dir.join(tarball_filename);
 
-        // Ensure that the download and unpack steps, which might write to the
-        // same paths, only run one at a time.
-        static MUTEX: Mutex<()> = Mutex::const_new(());
-        let mutex_lock = MUTEX.lock().await;
-
         tokio::fs::create_dir_all(&download_dir).await?;
         tokio::fs::create_dir_all(&destination_dir).await?;
 
@@ -634,9 +621,6 @@ impl<'a> Downloader<'a> {
         // behavior. This could be a little more consistent with Clickhouse.
         info!(self.log, "tarball path: {tarball_path}");
         unpack_tarball(&self.log, &tarball_path, &download_dir).await?;
-
-        // We are done writing to potentially shared files
-        drop(mutex_lock);
 
         // This is where the binary will end up eventually
         let cockroach_binary = destination_dir.join("bin/cockroach");

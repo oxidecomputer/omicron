@@ -47,18 +47,10 @@ const COCKROACHDB_USER: &'static str = "root";
 
 /// Path to the CockroachDB binary
 const COCKROACHDB_BIN: &str = "cockroach";
-/// Path to the CockroachDB binary for the previous major version
-const PREV_COCKROACHDB_BIN: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../out/prev_cockroachdb/bin/cockroach"
-);
 
 /// The expected CockroachDB version
-pub(super) const COCKROACHDB_VERSION: &str =
+const COCKROACHDB_VERSION: &str =
     include_str!("../../../tools/cockroachdb_version");
-/// The expected previous CockroachDB version
-pub(super) const PREV_COCKROACHDB_VERSION: &str =
-    include_str!("../../../tools/prev_cockroachdb_version");
 
 /// Builder for [`CockroachStarter`] that supports setting some command-line
 /// arguments for the `cockroach start-single-node` command
@@ -84,8 +76,6 @@ pub struct CockroachStarterBuilder {
     args: Vec<String>,
     /// describes the command line that we're going to execute
     cmd_builder: tokio::process::Command,
-    /// expected version of CockroachDB
-    expected_version: &'static str,
     /// how long to wait for CockroachDB to report itself listening
     start_timeout: Duration,
     /// redirect stdout and stderr to files
@@ -93,17 +83,40 @@ pub struct CockroachStarterBuilder {
 }
 
 impl CockroachStarterBuilder {
-    /// Create a starter for `cockroach` on `$PATH`.
     pub fn new() -> CockroachStarterBuilder {
-        CockroachStarterBuilder::new_raw(COCKROACHDB_BIN)
-            .new_setup(COCKROACHDB_VERSION.trim())
-    }
+        let mut builder = CockroachStarterBuilder::new_raw(COCKROACHDB_BIN);
 
-    /// Create a starter for the previous major version of `cockroach`, found in
-    /// `out/prev_cockroachdb/bin`.
-    pub fn new_prev() -> CockroachStarterBuilder {
-        CockroachStarterBuilder::new_raw(PREV_COCKROACHDB_BIN)
-            .new_setup(PREV_COCKROACHDB_VERSION.trim())
+        // Copy the current set of environment variables.  We could instead
+        // allow the default behavior of inheriting the current process
+        // environment.  But we want to print these out.  If we use the default
+        // behavior, it's possible that what we print out wouldn't match what
+        // was used if some other thread modified the process environment in
+        // between.
+        builder.cmd_builder.env_clear();
+
+        // Configure Go to generate a core file on fatal error.  This behavior
+        // may be overridden by the user if they've set this variable in their
+        // environment.
+        builder.env("GOTRACEBACK", "crash");
+        for (key, value) in std::env::vars_os() {
+            builder.env(key, value);
+        }
+
+        // We use single-node insecure mode listening only on localhost.  We
+        // consider this secure enough for development (including the test
+        // suite), though it does allow anybody on the system to do anything
+        // with this database (including fill up all disk space).  (It wouldn't
+        // be unreasonable to secure this with certificates even though we're
+        // on localhost.
+        //
+        // If we decide to let callers customize various listening addresses, we
+        // should be careful about making it too easy to generate a more
+        // insecure configuration.
+        builder
+            .arg("start-single-node")
+            .arg("--insecure")
+            .arg("--http-addr=:0");
+        builder
     }
 
     /// Helper for constructing a `CockroachStarterBuilder` that runs a specific
@@ -119,45 +132,9 @@ impl CockroachStarterBuilder {
             env: BTreeMap::new(),
             args: vec![String::from(cmd)],
             cmd_builder: tokio::process::Command::new(cmd),
-            expected_version: "",
             start_timeout: COCKROACHDB_START_TIMEOUT_DEFAULT,
             redirect_stdio: false,
         }
-    }
-
-    /// Common setup to run after `new_raw`.
-    fn new_setup(mut self, expected_version: &'static str) -> Self {
-        self.expected_version = expected_version;
-
-        // Copy the current set of environment variables.  We could instead
-        // allow the default behavior of inheriting the current process
-        // environment.  But we want to print these out.  If we use the default
-        // behavior, it's possible that what we print out wouldn't match what
-        // was used if some other thread modified the process environment in
-        // between.
-        self.cmd_builder.env_clear();
-
-        // Configure Go to generate a core file on fatal error.  This behavior
-        // may be overridden by the user if they've set this variable in their
-        // environment.
-        self.env("GOTRACEBACK", "crash");
-        for (key, value) in std::env::vars_os() {
-            self.env(key, value);
-        }
-
-        // We use single-node insecure mode listening only on localhost.  We
-        // consider this secure enough for development (including the test
-        // suite), though it does allow anybody on the system to do anything
-        // with this database (including fill up all disk space).  (It wouldn't
-        // be unreasonable to secure this with certificates even though we're
-        // on localhost.
-        //
-        // If we decide to let callers customize various listening addresses, we
-        // should be careful about making it too easy to generate a more
-        // insecure configuration.
-        self.arg("start-single-node").arg("--insecure").arg("--http-addr=:0");
-
-        self
     }
 
     /// Redirect stdout and stderr for the "cockroach" process to files within
@@ -269,7 +246,6 @@ impl CockroachStarterBuilder {
             args: self.args,
             env: self.env,
             cmd_builder: self.cmd_builder,
-            expected_version: self.expected_version,
             start_timeout: self.start_timeout,
         })
     }
@@ -325,8 +301,6 @@ pub struct CockroachStarter {
     args: Vec<String>,
     /// the command line that we're going to execute
     cmd_builder: tokio::process::Command,
-    /// expected version of CockroachDB
-    expected_version: &'static str,
     /// how long to wait for the listen URL to be written
     start_timeout: Duration,
 }
@@ -367,11 +341,7 @@ impl CockroachStarter {
     pub async fn start(
         mut self,
     ) -> Result<CockroachInstance, CockroachStartError> {
-        check_db_version(
-            self.cmd_builder.as_std().get_program(),
-            self.expected_version,
-        )
-        .await?;
+        check_db_version().await?;
 
         let mut child_process = self.cmd_builder.spawn().map_err(|source| {
             CockroachStartError::BadCmd { cmd: self.args[0].clone(), source }
@@ -733,30 +703,18 @@ pub async fn format_sql(input: &str) -> Result<String, CockroachStartError> {
 }
 
 /// Verify that CockroachDB has the correct version
-async fn check_db_version(
-    bin: &OsStr,
-    expected_version: &str,
-) -> Result<(), CockroachStartError> {
-    if expected_version.is_empty() {
-        // This can happen when `new_raw` is called without running `new_setup`,
-        // which we do in some tests. In that situation, `bin` might not be
-        // CockroachDB!
-        return Ok(());
-    }
-
-    let mut cmd = tokio::process::Command::new(bin);
+pub async fn check_db_version() -> Result<(), CockroachStartError> {
+    let mut cmd = tokio::process::Command::new(COCKROACHDB_BIN);
     cmd.args(&["version", "--build-tag"]);
     cmd.env("GOTRACEBACK", "crash");
-    let output =
-        cmd.output().await.map_err(|source| CockroachStartError::BadCmd {
-            cmd: bin.to_string_lossy().into_owned(),
-            source,
-        })?;
+    let output = cmd.output().await.map_err(|source| {
+        CockroachStartError::BadCmd { cmd: COCKROACHDB_BIN.to_string(), source }
+    })?;
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     if !output.status.success() {
         return Err(CockroachStartError::BadVersion {
-            expected: expected_version.to_string(),
+            expected: COCKROACHDB_VERSION.trim().to_string(),
             found: Err(anyhow!(
                 "error {:?} when checking CockroachDB version",
                 output.status.code()
@@ -783,10 +741,10 @@ async fn check_db_version(
         version_str
     };
 
-    if version_str != expected_version {
+    if version_str != COCKROACHDB_VERSION.trim() {
         return Err(CockroachStartError::BadVersion {
             found: Ok(version_str.to_string()),
-            expected: expected_version.to_string(),
+            expected: COCKROACHDB_VERSION.trim().to_string(),
             stdout,
             stderr,
         });
