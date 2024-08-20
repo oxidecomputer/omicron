@@ -70,6 +70,14 @@ impl From<nexus_db_model::Sled> for Sled {
     }
 }
 
+/// The result of calling [`realize_blueprint`] or
+/// [`realize_blueprint_with_overrides`].
+#[derive(Debug)]
+pub struct RealizeBlueprintOutput {
+    /// Whether any sagas need to be reassigned to a new Nexus.
+    pub needs_saga_recovery: bool,
+}
+
 /// Make one attempt to realize the given blueprint, meaning to take actions to
 /// alter the real system to match the blueprint
 ///
@@ -81,7 +89,7 @@ pub async fn realize_blueprint(
     resolver: &Resolver,
     blueprint: &Blueprint,
     nexus_id: Uuid,
-) -> Result<bool, Vec<anyhow::Error>> {
+) -> Result<RealizeBlueprintOutput, Vec<anyhow::Error>> {
     realize_blueprint_with_overrides(
         opctx,
         datastore,
@@ -100,7 +108,7 @@ pub async fn realize_blueprint_with_overrides(
     blueprint: &Blueprint,
     nexus_id: Uuid,
     overrides: &Overridables,
-) -> Result<bool, Vec<anyhow::Error>> {
+) -> Result<RealizeBlueprintOutput, Vec<anyhow::Error>> {
     let opctx = opctx.child(BTreeMap::from([(
         "comment".to_string(),
         blueprint.comment.clone(),
@@ -245,7 +253,7 @@ pub async fn realize_blueprint_with_overrides(
     }
 
     if errors.is_empty() {
-        Ok(needs_saga_recovery)
+        Ok(RealizeBlueprintOutput { needs_saga_recovery })
     } else {
         Err(errors)
     }

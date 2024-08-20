@@ -34,12 +34,10 @@ where
     pub(crate) fn new(
         log: &slog::Logger,
         update_id: Uuid,
+        event_receiver: mpsc::Receiver<Event>,
         discover_fn: F,
-    ) -> (Self, mpsc::Sender<Event>) {
-        // Set a large enough buffer that it filling up isn't an actual problem
-        // outside of something going horribly wrong.
-        let (event_sender, event_receiver) = mpsc::channel(512);
-        let ret = Self {
+    ) -> Self {
+        Self {
             log: log.new(slog::o!("component" => "EventReporter")),
             update_id,
             discover_fn,
@@ -49,8 +47,7 @@ where
             buffer: EventBuffer::new(8),
             last_reported: None,
             on_tick_task: None,
-        };
-        (ret, event_sender)
+        }
     }
 
     pub(crate) fn start(mut self) -> tokio::task::JoinHandle<()> {
