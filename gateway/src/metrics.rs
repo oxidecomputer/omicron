@@ -540,10 +540,15 @@ impl SpPoller {
         poll_interval: Duration,
         apictx: Arc<ServerContext>,
     ) -> Result<(), SpCommsError> {
+        /// How long to wait when a SP is not present.
+        ///
+        /// I picked this arbitrarily. It would be much nicer if we could
+        /// instead recieve a notification when the discovery state changes...
+        const NO_SP_BACKOFF: Duration = Duration::from_secs(30);
         let mut interval = tokio::time::interval(poll_interval);
         let switch = &apictx.mgmt_switch;
         let sp = switch.sp(self.spid)?;
-
+        let mut not_present_message_logged = false;
         loop {
             interval.tick().await;
             slog::trace!(&self.log, "interval elapsed, polling SP...");
@@ -565,12 +570,23 @@ impl SpPoller {
                         return Ok(());
                     }
                 }
+                //
                 Err(CommunicationError::NoSpDiscovered) => {
-                    slog::info!(
-                        &self.log,
-                        "our SP seems to no longer be present; giving up."
-                    );
-                    return Ok(());
+                    if !not_present_message_logged {
+                        not_present_message_logged = true;
+                        slog::info!(
+                            &self.log,
+                            "our SP seems to not be present, waiting to see if it \
+                             appears..."
+                        );
+                    } else {
+                        slog::debug!(
+                            &self.log,
+                            "SP is still not there, checking again in a little bit."
+                        )
+                    }
+
+                    tokio::time::sleep(NO_SP_BACKOFF).await;
                 }
                 Err(error) => {
                     slog::warn!(
