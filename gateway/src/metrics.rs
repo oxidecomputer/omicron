@@ -550,13 +550,21 @@ impl SpPoller {
             match self.poll(sp).await {
                 // No sense cluttering the ringbuffer with empty vecs...
                 Ok(samples) if samples.is_empty() => {
-                    slog::trace!(&self.log, "polled SP, no samples returned"; "num_samples" => 0usize);
+                    slog::trace!(
+                        &self.log,
+                        "polled SP, no samples returned";
+                        "num_samples" => 0usize
+                    );
                 }
                 Ok(samples) => {
-                    slog::trace!(&self.log, "polled SP successfully"; "num_samples" => samples.len());
+                    slog::trace!(
+                        &self.log,
+                        "polled SP successfully";
+                        "num_samples" => samples.len(),
+                    );
 
                     if let Err(_) = self.sample_tx.send(samples) {
-                        slog::info!(
+                        slog::debug!(
                             &self.log,
                             "all sample receiver handles have been dropped! \
                              presumably we are shutting down...";
@@ -569,6 +577,11 @@ impl SpPoller {
                 // a sled added to it in the future. So, let's wait until it
                 // changes.
                 Err(CommunicationError::NoSpDiscovered) => {
+                    slog::info!(
+                        &self.log,
+                        "no SP is present for this slot. waiting for a \
+                         little buddy to appear...";
+                    );
                     let mut watch = sp.sp_addr_watch().clone();
                     loop {
                         if let Some((addr, port)) = *watch.borrow_and_update() {
@@ -582,13 +595,8 @@ impl SpPoller {
                             break;
                         }
 
-                        slog::info!(
-                            &self.log,
-                            "no SP is present for this slot. waiting for a \
-                             little buddy to appear...";
-                        );
-
                         // Wait for an address to be discovered.
+                        slog::debug!(&self.log, "waiting for a SP to appear.");
                         if watch.changed().await.is_err() {
                             slog::debug!(
                                 &self.log,
