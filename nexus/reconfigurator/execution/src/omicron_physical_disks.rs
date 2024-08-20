@@ -100,6 +100,7 @@ pub(crate) async fn deploy_disks(
 
 /// Typestate indicating that the deploy disks step was performed.
 #[derive(Debug)]
+#[must_use = "this should be passed into decommission_expunged_disks"]
 pub(crate) struct DeployDisksDone {}
 
 /// Decommissions all disks which are currently expunged.
@@ -227,9 +228,13 @@ mod test {
         // Get a success result back when the blueprint has an empty set of
         // disks.
         let (_, blueprint) = create_blueprint(BTreeMap::new());
-        deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
-            .await
-            .expect("failed to deploy no disks");
+        // Use an explicit type here because not doing so can cause errors to
+        // be ignored (this behavior is genuinely terrible). Instead, ensure
+        // that the type has the right result.
+        let _: DeployDisksDone =
+            deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
+                .await
+                .expect("failed to deploy no disks");
 
         // Disks are updated in a particular order, but each request contains
         // the full set of disks that must be running.
@@ -282,9 +287,10 @@ mod test {
         }
 
         // Execute it.
-        deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
-            .await
-            .expect("failed to deploy initial disks");
+        let _: DeployDisksDone =
+            deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
+                .await
+                .expect("failed to deploy initial disks");
 
         s1.verify_and_clear();
         s2.verify_and_clear();
@@ -303,9 +309,10 @@ mod test {
                 )),
             );
         }
-        deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
-            .await
-            .expect("failed to deploy same disks");
+        let _: DeployDisksDone =
+            deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
+                .await
+                .expect("failed to deploy same disks");
         s1.verify_and_clear();
         s2.verify_and_clear();
 
