@@ -101,12 +101,15 @@ impl BlueprintExecutor {
         // If executing the blueprint requires activating the saga recovery
         // background task, do that now.
         info!(&opctx.log, "activating saga recovery task");
-        if let Ok(true) = result {
-            self.saga_recovery.activate();
+        if let Ok(output) = &result {
+            if output.needs_saga_recovery {
+                self.saga_recovery.activate();
+            }
         }
 
         // Return the result as a `serde_json::Value`
         match result {
+            // TODO: should we serialize the output above as a JSON object?
             Ok(_) => json!({}),
             Err(errors) => {
                 let errors: Vec<_> =

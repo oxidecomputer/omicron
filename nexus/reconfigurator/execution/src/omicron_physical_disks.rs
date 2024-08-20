@@ -25,7 +25,7 @@ pub(crate) async fn deploy_disks(
     opctx: &OpContext,
     sleds_by_id: &BTreeMap<SledUuid, Sled>,
     sled_configs: &BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
-) -> Result<(), Vec<anyhow::Error>> {
+) -> Result<DeployDisksDone, Vec<anyhow::Error>> {
     let errors: Vec<_> = stream::iter(sled_configs)
         .filter_map(|(sled_id, config)| async move {
             let log = opctx.log.new(o!(
@@ -92,16 +92,26 @@ pub(crate) async fn deploy_disks(
         .await;
 
     if errors.is_empty() {
-        Ok(())
+        Ok(DeployDisksDone {})
     } else {
         Err(errors)
     }
 }
 
-/// Decommissions all disks which are currently expunged
+/// Typestate indicating that the deploy disks step was performed.
+#[derive(Debug)]
+#[must_use = "this should be passed into decommission_expunged_disks"]
+pub(crate) struct DeployDisksDone {}
+
+/// Decommissions all disks which are currently expunged.
 pub(crate) async fn decommission_expunged_disks(
     opctx: &OpContext,
     datastore: &DataStore,
+    // This is taken as a parameter to ensure that this depends on a
+    // "deploy_disks" call made earlier. Disk expungement is a statement of
+    // policy, but we need to be assured that the Sled Agent has stopped using
+    // that disk before we can mark its state as decommissioned.
+    _deploy_disks_done: DeployDisksDone,
 ) -> Result<(), Vec<anyhow::Error>> {
     datastore
         .physical_disk_decommission_all_expunged(&opctx)
@@ -113,6 +123,7 @@ pub(crate) async fn decommission_expunged_disks(
 #[cfg(test)]
 mod test {
     use super::deploy_disks;
+    use super::DeployDisksDone;
 
     use crate::DataStore;
     use crate::Sled;
@@ -217,9 +228,13 @@ mod test {
         // Get a success result back when the blueprint has an empty set of
         // disks.
         let (_, blueprint) = create_blueprint(BTreeMap::new());
-        deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
-            .await
-            .expect("failed to deploy no disks");
+        // Use an explicit type here because not doing so can cause errors to
+        // be ignored (this behavior is genuinely terrible). Instead, ensure
+        // that the type has the right result.
+        let _: DeployDisksDone =
+            deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
+                .await
+                .expect("failed to deploy no disks");
 
         // Disks are updated in a particular order, but each request contains
         // the full set of disks that must be running.
@@ -272,9 +287,10 @@ mod test {
         }
 
         // Execute it.
-        deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
-            .await
-            .expect("failed to deploy initial disks");
+        let _: DeployDisksDone =
+            deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
+                .await
+                .expect("failed to deploy initial disks");
 
         s1.verify_and_clear();
         s2.verify_and_clear();
@@ -293,9 +309,10 @@ mod test {
                 )),
             );
         }
-        deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
-            .await
-            .expect("failed to deploy same disks");
+        let _: DeployDisksDone =
+            deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
+                .await
+                .expect("failed to deploy same disks");
         s1.verify_and_clear();
         s2.verify_and_clear();
 
@@ -567,7 +584,15 @@ mod test {
         assert_eq!(d.disk_state, PhysicalDiskState::Active);
         assert_eq!(d.disk_policy, PhysicalDiskPolicy::InService);
 
-        super::decommission_expunged_disks(&opctx, &datastore).await.unwrap();
+        super::decommission_expunged_disks(
+            &opctx,
+            &datastore,
+            // This is an internal test, and we're testing decommissioning in
+            // isolation, so it's okay to create the typestate here.
+            DeployDisksDone {},
+        )
+        .await
+        .unwrap();
 
         // After decommissioning, we see the expunged disk become
         // decommissioned. The other disk remains in-service.

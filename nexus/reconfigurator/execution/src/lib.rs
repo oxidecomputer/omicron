@@ -70,6 +70,15 @@ impl From<nexus_db_model::Sled> for Sled {
     }
 }
 
+/// The result of calling [`realize_blueprint`] or
+/// [`realize_blueprint_with_overrides`].
+#[derive(Debug)]
+#[must_use = "the output of realize_blueprint should probably be used"]
+pub struct RealizeBlueprintOutput {
+    /// Whether any sagas need to be reassigned to a new Nexus.
+    pub needs_saga_recovery: bool,
+}
+
 /// Make one attempt to realize the given blueprint, meaning to take actions to
 /// alter the real system to match the blueprint
 ///
@@ -81,7 +90,7 @@ pub async fn realize_blueprint(
     resolver: &Resolver,
     blueprint: &Blueprint,
     nexus_id: Uuid,
-) -> Result<bool, Vec<anyhow::Error>> {
+) -> Result<RealizeBlueprintOutput, Vec<anyhow::Error>> {
     realize_blueprint_with_overrides(
         opctx,
         datastore,
@@ -100,7 +109,7 @@ pub async fn realize_blueprint_with_overrides(
     blueprint: &Blueprint,
     nexus_id: Uuid,
     overrides: &Overridables,
-) -> Result<bool, Vec<anyhow::Error>> {
+) -> Result<RealizeBlueprintOutput, Vec<anyhow::Error>> {
     let opctx = opctx.child(BTreeMap::from([(
         "comment".to_string(),
         blueprint.comment.clone(),
@@ -132,7 +141,7 @@ pub async fn realize_blueprint_with_overrides(
         })
         .collect();
 
-    omicron_physical_disks::deploy_disks(
+    let deploy_disks_done = omicron_physical_disks::deploy_disks(
         &opctx,
         &sleds_by_id,
         &blueprint.blueprint_disks,
@@ -205,11 +214,12 @@ pub async fn realize_blueprint_with_overrides(
     )
     .await?;
 
-    // This depends on the "deploy_disks" call earlier -- disk expungement is a
-    // statement of policy, but we need to be assured that the Sled Agent has
-    // stopped using that disk before we can mark its state as decommissioned.
-    omicron_physical_disks::decommission_expunged_disks(&opctx, datastore)
-        .await?;
+    omicron_physical_disks::decommission_expunged_disks(
+        &opctx,
+        datastore,
+        deploy_disks_done,
+    )
+    .await?;
 
     // From this point on, we'll assume that any errors that we encounter do
     // *not* require stopping execution.  We'll just accumulate them and return
@@ -244,7 +254,7 @@ pub async fn realize_blueprint_with_overrides(
     }
 
     if errors.is_empty() {
-        Ok(needs_saga_recovery)
+        Ok(RealizeBlueprintOutput { needs_saga_recovery })
     } else {
         Err(errors)
     }
