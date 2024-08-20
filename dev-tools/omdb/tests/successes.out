@@ -176,7 +176,6 @@ SP DETAILS: type "Sled" slot 1
 
         NAME         DESCRIPTION                              DEVICE       PRESENCE SERIAL 
         sp3-host-cpu FAKE host cpu                            sp3-host-cpu Present  None   
-        sp3-host-cpu FAKE host cpu                            sp3-host-cpu Present  None   
         dev-0        FAKE temperature sensor                  tmp117       Present  None   
         dev-1        FAKE temperature sensor                  tmp117       Present  None   
         dev-2        FAKE Southeast temperature sensor        tmp117       Present  None   
