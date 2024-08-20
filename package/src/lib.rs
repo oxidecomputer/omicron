@@ -68,6 +68,21 @@ pub enum TargetCommand {
         /// fail in a single-sled environment. `single-sled` relaxes this
         /// requirement.
         rack_topology: crate::target::RackTopology,
+
+        #[clap(
+            short,
+            long,
+            default_value = Some("single-node"),
+            required = false
+        )]
+        // TODO (https://github.com/oxidecomputer/omicron/issues/4148): Remove
+        // once single-node functionality is removed.
+        /// Specify whether clickhouse will be deployed as a replicated cluster
+        /// or single-node configuration.
+        ///
+        /// Replicated cluster configuration is an experimental feature to be
+        /// used only for testing.
+        clickhouse_topology: crate::target::ClickhouseTopology,
     },
     /// List all existing targets
     List,

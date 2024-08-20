@@ -510,6 +510,10 @@ mod test {
             ServiceName::ClickhouseKeeper.dns_name(),
             "_clickhouse-keeper._tcp",
         );
+        assert_eq!(
+            ServiceName::ClickhouseServer.dns_name(),
+            "_clickhouse-server._tcp",
+        );
         assert_eq!(ServiceName::Cockroach.dns_name(), "_cockroach._tcp",);
         assert_eq!(ServiceName::InternalDns.dns_name(), "_nameservice._tcp",);
         assert_eq!(ServiceName::Nexus.dns_name(), "_nexus._tcp",);

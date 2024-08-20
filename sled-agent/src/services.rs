@@ -1618,18 +1618,82 @@ impl ServiceManager {
                 zone:
                     OmicronZoneConfig {
                         zone_type: OmicronZoneType::ClickhouseServer { .. },
-                        underlay_address: _,
+                        underlay_address,
                         ..
                     },
                 ..
             }) => {
-                // We aren't yet deploying this service
-                error!(
-                    &self.inner.log,
-                    "Deploying ClickhouseServer zones is not yet supported"
-                );
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
 
-                todo!()
+                let listen_addr = *underlay_address;
+                let listen_port = CLICKHOUSE_PORT.to_string();
+
+                let nw_setup_service = Self::zone_network_setup_install(
+                    Some(&info.underlay_address),
+                    &installed_zone,
+                    &[listen_addr],
+                )?;
+
+                let dns_service = Self::dns_install(info, None, &None).await?;
+
+                let config = PropertyGroupBuilder::new("config")
+                    .add_property(
+                        "listen_addr",
+                        "astring",
+                        listen_addr.to_string(),
+                    )
+                    .add_property("listen_port", "astring", listen_port)
+                    .add_property("store", "astring", "/data");
+                let clickhouse_server_service =
+                    ServiceBuilder::new("oxide/clickhouse_server")
+                        .add_instance(
+                            ServiceInstanceBuilder::new("default")
+                                .add_property_group(config),
+                        );
+
+                let ch_address =
+                    SocketAddr::new(IpAddr::V6(listen_addr), CLICKHOUSE_PORT)
+                        .to_string();
+
+                let admin_address = SocketAddr::new(
+                    IpAddr::V6(listen_addr),
+                    CLICKHOUSE_ADMIN_PORT,
+                )
+                .to_string();
+
+                let clickhouse_admin_config =
+                    PropertyGroupBuilder::new("config")
+                        .add_property(
+                            "clickhouse_address",
+                            "astring",
+                            ch_address,
+                        )
+                        .add_property("http_address", "astring", admin_address);
+                let clickhouse_admin_service =
+                    ServiceBuilder::new("oxide/clickhouse-admin").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(clickhouse_admin_config),
+                    );
+
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
+                    .add_service(disabled_ssh_service)
+                    .add_service(clickhouse_server_service)
+                    .add_service(dns_service)
+                    .add_service(enabled_dns_client_service)
+                    .add_service(clickhouse_admin_service);
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| {
+                        Error::io(
+                            "Failed to setup clickhouse server profile",
+                            err,
+                        )
+                    })?;
+                RunningZone::boot(installed_zone).await?
             }
 
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
