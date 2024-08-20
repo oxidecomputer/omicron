@@ -1,0 +1,52 @@
+<?xml version="1.0"?>
+<!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
+
+<service_bundle type='manifest' name='oximeter'>
+
+<service name='oxide/oximeter' type='service' version='1'>
+  <create_default_instance enabled='true' />
+
+  <dependency name='multi_user' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/milestone/multi-user:default' />
+  </dependency>
+
+  <dependency name='zone_network_setup' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/oxide/zone-network-setup:default' />
+  </dependency>
+
+  <method_context>
+    <method_environment>
+      <envvar name="LD_LIBRARY_PATH" value="/opt/ooce/pgsql-13/lib/amd64" />
+    </method_environment>
+  </method_context>
+  <exec_method type='method' name='start'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/oximeter-collector/bin/oximeter run /var/svc/manifest/site/oximeter/config.toml --address %{config/address} --id %{config/id} &amp;'
+    timeout_seconds='0'>
+  </exec_method>
+
+  <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
+
+  <property_group name='config' type='application'>
+    <propval name='id' type='astring' value='unknown' />
+    <propval name='address' type='astring' value='unknown' />
+  </property_group>
+
+  <property_group name='startd' type='framework'>
+    <propval name='duration' type='astring' value='contract' />
+  </property_group>
+
+  <stability value='Unstable' />
+
+  <template>
+    <common_name>
+      <loctext xml:lang='C'>Oxide Metric Collector</loctext>
+    </common_name>
+    <description>
+      <loctext xml:lang='C'>Server for collecting metrics from the Oxide rack</loctext>
+    </description>
+  </template>
+</service>
+
+</service_bundle>
