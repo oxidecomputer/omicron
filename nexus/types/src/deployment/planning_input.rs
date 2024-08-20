@@ -239,6 +239,8 @@ impl CockroachDbSettings {
 pub enum CockroachDbClusterVersion {
     #[display("22.1")]
     V22_1,
+    #[display("22.2")]
+    V22_2,
 }
 
 impl CockroachDbClusterVersion {
@@ -262,7 +264,7 @@ impl CockroachDbClusterVersion {
     /// version specified by `CockroachDbClusterVersion::POLICY`. During "tock"
     /// releases, these versions are the same.
     pub const NEWLY_INITIALIZED: CockroachDbClusterVersion =
-        CockroachDbClusterVersion::V22_1;
+        CockroachDbClusterVersion::V22_2;
 }
 
 /// Whether to set `cluster.preserve_downgrade_option` and what to set it to.

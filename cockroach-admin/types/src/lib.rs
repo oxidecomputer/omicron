@@ -4,7 +4,7 @@
 
 use std::{io, net::SocketAddr};
 
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
 use serde::{de, Deserialize, Serialize};
 
@@ -89,9 +89,9 @@ where
         where
             E: de::Error,
         {
-            let dt = NaiveDateTime::parse_from_str(v, "%Y-%m-%d %H:%M:%S%.f")
+            let dt = DateTime::parse_from_str(v, "%Y-%m-%d %H:%M:%S%.f %z %Z")
                 .map_err(E::custom)?;
-            Ok(DateTime::from_naive_utc_and_offset(dt, Utc))
+            Ok(dt.to_utc())
         }
     }
 
@@ -235,7 +235,7 @@ mod tests {
     #[test]
     fn test_node_status_parse_single_line_from_csv() {
         let input = br#"id,address,sql_address,build,started_at,updated_at,locality,is_available,is_live
-1,[::1]:42021,[::1]:42021,v22.1.9,2024-05-21 15:19:50.523796,2024-05-21 16:31:28.050069,,true,true"#;
+1,[::1]:42021,[::1]:42021,v22.1.9,2024-05-21 15:19:50.523796 +0000 UTC,2024-05-21 16:31:28.050069 +0000 UTC,,true,true"#;
         let expected = NodeStatus {
             node_id: "1".to_string(),
             address: "[::1]:42021".parse().unwrap(),
@@ -267,11 +267,11 @@ mod tests {
     #[test]
     fn test_node_status_parse_multiple_lines_from_csv() {
         let input = br#"id,address,sql_address,build,started_at,updated_at,locality,is_available,is_live
-1,[fd00:1122:3344:109::3]:32221,[fd00:1122:3344:109::3]:32221,v22.1.9-dirty,2024-05-18 19:18:00.597145,2024-05-21 15:22:34.290434,,true,true
-2,[fd00:1122:3344:105::3]:32221,[fd00:1122:3344:105::3]:32221,v22.1.9-dirty,2024-05-18 19:17:01.796714,2024-05-21 15:22:34.901268,,true,true
-3,[fd00:1122:3344:10b::3]:32221,[fd00:1122:3344:10b::3]:32221,v22.1.9-dirty,2024-05-18 19:18:52.37564,2024-05-21 15:22:36.341146,,true,true
-4,[fd00:1122:3344:107::3]:32221,[fd00:1122:3344:107::3]:32221,v22.1.9-dirty,2024-05-18 19:16:22.788276,2024-05-21 15:22:34.897047,,true,true
-5,[fd00:1122:3344:108::3]:32221,[fd00:1122:3344:108::3]:32221,v22.1.9-dirty,2024-05-18 19:18:09.196634,2024-05-21 15:22:35.168738,,true,true"#;
+1,[fd00:1122:3344:109::3]:32221,[fd00:1122:3344:109::3]:32221,v22.1.9-dirty,2024-05-18 19:18:00.597145 +0000 UTC,2024-05-21 15:22:34.290434 +0000 UTC,,true,true
+2,[fd00:1122:3344:105::3]:32221,[fd00:1122:3344:105::3]:32221,v22.1.9-dirty,2024-05-18 19:17:01.796714 +0000 UTC,2024-05-21 15:22:34.901268 +0000 UTC,,true,true
+3,[fd00:1122:3344:10b::3]:32221,[fd00:1122:3344:10b::3]:32221,v22.1.9-dirty,2024-05-18 19:18:52.37564 +0000 UTC,2024-05-21 15:22:36.341146 +0000 UTC,,true,true
+4,[fd00:1122:3344:107::3]:32221,[fd00:1122:3344:107::3]:32221,v22.1.9-dirty,2024-05-18 19:16:22.788276 +0000 UTC,2024-05-21 15:22:34.897047 +0000 UTC,,true,true
+5,[fd00:1122:3344:108::3]:32221,[fd00:1122:3344:108::3]:32221,v22.1.9-dirty,2024-05-18 19:18:09.196634 +0000 UTC,2024-05-21 15:22:35.168738 +0000 UTC,,true,true"#;
         let expected = vec![
             NodeStatus {
                 node_id: "1".to_string(),
