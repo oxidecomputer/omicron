@@ -37,6 +37,7 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 oximeter::use_timeseries!("sensor-measurement.toml");
+use hardware_component as metric;
 
 /// Handle to the metrics tasks.
 pub struct Metrics {
@@ -107,7 +108,7 @@ struct SpPoller {
 }
 
 struct ComponentMetrics {
-    target: component::Component,
+    target: metric::HardwareComponent,
     /// Counts of errors reported by sensors on this component.
     sensor_errors: HashMap<SensorErrorKey, Cumulative<u64>>,
     /// Counts of errors that occurred whilst polling the SP for measurements
@@ -705,21 +706,21 @@ impl SpPoller {
                 // TODO(eliza): i hate having to clone all these strings for
                 // every device on the SP...it would be cool if Oximeter let us
                 // reference count them...
-                let target = component::Component {
-                    chassis_type: Cow::Borrowed(match self.spid.typ {
+                let target = metric::HardwareComponent {
+                    rack_id: self.rack_id,
+                    gateway_id: self.mgs_id,
+                    chassis_model: Cow::Owned(model.clone()),
+                    chassis_revision: revision,
+                    chassis_kind: Cow::Borrowed(match self.spid.typ {
                         SpType::Sled => "sled",
                         SpType::Switch => "switch",
                         SpType::Power => "power",
                     }),
-                    slot: self.spid.slot as u32,
-                    component,
-                    device: Cow::Owned(dev.device),
-                    model: Cow::Owned(model.clone()),
-                    revision,
-                    serial: Cow::Owned(serial.clone()),
-                    rack_id: self.rack_id,
-                    gateway_id: self.mgs_id,
+                    chassis_serial: Cow::Owned(serial.clone()),
                     hubris_archive_id: Cow::Owned(hubris_archive_id.clone()),
+                    slot: self.spid.slot as u32,
+                    component_kind: Cow::Owned(dev.device),
+                    component,
                 };
                 match self.components.entry(dev.component) {
                     // Found a new device!
@@ -728,7 +729,7 @@ impl SpPoller {
                             &self.log,
                             "discovered a new component!";
                             "component" => ?dev.component,
-                            "device" => ?target.device,
+                            "device" => ?target.component_kind,
                         );
                         entry.insert(ComponentMetrics {
                             target,
@@ -823,33 +824,32 @@ impl SpPoller {
                     // than measurement channels, ignore it for now.
                     continue;
                 };
-                let name = Cow::Owned(m.name);
+                let sensor = Cow::Owned(m.name);
                 let sample = match (m.value, m.kind) {
                     (Ok(datum), MeasurementKind::Temperature) => Sample::new(
                         target,
-                        &component::Temperature { name, datum },
+                        &metric::Temperature { sensor, datum },
                     ),
                     (Ok(datum), MeasurementKind::Current) => {
-                        Sample::new(target, &component::Current { name, datum })
+                        Sample::new(target, &metric::Current { sensor, datum })
                     }
                     (Ok(datum), MeasurementKind::Voltage) => {
-                        Sample::new(target, &component::Voltage { name, datum })
+                        Sample::new(target, &metric::Voltage { sensor, datum })
                     }
                     (Ok(datum), MeasurementKind::Power) => {
-                        Sample::new(target, &component::Power { name, datum })
+                        Sample::new(target, &metric::Power { sensor, datum })
                     }
                     (Ok(datum), MeasurementKind::InputCurrent) => Sample::new(
                         target,
-                        &component::InputCurrent { name, datum },
+                        &metric::InputCurrent { sensor, datum },
                     ),
                     (Ok(datum), MeasurementKind::InputVoltage) => Sample::new(
                         target,
-                        &component::InputVoltage { name, datum },
+                        &metric::InputVoltage { sensor, datum },
                     ),
-                    (Ok(datum), MeasurementKind::Speed) => Sample::new(
-                        target,
-                        &component::FanSpeed { name, datum },
-                    ),
+                    (Ok(datum), MeasurementKind::Speed) => {
+                        Sample::new(target, &metric::FanSpeed { sensor, datum })
+                    }
                     (Err(e), kind) => {
                         let kind = match kind {
                             MeasurementKind::Temperature => "temperature",
@@ -873,7 +873,7 @@ impl SpPoller {
                         };
                         let datum = sensor_errors
                             .entry(SensorErrorKey {
-                                name: name.clone(),
+                                name: sensor.clone(),
                                 kind,
                                 error,
                             })
@@ -887,9 +887,9 @@ impl SpPoller {
                         datum.increment();
                         Sample::new(
                             target,
-                            &component::SensorErrorCount {
+                            &metric::SensorErrorCount {
                                 error: Cow::Borrowed(error),
-                                name,
+                                sensor,
                                 datum: *datum,
                                 sensor_kind: Cow::Borrowed(kind),
                             },
@@ -1019,7 +1019,7 @@ impl ComponentMetrics {
         datum.increment();
         Sample::new(
             &self.target,
-            &component::PollErrorCount {
+            &metric::PollErrorCount {
                 error: Cow::Borrowed(error_str),
                 datum: *datum,
             },

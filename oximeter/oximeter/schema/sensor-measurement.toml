@@ -1,21 +1,21 @@
 format_version = 1
 
 [target]
-name = "component"
-description = "A component which reports sensor measurements"
+name = "hardware_component"
+description = "A hardware component on a compute sled, switch, or power shelf"
 authz_scope = "fleet"
 versions = [
     { version = 1, fields = [
         "rack_id",
         "slot",
-        "chassis_type",
-        "serial",
-        "model",
-        "revision",
+        "chassis_kind",
+        "chassis_serial",
+        "chassis_model",
+        "chassis_revision",
         "hubris_archive_id",
         "gateway_id",
+        "component_kind",
         "component",
-        "device",
     ]}
 ]
 
@@ -29,15 +29,15 @@ description = """
 The cubby number or switch slot of the service processor reporting the \
 measurement"""
 
-[fields.model]
+[fields.chassis_model]
 type = "string"
 description = "Model number of the sled, switch, or power shelf"
 
-[fields.revision]
+[fields.chassis_revision]
 type = "u32"
 description = "Revision number of the sled, switch, or power shelf"
 
-[fields.serial]
+[fields.chassis_serial]
 type = "string"
 description = "Serial number of the sled, switch, or power shelf"
 
@@ -47,13 +47,12 @@ description = """
 Hubris firmware archive ID of the service processor when the measurement \
 was recorded."""
 
-
 [fields.gateway_id]
 type = "uuid"
 description = """
 ID of the Management Gateway Service process which recorded the measurement."""
 
-[fields.chassis_type]
+[fields.chassis_kind]
 type = "string"
 description = """
 What kind of thing the component resides on. This will be one of 'sled'\
@@ -63,16 +62,17 @@ or 'power', for components on power shelves."""
 [fields.component]
 type = "string"
 description = """
-The service processor component ID uniquely identifying the component on
-the sled, switch, or power shelf."""
+The service processor component ID uniquely identifying the hardware \
+component on the sled, switch, or power shelf."""
 
-[fields.device]
+[fields.component_kind]
 type = "string"
-description = "The name of the device which recorded a sensor reading"
+description = "What type of hardware component this thing is."
 
-[fields.name]
+[fields.sensor]
 type = "string"
-description = "A name identifying the quantity measured by a sensor measurement"
+description = """
+A string identifying the name of a sensor that recorded a sensor reading."""
 
 [fields.error]
 type = "string"
@@ -92,7 +92,7 @@ description = "Temperature reading in degrees Celcius"
 units = "degrees_celcius"
 datum_type = "f32"
 versions = [
-    { added_in = 1, fields = ["name"]}
+    { added_in = 1, fields = ["sensor"]}
 ]
 
 [[metrics]]
@@ -101,7 +101,7 @@ description = "Output current reading in amperes"
 units = "amps"
 datum_type = "f32"
 versions = [
-    { added_in = 1, fields = ["name"]}
+    { added_in = 1, fields = ["sensor"]}
 ]
 
 [[metrics]]
@@ -110,7 +110,7 @@ description = "Power reading, in watts"
 units = "watts"
 datum_type = "f32"
 versions = [
-    { added_in = 1, fields = ["name"]}
+    { added_in = 1, fields = ["sensor"]}
 ]
 
 [[metrics]]
@@ -119,7 +119,7 @@ description = "Output voltage reading, in volts"
 units = "volts"
 datum_type = "f32"
 versions = [
-    { added_in = 1, fields = ["name"]}
+    { added_in = 1, fields = ["sensor"]}
 ]
 
 [[metrics]]
@@ -128,7 +128,7 @@ description = "Input electric current reading in amperes"
 units = "amps"
 datum_type = "f32"
 versions = [
-    { added_in = 1, fields = ["name"]}
+    { added_in = 1, fields = ["sensor"]}
 ]
 
 [[metrics]]
@@ -137,7 +137,7 @@ description = "Input electric voltage reading, in volts"
 units = "volts"
 datum_type = "f32"
 versions = [
-    { added_in = 1, fields = ["name"]}
+    { added_in = 1, fields = ["sensor"]}
 ]
 
 
@@ -147,7 +147,7 @@ description = "A fan speed measurement, in rotations per minute"
 units = "rpm"
 datum_type = "f32"
 versions = [
-    { added_in = 1, fields = ["name"]}
+    { added_in = 1, fields = ["sensor"]}
 ]
 
 [[metrics]]
@@ -156,7 +156,7 @@ description = "Cumulative count of errors reported by a sensor"
 units = "count"
 datum_type = "cumulative_u64"
 versions = [
-    { added_in = 1, fields = ["name", "error", "sensor_kind"]}
+    { added_in = 1, fields = ["sensor", "error", "sensor_kind"]}
 ]
 
 [[metrics]]
