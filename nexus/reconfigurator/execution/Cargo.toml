@@ -29,6 +29,9 @@ reqwest.workspace = true
 sled-agent-client.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+update-engine.workspace = true
 uuid.workspace = true
 
 # See omicron-rpaths for more about the "pq-sys" dependency.  This is needed

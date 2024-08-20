@@ -14,6 +14,7 @@ debug-ignore.workspace = true
 derive-where.workspace = true
 either.workspace = true
 futures.workspace = true
+indent_write.workspace = true
 indexmap.workspace = true
 libsw.workspace = true
 linear-map.workspace = true

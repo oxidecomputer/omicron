@@ -4,8 +4,10 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use std::{fmt, marker::PhantomData};
+use std::{fmt, fmt::Write, marker::PhantomData};
 
+use anyhow::anyhow;
+use indent_write::fmt::IndentWriter;
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -243,4 +245,48 @@ impl AsError for anyhow::Error {
     fn as_error(&self) -> &(dyn std::error::Error + 'static) {
         self.as_ref()
     }
+}
+
+/// A temporary hack to convert a list of errors into a single `anyhow::Error`.
+/// If no errors are provided, panic (this should be handled at a higher
+/// level).
+///
+/// Eventually we should gain first-class support for representing errors as
+/// trees, but this will do for now.
+pub fn error_list_to_anyhow<I, E>(errors: I) -> anyhow::Error
+where
+    I: IntoIterator<Item = E>,
+    E: AsError,
+{
+    let mut iter = errors.into_iter().peekable();
+    // How many errors are there?
+    let Some(first_error) = iter.next() else {
+        // No errors: panic.
+        panic!("error_list_to_anyhow called with no errors");
+    };
+
+    if iter.peek().is_none() {
+        // One error. (Currently we lose the error type here, because all we
+        // have to work with is a borrowed error. it would be nice to preserve
+        // it somehow. Again, this is a temporary hack!)
+        return anyhow!(NestedError::new(first_error.as_error()));
+    }
+
+    // Multiple errors.
+    let mut out = String::new();
+    let mut nerrors = 0;
+    for error in std::iter::once(first_error).chain(iter) {
+        nerrors += 1;
+        let mut current = error.as_error();
+
+        let mut writer = IndentWriter::new_skip_initial("  ", &mut out);
+        writeln!(writer, "+ {current}").unwrap();
+
+        while let Some(cause) = current.source() {
+            let mut writer = IndentWriter::new_skip_initial("    ", &mut out);
+            writeln!(writer, "   - {cause}").unwrap();
+            current = cause;
+        }
+    }
+    anyhow!(out).context(format!("{nerrors} errors encountered"))
 }

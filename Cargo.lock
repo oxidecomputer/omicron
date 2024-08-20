@@ -5269,6 +5269,8 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "tokio",
+ "tokio-stream",
+ "update-engine",
  "uuid",
 ]
 
@@ -5479,6 +5481,7 @@ dependencies = [
  "strum",
  "test-strategy",
  "thiserror",
+ "update-engine",
  "uuid",
 ]
 
@@ -11310,6 +11313,7 @@ dependencies = [
  "derive-where",
  "either",
  "futures",
+ "indent_write",
  "indexmap 2.4.0",
  "indicatif",
  "libsw",

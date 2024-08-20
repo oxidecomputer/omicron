@@ -10,10 +10,12 @@ use futures::FutureExt;
 use internal_dns::resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::{Blueprint, BlueprintTarget};
+use nexus_types::deployment::{
+    execution::EventBuffer, Blueprint, BlueprintTarget,
+};
 use serde_json::json;
 use std::sync::Arc;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 use uuid::Uuid;
 
 /// Background task that takes a [`Blueprint`] and realizes the change to
@@ -86,14 +88,32 @@ impl BlueprintExecutor {
             });
         }
 
+        // Pick a large-ish buffer for reconfigurator execution to avoid
+        // blocking it.
+        let (sender, receiver) = mpsc::channel(256);
+
+        let receiver_task = tokio::spawn(async move {
+            // TODO: report progress.
+            let event_buffer = EventBuffer::default();
+            while let Some(event) = receiver.recv().await {
+                event_buffer.add_event(event);
+            }
+
+            event_buffer.generate_report()
+        });
+
         let result = nexus_reconfigurator_execution::realize_blueprint(
             opctx,
             &self.datastore,
             &self.resolver,
             blueprint,
             self.nexus_id,
+            sender,
         )
         .await;
+
+        // Get the report for the receiver task.
+        let event_report = receiver_task.await;
 
         // Trigger anybody waiting for this to finish.
         self.tx.send_modify(|count| *count = *count + 1);
@@ -101,19 +121,20 @@ impl BlueprintExecutor {
         // If executing the blueprint requires activating the saga recovery
         // background task, do that now.
         info!(&opctx.log, "activating saga recovery task");
-        if let Ok(true) = result {
-            self.saga_recovery.activate();
+        if let Ok(output) = &result {
+            if output.needs_saga_recovery {
+                self.saga_recovery.activate();
+            }
         }
 
         // Return the result as a `serde_json::Value`
         match result {
+            // TODO: should we serialize the output above as a JSON object?
             Ok(_) => json!({}),
-            Err(errors) => {
-                let errors: Vec<_> =
-                    errors.into_iter().map(|e| format!("{:#}", e)).collect();
+            Err(error) => {
                 json!({
                     "target_id": blueprint.id.to_string(),
-                    "errors": errors
+                    "error": NestedError::new(error),
                 })
             }
         }
