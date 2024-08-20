@@ -39,6 +39,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 use tokio::process::Command;
+use tokio::sync::mpsc;
 use wicket_common::preflight_check::EventBuffer;
 use wicket_common::preflight_check::StepContext;
 use wicket_common::preflight_check::StepProgress;
@@ -87,7 +88,8 @@ pub(super) async fn run_local_uplink_preflight_check(
     );
 
     // Build the update executor.
-    let (mut engine, mut receiver) = UpdateEngine::new(log);
+    let (sender, mut receiver) = mpsc::channel(128);
+    let mut engine = UpdateEngine::new(log, sender);
 
     for (port, uplink) in network_config.port_map(our_switch_location) {
         add_steps_for_single_local_uplink_preflight_check(

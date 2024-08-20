@@ -184,15 +184,8 @@ impl InstallOpts {
 
         let discovery = self.discover_opts.mechanism.clone();
         let discovery_log = log.clone();
-        let discovery_ref = &self.discover_opts.mechanism;
-
-        let (engine, event_receiver) = UpdateEngine::new(log);
-
-        let progress_reporter = ProgressReporter::new(
-            log,
-            image_id.update_id,
-            event_receiver,
-            move || {
+        let (progress_reporter, event_sender) =
+            ProgressReporter::new(log, image_id.update_id, move || {
                 let log = discovery_log.clone();
                 let discovery = discovery.clone();
                 async move {
@@ -202,9 +195,11 @@ impl InstallOpts {
                         Duration::from_secs(10),
                     ))
                 }
-            },
-        );
+            });
         let progress_handle = progress_reporter.start();
+        let discovery = &self.discover_opts.mechanism;
+
+        let engine = UpdateEngine::new(log, event_sender);
 
         let host_phase_2_id = ArtifactHashId {
             // TODO: currently we're assuming that wicketd will unpack the host
@@ -219,13 +214,9 @@ impl InstallOpts {
                 InstallinatorStepId::Download,
                 "Downloading host phase 2 artifact",
                 |cx| async move {
-                    let host_phase_2_artifact = fetch_artifact(
-                        &cx,
-                        &host_phase_2_id,
-                        discovery_ref,
-                        log,
-                    )
-                    .await?;
+                    let host_phase_2_artifact =
+                        fetch_artifact(&cx, &host_phase_2_id, discovery, log)
+                            .await?;
 
                     // Check that the sha256 of the data we got from wicket
                     // matches the data we asked for. If this fails, we fail the
@@ -268,13 +259,9 @@ impl InstallOpts {
                 InstallinatorStepId::Download,
                 "Downloading control plane artifact",
                 |cx| async move {
-                    let control_plane_artifact = fetch_artifact(
-                        &cx,
-                        &control_plane_id,
-                        discovery_ref,
-                        log,
-                    )
-                    .await?;
+                    let control_plane_artifact =
+                        fetch_artifact(&cx, &control_plane_id, discovery, log)
+                            .await?;
 
                     // Check that the sha256 of the data we got from wicket
                     // matches the data we asked for. We do not retry this for
