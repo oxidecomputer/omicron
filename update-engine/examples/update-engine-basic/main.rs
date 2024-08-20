@@ -64,9 +64,10 @@ impl App {
         };
 
         let context = ExampleContext::new(&logctx.log);
-        let (engine, receiver) = UpdateEngine::new(&logctx.log);
-        let display_handle =
-            make_displayer(&logctx.log, receiver, display_style, self.prefix);
+        let (display_handle, sender) =
+            make_displayer(&logctx.log, display_style, self.prefix);
+
+        let engine = UpdateEngine::new(&logctx.log, sender);
 
         // Download component 1.
         let component_1 = engine.for_component(ExampleComponent::Component1);
@@ -461,7 +462,8 @@ fn create_remote_engine(
     mut buf_list: BufList,
     destination: Utf8PathBuf,
 ) -> mpsc::Receiver<Event<ExampleWriteSpec>> {
-    let (engine, receiver) = UpdateEngine::new(log);
+    let (sender, receiver) = tokio::sync::mpsc::channel(128);
+    let engine = UpdateEngine::new(log, sender);
     engine
         .for_component(component)
         .new_step(

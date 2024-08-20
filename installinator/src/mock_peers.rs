@@ -590,13 +590,8 @@ mod tests {
 
             let reporter_log = logctx.log.clone();
 
-            let (engine, event_receiver) = UpdateEngine::new(&logctx.log);
-
-            let progress_reporter = ProgressReporter::new(
-                &logctx.log,
-                update_id,
-                event_receiver,
-                move || {
+            let (progress_reporter, event_sender) =
+                ProgressReporter::new(&logctx.log, update_id, move || {
                     let reporter_log = reporter_log.clone();
                     let report_sender = report_sender.clone();
 
@@ -611,10 +606,10 @@ mod tests {
                             Duration::from_secs(10),
                         ))
                     }
-                },
-            );
+                });
             let progress_handle = progress_reporter.start();
 
+            let engine = UpdateEngine::new(&logctx.log, event_sender);
             let log = logctx.log.clone();
             let artifact_handle = engine
                 .new_step(

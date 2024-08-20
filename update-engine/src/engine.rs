@@ -86,13 +86,9 @@ pub struct UpdateEngine<'a, S: StepSpec> {
 
 impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
     /// Creates a new `UpdateEngine`.
-    pub fn new(log: &slog::Logger) -> (Self, mpsc::Receiver<Event<S>>) {
-        // Set a large enough buffer that it filling up isn't an actual problem
-        // outside of something going horribly wrong.
-        let (sender, receiver) = mpsc::channel(512);
+    pub fn new(log: &slog::Logger, sender: mpsc::Sender<Event<S>>) -> Self {
         let sender = Arc::new(DefaultSender { sender });
-        let ret = Self::new_impl(log, EngineSender { sender });
-        (ret, receiver)
+        Self::new_impl(log, EngineSender { sender })
     }
 
     // See the comment on `StepContext::with_nested_engine` for why this is
@@ -1383,8 +1379,10 @@ mod tests {
         let mut step_2_run = false;
         let mut step_3_run = false;
 
-        let (engine, receiver): (UpdateEngine<TestSpec>, _) =
-            UpdateEngine::new(&logctx.log);
+        // Make a buffer big enough that the engine can never fill it up.
+        let (sender, receiver) = mpsc::channel(512);
+        let engine: UpdateEngine<TestSpec> =
+            UpdateEngine::new(&logctx.log, sender);
 
         engine
             .new_step("foo".to_owned(), 0, "Step 1", |_| async {

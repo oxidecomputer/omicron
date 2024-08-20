@@ -55,6 +55,7 @@ use std::time::Duration;
 use std::time::Instant;
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
+use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio::sync::Mutex;
@@ -558,11 +559,12 @@ impl SpawnUpdateDriver for FakeUpdateDriver {
         _plan: UpdatePlan,
         _setup_data: &Self::Setup,
     ) -> SpUpdateData {
+        let (sender, mut receiver) = mpsc::channel(128);
         let event_buffer = Arc::new(StdMutex::new(EventBuffer::new(16)));
         let event_buffer_2 = event_buffer.clone();
         let log = self.log.clone();
 
-        let (engine, mut receiver) = UpdateEngine::new(&log);
+        let engine = UpdateEngine::new(&log, sender);
         let abort_handle = engine.abort_handle();
 
         let fake_step_receiver = self
@@ -854,7 +856,8 @@ impl UpdateDriver {
         //    the newest components for the SP and RoT, and one without.
 
         // Build the update executor.
-        let (mut engine, mut receiver) = UpdateEngine::new(&update_cx.log);
+        let (sender, mut receiver) = mpsc::channel(128);
+        let mut engine = UpdateEngine::new(&update_cx.log, sender);
         let abort_handle = engine.abort_handle();
         _ = abort_handle_sender.send(abort_handle);
 
