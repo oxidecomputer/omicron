@@ -1895,7 +1895,8 @@ allow_tables_to_appear_in_same_query!(
 
 allow_tables_to_appear_in_same_query!(
     switch_port,
-    switch_port_settings_bgp_peer_config
+    switch_port_settings_bgp_peer_config,
+    bgp_config
 );
 
 allow_tables_to_appear_in_same_query!(disk, virtual_provisioning_resource);

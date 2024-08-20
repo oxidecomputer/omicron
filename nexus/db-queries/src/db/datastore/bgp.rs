@@ -101,6 +101,21 @@ impl DataStore {
                     let config =
                         BgpConfig::from_config_create(config, announce_set_id);
 
+                    // TODO: remove once per-switch-multi-asn support is added
+                    // Bail if an existing config for this ASN already exists.
+                    // This is a temporary measure until multi-asn-per-switch is supported.
+                    let configs_with_asn: Vec<BgpConfig> = dsl::bgp_config
+                        .filter(dsl::asn.eq(config.asn))
+                        .filter(dsl::time_deleted.is_null())
+                        .select(BgpConfig::as_select())
+                        .load_async(&conn)
+                        .await?;
+
+                    if !configs_with_asn.is_empty() {
+                        error!(opctx.log, "config for asn already exists"; "asn" => ?config.asn, "configs" => ?configs_with_asn);
+                        return Err(err.bail(Error::conflict("cannot have more than one configuration per ASN")));
+                    }
+
                     let matching_entry_subquery = dsl::bgp_config
                         .filter(dsl::name.eq(Name::from(config.name().clone())))
                         .filter(dsl::time_deleted.is_null())

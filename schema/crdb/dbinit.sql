@@ -2790,6 +2790,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_bgp_config_by_name ON omicron.public.bg
 ) WHERE
     time_deleted IS NULL;
 
+CREATE INDEX IF NOT EXISTS lookup_bgp_config_by_asn ON omicron.public.bgp_config (
+    asn
+) WHERE time_deleted IS NULL;
+
 CREATE TABLE IF NOT EXISTS omicron.public.bgp_announce_set (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -4217,7 +4221,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '87.0.0', NULL)
+    (TRUE, NOW(), NOW(), '88.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
