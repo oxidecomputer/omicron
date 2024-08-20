@@ -73,6 +73,7 @@ impl From<nexus_db_model::Sled> for Sled {
 /// The result of calling [`realize_blueprint`] or
 /// [`realize_blueprint_with_overrides`].
 #[derive(Debug)]
+#[must_use = "the output of realize_blueprint should probably be used"]
 pub struct RealizeBlueprintOutput {
     /// Whether any sagas need to be reassigned to a new Nexus.
     pub needs_saga_recovery: bool,
