@@ -1,0 +1,127 @@
+format_version = 1
+
+[target]
+name = "virtual_disk"
+description = "A virtual disk"
+authz_scope = "project"
+versions = [
+    { version = 1, fields = [ "attached_instance_id", "block_size", "disk_id", "project_id", "silo_id", ] },
+]
+
+[fields.attached_instance_id]
+type = "uuid"
+description = "ID of the instance the disk is attached to"
+
+[fields.block_size]
+type = "u32"
+description = "Block size of the disk, in bytes"
+
+[fields.disk_id]
+type = "uuid"
+description = "ID of the disk"
+
+[fields.failure_reason]
+type = "string"
+description = "The reason an I/O operation failed"
+
+[fields.io_kind]
+type = "string"
+description = "The kind of I/O operation"
+
+[fields.project_id]
+type = "uuid"
+description = "ID of the project containing the disk"
+
+[fields.silo_id]
+type = "uuid"
+description = "ID for the silo containing the disk"
+
+[[metrics]]
+name = "bytes_read"
+description = "Number of bytes read from the disk"
+units = "bytes"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "reads"
+description = "Total number of reads from the disk"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "failed_reads"
+description = "Total number of failed reads from the disk"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "failure_reason" ] }
+]
+
+[[metrics]]
+name = "bytes_written"
+description = "Number of bytes written to the disk"
+units = "bytes"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "writes"
+description = "Total of writes to the disk"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "failed_writes"
+description = "Total number of failed writes to the disk"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "failure_reason" ] }
+]
+
+[[metrics]]
+name = "flushes"
+description = "Total of flushes to the disk"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "failed_flushes"
+description = "Total number of failed flushes to the disk"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "failure_reason" ] }
+]
+
+[[metrics]]
+name = "io_latency"
+description = "Histogram of latency for I/O operations by kind"
+units = "nanoseconds"
+datum_type = "histogram_u64"
+versions = [
+    { added_in = 1, fields = [ "io_kind" ] }
+]
+
+[[metrics]]
+name = "io_size"
+description = "Histogram of sizes for I/O operations by kind"
+units = "bytes"
+datum_type = "histogram_u64"
+versions = [
+    { added_in = 1, fields = [ "io_kind" ] }
+]
