@@ -132,7 +132,7 @@ pub async fn realize_blueprint_with_overrides(
         })
         .collect();
 
-    omicron_physical_disks::deploy_disks(
+    let deploy_disks_done = omicron_physical_disks::deploy_disks(
         &opctx,
         &sleds_by_id,
         &blueprint.blueprint_disks,
@@ -205,11 +205,12 @@ pub async fn realize_blueprint_with_overrides(
     )
     .await?;
 
-    // This depends on the "deploy_disks" call earlier -- disk expungement is a
-    // statement of policy, but we need to be assured that the Sled Agent has
-    // stopped using that disk before we can mark its state as decommissioned.
-    omicron_physical_disks::decommission_expunged_disks(&opctx, datastore)
-        .await?;
+    omicron_physical_disks::decommission_expunged_disks(
+        &opctx,
+        datastore,
+        deploy_disks_done,
+    )
+    .await?;
 
     // From this point on, we'll assume that any errors that we encounter do
     // *not* require stopping execution.  We'll just accumulate them and return

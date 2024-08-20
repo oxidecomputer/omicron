@@ -25,7 +25,7 @@ pub(crate) async fn deploy_disks(
     opctx: &OpContext,
     sleds_by_id: &BTreeMap<SledUuid, Sled>,
     sled_configs: &BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
-) -> Result<(), Vec<anyhow::Error>> {
+) -> Result<DeployDisksDone, Vec<anyhow::Error>> {
     let errors: Vec<_> = stream::iter(sled_configs)
         .filter_map(|(sled_id, config)| async move {
             let log = opctx.log.new(o!(
@@ -92,16 +92,25 @@ pub(crate) async fn deploy_disks(
         .await;
 
     if errors.is_empty() {
-        Ok(())
+        Ok(DeployDisksDone {})
     } else {
         Err(errors)
     }
 }
 
-/// Decommissions all disks which are currently expunged
+/// Typestate indicating that the deploy disks step was performed.
+#[derive(Debug)]
+pub(crate) struct DeployDisksDone {}
+
+/// Decommissions all disks which are currently expunged.
 pub(crate) async fn decommission_expunged_disks(
     opctx: &OpContext,
     datastore: &DataStore,
+    // This is taken as a parameter to ensure that this depends on a
+    // "deploy_disks" call made earlier. Disk expungement is a statement of
+    // policy, but we need to be assured that the Sled Agent has stopped using
+    // that disk before we can mark its state as decommissioned.
+    _deploy_disks_done: DeployDisksDone,
 ) -> Result<(), Vec<anyhow::Error>> {
     datastore
         .physical_disk_decommission_all_expunged(&opctx)
@@ -113,6 +122,7 @@ pub(crate) async fn decommission_expunged_disks(
 #[cfg(test)]
 mod test {
     use super::deploy_disks;
+    use super::DeployDisksDone;
 
     use crate::DataStore;
     use crate::Sled;
@@ -567,7 +577,15 @@ mod test {
         assert_eq!(d.disk_state, PhysicalDiskState::Active);
         assert_eq!(d.disk_policy, PhysicalDiskPolicy::InService);
 
-        super::decommission_expunged_disks(&opctx, &datastore).await.unwrap();
+        super::decommission_expunged_disks(
+            &opctx,
+            &datastore,
+            // This is an internal test, and we're testing decommissioning in
+            // isolation, so it's okay to create the typestate here.
+            DeployDisksDone {},
+        )
+        .await
+        .unwrap();
 
         // After decommissioning, we see the expunged disk become
         // decommissioned. The other disk remains in-service.
