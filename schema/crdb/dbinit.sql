@@ -1335,6 +1335,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.producer_kind AS ENUM (
     'service',
     -- A Propolis VMM for an instance in the omicron.public.instance table
     'instance'
+    -- A management gateway service on a scrimlet.
+    'management_gateway'
 );
 
 /*
@@ -4212,7 +4214,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '90.0.0', NULL)
+    (TRUE, NOW(), NOW(), '91.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
