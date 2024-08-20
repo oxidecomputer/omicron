@@ -17,7 +17,6 @@ use futures::TryStreamExt;
 use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
 use nexus_client::types::IdSortMode;
-use omicron_common::address::CLICKHOUSE_PORT;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
@@ -396,16 +395,15 @@ impl OximeterAgent {
         let db_address = if let Some(address) = db_config.address {
             address
         } else if replicated {
-            let mut address = resolver
-                .lookup_socket_v6(ServiceName::ClickhouseServer)
-                .await?;
-            address.set_port(CLICKHOUSE_PORT);
-            SocketAddr::V6(address)
+            SocketAddr::V6(
+                resolver
+                    .lookup_socket_v6(ServiceName::ClickhouseServer)
+                    .await?,
+            )
         } else {
-            let mut address =
-                resolver.lookup_socket_v6(ServiceName::Clickhouse).await?;
-            address.set_port(CLICKHOUSE_PORT);
-            SocketAddr::V6(address)
+            SocketAddr::V6(
+                resolver.lookup_socket_v6(ServiceName::Clickhouse).await?,
+            )
         };
 
         // Determine the version of the database.
