@@ -14,11 +14,11 @@ use clickward::config::{
     ReplicaConfig, ServerConfig,
 };
 use clickward::{KeeperId, ServerId};
-use omicron_common::address::CLICKHOUSE_INTERSERVER_HTTP_PORT;
-use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use omicron_common::address::{
-    CLICKHOUSE_HTTP_PORT, CLICKHOUSE_KEEPER_PORT, CLICKHOUSE_KEEPER_RAFT_PORT,
+    CLICKHOUSE_HTTP_PORT, CLICKHOUSE_INTERSERVER_HTTP_PORT,
+    CLICKHOUSE_KEEPER_PORT, CLICKHOUSE_KEEPER_RAFT_PORT, CLICKHOUSE_TCP_PORT,
 };
+use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
@@ -29,19 +29,86 @@ use uuid::Uuid;
 
 const BASE_DIR: &str = "/opt/oxide/clickhouse";
 
+/// Clickhouse keeper clusters only allow adding one node at a time
+///
+/// The planner must progress through these states when adding a new keeper
+/// node.
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+pub enum AddKeeperState {
+    /// The executor should attempt to start the new keeper via `clickhouse-admin`
+    /// in the target zone.
+    ///
+    /// The generated keeper config for this node must include all the other
+    /// nodes, but those nodes should net yet learn of this config. That is done
+    /// in the `Reconfiguring` state.
+    StartingKeeper { omicron_zone_id: OmicronZoneUuid, config: KeeperConfig },
+    /// The executor should attempt a reconfiguration by updating the
+    /// configurations at all  the other keepers. It must stay in this state
+    /// until the reconfiguration either succeeds or fails, which it learns
+    /// by polling `clickhouse-admin` in one or more zones.
+    ///
+    /// If the keeper addition succeeds then a transition to a
+    /// [`StableKeeperConfig`] should be made. At this point, the configuration
+    /// for the clickhouse servers should also be updated to point to the new
+    /// keeper.
+    Reconfiguring {
+        new_node_omicron_zone_id: OmicronZoneUuid,
+        keepers: BTreeMap<OmicronZoneUuid, KeeperConfig>,
+    },
+    /// In some cases, reconfiguration of the keeper can fail. In this case,
+    /// the existing zone must be expunged. Once the zone is expunged, then the
+    /// planner should go ahead and try to add a new keeper zone again.
+    Failed { stable_config: BTreeMap<OmicronZoneUuid, KeeperConfig> },
+}
+
+/// The current configuration state of the keeper cluster
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+pub enum KeeperClusterState {
+    /// A configuration of a keeper cluster with no ongoing reconfigurations (node
+    /// additions or removals)
+    Stable { keepers: BTreeMap<OmicronZoneUuid, KeeperConfig> },
+    /// We're currently adding a node to the keeper cluster
+    AddingNode {
+        prior_stable_config: BTreeMap<OmicronZoneUuid, KeeperConfig>,
+        add_node_state: AddKeeperState,
+    },
+    // TODO: `RemovingNode`
+}
+
+/// The current configuration of the keeper cluster
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+pub struct KeeperClusterConfig {
+    max_used_keeper_id: u64,
+    state: KeeperClusterState,
+}
+
+/// The current configuration of all clickhouse server replicas
+///
+/// In contrast to keepers, servers do not require a multi-step reconfiguration
+/// to add, and multiple servers can be added or removed simultaneously. Removal
+/// is slightly more complex in that we need to ensure that the servers are
+/// shutdown and shutdown is noticed before we [drop](https://clickhouse.com/
+/// docs/en/sql-reference/statements/system#drop-replica) the replica from the
+/// cluster.
+///
+/// TODO: Model server removal
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+pub struct ClickhouseServerClusterConfig {
+    max_used_server_id: u64,
+    servers: BTreeMap<OmicronZoneUuid, ReplicaConfig>,
+}
+
 /// Global configuration for all clickhouse servers (replicas) and keepers
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub struct ClickhouseClusterConfig {
     // The last update to the clickhouse cluster configuration
     // This is used by clickhouse server and keeper zones to discard
     // configurations they are up to date with.
-    generation: u64,
-    max_used_server_id: u64,
-    max_used_keeper_id: u64,
+    generation: Generation,
     cluster_name: String,
     secret: String,
-    servers: BTreeMap<OmicronZoneUuid, ReplicaConfig>,
-    keepers: BTreeMap<OmicronZoneUuid, KeeperConfig>,
+    servers: ClickhouseServerClusterConfig,
+    keepers: KeeperClusterConfig,
 }
 
 impl ClickhouseClusterConfig {
@@ -161,10 +228,16 @@ impl ClickhouseClusterConfig {
             keepers.insert(kz.id, keeper_config);
         }
 
-        ClickhouseClusterConfig {
-            generation: 1,
-            max_used_server_id,
+        let keepers = KeeperClusterConfig {
             max_used_keeper_id,
+            state: KeeperClusterState::Stable { keepers },
+        };
+
+        let servers =
+            ClickhouseServerClusterConfig { max_used_server_id, servers };
+
+        ClickhouseClusterConfig {
+            generation: Generation::new(),
             cluster_name,
             secret,
             servers,
@@ -213,7 +286,7 @@ mod tests {
     use crate::deployment::blueprint_zone_type;
     use crate::deployment::BlueprintZoneType;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-    use omicron_common::address::CRUCIBLE_PANTRY_PORT;
+    use omicron_common::address::CRUCIBLE_PORT;
     use omicron_common::api::external::Generation;
     use std::collections::BTreeSet;
     use std::net::{Ipv6Addr, SocketAddrV6};
@@ -303,7 +376,7 @@ mod tests {
                         blueprint_zone_type::Crucible {
                             address: SocketAddrV6::new(
                                 crucible_underlay_address,
-                                CRUCIBLE_PANTRY_PORT,
+                                CRUCIBLE_PORT,
                                 0,
                                 0,
                             ),
@@ -337,19 +410,30 @@ mod tests {
             &all_blueprint_zones,
         );
 
-        assert_eq!(config.generation, 1);
-        assert_eq!(config.max_used_server_id, 2);
-        assert_eq!(config.max_used_keeper_id, 3);
+        assert_eq!(config.generation, Generation::new());
+        assert_eq!(config.servers.max_used_server_id, 2);
+        assert_eq!(config.keepers.max_used_keeper_id, 3);
         assert_eq!(config.cluster_name, cluster_name);
 
         println!("{:#?}", config);
+
+        // We know we are in a stable configuration, since this is the initial config
+        let KeeperClusterConfig {
+            max_used_keeper_id,
+            state: KeeperClusterState::Stable { keepers },
+        } = config.keepers
+        else {
+            panic!("Not in stable keeper state");
+        };
+
+        let ClickhouseServerClusterConfig { max_used_server_id, servers } =
+            config.servers;
 
         // Ensure we have 3 valid keeper configs
         for zones_config in all_blueprint_zones.values() {
             // Keeper zones are always first
             let keeper_bp_zone_config = zones_config.zones.first().unwrap();
-            let keeper_config =
-                config.keepers.get(&keeper_bp_zone_config.id).unwrap();
+            let keeper_config = keepers.get(&keeper_bp_zone_config.id).unwrap();
             assert!(keeper_bp_zone_config.zone_type.is_clickhouse_keeper());
             assert_eq!(
                 keeper_bp_zone_config.underlay_address.to_string(),
@@ -371,8 +455,7 @@ mod tests {
             };
             found_server_zones += 1;
 
-            let server_config =
-                config.servers.get(&server_bp_zone_config.id).unwrap();
+            let server_config = servers.get(&server_bp_zone_config.id).unwrap();
             assert!(server_bp_zone_config.zone_type.is_clickhouse_server());
             assert_eq!(
                 server_bp_zone_config.underlay_address.to_string(),
@@ -392,9 +475,9 @@ mod tests {
             [1, 2].into_iter().map(ServerId).collect();
 
         let keeper_ids: BTreeSet<_> =
-            config.keepers.values().map(|c| c.server_id).collect();
+            keepers.values().map(|c| c.server_id).collect();
         let server_ids: BTreeSet<_> =
-            config.servers.values().map(|c| c.macros.replica).collect();
+            servers.values().map(|c| c.macros.replica).collect();
 
         assert_eq!(expected_keeper_ids, keeper_ids);
         assert_eq!(expected_server_ids, server_ids);
@@ -402,7 +485,7 @@ mod tests {
         // All servers should have the same `remote_servers` and `keepers`
         // configurations
         let mut checker = None;
-        for replica_config in config.servers.values() {
+        for replica_config in servers.values() {
             match checker {
                 None => checker = Some(replica_config),
                 Some(checker) => {
@@ -417,7 +500,7 @@ mod tests {
 
         // All Keepers should have the same `raft_config`
         let mut checker = None;
-        for keeper_config in config.keepers.values() {
+        for keeper_config in keepers.values() {
             match checker {
                 None => {
                     checker = Some(keeper_config);

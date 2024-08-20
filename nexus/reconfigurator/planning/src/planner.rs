@@ -443,6 +443,8 @@ impl<'a> Planner<'a> {
                 self.input.target_clickhouse_server_zone_count()
             }
             DiscretionaryOmicronZone::ClickhouseKeeper => {
+                // TODO: Should we instead return 1 if the existing count is below the target count?
+                // Reconfiguration only allows adding one keeper node at a time
                 self.input.target_clickhouse_keeper_zone_count()
             }
         };
