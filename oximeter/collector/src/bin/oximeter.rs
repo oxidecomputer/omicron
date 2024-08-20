@@ -49,12 +49,6 @@ enum Args {
         /// The socket address at which `oximeter`'s HTTP server runs.
         #[clap(short, long, action)]
         address: SocketAddrV6,
-
-        // TODO (https://github.com/oxidecomputer/omicron/issues/4148): This flag
-        // should be removed if single node functionality is removed.
-        /// Is `oximeter` connecting to a replicated ClickHouse cluster
-        #[clap(short, long)]
-        replicated: bool,
     },
 
     /// Run `oximeter` in standalone mode for development.
@@ -125,9 +119,9 @@ async fn main() {
 async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
     match args {
-        Args::Run { config_file, id, address, replicated } => {
+        Args::Run { config_file, id, address } => {
             let config = Config::from_file(config_file).unwrap();
-            let args = OximeterArguments { id, address, replicated };
+            let args = OximeterArguments { id, address };
             Oximeter::new(&config, &args)
                 .await
                 .unwrap()
@@ -142,7 +136,7 @@ async fn do_run() -> Result<(), CmdError> {
             let nexus_server = StandaloneNexus::new(nexus.into(), log_level)
                 .context("Failed to create nexus")
                 .map_err(CmdError::Failure)?;
-            let args = OximeterArguments { id, address, replicated: false };
+            let args = OximeterArguments { id, address };
             Oximeter::new_standalone(
                 nexus_server.log(),
                 &args,

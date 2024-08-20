@@ -141,8 +141,8 @@ source.rust.binary_names = ["oximeter", "clickhouse-schema-updater"]
 source.rust.release = true
 source.paths = [
   { from = "oximeter/db/schema", to = "/opt/oxide/oximeter/schema" },
-  { from = "smf/oximeter/config.toml", to = "/var/svc/manifest/site/oximeter/config.toml" },
-  { from = "smf/oximeter/{{clickhouse-topology}}/manifest.xml", to = "/var/svc/manifest/site/oximeter/manifest.xml" },
+  { from = "smf/oximeter/{{clickhouse-topology}}/config.toml", to = "/var/svc/manifest/site/oximeter/config.toml" },
+  { from = "smf/oximeter/manifest.xml", to = "/var/svc/manifest/site/oximeter/manifest.xml" },
 ]
 output.type = "zone"
 output.intermediate_only = true

@@ -1427,6 +1427,7 @@ pub async fn start_oximeter(
         address: Some(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db_port)),
         batch_size: 10,
         batch_interval: 1,
+        replicated: false,
     };
     let config = oximeter_collector::Config {
         nexus_address: Some(nexus_address),
@@ -1437,7 +1438,6 @@ pub async fn start_oximeter(
     let args = oximeter_collector::OximeterArguments {
         id,
         address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
-        replicated: false,
     };
     Oximeter::with_logger(&config, &args, log).await.map_err(|e| e.to_string())
 }

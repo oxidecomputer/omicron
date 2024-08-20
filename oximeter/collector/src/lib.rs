@@ -79,12 +79,18 @@ pub struct DbConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub address: Option<SocketAddr>,
 
-    /// Batch size of samples at which to insert
+    /// Batch size of samples at which to insert.
     pub batch_size: usize,
 
     /// Interval on which to insert data into the database, regardless of the number of collected
     /// samples. Value is in seconds.
     pub batch_interval: u64,
+
+    // TODO (https://github.com/oxidecomputer/omicron/issues/4148): This field
+    // should be removed if single node functionality is removed.
+    /// Whether ClickHouse is running as a replicated cluster or
+    /// single-node server.
+    pub replicated: bool,
 }
 
 impl DbConfig {
@@ -96,12 +102,16 @@ impl DbConfig {
     /// ClickHouse.
     pub const DEFAULT_BATCH_INTERVAL: u64 = 5;
 
+    /// Default ClickHouse topology.
+    pub const DEFAULT_REPLICATED: bool = false;
+
     // Construct config with an address, using the defaults for other fields
     fn with_address(address: SocketAddr) -> Self {
         Self {
             address: Some(address),
             batch_size: Self::DEFAULT_BATCH_SIZE,
             batch_interval: Self::DEFAULT_BATCH_INTERVAL,
+            replicated: Self::DEFAULT_REPLICATED,
         }
     }
 }
@@ -146,9 +156,6 @@ impl Config {
 pub struct OximeterArguments {
     pub id: Uuid,
     pub address: SocketAddrV6,
-    // TODO TODO (https://github.com/oxidecomputer/omicron/issues/4148): Remove
-    // once single node ClickHouse functionality is removed
-    pub replicated: bool,
 }
 
 /// A server used to collect metrics from components in the control plane.
@@ -211,7 +218,7 @@ impl Oximeter {
                     config.db,
                     &resolver,
                     &log,
-                    args.replicated,
+                    config.db.replicated,
                 )
                 .await?,
             ))
