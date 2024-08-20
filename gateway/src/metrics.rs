@@ -540,15 +540,9 @@ impl SpPoller {
         poll_interval: Duration,
         apictx: Arc<ServerContext>,
     ) -> Result<(), SpCommsError> {
-        /// How long to wait when a SP is not present.
-        ///
-        /// I picked this arbitrarily. It would be much nicer if we could
-        /// instead recieve a notification when the discovery state changes...
-        const NO_SP_BACKOFF: Duration = Duration::from_secs(30);
         let mut interval = tokio::time::interval(poll_interval);
         let switch = &apictx.mgmt_switch;
         let sp = switch.sp(self.spid)?;
-        let mut not_present_message_logged = false;
         loop {
             interval.tick().await;
             slog::trace!(&self.log, "interval elapsed, polling SP...");
@@ -570,23 +564,40 @@ impl SpPoller {
                         return Ok(());
                     }
                 }
-                //
+                // No SP is currently present for this ID. This may change in
+                // the future: a cubby that is not populated at present may have
+                // a sled added to it in the future. So, let's wait until it
+                // changes.
                 Err(CommunicationError::NoSpDiscovered) => {
-                    if !not_present_message_logged {
-                        not_present_message_logged = true;
+                    let mut watch = sp.sp_addr_watch().clone();
+                    loop {
+                        if let Some((addr, port)) = *watch.borrow_and_update() {
+                            // Ladies and gentlemen...we got him!
+                            slog::info!(
+                                &self.log,
+                                "found a SP, resuming polling.";
+                                "sp_addr" => ?addr,
+                                "sp_port" => ?port,
+                            );
+                            break;
+                        }
+
                         slog::info!(
                             &self.log,
-                            "our SP seems to not be present, waiting to see if it \
-                             appears..."
+                            "no SP is present for this slot. waiting for a \
+                             little buddy to appear...";
                         );
-                    } else {
-                        slog::debug!(
-                            &self.log,
-                            "SP is still not there, checking again in a little bit."
-                        )
-                    }
 
-                    tokio::time::sleep(NO_SP_BACKOFF).await;
+                        // Wait for an address to be discovered.
+                        if watch.changed().await.is_err() {
+                            slog::debug!(
+                                &self.log,
+                                "SP address watch has been closed, presumably \
+                                 we are shutting down";
+                            );
+                            return Ok(());
+                        }
+                    }
                 }
                 Err(error) => {
                     slog::warn!(
