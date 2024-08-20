@@ -14,7 +14,6 @@ use dropshot::HttpServerStarter;
 use internal_dns::resolver::ResolveError;
 use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
-use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::backoff;
 use omicron_common::FileKv;
@@ -262,14 +261,14 @@ impl Oximeter {
             let nexus_address = if let Some(address) = config.nexus_address {
                 address
             } else {
-                SocketAddr::V6(SocketAddrV6::new(
-                    resolver.lookup_ipv6(ServiceName::Nexus).await.map_err(
-                        |e| backoff::BackoffError::transient(e.to_string()),
-                    )?,
-                    NEXUS_INTERNAL_PORT,
-                    0,
-                    0,
-                ))
+                SocketAddr::V6(
+                    resolver
+                        .lookup_socket_v6(ServiceName::Nexus)
+                        .await
+                        .map_err(|e| {
+                            backoff::BackoffError::transient(e.to_string())
+                        })?,
+                )
             };
             let client = nexus_client::Client::new(
                 &format!("http://{nexus_address}"),
