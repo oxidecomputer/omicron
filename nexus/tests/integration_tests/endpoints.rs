@@ -579,7 +579,7 @@ pub static DEMO_BGP_CONFIG: Lazy<params::BgpConfigCreate> =
         shaper: None,
     });
 pub const DEMO_BGP_ANNOUNCE_SET_URL: &'static str =
-    "/v1/system/networking/bgp-announce?name_or_id=a-bag-of-addrs";
+    "/v1/system/networking/bgp-announce-set";
 pub static DEMO_BGP_ANNOUNCE: Lazy<params::BgpAnnounceSetCreate> =
     Lazy::new(|| params::BgpAnnounceSetCreate {
         identity: IdentityMetadataCreateParams {
@@ -591,6 +591,10 @@ pub static DEMO_BGP_ANNOUNCE: Lazy<params::BgpAnnounceSetCreate> =
             network: "10.0.0.0/16".parse().unwrap(),
         }],
     });
+pub const DEMO_BGP_ANNOUNCE_SET_DELETE_URL: &'static str =
+    "/v1/system/networking/bgp-announce-set/a-bag-of-addrs";
+pub const DEMO_BGP_ANNOUNCEMENT_URL: &'static str =
+    "/v1/system/networking/bgp-announce-set/a-bag-of-addrs/announcement";
 pub const DEMO_BGP_STATUS_URL: &'static str =
     "/v1/system/networking/bgp-status";
 pub const DEMO_BGP_ROUTES_IPV4_URL: &'static str =
@@ -2290,6 +2294,7 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
                 AllowedMethod::GetNonexistent
             ],
         },
+
         VerifyEndpoint {
             url: &DEMO_BGP_CONFIG_CREATE_URL,
             visibility: Visibility::Public,
@@ -2311,8 +2316,25 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
                 AllowedMethod::Put(
                     serde_json::to_value(&*DEMO_BGP_ANNOUNCE).unwrap(),
                 ),
-                AllowedMethod::GetNonexistent,
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_BGP_ANNOUNCE_SET_DELETE_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
                 AllowedMethod::Delete
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_BGP_ANNOUNCEMENT_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent,
             ],
         },
 

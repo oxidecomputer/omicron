@@ -4094,7 +4094,9 @@ async fn networking_bgp_announce_set_update(
 }]
 async fn networking_bgp_announce_set_list(
     rqctx: RequestContext<ApiContext>,
-    query_params: Query<PaginatedByNameOrId<params::BgpAnnounceSetSelector>>,
+    query_params: Query<
+        PaginatedByNameOrId<params::OptionalBgpAnnounceSetSelector>,
+    >,
 ) -> Result<HttpResponseOk<Vec<BgpAnnounceSet>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -4122,17 +4124,17 @@ async fn networking_bgp_announce_set_list(
 /// Delete BGP announce set
 #[endpoint {
     method = DELETE,
-    path = "/v1/system/networking/bgp-announce-set",
+    path = "/v1/system/networking/bgp-announce-set/{name_or_id}",
     tags = ["system/networking"],
 }]
 async fn networking_bgp_announce_set_delete(
     rqctx: RequestContext<ApiContext>,
-    selector: Query<params::BgpAnnounceSetSelector>,
+    path_params: Path<params::BgpAnnounceSetSelector>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let sel = selector.into_inner();
+        let sel = path_params.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         nexus.bgp_delete_announce_set(&opctx, &sel).await?;
         Ok(HttpResponseUpdatedNoContent {})
@@ -4149,7 +4151,7 @@ async fn networking_bgp_announce_set_delete(
 /// Get originated routes for a specified BGP announce set
 #[endpoint {
     method = GET,
-    path = "/v1/system/networking/bgp-announce-set/{name_or_id}",
+    path = "/v1/system/networking/bgp-announce-set/{name_or_id}/announcement",
     tags = ["system/networking"],
 }]
 async fn networking_bgp_announcement_list(

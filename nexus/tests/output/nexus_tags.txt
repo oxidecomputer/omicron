@@ -179,9 +179,10 @@ networking_allow_list_view               GET      /v1/system/networking/allow-li
 networking_bfd_disable                   POST     /v1/system/networking/bfd-disable
 networking_bfd_enable                    POST     /v1/system/networking/bfd-enable
 networking_bfd_status                    GET      /v1/system/networking/bfd-status
-networking_bgp_announce_set_delete       DELETE   /v1/system/networking/bgp-announce
-networking_bgp_announce_set_list         GET      /v1/system/networking/bgp-announce
-networking_bgp_announce_set_update       PUT      /v1/system/networking/bgp-announce
+networking_bgp_announce_set_delete       DELETE   /v1/system/networking/bgp-announce-set/{name_or_id}
+networking_bgp_announce_set_list         GET      /v1/system/networking/bgp-announce-set
+networking_bgp_announce_set_update       PUT      /v1/system/networking/bgp-announce-set
+networking_bgp_announcement_list         GET      /v1/system/networking/bgp-announce-set/{name_or_id}/announcement
 networking_bgp_config_create             POST     /v1/system/networking/bgp
 networking_bgp_config_delete             DELETE   /v1/system/networking/bgp
 networking_bgp_config_list               GET      /v1/system/networking/bgp

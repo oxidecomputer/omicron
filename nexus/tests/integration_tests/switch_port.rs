@@ -76,7 +76,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
 
     NexusRequest::objects_post(
         client,
-        "/v1/system/networking/bgp-announce",
+        "/v1/system/networking/bgp-announce-set",
         &announce_set,
     )
     .authn_as(AuthnMode::PrivilegedUser)
