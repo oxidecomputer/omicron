@@ -6,11 +6,12 @@
 // Copyright 2021 Oxide Computer Company
 
 use crate::{
-    Error, FieldSchema, FieldSource, TimeseriesKey, TimeseriesSchema,
-    DATABASE_NAME, DATABASE_SELECT_FORMAT,
+    Error, FieldSchema, FieldSource, TimeseriesSchema, DATABASE_NAME,
+    DATABASE_SELECT_FORMAT,
 };
 use chrono::{DateTime, Utc};
 use dropshot::PaginationOrder;
+use oximeter::schema::TimeseriesKey;
 use oximeter::types::{DatumType, FieldType, FieldValue};
 use oximeter::{Metric, Target};
 use regex::Regex;

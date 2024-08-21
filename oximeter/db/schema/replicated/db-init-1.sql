@@ -78,10 +78,12 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_i64_local ON CLUSTER oximeter_cluster
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value Int64
+    field_value Int64,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/fields_i64_local', '{replica}')
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_i64 ON CLUSTER oximeter_cluster
 AS oximeter.fields_i64_local
@@ -93,10 +95,12 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_uuid_local ON CLUSTER oximeter_cluste
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value UUID
+    field_value UUID,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplicatedReplacingMergeTree('/clickhouse/tables/{shard}/fields_uuid_local', '{replica}')
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_uuid ON CLUSTER oximeter_cluster
 AS oximeter.fields_uuid_local

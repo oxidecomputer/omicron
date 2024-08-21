@@ -14,7 +14,7 @@ use crate::{
         display_api_spec, display_api_spec_file, display_error,
         display_summary, headers::*, plural, write_diff, OutputOpts, Styles,
     },
-    spec::{all_apis, CheckError, Environment},
+    spec::{all_apis, CheckStale, Environment},
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
 };
 
@@ -58,8 +58,8 @@ pub(crate) fn check_impl(
         total.style(styles.bold),
         plural::documents(total),
     );
-    let mut num_up_to_date = 0;
-    let mut num_out_of_date = 0;
+    let mut num_fresh = 0;
+    let mut num_stale = 0;
     let mut num_failed = 0;
 
     for (ix, spec) in all_apis.iter().enumerate() {
@@ -83,36 +83,44 @@ pub(crate) fn check_impl(
 
                     eprintln!(
                         "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}: {}{extra}",
-                        UP_TO_DATE.style(styles.success_header),
+                        FRESH.style(styles.success_header),
                         display_api_spec(spec, &styles),
                         display_summary(&status.summary, &styles),
                     );
 
-                    num_up_to_date += 1;
+                    num_fresh += 1;
                     continue;
                 }
 
                 // Out of date: print errors.
                 eprintln!(
                     "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}",
-                    OUT_OF_DATE.style(styles.warning_header),
+                    STALE.style(styles.warning_header),
                     display_api_spec(spec, &styles),
                 );
-                num_out_of_date += 1;
+                num_stale += 1;
 
                 for (error_ix, (spec_file, error)) in
                     status.iter_errors().enumerate()
                 {
                     let error_count = error_ix + 1;
 
+                    let display_heading = |heading: &str| {
+                        eprintln!(
+                            "{:>HEADER_WIDTH$}{count_section_indent}\
+                             ({error_count:>total_errors_width$}/{total_errors}) {}",
+                             heading.style(styles.warning_header),
+                            display_api_spec_file(spec, spec_file, &styles),
+                        );
+                    };
+
                     match error {
-                        CheckError::Stale { full_path, actual, expected } => {
-                            eprintln!(
-                                "{:>HEADER_WIDTH$}{count_section_indent}\
-                                 ({error_count:>total_errors_width$}/{total_errors}) {}",
-                                STALE.style(styles.warning_header),
-                                display_api_spec_file(spec, spec_file, &styles),
-                            );
+                        CheckStale::Modified {
+                            full_path,
+                            actual,
+                            expected,
+                        } => {
+                            display_heading(MODIFIED);
 
                             let diff =
                                 TextDiff::from_lines(&**actual, &**expected);
@@ -127,13 +135,8 @@ pub(crate) fn check_impl(
                                 ),
                             )?;
                         }
-                        CheckError::Missing => {
-                            eprintln!(
-                                "{:>HEADER_WIDTH$}{count_section_indent}\
-                                 ({error_count:>total_errors_width$}/{total_errors}) {}",
-                                MISSING.style(styles.warning_header),
-                                display_api_spec_file(spec, spec_file, &styles),
-                            );
+                        CheckStale::New => {
+                            display_heading(NEW);
                         }
                     }
                 }
@@ -160,19 +163,19 @@ pub(crate) fn check_impl(
 
     let status_header = if num_failed > 0 {
         FAILURE.style(styles.failure_header)
-    } else if num_out_of_date > 0 {
-        OUT_OF_DATE.style(styles.warning_header)
+    } else if num_stale > 0 {
+        STALE.style(styles.warning_header)
     } else {
         SUCCESS.style(styles.success_header)
     };
 
     eprintln!(
-        "{:>HEADER_WIDTH$} {} {} checked: {} up-to-date, {} out-of-date, {} failed",
+        "{:>HEADER_WIDTH$} {} {} checked: {} fresh, {} stale, {} failed",
         status_header,
         total.style(styles.bold),
         plural::documents(total),
-        num_up_to_date.style(styles.bold),
-        num_out_of_date.style(styles.bold),
+        num_fresh.style(styles.bold),
+        num_stale.style(styles.bold),
         num_failed.style(styles.bold),
     );
     if num_failed > 0 {
@@ -182,7 +185,7 @@ pub(crate) fn check_impl(
             "cargo xtask openapi generate".style(styles.bold)
         );
         Ok(CheckResult::Failures)
-    } else if num_out_of_date > 0 {
+    } else if num_stale > 0 {
         eprintln!(
             "{:>HEADER_WIDTH$} (run {} to update)",
             "",
