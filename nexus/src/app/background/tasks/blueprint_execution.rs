@@ -104,11 +104,9 @@ impl BlueprintExecutor {
             Ok(RealizeBlueprintOutput { needs_saga_recovery }) => {
                 // If executing the blueprint requires activating the saga
                 // recovery background task, do that now.
-                if let Ok(output) = &result {
-                    if output.needs_saga_recovery {
-                        info!(&opctx.log, "activating saga recovery task");
-                        self.saga_recovery.activate();
-                    }
+                if needs_saga_recovery {
+                    info!(&opctx.log, "activating saga recovery task");
+                    self.saga_recovery.activate();
                 }
 
                 json!({
