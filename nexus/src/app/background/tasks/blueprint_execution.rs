@@ -10,6 +10,7 @@ use futures::FutureExt;
 use internal_dns::resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_reconfigurator_execution::RealizeBlueprintOutput;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
 use serde_json::json;
 use std::sync::Arc;
@@ -98,16 +99,23 @@ impl BlueprintExecutor {
         // Trigger anybody waiting for this to finish.
         self.tx.send_modify(|count| *count = *count + 1);
 
-        // If executing the blueprint requires activating the saga recovery
-        // background task, do that now.
-        info!(&opctx.log, "activating saga recovery task");
-        if let Ok(true) = result {
-            self.saga_recovery.activate();
-        }
-
         // Return the result as a `serde_json::Value`
         match result {
-            Ok(_) => json!({}),
+            Ok(RealizeBlueprintOutput { needs_saga_recovery }) => {
+                // If executing the blueprint requires activating the saga
+                // recovery background task, do that now.
+                if let Ok(output) = &result {
+                    if output.needs_saga_recovery {
+                        info!(&opctx.log, "activating saga recovery task");
+                        self.saga_recovery.activate();
+                    }
+                }
+
+                json!({
+                    "target_id": blueprint.id.to_string(),
+                    "needs_saga_recovery": needs_saga_recovery,
+                })
+            }
             Err(errors) => {
                 let errors: Vec<_> =
                     errors.into_iter().map(|e| format!("{:#}", e)).collect();
@@ -302,10 +310,17 @@ mod test {
             )
             .await,
         );
+        let blueprint_id = blueprint.1.id;
         blueprint_tx.send(Some(blueprint)).unwrap();
         let value = task.activate(&opctx).await;
         println!("activating with no zones: {:?}", value);
-        assert_eq!(value, json!({}));
+        assert_eq!(
+            value,
+            json!({
+                "target_id": blueprint_id,
+                "needs_saga_recovery": false,
+            })
+        );
 
         // Create a non-empty blueprint describing two servers and verify that
         // the task correctly winds up making requests to both of them and
@@ -393,7 +408,13 @@ mod test {
         // Activate the task to trigger zone configuration on the sled-agents
         let value = task.activate(&opctx).await;
         println!("activating two sled agents: {:?}", value);
-        assert_eq!(value, json!({}));
+        assert_eq!(
+            value,
+            json!({
+                "target_id": blueprint.1.id.to_string(),
+                "needs_saga_recovery": false,
+            })
+        );
         s1.verify_and_clear();
         s2.verify_and_clear();
 
