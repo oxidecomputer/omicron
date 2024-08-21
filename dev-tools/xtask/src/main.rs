@@ -18,6 +18,7 @@ mod check_workspace_deps;
 mod clippy;
 #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
 mod external;
+mod live_test;
 mod usdt;
 
 #[cfg(target_os = "illumos")]
@@ -58,6 +59,9 @@ enum Cmds {
     Clippy(clippy::ClippyArgs),
     /// Download binaries, OpenAPI specs, and other out-of-repo utilities.
     Download(external::External),
+
+    /// Create a bundle of live tests
+    LiveTest(live_test::Args),
 
     /// Utilities for working with MGS.
     MgsDev(external::External),
@@ -127,6 +131,7 @@ fn main() -> Result<()> {
                 external.exec_bin("xtask-downloader")
             }
         }
+        Cmds::LiveTest(args) => live_test::run_cmd(args),
         Cmds::MgsDev(external) => external.exec_bin("mgs-dev"),
         Cmds::OmicronDev(external) => external.exec_bin("omicron-dev"),
         Cmds::Openapi(external) => external.exec_bin("openapi-manager"),
