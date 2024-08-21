@@ -13,10 +13,10 @@ use nexus_types::deployment::SledFilter;
 use omicron_common::address::Ipv6Subnet;
 use slog::info;
 use slog::o;
+use std::ffi::OsStr;
 use std::net::SocketAddrV6;
+use std::path::Component;
 use std::sync::Arc;
-
-// XXX-dap point tmp at some place other than /tmp
 
 pub struct LiveTestContext {
     logctx: LogContext,
@@ -169,20 +169,44 @@ async fn check_execution_environment(
         "live tests can only be run on deployed systems, which run illumos"
     );
 
-    resolver.lookup_ip(ServiceName::InternalDns).await.map(|_| ()).map_err(
-        |e| {
-            let text = format!(
-                "check_execution_environment(): failed to look up internal DNS \
+    resolver.lookup_ip(ServiceName::InternalDns).await.map_err(|e| {
+        let text = format!(
+            "check_execution_environment(): failed to look up internal DNS \
                  in the internal DNS servers.\n\n \
                  Are you trying to run this in a development environment?  \
                  This test can only be run on deployed systems and only from a \
                  context with connectivity to the underlay network.\n\n \
                  raw error: {}",
-                 slog_error_chain::InlineErrorChain::new(&e)
+            slog_error_chain::InlineErrorChain::new(&e)
+        );
+        anyhow!("{}", textwrap::wrap(&text, 80).join("\n"))
+    })?;
+
+    // Warn the user if the temporary directory is /tmp.  This check is
+    // heuristic.  There are other ways they may have specified a tmpfs
+    // temporary directory and we don't claim to catch all of them.
+    //
+    // We could also just go ahead and use /var/tmp, but it's not clear we can
+    // reliably do that at this point (if Rust or other components have cached
+    // TMPDIR) and it would be hard to override.
+    let tmpdir = std::env::temp_dir();
+    let mut tmpdir_components = tmpdir.components().take(2);
+    if let Some(first) = tmpdir_components.next() {
+        if let Some(next) = tmpdir_components.next() {
+            if first == Component::RootDir
+                && next == Component::Normal(OsStr::new("tmp"))
+            {
+                eprintln!(
+                    "WARNING: temporary directory appears to be under /tmp, \
+                     which is generally tmpfs.  Consider setting \
+                     TMPDIR=/var/tmp to avoid runaway tests using too much\
+                     memory and swap."
                 );
-            anyhow!("{}", textwrap::wrap(&text, 80).join("\n"))
-        },
-    )
+            }
+        }
+    }
+
+    Ok(())
 }
 
 async fn check_hardware_environment(

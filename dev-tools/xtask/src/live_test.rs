@@ -130,8 +130,11 @@ pub fn run_cmd(_args: Args) -> Result<()> {
     eprintln!("3. On that system, unpack the tarball with:\n");
     eprintln!("     tar xzf {}\n", final_tarball.file_name().unwrap());
     eprintln!("4. On that system, run tests with:\n");
+    // TMPDIR=/var/tmp puts stuff on disk, cached as needed, rather than the
+    // default /tmp which requires that stuff be in-memory.  That can lead to
+    // great sadness if the tests wind up writing a lot of data.
     let raw = &[
-        "./cargo-nextest nextest run \\",
+        "TMPDIR=/var/tmp ./cargo-nextest nextest run \\",
         &format!(
             "--archive-file {}/{} \\",
             NAME,
