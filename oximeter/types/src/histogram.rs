@@ -1029,8 +1029,10 @@ where
             return Err(QuantizationError::InvalidSteps);
         }
 
-        // The highest power must be representable in the target type.
-        if self.checked_pow(hi.into()).is_none() {
+        // The highest power must be representable in the target type. Note that
+        // we have to convert to that target type _before_ doing this check.
+        let base = <u64 as From<Self>>::from(*self);
+        if base.checked_pow(hi.into()).is_none() {
             return Err(QuantizationError::Overflow);
         }
 
@@ -1039,7 +1041,6 @@ where
         //
         // Note that we unwrap in a few places below, where we're sure the
         // narrowing conversion cannot fail, such as to a u32.
-        let base = <u64 as From<Self>>::from(*self);
         let lo = <u64 as From<Self>>::from(lo);
         let hi = <u64 as From<Self>>::from(hi);
         let count = <u64 as NumCast>::from(count.get())
@@ -1766,5 +1767,17 @@ mod tests {
             Histogram::<u64>::new(&[]).unwrap_err(),
             HistogramError::EmptyBins
         ));
+    }
+
+    #[test]
+    fn test_log_linear_bins_greater_than_power_width() {
+        let start: u16 = 3;
+        // 10u16 ** 10u16 overflows, but what we should be computing is 10u64 **
+        // 10u16, which would not overflow. We need to compute whether it
+        // overflows in the _support_ type.
+        let stop = 10;
+        Histogram::<u64>::span_decades(start, stop).expect(
+            "expected not to overflow, since support type is wide enough",
+        );
     }
 }
