@@ -10,6 +10,7 @@ use futures::FutureExt;
 use internal_dns::resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_reconfigurator_execution::RealizeBlueprintOutput;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
 use serde_json::json;
 use std::sync::Arc;
@@ -109,8 +110,11 @@ impl BlueprintExecutor {
 
         // Return the result as a `serde_json::Value`
         match result {
-            // TODO: should we serialize the output above as a JSON object?
-            Ok(_) => json!({}),
+            Ok(RealizeBlueprintOutput { needs_saga_recovery }) => json!({
+                "target_id": blueprint.id.to_string(),
+                "needs_saga_recovery": needs_saga_recovery,
+                "errors": [],
+            }),
             Err(errors) => {
                 let errors: Vec<_> =
                     errors.into_iter().map(|e| format!("{:#}", e)).collect();
