@@ -29,8 +29,6 @@ impl LiveTestContext {
     pub async fn new(
         test_name: &'static str,
     ) -> Result<LiveTestContext, anyhow::Error> {
-        // XXX-dap check that we're actually running inside an environment and
-        // not in some workspace
         let logctx = omicron_test_utils::dev::test_setup_log(test_name);
         let log = &logctx.log;
         let resolver = create_resolver(log)?;

@@ -12,6 +12,8 @@ use std::process::Command;
 pub struct Args {}
 
 pub fn run_cmd(_args: Args) -> Result<()> {
+    const NAME: &str = "live-test-archive";
+
     // The live tests operate in deployed environments, which always run
     // illumos.  Bail out quickly if someone tries to run this on a system whose
     // binaries won't be usable.  (We could compile this subcommand out
@@ -22,25 +24,25 @@ pub fn run_cmd(_args: Args) -> Result<()> {
         bail!("live-test archive can only be built on illumos systems");
     }
 
-    let tmpdir =
+    let tmpdir_root =
         camino_tempfile::tempdir().context("creating temporary directory")?;
-    let tarball = camino::Utf8PathBuf::try_from(
+    let final_tarball = camino::Utf8PathBuf::try_from(
         std::env::current_dir()
             .map(|d| d.join("target"))
             .context("getting current directory")?,
     )
     .context("non-UTF-8 current directory")?
-    .join("live-test-archive.tgz");
-    let contents = tmpdir.path().join("live-test-archive");
-    let archive_file = contents.join("omicron-live-tests.tar.zst");
+    .join(format!("{}.tgz", NAME));
+    let proto_root = tmpdir_root.path().join(NAME);
+    let nextest_archive_file = proto_root.join("omicron-live-tests.tar.zst");
 
-    eprintln!("using temporary directory: {}", tmpdir.path());
-    eprintln!("will create archive file:  {}", archive_file);
-    eprintln!("output tarball:            {}", tarball);
+    eprintln!("using temporary directory: {}", tmpdir_root.path());
+    eprintln!("will create archive file:  {}", nextest_archive_file);
+    eprintln!("output tarball:            {}", final_tarball);
     eprintln!();
 
-    std::fs::create_dir(&contents)
-        .with_context(|| format!("mkdir {:?}", &contents))?;
+    std::fs::create_dir(&proto_root)
+        .with_context(|| format!("mkdir {:?}", &proto_root))?;
 
     let cargo =
         std::env::var("CARGO").unwrap_or_else(|_| String::from("cargo"));
@@ -51,39 +53,56 @@ pub fn run_cmd(_args: Args) -> Result<()> {
     command.arg("--package");
     command.arg("omicron-live-tests");
     command.arg("--archive-file");
-    command.arg(&archive_file);
+    command.arg(&nextest_archive_file);
     run_subcmd(command)?;
 
-    // Bundle up the source.
-    // XXX-dap using git here is debatable.
-    // XXX-dap consider adding nextest binary
-    let mut command = Command::new("git");
-    command.arg("archive");
-    command.arg("--format=tar.gz");
-    command.arg("--prefix=live-test-archive/");
-    command.arg(format!("--add-file={}", &archive_file));
-    command.arg("HEAD");
-    let archive_stream = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(&tarball)
-        .with_context(|| format!("open {:?}", tarball))?;
-    command.stdout(archive_stream);
-
+    // Using nextest archives requires that the source be separately transmitted
+    // to the system where the tests will be run.  We're trying to automate
+    // that.  So let's bundle up the source and the nextest archive into one big
+    // tarball.  But which source files do we bundle?  We need:
+    //
+    // - Cargo.toml (nextest expects to find this)
+    // - .config/nextest.toml (nextest's configuration, which is used while
+    //   running the tests)
+    // - live-tests (this is where the tests live, and they might expect stuff
+    //   that exists in here like expectorate files)
+    //
+    // plus the nextext archive file.
+    //
+    // To avoid creating a tarbomb, we want all the files prefixed with
+    // "live-test-archive/".  There's no great way to do this with the illumos
+    // tar(1) except to create a temporary directory called "live-test-archive"
+    // that contains the files and then tar'ing up that.
+    //
+    // Ironically, an easy way to construct that directory is with tar(1).
+    let mut command = Command::new("bash");
+    command.arg("-c");
+    command.arg(format!(
+        "tar cf - Cargo.toml .config/nextest.toml live-tests | \
+         tar xf - -C {:?}",
+        &proto_root
+    ));
     run_subcmd(command)?;
 
-    drop(tmpdir);
+    let mut command = Command::new("tar");
+    command.arg("cf");
+    command.arg(&final_tarball);
+    command.arg("-C");
+    command.arg(tmpdir_root.path());
+    command.arg(NAME);
+    run_subcmd(command)?;
+
+    drop(tmpdir_root);
 
     eprint!("created: ");
-    println!("{}", &tarball);
+    println!("{}", &final_tarball);
     eprintln!("\nTo use this:\n");
     eprintln!(
         "1. Copy the tarball to the switch zone in a deployed Omicron system.\n"
     );
     let raw = &[
         "scp \\",
-        &format!("{} \\", &tarball),
+        &format!("{} \\", &final_tarball),
         "root@YOUR_SCRIMLET_GZ_IP:/zone/oxz_switch/root/root",
     ]
     .join("\n");
@@ -109,16 +128,16 @@ pub fn run_cmd(_args: Args) -> Result<()> {
     );
     eprintln!("{}\n", text.join("\n"));
     eprintln!("3. On that system, unpack the tarball with:\n");
-    eprintln!("     tar xzf {}\n", tarball.file_name().unwrap());
+    eprintln!("     tar xzf {}\n", final_tarball.file_name().unwrap());
     eprintln!("4. On that system, run tests with:\n");
     let raw = &[
         "./cargo-nextest nextest run \\",
         &format!(
             "--archive-file {}/{} \\",
-            contents.file_name().unwrap(),
-            archive_file.file_name().unwrap()
+            NAME,
+            nextest_archive_file.file_name().unwrap()
         ),
-        &format!("--workspace-remap {}", contents.file_name().unwrap()),
+        &format!("--workspace-remap {}", NAME),
     ]
     .join("\n");
     let text = textwrap::wrap(

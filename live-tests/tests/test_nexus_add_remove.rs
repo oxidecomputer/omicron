@@ -106,8 +106,7 @@ async fn test_nexus_add_remove() {
         .next()
         .expect("at least one sled with added zones")
         .zones
-        .iter()
-        .next()
+        .first()
         .expect("at least one added zone on that sled");
     assert_eq!(new_zone.kind(), ZoneKind::Nexus);
     let new_zone_addr = new_zone.underlay_address();
