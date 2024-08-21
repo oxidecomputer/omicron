@@ -114,7 +114,6 @@ impl BlueprintExecutor {
                 json!({
                     "target_id": blueprint.id.to_string(),
                     "needs_saga_recovery": needs_saga_recovery,
-                    "errors": [],
                 })
             }
             Err(errors) => {
@@ -311,10 +310,17 @@ mod test {
             )
             .await,
         );
+        let blueprint_id = blueprint.1.id;
         blueprint_tx.send(Some(blueprint)).unwrap();
         let value = task.activate(&opctx).await;
         println!("activating with no zones: {:?}", value);
-        assert_eq!(value, json!({}));
+        assert_eq!(
+            value,
+            json!({
+                "target_id": blueprint_id,
+                "needs_saga_recovery": false,
+            })
+        );
 
         // Create a non-empty blueprint describing two servers and verify that
         // the task correctly winds up making requests to both of them and
@@ -402,7 +408,13 @@ mod test {
         // Activate the task to trigger zone configuration on the sled-agents
         let value = task.activate(&opctx).await;
         println!("activating two sled agents: {:?}", value);
-        assert_eq!(value, json!({}));
+        assert_eq!(
+            value,
+            json!({
+                "target_id": blueprint.1.id.to_string(),
+                "needs_saga_recovery": false,
+            })
+        );
         s1.verify_and_clear();
         s2.verify_and_clear();
 
