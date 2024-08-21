@@ -37,8 +37,6 @@ impl DataStore {
         use db::schema::{
             bgp_announce_set, bgp_announce_set::dsl as announce_set_dsl,
         };
-        use diesel::sql_types;
-        use diesel::IntoSql;
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
@@ -101,8 +99,41 @@ impl DataStore {
                     let config =
                         BgpConfig::from_config_create(config, announce_set_id);
 
+                    // Idempotency:
+                    // Check to see if an exact match for the config already exists
+                    let matching_config = match dsl::bgp_config
+                        .filter(dsl::name.eq(config.name().to_string()))
+                        .filter(dsl::asn.eq(config.asn))
+                        .filter(dsl::bgp_announce_set_id.eq(config.bgp_announce_set_id))
+                        .filter(dsl::vrf.eq(config.vrf.clone()))
+                        .filter(dsl::shaper.eq(config.shaper.clone()))
+                        .filter(dsl::checker.eq(config.checker.clone()))
+                        .filter(dsl::time_deleted.is_null())
+                        .select(BgpConfig::as_select())
+                        .first_async::<BgpConfig>(&conn)
+                        .await {
+                           Ok(v)  => Ok(Some(v)),
+                           Err(e) => {
+                                match e {
+                                    diesel::result::Error::NotFound => {
+                                        Ok(None)
+                                    }
+                                    _ => {
+                                        let msg = "error while checking if bgp config exists";
+                                        error!(opctx.log, "{msg}"; "error" => ?e);
+                                        Err(err.bail(Error::internal_error(msg)))
+                                    }
+                                }
+                            }
+                        }?;
+
+                    // If so, we're done!
+                    if let Some(existing_config) = matching_config {
+                        return Ok(existing_config);
+                    }
+
                     // TODO: remove once per-switch-multi-asn support is added
-                    // Bail if an existing config for this ASN already exists.
+                    // Bail if a conflicting config for this ASN already exists.
                     // This is a temporary measure until multi-asn-per-switch is supported.
                     let configs_with_asn: Vec<BgpConfig> = dsl::bgp_config
                         .filter(dsl::asn.eq(config.asn))
@@ -112,50 +143,14 @@ impl DataStore {
                         .await?;
 
                     if !configs_with_asn.is_empty() {
-                        error!(opctx.log, "config for asn already exists"; "asn" => ?config.asn, "configs" => ?configs_with_asn);
+                        error!(opctx.log, "different config for asn already exists"; "asn" => ?config.asn, "configs" => ?configs_with_asn);
                         return Err(err.bail(Error::conflict("cannot have more than one configuration per ASN")));
                     }
 
-                    let matching_entry_subquery = dsl::bgp_config
-                        .filter(dsl::name.eq(Name::from(config.name().clone())))
-                        .filter(dsl::time_deleted.is_null())
-                        .select(dsl::name);
-
-                    // SELECT exactly the values we're trying to INSERT, but only
-                    // if they do not already exist.
-                    let new_entry_subquery = diesel::dsl::select((
-                        config.id().into_sql::<sql_types::Uuid>(),
-                        config.name().to_string().into_sql::<sql_types::Text>(),
-                        config
-                            .description()
-                            .to_string()
-                            .into_sql::<sql_types::Text>(),
-                        config.asn.into_sql::<sql_types::BigInt>(),
-                        config.bgp_announce_set_id.into_sql::<sql_types::Uuid>(),
-                        config
-                            .vrf
-                            .clone()
-                            .into_sql::<sql_types::Nullable<sql_types::Text>>(),
-                        Utc::now().into_sql::<sql_types::Timestamptz>(),
-                        Utc::now().into_sql::<sql_types::Timestamptz>(),
-                    ))
-                        .filter(diesel::dsl::not(diesel::dsl::exists(
-                            matching_entry_subquery,
-                        )));
-
                     diesel::insert_into(dsl::bgp_config)
-                        .values(new_entry_subquery)
-                        .into_columns((
-                            dsl::id,
-                            dsl::name,
-                            dsl::description,
-                            dsl::asn,
-                            dsl::bgp_announce_set_id,
-                            dsl::vrf,
-                            dsl::time_created,
-                            dsl::time_modified,
-                        ))
-                        .execute_async(&conn)
+                        .values(config.clone())
+                        .returning(BgpConfig::as_returning())
+                        .get_result_async(&conn)
                         .await
                         .map_err(|e | {
                             let msg = "failed to insert bgp config";
@@ -182,31 +177,6 @@ impl DataStore {
                                     }
                                 }
                                 _ => err.bail(Error::internal_error(msg)),
-
-
-                            }
-                        })?;
-
-                    dsl::bgp_config
-                        .filter(dsl::name.eq(Name::from(config.name().clone())))
-                        .filter(dsl::time_deleted.is_null())
-                        .select(BgpConfig::as_select())
-                        .limit(1)
-                        .first_async(&conn)
-                        .await
-                        .map_err(|e| {
-                            let msg = "failed to lookup bgp config";
-                            error!(opctx.log, "{msg}"; "error" => ?e);
-
-                            match e {
-                                diesel::result::Error::NotFound => {
-                                    err.bail(Error::not_found_by_name(
-                                        ResourceType::BgpConfig,
-                                        config.name(),
-                                    ))
-                                }
-                                _ => err.bail(Error::internal_error(msg)),
-
                             }
                         })
                 }
@@ -898,16 +868,16 @@ impl DataStore {
 
                     let list =
                         dsl::switch_port_settings_bgp_peer_config_allow_export
-                            .filter(
-                                db_allow::port_settings_id.eq(port_settings_id),
-                            )
-                            .filter(
-                                db_allow::interface_name
-                                    .eq(interface_name.to_owned()),
-                            )
-                            .filter(db_allow::addr.eq(addr))
-                            .load_async(&conn)
-                            .await?;
+                        .filter(
+                            db_allow::port_settings_id.eq(port_settings_id),
+                        )
+                        .filter(
+                            db_allow::interface_name
+                                .eq(interface_name.to_owned()),
+                        )
+                        .filter(db_allow::addr.eq(addr))
+                        .load_async(&conn)
+                        .await?;
 
                     Ok(Some(list))
                 }
