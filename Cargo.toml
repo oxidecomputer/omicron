@@ -31,6 +31,7 @@ members = [
     "dev-tools/omicron-dev",
     "dev-tools/omicron-dev-lib",
     "dev-tools/openapi-manager",
+    "dev-tools/openapi-manager/types",
     "dev-tools/oxlog",
     "dev-tools/reconfigurator-cli",
     "dev-tools/releng",
@@ -145,6 +146,7 @@ default-members = [
     "dev-tools/omicron-dev",
     "dev-tools/omicron-dev-lib",
     "dev-tools/openapi-manager",
+    "dev-tools/openapi-manager/types",
     "dev-tools/oxlog",
     "dev-tools/reconfigurator-cli",
     "dev-tools/releng",
@@ -453,6 +455,7 @@ oxlog = { path = "dev-tools/oxlog" }
 oxnet = { git = "https://github.com/oxidecomputer/oxnet" }
 once_cell = "1.19.0"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
+openapi-manager-types = { path = "dev-tools/openapi-manager/types" }
 openapiv3 = "2.0.0"
 # must match samael's crate!
 openssl = "0.10"
