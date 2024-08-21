@@ -23,6 +23,7 @@ pub use dropshot::PaginationOrder;
 pub use error::*;
 use futures::stream::BoxStream;
 use oxnet::IpNet;
+use oxnet::Ipv4Net;
 use parse_display::Display;
 use parse_display::FromStr;
 use rand::thread_rng;
@@ -2706,6 +2707,15 @@ pub struct BgpPeerStatus {
 
     /// Switch with the peer session.
     pub switch: SwitchLocation,
+}
+
+/// The current status of a BGP peer.
+#[derive(
+    Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, Default,
+)]
+pub struct BgpExported {
+    /// Exported routes indexed by peer address.
+    pub exports: HashMap<String, Vec<Ipv4Net>>,
 }
 
 /// Opaque object representing BGP message history for a given BGP peer. The

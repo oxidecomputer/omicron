@@ -6640,6 +6640,33 @@
         }
       }
     },
+    "/v1/system/networking/bgp-exported": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get BGP exported routes",
+        "operationId": "networking_bgp_exported",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BgpExported"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/networking/bgp-message-history": {
       "get": {
         "tags": [
@@ -10349,6 +10376,25 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "BgpExported": {
+        "description": "The current status of a BGP peer.",
+        "type": "object",
+        "properties": {
+          "exports": {
+            "description": "Exported routes indexed by peer address.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Ipv4Net"
+              }
+            }
+          }
+        },
+        "required": [
+          "exports"
         ]
       },
       "BgpImportedRouteIpv4": {

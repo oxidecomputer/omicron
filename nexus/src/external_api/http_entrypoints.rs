@@ -41,6 +41,7 @@ use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
 use nexus_types::external_api::shared::{BfdStatus, ProbeInfo};
+use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
@@ -55,9 +56,11 @@ use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotBlock;
 use omicron_common::api::external::AddressLotCreateResponse;
+use omicron_common::api::external::AggregateBgpMessageHistory;
 use omicron_common::api::external::BgpAnnounceSet;
 use omicron_common::api::external::BgpAnnouncement;
 use omicron_common::api::external::BgpConfig;
+use omicron_common::api::external::BgpExported;
 use omicron_common::api::external::BgpImportedRouteIpv4;
 use omicron_common::api::external::BgpPeerStatus;
 use omicron_common::api::external::DataPageParams;
@@ -78,9 +81,6 @@ use omicron_common::api::external::TufRepoGetResponse;
 use omicron_common::api::external::TufRepoInsertResponse;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
-use omicron_common::api::external::{
-    http_pagination::data_page_params_for, AggregateBgpMessageHistory,
-};
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use parse_display::Display;
@@ -277,6 +277,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_bgp_config_create)?;
         api.register(networking_bgp_config_list)?;
         api.register(networking_bgp_status)?;
+        api.register(networking_bgp_exported)?;
         api.register(networking_bgp_imported_routes_ipv4)?;
         api.register(networking_bgp_config_delete)?;
         api.register(networking_bgp_announce_set_update)?;
@@ -3928,6 +3929,30 @@ async fn networking_bgp_status(
     let handler = async {
         let nexus = &apictx.context.nexus;
         let result = nexus.bgp_peer_status(&opctx).await?;
+        Ok(HttpResponseOk(result))
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+//TODO pagination? the normal by-name/by-id stuff does not work here
+/// Get BGP exported routes
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/bgp-exported",
+    tags = ["system/networking"],
+}]
+async fn networking_bgp_exported(
+    rqctx: RequestContext<ApiContext>,
+) -> Result<HttpResponseOk<BgpExported>, HttpError> {
+    let apictx = rqctx.context();
+    let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let result = nexus.bgp_exported(&opctx).await?;
         Ok(HttpResponseOk(result))
     };
     apictx
