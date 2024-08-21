@@ -414,34 +414,31 @@ impl PollerManager {
             "rack ID sender has gone away...we must be shutting down",
         )?;
 
-        let mut known_sps: HashMap<SpIdentifier, tokio::task::AbortHandle> =
-            HashMap::with_capacity(NORMAL_NUMBER_OF_SPS);
         // Wait for SP discovery to complete, if it hasn't already.
         // TODO(eliza): presently, we busy-poll here. It would be nicer to
         // replace the `OnceLock<Result<LocationMap, ...>` in `ManagementSwitch`
         // with a `tokio::sync::watch`
-        backoff::retry_notify_ext(
+        let sps = backoff::retry_notify_ext(
             backoff::retry_policy_local(),
             || async {
-                if switch.is_discovery_complete() {
-                    Ok(())
-                } else {
-                    Err(backoff::BackoffError::transient(()))
-                }
+                switch.all_sps().map_err(backoff::BackoffError::transient)
             },
-            |_, _, elapsed| {
+            |err, _, elapsed| {
                 let secs = elapsed.as_secs();
                 if secs < 30 {
                     slog::debug!(
                         &self.log,
                         "waiting for SP discovery to complete...";
                         "elapsed" => ?elapsed,
+                        "error" => err,
                     );
                 } else if secs < 180 {
                     slog::info!(
                         &self.log,
                         "still waiting for SP discovery to complete...";
                         "elapsed" => ?elapsed,
+
+                        "error" => err,
                     )
                 } else {
                     slog::warn!(
@@ -449,6 +446,7 @@ impl PollerManager {
                         "we have been waiting for SP discovery to complete \
                          for a pretty long time!";
                         "elapsed" => ?elapsed,
+                        "error" => err,
                     )
                 }
             },
@@ -461,73 +459,24 @@ impl PollerManager {
             "starting to polling SP sensor data every {:?}", self.poll_interval;
         );
 
+        let mut known_sps = HashMap::with_capacity(NORMAL_NUMBER_OF_SPS);
+        for (spid, _) in sps {
+            slog::info!(
+                &self.log,
+                "found a new little friend!";
+                "sp_slot" => ?spid.slot,
+                "chassis_type" => ?spid.typ,
+            );
+            let task = self.tasks.spawn(self.make_poller(spid, rack_id));
+            let _prev = known_sps.insert(spid, task);
+            debug_assert!(
+                _prev.is_none(),
+                "we should not have clobbered an existing SP poller!"
+            );
+        }
+
+        // All pollers started! Now wait to see if any of them have died...
         loop {
-            let sps = backoff::retry_notify_ext(
-                backoff::retry_policy_internal_service(),
-                || async {
-                    switch.all_sps().map_err(backoff::BackoffError::transient)
-                },
-                |error, attempts, elapsed| {
-                    slog::warn!(
-                        &self.log,
-                        "failed to list SPs! we'll try again in a little bit.";
-                        "error" => error,
-                        "elapsed" => ?elapsed,
-                        "attempts" => attempts,
-                    )
-                },
-            )
-            .await
-            .expect("we never return a permanent error here");
-
-            for (spid, _) in sps {
-                // Do we know about this li'l guy already?
-                match known_sps.get(&spid) {
-                    // Okay, and has it got someone checking up on it? Right?
-                    Some(poller) if poller.is_finished() => {
-                        // Welp.
-                        slog::info!(
-                            &self.log,
-                            "uh-oh! a known SP's poller task has gone AWOL. restarting it...";
-                            "sp_slot" => ?spid.slot,
-                            "chassis_type" => ?spid.typ,
-                        );
-                    }
-                    Some(_) => continue,
-                    None => {
-                        slog::info!(
-                            &self.log,
-                            "found a new little friend!";
-                            "sp_slot" => ?spid.slot,
-                            "chassis_type" => ?spid.typ,
-                        );
-                    }
-                }
-
-                let poller = SpPoller {
-                    spid,
-                    rack_id,
-                    mgs_id: self.mgs_id,
-                    log: self.log.new(slog::o!(
-                        "sp_slot" => spid.slot,
-                        "chassis_type" => format!("{:?}", spid.typ),
-                    )),
-                    components: HashMap::new(),
-                    known_state: None,
-                    sample_tx: self.sample_tx.clone(),
-                };
-                let poller_handle = self
-                    .tasks
-                    .spawn(poller.run(self.poll_interval, self.apictx.clone()));
-                let _prev_poller = known_sps.insert(spid, poller_handle);
-                debug_assert!(
-                    _prev_poller.map(|p| p.is_finished()).unwrap_or(true),
-                    "if we clobbered an existing poller task, it better have \
-                     been because it was dead..."
-                );
-            }
-
-            // All pollers started! Now wait to see if any of them have died...
             let mut joined = self.tasks.join_next().await;
             while let Some(result) = joined {
                 if let Err(e) = result {
@@ -550,7 +499,42 @@ impl PollerManager {
                 // drain any remaining errors
                 joined = self.tasks.try_join_next();
             }
+
+            for (spid, poller) in &mut known_sps {
+                // There's still someone checking up on this SP, right?
+                if poller.is_finished() {
+                    // Welp.
+                    slog::info!(
+                        &self.log,
+                        "uh-oh! a known SP's poller task has gone AWOL. restarting it...";
+                        "sp_slot" => ?spid.slot,
+                        "chassis_type" => ?spid.typ,
+                    );
+                    *poller =
+                        self.tasks.spawn(self.make_poller(*spid, rack_id));
+                }
+            }
         }
+    }
+
+    fn make_poller(
+        &self,
+        spid: SpIdentifier,
+        rack_id: Uuid,
+    ) -> impl std::future::Future<Output = Result<(), SpCommsError>> {
+        let poller = SpPoller {
+            spid,
+            rack_id,
+            mgs_id: self.mgs_id,
+            log: self.log.new(slog::o!(
+                "sp_slot" => spid.slot,
+                "chassis_type" => format!("{:?}", spid.typ),
+            )),
+            components: HashMap::new(),
+            known_state: None,
+            sample_tx: self.sample_tx.clone(),
+        };
+        poller.run(self.poll_interval, self.apictx.clone())
     }
 }
 
