@@ -1093,12 +1093,6 @@ impl JsonSchema for UserData {
     }
 }
 
-/// Migration parameters for an `Instance`
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceMigrate {
-    pub dst_sled_id: Uuid,
-}
-
 /// Forwarded to a propolis server to request the contents of an Instance's serial console.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct InstanceSerialConsoleRequest {
@@ -1587,6 +1581,10 @@ pub struct Route {
 
     /// VLAN id the gateway is reachable over.
     pub vid: Option<u16>,
+
+    /// Local preference for route. Higher preference indictes precedence
+    /// within and across protocols.
+    pub local_pref: Option<u32>,
 }
 
 /// Select a BGP config by a name or id.

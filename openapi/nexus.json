@@ -2276,62 +2276,6 @@
         }
       }
     },
-    "/v1/instances/{instance}/migrate": {
-      "post": {
-        "tags": [
-          "instances"
-        ],
-        "summary": "Migrate an instance",
-        "operationId": "instance_migrate",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "path",
-            "name": "instance",
-            "description": "Name or ID of the instance",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstanceMigrate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Instance"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v1/instances/{instance}/reboot": {
       "post": {
         "tags": [
@@ -6769,6 +6713,33 @@
         }
       }
     },
+    "/v1/system/networking/bgp-exported": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get BGP exported routes",
+        "operationId": "networking_bgp_exported",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BgpExported"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/networking/bgp-message-history": {
       "get": {
         "tags": [
@@ -8155,11 +8126,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_Table",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Table"
-                  }
+                  "$ref": "#/components/schemas/OxqlQueryResult"
                 }
               }
             }
@@ -10482,6 +10449,25 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "BgpExported": {
+        "description": "The current status of a BGP peer.",
+        "type": "object",
+        "properties": {
+          "exports": {
+            "description": "Exported routes indexed by peer address.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Ipv4Net"
+              }
+            }
+          }
+        },
+        "required": [
+          "exports"
         ]
       },
       "BgpImportedRouteIpv4": {
@@ -15344,19 +15330,6 @@
           }
         ]
       },
-      "InstanceMigrate": {
-        "description": "Migration parameters for an `Instance`",
-        "type": "object",
-        "properties": {
-          "dst_sled_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "dst_sled_id"
-        ]
-      },
       "InstanceNetworkInterface": {
         "description": "An `InstanceNetworkInterface` represents a virtual network interface device attached to an instance.",
         "type": "object",
@@ -16643,6 +16616,22 @@
           }
         ]
       },
+      "OxqlQueryResult": {
+        "description": "The result of a successful OxQL query.",
+        "type": "object",
+        "properties": {
+          "tables": {
+            "description": "Tables resulting from the query, each containing timeseries.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Table"
+            }
+          }
+        },
+        "required": [
+          "tables"
+        ]
+      },
       "Password": {
         "title": "A password used to authenticate a user",
         "description": "Passwords may be subject to additional constraints.",
@@ -17309,6 +17298,13 @@
             "description": "The route gateway.",
             "type": "string",
             "format": "ip"
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "Local preference for route. Higher preference indictes precedence within and across protocols.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "vid": {
             "nullable": true,
@@ -19368,6 +19364,13 @@
             "description": "The interface name this route configuration is assigned to.",
             "type": "string"
           },
+          "local_pref": {
+            "nullable": true,
+            "description": "Local preference indicating priority within and across protocols.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
           "port_settings_id": {
             "description": "The port settings object this route configuration belongs to.",
             "type": "string",
@@ -20273,10 +20276,20 @@
         "type": "object",
         "properties": {
           "metric_type": {
-            "$ref": "#/components/schemas/MetricType"
+            "description": "The type of this metric.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MetricType"
+              }
+            ]
           },
           "values": {
-            "$ref": "#/components/schemas/ValueArray"
+            "description": "The data values.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ValueArray"
+              }
+            ]
           }
         },
         "required": [

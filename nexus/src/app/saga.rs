@@ -469,6 +469,10 @@ impl super::Nexus {
         // We don't need the handle that runnable_saga.start() returns because
         // we're not going to wait for the saga to finish here.
         let _ = runnable_saga.start().await?;
+
+        let mut demo_sagas = self.demo_sagas()?;
+        demo_sagas.preregister(demo_saga_id);
+
         Ok(DemoSaga { saga_id, demo_saga_id })
     }
 

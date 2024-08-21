@@ -43,7 +43,6 @@ impl BackgroundTask for PhantomDiskDetector {
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
             let log = &opctx.log;
-            warn!(&log, "phantom disk task started");
 
             let phantom_disks = match self.datastore.find_phantom_disks().await
             {
@@ -83,14 +82,13 @@ impl BackgroundTask for PhantomDiskDetector {
                 } else {
                     info!(
                         &log,
-                        "phandom disk {} un-deleted andset to faulted ok",
+                        "phandom disk {} un-deleted and set to faulted ok",
                         disk.id(),
                     );
                     phantom_disk_deleted_ok += 1;
                 }
             }
 
-            warn!(&log, "phantom disk task done");
             json!({
                 "phantom_disk_deleted_ok": phantom_disk_deleted_ok,
                 "phantom_disk_deleted_err": phantom_disk_deleted_err,

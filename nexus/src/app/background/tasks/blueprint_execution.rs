@@ -4,16 +4,18 @@
 
 //! Background task for realizing a plan blueprint
 
-use crate::app::background::BackgroundTask;
+use crate::app::background::{Activator, BackgroundTask};
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use internal_dns::resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_reconfigurator_execution::RealizeBlueprintOutput;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
+use uuid::Uuid;
 
 /// Background task that takes a [`Blueprint`] and realizes the change to
 /// the state of the system based on the `Blueprint`.
@@ -21,8 +23,9 @@ pub struct BlueprintExecutor {
     datastore: Arc<DataStore>,
     resolver: Resolver,
     rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
-    nexus_label: String,
+    nexus_id: Uuid,
     tx: watch::Sender<usize>,
+    saga_recovery: Activator,
 }
 
 impl BlueprintExecutor {
@@ -32,10 +35,18 @@ impl BlueprintExecutor {
         rx_blueprint: watch::Receiver<
             Option<Arc<(BlueprintTarget, Blueprint)>>,
         >,
-        nexus_label: String,
+        nexus_id: Uuid,
+        saga_recovery: Activator,
     ) -> BlueprintExecutor {
         let (tx, _) = watch::channel(0);
-        BlueprintExecutor { datastore, resolver, rx_blueprint, nexus_label, tx }
+        BlueprintExecutor {
+            datastore,
+            resolver,
+            rx_blueprint,
+            nexus_id,
+            tx,
+            saga_recovery,
+        }
     }
 
     pub fn watcher(&self) -> watch::Receiver<usize> {
@@ -81,7 +92,7 @@ impl BlueprintExecutor {
             &self.datastore,
             &self.resolver,
             blueprint,
-            &self.nexus_label,
+            self.nexus_id,
         )
         .await;
 
@@ -90,7 +101,21 @@ impl BlueprintExecutor {
 
         // Return the result as a `serde_json::Value`
         match result {
-            Ok(()) => json!({}),
+            Ok(RealizeBlueprintOutput { needs_saga_recovery }) => {
+                // If executing the blueprint requires activating the saga
+                // recovery background task, do that now.
+                if let Ok(output) = &result {
+                    if output.needs_saga_recovery {
+                        info!(&opctx.log, "activating saga recovery task");
+                        self.saga_recovery.activate();
+                    }
+                }
+
+                json!({
+                    "target_id": blueprint.id.to_string(),
+                    "needs_saga_recovery": needs_saga_recovery,
+                })
+            }
             Err(errors) => {
                 let errors: Vec<_> =
                     errors.into_iter().map(|e| format!("{:#}", e)).collect();
@@ -115,7 +140,7 @@ impl BackgroundTask for BlueprintExecutor {
 #[cfg(test)]
 mod test {
     use super::BlueprintExecutor;
-    use crate::app::background::BackgroundTask;
+    use crate::app::background::{Activator, BackgroundTask};
     use httptest::matchers::{all_of, request};
     use httptest::responders::status_code;
     use httptest::Expectation;
@@ -261,7 +286,8 @@ mod test {
             datastore.clone(),
             resolver.clone(),
             blueprint_rx,
-            String::from("test-suite"),
+            Uuid::new_v4(),
+            Activator::new(),
         );
 
         // Now we're ready.
@@ -284,10 +310,17 @@ mod test {
             )
             .await,
         );
+        let blueprint_id = blueprint.1.id;
         blueprint_tx.send(Some(blueprint)).unwrap();
         let value = task.activate(&opctx).await;
         println!("activating with no zones: {:?}", value);
-        assert_eq!(value, json!({}));
+        assert_eq!(
+            value,
+            json!({
+                "target_id": blueprint_id,
+                "needs_saga_recovery": false,
+            })
+        );
 
         // Create a non-empty blueprint describing two servers and verify that
         // the task correctly winds up making requests to both of them and
@@ -375,7 +408,13 @@ mod test {
         // Activate the task to trigger zone configuration on the sled-agents
         let value = task.activate(&opctx).await;
         println!("activating two sled agents: {:?}", value);
-        assert_eq!(value, json!({}));
+        assert_eq!(
+            value,
+            json!({
+                "target_id": blueprint.1.id.to_string(),
+                "needs_saga_recovery": false,
+            })
+        );
         s1.verify_and_clear();
         s2.verify_and_clear();
 

@@ -2715,6 +2715,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_route_config (
     dst INET,
     gw INET,
     vid INT4,
+    local_pref INT8,
 
     /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
     PRIMARY KEY (port_settings_id, interface_name, dst, gw)
@@ -4221,7 +4222,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '88.0.0', NULL)
+    (TRUE, NOW(), NOW(), '89.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

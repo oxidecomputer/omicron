@@ -570,6 +570,7 @@ impl super::Nexus {
                     dst: r.destination,
                     gw: r.nexthop,
                     vid: r.vlan_id,
+                    local_pref: r.local_pref,
                 })
                 .collect();
 

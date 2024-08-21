@@ -34,11 +34,13 @@ pub(crate) async fn ensure_settings(
 mod test {
     use super::*;
     use crate::overridables::Overridables;
+    use crate::RealizeBlueprintOutput;
     use nexus_db_queries::authn;
     use nexus_db_queries::authz;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::CockroachDbClusterVersion;
     use std::sync::Arc;
+    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -96,16 +98,17 @@ mod test {
         .await;
         // Execute the initial blueprint.
         let overrides = Overridables::for_test(cptestctx);
-        crate::realize_blueprint_with_overrides(
-            &opctx,
-            datastore,
-            resolver,
-            &blueprint,
-            "test-suite",
-            &overrides,
-        )
-        .await
-        .expect("failed to execute initial blueprint");
+        let _: RealizeBlueprintOutput =
+            crate::realize_blueprint_with_overrides(
+                &opctx,
+                datastore,
+                resolver,
+                &blueprint,
+                Uuid::new_v4(),
+                &overrides,
+            )
+            .await
+            .expect("failed to execute initial blueprint");
         // The CockroachDB settings should not have changed.
         assert_eq!(
             settings,

@@ -56,6 +56,7 @@ fn assert_oximeter_list_producers_output(
 
 #[tokio::test]
 async fn test_omdb_usage_errors() {
+    clear_omdb_env();
     let cmd_path = path_to_executable(CMD_OMDB);
     let mut output = String::new();
     let invocations: &[&[&'static str]] = &[
@@ -80,6 +81,7 @@ async fn test_omdb_usage_errors() {
         &["mgs"],
         &["nexus"],
         &["nexus", "background-tasks"],
+        &["nexus", "background-tasks", "show", "--help"],
         &["nexus", "blueprints"],
         &["nexus", "sagas"],
         // Missing "--destructive" flag.  The URL is bogus but just ensures that
@@ -110,6 +112,8 @@ async fn test_omdb_usage_errors() {
 
 #[nexus_test]
 async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
+    clear_omdb_env();
+
     let gwtestctx = gateway_test_utils::setup::test_setup(
         "test_omdb_success_case",
         gateway_messages::SpPort::One,
@@ -144,6 +148,19 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["mgs", "inventory"],
         &["nexus", "background-tasks", "doc"],
         &["nexus", "background-tasks", "show"],
+        // background tasks: test picking out specific names
+        &["nexus", "background-tasks", "show", "saga_recovery"],
+        &[
+            "nexus",
+            "background-tasks",
+            "show",
+            "blueprint_loader",
+            "blueprint_executor",
+        ],
+        // background tasks: test recognized group names
+        &["nexus", "background-tasks", "show", "dns_internal"],
+        &["nexus", "background-tasks", "show", "dns_external"],
+        &["nexus", "background-tasks", "show", "all"],
         &["nexus", "sagas", "list"],
         &["--destructive", "nexus", "sagas", "demo-create"],
         &["nexus", "sagas", "list"],
@@ -257,6 +274,8 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
 /// that's covered by the success tests above.
 #[nexus_test]
 async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
+    clear_omdb_env();
+
     let cmd_path = path_to_executable(CMD_OMDB);
     let postgres_url = cptestctx.database.listen_url().to_string();
     let nexus_internal_url =
@@ -489,4 +508,23 @@ async fn do_run_extra<F>(
     }
 
     write!(output, "=============================================\n").unwrap();
+}
+
+// We're testing behavior that can be affected by OMDB-related environment
+// variables.  Clear all of them from the current process so that all child
+// processes don't have them.  OMDB environment variables can affect even the
+// help output provided by clap.  See clap-rs/clap#5673 for an example.
+fn clear_omdb_env() {
+    // Rust documents that it's not safe to manipulate the environment in a
+    // multi-threaded process outside of Windows because it's possible that
+    // other threads are reading or writing the environment and most systems do
+    // not support this.  On illumos, the underlying interfaces are broadly
+    // thread-safe.  Further, Omicron only supports running tests under `cargo
+    // nextest`, in which case there are no threads running concurrently here
+    // that may be reading or modifying the environment.
+    for (env_var, _) in std::env::vars().filter(|(k, _)| k.starts_with("OMDB_"))
+    {
+        eprintln!("removing {:?} from environment", env_var);
+        std::env::remove_var(env_var);
+    }
 }

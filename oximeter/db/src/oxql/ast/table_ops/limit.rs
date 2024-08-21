@@ -6,12 +6,8 @@
 
 // Copyright 2024 Oxide Computer Company
 
-use crate::oxql::point::Points;
-use crate::oxql::point::ValueArray;
-use crate::oxql::point::Values;
-use crate::oxql::Error;
-use crate::oxql::Table;
-use crate::oxql::Timeseries;
+use anyhow::Error;
+use oxql_types::Table;
 use std::num::NonZeroUsize;
 
 /// The kind of limiting operation
@@ -65,58 +61,7 @@ impl Limit {
                         }
                     };
 
-                    // Slice the various data arrays.
-                    let start_times = input_points
-                        .start_times
-                        .as_ref()
-                        .map(|s| s[start..end].to_vec());
-                    let timestamps =
-                        input_points.timestamps[start..end].to_vec();
-                    let values = input_points
-                        .values
-                        .iter()
-                        .map(|vals| {
-                            let values = match &vals.values {
-                                ValueArray::Integer(inner) => {
-                                    ValueArray::Integer(
-                                        inner[start..end].to_vec(),
-                                    )
-                                }
-                                ValueArray::Double(inner) => {
-                                    ValueArray::Double(
-                                        inner[start..end].to_vec(),
-                                    )
-                                }
-                                ValueArray::Boolean(inner) => {
-                                    ValueArray::Boolean(
-                                        inner[start..end].to_vec(),
-                                    )
-                                }
-                                ValueArray::String(inner) => {
-                                    ValueArray::String(
-                                        inner[start..end].to_vec(),
-                                    )
-                                }
-                                ValueArray::IntegerDistribution(inner) => {
-                                    ValueArray::IntegerDistribution(
-                                        inner[start..end].to_vec(),
-                                    )
-                                }
-                                ValueArray::DoubleDistribution(inner) => {
-                                    ValueArray::DoubleDistribution(
-                                        inner[start..end].to_vec(),
-                                    )
-                                }
-                            };
-                            Values { values, metric_type: vals.metric_type }
-                        })
-                        .collect();
-                    let points = Points { start_times, timestamps, values };
-                    Timeseries {
-                        fields: timeseries.fields.clone(),
-                        points,
-                        alignment: timeseries.alignment,
-                    }
+                    timeseries.limit(start, end)
                 });
                 Table::from_timeseries(table.name(), timeseries)
             })
@@ -127,9 +72,12 @@ impl Limit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::oxql::point::{DataType, MetricType};
     use chrono::Utc;
     use oximeter::FieldValue;
+    use oxql_types::{
+        point::{DataType, MetricType},
+        Timeseries,
+    };
     use std::{collections::BTreeMap, time::Duration};
 
     fn test_tables() -> Vec<Table> {
@@ -150,12 +98,14 @@ mod tests {
             MetricType::Gauge,
         )
         .unwrap();
-        timeseries.points.timestamps.clone_from(&timestamps);
-        timeseries.points.values[0].values.as_integer_mut().unwrap().extend([
-            Some(1),
-            Some(2),
-            Some(3),
-        ]);
+        timeseries.points.set_timestamps(timestamps.clone());
+        timeseries
+            .points
+            .values_mut(0)
+            .unwrap()
+            .as_integer_mut()
+            .unwrap()
+            .extend([Some(1), Some(2), Some(3)]);
         let table1 =
             Table::from_timeseries("first", std::iter::once(timeseries))
                 .unwrap();
@@ -166,12 +116,14 @@ mod tests {
             MetricType::Gauge,
         )
         .unwrap();
-        timeseries.points.timestamps.clone_from(&timestamps);
-        timeseries.points.values[0].values.as_integer_mut().unwrap().extend([
-            Some(4),
-            Some(5),
-            Some(6),
-        ]);
+        timeseries.points.set_timestamps(timestamps.clone());
+        timeseries
+            .points
+            .values_mut(0)
+            .unwrap()
+            .as_integer_mut()
+            .unwrap()
+            .extend([Some(4), Some(5), Some(6)]);
         let table2 =
             Table::from_timeseries("second", std::iter::once(timeseries))
                 .unwrap();
@@ -223,7 +175,8 @@ mod tests {
                     "Limited table should have the same fields"
                 );
                 assert_eq!(
-                    timeseries.alignment, limited_timeseries.alignment,
+                    timeseries.alignment(),
+                    limited_timeseries.alignment(),
                     "Limited timeseries should have the same alignment"
                 );
                 assert_eq!(
@@ -237,14 +190,15 @@ mod tests {
                 // These depend on the limit operation.
                 let points = &timeseries.points;
                 let limited_points = &limited_timeseries.points;
-                assert_eq!(points.start_times, limited_points.start_times);
+                assert_eq!(points.start_times(), limited_points.start_times());
                 assert_eq!(
-                    points.timestamps[start..end],
-                    limited_points.timestamps
+                    &points.timestamps()[start..end],
+                    limited_points.timestamps()
                 );
                 assert_eq!(
-                    limited_points.values[0].values.as_integer().unwrap(),
-                    &points.values[0].values.as_integer().unwrap()[start..end],
+                    limited_points.values(0).unwrap().as_integer().unwrap(),
+                    &points.values(0).unwrap().as_integer().unwrap()
+                        [start..end],
                     "Points should be limited to [{start}..{end}]",
                 );
             }
