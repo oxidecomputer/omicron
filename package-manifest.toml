@@ -140,13 +140,15 @@ source.type = "local"
 source.rust.binary_names = ["oximeter", "clickhouse-schema-updater"]
 source.rust.release = true
 source.paths = [
-  { from = "smf/oximeter", to = "/var/svc/manifest/site/oximeter" },
   { from = "oximeter/db/schema", to = "/opt/oxide/oximeter/schema" },
+  { from = "smf/oximeter/{{clickhouse-topology}}/config.toml", to = "/var/svc/manifest/site/oximeter/config.toml" },
+  { from = "smf/oximeter/manifest.xml", to = "/var/svc/manifest/site/oximeter/manifest.xml" },
 ]
 output.type = "zone"
 output.intermediate_only = true
 
 [package.clickhouse]
+# This service runs a single-node ClickHouse server.
 service_name = "clickhouse"
 only_for_targets.image = "standard"
 source.type = "composite"
@@ -169,13 +171,45 @@ source.paths = [
   { from = "out/clickhouse", to = "/opt/oxide/clickhouse" },
   { from = "smf/clickhouse/manifest.xml", to = "/var/svc/manifest/site/clickhouse/manifest.xml" },
   { from = "smf/clickhouse/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse.sh" },
-  { from = "smf/clickhouse/config_replica.xml", to = "/opt/oxide/clickhouse/config.d/config_replica.xml" },
+]
+output.type = "zone"
+output.intermediate_only = true
+setup_hint = "Run `cargo xtask download clickhouse` to download the necessary binaries"
+
+[package.clickhouse_server]
+# This service runs a server for a replicated ClickHouse cluster.
+# It is complimentary to the clickhouse_keeper service.
+# One cannot be run without the other.
+service_name = "clickhouse_server"
+only_for_targets.image = "standard"
+source.type = "composite"
+source.packages = [
+  "clickhouse_server_svc.tar.gz",
+  "internal-dns-cli.tar.gz",
+  "omicron-clickhouse-admin.tar.gz",
+  "zone-setup.tar.gz",
+  "zone-network-install.tar.gz"
+]
+output.type = "zone"
+
+[package.clickhouse_server_svc]
+service_name = "clickhouse_server_svc"
+only_for_targets.image = "standard"
+source.type = "local"
+source.paths = [
+  { from = "out/clickhouse", to = "/opt/oxide/clickhouse_server" },
+  { from = "smf/clickhouse_server/manifest.xml", to = "/var/svc/manifest/site/clickhouse_server/manifest.xml" },
+  { from = "smf/clickhouse_server/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse_server.sh" },
+  { from = "smf/clickhouse_server/config_replica.xml", to = "/opt/oxide/clickhouse_server/config.d/config_replica.xml" },
 ]
 output.type = "zone"
 output.intermediate_only = true
 setup_hint = "Run `cargo xtask download clickhouse` to download the necessary binaries"
 
 [package.clickhouse_keeper]
+# This service runs a keeper for a replicated ClickHouse cluster.
+# It is complimentary to the clickhouse_server service.
+# One cannot be run without the other.
 service_name = "clickhouse_keeper"
 only_for_targets.image = "standard"
 source.type = "composite"

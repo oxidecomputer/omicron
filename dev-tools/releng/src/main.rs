@@ -143,6 +143,10 @@ struct Args {
     /// Path to a pre-built omicron-package binary (skips building if set)
     #[clap(long, env = "OMICRON_PACKAGE")]
     omicron_package_bin: Option<Utf8PathBuf>,
+
+    /// Build the helios OS image from local sources.
+    #[clap(long)]
+    helios_local: bool,
 }
 
 impl Args {
@@ -286,7 +290,7 @@ async fn main() -> Result<()> {
                     logger,
                     "helios checkout at {0} is out-of-date; run \
                     `git pull -C {0}`, or run omicron-releng with \
-                    --ignore-helios-origin or --helios-path",
+                    --ignore-helios-origin or --helios-dir",
                     shell_words::quote(args.helios_dir.as_str())
                 );
                 preflight_ok = false;
@@ -496,39 +500,42 @@ async fn main() -> Result<()> {
             Utc::now().format("%Y-%m-%d %H:%M")
         );
 
-        // helios-build experiment-image
-        jobs.push_command(
-            format!("{}-image", target),
-            Command::new("ptime")
-                .arg("-m")
-                .arg(args.helios_dir.join("helios-build"))
-                .arg("experiment-image")
-                .arg("-o") // output directory for image
-                .arg(args.output_dir.join(format!("os-{}", target)))
+        let mut image_cmd = Command::new("ptime")
+            .arg("-m")
+            .arg(args.helios_dir.join("helios-build"))
+            .arg("experiment-image")
+            .arg("-o") // output directory for image
+            .arg(args.output_dir.join(format!("os-{}", target)))
+            .arg("-F") // pass extra image builder features
+            .arg(format!("optever={}", opte_version.trim()))
+            .arg("-P") // include all files from extra proto area
+            .arg(proto_dir.join("root"))
+            .arg("-N") // image name
+            .arg(image_name)
+            .arg("-s") // tempdir name suffix
+            .arg(target.as_str())
+            .args(target.image_build_args())
+            .current_dir(&args.helios_dir)
+            .env(
+                "IMAGE_DATASET",
+                match target {
+                    Target::Host => &args.host_dataset,
+                    Target::Recovery => &args.recovery_dataset,
+                },
+            )
+            .env_remove("CARGO")
+            .env_remove("RUSTUP_TOOLCHAIN");
+
+        if !args.helios_local {
+            image_cmd = image_cmd
                 .arg("-p") // use an external package repository
-                .arg(format!("helios-dev={}", HELIOS_REPO))
-                .arg("-F") // pass extra image builder features
-                .arg(format!("optever={}", opte_version.trim()))
-                .arg("-P") // include all files from extra proto area
-                .arg(proto_dir.join("root"))
-                .arg("-N") // image name
-                .arg(image_name)
-                .arg("-s") // tempdir name suffix
-                .arg(target.as_str())
-                .args(target.image_build_args())
-                .current_dir(&args.helios_dir)
-                .env(
-                    "IMAGE_DATASET",
-                    match target {
-                        Target::Host => &args.host_dataset,
-                        Target::Recovery => &args.recovery_dataset,
-                    },
-                )
-                .env_remove("CARGO")
-                .env_remove("RUSTUP_TOOLCHAIN"),
-        )
-        .after("helios-setup")
-        .after(format!("{}-proto", target));
+                .arg(format!("helios-dev={HELIOS_REPO}"))
+        }
+
+        // helios-build experiment-image
+        jobs.push_command(format!("{}-image", target), image_cmd)
+            .after("helios-setup")
+            .after(format!("{}-proto", target));
     }
     // Build the recovery target after we build the host target. Only one
     // of these will build at a time since Cargo locks its target directory;
