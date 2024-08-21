@@ -216,10 +216,14 @@ pub(crate) mod headers {
     pub(crate) static CHECKING: &str = "Checking";
     pub(crate) static GENERATING: &str = "Generating";
 
-    pub(crate) static UP_TO_DATE: &str = "Up-to-date";
-    pub(crate) static OUT_OF_DATE: &str = "Out-of-date";
-    pub(crate) static STALE: &str = "-> Stale";
-    pub(crate) static MISSING: &str = "-> Missing";
+    pub(crate) static FRESH: &str = "Fresh";
+
+    // Stale encompasses:
+    // - Stale: the file on disk is different from what we generated.
+    // - Missing: the file on disk does not exist.
+    pub(crate) static STALE: &str = "Stale";
+    pub(crate) static NEW: &str = "-> New";
+    pub(crate) static MODIFIED: &str = "-> Modified";
 
     pub(crate) static UPDATED: &str = "Updated";
     pub(crate) static UNCHANGED: &str = "Unchanged";

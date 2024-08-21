@@ -17,6 +17,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use num::traits::Zero;
 use oximeter::histogram::Histogram;
+use oximeter::schema::TimeseriesKey;
 use oximeter::traits;
 use oximeter::types::Cumulative;
 use oximeter::types::Datum;
@@ -28,7 +29,6 @@ use oximeter::types::Measurement;
 use oximeter::types::MissingDatum;
 use oximeter::types::Sample;
 use oximeter::Quantile;
-use oxql_types::TimeseriesKey;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -45,7 +45,7 @@ use uuid::Uuid;
 /// - [`crate::Client::initialize_db_with_version`]
 /// - [`crate::Client::ensure_schema`]
 /// - The `clickhouse-schema-updater` binary in this crate
-pub const OXIMETER_VERSION: u64 = 9;
+pub const OXIMETER_VERSION: u64 = 10;
 
 // Wrapper type to represent a boolean in the database.
 //
