@@ -184,6 +184,7 @@ networking_bgp_announce_set_update       PUT      /v1/system/networking/bgp-anno
 networking_bgp_config_create             POST     /v1/system/networking/bgp
 networking_bgp_config_delete             DELETE   /v1/system/networking/bgp
 networking_bgp_config_list               GET      /v1/system/networking/bgp
+networking_bgp_exported                  GET      /v1/system/networking/bgp-exported
 networking_bgp_imported_routes_ipv4      GET      /v1/system/networking/bgp-routes-ipv4
 networking_bgp_message_history           GET      /v1/system/networking/bgp-message-history
 networking_bgp_status                    GET      /v1/system/networking/bgp-status

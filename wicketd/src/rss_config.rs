@@ -703,6 +703,7 @@ fn build_port_config(
                 destination: r.destination,
                 nexthop: r.nexthop,
                 vlan_id: r.vlan_id,
+                local_pref: r.local_pref,
             })
             .collect(),
         addresses: config

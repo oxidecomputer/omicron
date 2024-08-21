@@ -6640,6 +6640,33 @@
         }
       }
     },
+    "/v1/system/networking/bgp-exported": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get BGP exported routes",
+        "operationId": "networking_bgp_exported",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BgpExported"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/networking/bgp-message-history": {
       "get": {
         "tags": [
@@ -10349,6 +10376,25 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "BgpExported": {
+        "description": "The current status of a BGP peer.",
+        "type": "object",
+        "properties": {
+          "exports": {
+            "description": "Exported routes indexed by peer address.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Ipv4Net"
+              }
+            }
+          }
+        },
+        "required": [
+          "exports"
         ]
       },
       "BgpImportedRouteIpv4": {
@@ -17180,6 +17226,13 @@
             "type": "string",
             "format": "ip"
           },
+          "local_pref": {
+            "nullable": true,
+            "description": "Local preference for route. Higher preference indictes precedence within and across protocols.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
           "vid": {
             "nullable": true,
             "description": "VLAN id the gateway is reachable over.",
@@ -19237,6 +19290,13 @@
           "interface_name": {
             "description": "The interface name this route configuration is assigned to.",
             "type": "string"
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "Local preference indicating priority within and across protocols.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "port_settings_id": {
             "description": "The port settings object this route configuration belongs to.",
