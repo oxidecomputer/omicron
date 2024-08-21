@@ -15,7 +15,8 @@ versions = [
         "hubris_archive_id",
         "gateway_id",
         "component_kind",
-        "component",
+        "component_id",
+        "description",
     ]}
 ]
 
@@ -59,7 +60,7 @@ What kind of thing the component resides on. This will be one of 'sled'\
 for components on compute sled; 'switch', for components on rack switches; \
 or 'power', for components on power shelves."""
 
-[fields.component]
+[fields.component_id]
 type = "string"
 description = """
 The service processor component ID uniquely identifying the hardware \
@@ -68,6 +69,13 @@ component on the sled, switch, or power shelf."""
 [fields.component_kind]
 type = "string"
 description = "What type of hardware component this thing is."
+
+[fields.description]
+type = "string"
+description = """
+A human-readable description of the hardware component. This may include \
+its location or role in the system (e.g. a DIMM's number, or a temperature \
+sensor's location)."""
 
 [fields.sensor]
 type = "string"

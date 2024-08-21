@@ -686,7 +686,7 @@ impl SpPoller {
                 {
                     continue;
                 }
-                let component = match dev.component.as_str() {
+                let component_id = match dev.component.as_str() {
                     Some(c) => Cow::Owned(c.to_string()),
                     None => {
                         // These are supposed to always be strings. But, if we
@@ -720,7 +720,8 @@ impl SpPoller {
                     hubris_archive_id: Cow::Owned(hubris_archive_id.clone()),
                     slot: self.spid.slot as u32,
                     component_kind: Cow::Owned(dev.device),
-                    component,
+                    component_id,
+                    description: Cow::Owned(dev.description),
                 };
                 match self.components.entry(dev.component) {
                     // Found a new device!
@@ -728,8 +729,9 @@ impl SpPoller {
                         slog::debug!(
                             &self.log,
                             "discovered a new component!";
-                            "component" => ?dev.component,
-                            "device" => ?target.component_kind,
+                            "component_id" => %target.component_id,
+                            "component_kind" => %target.component_kind,
+                            "description" => %target.component_id,
                         );
                         entry.insert(ComponentMetrics {
                             target,
