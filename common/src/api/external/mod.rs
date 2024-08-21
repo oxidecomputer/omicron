@@ -2492,6 +2492,9 @@ pub struct SwitchPortRouteConfig {
     /// The VLAN identifier for the route. Use this if the gateway is reachable
     /// over an 802.1Q tagged L2 segment.
     pub vlan_id: Option<u16>,
+
+    /// Local preference indicating priority within and across protocols.
+    pub local_pref: Option<u32>,
 }
 
 /*

@@ -771,7 +771,8 @@ fn rss_config_text<'a>(
             ];
 
             let routes = routes.iter().map(|r| {
-                let RouteConfig { destination, nexthop, vlan_id } = r;
+                let RouteConfig { destination, nexthop, vlan_id, local_pref } =
+                    r;
 
                 let mut items = vec![
                     Span::styled("  • Route         : ", label_style),
@@ -784,6 +785,13 @@ fn rss_config_text<'a>(
                     items.extend([
                         Span::styled(" (vlan_id=", label_style),
                         Span::styled(vlan_id.to_string(), ok_style),
+                        Span::styled(")", label_style),
+                    ]);
+                }
+                if let Some(local_pref) = local_pref {
+                    items.extend([
+                        Span::styled(" (local_pref=", label_style),
+                        Span::styled(local_pref.to_string(), ok_style),
                         Span::styled(")", label_style),
                     ]);
                 }
