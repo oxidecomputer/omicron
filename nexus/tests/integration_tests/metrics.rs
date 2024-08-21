@@ -23,8 +23,10 @@ use nexus_types::external_api::views::OxqlQueryResult;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use oximeter::types::Datum;
+use oximeter::types::FieldValue;
 use oximeter::types::Measurement;
 use oximeter::TimeseriesSchema;
+use std::borrow::Borrow;
 use uuid::Uuid;
 
 pub async fn query_for_metrics(
@@ -344,7 +346,6 @@ async fn test_instance_watcher_metrics(
             );
         }};
     }
-    use oximeter::types::FieldValue;
     const INSTANCE_ID_FIELD: &str = "instance_id";
     const STATE_FIELD: &str = "state";
     const STATE_STARTING: &str = "starting";
@@ -587,6 +588,99 @@ async fn test_instance_watcher_metrics(
     assert_gte!(ts1_stopping, 1);
     assert_gte!(ts2_starting, 2);
     assert_gte!(ts2_running, 2);
+}
+
+#[nexus_test]
+async fn test_mgs_metrics(
+    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
+) {
+    // Make a MGS
+    let mgs = {
+        let (mut mgs_config, sp_sim_config) =
+            gateway_test_utils::setup::load_test_config();
+        // munge the already-parsed MGS config file to point it at the test
+        // Nexus' address.
+        mgs_config.metrics.dev =
+            Some(gateway_test_utils::setup::MetricsDevConfig {
+                bind_loopback: true,
+                nexus_address: Some(cptestctx.internal_client.bind_address),
+            });
+        gateway_test_utils::setup::test_setup_with_config(
+            "test_mgs_metrics",
+            gateway_messages::SpPort::One,
+            mgs_config,
+            &sp_sim_config,
+            None,
+        )
+        .await
+    };
+
+    // Wait until the MGS registers as a producer with Oximeter.
+    wait_for_producer(&cptestctx.oximeter, &mgs.gateway_id).await;
+    cptestctx.oximeter.force_collect().await;
+
+    async fn get_timeseries(
+        cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
+        name: &str,
+    ) -> oxql_types::Table {
+        let table = timeseries_query(&cptestctx, &format!("get {name}"))
+            .await
+            .into_iter()
+            .find(|t| t.name() == name);
+        match table {
+            Some(table) => table,
+            None => panic!("missing table for {name}"),
+        }
+    }
+
+    #[track_caller]
+    fn check_all_serials_present(table: oxql_types::Table) {
+        let mut sim_gimlet_00 = 0;
+        let mut sim_gimlet_01 = 0;
+        for timeseries in table.timeseries() {
+            let fields = &timeseries.fields;
+            let n_points = timeseries.points.len();
+            eprintln!("found timeseries: {fields:?} ({n_points} points)");
+            assert!(n_points > 0, "timeseries {fields:?} should have points");
+            let serial_str = match timeseries.fields.get("chassis_serial") {
+                Some(FieldValue::String(s)) => s.borrow(),
+                Some(x) => panic!(
+                    "`chassis_serial` field should be a string, but got: {x:?}"
+                ),
+                None => {
+                    panic!("timeseries should have a `chassis_serial` field")
+                }
+            };
+            match serial_str {
+                "SimGimlet00" => sim_gimlet_00 += 1,
+                "SimGimlet01" => sim_gimlet_01 += 1,
+                // if someone adds sensor readings to the fake sidecar later,
+                // that's okay...
+                _ => eprintln!("bonus simulated chassis serial {serial_str:?}"),
+            }
+        }
+
+        assert!(
+            sim_gimlet_00 > 0,
+            "expected at least one timeseries from SimGimlet00 in {table:#?}"
+        );
+        assert!(
+            sim_gimlet_01 > 0,
+            "expected at least one timeseries from SimGimlet01 in {table:#?}"
+        );
+    }
+
+    let temp_metrics =
+        get_timeseries(&cptestctx, "hardware_component:temperature").await;
+    check_all_serials_present(temp_metrics);
+
+    let voltage_metrics =
+        get_timeseries(&cptestctx, "hardware_component:voltage").await;
+    check_all_serials_present(voltage_metrics);
+
+    let current_metrics =
+        get_timeseries(&cptestctx, "hardware_component:current").await;
+    check_all_serials_present(current_metrics);
 }
 
 /// Wait until a producer is registered with Oximeter.

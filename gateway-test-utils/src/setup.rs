@@ -8,6 +8,9 @@ use camino::Utf8Path;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use gateway_messages::SpPort;
+pub use omicron_gateway::metrics::{
+    DevConfig as MetricsDevConfig, MetricsConfig,
+};
 use omicron_gateway::MgsArguments;
 use omicron_gateway::SpType;
 use omicron_gateway::SwitchPortConfig;
@@ -33,6 +36,7 @@ pub struct GatewayTestContext {
     pub server: omicron_gateway::Server,
     pub simrack: SimRack,
     pub logctx: LogContext,
+    pub gateway_id: Uuid,
 }
 
 impl GatewayTestContext {
@@ -143,8 +147,8 @@ pub async fn test_setup_with_config(
 
     // Start gateway server
     let rack_id = Some(Uuid::parse_str(RACK_UUID).unwrap());
-
-    let args = MgsArguments { id: Uuid::new_v4(), addresses, rack_id };
+    let gateway_id = Uuid::new_v4();
+    let args = MgsArguments { id: gateway_id, addresses, rack_id };
     let server = omicron_gateway::Server::start(
         server_config.clone(),
         args,
@@ -206,5 +210,5 @@ pub async fn test_setup_with_config(
         log.new(o!("component" => "client test context")),
     );
 
-    GatewayTestContext { client, server, simrack, logctx }
+    GatewayTestContext { client, server, simrack, logctx, gateway_id }
 }
