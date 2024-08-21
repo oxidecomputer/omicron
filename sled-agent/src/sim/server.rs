@@ -12,6 +12,10 @@ use crate::nexus::d2n_params;
 use crate::nexus::NexusClient;
 use crate::rack_setup::service::build_initial_blueprint_from_sled_configs;
 use crate::rack_setup::SledConfig;
+use crate::rack_setup::{
+    from_ipaddr_to_external_floating_ip,
+    from_sockaddr_to_external_floating_addr,
+};
 use anyhow::anyhow;
 use crucible_agent_client::types::State as RegionState;
 use illumos_utils::zpool::ZpoolName;
@@ -19,9 +23,11 @@ use internal_dns::ServiceName;
 use nexus_client::types as NexusTypes;
 use nexus_client::types::{IpRange, Ipv4Range, Ipv6Range};
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
-use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_sled_agent_shared::inventory::OmicronZoneType;
+use nexus_types::deployment::blueprint_zone_type;
+use nexus_types::deployment::{
+    BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
+};
 use nexus_types::inventory::NetworkInterfaceKind;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
@@ -36,6 +42,7 @@ use omicron_common::backoff::{
 use omicron_common::disk::DiskIdentity;
 use omicron_common::FileKv;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
@@ -375,19 +382,22 @@ pub async fn run_standalone_server(
         SocketAddr::V6(a) => a,
     };
     let pool_name = ZpoolName::new_external(ZpoolUuid::new_v4());
-    let mut zones = vec![OmicronZoneConfig {
-        id: Uuid::new_v4(),
+    let mut zones = vec![BlueprintZoneConfig {
+        disposition: BlueprintZoneDisposition::InService,
+        id: OmicronZoneUuid::new_v4(),
         underlay_address: *http_bound.ip(),
-        zone_type: OmicronZoneType::InternalDns {
-            dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
-            http_address: http_bound,
-            dns_address: match dns.dns_server.local_address() {
-                SocketAddr::V4(_) => panic!("did not expect v4 address"),
-                SocketAddr::V6(a) => a,
+        zone_type: BlueprintZoneType::InternalDns(
+            blueprint_zone_type::InternalDns {
+                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+                http_address: http_bound,
+                dns_address: match dns.dns_server.local_address() {
+                    SocketAddr::V4(_) => panic!("did not expect v4 address"),
+                    SocketAddr::V6(a) => a,
+                },
+                gz_address: Ipv6Addr::LOCALHOST,
+                gz_address_index: 0,
             },
-            gz_address: Ipv6Addr::LOCALHOST,
-            gz_address_index: 0,
-        },
+        ),
         // Co-locate the filesystem pool with the dataset
         filesystem_pool: Some(pool_name),
     }];
@@ -396,23 +406,26 @@ pub async fn run_standalone_server(
     let mut macs = MacAddr::iter_system();
     if let Some(nexus_external_addr) = rss_args.nexus_external_addr {
         let ip = nexus_external_addr.ip();
-        let id = Uuid::new_v4();
+        let id = OmicronZoneUuid::new_v4();
 
-        zones.push(OmicronZoneConfig {
+        zones.push(BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
             id,
             underlay_address: match ip {
                 IpAddr::V4(_) => panic!("did not expect v4 address"),
                 IpAddr::V6(a) => a,
             },
-            zone_type: OmicronZoneType::Nexus {
+            zone_type: BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address: match config.nexus_address {
                     SocketAddr::V4(_) => panic!("did not expect v4 address"),
                     SocketAddr::V6(a) => a,
                 },
-                external_ip: ip,
+                external_ip: from_ipaddr_to_external_floating_ip(ip),
                 nic: nexus_types::inventory::NetworkInterface {
                     id: Uuid::new_v4(),
-                    kind: NetworkInterfaceKind::Service { id },
+                    kind: NetworkInterfaceKind::Service {
+                        id: id.into_untyped_uuid(),
+                    },
                     name: "nexus".parse().unwrap(),
                     ip: NEXUS_OPTE_IPV4_SUBNET
                         .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
@@ -427,7 +440,7 @@ pub async fn run_standalone_server(
                 },
                 external_tls: false,
                 external_dns_servers: vec![],
-            },
+            }),
             filesystem_pool: Some(get_random_zpool()),
         });
 
@@ -445,31 +458,40 @@ pub async fn run_standalone_server(
         rss_args.external_dns_internal_addr
     {
         let ip = *external_dns_internal_addr.ip();
-        let id = Uuid::new_v4();
+        let id = OmicronZoneUuid::new_v4();
         let pool_name = ZpoolName::new_external(ZpoolUuid::new_v4());
-        zones.push(OmicronZoneConfig {
+        zones.push(BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
             id,
             underlay_address: ip,
-            zone_type: OmicronZoneType::ExternalDns {
-                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
-                http_address: external_dns_internal_addr,
-                dns_address: SocketAddr::V6(external_dns_internal_addr),
-                nic: nexus_types::inventory::NetworkInterface {
-                    id: Uuid::new_v4(),
-                    kind: NetworkInterfaceKind::Service { id },
-                    name: "external-dns".parse().unwrap(),
-                    ip: DNS_OPTE_IPV4_SUBNET
-                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
-                        .unwrap()
-                        .into(),
-                    mac: macs.next().unwrap(),
-                    subnet: (*DNS_OPTE_IPV4_SUBNET).into(),
-                    vni: Vni::SERVICES_VNI,
-                    primary: true,
-                    slot: 0,
-                    transit_ips: vec![],
+            zone_type: BlueprintZoneType::ExternalDns(
+                blueprint_zone_type::ExternalDns {
+                    dataset: OmicronZoneDataset {
+                        pool_name: pool_name.clone(),
+                    },
+                    http_address: external_dns_internal_addr,
+                    dns_address: from_sockaddr_to_external_floating_addr(
+                        SocketAddr::V6(external_dns_internal_addr),
+                    ),
+                    nic: nexus_types::inventory::NetworkInterface {
+                        id: Uuid::new_v4(),
+                        kind: NetworkInterfaceKind::Service {
+                            id: id.into_untyped_uuid(),
+                        },
+                        name: "external-dns".parse().unwrap(),
+                        ip: DNS_OPTE_IPV4_SUBNET
+                            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
+                            .unwrap()
+                            .into(),
+                        mac: macs.next().unwrap(),
+                        subnet: (*DNS_OPTE_IPV4_SUBNET).into(),
+                        vni: Vni::SERVICES_VNI,
+                        primary: true,
+                        slot: 0,
+                        transit_ips: vec![],
+                    },
                 },
-            },
+            ),
             // Co-locate the filesystem pool with the dataset
             filesystem_pool: Some(pool_name),
         });
@@ -530,8 +552,7 @@ pub async fn run_standalone_server(
         blueprint: build_initial_blueprint_from_sled_configs(
             &sled_configs,
             internal_dns_version,
-        )
-        .expect("failed to construct initial blueprint"),
+        ),
         physical_disks,
         zpools,
         datasets,
