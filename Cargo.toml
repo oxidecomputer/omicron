@@ -169,7 +169,8 @@ default-members = [
     "internal-dns",
     "ipcc",
     "key-manager",
-    "live-tests",
+    # Do not include live-tests in the list of default members because its tests
+    # only work in a deployed system.
     "nexus",
     "nexus-config",
     "nexus-sled-agent-shared",
