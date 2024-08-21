@@ -448,7 +448,8 @@ impl BackgroundTasksInitializer {
             datastore.clone(),
             resolver.clone(),
             rx_blueprint.clone(),
-            nexus_id.to_string(),
+            nexus_id,
+            task_saga_recovery.clone(),
         );
         let rx_blueprint_exec = blueprint_executor.watcher();
         driver.register(TaskDefinition {

@@ -13,8 +13,6 @@ pub mod table;
 pub use self::table::Table;
 pub use self::table::Timeseries;
 
-pub type TimeseriesKey = u64;
-
 /// Describes the time alignment for an OxQL query.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Alignment {

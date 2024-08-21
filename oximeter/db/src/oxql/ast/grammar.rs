@@ -189,11 +189,11 @@ peg::parser! {
         rule dashed_uuid_literal() -> Uuid
             = s:$(
                 "\""
-                ['a'..='f' | '0'..='9']*<8> "-"
-                ['a'..='f' | '0'..='9']*<4> "-"
-                ['a'..='f' | '0'..='9']*<4> "-"
-                ['a'..='f' | '0'..='9']*<4> "-"
-                ['a'..='f' | '0'..='9']*<12>
+                ['a'..='f' | 'A'..='F' | '0'..='9']*<8> "-"
+                ['a'..='f' | 'A'..='F' | '0'..='9']*<4> "-"
+                ['a'..='f' | 'A'..='F' | '0'..='9']*<4> "-"
+                ['a'..='f' | 'A'..='F' | '0'..='9']*<4> "-"
+                ['a'..='f' | 'A'..='F' | '0'..='9']*<12>
                 "\""
             ) {?
                 let Some(middle) = s.get(1..37) else {
@@ -202,7 +202,7 @@ peg::parser! {
                 middle.parse().or(Err("invalid UUID literal"))
             }
         rule undashed_uuid_literal() -> Uuid
-            = s:$("\"" ['a'..='f' | '0'..='9']*<32> "\"") {?
+            = s:$("\"" ['a'..='f' | 'A'..='F' | '0'..='9']*<32> "\"") {?
             let Some(middle) = s.get(1..33) else {
                 return Err("invalid UUID literal");
             };
@@ -279,11 +279,27 @@ peg::parser! {
         pub rule string_literal() -> Literal
             = s:string_literal_impl() { Literal::String(s) }
 
-        pub(super) rule integer_literal_impl() -> i128
-            = n:$("-"? ['0'..='9']+ !['e' | 'E' | '.'])
+        pub(super) rule hex_integer_literal_impl() -> i128
+            = n:$("0x" ['0'..='9' | 'a'..='f' | 'A'..='F']+ !['.'])
         {?
-            let Ok(x) = n.parse() else {
-                return Err("integer literal");
+            let Some((maybe_sign, digits)) = n.split_once("0x") else {
+                return Err("hex literals should start with '0x'");
+            };
+            i128::from_str_radix(digits, 16).map_err(|_| "invalid hex literal")
+        }
+
+        pub(super) rule dec_integer_literal_impl() -> i128
+            = n:$(['0'..='9']+ !['e' | 'E' | '.'])
+        {?
+            n.parse().map_err(|_| "integer literal")
+        }
+
+        pub(super) rule integer_literal_impl() -> i128
+            = maybe_sign:$("-"?) n:(hex_integer_literal_impl() / dec_integer_literal_impl())
+        {?
+            let sign = if maybe_sign == "-" { -1 } else { 1 };
+            let Some(x) = n.checked_mul(sign) else {
+                return Err("negative overflow");
             };
             if x < i128::from(i64::MIN) {
                 Err("negative overflow")
@@ -735,14 +751,46 @@ mod tests {
     }
 
     #[test]
+    fn test_uuid_literal_is_case_insensitive() {
+        const ID: Uuid = uuid::uuid!("880D82A1-102F-4699-BE1A-7E2A6A469E8E");
+        let as_str = format!("\"{ID}\"");
+        let as_lower = as_str.to_lowercase();
+        assert_eq!(query_parser::uuid_literal_impl(&as_str).unwrap(), ID,);
+        assert_eq!(query_parser::uuid_literal_impl(&as_lower).unwrap(), ID,);
+    }
+
+    #[test]
     fn test_integer_literal() {
         assert_eq!(query_parser::integer_literal_impl("1").unwrap(), 1);
-        assert_eq!(query_parser::integer_literal_impl("-1").unwrap(), -1);
         assert_eq!(query_parser::integer_literal_impl("-1").unwrap(), -1);
 
         assert!(query_parser::integer_literal_impl("-1.0").is_err());
         assert!(query_parser::integer_literal_impl("-1.").is_err());
         assert!(query_parser::integer_literal_impl("1e3").is_err());
+    }
+
+    #[test]
+    fn test_hex_integer_literal() {
+        assert_eq!(query_parser::integer_literal_impl("0x1").unwrap(), 1);
+        assert_eq!(query_parser::integer_literal_impl("-0x1").unwrap(), -1);
+        assert_eq!(query_parser::integer_literal_impl("-0xa").unwrap(), -0xa);
+        assert_eq!(
+            query_parser::integer_literal_impl("0xfeed").unwrap(),
+            0xfeed
+        );
+        assert_eq!(
+            query_parser::integer_literal_impl("0xFEED").unwrap(),
+            0xfeed
+        );
+
+        // Out of range in either direction
+        assert!(query_parser::integer_literal_impl("0xFFFFFFFFFFFFFFFFFFFF")
+            .is_err());
+        assert!(query_parser::integer_literal_impl("-0xFFFFFFFFFFFFFFFFFFFF")
+            .is_err());
+
+        assert!(query_parser::integer_literal_impl("-0x1.0").is_err());
+        assert!(query_parser::integer_literal_impl("-0x1.").is_err());
     }
 
     #[test]

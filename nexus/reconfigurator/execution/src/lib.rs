@@ -24,6 +24,7 @@ use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
+use uuid::Uuid;
 
 mod cockroachdb;
 mod datasets;
@@ -31,6 +32,7 @@ mod dns;
 mod omicron_physical_disks;
 mod omicron_zones;
 mod overridables;
+mod sagas;
 mod sled_state;
 
 pub use dns::blueprint_external_dns_config;
@@ -73,38 +75,32 @@ impl From<nexus_db_model::Sled> for Sled {
 ///
 /// The assumption is that callers are running this periodically or in a loop to
 /// deal with transient errors or changes in the underlying system state.
-pub async fn realize_blueprint<S>(
+pub async fn realize_blueprint(
     opctx: &OpContext,
     datastore: &DataStore,
     resolver: &Resolver,
     blueprint: &Blueprint,
-    nexus_label: S,
-) -> Result<(), Vec<anyhow::Error>>
-where
-    String: From<S>,
-{
+    nexus_id: Uuid,
+) -> Result<bool, Vec<anyhow::Error>> {
     realize_blueprint_with_overrides(
         opctx,
         datastore,
         resolver,
         blueprint,
-        nexus_label,
+        nexus_id,
         &Default::default(),
     )
     .await
 }
 
-pub async fn realize_blueprint_with_overrides<S>(
+pub async fn realize_blueprint_with_overrides(
     opctx: &OpContext,
     datastore: &DataStore,
     resolver: &Resolver,
     blueprint: &Blueprint,
-    nexus_label: S,
+    nexus_id: Uuid,
     overrides: &Overridables,
-) -> Result<(), Vec<anyhow::Error>>
-where
-    String: From<S>,
-{
+) -> Result<bool, Vec<anyhow::Error>> {
     let opctx = opctx.child(BTreeMap::from([(
         "comment".to_string(),
         blueprint.comment.clone(),
@@ -182,7 +178,7 @@ where
     dns::deploy_dns(
         &opctx,
         datastore,
-        String::from(nexus_label),
+        nexus_id.to_string(),
         blueprint,
         &sleds_by_id,
         overrides,
@@ -215,14 +211,43 @@ where
     omicron_physical_disks::decommission_expunged_disks(&opctx, datastore)
         .await?;
 
+    // From this point on, we'll assume that any errors that we encounter do
+    // *not* require stopping execution.  We'll just accumulate them and return
+    // them all at the end.
+    //
+    // TODO We should probably do this with more of the errors above, too.
+    let mut errors = Vec::new();
+
+    // For any expunged Nexus zones, re-assign in-progress sagas to some other
+    // Nexus.  If this fails for some reason, it doesn't affect anything else.
+    let sec_id = nexus_db_model::SecId(nexus_id);
+    let reassigned = sagas::reassign_sagas_from_expunged(
+        &opctx, datastore, blueprint, sec_id,
+    )
+    .await
+    .context("failed to re-assign sagas");
+    let needs_saga_recovery = match reassigned {
+        Ok(needs_recovery) => needs_recovery,
+        Err(error) => {
+            errors.push(error);
+            false
+        }
+    };
+
     // This is likely to error if any cluster upgrades are in progress (which
     // can take some time), so it should remain at the end so that other parts
     // of the blueprint can progress normally.
-    cockroachdb::ensure_settings(&opctx, datastore, blueprint)
-        .await
-        .map_err(|err| vec![err])?;
+    if let Err(error) =
+        cockroachdb::ensure_settings(&opctx, datastore, blueprint).await
+    {
+        errors.push(error);
+    }
 
-    Ok(())
+    if errors.is_empty() {
+        Ok(needs_saga_recovery)
+    } else {
+        Err(errors)
+    }
 }
 
 #[cfg(test)]
