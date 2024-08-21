@@ -30,6 +30,8 @@ omicron-test-utils.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 slog.workspace = true
+slog-error-chain.workspace = true
+textwrap.workspace = true
 tokio.workspace = true
 uuid.workspace = true
 

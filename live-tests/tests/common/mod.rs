@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::{anyhow, bail, Context};
+use anyhow::{anyhow, bail, ensure, Context};
 use dropshot::test_util::LogContext;
 use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
@@ -34,9 +34,10 @@ impl LiveTestContext {
         let logctx = omicron_test_utils::dev::test_setup_log(test_name);
         let log = &logctx.log;
         let resolver = create_resolver(log)?;
+        check_execution_environment(&resolver).await?;
         let datastore = create_datastore(&log, &resolver).await?;
         let opctx = OpContext::for_tests(log.clone(), datastore.clone());
-        check_environment(&opctx, &datastore).await?;
+        check_hardware_environment(&opctx, &datastore).await?;
         Ok(LiveTestContext { logctx, opctx, resolver, datastore })
     }
 
@@ -162,7 +163,31 @@ async fn create_datastore(
     Ok(Arc::new(datastore))
 }
 
-async fn check_environment(
+async fn check_execution_environment(
+    resolver: &Resolver,
+) -> Result<(), anyhow::Error> {
+    ensure!(
+        cfg!(target_os = "illumos"),
+        "live tests can only be run on deployed systems, which run illumos"
+    );
+
+    resolver.lookup_ip(ServiceName::InternalDns).await.map(|_| ()).map_err(
+        |e| {
+            let text = format!(
+                "check_execution_environment(): failed to look up internal DNS \
+                 in the internal DNS servers.\n\n \
+                 Are you trying to run this in a development environment?  \
+                 This test can only be run on deployed systems and only from a \
+                 context with connectivity to the underlay network.\n\n \
+                 raw error: {}",
+                 slog_error_chain::InlineErrorChain::new(&e)
+                );
+            anyhow!("{}", textwrap::wrap(&text, 80).join("\n"))
+        },
+    )
+}
+
+async fn check_hardware_environment(
     opctx: &OpContext,
     datastore: &DataStore,
 ) -> Result<(), anyhow::Error> {

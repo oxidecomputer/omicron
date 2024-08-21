@@ -6021,6 +6021,8 @@ dependencies = [
  "reqwest",
  "serde",
  "slog",
+ "slog-error-chain",
+ "textwrap",
  "tokio",
  "uuid",
 ]

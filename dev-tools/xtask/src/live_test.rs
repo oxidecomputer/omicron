@@ -8,12 +8,20 @@ use anyhow::{bail, Context, Result};
 use clap::Parser;
 use std::process::Command;
 
-// XXX-dap This should probably bail out if !illumos
-
 #[derive(Parser)]
 pub struct Args {}
 
 pub fn run_cmd(_args: Args) -> Result<()> {
+    // The live tests operate in deployed environments, which always run
+    // illumos.  Bail out quickly if someone tries to run this on a system whose
+    // binaries won't be usable.  (We could compile this subcommand out
+    // altogether on non-illumos systems, but it seems more confusing to be
+    // silently missing something you might expect to be there.  Plus, you can
+    // still check and even build *this* code on non-illumos systems.)
+    if cfg!(not(target_os = "illumos")) {
+        bail!("live-test archive can only be built on illumos systems");
+    }
+
     let tmpdir =
         camino_tempfile::tempdir().context("creating temporary directory")?;
     let tarball = camino::Utf8PathBuf::try_from(
