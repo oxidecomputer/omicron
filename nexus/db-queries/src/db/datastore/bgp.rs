@@ -42,7 +42,7 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
-        self.transaction_retry_wrapper("bgp_config_set")
+        self.transaction_retry_wrapper("bgp_config_create")
             .transaction(&conn, |conn| {
 
                 let err = err.clone();
@@ -213,7 +213,7 @@ impl DataStore {
             })
             .await
             .map_err(|e|{
-                let msg = "bgp_config_set failed";
+                let msg = "bgp_config_create failed";
                 if let Some(err) = err.take() {
                     error!(opctx.log, "{msg}"; "error" => ?err);
                     err

@@ -1671,7 +1671,7 @@ mod test {
             shaper: None,
         };
 
-        datastore.bgp_config_set(&opctx, &bgp_config).await.unwrap();
+        datastore.bgp_config_create(&opctx, &bgp_config).await.unwrap();
 
         let settings = SwitchPortSettingsCreate {
             identity: IdentityMetadataCreateParams {
