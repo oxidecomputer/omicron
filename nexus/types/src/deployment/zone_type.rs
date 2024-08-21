@@ -337,6 +337,7 @@ pub mod blueprint_zone_type {
         Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
     )]
     pub struct ClickhouseKeeper {
+        pub keeper_id: u64,
         pub address: SocketAddrV6,
         pub dataset: OmicronZoneDataset,
     }
@@ -346,6 +347,7 @@ pub mod blueprint_zone_type {
         Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
     )]
     pub struct ClickhouseServer {
+        pub server_id: u64,
         pub address: SocketAddrV6,
         pub dataset: OmicronZoneDataset,
     }

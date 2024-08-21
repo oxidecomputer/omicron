@@ -19,99 +19,51 @@ use omicron_common::address::{
     CLICKHOUSE_KEEPER_PORT, CLICKHOUSE_KEEPER_RAFT_PORT, CLICKHOUSE_TCP_PORT,
 };
 use omicron_common::api::external::Generation;
-use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use slog::Logger;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
 const BASE_DIR: &str = "/opt/oxide/clickhouse";
 
-/// Clickhouse keeper clusters only allow adding one node at a time
-///
-/// The planner must progress through these states when adding a new keeper
-/// node.
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
-pub enum AddKeeperState {
-    /// The executor should attempt to start the new keeper via `clickhouse-admin`
-    /// in the target zone.
-    ///
-    /// The generated keeper config for this node must include all the other
-    /// nodes, but those nodes should net yet learn of this config. That is done
-    /// in the `Reconfiguring` state.
-    StartingKeeper { omicron_zone_id: OmicronZoneUuid, config: KeeperConfig },
-    /// The executor should attempt a reconfiguration by updating the
-    /// configurations at all  the other keepers. It must stay in this state
-    /// until the reconfiguration either succeeds or fails, which it learns
-    /// by polling `clickhouse-admin` in one or more zones.
-    ///
-    /// If the keeper addition succeeds then a transition to a
-    /// [`StableKeeperConfig`] should be made. At this point, the configuration
-    /// for the clickhouse servers should also be updated to point to the new
-    /// keeper.
-    Reconfiguring {
-        new_node_omicron_zone_id: OmicronZoneUuid,
-        keepers: BTreeMap<OmicronZoneUuid, KeeperConfig>,
-    },
-    /// In some cases, reconfiguration of the keeper can fail. In this case,
-    /// the existing zone must be expunged. Once the zone is expunged, then the
-    /// planner should go ahead and try to add a new keeper zone again.
-    Failed { stable_config: BTreeMap<OmicronZoneUuid, KeeperConfig> },
-}
-
-/// The current configuration state of the keeper cluster
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
-pub enum KeeperClusterState {
-    /// A configuration of a keeper cluster with no ongoing reconfigurations (node
-    /// additions or removals)
-    Stable { keepers: BTreeMap<OmicronZoneUuid, KeeperConfig> },
-    /// We're currently adding a node to the keeper cluster
-    AddingNode {
-        prior_stable_config: BTreeMap<OmicronZoneUuid, KeeperConfig>,
-        add_node_state: AddKeeperState,
-    },
-    // TODO: `RemovingNode`
-}
-
-/// The current configuration of the keeper cluster
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
-pub struct KeeperClusterConfig {
-    max_used_keeper_id: u64,
-    state: KeeperClusterState,
-}
-
-/// The current configuration of all clickhouse server replicas
-///
-/// In contrast to keepers, servers do not require a multi-step reconfiguration
-/// to add, and multiple servers can be added or removed simultaneously. Removal
-/// is slightly more complex in that we need to ensure that the servers are
-/// shutdown and shutdown is noticed before we [drop](https://clickhouse.com/
-/// docs/en/sql-reference/statements/system#drop-replica) the replica from the
-/// cluster.
-///
-/// TODO: Model server removal
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
-pub struct ClickhouseServerClusterConfig {
-    max_used_server_id: u64,
-    servers: BTreeMap<OmicronZoneUuid, ReplicaConfig>,
-}
-
 /// Global configuration for all clickhouse servers (replicas) and keepers
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub struct ClickhouseClusterConfig {
-    // The last update to the clickhouse cluster configuration
-    // This is used by clickhouse server and keeper zones to discard
-    // configurations they are up to date with.
-    generation: Generation,
-    cluster_name: String,
-    secret: String,
-    servers: ClickhouseServerClusterConfig,
-    keepers: KeeperClusterConfig,
+    /// The last update to the clickhouse cluster configuration
+    ///
+    /// This is used by `clickhouse-admin` in the clickhouse server and keeper
+    /// zones to discard old configurations.
+    pub generation: Generation,
+    /// CLickhouse Server ids must be unique and are handed out monotonically. Keep track
+    /// of the last used one.
+    pub max_used_server_id: u64,
+    /// CLickhouse Keeper ids must be unique and are handed out monotonically. Keep track
+    /// of the last used one.
+    pub max_used_keeper_id: u64,
+    /// An arbitrary name for the Clickhouse cluster shared by all nodes
+    pub cluster_name: String,
+    /// An arbitrary string shared by all nodes used at runtime to determine whether
+    /// nodes are part of the same cluster.
+    pub secret: String,
 }
 
 impl ClickhouseClusterConfig {
+    pub fn new(
+        cluster_name: String,
+        secret: String,
+    ) -> ClickhouseClusterConfig {
+        ClickhouseClusterConfig {
+            generation: Generation::new(),
+            max_used_server_id: 0,
+            max_used_keeper_id: 0,
+            cluster_name,
+            secret,
+        }
+    }
+}
+
+/*impl ClickhouseClusterConfig {
     ///  Create an intitial deployment for the first blueprint
     pub fn new(
         cluster_name: String,
@@ -245,14 +197,15 @@ impl ClickhouseClusterConfig {
         }
     }
 
-    /// Create a deployment dependent on the configuration from the parent
-    /// blueprint
-    pub fn new_based_on<'a>(
-        log: &Logger,
-        parent_config: &'a ClickhouseClusterConfig,
-        all_blueprint_zones: &BTreeMap<SledUuid, BlueprintZonesConfig>,
-    ) -> ClickhouseClusterConfig {
-        todo!()
+    /// Is the clickhouse keeper configuration state `Stable`? In other words, are no nodes
+    /// currently being added or removed?
+    pub fn keeper_config_stable(&self) -> bool {
+        self.keepers.state.is_stable()
+    }
+
+    /// Are we currently adding a keeper to the config
+    pub fn adding_keeper(&self) -> bool {
+        self.keepers.state.is_adding_node()
     }
 }
 
@@ -512,3 +465,4 @@ mod tests {
         }
     }
 }
+*/

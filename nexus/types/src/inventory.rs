@@ -23,11 +23,13 @@ use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
 use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::Generation;
 pub use omicron_common::api::internal::shared::NetworkInterface;
 pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
 pub use omicron_common::api::internal::shared::SourceNatConfig;
 pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
@@ -115,6 +117,9 @@ pub struct Collection {
 
     /// Omicron zones found, by *sled* id
     pub omicron_zones: BTreeMap<SledUuid, OmicronZonesFound>,
+
+    /// Clickhouse Keeper state, by *zone* id
+    pub clickhouse_keepers: BTreeMap<OmicronZoneUuid, ClickhouseKeeperState>,
 }
 
 impl Collection {
@@ -423,4 +428,33 @@ pub struct OmicronZonesFound {
     pub source: String,
     pub sled_id: SledUuid,
     pub zones: OmicronZonesConfig,
+}
+
+/// The state of a Clickhouse Keeper node
+///
+/// This is retrieved from the `clickhouse-admin` dropshot server running
+/// in a `ClickhouseKeeper` zone and is used to manage reconfigurations of a
+/// clickhouse keeper cluster.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub enum ClickhouseKeeperState {
+    /// The keeper process is not running because it has not received a
+    /// configuration yet
+    NeedsConfiguration,
+
+    /// The keeper process is running, but is not yet part of a cluster.
+    /// It's generated configuration in the blueprint is `keeper_config_gen`
+    RunningStandalone { keeper_id: u64, keeper_config_gen: Generation },
+
+    /// The keeper process is part of a cluster at the given generation
+    ActiveMember { keeper_id: u64, keeper_config_gen: Generation },
+
+    /// The keeper process has failed to join the cluster.
+    ///
+    /// If this occurs, a new keeper process with a new id and configuration
+    /// should be started in the existing zone or the zone should be expunged.
+    FailedToJoin { keeper_id: u64, keeper_config_gen: Generation },
+
+    /// The keeper has been removed from the cluster. At no point may a keeper
+    /// that has been removed rejoin.
+    Removed { keeper_id: u64, keeper_config_gen: Generation },
 }
