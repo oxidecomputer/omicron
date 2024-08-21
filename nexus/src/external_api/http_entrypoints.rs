@@ -3910,7 +3910,7 @@ async fn networking_bgp_config_create(
         let nexus = &apictx.context.nexus;
         let config = config.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let result = nexus.bgp_config_set(&opctx, &config).await?;
+        let result = nexus.bgp_config_create(&opctx, &config).await?;
         Ok(HttpResponseCreated::<BgpConfig>(result.into()))
     };
     apictx

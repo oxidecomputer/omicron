@@ -15,13 +15,13 @@ use omicron_common::api::external::{
 use std::net::IpAddr;
 
 impl super::Nexus {
-    pub async fn bgp_config_set(
+    pub async fn bgp_config_create(
         &self,
         opctx: &OpContext,
         config: &params::BgpConfigCreate,
     ) -> CreateResult<BgpConfig> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        let result = self.db_datastore.bgp_config_set(opctx, config).await?;
+        let result = self.db_datastore.bgp_config_create(opctx, config).await?;
         Ok(result)
     }
 

@@ -28,7 +28,7 @@ use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl DataStore {
-    pub async fn bgp_config_set(
+    pub async fn bgp_config_create(
         &self,
         opctx: &OpContext,
         config: &params::BgpConfigCreate,
@@ -218,6 +218,10 @@ impl DataStore {
                     error!(opctx.log, "{msg}"; "error" => ?err);
                     err
                 } else {
+                    // The transaction handler errors along with any errors emitted via "?"
+                    // will fall through to here. These errors should truly be 500s
+                    // because they are an internal hiccup that likely was not triggered by
+                    // user input.
                     error!(opctx.log, "{msg}"; "error" => ?e);
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
@@ -465,7 +469,7 @@ impl DataStore {
                                 match e {
                                     diesel::result::Error::NotFound => err
                                         .bail(Error::not_found_by_id(
-                                            ResourceType::BgpConfig,
+                                            ResourceType::BgpAnnounceSet,
                                             &id,
                                         )),
                                     _ => err.bail(Error::internal_error(msg)),
@@ -491,7 +495,7 @@ impl DataStore {
                                     match e {
                                         diesel::result::Error::NotFound => err
                                             .bail(Error::not_found_by_name(
-                                                ResourceType::BgpConfig,
+                                                ResourceType::BgpAnnounceSet,
                                                 &name,
                                             )),
                                         _ => {
@@ -727,7 +731,7 @@ impl DataStore {
                                 match e {
                                     diesel::result::Error::NotFound => err
                                         .bail(Error::not_found_by_id(
-                                            ResourceType::BgpConfig,
+                                            ResourceType::BgpAnnounceSet,
                                             &id,
                                         )),
                                     _ => err.bail(Error::internal_error(msg)),
@@ -753,7 +757,7 @@ impl DataStore {
                                     match e {
                                         diesel::result::Error::NotFound => err
                                             .bail(Error::not_found_by_name(
-                                                ResourceType::BgpConfig,
+                                                ResourceType::BgpAnnounceSet,
                                                 &name,
                                             )),
                                         _ => {
