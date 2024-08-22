@@ -7,6 +7,7 @@
 use super::DataStore;
 use crate::db;
 use crate::db::datastore::OpContext;
+use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
@@ -21,6 +22,8 @@ use crate::db::model::UpstairsRepairNotification;
 use crate::db::model::UpstairsRepairNotificationType;
 use crate::db::model::UpstairsRepairProgress;
 use crate::db::model::Volume;
+use crate::db::pagination::paginated;
+use crate::db::pagination::Paginator;
 use crate::db::queries::volume::DecreaseCrucibleResourceCountAndSoftDeleteVolume;
 use crate::transaction_retry::OptionalError;
 use anyhow::bail;
@@ -48,6 +51,7 @@ use serde::Deserializer;
 use serde::Serialize;
 use sled_agent_client::types::VolumeConstructionRequest;
 use std::collections::VecDeque;
+use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
 
@@ -1164,12 +1168,14 @@ impl DataStore {
 
         let mut targets: Vec<SocketAddrV6> = vec![];
 
-        find_matching_rw_regions_in_volume(
-            &vcr,
-            dataset.address().ip(),
-            &mut targets,
-        )
-        .map_err(|e| Error::internal_error(&e.to_string()))?;
+        let Some(address) = dataset.address() else {
+            return Err(Error::internal_error(
+                "Crucible Dataset missing IP address",
+            ));
+        };
+
+        find_matching_rw_regions_in_volume(&vcr, address.ip(), &mut targets)
+            .map_err(|e| Error::internal_error(&e.to_string()))?;
 
         Ok(targets)
     }
@@ -1527,10 +1533,7 @@ where
     D: Deserializer<'de>,
     T: Deserialize<'de>,
 {
-    Ok(match Option::<Vec<T>>::deserialize(de)? {
-        Some(v) => v,
-        None => vec![],
-    })
+    Ok(Option::<Vec<T>>::deserialize(de)?.unwrap_or_default())
 }
 
 impl DataStore {
@@ -1718,11 +1721,90 @@ fn region_in_vcr(
     Ok(region_found)
 }
 
+/// Check if a read-only target is present anywhere in a Volume Construction
+/// Request
+fn read_only_target_in_vcr(
+    vcr: &VolumeConstructionRequest,
+    read_only_target: &SocketAddrV6,
+) -> anyhow::Result<bool> {
+    struct Work<'a> {
+        vcr_part: &'a VolumeConstructionRequest,
+        under_read_only_parent: bool,
+    }
+
+    let mut parts: VecDeque<Work> = VecDeque::new();
+    parts.push_back(Work { vcr_part: &vcr, under_read_only_parent: false });
+
+    while let Some(work) = parts.pop_front() {
+        match work.vcr_part {
+            VolumeConstructionRequest::Volume {
+                sub_volumes,
+                read_only_parent,
+                ..
+            } => {
+                for sub_volume in sub_volumes {
+                    parts.push_back(Work {
+                        vcr_part: &sub_volume,
+                        under_read_only_parent: work.under_read_only_parent,
+                    });
+                }
+
+                if let Some(read_only_parent) = read_only_parent {
+                    parts.push_back(Work {
+                        vcr_part: &read_only_parent,
+                        under_read_only_parent: true,
+                    });
+                }
+            }
+
+            VolumeConstructionRequest::Url { .. } => {
+                // nothing required
+            }
+
+            VolumeConstructionRequest::Region { opts, .. } => {
+                if work.under_read_only_parent && !opts.read_only {
+                    // This VCR isn't constructed properly, there's a read/write
+                    // region under a read-only parent
+                    bail!("read-write region under read-only parent");
+                }
+
+                for target in &opts.target {
+                    let parsed_target: SocketAddrV6 = target.parse()?;
+                    if parsed_target == *read_only_target && opts.read_only {
+                        return Ok(true);
+                    }
+                }
+            }
+
+            VolumeConstructionRequest::File { .. } => {
+                // nothing required
+            }
+        }
+    }
+
+    Ok(false)
+}
+
 pub struct VolumeReplacementParams {
     pub volume_id: Uuid,
     pub region_id: Uuid,
     pub region_addr: SocketAddrV6,
 }
+
+// types for volume_replace_snapshot and replace_read_only_target_in_vcr
+// parameters
+
+#[derive(Debug, Clone, Copy)]
+pub struct VolumeWithTarget(pub Uuid);
+
+#[derive(Debug, Clone, Copy)]
+pub struct ExistingTarget(pub SocketAddrV6);
+
+#[derive(Debug, Clone, Copy)]
+pub struct ReplacementTarget(pub SocketAddrV6);
+
+#[derive(Debug, Clone, Copy)]
+pub struct VolumeToDelete(pub Uuid);
 
 impl DataStore {
     /// Replace a read-write region in a Volume with a new region.
@@ -2005,6 +2087,265 @@ impl DataStore {
                 }
             })
     }
+
+    /// Replace a read-only target in a Volume with a new region
+    ///
+    /// In a single transaction:
+    ///
+    /// - update a volume's serialized construction request by replacing a
+    ///   single target.
+    ///
+    /// - stash the replaced target in a "volume to delete"'s serialized
+    ///   construction request
+    ///
+    /// Note that this transaction does _not_ update a region snapshot's volume
+    /// references table! This is legal because the existing target reference is
+    /// written into the volume to delete's construction request.
+    ///
+    /// This function's effects can be undone by calling it with swapped
+    /// `existing` and `replacement` parameters.
+    pub async fn volume_replace_snapshot(
+        &self,
+        volume_id: VolumeWithTarget,
+        existing: ExistingTarget,
+        replacement: ReplacementTarget,
+        volume_to_delete_id: VolumeToDelete,
+    ) -> Result<(), Error> {
+        #[derive(Debug, thiserror::Error)]
+        enum VolumeReplaceSnapshotError {
+            #[error("Error from Volume snapshot replacement: {0}")]
+            Public(Error),
+
+            #[error("Serde error during Volume snapshot replacement: {0}")]
+            SerdeError(#[from] serde_json::Error),
+
+            #[error("Target Volume deleted")]
+            TargetVolumeDeleted,
+
+            #[error("Snapshot replacement error: {0}")]
+            SnapshotReplacementError(#[from] anyhow::Error),
+
+            #[error("Replaced {0} targets, expected {1}")]
+            UnexpectedReplacedTargets(usize, usize),
+
+            #[error("Updated {0} database rows, expected {1}")]
+            UnexpectedDatabaseUpdate(usize, usize),
+        }
+        let err = OptionalError::new();
+
+        let conn = self.pool_connection_unauthorized().await?;
+        self.transaction_retry_wrapper("volume_replace_snapshot")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    use db::schema::volume::dsl as volume_dsl;
+
+                    // Grab the old volume first
+                    let maybe_old_volume = {
+                        volume_dsl::volume
+                            .filter(volume_dsl::id.eq(volume_id.0))
+                            .select(Volume::as_select())
+                            .first_async::<Volume>(&conn)
+                            .await
+                            .optional()
+                            .map_err(|e| {
+                                err.bail_retryable_or_else(e, |e| {
+                                    VolumeReplaceSnapshotError::Public(
+                                        public_error_from_diesel(
+                                            e,
+                                            ErrorHandler::Server,
+                                        )
+                                    )
+                                })
+                            })?
+                    };
+
+                    let old_volume = if let Some(old_volume) = maybe_old_volume {
+                        old_volume
+                    } else {
+                        // Existing volume was deleted, so return an error. We
+                        // can't perform the snapshot replacement now!
+                        return Err(err.bail(
+                            VolumeReplaceSnapshotError::TargetVolumeDeleted
+                        ));
+                    };
+
+                    let old_vcr: VolumeConstructionRequest =
+                        match serde_json::from_str(&old_volume.data()) {
+                            Ok(vcr) => vcr,
+                            Err(e) => {
+                                return Err(err.bail(
+                                    VolumeReplaceSnapshotError::SerdeError(e)
+                                ));
+                            },
+                        };
+
+                    // Does it look like this replacement already happened?
+                    let old_target_in_vcr = match read_only_target_in_vcr(&old_vcr, &existing.0) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            return Err(err.bail(
+                                VolumeReplaceSnapshotError::SnapshotReplacementError(e)
+                            ));
+                        },
+                    };
+
+                    let new_target_in_vcr = match read_only_target_in_vcr(&old_vcr, &replacement.0) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            return Err(err.bail(
+                                VolumeReplaceSnapshotError::SnapshotReplacementError(e)
+                            ));
+                        },
+                    };
+
+                    if !old_target_in_vcr && new_target_in_vcr {
+                        // It does seem like the replacement happened
+                        return Ok(());
+                    }
+
+                    // Update the existing volume's construction request to
+                    // replace the existing target's SocketAddrV6 with the
+                    // replacement target's
+
+                    // Copy the old volume's VCR, changing out the old target
+                    // for the new.
+                    let (new_vcr, replacements) = match replace_read_only_target_in_vcr(
+                        &old_vcr,
+                        existing,
+                        replacement,
+                    ) {
+                        Ok(new_vcr) => new_vcr,
+                        Err(e) => {
+                            return Err(err.bail(
+                                VolumeReplaceSnapshotError::SnapshotReplacementError(e)
+                            ));
+                        }
+                    };
+
+                    // Expect that this only happened once. If it happened
+                    // multiple times, question everything: how would a snapshot
+                    // be used twice?!
+
+                    if replacements != 1 {
+                        return Err(err.bail(
+                            VolumeReplaceSnapshotError::UnexpectedReplacedTargets(
+                                replacements, 1,
+                            )
+                        ));
+                    }
+
+                    let new_volume_data = serde_json::to_string(
+                        &new_vcr,
+                    )
+                    .map_err(|e| {
+                        err.bail(VolumeReplaceSnapshotError::SerdeError(e))
+                    })?;
+
+                    // Update the existing volume's data
+                    diesel::update(volume_dsl::volume)
+                        .filter(volume_dsl::id.eq(volume_id.0))
+                        .set(volume_dsl::data.eq(new_volume_data))
+                        .execute_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                VolumeReplaceSnapshotError::Public(
+                                    public_error_from_diesel(
+                                        e,
+                                        ErrorHandler::Server,
+                                    )
+                                )
+                            })
+                        })?;
+
+                    // Make a new VCR that will stash the target to delete. The
+                    // values here don't matter, just that it gets fed into the
+                    // volume_delete machinery later.
+                    let vcr = VolumeConstructionRequest::Volume {
+                        id: volume_to_delete_id.0,
+                        block_size: 512,
+                        sub_volumes: vec![
+                            VolumeConstructionRequest::Region {
+                                block_size: 512,
+                                blocks_per_extent: 1,
+                                extent_count: 1,
+                                gen: 1,
+                                opts: sled_agent_client::types::CrucibleOpts {
+                                    id: volume_to_delete_id.0,
+                                    target: vec![
+                                        existing.0.to_string(),
+                                    ],
+                                    lossy: false,
+                                    flush_timeout: None,
+                                    key: None,
+                                    cert_pem: None,
+                                    key_pem: None,
+                                    root_cert_pem: None,
+                                    control: None,
+                                    read_only: true,
+                                },
+                            }
+                        ],
+                        read_only_parent: None,
+                    };
+
+                    let volume_data = serde_json::to_string(&vcr)
+                        .map_err(|e| {
+                            err.bail(VolumeReplaceSnapshotError::SerdeError(e))
+                        })?;
+
+                    // Update the volume to delete data
+                    let num_updated =
+                        diesel::update(volume_dsl::volume)
+                            .filter(volume_dsl::id.eq(volume_to_delete_id.0))
+                            .filter(volume_dsl::time_deleted.is_null())
+                            .set(volume_dsl::data.eq(volume_data))
+                            .execute_async(&conn)
+                            .await?;
+
+                    if num_updated != 1 {
+                        return Err(err.bail(
+                            VolumeReplaceSnapshotError::UnexpectedDatabaseUpdate(
+                                num_updated, 1,
+                            )
+                        ));
+                    }
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    match err {
+                        VolumeReplaceSnapshotError::Public(e) => e,
+
+                        VolumeReplaceSnapshotError::SerdeError(_) => {
+                            Error::internal_error(&err.to_string())
+                        }
+
+                        VolumeReplaceSnapshotError::TargetVolumeDeleted => {
+                            Error::internal_error(&err.to_string())
+                        }
+
+                        VolumeReplaceSnapshotError::SnapshotReplacementError(_) => {
+                            Error::internal_error(&err.to_string())
+                        }
+
+                        VolumeReplaceSnapshotError::UnexpectedReplacedTargets(_, _) => {
+                            Error::internal_error(&err.to_string())
+                        }
+
+                        VolumeReplaceSnapshotError::UnexpectedDatabaseUpdate(_, _) => {
+                            Error::internal_error(&err.to_string())
+                        }
+                    }
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
+    }
 }
 
 /// Return the targets from a VolumeConstructionRequest.
@@ -2158,6 +2499,87 @@ fn replace_region_in_vcr(
     Ok(new_vcr)
 }
 
+/// Replace a read-only target in a VolumeConstructionRequest
+///
+/// Note that UUIDs are not randomized by this step: Crucible will reject a
+/// `target_replace` call if the replacement VolumeConstructionRequest does not
+/// exactly match the original, except for a single Region difference.
+///
+/// Note that the generation number _is not_ bumped in this step.
+fn replace_read_only_target_in_vcr(
+    vcr: &VolumeConstructionRequest,
+    old_target: ExistingTarget,
+    new_target: ReplacementTarget,
+) -> anyhow::Result<(VolumeConstructionRequest, usize)> {
+    struct Work<'a> {
+        vcr_part: &'a mut VolumeConstructionRequest,
+        under_read_only_parent: bool,
+    }
+    let mut new_vcr = vcr.clone();
+
+    let mut parts: VecDeque<Work> = VecDeque::new();
+    parts.push_back(Work {
+        vcr_part: &mut new_vcr,
+        under_read_only_parent: false,
+    });
+
+    let mut replacements = 0;
+
+    while let Some(work) = parts.pop_front() {
+        match work.vcr_part {
+            VolumeConstructionRequest::Volume {
+                sub_volumes,
+                read_only_parent,
+                ..
+            } => {
+                for sub_volume in sub_volumes {
+                    parts.push_back(Work {
+                        vcr_part: sub_volume,
+                        under_read_only_parent: work.under_read_only_parent,
+                    });
+                }
+
+                if let Some(read_only_parent) = read_only_parent {
+                    parts.push_back(Work {
+                        vcr_part: read_only_parent,
+                        under_read_only_parent: true,
+                    });
+                }
+            }
+
+            VolumeConstructionRequest::Url { .. } => {
+                // nothing required
+            }
+
+            VolumeConstructionRequest::Region { opts, .. } => {
+                if work.under_read_only_parent && !opts.read_only {
+                    // This VCR isn't constructed properly, there's a read/write
+                    // region under a read-only parent
+                    bail!("read-write region under read-only parent");
+                }
+
+                for target in &mut opts.target {
+                    let parsed_target: SocketAddrV6 = target.parse()?;
+                    if parsed_target == old_target.0 && opts.read_only {
+                        *target = new_target.0.to_string();
+                        replacements += 1;
+                    }
+                }
+            }
+
+            VolumeConstructionRequest::File { .. } => {
+                // nothing required
+            }
+        }
+    }
+
+    if replacements == 0 {
+        bail!("target {old_target:?} not found!");
+    }
+
+    Ok((new_vcr, replacements))
+}
+
 /// Find Regions in a Volume's subvolumes list whose target match the argument
 /// IP, and add them to the supplied Vec.
 fn find_matching_rw_regions_in_volume(
@@ -2198,6 +2620,45 @@ fn find_matching_rw_regions_in_volume(
     }
 
     Ok(())
+}
+
+impl DataStore {
+    pub async fn find_volumes_referencing_socket_addr(
+        &self,
+        opctx: &OpContext,
+        address: SocketAddr,
+    ) -> ListResultVec<Volume> {
+        opctx.check_complex_operations_allowed()?;
+
+        let mut volumes = Vec::new();
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let needle = address.to_string();
+
+        while let Some(p) = paginator.next() {
+            use db::schema::volume::dsl;
+
+            let haystack =
+                paginated(dsl::volume, dsl::id, &p.current_pagparams())
+                    .select(Volume::as_select())
+                    .get_results_async::<Volume>(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+
+            paginator = p.found_batch(&haystack, &|r| r.id());
+
+            for volume in haystack {
+                if volume.data().contains(&needle) {
+                    volumes.push(volume);
+                }
+            }
+        }
+
+        Ok(volumes)
+    }
 }
 
 #[cfg(test)]
@@ -2347,6 +2808,7 @@ mod tests {
                     10,
                     10,
                     10001,
+                    false,
                 );
 
                 region_and_volume_ids[i].0 = region.id();
@@ -2521,5 +2983,908 @@ mod tests {
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_volume_replace_snapshot() {
+        let logctx = dev::test_setup_log("test_volume_replace_snapshot");
+        let log = logctx.log.new(o!());
+        let mut db = test_setup_database(&log).await;
+        let (_opctx, db_datastore) = datastore_test(&logctx, &db).await;
+
+        // Insert two volumes: one with the target to replace, and one temporary
+        // "volume to delete" that's blank.
+
+        let volume_id = Uuid::new_v4();
+        let volume_to_delete_id = Uuid::new_v4();
+        let rop_id = Uuid::new_v4();
+
+        db_datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![VolumeConstructionRequest::Region {
+                        block_size: 512,
+                        blocks_per_extent: 10,
+                        extent_count: 10,
+                        gen: 1,
+                        opts: CrucibleOpts {
+                            id: volume_id,
+                            target: vec![
+                                String::from("[fd00:1122:3344:101::1]:11111"),
+                                String::from("[fd00:1122:3344:102::1]:22222"),
+                                String::from("[fd00:1122:3344:103::1]:33333"),
+                            ],
+                            lossy: false,
+                            flush_timeout: None,
+                            key: None,
+                            cert_pem: None,
+                            key_pem: None,
+                            root_cert_pem: None,
+                            control: None,
+                            read_only: false,
+                        },
+                    }],
+                    read_only_parent: Some(Box::new(
+                        VolumeConstructionRequest::Region {
+                            block_size: 512,
+                            blocks_per_extent: 10,
+                            extent_count: 10,
+                            gen: 1,
+                            opts: CrucibleOpts {
+                                id: rop_id,
+                                target: vec![
+                                    // target to replace
+                                    String::from("[fd00:1122:3344:104::1]:400"),
+                                    String::from("[fd00:1122:3344:105::1]:401"),
+                                    String::from("[fd00:1122:3344:106::1]:402"),
+                                ],
+                                lossy: false,
+                                flush_timeout: None,
+                                key: None,
+                                cert_pem: None,
+                                key_pem: None,
+                                root_cert_pem: None,
+                                control: None,
+                                read_only: true,
+                            },
+                        },
+                    )),
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
+        db_datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_to_delete_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: volume_to_delete_id,
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
+        // Do the replacement
+
+        db_datastore
+            .volume_replace_snapshot(
+                VolumeWithTarget(volume_id),
+                ExistingTarget("[fd00:1122:3344:104::1]:400".parse().unwrap()),
+                ReplacementTarget(
+                    "[fd55:1122:3344:101::1]:111".parse().unwrap(),
+                ),
+                VolumeToDelete(volume_to_delete_id),
+            )
+            .await
+            .unwrap();
+
+        // Ensure the shape of the resulting VCRs
+
+        let vcr: VolumeConstructionRequest = serde_json::from_str(
+            db_datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            &vcr,
+            &VolumeConstructionRequest::Volume {
+                id: volume_id,
+                block_size: 512,
+                sub_volumes: vec![VolumeConstructionRequest::Region {
+                    block_size: 512,
+                    blocks_per_extent: 10,
+                    extent_count: 10,
+                    gen: 1,
+                    opts: CrucibleOpts {
+                        id: volume_id,
+                        target: vec![
+                            String::from("[fd00:1122:3344:101::1]:11111"),
+                            String::from("[fd00:1122:3344:102::1]:22222"),
+                            String::from("[fd00:1122:3344:103::1]:33333"),
+                        ],
+                        lossy: false,
+                        flush_timeout: None,
+                        key: None,
+                        cert_pem: None,
+                        key_pem: None,
+                        root_cert_pem: None,
+                        control: None,
+                        read_only: false,
+                    },
+                }],
+                read_only_parent: Some(Box::new(
+                    VolumeConstructionRequest::Region {
+                        block_size: 512,
+                        blocks_per_extent: 10,
+                        extent_count: 10,
+                        gen: 1,
+                        opts: CrucibleOpts {
+                            id: rop_id,
+                            target: vec![
+                                // target replaced
+                                String::from("[fd55:1122:3344:101::1]:111"),
+                                String::from("[fd00:1122:3344:105::1]:401"),
+                                String::from("[fd00:1122:3344:106::1]:402"),
+                            ],
+                            lossy: false,
+                            flush_timeout: None,
+                            key: None,
+                            cert_pem: None,
+                            key_pem: None,
+                            root_cert_pem: None,
+                            control: None,
+                            read_only: true,
+                        },
+                    }
+                )),
+            },
+        );
+
+        let vcr: VolumeConstructionRequest = serde_json::from_str(
+            db_datastore
+                .volume_get(volume_to_delete_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .data(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            &vcr,
+            &VolumeConstructionRequest::Volume {
+                id: volume_to_delete_id,
+                block_size: 512,
+                sub_volumes: vec![VolumeConstructionRequest::Region {
+                    block_size: 512,
+                    blocks_per_extent: 1,
+                    extent_count: 1,
+                    gen: 1,
+                    opts: CrucibleOpts {
+                        id: volume_to_delete_id,
+                        target: vec![
+                            // replaced target stashed here
+                            String::from("[fd00:1122:3344:104::1]:400"),
+                        ],
+                        lossy: false,
+                        flush_timeout: None,
+                        key: None,
+                        cert_pem: None,
+                        key_pem: None,
+                        root_cert_pem: None,
+                        control: None,
+                        read_only: true,
+                    },
+                }],
+                read_only_parent: None,
+            },
+        );
+
+        // Now undo the replacement. Note volume ID is not swapped.
+
+        db_datastore
+            .volume_replace_snapshot(
+                VolumeWithTarget(volume_id),
+                ExistingTarget("[fd55:1122:3344:101::1]:111".parse().unwrap()),
+                ReplacementTarget(
+                    "[fd00:1122:3344:104::1]:400".parse().unwrap(),
+                ),
+                VolumeToDelete(volume_to_delete_id),
+            )
+            .await
+            .unwrap();
+
+        let vcr: VolumeConstructionRequest = serde_json::from_str(
+            db_datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
+        )
+        .unwrap();
+
+        // Ensure the shape of the resulting VCR
+        assert_eq!(
+            &vcr,
+            &VolumeConstructionRequest::Volume {
+                id: volume_id,
+                block_size: 512,
+                sub_volumes: vec![VolumeConstructionRequest::Region {
+                    block_size: 512,
+                    blocks_per_extent: 10,
+                    extent_count: 10,
+                    gen: 1,
+                    opts: CrucibleOpts {
+                        id: volume_id,
+                        target: vec![
+                            String::from("[fd00:1122:3344:101::1]:11111"),
+                            String::from("[fd00:1122:3344:102::1]:22222"),
+                            String::from("[fd00:1122:3344:103::1]:33333"),
+                        ],
+                        lossy: false,
+                        flush_timeout: None,
+                        key: None,
+                        cert_pem: None,
+                        key_pem: None,
+                        root_cert_pem: None,
+                        control: None,
+                        read_only: false,
+                    },
+                }],
+                read_only_parent: Some(Box::new(
+                    VolumeConstructionRequest::Region {
+                        block_size: 512,
+                        blocks_per_extent: 10,
+                        extent_count: 10,
+                        gen: 1,
+                        opts: CrucibleOpts {
+                            id: rop_id,
+                            target: vec![
+                                // back to what it was
+                                String::from("[fd00:1122:3344:104::1]:400"),
+                                String::from("[fd00:1122:3344:105::1]:401"),
+                                String::from("[fd00:1122:3344:106::1]:402"),
+                            ],
+                            lossy: false,
+                            flush_timeout: None,
+                            key: None,
+                            cert_pem: None,
+                            key_pem: None,
+                            root_cert_pem: None,
+                            control: None,
+                            read_only: true,
+                        },
+                    }
+                )),
+            },
+        );
+
+        let vcr: VolumeConstructionRequest = serde_json::from_str(
+            db_datastore
+                .volume_get(volume_to_delete_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .data(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            &vcr,
+            &VolumeConstructionRequest::Volume {
+                id: volume_to_delete_id,
+                block_size: 512,
+                sub_volumes: vec![VolumeConstructionRequest::Region {
+                    block_size: 512,
+                    blocks_per_extent: 1,
+                    extent_count: 1,
+                    gen: 1,
+                    opts: CrucibleOpts {
+                        id: volume_to_delete_id,
+                        target: vec![
+                            // replacement stashed here
+                            String::from("[fd55:1122:3344:101::1]:111"),
+                        ],
+                        lossy: false,
+                        flush_timeout: None,
+                        key: None,
+                        cert_pem: None,
+                        key_pem: None,
+                        root_cert_pem: None,
+                        control: None,
+                        read_only: true,
+                    },
+                }],
+                read_only_parent: None,
+            },
+        );
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_find_volumes_referencing_socket_addr() {
+        let logctx =
+            dev::test_setup_log("test_find_volumes_referencing_socket_addr");
+        let log = logctx.log.new(o!());
+        let mut db = test_setup_database(&log).await;
+        let (opctx, db_datastore) = datastore_test(&logctx, &db).await;
+
+        let volume_id = Uuid::new_v4();
+
+        // case where the needle is found
+
+        db_datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: Some(Box::new(
+                        VolumeConstructionRequest::Region {
+                            block_size: 512,
+                            blocks_per_extent: 10,
+                            extent_count: 10,
+                            gen: 1,
+                            opts: CrucibleOpts {
+                                id: Uuid::new_v4(),
+                                target: vec![
+                                    String::from("[fd00:1122:3344:104::1]:400"),
+                                    String::from("[fd00:1122:3344:105::1]:401"),
+                                    String::from("[fd00:1122:3344:106::1]:402"),
+                                ],
+                                lossy: false,
+                                flush_timeout: None,
+                                key: None,
+                                cert_pem: None,
+                                key_pem: None,
+                                root_cert_pem: None,
+                                control: None,
+                                read_only: true,
+                            },
+                        },
+                    )),
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
+        let volumes = db_datastore
+            .find_volumes_referencing_socket_addr(
+                &opctx,
+                "[fd00:1122:3344:104::1]:400".parse().unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(volumes.len(), 1);
+        assert_eq!(volumes[0].id(), volume_id);
+
+        // case where the needle is missing
+
+        let volumes = db_datastore
+            .find_volumes_referencing_socket_addr(
+                &opctx,
+                "[fd55:1122:3344:104::1]:400".parse().unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert!(volumes.is_empty());
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_read_only_target_in_vcr() {
+        // read_only_target_in_vcr should find read-only targets
+
+        let vcr = VolumeConstructionRequest::Volume {
+            id: Uuid::new_v4(),
+            block_size: 512,
+            sub_volumes: vec![],
+            read_only_parent: Some(Box::new(
+                VolumeConstructionRequest::Region {
+                    block_size: 512,
+                    blocks_per_extent: 10,
+                    extent_count: 10,
+                    gen: 1,
+                    opts: CrucibleOpts {
+                        id: Uuid::new_v4(),
+                        target: vec![
+                            String::from("[fd00:1122:3344:104::1]:400"),
+                            String::from("[fd00:1122:3344:105::1]:401"),
+                            String::from("[fd00:1122:3344:106::1]:402"),
+                        ],
+                        lossy: false,
+                        flush_timeout: None,
+                        key: None,
+                        cert_pem: None,
+                        key_pem: None,
+                        root_cert_pem: None,
+                        control: None,
+                        read_only: true,
+                    },
+                },
+            )),
+        };
+
+        assert!(read_only_target_in_vcr(
+            &vcr,
+            &"[fd00:1122:3344:104::1]:400".parse().unwrap(),
+        )
+        .unwrap());
+
+        // read_only_target_in_vcr should _not_ find read-write targets
+
+        let vcr = VolumeConstructionRequest::Volume {
+            id: Uuid::new_v4(),
+            block_size: 512,
+            sub_volumes: vec![VolumeConstructionRequest::Region {
+                block_size: 512,
+                blocks_per_extent: 10,
+                extent_count: 10,
+                gen: 1,
+                opts: CrucibleOpts {
+                    id: Uuid::new_v4(),
+                    target: vec![
+                        String::from("[fd00:1122:3344:104::1]:400"),
+                        String::from("[fd00:1122:3344:105::1]:401"),
+                        String::from("[fd00:1122:3344:106::1]:402"),
+                    ],
+                    lossy: false,
+                    flush_timeout: None,
+                    key: None,
+                    cert_pem: None,
+                    key_pem: None,
+                    root_cert_pem: None,
+                    control: None,
+                    read_only: false,
+                },
+            }],
+            read_only_parent: None,
+        };
+
+        assert!(!read_only_target_in_vcr(
+            &vcr,
+            &"[fd00:1122:3344:104::1]:400".parse().unwrap(),
+        )
+        .unwrap());
+
+        // read_only_target_in_vcr should bail on incorrect VCRs (currently it
+        // only detects a read/write region under a read-only parent)
+
+        let vcr = VolumeConstructionRequest::Volume {
+            id: Uuid::new_v4(),
+            block_size: 512,
+            sub_volumes: vec![],
+            read_only_parent: Some(Box::new(
+                VolumeConstructionRequest::Region {
+                    block_size: 512,
+                    blocks_per_extent: 10,
+                    extent_count: 10,
+                    gen: 1,
+                    opts: CrucibleOpts {
+                        id: Uuid::new_v4(),
+                        target: vec![
+                            String::from("[fd00:1122:3344:104::1]:400"),
+                            String::from("[fd00:1122:3344:105::1]:401"),
+                            String::from("[fd00:1122:3344:106::1]:402"),
+                        ],
+                        lossy: false,
+                        flush_timeout: None,
+                        key: None,
+                        cert_pem: None,
+                        key_pem: None,
+                        root_cert_pem: None,
+                        control: None,
+                        read_only: false, // invalid!
+                    },
+                },
+            )),
+        };
+
+        read_only_target_in_vcr(
+            &vcr,
+            &"[fd00:1122:3344:104::1]:400".parse().unwrap(),
+        )
+        .unwrap_err();
+    }
+
+    #[test]
+    fn test_replace_read_only_target_in_vcr() {
+        // replace_read_only_target_in_vcr should perform a replacement in a
+        // read-only parent
+
+        let volume_id = Uuid::new_v4();
+
+        let vcr = VolumeConstructionRequest::Volume {
+            id: volume_id,
+            block_size: 512,
+            sub_volumes: vec![],
+            read_only_parent: Some(Box::new(
+                VolumeConstructionRequest::Region {
+                    block_size: 512,
+                    blocks_per_extent: 10,
+                    extent_count: 10,
+                    gen: 1,
+                    opts: CrucibleOpts {
+                        id: volume_id,
+                        target: vec![
+                            String::from("[fd00:1122:3344:104::1]:400"),
+                            String::from("[fd00:1122:3344:105::1]:401"),
+                            String::from("[fd00:1122:3344:106::1]:402"),
+                        ],
+                        lossy: false,
+                        flush_timeout: None,
+                        key: None,
+                        cert_pem: None,
+                        key_pem: None,
+                        root_cert_pem: None,
+                        control: None,
+                        read_only: true,
+                    },
+                },
+            )),
+        };
+
+        let old_target =
+            ExistingTarget("[fd00:1122:3344:105::1]:401".parse().unwrap());
+        let new_target =
+            ReplacementTarget("[fd99:1122:3344:105::1]:12345".parse().unwrap());
+
+        let (new_vcr, replacements) =
+            replace_read_only_target_in_vcr(&vcr, old_target, new_target)
+                .unwrap();
+
+        assert_eq!(replacements, 1);
+        assert_eq!(
+            &new_vcr,
+            &VolumeConstructionRequest::Volume {
+                id: volume_id,
+                block_size: 512,
+                sub_volumes: vec![],
+                read_only_parent: Some(Box::new(
+                    VolumeConstructionRequest::Region {
+                        block_size: 512,
+                        blocks_per_extent: 10,
+                        extent_count: 10,
+                        gen: 1,
+                        opts: CrucibleOpts {
+                            id: volume_id,
+                            target: vec![
+                                String::from("[fd00:1122:3344:104::1]:400"),
+                                new_target.0.to_string(),
+                                String::from("[fd00:1122:3344:106::1]:402"),
+                            ],
+                            lossy: false,
+                            flush_timeout: None,
+                            key: None,
+                            cert_pem: None,
+                            key_pem: None,
+                            root_cert_pem: None,
+                            control: None,
+                            read_only: true,
+                        }
+                    }
+                ))
+            }
+        );
+
+        // replace_read_only_target_in_vcr should perform a replacement in a
+        // read-only parent in a sub-volume
+
+        let vcr = VolumeConstructionRequest::Volume {
+            id: volume_id,
+            block_size: 512,
+            sub_volumes: vec![VolumeConstructionRequest::Volume {
+                id: volume_id,
+                block_size: 512,
+                sub_volumes: vec![VolumeConstructionRequest::Region {
+                    block_size: 512,
+                    blocks_per_extent: 10,
+                    extent_count: 10,
+                    gen: 1,
+                    opts: CrucibleOpts {
+                        id: volume_id,
+                        target: vec![
+                            String::from("[fd55:1122:3344:204::1]:1000"),
+                            String::from("[fd55:1122:3344:205::1]:1001"),
+                            String::from("[fd55:1122:3344:206::1]:1002"),
+                        ],
+                        lossy: false,
+                        flush_timeout: None,
+                        key: None,
+                        cert_pem: None,
+                        key_pem: None,
+                        root_cert_pem: None,
+                        control: None,
+                        read_only: false,
+                    },
+                }],
+                read_only_parent: Some(Box::new(
+                    VolumeConstructionRequest::Region {
+                        block_size: 512,
+                        blocks_per_extent: 10,
+                        extent_count: 10,
+                        gen: 1,
+                        opts: CrucibleOpts {
+                            id: volume_id,
+                            target: vec![
+                                String::from("[fd33:1122:3344:304::1]:2000"),
+                                String::from("[fd33:1122:3344:305::1]:2001"),
+                                String::from("[fd33:1122:3344:306::1]:2002"),
+                            ],
+                            lossy: false,
+                            flush_timeout: None,
+                            key: None,
+                            cert_pem: None,
+                            key_pem: None,
+                            root_cert_pem: None,
+                            control: None,
+                            read_only: true,
+                        },
+                    },
+                )),
+            }],
+            read_only_parent: Some(Box::new(
+                VolumeConstructionRequest::Region {
+                    block_size: 512,
+                    blocks_per_extent: 10,
+                    extent_count: 10,
+                    gen: 1,
+                    opts: CrucibleOpts {
+                        id: volume_id,
+                        target: vec![
+                            String::from("[fd00:1122:3344:104::1]:400"),
+                            String::from("[fd00:1122:3344:105::1]:401"),
+                            String::from("[fd00:1122:3344:106::1]:402"),
+                        ],
+                        lossy: false,
+                        flush_timeout: None,
+                        key: None,
+                        cert_pem: None,
+                        key_pem: None,
+                        root_cert_pem: None,
+                        control: None,
+                        read_only: true,
+                    },
+                },
+            )),
+        };
+
+        let old_target =
+            ExistingTarget("[fd33:1122:3344:306::1]:2002".parse().unwrap());
+        let new_target =
+            ReplacementTarget("[fd99:1122:3344:105::1]:12345".parse().unwrap());
+
+        let (new_vcr, replacements) =
+            replace_read_only_target_in_vcr(&vcr, old_target, new_target)
+                .unwrap();
+
+        assert_eq!(replacements, 1);
+        assert_eq!(
+            &new_vcr,
+            &VolumeConstructionRequest::Volume {
+                id: volume_id,
+                block_size: 512,
+                sub_volumes: vec![VolumeConstructionRequest::Volume {
+                    id: volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![VolumeConstructionRequest::Region {
+                        block_size: 512,
+                        blocks_per_extent: 10,
+                        extent_count: 10,
+                        gen: 1,
+                        opts: CrucibleOpts {
+                            id: volume_id,
+                            target: vec![
+                                String::from("[fd55:1122:3344:204::1]:1000"),
+                                String::from("[fd55:1122:3344:205::1]:1001"),
+                                String::from("[fd55:1122:3344:206::1]:1002"),
+                            ],
+                            lossy: false,
+                            flush_timeout: None,
+                            key: None,
+                            cert_pem: None,
+                            key_pem: None,
+                            root_cert_pem: None,
+                            control: None,
+                            read_only: false,
+                        }
+                    }],
+                    read_only_parent: Some(Box::new(
+                        VolumeConstructionRequest::Region {
+                            block_size: 512,
+                            blocks_per_extent: 10,
+                            extent_count: 10,
+                            gen: 1,
+                            opts: CrucibleOpts {
+                                id: volume_id,
+                                target: vec![
+                                    String::from(
+                                        "[fd33:1122:3344:304::1]:2000"
+                                    ),
+                                    String::from(
+                                        "[fd33:1122:3344:305::1]:2001"
+                                    ),
+                                    new_target.0.to_string(),
+                                ],
+                                lossy: false,
+                                flush_timeout: None,
+                                key: None,
+                                cert_pem: None,
+                                key_pem: None,
+                                root_cert_pem: None,
+                                control: None,
+                                read_only: true,
+                            }
+                        }
+                    )),
+                }],
+                read_only_parent: Some(Box::new(
+                    VolumeConstructionRequest::Region {
+                        block_size: 512,
+                        blocks_per_extent: 10,
+                        extent_count: 10,
+                        gen: 1,
+                        opts: CrucibleOpts {
+                            id: volume_id,
+                            target: vec![
+                                String::from("[fd00:1122:3344:104::1]:400"),
+                                String::from("[fd00:1122:3344:105::1]:401"),
+                                String::from("[fd00:1122:3344:106::1]:402"),
+                            ],
+                            lossy: false,
+                            flush_timeout: None,
+                            key: None,
+                            cert_pem: None,
+                            key_pem: None,
+                            root_cert_pem: None,
+                            control: None,
+                            read_only: true,
+                        }
+                    }
+                ))
+            }
+        );
+
+        // replace_read_only_target_in_vcr should perform multiple replacements
+        // if necessary (even if this is dubious!) - the caller will decide if
+        // this should be legal or not
+
+        let rop = VolumeConstructionRequest::Region {
+            block_size: 512,
+            blocks_per_extent: 10,
+            extent_count: 10,
+            gen: 1,
+            opts: CrucibleOpts {
+                id: volume_id,
+                target: vec![
+                    String::from("[fd33:1122:3344:304::1]:2000"),
+                    String::from("[fd33:1122:3344:305::1]:2001"),
+                    String::from("[fd33:1122:3344:306::1]:2002"),
+                ],
+                lossy: false,
+                flush_timeout: None,
+                key: None,
+                cert_pem: None,
+                key_pem: None,
+                root_cert_pem: None,
+                control: None,
+                read_only: true,
+            },
+        };
+
+        let vcr = VolumeConstructionRequest::Volume {
+            id: volume_id,
+            block_size: 512,
+            sub_volumes: vec![VolumeConstructionRequest::Volume {
+                id: volume_id,
+                block_size: 512,
+                sub_volumes: vec![VolumeConstructionRequest::Region {
+                    block_size: 512,
+                    blocks_per_extent: 10,
+                    extent_count: 10,
+                    gen: 1,
+                    opts: CrucibleOpts {
+                        id: volume_id,
+                        target: vec![
+                            String::from("[fd55:1122:3344:204::1]:1000"),
+                            String::from("[fd55:1122:3344:205::1]:1001"),
+                            String::from("[fd55:1122:3344:206::1]:1002"),
+                        ],
+                        lossy: false,
+                        flush_timeout: None,
+                        key: None,
+                        cert_pem: None,
+                        key_pem: None,
+                        root_cert_pem: None,
+                        control: None,
+                        read_only: false,
+                    },
+                }],
+                read_only_parent: Some(Box::new(rop.clone())),
+            }],
+            read_only_parent: Some(Box::new(rop)),
+        };
+
+        let old_target =
+            ExistingTarget("[fd33:1122:3344:304::1]:2000".parse().unwrap());
+        let new_target =
+            ReplacementTarget("[fd99:1122:3344:105::1]:12345".parse().unwrap());
+
+        let (new_vcr, replacements) =
+            replace_read_only_target_in_vcr(&vcr, old_target, new_target)
+                .unwrap();
+
+        assert_eq!(replacements, 2);
+
+        let rop = VolumeConstructionRequest::Region {
+            block_size: 512,
+            blocks_per_extent: 10,
+            extent_count: 10,
+            gen: 1,
+            opts: CrucibleOpts {
+                id: volume_id,
+                target: vec![
+                    new_target.0.to_string(),
+                    String::from("[fd33:1122:3344:305::1]:2001"),
+                    String::from("[fd33:1122:3344:306::1]:2002"),
+                ],
+                lossy: false,
+                flush_timeout: None,
+                key: None,
+                cert_pem: None,
+                key_pem: None,
+                root_cert_pem: None,
+                control: None,
+                read_only: true,
+            },
+        };
+
+        assert_eq!(
+            &new_vcr,
+            &VolumeConstructionRequest::Volume {
+                id: volume_id,
+                block_size: 512,
+                sub_volumes: vec![VolumeConstructionRequest::Volume {
+                    id: volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![VolumeConstructionRequest::Region {
+                        block_size: 512,
+                        blocks_per_extent: 10,
+                        extent_count: 10,
+                        gen: 1,
+                        opts: CrucibleOpts {
+                            id: volume_id,
+                            target: vec![
+                                String::from("[fd55:1122:3344:204::1]:1000"),
+                                String::from("[fd55:1122:3344:205::1]:1001"),
+                                String::from("[fd55:1122:3344:206::1]:1002"),
+                            ],
+                            lossy: false,
+                            flush_timeout: None,
+                            key: None,
+                            cert_pem: None,
+                            key_pem: None,
+                            root_cert_pem: None,
+                            control: None,
+                            read_only: false,
+                        }
+                    }],
+                    read_only_parent: Some(Box::new(rop.clone())),
+                }],
+                read_only_parent: Some(Box::new(rop)),
+            }
+        );
     }
 }

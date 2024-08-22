@@ -21,6 +21,7 @@ use itertools::Itertools;
 use omicron_common::address::IpRange;
 use omicron_common::api::internal::shared::AllowedSourceIps;
 use omicron_common::api::internal::shared::BgpConfig;
+use omicron_common::api::internal::shared::LldpPortConfig;
 use omicron_common::api::internal::shared::RouteConfig;
 use ratatui::layout::Constraint;
 use ratatui::layout::Direction;
@@ -352,7 +353,7 @@ fn draw_rack_status_details_popup(
             ]));
             if let Some(id) = reset_id {
                 body.lines.push(Line::from(vec![Span::styled(
-                    format!("Last reset operation ID: {}", id.0),
+                    format!("Last reset operation ID: {}", id),
                     style::plain_text(),
                 )]));
             }
@@ -364,7 +365,7 @@ fn draw_rack_status_details_popup(
             ]));
             if let Some(id) = id {
                 body.lines.push(Line::from(vec![Span::styled(
-                    format!("Last initialization operation ID: {}", id.0),
+                    format!("Last initialization operation ID: {}", id),
                     style::plain_text(),
                 )]));
             }
@@ -375,7 +376,7 @@ fn draw_rack_status_details_popup(
                 Span::styled("Initialization Failed", style::plain_text()),
             ]));
             body.lines.push(Line::from(vec![Span::styled(
-                format!("Last initialization operation ID: {}", id.0),
+                format!("Last initialization operation ID: {}", id),
                 style::plain_text(),
             )]));
             push_text_lines(message, prefix, &mut body.lines);
@@ -386,7 +387,7 @@ fn draw_rack_status_details_popup(
                 Span::styled("Initialization Panicked", style::plain_text()),
             ]));
             body.lines.push(Line::from(vec![Span::styled(
-                format!("Last initialization operation ID: {}", id.0),
+                format!("Last initialization operation ID: {}", id),
                 style::plain_text(),
             )]));
         }
@@ -396,7 +397,7 @@ fn draw_rack_status_details_popup(
                 Span::styled("Reset Failed", style::plain_text()),
             ]));
             body.lines.push(Line::from(vec![Span::styled(
-                format!("Last reset operation ID: {}", id.0),
+                format!("Last reset operation ID: {}", id),
                 style::plain_text(),
             )]));
             push_text_lines(message, prefix, &mut body.lines);
@@ -407,7 +408,7 @@ fn draw_rack_status_details_popup(
                 Span::styled("Reset Panicked", style::plain_text()),
             ]));
             body.lines.push(Line::from(vec![Span::styled(
-                format!("Last reset operation ID: {}", id.0),
+                format!("Last reset operation ID: {}", id),
                 style::plain_text(),
             )]));
         }
@@ -417,7 +418,7 @@ fn draw_rack_status_details_popup(
                 Span::styled("Initializing", style::plain_text()),
             ]));
             body.lines.push(Line::from(vec![Span::styled(
-                format!("Current operation ID: {}", id.0),
+                format!("Current operation ID: {}", id),
                 style::plain_text(),
             )]));
         }
@@ -427,7 +428,7 @@ fn draw_rack_status_details_popup(
                 Span::styled("Resetting", style::plain_text()),
             ]));
             body.lines.push(Line::from(vec![Span::styled(
-                format!("Current operation ID: {}", id.0),
+                format!("Current operation ID: {}", id),
                 style::plain_text(),
             )]));
         }
@@ -740,6 +741,7 @@ fn rss_config_text<'a>(
                 uplink_port_fec,
                 autoneg,
                 bgp_peers,
+                lldp,
             } = uplink;
 
             let mut items = vec![
@@ -771,7 +773,8 @@ fn rss_config_text<'a>(
             ];
 
             let routes = routes.iter().map(|r| {
-                let RouteConfig { destination, nexthop, vlan_id } = r;
+                let RouteConfig { destination, nexthop, vlan_id, local_pref } =
+                    r;
 
                 let mut items = vec![
                     Span::styled("  • Route         : ", label_style),
@@ -784,6 +787,13 @@ fn rss_config_text<'a>(
                     items.extend([
                         Span::styled(" (vlan_id=", label_style),
                         Span::styled(vlan_id.to_string(), ok_style),
+                        Span::styled(")", label_style),
+                    ]);
+                }
+                if let Some(local_pref) = local_pref {
+                    items.extend([
+                        Span::styled(" (local_pref=", label_style),
+                        Span::styled(local_pref.to_string(), ok_style),
                         Span::styled(")", label_style),
                     ]);
                 }
@@ -1026,6 +1036,68 @@ fn rss_config_text<'a>(
             items.extend(routes);
             items.extend(addresses);
             items.extend(peers);
+
+            if let Some(lp) = lldp {
+                let LldpPortConfig {
+                    status,
+                    chassis_id,
+                    port_id,
+                    system_name,
+                    system_description,
+                    port_description,
+                    management_addrs,
+                } = lp;
+
+                let mut lldp = vec![
+                    vec![Span::styled("  • LLDP port settings: ", label_style)],
+                    vec![
+                        Span::styled("    • Admin status      : ", label_style),
+                        Span::styled(status.to_string(), ok_style),
+                    ],
+                ];
+
+                if let Some(c) = chassis_id {
+                    lldp.push(vec![
+                        Span::styled("    • Chassis ID        : ", label_style),
+                        Span::styled(c.to_string(), ok_style),
+                    ])
+                }
+                if let Some(s) = system_name {
+                    lldp.push(vec![
+                        Span::styled("    • System name       : ", label_style),
+                        Span::styled(s.to_string(), ok_style),
+                    ])
+                }
+                if let Some(s) = system_description {
+                    lldp.push(vec![
+                        Span::styled("    • System description: ", label_style),
+                        Span::styled(s.to_string(), ok_style),
+                    ])
+                }
+                if let Some(p) = port_id {
+                    lldp.push(vec![
+                        Span::styled("    • Port ID           : ", label_style),
+                        Span::styled(p.to_string(), ok_style),
+                    ])
+                }
+                if let Some(p) = port_description {
+                    lldp.push(vec![
+                        Span::styled("    • Port description  : ", label_style),
+                        Span::styled(p.to_string(), ok_style),
+                    ])
+                }
+                if let Some(addrs) = management_addrs {
+                    let mut label = "    • Management addrs  : ";
+                    for a in addrs {
+                        lldp.push(vec![
+                            Span::styled(label, label_style),
+                            Span::styled(a.to_string(), ok_style),
+                        ]);
+                        label = "                        : ";
+                    }
+                }
+                items.extend(lldp);
+            }
 
             append_list(
                 &mut spans,

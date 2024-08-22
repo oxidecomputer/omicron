@@ -4,14 +4,11 @@
 
 //! Interface for making API requests to a Sled Agent
 
-use anyhow::Context;
 use async_trait::async_trait;
-use omicron_common::api::internal::shared::NetworkInterface;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
 use std::convert::TryFrom;
-use std::fmt;
-use std::hash::Hash;
-use std::net::IpAddr;
-use std::net::SocketAddr;
 use uuid::Uuid;
 
 progenitor::generate_api!(
@@ -32,6 +29,7 @@ progenitor::generate_api!(
         BfdPeerConfig = { derives = [Eq, Hash] },
         BgpConfig = { derives = [Eq, Hash] },
         BgpPeerConfig = { derives = [Eq, Hash] },
+        LldpPortConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
         OmicronPhysicalDiskConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
         PortConfigV2 = { derives = [Eq, Hash] },
         RouteConfig = { derives = [Eq, Hash] },
@@ -42,13 +40,24 @@ progenitor::generate_api!(
         "oxnet" = "0.1.0",
     },
     replace = {
+        Baseboard = nexus_sled_agent_shared::inventory::Baseboard,
         ByteCount = omicron_common::api::external::ByteCount,
         DiskIdentity = omicron_common::disk::DiskIdentity,
+        DiskVariant = omicron_common::disk::DiskVariant,
         Generation = omicron_common::api::external::Generation,
         ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
+        Inventory = nexus_sled_agent_shared::inventory::Inventory,
+        InventoryDisk = nexus_sled_agent_shared::inventory::InventoryDisk,
+        InventoryZpool = nexus_sled_agent_shared::inventory::InventoryZpool,
         MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
         NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
+        OmicronPhysicalDiskConfig = omicron_common::disk::OmicronPhysicalDiskConfig,
+        OmicronPhysicalDisksConfig = omicron_common::disk::OmicronPhysicalDisksConfig,
+        OmicronZoneConfig = nexus_sled_agent_shared::inventory::OmicronZoneConfig,
+        OmicronZoneDataset = nexus_sled_agent_shared::inventory::OmicronZoneDataset,
+        OmicronZoneType = nexus_sled_agent_shared::inventory::OmicronZoneType,
+        OmicronZonesConfig = nexus_sled_agent_shared::inventory::OmicronZonesConfig,
         PortFec = omicron_common::api::internal::shared::PortFec,
         PortSpeed = omicron_common::api::internal::shared::PortSpeed,
         RouterId = omicron_common::api::internal::shared::RouterId,
@@ -56,6 +65,7 @@ progenitor::generate_api!(
         ResolvedVpcRouteSet = omicron_common::api::internal::shared::ResolvedVpcRouteSet,
         RouterTarget = omicron_common::api::internal::shared::RouterTarget,
         RouterVersion = omicron_common::api::internal::shared::RouterVersion,
+        SledRole = nexus_sled_agent_shared::inventory::SledRole,
         SourceNatConfig = omicron_common::api::internal::shared::SourceNatConfig,
         SwitchLocation = omicron_common::api::external::SwitchLocation,
         TypedUuidForInstanceKind = omicron_uuid_kinds::InstanceUuid,
@@ -66,182 +76,6 @@ progenitor::generate_api!(
         ZpoolName = omicron_common::zpool_name::ZpoolName,
     }
 );
-
-// We cannot easily configure progenitor to derive `Eq` on all the client-
-// generated types because some have floats and other types that can't impl
-// `Eq`.  We impl it explicitly for a few types on which we need it.
-impl Eq for types::OmicronPhysicalDisksConfig {}
-impl Eq for types::OmicronZonesConfig {}
-impl Eq for types::OmicronZoneConfig {}
-impl Eq for types::OmicronZoneType {}
-impl Eq for types::OmicronZoneDataset {}
-
-/// Like [`types::OmicronZoneType`], but without any associated data.
-///
-/// We have a few enums of this form floating around. This particular one is
-/// meant to correspond exactly 1:1 with `OmicronZoneType`.
-///
-/// The [`fmt::Display`] impl for this type is a human-readable label, meant
-/// for testing and reporting.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum ZoneKind {
-    BoundaryNtp,
-    Clickhouse,
-    ClickhouseKeeper,
-    CockroachDb,
-    Crucible,
-    CruciblePantry,
-    ExternalDns,
-    InternalDns,
-    InternalNtp,
-    Nexus,
-    Oximeter,
-}
-
-impl fmt::Display for ZoneKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ZoneKind::BoundaryNtp => write!(f, "boundary_ntp"),
-            ZoneKind::Clickhouse => write!(f, "clickhouse"),
-            ZoneKind::ClickhouseKeeper => write!(f, "clickhouse_keeper"),
-            ZoneKind::CockroachDb => write!(f, "cockroach_db"),
-            ZoneKind::Crucible => write!(f, "crucible"),
-            ZoneKind::CruciblePantry => write!(f, "crucible_pantry"),
-            ZoneKind::ExternalDns => write!(f, "external_dns"),
-            ZoneKind::InternalDns => write!(f, "internal_dns"),
-            ZoneKind::InternalNtp => write!(f, "internal_ntp"),
-            ZoneKind::Nexus => write!(f, "nexus"),
-            ZoneKind::Oximeter => write!(f, "oximeter"),
-        }
-    }
-}
-
-impl types::OmicronZoneType {
-    /// Returns the [`ZoneKind`] corresponding to this variant.
-    pub fn kind(&self) -> ZoneKind {
-        match self {
-            types::OmicronZoneType::BoundaryNtp { .. } => ZoneKind::BoundaryNtp,
-            types::OmicronZoneType::Clickhouse { .. } => ZoneKind::Clickhouse,
-            types::OmicronZoneType::ClickhouseKeeper { .. } => {
-                ZoneKind::ClickhouseKeeper
-            }
-            types::OmicronZoneType::CockroachDb { .. } => ZoneKind::CockroachDb,
-            types::OmicronZoneType::Crucible { .. } => ZoneKind::Crucible,
-            types::OmicronZoneType::CruciblePantry { .. } => {
-                ZoneKind::CruciblePantry
-            }
-            types::OmicronZoneType::ExternalDns { .. } => ZoneKind::ExternalDns,
-            types::OmicronZoneType::InternalDns { .. } => ZoneKind::InternalDns,
-            types::OmicronZoneType::InternalNtp { .. } => ZoneKind::InternalNtp,
-            types::OmicronZoneType::Nexus { .. } => ZoneKind::Nexus,
-            types::OmicronZoneType::Oximeter { .. } => ZoneKind::Oximeter,
-        }
-    }
-
-    /// Identifies whether this is an NTP zone
-    pub fn is_ntp(&self) -> bool {
-        match self {
-            types::OmicronZoneType::BoundaryNtp { .. }
-            | types::OmicronZoneType::InternalNtp { .. } => true,
-
-            types::OmicronZoneType::Clickhouse { .. }
-            | types::OmicronZoneType::ClickhouseKeeper { .. }
-            | types::OmicronZoneType::CockroachDb { .. }
-            | types::OmicronZoneType::Crucible { .. }
-            | types::OmicronZoneType::CruciblePantry { .. }
-            | types::OmicronZoneType::ExternalDns { .. }
-            | types::OmicronZoneType::InternalDns { .. }
-            | types::OmicronZoneType::Nexus { .. }
-            | types::OmicronZoneType::Oximeter { .. } => false,
-        }
-    }
-
-    /// Identifies whether this is a Nexus zone
-    pub fn is_nexus(&self) -> bool {
-        match self {
-            types::OmicronZoneType::Nexus { .. } => true,
-
-            types::OmicronZoneType::BoundaryNtp { .. }
-            | types::OmicronZoneType::InternalNtp { .. }
-            | types::OmicronZoneType::Clickhouse { .. }
-            | types::OmicronZoneType::ClickhouseKeeper { .. }
-            | types::OmicronZoneType::CockroachDb { .. }
-            | types::OmicronZoneType::Crucible { .. }
-            | types::OmicronZoneType::CruciblePantry { .. }
-            | types::OmicronZoneType::ExternalDns { .. }
-            | types::OmicronZoneType::InternalDns { .. }
-            | types::OmicronZoneType::Oximeter { .. } => false,
-        }
-    }
-
-    /// Identifies whether this a Crucible (not Crucible pantry) zone
-    pub fn is_crucible(&self) -> bool {
-        match self {
-            types::OmicronZoneType::Crucible { .. } => true,
-
-            types::OmicronZoneType::BoundaryNtp { .. }
-            | types::OmicronZoneType::InternalNtp { .. }
-            | types::OmicronZoneType::Clickhouse { .. }
-            | types::OmicronZoneType::ClickhouseKeeper { .. }
-            | types::OmicronZoneType::CockroachDb { .. }
-            | types::OmicronZoneType::CruciblePantry { .. }
-            | types::OmicronZoneType::ExternalDns { .. }
-            | types::OmicronZoneType::InternalDns { .. }
-            | types::OmicronZoneType::Nexus { .. }
-            | types::OmicronZoneType::Oximeter { .. } => false,
-        }
-    }
-
-    /// This zone's external IP
-    pub fn external_ip(&self) -> anyhow::Result<Option<IpAddr>> {
-        match self {
-            types::OmicronZoneType::Nexus { external_ip, .. } => {
-                Ok(Some(*external_ip))
-            }
-
-            types::OmicronZoneType::ExternalDns { dns_address, .. } => {
-                let dns_address =
-                    dns_address.parse::<SocketAddr>().with_context(|| {
-                        format!(
-                            "failed to parse ExternalDns address {dns_address}"
-                        )
-                    })?;
-                Ok(Some(dns_address.ip()))
-            }
-
-            types::OmicronZoneType::BoundaryNtp { snat_cfg, .. } => {
-                Ok(Some(snat_cfg.ip))
-            }
-
-            types::OmicronZoneType::InternalNtp { .. }
-            | types::OmicronZoneType::Clickhouse { .. }
-            | types::OmicronZoneType::ClickhouseKeeper { .. }
-            | types::OmicronZoneType::CockroachDb { .. }
-            | types::OmicronZoneType::Crucible { .. }
-            | types::OmicronZoneType::CruciblePantry { .. }
-            | types::OmicronZoneType::InternalDns { .. }
-            | types::OmicronZoneType::Oximeter { .. } => Ok(None),
-        }
-    }
-
-    /// The service vNIC providing external connectivity to this zone
-    pub fn service_vnic(&self) -> Option<&NetworkInterface> {
-        match self {
-            types::OmicronZoneType::Nexus { nic, .. }
-            | types::OmicronZoneType::ExternalDns { nic, .. }
-            | types::OmicronZoneType::BoundaryNtp { nic, .. } => Some(nic),
-
-            types::OmicronZoneType::InternalNtp { .. }
-            | types::OmicronZoneType::Clickhouse { .. }
-            | types::OmicronZoneType::ClickhouseKeeper { .. }
-            | types::OmicronZoneType::CockroachDb { .. }
-            | types::OmicronZoneType::Crucible { .. }
-            | types::OmicronZoneType::CruciblePantry { .. }
-            | types::OmicronZoneType::InternalDns { .. }
-            | types::OmicronZoneType::Oximeter { .. } => None,
-        }
-    }
-}
 
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {
@@ -332,10 +166,10 @@ impl From<types::SledInstanceState>
 {
     fn from(s: types::SledInstanceState) -> Self {
         Self {
-            instance_state: s.instance_state.into(),
             propolis_id: s.propolis_id,
             vmm_state: s.vmm_state.into(),
-            migration_state: s.migration_state.map(Into::into),
+            migration_in: s.migration_in.map(Into::into),
+            migration_out: s.migration_out.map(Into::into),
         }
     }
 }
@@ -347,21 +181,8 @@ impl From<types::MigrationRuntimeState>
         Self {
             migration_id: s.migration_id,
             state: s.state.into(),
-            role: s.role.into(),
             gen: s.gen,
             time_updated: s.time_updated,
-        }
-    }
-}
-
-impl From<types::MigrationRole>
-    for omicron_common::api::internal::nexus::MigrationRole
-{
-    fn from(r: types::MigrationRole) -> Self {
-        use omicron_common::api::internal::nexus::MigrationRole as Output;
-        match r {
-            types::MigrationRole::Source => Output::Source,
-            types::MigrationRole::Target => Output::Target,
         }
     }
 }
@@ -627,12 +448,29 @@ impl From<types::SledIdentifiers>
 /// are bonus endpoints, not generated in the real client.
 #[async_trait]
 pub trait TestInterfaces {
+    async fn instance_single_step(&self, id: Uuid);
     async fn instance_finish_transition(&self, id: Uuid);
+    async fn instance_simulate_migration_source(
+        &self,
+        id: Uuid,
+        params: SimulateMigrationSource,
+    );
     async fn disk_finish_transition(&self, id: Uuid);
 }
 
 #[async_trait]
 impl TestInterfaces for Client {
+    async fn instance_single_step(&self, id: Uuid) {
+        let baseurl = self.baseurl();
+        let client = self.client();
+        let url = format!("{}/instances/{}/poke-single-step", baseurl, id);
+        client
+            .post(url)
+            .send()
+            .await
+            .expect("instance_single_step() failed unexpectedly");
+    }
+
     async fn instance_finish_transition(&self, id: Uuid) {
         let baseurl = self.baseurl();
         let client = self.client();
@@ -654,4 +492,46 @@ impl TestInterfaces for Client {
             .await
             .expect("disk_finish_transition() failed unexpectedly");
     }
+
+    async fn instance_simulate_migration_source(
+        &self,
+        id: Uuid,
+        params: SimulateMigrationSource,
+    ) {
+        let baseurl = self.baseurl();
+        let client = self.client();
+        let url = format!("{baseurl}/instances/{id}/sim-migration-source");
+        client
+            .post(url)
+            .json(&params)
+            .send()
+            .await
+            .expect("instance_simulate_migration_source() failed unexpectedly");
+    }
+}
+
+/// Parameters to the `/instances/{id}/sim-migration-source` test API.
+///
+/// This message type is not included in the OpenAPI spec, because this API
+/// exists only in test builds.
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SimulateMigrationSource {
+    /// The ID of the migration out of the instance's current active VMM.
+    pub migration_id: Uuid,
+    /// What migration result (success or failure) to simulate.
+    pub result: SimulatedMigrationResult,
+}
+
+/// The result of a simulated migration out from an instance's current active
+/// VMM.
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub enum SimulatedMigrationResult {
+    /// Simulate a successful migration out.
+    Success,
+    /// Simulate a failed migration out.
+    ///
+    /// # Note
+    ///
+    /// This is not currently implemented by the simulated sled-agent.
+    Failure,
 }

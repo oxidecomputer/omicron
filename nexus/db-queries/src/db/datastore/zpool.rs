@@ -15,6 +15,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::PhysicalDisk;
+use crate::db::model::PhysicalDiskState;
 use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
@@ -27,10 +28,13 @@ use diesel::upsert::excluded;
 use nexus_db_model::PhysicalDiskKind;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use uuid::Uuid;
 
 impl DataStore {
@@ -134,5 +138,136 @@ impl DataStore {
         }
 
         Ok(zpools)
+    }
+
+    /// Returns all (non-deleted) zpools on decommissioned (or deleted) disks
+    pub async fn zpool_on_decommissioned_disk_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<Zpool> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::physical_disk::dsl as physical_disk_dsl;
+        use db::schema::zpool::dsl as zpool_dsl;
+
+        paginated(zpool_dsl::zpool, zpool_dsl::id, pagparams)
+            .filter(zpool_dsl::time_deleted.is_null())
+            // Note the LEFT JOIN here -- we want to see zpools where the
+            // physical disk has been deleted too.
+            .left_join(
+                physical_disk_dsl::physical_disk
+                    .on(physical_disk_dsl::id.eq(zpool_dsl::physical_disk_id)),
+            )
+            .filter(
+                // The physical disk has been either explicitly decommissioned,
+                // or has been deleted altogether.
+                physical_disk_dsl::disk_state
+                    .eq(PhysicalDiskState::Decommissioned)
+                    .or(physical_disk_dsl::id.is_null())
+                    .or(
+                        // NOTE: We should probably get rid of this altogether
+                        // (it's kinda implied by "Decommissioned", being a terminal
+                        // state) but this is an extra cautious statement.
+                        physical_disk_dsl::time_deleted.is_not_null(),
+                    ),
+            )
+            .select(Zpool::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Soft-deletes the Zpools and cleans up all associated DB resources.
+    ///
+    /// This should only be called for zpools on physical disks which
+    /// have been decommissioned.
+    ///
+    /// In order:
+    /// - Finds all datasets within the zpool
+    /// - Ensures that no regions nor region snapshots are using these datasets
+    /// - Soft-deletes the datasets within the zpool
+    /// - Soft-deletes the zpool itself
+    pub async fn zpool_delete_self_and_all_datasets(
+        &self,
+        opctx: &OpContext,
+        zpool_id: ZpoolUuid,
+    ) -> DeleteResult {
+        let conn = &*self.pool_connection_authorized(&opctx).await?;
+        Self::zpool_delete_self_and_all_datasets_on_connection(
+            &conn, opctx, zpool_id,
+        )
+        .await
+    }
+
+    /// See: [Self::zpool_delete_self_and_all_datasets]
+    pub(crate) async fn zpool_delete_self_and_all_datasets_on_connection(
+        conn: &async_bb8_diesel::Connection<db::DbConnection>,
+        opctx: &OpContext,
+        zpool_id: ZpoolUuid,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let now = Utc::now();
+        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::zpool::dsl as zpool_dsl;
+
+        let zpool_id = *zpool_id.as_untyped_uuid();
+
+        // Get the IDs of all datasets to-be-deleted
+        let dataset_ids: Vec<Uuid> = dataset_dsl::dataset
+            .filter(dataset_dsl::time_deleted.is_null())
+            .filter(dataset_dsl::pool_id.eq(zpool_id))
+            .select(dataset_dsl::id)
+            .load_async(conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        // Verify that there are no regions nor region snapshots using this dataset
+        use db::schema::region::dsl as region_dsl;
+        let region_count = region_dsl::region
+            .filter(region_dsl::dataset_id.eq_any(dataset_ids.clone()))
+            .count()
+            .first_async::<i64>(conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        if region_count > 0 {
+            return Err(Error::unavail(&format!(
+                "Cannot delete this zpool; it has {region_count} regions"
+            )));
+        }
+
+        use db::schema::region_snapshot::dsl as region_snapshot_dsl;
+        let region_snapshot_count = region_snapshot_dsl::region_snapshot
+            .filter(region_snapshot_dsl::dataset_id.eq_any(dataset_ids))
+            .count()
+            .first_async::<i64>(conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        if region_snapshot_count > 0 {
+            return Err(
+                Error::unavail(&format!("Cannot delete this zpool; it has {region_snapshot_count} region snapshots"))
+            );
+        }
+
+        // Ensure the datasets are deleted
+        diesel::update(dataset_dsl::dataset)
+            .filter(dataset_dsl::time_deleted.is_null())
+            .filter(dataset_dsl::pool_id.eq(zpool_id))
+            .set(dataset_dsl::time_deleted.eq(now))
+            .execute_async(conn)
+            .await
+            .map(|_rows_modified| ())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        // Ensure the zpool is deleted
+        diesel::update(zpool_dsl::zpool)
+            .filter(zpool_dsl::id.eq(zpool_id))
+            .filter(zpool_dsl::time_deleted.is_null())
+            .set(zpool_dsl::time_deleted.eq(now))
+            .execute_async(conn)
+            .await
+            .map(|_rows_modified| ())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
     }
 }

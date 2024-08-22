@@ -66,7 +66,7 @@ pub(crate) async fn ensure_dataset_records_exist(
         let dataset = Dataset::new(
             id.into_untyped_uuid(),
             pool_id.into_untyped_uuid(),
-            address,
+            Some(address),
             kind.into(),
         );
         let maybe_inserted = datastore
@@ -119,6 +119,7 @@ mod tests {
     use super::*;
     use nexus_db_model::Zpool;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneDisposition;
@@ -127,7 +128,6 @@ mod tests {
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use sled_agent_client::types::OmicronZoneDataset;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -153,7 +153,10 @@ mod tests {
 
         // Record the sleds and zpools.
         crate::tests::insert_sled_records(datastore, &blueprint).await;
-        crate::tests::insert_zpool_records(datastore, opctx, &blueprint).await;
+        crate::tests::create_disks_for_zones_using_datasets(
+            datastore, opctx, &blueprint,
+        )
+        .await;
 
         // Prior to ensuring datasets exist, there should be none.
         assert_eq!(

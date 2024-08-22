@@ -14,6 +14,7 @@ use dropshot::EmptyScanParams;
 use dropshot::PaginationParams;
 pub use oximeter::schema::FieldSchema;
 pub use oximeter::schema::FieldSource;
+use oximeter::schema::TimeseriesKey;
 pub use oximeter::schema::TimeseriesName;
 pub use oximeter::schema::TimeseriesSchema;
 pub use oximeter::DatumType;
@@ -48,6 +49,7 @@ pub use client::oxql::OxqlResult;
 pub use client::query_summary::QuerySummary;
 pub use client::Client;
 pub use client::DbWrite;
+pub use client::TestDbWrite;
 pub use model::OXIMETER_VERSION;
 
 #[derive(Debug, Error)]
@@ -265,8 +267,6 @@ pub async fn make_client(
         .context("Failed to initialize timeseries database")?;
     Ok(client)
 }
-
-pub(crate) type TimeseriesKey = u64;
 
 // TODO-cleanup: Add the timeseries version in to the computation of the key.
 // This will require a full drop of the database, since we're changing the

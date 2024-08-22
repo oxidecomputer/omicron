@@ -33,6 +33,7 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
+use omicron_common::api::external::UserId;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_test_utils::certificates::CertificateChain;
 use once_cell::sync::Lazy;
@@ -358,12 +359,6 @@ pub static DEMO_INSTANCE_REBOOT_URL: Lazy<String> = Lazy::new(|| {
         *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
     )
 });
-pub static DEMO_INSTANCE_MIGRATE_URL: Lazy<String> = Lazy::new(|| {
-    format!(
-        "/v1/instances/{}/migrate?{}",
-        *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
-    )
-});
 pub static DEMO_INSTANCE_SERIAL_URL: Lazy<String> = Lazy::new(|| {
     format!(
         "/v1/instances/{}/serial-console?{}",
@@ -578,7 +573,7 @@ pub static DEMO_BGP_CONFIG: Lazy<params::BgpConfigCreate> =
         shaper: None,
     });
 pub const DEMO_BGP_ANNOUNCE_SET_URL: &'static str =
-    "/v1/system/networking/bgp-announce?name_or_id=a-bag-of-addrs";
+    "/v1/system/networking/bgp-announce-set";
 pub static DEMO_BGP_ANNOUNCE: Lazy<params::BgpAnnounceSetCreate> =
     Lazy::new(|| params::BgpAnnounceSetCreate {
         identity: IdentityMetadataCreateParams {
@@ -590,8 +585,14 @@ pub static DEMO_BGP_ANNOUNCE: Lazy<params::BgpAnnounceSetCreate> =
             network: "10.0.0.0/16".parse().unwrap(),
         }],
     });
+pub const DEMO_BGP_ANNOUNCE_SET_DELETE_URL: &'static str =
+    "/v1/system/networking/bgp-announce-set/a-bag-of-addrs";
+pub const DEMO_BGP_ANNOUNCEMENT_URL: &'static str =
+    "/v1/system/networking/bgp-announce-set/a-bag-of-addrs/announcement";
 pub const DEMO_BGP_STATUS_URL: &'static str =
     "/v1/system/networking/bgp-status";
+pub const DEMO_BGP_EXPORTED_URL: &'static str =
+    "/v1/system/networking/bgp-exported";
 pub const DEMO_BGP_ROUTES_IPV4_URL: &'static str =
     "/v1/system/networking/bgp-routes-ipv4?asn=47";
 pub const DEMO_BGP_MESSAGE_HISTORY_URL: &'static str =
@@ -877,7 +878,7 @@ pub static DEMO_TIMESERIES_QUERY: Lazy<params::TimeseriesQuery> =
 // Users
 pub static DEMO_USER_CREATE: Lazy<params::UserCreate> =
     Lazy::new(|| params::UserCreate {
-        external_id: params::UserId::from_str("dummy-user").unwrap(),
+        external_id: UserId::from_str("dummy-user").unwrap(),
         password: params::UserPassword::LoginDisallowed,
     });
 
@@ -1823,18 +1824,6 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             ],
         },
         VerifyEndpoint {
-            url: &DEMO_INSTANCE_MIGRATE_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(serde_json::to_value(
-                    params::InstanceMigrate {
-                        dst_sled_id: uuid::Uuid::new_v4(),
-                    }
-                ).unwrap()),
-            ],
-        },
-        VerifyEndpoint {
             url: &DEMO_INSTANCE_SERIAL_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
@@ -2289,6 +2278,7 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
                 AllowedMethod::GetNonexistent
             ],
         },
+
         VerifyEndpoint {
             url: &DEMO_BGP_CONFIG_CREATE_URL,
             visibility: Visibility::Public,
@@ -2310,13 +2300,39 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
                 AllowedMethod::Put(
                     serde_json::to_value(&*DEMO_BGP_ANNOUNCE).unwrap(),
                 ),
-                AllowedMethod::GetNonexistent,
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_BGP_ANNOUNCE_SET_DELETE_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
                 AllowedMethod::Delete
             ],
         },
 
         VerifyEndpoint {
+            url: &DEMO_BGP_ANNOUNCEMENT_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent,
+            ],
+        },
+
+        VerifyEndpoint {
             url: &DEMO_BGP_STATUS_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_BGP_EXPORTED_URL,
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![

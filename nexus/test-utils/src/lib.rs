@@ -4,6 +4,7 @@
 
 //! Integration testing facilities for Nexus
 
+#[cfg(feature = "omicron-dev")]
 use anyhow::Context;
 use anyhow::Result;
 use camino::Utf8Path;
@@ -17,12 +18,20 @@ use dropshot::HandlerTaskMode;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use gateway_test_utils::setup::GatewayTestContext;
+use hickory_resolver::config::NameServerConfig;
+use hickory_resolver::config::Protocol;
+use hickory_resolver::config::ResolverConfig;
+use hickory_resolver::config::ResolverOpts;
+use hickory_resolver::TokioAsyncResolver;
 use nexus_config::Database;
 use nexus_config::DpdConfig;
 use nexus_config::InternalDns;
 use nexus_config::MgdConfig;
 use nexus_config::NexusConfig;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
+use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
@@ -33,23 +42,20 @@ use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
-use nexus_types::external_api::params::UserId;
 use nexus_types::external_api::views::SledState;
-use nexus_types::internal_api::params::Certificate;
 use nexus_types::internal_api::params::DatasetCreateRequest;
-use nexus_types::internal_api::params::DatasetKind;
 use nexus_types::internal_api::params::DatasetPutRequest;
-use nexus_types::internal_api::params::RecoverySiloConfig;
-use nexus_types::inventory::OmicronZoneDataset;
-use nexus_types::inventory::OmicronZonesConfig;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
+use omicron_common::api::external::UserId;
 use omicron_common::api::external::Vni;
 use omicron_common::api::external::{IdentityMetadata, Name};
+use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
+use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::SwitchLocation;
@@ -73,11 +79,6 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
-use trust_dns_resolver::config::NameServerConfig;
-use trust_dns_resolver::config::Protocol;
-use trust_dns_resolver::config::ResolverConfig;
-use trust_dns_resolver::config::ResolverOpts;
-use trust_dns_resolver::TokioAsyncResolver;
 use uuid::Uuid;
 
 pub use sim::TEST_HARDWARE_THREADS;
@@ -1427,6 +1428,7 @@ pub async fn start_oximeter(
         address: Some(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db_port)),
         batch_size: 10,
         batch_interval: 1,
+        replicated: false,
     };
     let config = oximeter_collector::Config {
         nexus_address: Some(nexus_address),
@@ -1575,6 +1577,7 @@ pub async fn start_dns_server(
             bind_address: "[::1]:0".parse().unwrap(),
             request_body_max_bytes: 8 * 1024,
             default_handler_task_mode: HandlerTaskMode::Detached,
+            log_headers: vec![],
         },
     )
     .await
@@ -1585,12 +1588,12 @@ pub async fn start_dns_server(
         socket_addr: dns_server.local_address(),
         protocol: Protocol::Udp,
         tls_dns_name: None,
-        trust_nx_responses: false,
+        trust_negative_responses: false,
         bind_addr: None,
     });
-    let resolver =
-        TokioAsyncResolver::tokio(resolver_config, ResolverOpts::default())
-            .context("creating DNS resolver")?;
+    let mut resolver_opts = ResolverOpts::default();
+    resolver_opts.edns0 = true;
+    let resolver = TokioAsyncResolver::tokio(resolver_config, resolver_opts);
 
     Ok((dns_server, http_server, resolver))
 }

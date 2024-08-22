@@ -29,6 +29,8 @@ progenitor::generate_api!(
         // as "blueprint" this way, but we have really useful functionality
         // (e.g., diff'ing) that's implemented on our local type.
         Blueprint = nexus_types::deployment::Blueprint,
+        Certificate = omicron_common::api::internal::nexus::Certificate,
+        DatasetKind = omicron_common::api::internal::shared::DatasetKind,
         Generation = omicron_common::api::external::Generation,
         ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         MacAddr = omicron_common::api::external::MacAddr,
@@ -36,7 +38,11 @@ progenitor::generate_api!(
         NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
         NetworkInterfaceKind = omicron_common::api::internal::shared::NetworkInterfaceKind,
         NewPasswordHash = omicron_passwords::NewPasswordHash,
+        OmicronPhysicalDiskConfig = nexus_types::disk::OmicronPhysicalDiskConfig,
+        OmicronPhysicalDisksConfig = nexus_types::disk::OmicronPhysicalDisksConfig,
+        RecoverySiloConfig = nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
         TypedUuidForCollectionKind = omicron_uuid_kinds::CollectionUuid,
+        TypedUuidForDemoSagaKind = omicron_uuid_kinds::DemoSagaUuid,
         TypedUuidForDownstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::DownstairsKind>,
         TypedUuidForPropolisKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::PropolisKind>,
         TypedUuidForSledKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::SledKind>,
@@ -117,22 +123,6 @@ impl From<types::VmmState> for omicron_common::api::internal::nexus::VmmState {
     }
 }
 
-impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
-    for types::InstanceRuntimeState
-{
-    fn from(
-        s: omicron_common::api::internal::nexus::InstanceRuntimeState,
-    ) -> Self {
-        Self {
-            dst_propolis_id: s.dst_propolis_id,
-            gen: s.gen,
-            migration_id: s.migration_id,
-            propolis_id: s.propolis_id,
-            time_updated: s.time_updated,
-        }
-    }
-}
-
 impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
     for types::VmmRuntimeState
 {
@@ -148,10 +138,10 @@ impl From<omicron_common::api::internal::nexus::SledInstanceState>
         s: omicron_common::api::internal::nexus::SledInstanceState,
     ) -> Self {
         Self {
-            instance_state: s.instance_state.into(),
             propolis_id: s.propolis_id,
             vmm_state: s.vmm_state.into(),
-            migration_state: s.migration_state.map(Into::into),
+            migration_in: s.migration_in.map(Into::into),
+            migration_out: s.migration_out.map(Into::into),
         }
     }
 }
@@ -164,22 +154,9 @@ impl From<omicron_common::api::internal::nexus::MigrationRuntimeState>
     ) -> Self {
         Self {
             migration_id: s.migration_id,
-            role: s.role.into(),
             state: s.state.into(),
             gen: s.gen,
             time_updated: s.time_updated,
-        }
-    }
-}
-
-impl From<omicron_common::api::internal::nexus::MigrationRole>
-    for types::MigrationRole
-{
-    fn from(s: omicron_common::api::internal::nexus::MigrationRole) -> Self {
-        use omicron_common::api::internal::nexus::MigrationRole as Input;
-        match s {
-            Input::Source => Self::Source,
-            Input::Target => Self::Target,
         }
     }
 }

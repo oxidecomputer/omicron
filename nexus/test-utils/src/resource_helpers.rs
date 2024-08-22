@@ -15,7 +15,6 @@ use http::StatusCode;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
 use nexus_types::external_api::params;
-use nexus_types::external_api::params::UserId;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::Baseboard;
 use nexus_types::external_api::shared::IdentityType;
@@ -40,6 +39,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRoute;
+use omicron_common::api::external::UserId;
 use omicron_common::disk::DiskIdentity;
 use omicron_sled_agent::sim::SledAgent;
 use omicron_test_utils::dev::poll::wait_for_condition;
@@ -427,6 +427,28 @@ pub async fn create_disk(
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
             size: ByteCount::from_gibibytes_u32(1),
+        },
+    )
+    .await
+}
+
+pub async fn create_snapshot(
+    client: &ClientTestContext,
+    project_name: &str,
+    disk_name: &str,
+    snapshot_name: &str,
+) -> views::Snapshot {
+    let snapshots_url = format!("/v1/snapshots?project={}", project_name);
+
+    object_create(
+        client,
+        &snapshots_url,
+        &params::SnapshotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: snapshot_name.parse().unwrap(),
+                description: format!("snapshot {:?}", snapshot_name),
+            },
+            disk: disk_name.to_string().try_into().unwrap(),
         },
     )
     .await

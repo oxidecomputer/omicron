@@ -7,11 +7,11 @@
 use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
-use crate::bootstrap::params::StartSledAgentRequest;
 use crate::long_running_tasks::LongRunningTaskHandles;
-use crate::nexus::NexusClientWithResolver;
+use crate::nexus::make_nexus_client;
 use crate::services::ServiceManager;
 use internal_dns::resolver::Resolver;
+use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -52,8 +52,7 @@ impl Server {
             .map_err(|e| e.to_string())?,
         );
 
-        let nexus_client = NexusClientWithResolver::new(&log, resolver)
-            .map_err(|e| e.to_string())?;
+        let nexus_client = make_nexus_client(&log, resolver);
 
         let sled_agent = SledAgent::new(
             &config,
@@ -68,7 +67,7 @@ impl Server {
 
         let dropshot_config = dropshot::ConfigDropshot {
             bind_address: SocketAddr::V6(sled_address),
-            ..config.dropshot
+            ..config.dropshot.clone()
         };
         let dropshot_log = log.new(o!("component" => "dropshot (SledAgent)"));
         let http_server = dropshot::HttpServerStarter::new(
@@ -99,15 +98,4 @@ impl Server {
     pub async fn close(self) -> Result<(), String> {
         self.http_server.close().await
     }
-}
-
-/// Runs the OpenAPI generator, emitting the spec to stdout.
-pub fn run_openapi() -> Result<(), String> {
-    http_api()
-        .openapi("Oxide Sled Agent API", "0.0.1")
-        .description("API for interacting with individual sleds")
-        .contact_url("https://oxide.computer")
-        .contact_email("api@oxide.computer")
-        .write(&mut std::io::stdout())
-        .map_err(|e| e.to_string())
 }

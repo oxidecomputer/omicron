@@ -6,14 +6,10 @@
 
 use super::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use super::http_entrypoints;
-use super::params::RackInitializeRequest;
-use super::params::StartSledAgentRequest;
-use super::rack_ops::RackInitId;
 use super::views::SledAgentResponse;
 use super::BootstrapError;
 use super::RssAccessError;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
-use crate::bootstrap::http_entrypoints::api as http_api;
 use crate::bootstrap::http_entrypoints::BootstrapServerContext;
 use crate::bootstrap::maghemite;
 use crate::bootstrap::pre_server::BootstrapAgentStartup;
@@ -42,6 +38,9 @@ use omicron_common::ledger;
 use omicron_common::ledger::Ledger;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_ddm_admin_client::DdmError;
+use omicron_uuid_kinds::RackInitUuid;
+use sled_agent_types::rack_init::RackInitializeRequest;
+use sled_agent_types::sled::StartSledAgentRequest;
 use sled_hardware::underlay;
 use sled_storage::dataset::CONFIG_DATASET;
 use sled_storage::manager::StorageHandle;
@@ -290,7 +289,7 @@ impl Server {
     pub fn start_rack_initialize(
         &self,
         request: RackInitializeRequest,
-    ) -> Result<RackInitId, RssAccessError> {
+    ) -> Result<RackInitUuid, RssAccessError> {
         self.bootstrap_http_server.app_private().start_rack_initialize(request)
     }
 
@@ -499,17 +498,6 @@ async fn sled_config_paths(
         return Err(MissingM2Paths(CONFIG_DATASET));
     }
     Ok(paths)
-}
-
-/// Runs the OpenAPI generator, emitting the spec to stdout.
-pub fn run_openapi() -> Result<(), String> {
-    http_api()
-        .openapi("Oxide Bootstrap Agent API", "0.0.1")
-        .description("API for interacting with individual sleds")
-        .contact_url("https://oxide.computer")
-        .contact_email("api@oxide.computer")
-        .write(&mut std::io::stdout())
-        .map_err(|e| e.to_string())
 }
 
 struct Inner {
@@ -726,11 +714,10 @@ impl Inner {
 
 #[cfg(test)]
 mod tests {
-    use crate::bootstrap::params::StartSledAgentRequestBody;
-
     use super::*;
     use omicron_common::address::Ipv6Subnet;
     use omicron_test_utils::dev::test_setup_log;
+    use sled_agent_types::sled::StartSledAgentRequestBody;
     use std::net::Ipv6Addr;
     use uuid::Uuid;
 

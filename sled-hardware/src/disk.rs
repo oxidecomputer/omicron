@@ -5,10 +5,9 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use illumos_utils::fstyp::Fstyp;
 use illumos_utils::zpool::Zpool;
-use omicron_common::disk::DiskIdentity;
-use omicron_common::zpool_name::{ZpoolKind, ZpoolName};
+use omicron_common::disk::{DiskIdentity, DiskVariant};
+use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::ZpoolUuid;
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::Logger;
 use slog::{info, warn};
@@ -421,33 +420,6 @@ pub fn ensure_zpool_failmode_is_continue(
         PooledDiskError::ZpoolImport(e)
     })?;
     Ok(())
-}
-
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    Ord,
-    PartialOrd,
-)]
-pub enum DiskVariant {
-    U2,
-    M2,
-}
-
-impl From<ZpoolKind> for DiskVariant {
-    fn from(kind: ZpoolKind) -> DiskVariant {
-        match kind {
-            ZpoolKind::External => DiskVariant::U2,
-            ZpoolKind::Internal => DiskVariant::M2,
-        }
-    }
 }
 
 #[cfg(test)]

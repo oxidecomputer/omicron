@@ -1,0 +1,21 @@
+[package]
+name = "gateway-types"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+gateway-messages.workspace = true
+# Avoid depending on gateway-sp-comms! It is a pretty heavy dependency and
+# would only be used for From impls anyway. We put those impls in
+# omicron-gateway instead, and don't use `From`.
+hex.workspace = true
+ipcc.workspace = true
+omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
+schemars.workspace = true
+serde.workspace = true
+uuid.workspace = true

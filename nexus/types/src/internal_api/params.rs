@@ -6,14 +6,17 @@
 
 use crate::deployment::Blueprint;
 use crate::external_api::params::PhysicalDiskKind;
-use crate::external_api::params::UserId;
 use crate::external_api::shared::Baseboard;
 use crate::external_api::shared::IpRange;
+use nexus_sled_agent_shared::inventory::SledRole;
+use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
+use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::api::internal::shared::AllowedSourceIps;
+use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SourceNatConfig;
@@ -24,20 +27,6 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
-
-/// Describes the role of the sled within the rack.
-///
-/// Note that this may change if the sled is physically moved
-/// within the rack.
-#[derive(Serialize, Deserialize, JsonSchema, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum SledRole {
-    /// The sled is a general compute sled.
-    Gimlet,
-    /// The sled is attached to the network switch, and has additional
-    /// responsibilities.
-    Scrimlet,
-}
 
 /// Sent by a sled agent to Nexus to inform about resources
 #[derive(Serialize, Deserialize, Debug, JsonSchema)]
@@ -100,35 +89,6 @@ pub struct ZpoolPutRequest {
     pub id: Uuid,
     pub sled_id: Uuid,
     pub physical_disk_id: Uuid,
-}
-
-/// Describes the purpose of the dataset.
-#[derive(
-    Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum DatasetKind {
-    Crucible,
-    Cockroach,
-    Clickhouse,
-    ClickhouseKeeper,
-    ExternalDns,
-    InternalDns,
-}
-
-impl fmt::Display for DatasetKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use DatasetKind::*;
-        let s = match self {
-            Crucible => "crucible",
-            Cockroach => "cockroach",
-            Clickhouse => "clickhouse",
-            ClickhouseKeeper => "clickhouse_keeper",
-            ExternalDns => "external_dns",
-            InternalDns => "internal_dns",
-        };
-        write!(f, "{}", s)
-    }
 }
 
 /// Describes a dataset within a pool.
@@ -201,21 +161,6 @@ pub struct DatasetCreateRequest {
     pub request: DatasetPutRequest,
 }
 
-#[derive(Clone, Serialize, Deserialize, JsonSchema)]
-pub struct Certificate {
-    pub cert: String,
-    pub key: String,
-}
-
-impl std::fmt::Debug for Certificate {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Certificate")
-            .field("cert", &self.cert)
-            .field("key", &"<redacted>")
-            .finish()
-    }
-}
-
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct RackInitializationRequest {
     /// Blueprint describing services initialized by RSS.
@@ -253,13 +198,6 @@ pub type DnsConfigZone = dns_service_client::types::DnsConfigZone;
 pub type DnsRecord = dns_service_client::types::DnsRecord;
 pub type Srv = dns_service_client::types::Srv;
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct RecoverySiloConfig {
-    pub silo_name: Name,
-    pub user_name: UserId,
-    pub user_password_hash: omicron_passwords::NewPasswordHash,
-}
-
 /// Message used to notify Nexus that this oximeter instance is up and running.
 #[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
 pub struct OximeterInfo {
@@ -268,4 +206,11 @@ pub struct OximeterInfo {
 
     /// The address on which this oximeter instance listens for requests
     pub address: SocketAddr,
+}
+
+/// Parameters used when migrating an instance.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceMigrateRequest {
+    /// The ID of the sled to which to migrate the target instance.
+    pub dst_sled_id: Uuid,
 }

@@ -19,6 +19,7 @@ use crate::db::model::Region;
 use crate::db::model::SqlU16;
 use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
+use crate::db::queries::region_allocation::RegionParameters;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use crate::transaction_retry::OptionalError;
@@ -259,9 +260,12 @@ impl DataStore {
         let query = crate::db::queries::region_allocation::allocation_query(
             volume_id,
             maybe_snapshot_id,
-            block_size,
-            blocks_per_extent,
-            extent_count,
+            RegionParameters {
+                block_size,
+                blocks_per_extent,
+                extent_count,
+                read_only: false,
+            },
             allocation_strategy,
             num_regions_required,
         );
@@ -496,7 +500,13 @@ impl DataStore {
 
         let dataset = self.dataset_get(region.dataset_id()).await?;
 
-        Ok(Some(SocketAddrV6::new(*dataset.address().ip(), port, 0, 0)))
+        let Some(address) = dataset.address() else {
+            return Err(Error::internal_error(
+                "Dataset for Crucible region does know IP address",
+            ));
+        };
+
+        Ok(Some(SocketAddrV6::new(*address.ip(), port, 0, 0)))
     }
 
     pub async fn regions_missing_ports(

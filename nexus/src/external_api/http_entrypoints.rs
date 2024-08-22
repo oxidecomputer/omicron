@@ -41,6 +41,7 @@ use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
 use nexus_types::external_api::shared::{BfdStatus, ProbeInfo};
+use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
@@ -55,9 +56,11 @@ use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotBlock;
 use omicron_common::api::external::AddressLotCreateResponse;
+use omicron_common::api::external::AggregateBgpMessageHistory;
 use omicron_common::api::external::BgpAnnounceSet;
 use omicron_common::api::external::BgpAnnouncement;
 use omicron_common::api::external::BgpConfig;
+use omicron_common::api::external::BgpExported;
 use omicron_common::api::external::BgpImportedRouteIpv4;
 use omicron_common::api::external::BgpPeerStatus;
 use omicron_common::api::external::DataPageParams;
@@ -78,9 +81,6 @@ use omicron_common::api::external::TufRepoGetResponse;
 use omicron_common::api::external::TufRepoInsertResponse;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
-use omicron_common::api::external::{
-    http_pagination::data_page_params_for, AggregateBgpMessageHistory,
-};
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use parse_display::Display;
@@ -167,7 +167,6 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(instance_view)?;
         api.register(instance_create)?;
         api.register(instance_delete)?;
-        api.register(instance_migrate)?;
         api.register(instance_reboot)?;
         api.register(instance_start)?;
         api.register(instance_stop)?;
@@ -278,12 +277,15 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_bgp_config_create)?;
         api.register(networking_bgp_config_list)?;
         api.register(networking_bgp_status)?;
+        api.register(networking_bgp_exported)?;
         api.register(networking_bgp_imported_routes_ipv4)?;
         api.register(networking_bgp_config_delete)?;
         api.register(networking_bgp_announce_set_update)?;
         api.register(networking_bgp_announce_set_list)?;
         api.register(networking_bgp_announce_set_delete)?;
         api.register(networking_bgp_message_history)?;
+
+        api.register(networking_bgp_announcement_list)?;
 
         api.register(networking_bfd_enable)?;
         api.register(networking_bfd_disable)?;
@@ -1613,11 +1615,6 @@ async fn ip_pool_list(
         .await
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct IpPoolPathParam {
-    pub pool_name: Name,
-}
-
 /// Create IP pool
 #[endpoint {
     method = POST,
@@ -2871,48 +2868,6 @@ async fn instance_delete(
         .await
 }
 
-// TODO should this be in the public API?
-/// Migrate an instance
-#[endpoint {
-    method = POST,
-    path = "/v1/instances/{instance}/migrate",
-    tags = ["instances"],
-}]
-async fn instance_migrate(
-    rqctx: RequestContext<ApiContext>,
-    query_params: Query<params::OptionalProjectSelector>,
-    path_params: Path<params::InstancePath>,
-    migrate_params: TypedBody<params::InstanceMigrate>,
-) -> Result<HttpResponseOk<Instance>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.context.nexus;
-    let path = path_params.into_inner();
-    let query = query_params.into_inner();
-    let migrate_instance_params = migrate_params.into_inner();
-    let instance_selector = params::InstanceSelector {
-        project: query.project,
-        instance: path.instance,
-    };
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let instance_lookup =
-            nexus.instance_lookup(&opctx, instance_selector)?;
-        let instance = nexus
-            .project_instance_migrate(
-                &opctx,
-                &instance_lookup,
-                migrate_instance_params,
-            )
-            .await?;
-        Ok(HttpResponseOk(instance.into()))
-    };
-    apictx
-        .context
-        .external_latencies
-        .instrument_dropshot_handler(&rqctx, handler)
-        .await
-}
-
 /// Reboot an instance
 #[endpoint {
     method = POST,
@@ -3913,7 +3868,7 @@ async fn networking_bgp_config_create(
         let nexus = &apictx.context.nexus;
         let config = config.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let result = nexus.bgp_config_set(&opctx, &config).await?;
+        let result = nexus.bgp_config_create(&opctx, &config).await?;
         Ok(HttpResponseCreated::<BgpConfig>(result.into()))
     };
     apictx
@@ -3976,6 +3931,30 @@ async fn networking_bgp_status(
     let handler = async {
         let nexus = &apictx.context.nexus;
         let result = nexus.bgp_peer_status(&opctx).await?;
+        Ok(HttpResponseOk(result))
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+//TODO pagination? the normal by-name/by-id stuff does not work here
+/// Get BGP exported routes
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/bgp-exported",
+    tags = ["system/networking"],
+}]
+async fn networking_bgp_exported(
+    rqctx: RequestContext<ApiContext>,
+) -> Result<HttpResponseOk<BgpExported>, HttpError> {
+    let apictx = rqctx.context();
+    let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let result = nexus.bgp_exported(&opctx).await?;
         Ok(HttpResponseOk(result))
     };
     apictx
@@ -4067,7 +4046,7 @@ async fn networking_bgp_config_delete(
 /// set with the one specified.
 #[endpoint {
     method = PUT,
-    path = "/v1/system/networking/bgp-announce",
+    path = "/v1/system/networking/bgp-announce-set",
     tags = ["system/networking"],
 }]
 async fn networking_bgp_announce_set_update(
@@ -4089,24 +4068,28 @@ async fn networking_bgp_announce_set_update(
         .await
 }
 
-//TODO pagination? the normal by-name/by-id stuff does not work here
-/// Get originated routes for a BGP configuration
+/// List BGP announce sets
 #[endpoint {
     method = GET,
-    path = "/v1/system/networking/bgp-announce",
+    path = "/v1/system/networking/bgp-announce-set",
     tags = ["system/networking"],
 }]
 async fn networking_bgp_announce_set_list(
     rqctx: RequestContext<ApiContext>,
-    query_params: Query<params::BgpAnnounceSetSelector>,
-) -> Result<HttpResponseOk<Vec<BgpAnnouncement>>, HttpError> {
+    query_params: Query<
+        PaginatedByNameOrId<params::OptionalBgpAnnounceSetSelector>,
+    >,
+) -> Result<HttpResponseOk<Vec<BgpAnnounceSet>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let sel = query_params.into_inner();
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let result = nexus
-            .bgp_announce_list(&opctx, &sel)
+            .bgp_announce_set_list(&opctx, &paginated_by)
             .await?
             .into_iter()
             .map(|p| p.into())
@@ -4123,20 +4106,54 @@ async fn networking_bgp_announce_set_list(
 /// Delete BGP announce set
 #[endpoint {
     method = DELETE,
-    path = "/v1/system/networking/bgp-announce",
+    path = "/v1/system/networking/bgp-announce-set/{name_or_id}",
     tags = ["system/networking"],
 }]
 async fn networking_bgp_announce_set_delete(
     rqctx: RequestContext<ApiContext>,
-    selector: Query<params::BgpAnnounceSetSelector>,
+    path_params: Path<params::BgpAnnounceSetSelector>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let sel = selector.into_inner();
+        let sel = path_params.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         nexus.bgp_delete_announce_set(&opctx, &sel).await?;
         Ok(HttpResponseUpdatedNoContent {})
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+// TODO: is pagination necessary here? How large do we expect the list of
+// announcements to become in real usage?
+/// Get originated routes for a specified BGP announce set
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/bgp-announce-set/{name_or_id}/announcement",
+    tags = ["system/networking"],
+}]
+async fn networking_bgp_announcement_list(
+    rqctx: RequestContext<ApiContext>,
+    path_params: Path<params::BgpAnnounceSetSelector>,
+) -> Result<HttpResponseOk<Vec<BgpAnnouncement>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let sel = path_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        let result = nexus
+            .bgp_announcement_list(&opctx, &sel)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
+
+        Ok(HttpResponseOk(result))
     };
     apictx
         .context
@@ -5378,7 +5395,6 @@ async fn vpc_subnet_list_network_interfaces(
 
 // VPC Firewalls
 
-// TODO Is the number of firewall rules bounded?
 /// List firewall rules
 #[endpoint {
     method = GET,
@@ -5410,7 +5426,23 @@ async fn vpc_firewall_rules_view(
         .await
 }
 
+// Note: the limits in the below comment come from the firewall rules model
+// file, nexus/db-model/src/vpc_firewall_rule.rs.
+
 /// Replace firewall rules
+///
+/// The maximum number of rules per VPC is 1024.
+///
+/// Targets are used to specify the set of instances to which a firewall rule
+/// applies. You can target instances directly by name, or specify a VPC, VPC
+/// subnet, IP, or IP subnet, which will apply the rule to traffic going to
+/// all matching instances. Targets are additive: the rule applies to instances
+/// matching ANY target. The maximum number of targets is 256.
+///
+/// Filters reduce the scope of a firewall rule. Without filters, the rule
+/// applies to all packets to the targets (or from the targets, if it's an
+/// outbound rule). With multiple filters, the rule applies only to packets
+/// matching ALL filters. The maximum number of each type of filter is 256.
 #[endpoint {
     method = PUT,
     path = "/v1/vpc-firewall-rules",
@@ -6261,19 +6293,6 @@ async fn sled_physical_disk_list(
 
 // Metrics
 
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct SystemMetricParams {
-    /// A silo ID. If unspecified, get aggregate metrics across all silos.
-    pub silo_id: Option<Uuid>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct SiloMetricParams {
-    /// A project ID. If unspecified, get aggregate metrics across all projects
-    /// in current silo.
-    pub project_id: Option<Uuid>,
-}
-
 #[derive(Display, Deserialize, JsonSchema)]
 #[display(style = "snake_case")]
 #[serde(rename_all = "snake_case")]
@@ -6432,7 +6451,7 @@ async fn timeseries_schema_list(
 async fn timeseries_query(
     rqctx: RequestContext<ApiContext>,
     body: TypedBody<params::TimeseriesQuery>,
-) -> Result<HttpResponseOk<Vec<oximeter_db::oxql::Table>>, HttpError> {
+) -> Result<HttpResponseOk<views::OxqlQueryResult>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
@@ -6441,7 +6460,7 @@ async fn timeseries_query(
         nexus
             .timeseries_query(&opctx, &query)
             .await
-            .map(HttpResponseOk)
+            .map(|tables| HttpResponseOk(views::OxqlQueryResult { tables }))
             .map_err(HttpError::from)
     };
     apictx

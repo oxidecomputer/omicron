@@ -24,14 +24,15 @@ use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
+use uuid::Uuid;
 
 mod cockroachdb;
 mod datasets;
 mod dns;
-mod external_networking;
 mod omicron_physical_disks;
 mod omicron_zones;
 mod overridables;
+mod sagas;
 mod sled_state;
 
 pub use dns::blueprint_external_dns_config;
@@ -69,43 +70,46 @@ impl From<nexus_db_model::Sled> for Sled {
     }
 }
 
+/// The result of calling [`realize_blueprint`] or
+/// [`realize_blueprint_with_overrides`].
+#[derive(Debug)]
+#[must_use = "the output of realize_blueprint should probably be used"]
+pub struct RealizeBlueprintOutput {
+    /// Whether any sagas need to be reassigned to a new Nexus.
+    pub needs_saga_recovery: bool,
+}
+
 /// Make one attempt to realize the given blueprint, meaning to take actions to
 /// alter the real system to match the blueprint
 ///
 /// The assumption is that callers are running this periodically or in a loop to
 /// deal with transient errors or changes in the underlying system state.
-pub async fn realize_blueprint<S>(
+pub async fn realize_blueprint(
     opctx: &OpContext,
     datastore: &DataStore,
     resolver: &Resolver,
     blueprint: &Blueprint,
-    nexus_label: S,
-) -> Result<(), Vec<anyhow::Error>>
-where
-    String: From<S>,
-{
+    nexus_id: Uuid,
+) -> Result<RealizeBlueprintOutput, Vec<anyhow::Error>> {
     realize_blueprint_with_overrides(
         opctx,
         datastore,
         resolver,
         blueprint,
-        nexus_label,
+        nexus_id,
         &Default::default(),
     )
     .await
 }
 
-pub async fn realize_blueprint_with_overrides<S>(
+pub async fn realize_blueprint_with_overrides(
     opctx: &OpContext,
     datastore: &DataStore,
     resolver: &Resolver,
     blueprint: &Blueprint,
-    nexus_label: S,
+    nexus_id: Uuid,
     overrides: &Overridables,
-) -> Result<(), Vec<anyhow::Error>>
-where
-    String: From<S>,
-{
+) -> Result<RealizeBlueprintOutput, Vec<anyhow::Error>> {
     let opctx = opctx.child(BTreeMap::from([(
         "comment".to_string(),
         blueprint.comment.clone(),
@@ -117,31 +121,14 @@ where
         "blueprint_id" => %blueprint.id
     );
 
-    // Deallocate external networking resources for non-externally-reachable
-    // zones first. This will allow external networking resource allocation to
-    // succeed if we are swapping an external IP between two zones (e.g., moving
-    // a specific external IP from an old external DNS zone to a new one).
-    external_networking::ensure_zone_external_networking_deallocated(
-        &opctx,
-        datastore,
-        blueprint
-            .all_omicron_zones_not_in(
-                BlueprintZoneFilter::ShouldBeExternallyReachable,
-            )
-            .map(|(_sled_id, zone)| zone),
-    )
-    .await
-    .map_err(|err| vec![err])?;
-
-    external_networking::ensure_zone_external_networking_allocated(
-        &opctx,
-        datastore,
-        blueprint
-            .all_omicron_zones(BlueprintZoneFilter::ShouldBeExternallyReachable)
-            .map(|(_sled_id, zone)| zone),
-    )
-    .await
-    .map_err(|err| vec![err])?;
+    datastore
+        .blueprint_ensure_external_networking_resources(&opctx, blueprint)
+        .await
+        .map_err(|err| {
+            vec![anyhow!(err).context(
+                "failed to ensure external networking resources in database",
+            )]
+        })?;
 
     let sleds_by_id: BTreeMap<SledUuid, _> = datastore
         .sled_list_all_batched(&opctx, SledFilter::InService)
@@ -154,7 +141,7 @@ where
         })
         .collect();
 
-    omicron_physical_disks::deploy_disks(
+    let deploy_disks_done = omicron_physical_disks::deploy_disks(
         &opctx,
         &sleds_by_id,
         &blueprint.blueprint_disks,
@@ -200,7 +187,7 @@ where
     dns::deploy_dns(
         &opctx,
         datastore,
-        String::from(nexus_label),
+        nexus_id.to_string(),
         blueprint,
         &sleds_by_id,
         overrides,
@@ -227,20 +214,58 @@ where
     )
     .await?;
 
+    omicron_physical_disks::decommission_expunged_disks(
+        &opctx,
+        datastore,
+        deploy_disks_done,
+    )
+    .await?;
+
+    // From this point on, we'll assume that any errors that we encounter do
+    // *not* require stopping execution.  We'll just accumulate them and return
+    // them all at the end.
+    //
+    // TODO We should probably do this with more of the errors above, too.
+    let mut errors = Vec::new();
+
+    // For any expunged Nexus zones, re-assign in-progress sagas to some other
+    // Nexus.  If this fails for some reason, it doesn't affect anything else.
+    let sec_id = nexus_db_model::SecId(nexus_id);
+    let reassigned = sagas::reassign_sagas_from_expunged(
+        &opctx, datastore, blueprint, sec_id,
+    )
+    .await
+    .context("failed to re-assign sagas");
+    let needs_saga_recovery = match reassigned {
+        Ok(needs_recovery) => needs_recovery,
+        Err(error) => {
+            errors.push(error);
+            false
+        }
+    };
+
     // This is likely to error if any cluster upgrades are in progress (which
     // can take some time), so it should remain at the end so that other parts
     // of the blueprint can progress normally.
-    cockroachdb::ensure_settings(&opctx, datastore, blueprint)
-        .await
-        .map_err(|err| vec![err])?;
+    if let Err(error) =
+        cockroachdb::ensure_settings(&opctx, datastore, blueprint).await
+    {
+        errors.push(error);
+    }
 
-    Ok(())
+    if errors.is_empty() {
+        Ok(RealizeBlueprintOutput { needs_saga_recovery })
+    } else {
+        Err(errors)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use nexus_db_model::Generation;
+    use nexus_db_model::PhysicalDisk;
+    use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
@@ -290,7 +315,7 @@ mod tests {
     // tests expect to be able to realize the the blueprint created from an
     // initial collection, and ensuring the zones' datasets exist requires first
     // inserting the sled and zpool records.
-    pub(crate) async fn insert_zpool_records(
+    pub(crate) async fn create_disks_for_zones_using_datasets(
         datastore: &DataStore,
         opctx: &OpContext,
         blueprint: &Blueprint,
@@ -304,12 +329,27 @@ mod tests {
                 continue;
             };
 
+            let physical_disk_id = Uuid::new_v4();
             let pool_id = dataset.dataset.pool_name.id();
+
+            let disk = PhysicalDisk::new(
+                physical_disk_id,
+                String::from("Oxide"),
+                format!("PhysDisk of {}", pool_id),
+                String::from("FakeDisk"),
+                PhysicalDiskKind::U2,
+                sled_id.into_untyped_uuid(),
+            );
+            datastore
+                .physical_disk_insert(&opctx, disk.clone())
+                .await
+                .expect("failed to upsert physical disk");
+
             if pool_inserted.insert(pool_id) {
                 let zpool = Zpool::new(
                     pool_id.into_untyped_uuid(),
                     sled_id.into_untyped_uuid(),
-                    Uuid::new_v4(), // physical_disk_id
+                    physical_disk_id,
                 );
                 datastore
                     .zpool_insert(opctx, zpool)

@@ -2,24 +2,24 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use hickory_resolver::config::{
+    LookupIpStrategy, NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
+};
+use hickory_resolver::lookup::SrvLookup;
+use hickory_resolver::TokioAsyncResolver;
 use hyper::client::connect::dns::Name;
 use omicron_common::address::{
     Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX, DNS_PORT,
 };
 use slog::{debug, error, info, trace};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
-use trust_dns_resolver::config::{
-    LookupIpStrategy, NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
-};
-use trust_dns_resolver::lookup::SrvLookup;
-use trust_dns_resolver::TokioAsyncResolver;
 
 pub type DnsError = dns_service_client::Error<dns_service_client::types::Error>;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ResolveError {
     #[error(transparent)]
-    Resolve(#[from] trust_dns_resolver::error::ResolveError),
+    Resolve(#[from] hickory_resolver::error::ResolveError),
 
     #[error("Record not found for SRV key: {}", .0.dns_name())]
     NotFound(crate::ServiceName),
@@ -52,6 +52,19 @@ impl reqwest::dns::Resolve for Resolver {
 }
 
 impl Resolver {
+    /// Construct a new DNS resolver from the system configuration.
+    pub fn new_from_system_conf(
+        log: slog::Logger,
+    ) -> Result<Self, ResolveError> {
+        let (rc, mut opts) = hickory_resolver::system_conf::read_system_conf()?;
+        // Enable edns for potentially larger records
+        opts.edns0 = true;
+
+        let resolver = TokioAsyncResolver::tokio(rc, opts);
+
+        Ok(Self { log, resolver })
+    }
+
     /// Construct a new DNS resolver from specific DNS server addresses.
     pub fn new_from_addrs(
         log: slog::Logger,
@@ -66,18 +79,20 @@ impl Resolver {
                 socket_addr,
                 protocol: Protocol::Udp,
                 tls_dns_name: None,
-                trust_nx_responses: false,
+                trust_negative_responses: false,
                 bind_addr: None,
             });
         }
         let mut opts = ResolverOpts::default();
+        // Enable edns for potentially larger records
+        opts.edns0 = true;
         opts.use_hosts_file = false;
         opts.num_concurrent_reqs = dns_server_count;
         // The underlay is IPv6 only, so this helps avoid needless lookups of
         // the IPv4 variant.
         opts.ip_strategy = LookupIpStrategy::Ipv6Only;
         opts.negative_max_ttl = Some(std::time::Duration::from_secs(15));
-        let resolver = TokioAsyncResolver::tokio(rc, opts)?;
+        let resolver = TokioAsyncResolver::tokio(rc, opts);
 
         Ok(Self { log, resolver })
     }
@@ -145,27 +160,6 @@ impl Resolver {
         self.resolver.clear_cache();
     }
 
-    /// Looks up a single [`Ipv6Addr`] based on the SRV name.
-    /// Returns an error if the record does not exist.
-    // TODO: There are lots of ways this API can expand: Caching,
-    // actually respecting TTL, looking up ports, etc.
-    //
-    // For now, however, it serves as a very simple "get everyone using DNS"
-    // API that can be improved upon later.
-    pub async fn lookup_ipv6(
-        &self,
-        srv: crate::ServiceName,
-    ) -> Result<Ipv6Addr, ResolveError> {
-        let name = srv.srv_name();
-        debug!(self.log, "lookup_ipv6 srv"; "dns_name" => &name);
-        let response = self.resolver.ipv6_lookup(&name).await?;
-        let address = response
-            .iter()
-            .next()
-            .ok_or_else(|| ResolveError::NotFound(srv))?;
-        Ok(*address)
-    }
-
     /// Returns the targets of the SRV records for a DNS name
     ///
     /// The returned values are generally other DNS names that themselves would
@@ -220,6 +214,12 @@ impl Resolver {
     // TODO-robustness: any callers of this should probably be using
     // all the targets for a given SRV and not just the first one
     // we get, see [`Resolver::lookup_all_socket_v6`].
+    //
+    // TODO: There are lots of ways this API can expand: Caching,
+    // actually respecting TTL, looking up ports, etc.
+    //
+    // For now, however, it serves as a very simple "get everyone using DNS"
+    // API that can be improved upon later.
     pub async fn lookup_socket_v6(
         &self,
         service: crate::ServiceName,
@@ -313,7 +313,7 @@ impl Resolver {
     //   (1) it returns `IpAddr`'s rather than `SocketAddr`'s
     //   (2) it doesn't actually return all the addresses from the Additional
     //       section of the DNS server's response.
-    //       See bluejekyll/trust-dns#1980
+    //       See hickory-dns/hickory-dns#1980
     //
     // (1) is not a huge deal as we can try to match up the targets ourselves
     // to grab the port for creating a `SocketAddr` but (2) means we need to do
@@ -350,10 +350,9 @@ impl Resolver {
             .await
             .into_iter()
             .flat_map(move |target| match target {
-                Ok((ips, port)) => Some(
-                    ips.into_iter()
-                        .map(move |ip| SocketAddrV6::new(ip, port, 0, 0)),
-                ),
+                Ok((ips, port)) => Some(ips.into_iter().map(move |aaaa| {
+                    SocketAddrV6::new(aaaa.into(), port, 0, 0)
+                })),
                 Err((target, err)) => {
                     error!(
                         log,
@@ -434,6 +433,7 @@ mod test {
                     bind_address: "[::1]:0".parse().unwrap(),
                     request_body_max_bytes: 8 * 1024,
                     default_handler_task_mode: HandlerTaskMode::Detached,
+                    log_headers: vec![],
                 },
             )
             .await
@@ -510,7 +510,7 @@ mod test {
         assert!(
             matches!(
                 dns_error.kind(),
-                trust_dns_resolver::error::ResolveErrorKind::NoRecordsFound { .. },
+                hickory_resolver::error::ResolveErrorKind::NoRecordsFound { .. },
             ),
             "Saw error: {dns_error}",
         );
@@ -534,11 +534,11 @@ mod test {
         dns_server.update(&dns_config).await.unwrap();
 
         let resolver = dns_server.resolver().unwrap();
-        let found_ip = resolver
-            .lookup_ipv6(ServiceName::Cockroach)
+        let found_addr = resolver
+            .lookup_socket_v6(ServiceName::Cockroach)
             .await
             .expect("Should have been able to look up IP address");
-        assert_eq!(found_ip, ip,);
+        assert_eq!(found_addr.ip(), &ip,);
 
         dns_server.cleanup_successful();
         logctx.cleanup_successful();
@@ -616,11 +616,13 @@ mod test {
 
         // Look up Cockroach
         let resolver = dns_server.resolver().unwrap();
-        let ip = resolver
-            .lookup_ipv6(ServiceName::Cockroach)
+        let resolved_addr = resolver
+            .lookup_socket_v6(ServiceName::Cockroach)
             .await
             .expect("Should have been able to look up IP address");
-        assert!(cockroach_addrs.iter().any(|addr| addr.ip() == &ip));
+        assert!(cockroach_addrs
+            .iter()
+            .any(|addr| addr.ip() == resolved_addr.ip()));
 
         // Look up all the Cockroach addresses.
         let mut ips =
@@ -634,18 +636,18 @@ mod test {
         );
 
         // Look up Clickhouse
-        let ip = resolver
-            .lookup_ipv6(ServiceName::Clickhouse)
+        let addr = resolver
+            .lookup_socket_v6(ServiceName::Clickhouse)
             .await
             .expect("Should have been able to look up IP address");
-        assert_eq!(&ip, clickhouse_addr.ip());
+        assert_eq!(addr.ip(), clickhouse_addr.ip());
 
         // Look up Backend Service
-        let ip = resolver
-            .lookup_ipv6(srv_backend)
+        let addr = resolver
+            .lookup_socket_v6(srv_backend)
             .await
             .expect("Should have been able to look up IP address");
-        assert_eq!(&ip, crucible_addr.ip());
+        assert_eq!(addr.ip(), crucible_addr.ip());
 
         // If we deploy a new generation that removes all records, then we don't
         // find anything any more.
@@ -656,14 +658,14 @@ mod test {
         // If we remove the records for all services, we won't find them any
         // more.  (e.g., there's no hidden caching going on)
         let error = resolver
-            .lookup_ipv6(ServiceName::Cockroach)
+            .lookup_socket_v6(ServiceName::Cockroach)
             .await
             .expect_err("unexpectedly found records");
         assert_matches!(
             error,
             ResolveError::Resolve(error)
                 if matches!(error.kind(),
-                    trust_dns_resolver::error::ResolveErrorKind::NoRecordsFound { .. }
+                    hickory_resolver::error::ResolveErrorKind::NoRecordsFound { .. }
                 )
         );
 
@@ -693,11 +695,11 @@ mod test {
         dns_builder.service_backend_zone(srv_crdb, &zone, 12345).unwrap();
         let dns_config = dns_builder.build_full_config_for_initial_generation();
         dns_server.update(&dns_config).await.unwrap();
-        let found_ip = resolver
-            .lookup_ipv6(ServiceName::Cockroach)
+        let found_addr = resolver
+            .lookup_socket_v6(ServiceName::Cockroach)
             .await
             .expect("Should have been able to look up IP address");
-        assert_eq!(found_ip, ip1);
+        assert_eq!(found_addr.ip(), &ip1);
 
         // If we insert the same record with a new address, it should be
         // updated.
@@ -711,11 +713,11 @@ mod test {
             dns_builder.build_full_config_for_initial_generation();
         dns_config.generation += 1;
         dns_server.update(&dns_config).await.unwrap();
-        let found_ip = resolver
-            .lookup_ipv6(ServiceName::Cockroach)
+        let found_addr = resolver
+            .lookup_socket_v6(ServiceName::Cockroach)
             .await
             .expect("Should have been able to look up IP address");
-        assert_eq!(found_ip, ip2);
+        assert_eq!(found_addr.ip(), &ip2);
 
         dns_server.cleanup_successful();
         logctx.cleanup_successful();
@@ -846,11 +848,11 @@ mod test {
         dns_server.update(&dns_config).await.unwrap();
 
         // Confirm that we can access this record manually.
-        let found_ip = resolver
-            .lookup_ipv6(ServiceName::Nexus)
+        let found_addr = resolver
+            .lookup_socket_v6(ServiceName::Nexus)
             .await
             .expect("Should have been able to look up IP address");
-        assert_eq!(found_ip, ip);
+        assert_eq!(found_addr.ip(), &ip);
 
         // Confirm that the progenitor client can access this record too.
         let value = client.test_endpoint().await.unwrap();

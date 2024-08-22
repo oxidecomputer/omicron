@@ -17,8 +17,6 @@ use futures::TryStreamExt;
 use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
 use nexus_client::types::IdSortMode;
-use omicron_common::address::CLICKHOUSE_PORT;
-use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
 use oximeter::types::ProducerResults;
@@ -381,6 +379,7 @@ impl OximeterAgent {
         db_config: DbConfig,
         resolver: &Resolver,
         log: &Logger,
+        replicated: bool,
     ) -> Result<Self, Error> {
         let (result_sender, result_receiver) = mpsc::channel(8);
         let log = log.new(o!(
@@ -394,10 +393,15 @@ impl OximeterAgent {
         // database.
         let db_address = if let Some(address) = db_config.address {
             address
+        } else if replicated {
+            SocketAddr::V6(
+                resolver
+                    .lookup_socket_v6(ServiceName::ClickhouseServer)
+                    .await?,
+            )
         } else {
-            SocketAddr::new(
-                resolver.lookup_ip(ServiceName::Clickhouse).await?,
-                CLICKHOUSE_PORT,
+            SocketAddr::V6(
+                resolver.lookup_socket_v6(ServiceName::Clickhouse).await?,
             )
         };
 
@@ -423,7 +427,6 @@ impl OximeterAgent {
                 ..
             }) => {
                 debug!(log, "oximeter database does not exist, creating");
-                let replicated = client.is_oximeter_cluster().await?;
                 client
                     .initialize_db_with_version(
                         replicated,
@@ -816,7 +819,7 @@ async fn refresh_producer_list(agent: OximeterAgent, resolver: Resolver) {
 async fn resolve_nexus_with_backoff(
     log: &Logger,
     resolver: &Resolver,
-) -> SocketAddr {
+) -> SocketAddrV6 {
     let log_failure = |error, delay| {
         warn!(
             log,
@@ -827,12 +830,9 @@ async fn resolve_nexus_with_backoff(
     };
     let do_lookup = || async {
         resolver
-            .lookup_ipv6(ServiceName::Nexus)
+            .lookup_socket_v6(ServiceName::Nexus)
             .await
             .map_err(|e| BackoffError::transient(e.to_string()))
-            .map(|ip| {
-                SocketAddr::V6(SocketAddrV6::new(ip, NEXUS_INTERNAL_PORT, 0, 0))
-            })
     };
     backoff::retry_notify(
         backoff::retry_policy_internal_service(),

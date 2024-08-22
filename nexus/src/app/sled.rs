@@ -6,13 +6,14 @@
 
 use crate::external_api::params;
 use crate::internal_api::params::{
-    PhysicalDiskPutRequest, SledAgentInfo, SledRole, ZpoolPutRequest,
+    PhysicalDiskPutRequest, SledAgentInfo, ZpoolPutRequest,
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::model::DatasetKind;
+use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
@@ -306,7 +307,8 @@ impl super::Nexus {
             "dataset_id" => id.to_string(),
             "address" => address.to_string()
         );
-        let dataset = db::model::Dataset::new(id, zpool_id, address, kind);
+        let dataset =
+            db::model::Dataset::new(id, zpool_id, Some(address), kind);
         self.db_datastore.dataset_upsert(dataset).await?;
         Ok(())
     }

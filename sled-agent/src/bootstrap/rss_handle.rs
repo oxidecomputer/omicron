@@ -5,8 +5,6 @@
 //! sled-agent's handle to the Rack Setup Service it spawns
 
 use super::client as bootstrap_agent_client;
-use super::params::StartSledAgentRequest;
-use crate::rack_setup::config::SetupServiceConfig;
 use crate::rack_setup::service::RackSetupService;
 use crate::rack_setup::service::SetupServiceError;
 use ::bootstrap_agent_client::Client as BootstrapAgentClient;
@@ -16,6 +14,8 @@ use futures::StreamExt;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_local;
 use omicron_common::backoff::BackoffError;
+use sled_agent_types::rack_init::RackInitializeRequest;
+use sled_agent_types::sled::StartSledAgentRequest;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::net::Ipv6Addr;
@@ -44,7 +44,7 @@ impl RssHandle {
     /// Executes the rack setup service until it has completed
     pub(super) async fn run_rss(
         log: &Logger,
-        config: SetupServiceConfig,
+        config: RackInitializeRequest,
         our_bootstrap_address: Ipv6Addr,
         storage_manager: StorageHandle,
         bootstore: bootstore::NodeHandle,

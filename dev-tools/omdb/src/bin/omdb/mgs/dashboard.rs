@@ -1091,7 +1091,7 @@ fn draw_status(f: &mut Frame, parent: Rect, status: &[(&str, &str)]) {
 }
 
 fn draw(f: &mut Frame, dashboard: &mut Dashboard) {
-    let size = f.size();
+    let size = f.area();
 
     let screen = Layout::default()
         .direction(Direction::Vertical)

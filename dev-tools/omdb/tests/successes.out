@@ -248,6 +248,11 @@ task: "crdb_node_id_collector"
     Collects node IDs of running CockroachDB zones
 
 
+task: "decommissioned_disk_cleaner"
+    deletes DB records for decommissioned disks, after regions and region
+    snapshots have been replaced
+
+
 task: "dns_config_external"
     watches external DNS data stored in CockroachDB
 
@@ -280,6 +285,10 @@ task: "external_endpoints"
     reads config for silos and TLS certificates to determine the right set of
     HTTP endpoints, their HTTP server names, and which TLS certificates to use
     on each one
+
+
+task: "instance_updater"
+    detects if instances require update sagas and schedules them
 
 
 task: "instance_watcher"
@@ -317,6 +326,14 @@ task: "region_replacement"
 
 task: "region_replacement_driver"
     drive region replacements forward to completion
+
+
+task: "region_snapshot_replacement_garbage_collection"
+    clean up all region snapshot replacement step volumes
+
+
+task: "region_snapshot_replacement_start"
+    detect if region snapshots need replacement and begin the process
 
 
 task: "saga_recovery"
@@ -453,6 +470,13 @@ task: "crdb_node_id_collector"
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: no blueprint
 
+task: "decommissioned_disk_cleaner"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "decommissioned_disk_cleaner" (don't know how to interpret details: Object {"deleted": Number(0), "error": Null, "error_count": Number(0), "found": Number(0), "not_ready_to_be_deleted": Number(0)})
+
 task: "external_endpoints"
   configured period: every 1m
   currently executing: no
@@ -470,6 +494,17 @@ task: "external_endpoints"
 
     TLS certificates: 0
 
+task: "instance_updater"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total instances in need of updates: 0
+      instances with destroyed active VMMs: 0
+      instances with terminated active migrations: 0
+    update sagas started: 0
+    update sagas completed successfully: 0
+
 task: "instance_watcher"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
@@ -478,6 +513,7 @@ task: "instance_watcher"
     total instances checked: 0
     checks completed: 0
        successful checks: 0
+       update sagas queued: 0
        failed checks: 0
     checks that could not be completed: 0
     stale instance metrics pruned: 0
@@ -538,6 +574,23 @@ task: "region_replacement_driver"
     number of region replacement finish sagas started ok: 0
     number of errors: 0
 
+task: "region_snapshot_replacement_garbage_collection"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total garbage collections requested: 0
+    errors: 0
+
+task: "region_snapshot_replacement_start"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total requests created ok: 0
+    total start saga invoked ok: 0
+    errors: 0
+
 task: "saga_recovery"
   configured period: every 10m
   currently executing: no
@@ -597,6 +650,449 @@ warning: unknown background task: "vpc_route_manager" (don't know how to interpr
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
+EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "saga_recovery"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+task: "saga_recovery"
+  configured period: every 10m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    since Nexus started:
+        sagas recovered:           0
+        sagas recovery errors:     0
+        sagas observed started:    0
+        sagas inferred finished:   0
+        missing from SEC:          0
+        bad state in SEC:          0
+    last pass:
+        found sagas:   0 (in-progress, assigned to this Nexus)
+        recovered:     0 (successfully)
+        failed:        0
+        skipped:       0 (already running)
+        removed:       0 (newly finished)
+    no recovered sagas
+    no saga recovery failures
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "blueprint_loader", "blueprint_executor"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+task: "blueprint_loader"
+  configured period: every 1m <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
+
+task: "blueprint_executor"
+  configured period: every 10m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: no blueprint
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "dns_internal"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+task: "dns_config_internal"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last generation found: 1
+
+task: "dns_servers_internal"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    servers found: 1
+
+      DNS_SERVER_ADDR 
+      [::1]:REDACTED_PORT     
+
+task: "dns_propagation_internal"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    attempt to propagate generation: 1
+
+      DNS_SERVER_ADDR LAST_RESULT 
+      [::1]:REDACTED_PORT     success     
+
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "dns_external"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+task: "dns_config_external"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last generation found: 2
+
+task: "dns_servers_external"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    servers found: 1
+
+      DNS_SERVER_ADDR 
+      [::1]:REDACTED_PORT     
+
+task: "dns_propagation_external"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    attempt to propagate generation: 2
+
+      DNS_SERVER_ADDR LAST_RESULT 
+      [::1]:REDACTED_PORT     success     
+
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "all"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+task: "dns_config_internal"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last generation found: 1
+
+task: "dns_servers_internal"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    servers found: 1
+
+      DNS_SERVER_ADDR 
+      [::1]:REDACTED_PORT     
+
+task: "dns_propagation_internal"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    attempt to propagate generation: 1
+
+      DNS_SERVER_ADDR LAST_RESULT 
+      [::1]:REDACTED_PORT     success     
+
+
+task: "dns_config_external"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last generation found: 2
+
+task: "dns_servers_external"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    servers found: 1
+
+      DNS_SERVER_ADDR 
+      [::1]:REDACTED_PORT     
+
+task: "dns_propagation_external"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    attempt to propagate generation: 2
+
+      DNS_SERVER_ADDR LAST_RESULT 
+      [::1]:REDACTED_PORT     success     
+
+
+task: "nat_v4_garbage_collector"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+
+task: "blueprint_loader"
+  configured period: every 1m <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
+
+task: "blueprint_executor"
+  configured period: every 10m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: no blueprint
+
+task: "abandoned_vmm_reaper"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total abandoned VMMs found: 0
+      VMM records deleted: 0
+      VMM records already deleted by another Nexus: 0
+    sled resource reservations deleted: 0
+
+task: "bfd_manager"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+
+task: "crdb_node_id_collector"
+  configured period: every 10m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: no blueprint
+
+task: "decommissioned_disk_cleaner"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "decommissioned_disk_cleaner" (don't know how to interpret details: Object {"deleted": Number(0), "error": Null, "error_count": Number(0), "found": Number(0), "not_ready_to_be_deleted": Number(0)})
+
+task: "external_endpoints"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    external API endpoints: 2 ('*' below marks default)
+
+          SILO_ID                              DNS_NAME                           
+          ..........<REDACTED_UUID>........... default-silo.sys.oxide-dev.test    
+        * ..........<REDACTED_UUID>........... test-suite-silo.sys.oxide-dev.test 
+
+    warnings: 2
+        warning: silo ..........<REDACTED_UUID>........... with DNS name "default-silo.sys.oxide-dev.test" has no usable certificates
+        warning: silo ..........<REDACTED_UUID>........... with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
+
+    TLS certificates: 0
+
+task: "instance_updater"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total instances in need of updates: 0
+      instances with destroyed active VMMs: 0
+      instances with terminated active migrations: 0
+    update sagas started: 0
+    update sagas completed successfully: 0
+
+task: "instance_watcher"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total instances checked: 0
+    checks completed: 0
+       successful checks: 0
+       update sagas queued: 0
+       failed checks: 0
+    checks that could not be completed: 0
+    stale instance metrics pruned: 0
+
+task: "inventory_collection"
+  configured period: every 10m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last collection id:      ..........<REDACTED_UUID>...........
+    last collection started: <REDACTED_TIMESTAMP>
+    last collection done:    <REDACTED_TIMESTAMP>
+
+task: "lookup_region_port"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total filled in ports: 0
+    errors: 0
+
+task: "metrics_producer_gc"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "metrics_producer_gc" (don't know how to interpret details: Object {"expiration": String("<REDACTED           TIMESTAMP>"), "pruned": Array []})
+
+task: "phantom_disks"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    number of phantom disks deleted: 0
+    number of phantom disk delete errors: 0
+
+task: "physical_disk_adoption"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: task disabled
+
+task: "region_replacement"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    number of region replacements started ok: 0
+    number of region replacement start errors: 0
+
+task: "region_replacement_driver"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    number of region replacement drive sagas started ok: 0
+    number of region replacement finish sagas started ok: 0
+    number of errors: 0
+
+task: "region_snapshot_replacement_garbage_collection"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total garbage collections requested: 0
+    errors: 0
+
+task: "region_snapshot_replacement_start"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total requests created ok: 0
+    total start saga invoked ok: 0
+    errors: 0
+
+task: "saga_recovery"
+  configured period: every 10m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    since Nexus started:
+        sagas recovered:           0
+        sagas recovery errors:     0
+        sagas observed started:    0
+        sagas inferred finished:   0
+        missing from SEC:          0
+        bad state in SEC:          0
+    last pass:
+        found sagas:   0 (in-progress, assigned to this Nexus)
+        recovered:     0 (successfully)
+        failed:        0
+        skipped:       0 (already running)
+        removed:       0 (newly finished)
+    no recovered sagas
+    no saga recovery failures
+
+task: "service_firewall_rule_propagation"
+  configured period: every 5m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+
+task: "service_zone_nat_tracker"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: inventory collection is None
+
+task: "switch_port_config_manager"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+
+task: "v2p_manager"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "v2p_manager" (don't know how to interpret details: Object {})
+
+task: "vpc_route_manager"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "vpc_route_manager" (don't know how to interpret details: Object {})
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "sagas", "list"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+SAGA_ID STATE 
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+NOTE: This command only reads in-memory state from the targeted Nexus instance.
+Sagas may be missing if they were run by a different Nexus instance or if they
+finished before this Nexus instance last started up.
+=============================================
+EXECUTING COMMAND: omdb ["--destructive", "nexus", "sagas", "demo-create"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+saga id:      ..........<REDACTED_UUID>...........
+demo saga id: ..........<REDACTED_UUID>........... (use this with `demo-complete`)
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "sagas", "list"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+SAGA_ID                              STATE   
+..........<REDACTED_UUID>........... running 
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+NOTE: This command only reads in-memory state from the targeted Nexus instance.
+Sagas may be missing if they were run by a different Nexus instance or if they
+finished before this Nexus instance last started up.
+=============================================
 EXECUTING COMMAND: omdb ["--destructive", "nexus", "background-tasks", "activate", "inventory_collection"]
 termination: Exited(0)
 ---------------------------------------------
@@ -639,8 +1135,8 @@ WARNING: Zones exist without physical disks!
 
 
  COCKROACHDB SETTINGS:
-    state fingerprint:::::::::::::::::   d4d87aa2ad877a4cc2fddd0573952362739110de
-    cluster.preserve_downgrade_option:   "22.1"
+    state fingerprint:::::::::::::::::   <COCKROACHDB_FINGERPRINT_REDACTED>
+    cluster.preserve_downgrade_option:   <COCKROACHDB_VERSION_REDACTED>
 
  METADATA:
     created by:::::::::::   nexus-test-utils
@@ -677,8 +1173,8 @@ WARNING: Zones exist without physical disks!
 
 
  COCKROACHDB SETTINGS:
-    state fingerprint:::::::::::::::::   d4d87aa2ad877a4cc2fddd0573952362739110de
-    cluster.preserve_downgrade_option:   "22.1"
+    state fingerprint:::::::::::::::::   <COCKROACHDB_FINGERPRINT_REDACTED>
+    cluster.preserve_downgrade_option:   <COCKROACHDB_VERSION_REDACTED>
 
  METADATA:
     created by:::::::::::   nexus-test-utils
@@ -718,8 +1214,8 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
 
 
  COCKROACHDB SETTINGS:
-    state fingerprint:::::::::::::::::   d4d87aa2ad877a4cc2fddd0573952362739110de (unchanged)
-    cluster.preserve_downgrade_option:   "22.1" (unchanged)
+    state fingerprint:::::::::::::::::   <COCKROACHDB_FINGERPRINT_REDACTED> (unchanged)
+    cluster.preserve_downgrade_option:   <COCKROACHDB_VERSION_REDACTED> (unchanged)
 
  METADATA:
     internal DNS version:   1 (unchanged)

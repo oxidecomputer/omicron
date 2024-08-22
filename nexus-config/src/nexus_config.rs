@@ -361,6 +361,8 @@ pub struct BackgroundTaskConfig {
     pub inventory: InventoryConfig,
     /// configuration for physical disk adoption tasks
     pub physical_disk_adoption: PhysicalDiskAdoptionConfig,
+    /// configuration for decommissioned disk cleaner task
+    pub decommissioned_disk_cleaner: DecommissionedDiskCleanerConfig,
     /// configuration for phantom disks task
     pub phantom_disks: PhantomDiskConfig,
     /// configuration for blueprint related tasks
@@ -377,6 +379,8 @@ pub struct BackgroundTaskConfig {
     pub region_replacement_driver: RegionReplacementDriverConfig,
     /// configuration for instance watcher task
     pub instance_watcher: InstanceWatcherConfig,
+    /// configuration for instance updater task
+    pub instance_updater: InstanceUpdaterConfig,
     /// configuration for service VPC firewall propagation task
     pub service_firewall_propagation: ServiceFirewallPropagationConfig,
     /// configuration for v2p mapping propagation task
@@ -387,6 +391,11 @@ pub struct BackgroundTaskConfig {
     pub saga_recovery: SagaRecoveryConfig,
     /// configuration for lookup region port task
     pub lookup_region_port: LookupRegionPortConfig,
+    /// configuration for region snapshot replacement starter task
+    pub region_snapshot_replacement_start: RegionSnapshotReplacementStartConfig,
+    /// configuration for region snapshot replacement garbage collection
+    pub region_snapshot_replacement_garbage_collection:
+        RegionSnapshotReplacementGarbageCollectionConfig,
 }
 
 #[serde_as]
@@ -438,6 +447,20 @@ pub struct PhysicalDiskAdoptionConfig {
     pub period_secs: Duration,
 
     /// A toggle to disable automated disk adoption.
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub disable: bool,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DecommissionedDiskCleanerConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// A toggle to disable automated disk cleanup
     ///
     /// Default: Off
     #[serde(default)]
@@ -546,6 +569,23 @@ pub struct InstanceWatcherConfig {
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct InstanceUpdaterConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// disable background checks for instances in need of updates.
+    ///
+    /// This config is intended for use in testing, and should generally not be
+    /// enabled in real life.
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub disable: bool,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ServiceFirewallPropagationConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
@@ -587,6 +627,22 @@ pub struct RegionReplacementDriverConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LookupRegionPortConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RegionSnapshotReplacementStartConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RegionSnapshotReplacementGarbageCollectionConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -822,6 +878,7 @@ mod test {
             inventory.nkeep = 11
             inventory.disable = false
             physical_disk_adoption.period_secs = 30
+            decommissioned_disk_cleaner.period_secs = 30
             phantom_disks.period_secs = 30
             blueprints.period_secs_load = 10
             blueprints.period_secs_execute = 60
@@ -831,11 +888,15 @@ mod test {
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
             instance_watcher.period_secs = 30
+            instance_updater.period_secs = 30
+            instance_updater.disable = false
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60
             saga_recovery.period_secs = 60
             lookup_region_port.period_secs = 60
+            region_snapshot_replacement_start.period_secs = 30
+            region_snapshot_replacement_garbage_collection.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -947,6 +1008,11 @@ mod test {
                             period_secs: Duration::from_secs(30),
                             disable: false,
                         },
+                        decommissioned_disk_cleaner:
+                            DecommissionedDiskCleanerConfig {
+                                period_secs: Duration::from_secs(30),
+                                disable: false,
+                            },
                         phantom_disks: PhantomDiskConfig {
                             period_secs: Duration::from_secs(30),
                         },
@@ -973,6 +1039,10 @@ mod test {
                         instance_watcher: InstanceWatcherConfig {
                             period_secs: Duration::from_secs(30),
                         },
+                        instance_updater: InstanceUpdaterConfig {
+                            period_secs: Duration::from_secs(30),
+                            disable: false,
+                        },
                         service_firewall_propagation:
                             ServiceFirewallPropagationConfig {
                                 period_secs: Duration::from_secs(300),
@@ -989,6 +1059,14 @@ mod test {
                         lookup_region_port: LookupRegionPortConfig {
                             period_secs: Duration::from_secs(60),
                         },
+                        region_snapshot_replacement_start:
+                            RegionSnapshotReplacementStartConfig {
+                                period_secs: Duration::from_secs(30),
+                            },
+                        region_snapshot_replacement_garbage_collection:
+                            RegionSnapshotReplacementGarbageCollectionConfig {
+                                period_secs: Duration::from_secs(30),
+                            },
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -1049,6 +1127,7 @@ mod test {
             inventory.nkeep = 3
             inventory.disable = false
             physical_disk_adoption.period_secs = 30
+            decommissioned_disk_cleaner.period_secs = 30
             phantom_disks.period_secs = 30
             blueprints.period_secs_load = 10
             blueprints.period_secs_execute = 60
@@ -1058,11 +1137,14 @@ mod test {
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
             instance_watcher.period_secs = 30
+            instance_updater.period_secs = 30
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60
             saga_recovery.period_secs = 60
             lookup_region_port.period_secs = 60
+            region_snapshot_replacement_start.period_secs = 30
+            region_snapshot_replacement_garbage_collection.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             "##,

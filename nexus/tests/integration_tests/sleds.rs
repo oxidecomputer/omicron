@@ -20,6 +20,8 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views::SledInstance;
 use nexus_types::external_api::views::{PhysicalDisk, Sled};
 use omicron_sled_agent::sim;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -128,7 +130,7 @@ async fn test_physical_disk_create_list_delete(
 
     let disks = physical_disks_list(&external_client, &disks_url).await;
     assert_eq!(disks.len(), disks_initial.len() + 1);
-    let _new_disk = disks
+    let new_disk = disks
         .iter()
         .find(|found_disk| {
             found_disk.vendor == "v"
@@ -141,10 +143,7 @@ async fn test_physical_disk_create_list_delete(
     datastore
         .physical_disk_delete(
             &opctx,
-            "v".into(),
-            "s".into(),
-            "m".into(),
-            sled_id,
+            PhysicalDiskUuid::from_untyped_uuid(new_disk.identity.id),
         )
         .await
         .expect("Failed to upsert physical disk");

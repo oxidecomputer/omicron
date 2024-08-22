@@ -62,6 +62,18 @@ pub enum RackTopology {
     SingleSled,
 }
 
+/// Topology of the ClickHouse installation within the rack.
+#[derive(Clone, Debug, strum::EnumString, strum::Display, ValueEnum)]
+#[strum(serialize_all = "kebab-case")]
+#[clap(rename_all = "kebab-case")]
+pub enum ClickhouseTopology {
+    /// Use configurations suitable for a replicated ClickHouse cluster deployment.
+    ReplicatedCluster,
+
+    /// Use configurations suitable for a single-node ClickHouse deployment.
+    SingleNode,
+}
+
 /// A strongly-typed variant of [Target].
 #[derive(Clone, Debug)]
 pub struct KnownTarget {
@@ -69,6 +81,7 @@ pub struct KnownTarget {
     machine: Option<Machine>,
     switch: Option<Switch>,
     rack_topology: RackTopology,
+    clickhouse_topology: ClickhouseTopology,
 }
 
 impl KnownTarget {
@@ -77,6 +90,7 @@ impl KnownTarget {
         machine: Option<Machine>,
         switch: Option<Switch>,
         rack_topology: RackTopology,
+        clickhouse_topology: ClickhouseTopology,
     ) -> Result<Self> {
         if matches!(image, Image::Trampoline) {
             if machine.is_some() {
@@ -93,7 +107,7 @@ impl KnownTarget {
             bail!("'switch=asic' is only valid with 'machine=gimlet'");
         }
 
-        Ok(Self { image, machine, switch, rack_topology })
+        Ok(Self { image, machine, switch, rack_topology, clickhouse_topology })
     }
 }
 
@@ -104,6 +118,7 @@ impl Default for KnownTarget {
             machine: Some(Machine::NonGimlet),
             switch: Some(Switch::Stub),
             rack_topology: RackTopology::MultiSled,
+            clickhouse_topology: ClickhouseTopology::SingleNode,
         }
     }
 }
@@ -119,6 +134,10 @@ impl From<KnownTarget> for Target {
             map.insert("switch".to_string(), switch.to_string());
         }
         map.insert("rack-topology".to_string(), kt.rack_topology.to_string());
+        map.insert(
+            "clickhouse-topology".to_string(),
+            kt.clickhouse_topology.to_string(),
+        );
         Target(map)
     }
 }
@@ -140,6 +159,7 @@ impl std::str::FromStr for KnownTarget {
         let mut machine = None;
         let mut switch = None;
         let mut rack_topology = None;
+        let mut clickhouse_topology = None;
 
         for (k, v) in target.0.into_iter() {
             match k.as_str() {
@@ -154,6 +174,9 @@ impl std::str::FromStr for KnownTarget {
                 }
                 "rack-topology" => {
                     rack_topology = Some(v.parse()?);
+                }
+                "clickhouse-topology" => {
+                    clickhouse_topology = Some(v.parse()?);
                 }
                 _ => {
                     bail!(
@@ -173,6 +196,7 @@ impl std::str::FromStr for KnownTarget {
             machine,
             switch,
             rack_topology.unwrap_or(RackTopology::MultiSled),
+            clickhouse_topology.unwrap_or(ClickhouseTopology::SingleNode),
         )
     }
 }

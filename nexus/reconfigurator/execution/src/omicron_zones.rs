@@ -118,7 +118,7 @@ pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
             let log = opctx.log.new(slog::o!(
                 "sled_id" => sled_id.to_string(),
                 "zone_id" => config.id.to_string(),
-                "zone_type" => config.zone_type.kind().to_string(),
+                "zone_type" => config.zone_type.kind().report_str(),
             ));
 
             let result = match &config.zone_type {
@@ -138,6 +138,7 @@ pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
                 BlueprintZoneType::BoundaryNtp(_)
                 | BlueprintZoneType::Clickhouse(_)
                 | BlueprintZoneType::ClickhouseKeeper(_)
+                | BlueprintZoneType::ClickhouseServer(_)
                 | BlueprintZoneType::Crucible(_)
                 | BlueprintZoneType::CruciblePantry(_)
                 | BlueprintZoneType::ExternalDns(_)
@@ -309,12 +310,14 @@ mod test {
     use httptest::matchers::{all_of, json_decoded, request};
     use httptest::responders::{json_encoded, status_code};
     use httptest::Expectation;
+    use nexus_sled_agent_shared::inventory::{
+        OmicronZoneDataset, OmicronZonesConfig,
+    };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
         blueprint_zone_type, Blueprint, BlueprintTarget,
-        CockroachDbPreserveDowngrade, OmicronZonesConfig,
+        CockroachDbPreserveDowngrade,
     };
-    use nexus_types::inventory::OmicronZoneDataset;
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::OmicronZoneUuid;
