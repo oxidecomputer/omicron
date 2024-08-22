@@ -33,7 +33,6 @@ use nexus_types::inventory::SpType;
 use omicron_common::address::get_sled_address;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
@@ -41,6 +40,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
+use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -329,6 +329,7 @@ impl SystemDescription {
             target_cockroachdb_zone_count: self.target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version: self
                 .target_cockroachdb_cluster_version,
+            clickhouse_policy: None,
         };
         let mut builder = PlanningInputBuilder::new(
             policy,

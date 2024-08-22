@@ -6,19 +6,19 @@
 
 // Copyright 2024 Oxide Computer Company
 
-use crate::oxql::point::DataType;
-use crate::oxql::point::MetricType;
-use crate::oxql::point::Points;
-use crate::oxql::point::ValueArray;
-use crate::oxql::point::Values;
-use crate::oxql::query::Alignment;
-use crate::oxql::Error;
-use crate::oxql::Table;
-use crate::oxql::Timeseries;
 use anyhow::Context;
+use anyhow::Error;
 use chrono::DateTime;
 use chrono::TimeDelta;
 use chrono::Utc;
+use oxql_types::point::DataType;
+use oxql_types::point::MetricType;
+use oxql_types::point::Points;
+use oxql_types::point::ValueArray;
+use oxql_types::point::Values;
+use oxql_types::Alignment;
+use oxql_types::Table;
+use oxql_types::Timeseries;
 use std::time::Duration;
 
 // The maximum factor by which an alignment operation may upsample data.
@@ -144,7 +144,7 @@ fn align_mean_within(
             "Alignment by mean requires a gauge or delta metric, not {}",
             metric_type,
         );
-        verify_max_upsampling_ratio(&points.timestamps, &period)?;
+        verify_max_upsampling_ratio(points.timestamps(), &period)?;
 
         // Always convert the output to doubles, when computing the mean. The
         // output is always a gauge, so we do not need the start times of the
@@ -179,7 +179,7 @@ fn align_mean_within(
         // - Compute the mean of those.
         let period_ =
             TimeDelta::from_std(*period).context("time delta out of range")?;
-        let first_timestamp = points.timestamps[0];
+        let first_timestamp = points.timestamps()[0];
         let mut ix: u32 = 0;
         loop {
             // Compute the next output timestamp, by shifting the query end time
@@ -220,15 +220,15 @@ fn align_mean_within(
             // entries.
             let output_value = if matches!(metric_type, MetricType::Gauge) {
                 mean_gauge_value_in_window(
-                    &points.timestamps,
+                    points.timestamps(),
                     &input_points,
                     window_start,
                     output_time,
                 )
             } else {
                 mean_delta_value_in_window(
-                    points.start_times.as_ref().unwrap(),
-                    &points.timestamps,
+                    points.start_times().unwrap(),
+                    points.timestamps(),
                     &input_points,
                     window_start,
                     output_time,
@@ -255,10 +255,9 @@ fn align_mean_within(
             ValueArray::Double(output_values.into_iter().rev().collect());
         let timestamps = output_timestamps.into_iter().rev().collect();
         let values = Values { values, metric_type: MetricType::Gauge };
-        new_timeseries.points =
-            Points { start_times: None, timestamps, values: vec![values] };
-        new_timeseries.alignment =
-            Some(Alignment { end_time: *query_end, period: *period });
+        new_timeseries.points = Points::new(None, timestamps, vec![values]);
+        new_timeseries
+            .set_alignment(Alignment { end_time: *query_end, period: *period });
         output_table.insert(new_timeseries).unwrap();
     }
     Ok(output_table)

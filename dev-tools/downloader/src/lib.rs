@@ -586,7 +586,10 @@ impl<'a> Downloader<'a> {
         let version = version.trim();
 
         let (url_base, suffix) = match os {
-            Os::Illumos => ("https://illumos.org/downloads", "tar.gz"),
+            Os::Illumos => (
+                "https://oxide-cockroachdb-build.s3.us-west-2.amazonaws.com",
+                "tar.gz",
+            ),
             Os::Linux | Os::Mac => ("https://binaries.cockroachdb.com", "tgz"),
         };
         let build = match os {

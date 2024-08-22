@@ -1,9 +1,8 @@
 use crate::metrics::MetricsRequestQueue;
-use crate::nexus::NexusClientWithResolver;
+use crate::nexus::NexusClient;
 use anyhow::{anyhow, Result};
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
-use illumos_utils::opte::params::VpcFirewallRule;
 use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::Zones;
@@ -14,7 +13,9 @@ use omicron_common::api::external::{
     Generation, VpcFirewallRuleAction, VpcFirewallRuleDirection,
     VpcFirewallRulePriority, VpcFirewallRuleStatus,
 };
-use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_common::api::internal::shared::{
+    NetworkInterface, ResolvedVpcFirewallRule,
+};
 use rand::prelude::IteratorRandom;
 use rand::SeedableRng;
 use sled_storage::dataset::ZONE_DATASET;
@@ -54,7 +55,7 @@ struct RunningProbes {
 
 pub(crate) struct ProbeManagerInner {
     join_handle: Mutex<Option<JoinHandle<()>>>,
-    nexus_client: NexusClientWithResolver,
+    nexus_client: NexusClient,
     log: Logger,
     sled_id: Uuid,
     vnic_allocator: VnicAllocator<Etherstub>,
@@ -67,7 +68,7 @@ pub(crate) struct ProbeManagerInner {
 impl ProbeManager {
     pub(crate) fn new(
         sled_id: Uuid,
-        nexus_client: NexusClientWithResolver,
+        nexus_client: NexusClient,
         etherstub: Etherstub,
         storage: StorageHandle,
         port_manager: PortManager,
@@ -248,7 +249,6 @@ impl ProbeManagerInner {
                 if n_added > 0 {
                     if let Err(e) = self
                         .nexus_client
-                        .client()
                         .bgtask_activate(&BackgroundTasksActivateRequest {
                             bgtask_names: vec!["vpc_route_manager".into()],
                         })
@@ -309,7 +309,7 @@ impl ProbeManagerInner {
             source_nat: None,
             ephemeral_ip: Some(eip.ip),
             floating_ips: &[],
-            firewall_rules: &[VpcFirewallRule {
+            firewall_rules: &[ResolvedVpcFirewallRule {
                 status: VpcFirewallRuleStatus::Enabled,
                 direction: VpcFirewallRuleDirection::Inbound,
                 targets: vec![nic.clone()],
@@ -439,7 +439,6 @@ impl ProbeManagerInner {
     async fn target_state(self: &Arc<Self>) -> Result<HashSet<ProbeState>> {
         Ok(self
             .nexus_client
-            .client()
             .probes_get(
                 &self.sled_id,
                 None, //limit

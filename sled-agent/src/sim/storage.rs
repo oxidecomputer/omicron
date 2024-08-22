@@ -18,19 +18,19 @@ use crucible_agent_client::types::{
 use dropshot::HandlerTaskMode;
 use dropshot::HttpError;
 use futures::lock::Mutex;
+use omicron_common::disk::DatasetManagementStatus;
 use omicron_common::disk::DatasetsConfig;
+use omicron_common::disk::DatasetsManagementResult;
 use omicron_common::disk::DiskIdentity;
+use omicron_common::disk::DiskManagementStatus;
 use omicron_common::disk::DiskVariant;
+use omicron_common::disk::DisksManagementResult;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::types::VolumeConstructionRequest;
-use sled_storage::resources::DatasetManagementStatus;
-use sled_storage::resources::DatasetsManagementResult;
-use sled_storage::resources::DiskManagementStatus;
-use sled_storage::resources::DisksManagementResult;
 use slog::Logger;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -586,7 +586,9 @@ impl Storage {
         &self.physical_disks
     }
 
-    pub async fn datasets_list(&self) -> Result<DatasetsConfig, HttpError> {
+    pub async fn datasets_config_list(
+        &self,
+    ) -> Result<DatasetsConfig, HttpError> {
         let Some(config) = self.dataset_config.as_ref() else {
             return Err(HttpError::for_not_found(
                 None,

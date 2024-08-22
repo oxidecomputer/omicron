@@ -595,6 +595,7 @@ impl DataStore {
             BlueprintZoneType::InternalNtp(_)
             | BlueprintZoneType::Clickhouse(_)
             | BlueprintZoneType::ClickhouseKeeper(_)
+            | BlueprintZoneType::ClickhouseServer(_)
             | BlueprintZoneType::CockroachDb(_)
             | BlueprintZoneType::Crucible(_)
             | BlueprintZoneType::CruciblePantry(_)

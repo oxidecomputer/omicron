@@ -1,0 +1,12 @@
+# Example configuration file for running an oximeter collector server
+
+[db]
+batch_size = 1000
+batch_interval = 5 # In seconds
+replicated = true
+
+[log]
+level = "debug"
+mode = "file"
+path = "/dev/stdout"
+if_exists = "append"

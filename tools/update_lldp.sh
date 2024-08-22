@@ -47,7 +47,9 @@ function main {
       esac
     done
 
-    TARGET_COMMIT=$(get_latest_commit_from_gh "$REPO" "$TARGET_COMMIT")
+    if [[ -z "$TARGET_COMMIT" ]]; then
+	    TARGET_COMMIT=$(get_latest_commit_from_gh "$REPO" "$TARGET_BRANCH")
+    fi
     install_toml2json
     do_update_packages "$TARGET_COMMIT" "$DRY_RUN" "$REPO" "${PACKAGES[@]}"
     do_update_crates "$TARGET_COMMIT" "$DRY_RUN" "$REPO" "${CRATES[@]}"

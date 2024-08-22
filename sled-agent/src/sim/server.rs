@@ -524,7 +524,7 @@ pub async fn run_standalone_server(
         SledUuid::from_untyped_uuid(config.id),
         SledConfig {
             disks: server.sled_agent.omicron_physical_disks_list().await?,
-            datasets: server.sled_agent.datasets_list().await?,
+            datasets: server.sled_agent.datasets_config_list().await?,
             zones,
         },
     );

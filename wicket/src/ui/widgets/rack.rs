@@ -65,7 +65,7 @@ impl<'a> Rack<'a> {
             // TODO: Draw 10 only? - That may not scale down as well
             for x in inner.left()..inner.right() {
                 for y in inner.top()..inner.bottom() {
-                    let cell = buf.get_mut(x, y).set_symbol("▕");
+                    let cell = buf[(x, y)].set_symbol("▕");
                     if self.state.selected == component_id {
                         if let Some(KnightRiderMode { count }) =
                             self.state.knight_rider_mode
@@ -118,7 +118,7 @@ impl<'a> Rack<'a> {
         if presence == ComponentPresence::Present {
             for x in inner.left()..inner.right() {
                 for y in inner.top()..inner.bottom() {
-                    buf.get_mut(x, y).set_symbol("❒");
+                    buf[(x, y)].set_symbol("❒");
                 }
             }
         }
@@ -156,7 +156,7 @@ impl<'a> Rack<'a> {
             for x in inner.left() + border..inner.right() - border {
                 for y in inner.top()..inner.bottom() {
                     if x % step != 0 {
-                        buf.get_mut(x, y).set_symbol("█");
+                        buf[(x, y)].set_symbol("█");
                     }
                 }
             }

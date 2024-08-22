@@ -11,18 +11,12 @@ use super::instance::{self, SimInstance};
 use super::storage::CrucibleData;
 use super::storage::Storage;
 use crate::nexus::NexusClient;
-use crate::params::{
-    DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
-    InstanceMetadata, InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse,
-};
 use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
 use anyhow::bail;
 use anyhow::Context;
 use dropshot::{HttpError, HttpServer};
 use futures::lock::Mutex;
-use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
 use nexus_sled_agent_shared::inventory::{
     Inventory, InventoryDisk, InventoryZpool, OmicronZonesConfig, SledRole,
 };
@@ -38,9 +32,11 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::shared::{
     RackNetworkConfig, ResolvedVpcRoute, ResolvedVpcRouteSet,
     ResolvedVpcRouteState, RouterId, RouterKind, RouterVersion,
+    VirtualNetworkInterfaceHost,
 };
 use omicron_common::disk::{
-    DatasetsConfig, DiskIdentity, DiskVariant, OmicronPhysicalDisksConfig,
+    DatasetsConfig, DatasetsManagementResult, DiskIdentity, DiskVariant,
+    DisksManagementResult, OmicronPhysicalDisksConfig,
 };
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, ZpoolUuid};
 use oxnet::Ipv6Net;
@@ -48,11 +44,15 @@ use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
 };
 use propolis_mock_server::Context as PropolisContext;
+use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
 };
-use sled_storage::resources::DatasetsManagementResult;
-use sled_storage::resources::DisksManagementResult;
+use sled_agent_types::instance::{
+    InstanceExternalIpBody, InstanceHardware, InstanceMetadata,
+    InstancePutStateResponse, InstanceStateRequested,
+    InstanceUnregisterResponse,
+};
 use slog::Logger;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -914,8 +914,10 @@ impl SledAgent {
         self.storage.lock().await.datasets_ensure(config).await
     }
 
-    pub async fn datasets_list(&self) -> Result<DatasetsConfig, HttpError> {
-        self.storage.lock().await.datasets_list().await
+    pub async fn datasets_config_list(
+        &self,
+    ) -> Result<DatasetsConfig, HttpError> {
+        self.storage.lock().await.datasets_config_list().await
     }
 
     pub async fn omicron_physical_disks_list(

@@ -6,17 +6,14 @@
 
 // Copyright 2024 Oxide Computer Company
 
-use dropshot::{
-    HttpError, HttpResponse, RequestContext, RequestInfo, ServerContext,
-};
+use dropshot::{HttpError, HttpResponse, RequestContext, ServerContext};
 use futures::Future;
 use http::StatusCode;
-use http::Uri;
 use oximeter::{
     histogram::Histogram, histogram::Record, MetricsError, Producer, Sample,
 };
-use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash as _, Hasher};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -24,28 +21,18 @@ oximeter::use_timeseries!("http-service.toml");
 pub use http_service::HttpService;
 pub use http_service::RequestLatencyHistogram;
 
-// Return the route portion of the request, normalized to include a single
-// leading slash and no trailing slashes.
-fn normalized_uri_path(uri: &Uri) -> Cow<'static, str> {
-    Cow::Owned(format!(
-        "/{}",
-        uri.path().trim_end_matches('/').trim_start_matches('/')
-    ))
-}
-
 impl RequestLatencyHistogram {
     /// Build a new `RequestLatencyHistogram` with a specified histogram.
     ///
     /// Latencies are expressed in seconds.
     pub fn new(
-        request: &RequestInfo,
+        operation_id: &str,
         status_code: StatusCode,
         histogram: Histogram<f64>,
     ) -> Self {
         Self {
-            route: normalized_uri_path(request.uri()),
-            method: request.method().to_string().into(),
-            status_code: status_code.as_u16().into(),
+            operation_id: operation_id.to_string().into(),
+            status_code: status_code.as_u16(),
             datum: histogram,
         }
     }
@@ -59,25 +46,27 @@ impl RequestLatencyHistogram {
     ///
     /// Latencies are expressed as seconds.
     pub fn with_latency_decades(
-        request: &RequestInfo,
+        operation_id: &str,
         status_code: StatusCode,
         start_decade: i16,
         end_decade: i16,
     ) -> Result<Self, MetricsError> {
         Ok(Self::new(
-            request,
+            operation_id,
             status_code,
             Histogram::span_decades(start_decade, end_decade)?,
         ))
     }
 
-    fn key_for(request: &RequestInfo, status_code: StatusCode) -> String {
-        format!(
-            "{}:{}:{}",
-            normalized_uri_path(request.uri()),
-            request.method(),
-            status_code.as_u16()
-        )
+    /// Return a key used to ID this histogram.
+    ///
+    /// This is a quick way to look up the histogram tracking any particular
+    /// request and response.
+    fn key_for(operation_id: &str, status_code: StatusCode) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        operation_id.hash(&mut hasher);
+        status_code.hash(&mut hasher);
+        hasher.finish()
     }
 }
 
@@ -92,8 +81,19 @@ impl RequestLatencyHistogram {
 /// The `LatencyTracker` can be used to produce metric data collected by `oximeter`.
 #[derive(Debug, Clone)]
 pub struct LatencyTracker {
+    /// The HTTP service target for which we're tracking request histograms.
     pub service: HttpService,
-    latencies: Arc<Mutex<BTreeMap<String, RequestLatencyHistogram>>>,
+    /// The latency histogram for each request.
+    ///
+    /// The map here use a hash of the request fields (operation and status
+    /// code) as the key to each histogram. It's a bit redundant to then store
+    /// that in a hashmap, but this lets us avoid creating a new
+    /// `RequestLatencyHistogram` when handling a request that we already have
+    /// one for. Instead, we use this key to get the existing entry.
+    latencies: Arc<Mutex<HashMap<u64, RequestLatencyHistogram>>>,
+    /// The histogram used to track each request.
+    ///
+    /// We store it here to clone as we see new requests.
     histogram: Histogram<f64>,
 }
 
@@ -104,7 +104,7 @@ impl LatencyTracker {
     pub fn new(service: HttpService, histogram: Histogram<f64>) -> Self {
         Self {
             service,
-            latencies: Arc::new(Mutex::new(BTreeMap::new())),
+            latencies: Arc::new(Mutex::new(HashMap::new())),
             histogram,
         }
     }
@@ -129,15 +129,15 @@ impl LatencyTracker {
     /// to which the other arguments belong. (One is created if it does not exist.)
     pub fn update(
         &self,
-        request: &RequestInfo,
+        operation_id: &str,
         status_code: StatusCode,
         latency: Duration,
     ) -> Result<(), MetricsError> {
-        let key = RequestLatencyHistogram::key_for(request, status_code);
+        let key = RequestLatencyHistogram::key_for(operation_id, status_code);
         let mut latencies = self.latencies.lock().unwrap();
         let entry = latencies.entry(key).or_insert_with(|| {
             RequestLatencyHistogram::new(
-                request,
+                operation_id,
                 status_code,
                 self.histogram.clone(),
             )
@@ -170,14 +170,14 @@ impl LatencyTracker {
             Ok(response) => response.status_code(),
             Err(ref e) => e.status_code,
         };
-        if let Err(e) = self.update(&context.request, status_code, latency) {
+        if let Err(e) = self.update(&context.operation_id, status_code, latency)
+        {
             slog::error!(
                 &context.log,
                 "error instrumenting dropshot handler";
                 "error" => ?e,
                 "status_code" => status_code.as_u16(),
-                "method" => %context.request.method(),
-                "uri" => %context.request.uri(),
+                "operation_id" => &context.operation_id,
                 "remote_addr" => context.request.remote_addr(),
                 "latency" => ?latency,
             );
@@ -220,41 +220,24 @@ mod tests {
             HttpService { name: "my-service".into(), id: ID.parse().unwrap() };
         let hist = Histogram::new(&[0.0, 1.0]).unwrap();
         let tracker = LatencyTracker::new(service, hist);
-        let request = http::request::Builder::new()
-            .method(http::Method::GET)
-            .uri("/some/uri")
-            .body(())
-            .unwrap();
-        let status_code = StatusCode::OK;
+        let status_code0 = StatusCode::OK;
+        let status_code1 = StatusCode::NOT_FOUND;
+        let operation_id = "some_operation_id";
         tracker
-            .update(
-                &RequestInfo::new(&request, "0.0.0.0:0".parse().unwrap()),
-                status_code,
-                Duration::from_secs_f64(0.5),
-            )
+            .update(operation_id, status_code0, Duration::from_secs_f64(0.5))
             .unwrap();
-
-        let key = "/some/uri:GET:200";
-        let actual_hist = tracker.latencies.lock().unwrap()[key].datum.clone();
-        assert_eq!(actual_hist.n_samples(), 1);
-        let bins = actual_hist.iter().collect::<Vec<_>>();
-        assert_eq!(bins[1].count, 1);
-    }
-
-    #[test]
-    fn test_normalize_uri_path() {
-        const EXPECTED: &str = "/foo/bar";
-        const TESTS: &[&str] = &[
-            "/foo/bar",
-            "/foo/bar/",
-            "//foo/bar",
-            "//foo/bar/",
-            "/foo/bar//",
-            "////foo/bar/////",
-        ];
-        for test in TESTS.iter() {
-            println!("{test}");
-            assert_eq!(normalized_uri_path(&test.parse().unwrap()), EXPECTED);
+        tracker
+            .update(operation_id, status_code1, Duration::from_secs_f64(0.5))
+            .unwrap();
+        let key0 = RequestLatencyHistogram::key_for(operation_id, status_code0);
+        let key1 = RequestLatencyHistogram::key_for(operation_id, status_code1);
+        let latencies = tracker.latencies.lock().unwrap();
+        assert_eq!(latencies.len(), 2);
+        for key in [key0, key1] {
+            let actual_hist = &latencies[&key].datum;
+            assert_eq!(actual_hist.n_samples(), 1);
+            let bins = actual_hist.iter().collect::<Vec<_>>();
+            assert_eq!(bins[1].count, 1);
         }
     }
 }

@@ -21,6 +21,7 @@ impl_enum_type!(
     Cockroach => b"cockroach"
     Clickhouse => b"clickhouse"
     ClickhouseKeeper => b"clickhouse_keeper"
+    ClickhouseServer => b"clickhouse_server"
     ExternalDns => b"external_dns"
     InternalDns => b"internal_dns"
     ZoneRoot => b"zone_root"
@@ -39,6 +40,7 @@ impl DatasetKind {
             (Self::Cockroach, None) => ApiKind::Cockroach,
             (Self::Clickhouse, None) => ApiKind::Clickhouse,
             (Self::ClickhouseKeeper, None) => ApiKind::ClickhouseKeeper,
+            (Self::ClickhouseServer, None) => ApiKind::ClickhouseServer,
             (Self::ExternalDns, None) => ApiKind::ExternalDns,
             (Self::InternalDns, None) => ApiKind::InternalDns,
             (Self::ZoneRoot, None) => ApiKind::ZoneRoot,
@@ -66,6 +68,9 @@ impl From<&internal::shared::DatasetKind> for DatasetKind {
             }
             internal::shared::DatasetKind::ClickhouseKeeper => {
                 DatasetKind::ClickhouseKeeper
+            }
+            internal::shared::DatasetKind::ClickhouseServer => {
+                DatasetKind::ClickhouseServer
             }
             internal::shared::DatasetKind::ExternalDns => {
                 DatasetKind::ExternalDns

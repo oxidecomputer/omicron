@@ -127,8 +127,12 @@ pub use vmm::VmmStateUpdateResult;
 pub use volume::read_only_resources_associated_with_volume;
 pub use volume::CrucibleResources;
 pub use volume::CrucibleTargets;
+pub use volume::ExistingTarget;
+pub use volume::ReplacementTarget;
 pub use volume::VolumeCheckoutReason;
 pub use volume::VolumeReplacementParams;
+pub use volume::VolumeToDelete;
+pub use volume::VolumeWithTarget;
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.
@@ -362,6 +366,7 @@ impl DataStore {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
 pub enum UpdatePrecondition<T> {
     DontCare,
     Null,

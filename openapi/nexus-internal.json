@@ -364,6 +364,59 @@
         }
       }
     },
+    "/demo-saga": {
+      "post": {
+        "summary": "Kick off an instance of the \"demo\" saga",
+        "description": "This saga is used for demo and testing.  The saga just waits until you complete using the `saga_demo_complete` API.",
+        "operationId": "saga_demo_create",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoSaga"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/demo-saga/{demo_saga_id}/complete": {
+      "post": {
+        "summary": "Complete a waiting demo saga",
+        "description": "Note that the id used here is not the same as the id of the saga.  It's the one returned by the `saga_demo_create` API.",
+        "operationId": "saga_demo_complete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "demo_saga_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForDemoSagaKind"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/deployment/blueprints/all": {
       "get": {
         "summary": "Lists blueprints",
@@ -721,6 +774,50 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/instances/{instance_id}/migrate": {
+      "post": {
+        "operationId": "instance_migrate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceMigrateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -2195,6 +2292,7 @@
             ]
           },
           {
+            "description": "Used in single-node clickhouse setups",
             "type": "object",
             "properties": {
               "address": {
@@ -2229,6 +2327,29 @@
                 "type": "string",
                 "enum": [
                   "clickhouse_keeper"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "description": "Used in replicated clickhouse setups",
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse_server"
                 ]
               }
             },
@@ -2708,6 +2829,23 @@
         "required": [
           "address",
           "kind"
+        ]
+      },
+      "DemoSaga": {
+        "description": "Identifies an instance of the demo saga",
+        "type": "object",
+        "properties": {
+          "demo_saga_id": {
+            "$ref": "#/components/schemas/TypedUuidForDemoSagaKind"
+          },
+          "saga_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "demo_saga_id",
+          "saga_id"
         ]
       },
       "DiskIdentity": {
@@ -3269,6 +3407,179 @@
           }
         ]
       },
+      "Instance": {
+        "description": "View of an Instance",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "hostname": {
+            "description": "RFC1035-compliant hostname for the Instance.",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "memory": {
+            "description": "memory allocated for this Instance",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "ncpus": {
+            "description": "number of CPUs allocated for this Instance",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceCpuCount"
+              }
+            ]
+          },
+          "project_id": {
+            "description": "id for the project containing this Instance",
+            "type": "string",
+            "format": "uuid"
+          },
+          "run_state": {
+            "$ref": "#/components/schemas/InstanceState"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_run_state_updated": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "hostname",
+          "id",
+          "memory",
+          "name",
+          "ncpus",
+          "project_id",
+          "run_state",
+          "time_created",
+          "time_modified",
+          "time_run_state_updated"
+        ]
+      },
+      "InstanceCpuCount": {
+        "description": "The number of CPUs in an Instance",
+        "type": "integer",
+        "format": "uint16",
+        "minimum": 0
+      },
+      "InstanceMigrateRequest": {
+        "description": "Parameters used when migrating an instance.",
+        "type": "object",
+        "properties": {
+          "dst_sled_id": {
+            "description": "The ID of the sled to which to migrate the target instance.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "dst_sled_id"
+        ]
+      },
+      "InstanceState": {
+        "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
+        "oneOf": [
+          {
+            "description": "The instance is being created.",
+            "type": "string",
+            "enum": [
+              "creating"
+            ]
+          },
+          {
+            "description": "The instance is currently starting up.",
+            "type": "string",
+            "enum": [
+              "starting"
+            ]
+          },
+          {
+            "description": "The instance is currently running.",
+            "type": "string",
+            "enum": [
+              "running"
+            ]
+          },
+          {
+            "description": "The instance has been requested to stop and a transition to \"Stopped\" is imminent.",
+            "type": "string",
+            "enum": [
+              "stopping"
+            ]
+          },
+          {
+            "description": "The instance is currently stopped.",
+            "type": "string",
+            "enum": [
+              "stopped"
+            ]
+          },
+          {
+            "description": "The instance is in the process of rebooting - it will remain in the \"rebooting\" state until the VM is starting once more.",
+            "type": "string",
+            "enum": [
+              "rebooting"
+            ]
+          },
+          {
+            "description": "The instance is in the process of migrating - it will remain in the \"migrating\" state until the migration process is complete and the destination propolis is ready to continue execution.",
+            "type": "string",
+            "enum": [
+              "migrating"
+            ]
+          },
+          {
+            "description": "The instance is attempting to recover from a failure.",
+            "type": "string",
+            "enum": [
+              "repairing"
+            ]
+          },
+          {
+            "description": "The instance has encountered a failure.",
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          },
+          {
+            "description": "The instance has been deleted.",
+            "type": "string",
+            "enum": [
+              "destroyed"
+            ]
+          }
+        ]
+      },
       "IpNet": {
         "x-rust-type": {
           "crate": "oxnet",
@@ -3499,6 +3810,67 @@
           "iteration",
           "reason",
           "start_time"
+        ]
+      },
+      "LldpAdminStatus": {
+        "description": "To what extent should this port participate in LLDP",
+        "type": "string",
+        "enum": [
+          "enabled",
+          "disabled",
+          "rx_only",
+          "tx_only"
+        ]
+      },
+      "LldpPortConfig": {
+        "description": "Per-port LLDP configuration settings.  Only the \"status\" setting is mandatory.  All other fields have natural defaults or may be inherited from the switch.",
+        "type": "object",
+        "properties": {
+          "chassis_id": {
+            "nullable": true,
+            "description": "Chassis ID to advertise.  If this is set, it will be advertised as a LocallyAssigned ID type.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          },
+          "management_addrs": {
+            "nullable": true,
+            "description": "Management IP addresses to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
+          "port_description": {
+            "nullable": true,
+            "description": "Port description to advertise.  If this is not set, no description will be advertised.",
+            "type": "string"
+          },
+          "port_id": {
+            "nullable": true,
+            "description": "Port ID to advertise.  If this is set, it will be advertised as a LocallyAssigned ID type.  If this is not set, it will be set to the port name. e.g., qsfp0/0.",
+            "type": "string"
+          },
+          "status": {
+            "description": "To what extent should this port participate in LLDP",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpAdminStatus"
+              }
+            ]
+          },
+          "system_description": {
+            "nullable": true,
+            "description": "System description to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          },
+          "system_name": {
+            "nullable": true,
+            "description": "System name to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
         ]
       },
       "MacAddr": {
@@ -3905,6 +4277,15 @@
             "items": {
               "$ref": "#/components/schemas/BgpPeerConfig"
             }
+          },
+          "lldp": {
+            "nullable": true,
+            "description": "LLDP configuration for this port",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpPortConfig"
+              }
+            ]
           },
           "port": {
             "description": "Nmae of the port this config applies to.",
@@ -4416,6 +4797,14 @@
                 "$ref": "#/components/schemas/IpNet"
               }
             ]
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "The local preference associated with this route.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "nexthop": {
             "description": "The nexthop/gateway address.",
@@ -4984,6 +5373,10 @@
         "type": "object"
       },
       "TypedUuidForDatasetKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForDemoSagaKind": {
         "type": "string",
         "format": "uuid"
       },

@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::schema::{
-    lldp_config, lldp_service_config, switch_port, switch_port_settings,
+    lldp_link_config, switch_port, switch_port_settings,
     switch_port_settings_address_config, switch_port_settings_bgp_peer_config,
     switch_port_settings_bgp_peer_config_allow_export,
     switch_port_settings_bgp_peer_config_allow_import,
@@ -14,6 +14,7 @@ use crate::schema::{
 };
 use crate::{impl_enum_type, SqlU32};
 use crate::{SqlU16, SqlU8};
+use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use diesel::AsChangeset;
 use ipnetwork::IpNetwork;
@@ -380,7 +381,7 @@ impl Into<external::SwitchPortConfig> for SwitchPortConfig {
 #[diesel(table_name = switch_port_settings_link_config)]
 pub struct SwitchPortLinkConfig {
     pub port_settings_id: Uuid,
-    pub lldp_service_config_id: Uuid,
+    pub lldp_link_config_id: Uuid,
     pub link_name: String,
     pub mtu: SqlU16,
     pub fec: SwitchLinkFec,
@@ -391,7 +392,7 @@ pub struct SwitchPortLinkConfig {
 impl SwitchPortLinkConfig {
     pub fn new(
         port_settings_id: Uuid,
-        lldp_service_config_id: Uuid,
+        lldp_link_config_id: Uuid,
         link_name: String,
         mtu: u16,
         fec: SwitchLinkFec,
@@ -400,7 +401,7 @@ impl SwitchPortLinkConfig {
     ) -> Self {
         Self {
             port_settings_id,
-            lldp_service_config_id,
+            lldp_link_config_id,
             link_name,
             fec,
             speed,
@@ -414,7 +415,7 @@ impl Into<external::SwitchPortLinkConfig> for SwitchPortLinkConfig {
     fn into(self) -> external::SwitchPortLinkConfig {
         external::SwitchPortLinkConfig {
             port_settings_id: self.port_settings_id,
-            lldp_service_config_id: self.lldp_service_config_id,
+            lldp_link_config_id: self.lldp_link_config_id,
             link_name: self.link_name.clone(),
             mtu: self.mtu.into(),
             fec: self.fec.into(),
@@ -434,57 +435,61 @@ impl Into<external::SwitchPortLinkConfig> for SwitchPortLinkConfig {
     Deserialize,
     AsChangeset,
 )]
-#[diesel(table_name = lldp_service_config)]
-pub struct LldpServiceConfig {
+#[diesel(table_name = lldp_link_config)]
+pub struct LldpLinkConfig {
     pub id: Uuid,
     pub enabled: bool,
-    pub lldp_config_id: Option<Uuid>,
+    pub link_name: Option<String>,
+    pub link_description: Option<String>,
+    pub chassis_id: Option<String>,
+    pub system_name: Option<String>,
+    pub system_description: Option<String>,
+    pub management_ip: Option<IpNetwork>,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
 }
 
-impl LldpServiceConfig {
-    pub fn new(enabled: bool, lldp_config_id: Option<Uuid>) -> Self {
-        Self { id: Uuid::new_v4(), enabled, lldp_config_id }
-    }
-}
-
-impl Into<external::LldpServiceConfig> for LldpServiceConfig {
-    fn into(self) -> external::LldpServiceConfig {
-        external::LldpServiceConfig {
-            id: self.id,
-            lldp_config_id: self.lldp_config_id,
-            enabled: self.enabled,
+impl LldpLinkConfig {
+    pub fn new(
+        enabled: bool,
+        link_name: Option<String>,
+        link_description: Option<String>,
+        chassis_id: Option<String>,
+        system_name: Option<String>,
+        system_description: Option<String>,
+        management_ip: Option<IpNetwork>,
+    ) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4(),
+            enabled,
+            link_name,
+            link_description,
+            chassis_id,
+            system_name,
+            system_description,
+            management_ip,
+            time_created: now,
+            time_modified: now,
+            time_deleted: None,
         }
     }
 }
 
-#[derive(
-    Queryable,
-    Insertable,
-    Selectable,
-    Clone,
-    Debug,
-    Resource,
-    Serialize,
-    Deserialize,
-)]
-#[diesel(table_name = lldp_config)]
-pub struct LldpConfig {
-    #[diesel(embed)]
-    pub identity: LldpConfigIdentity,
-    pub chassis_id: String,
-    pub system_name: String,
-    pub system_description: String,
-    pub management_ip: IpNetwork,
-}
-
-impl Into<external::LldpConfig> for LldpConfig {
-    fn into(self) -> external::LldpConfig {
-        external::LldpConfig {
-            identity: self.identity(),
+// This converts the internal database version of the config into the
+// user-facing version.
+impl Into<external::LldpLinkConfig> for LldpLinkConfig {
+    fn into(self) -> external::LldpLinkConfig {
+        external::LldpLinkConfig {
+            id: self.id,
+            enabled: self.enabled,
+            link_name: self.link_name.clone(),
+            link_description: self.link_description.clone(),
             chassis_id: self.chassis_id.clone(),
             system_name: self.system_name.clone(),
             system_description: self.system_description.clone(),
-            management_ip: self.management_ip.into(),
+            management_ip: self.management_ip.map(|a| a.into()),
         }
     }
 }
@@ -554,6 +559,7 @@ pub struct SwitchPortRouteConfig {
     pub dst: IpNetwork,
     pub gw: IpNetwork,
     pub vid: Option<SqlU16>,
+    pub local_pref: Option<SqlU32>,
 }
 
 impl SwitchPortRouteConfig {
@@ -563,8 +569,9 @@ impl SwitchPortRouteConfig {
         dst: IpNetwork,
         gw: IpNetwork,
         vid: Option<SqlU16>,
+        local_pref: Option<SqlU32>,
     ) -> Self {
-        Self { port_settings_id, interface_name, dst, gw, vid }
+        Self { port_settings_id, interface_name, dst, gw, vid, local_pref }
     }
 }
 
@@ -576,6 +583,7 @@ impl Into<external::SwitchPortRouteConfig> for SwitchPortRouteConfig {
             dst: self.dst.into(),
             gw: self.gw.into(),
             vlan_id: self.vid.map(Into::into),
+            local_pref: self.local_pref.map(Into::into),
         }
     }
 }
@@ -642,9 +650,13 @@ pub struct SwitchPortBgpPeerConfigCommunity {
 )]
 #[diesel(table_name = switch_port_settings_bgp_peer_config_allow_export)]
 pub struct SwitchPortBgpPeerConfigAllowExport {
+    /// Parent switch port configuration
     pub port_settings_id: Uuid,
+    /// Interface peer is reachable on
     pub interface_name: String,
+    /// Peer Address
     pub addr: IpNetwork,
+    /// Allowed Prefix
     pub prefix: IpNetwork,
 }
 
@@ -660,9 +672,13 @@ pub struct SwitchPortBgpPeerConfigAllowExport {
 )]
 #[diesel(table_name = switch_port_settings_bgp_peer_config_allow_import)]
 pub struct SwitchPortBgpPeerConfigAllowImport {
+    /// Parent switch port configuration
     pub port_settings_id: Uuid,
+    /// Interface peer is reachable on
     pub interface_name: String,
+    /// Peer Address
     pub addr: IpNetwork,
+    /// Allowed Prefix
     pub prefix: IpNetwork,
 }
 

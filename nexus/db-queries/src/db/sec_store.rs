@@ -4,7 +4,7 @@
 
 //! Implementation of [`steno::SecStore`] backed by Omicron's database
 
-use crate::db::{self, model::Generation};
+use crate::db;
 use anyhow::Context;
 use async_trait::async_trait;
 use dropshot::HttpError;
@@ -102,12 +102,7 @@ impl steno::SecStore for CockroachDbSecStore {
             &log,
             || {
                 self.datastore
-                    .saga_update_state(
-                        id,
-                        update,
-                        self.sec_id,
-                        Generation::new(),
-                    )
+                    .saga_update_state(id, update, self.sec_id)
                     .map_err(backoff::BackoffError::transient)
             },
             "updating saga state",

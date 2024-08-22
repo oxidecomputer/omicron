@@ -19,12 +19,14 @@ use clap::Subcommand;
 use clap::ValueEnum;
 use futures::future::try_join;
 use futures::TryStreamExt;
+use itertools::Itertools;
 use nexus_client::types::ActivationReason;
 use nexus_client::types::BackgroundTask;
 use nexus_client::types::BackgroundTasksActivateRequest;
 use nexus_client::types::CurrentStatus;
 use nexus_client::types::LastResult;
 use nexus_client::types::PhysicalDiskPath;
+use nexus_client::types::SagaState;
 use nexus_client::types::SledSelector;
 use nexus_client::types::UninitializedSledId;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -32,8 +34,11 @@ use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
+use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
+use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::DemoSagaUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -43,6 +48,7 @@ use reedline::Reedline;
 use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::str::FromStr;
 use tabled::Tabled;
 use uuid::Uuid;
@@ -71,6 +77,8 @@ enum NexusCommands {
     BackgroundTasks(BackgroundTasksArgs),
     /// interact with blueprints
     Blueprints(BlueprintsArgs),
+    /// view sagas, create and complete demo sagas
+    Sagas(SagasArgs),
     /// interact with sleds
     Sleds(SledsArgs),
 }
@@ -88,9 +96,19 @@ enum BackgroundTasksCommands {
     /// Print a summary of the status of all background tasks
     List,
     /// Print human-readable summary of the status of each background task
-    Show,
+    Show(BackgroundTasksShowArgs),
     /// Activate one or more background tasks
     Activate(BackgroundTasksActivateArgs),
+}
+
+#[derive(Debug, Args)]
+struct BackgroundTasksShowArgs {
+    /// Names of background tasks to show (default: all)
+    ///
+    /// You can use any background task name here or one of the special strings
+    /// "all", "dns_external", or "dns_internal".
+    #[clap(value_name = "TASK_NAME")]
+    tasks: Vec<String>,
 }
 
 #[derive(Debug, Args)]
@@ -245,6 +263,36 @@ struct BlueprintImportArgs {
 }
 
 #[derive(Debug, Args)]
+struct SagasArgs {
+    #[command(subcommand)]
+    command: SagasCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum SagasCommands {
+    /// List sagas run by this Nexus
+    ///
+    /// Note that this is reporting in-memory state about sagas run by *this*
+    /// Nexus instance.  You'll get different answers if you ask different Nexus
+    /// instances.
+    List,
+
+    /// Create a "demo" saga
+    ///
+    /// This saga will wait until it's explicitly completed using the
+    /// "demo-complete" subcommand.
+    DemoCreate,
+
+    /// Complete a demo saga started with "demo-create".
+    DemoComplete(DemoSagaIdArgs),
+}
+
+#[derive(Debug, Args)]
+struct DemoSagaIdArgs {
+    demo_saga_id: DemoSagaUuid,
+}
+
+#[derive(Debug, Args)]
 struct SledsArgs {
     #[command(subcommand)]
     command: SledsCommands,
@@ -326,8 +374,8 @@ impl NexusArgs {
                 command: BackgroundTasksCommands::List,
             }) => cmd_nexus_background_tasks_list(&client).await,
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {
-                command: BackgroundTasksCommands::Show,
-            }) => cmd_nexus_background_tasks_show(&client).await,
+                command: BackgroundTasksCommands::Show(args),
+            }) => cmd_nexus_background_tasks_show(&client, args).await,
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {
                 command: BackgroundTasksCommands::Activate(args),
             }) => {
@@ -402,6 +450,34 @@ impl NexusArgs {
                 cmd_nexus_blueprints_import(&client, token, args).await
             }
 
+            NexusCommands::Sagas(SagasArgs { command }) => {
+                if self.nexus_internal_url.is_none() {
+                    eprintln!(
+                        "{}",
+                        textwrap::wrap(
+                            "WARNING: A Nexus instance was selected from DNS \
+                            because a specific one was not specified.  But \
+                            the `omdb nexus sagas` commands usually only make \
+                            sense when targeting a specific Nexus instance.",
+                            80
+                        )
+                        .join("\n")
+                    );
+                }
+                match command {
+                    SagasCommands::List => cmd_nexus_sagas_list(&client).await,
+                    SagasCommands::DemoCreate => {
+                        let token = omdb.check_allow_destructive()?;
+                        cmd_nexus_sagas_demo_create(&client, token).await
+                    }
+                    SagasCommands::DemoComplete(args) => {
+                        let token = omdb.check_allow_destructive()?;
+                        cmd_nexus_sagas_demo_complete(&client, args, token)
+                            .await
+                    }
+                }
+            }
+
             NexusCommands::Sleds(SledsArgs {
                 command: SledsCommands::ListUninitialized,
             }) => cmd_nexus_sleds_list_uninitialized(&client).await,
@@ -460,7 +536,9 @@ async fn cmd_nexus_background_tasks_list(
 ) -> Result<(), anyhow::Error> {
     let response =
         client.bgtask_list().await.context("listing background tasks")?;
-    let tasks = response.into_inner();
+    // Convert the HashMap to a BTreeMap because we want the keys in sorted
+    // order.
+    let tasks = response.into_inner().into_iter().collect::<BTreeMap<_, _>>();
     let table_rows = tasks.values().map(BackgroundTaskStatusRow::from);
     let table = tabled::Table::new(table_rows)
         .with(tabled::settings::Style::empty())
@@ -473,6 +551,7 @@ async fn cmd_nexus_background_tasks_list(
 /// Runs `omdb nexus background-tasks show`
 async fn cmd_nexus_background_tasks_show(
     client: &nexus_client::Client,
+    args: &BackgroundTasksShowArgs,
 ) -> Result<(), anyhow::Error> {
     let response =
         client.bgtask_list().await.context("listing background tasks")?;
@@ -481,8 +560,50 @@ async fn cmd_nexus_background_tasks_show(
     let mut tasks =
         response.into_inner().into_iter().collect::<BTreeMap<_, _>>();
 
-    // We want to pick the order that we print some tasks intentionally.  Then
-    // we want to print anything else that we find.
+    // Now, pick out the tasks that the user selected.
+    //
+    // The set of user tasks may include:
+    //
+    // - nothing at all, in which case we include all tasks
+    // - individual task names
+    // - certain groups that we recognize, like "dns_external" for all the tasks
+    //   related to external DNS propagation.  "all" means "all tasks".
+    let selected_set: BTreeSet<_> =
+        args.tasks.iter().map(AsRef::as_ref).collect();
+    let selected_all = selected_set.is_empty() || selected_set.contains("all");
+    if !selected_all {
+        for s in &selected_set {
+            if !tasks.contains_key(*s)
+                && *s != "all"
+                && *s != "dns_external"
+                && *s != "dns_internal"
+            {
+                bail!(
+                    "unknown task name: {:?} (known task names: all, \
+                    dns_external, dns_internal, {})",
+                    s,
+                    tasks.keys().join(", ")
+                );
+            }
+        }
+
+        tasks.retain(|k, _| {
+            selected_set.contains(k.as_str())
+                || selected_set.contains("all")
+                || (selected_set.contains("dns_external")
+                    && k.starts_with("dns_")
+                    && k.ends_with("_external"))
+                || (selected_set.contains("dns_internal")
+                    && k.starts_with("dns_")
+                    && k.ends_with("_internal"))
+        });
+    }
+
+    // Some tasks should be grouped and printed together in a certain order,
+    // even though their names aren't alphabetical.  Notably, the DNS tasks
+    // logically go from config -> servers -> propagation, so we want to print
+    // them in that order.  So we pick these out first and then print anything
+    // else that we find in alphabetical order.
     for name in [
         "dns_config_internal",
         "dns_servers_internal",
@@ -496,7 +617,7 @@ async fn cmd_nexus_background_tasks_show(
     ] {
         if let Some(bgtask) = tasks.remove(name) {
             print_task(&bgtask);
-        } else {
+        } else if selected_all {
             eprintln!("warning: expected to find background task {:?}", name);
         }
     }
@@ -1332,6 +1453,63 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 }
             }
         };
+    } else if name == "region_snapshot_replacement_start" {
+        match serde_json::from_value::<RegionSnapshotReplacementStartStatus>(
+            details.clone(),
+        ) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+
+            Ok(status) => {
+                println!(
+                    "    total requests created ok: {}",
+                    status.requests_created_ok.len(),
+                );
+                for line in &status.requests_created_ok {
+                    println!("    > {line}");
+                }
+
+                println!(
+                    "    total start saga invoked ok: {}",
+                    status.start_invoked_ok.len(),
+                );
+                for line in &status.start_invoked_ok {
+                    println!("    > {line}");
+                }
+
+                println!("    errors: {}", status.errors.len());
+                for line in &status.errors {
+                    println!("    > {line}");
+                }
+            }
+        }
+    } else if name == "region_snapshot_replacement_garbage_collection" {
+        match serde_json::from_value::<
+            RegionSnapshotReplacementGarbageCollectStatus,
+        >(details.clone())
+        {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+
+            Ok(status) => {
+                println!(
+                    "    total garbage collections requested: {}",
+                    status.garbage_collect_requested.len(),
+                );
+                for line in &status.garbage_collect_requested {
+                    println!("    > {line}");
+                }
+
+                println!("    errors: {}", status.errors.len());
+                for line in &status.errors {
+                    println!("    > {line}");
+                }
+            }
+        }
     } else {
         println!(
             "warning: unknown background task: {:?} \
@@ -1624,6 +1802,91 @@ async fn cmd_nexus_blueprints_import(
         .with_context(|| format!("upload {:?}", input_path))?;
     eprintln!("uploaded new blueprint {}", blueprint.id);
     Ok(())
+}
+
+/// Runs `omdb nexus sagas list`
+async fn cmd_nexus_sagas_list(
+    client: &nexus_client::Client,
+) -> Result<(), anyhow::Error> {
+    // We don't want users to confuse this with a general way to list all sagas.
+    // Such a command would read database state and it would go under "omdb db".
+    eprintln!(
+        "{}",
+        textwrap::wrap(
+            "NOTE: This command only reads in-memory state from the targeted \
+            Nexus instance.  Sagas may be missing if they were run by a \
+            different Nexus instance or if they finished before this Nexus \
+            instance last started up.",
+            80
+        )
+        .join("\n")
+    );
+
+    let saga_stream = client.saga_list_stream(None, None);
+    let sagas =
+        saga_stream.try_collect::<Vec<_>>().await.context("listing sagas")?;
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct SagaRow {
+        saga_id: Uuid,
+        state: &'static str,
+    }
+    let rows = sagas.into_iter().map(|saga| SagaRow {
+        saga_id: saga.id,
+        state: match saga.state {
+            SagaState::Running => "running",
+            SagaState::Succeeded => "succeeded",
+            SagaState::Failed { .. } => "failed",
+            SagaState::Stuck { .. } => "stuck",
+        },
+    });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+    println!("{}", table);
+    Ok(())
+}
+
+/// Runs `omdb nexus sagas demo-create`
+async fn cmd_nexus_sagas_demo_create(
+    client: &nexus_client::Client,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let demo_saga =
+        client.saga_demo_create().await.context("creating demo saga")?;
+    println!("saga id:      {}", demo_saga.saga_id);
+    println!(
+        "demo saga id: {} (use this with `demo-complete`)",
+        demo_saga.demo_saga_id,
+    );
+    Ok(())
+}
+
+/// Runs `omdb nexus sagas demo-complete`
+async fn cmd_nexus_sagas_demo_complete(
+    client: &nexus_client::Client,
+    args: &DemoSagaIdArgs,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    if let Err(error) = client
+        .saga_demo_complete(&args.demo_saga_id)
+        .await
+        .context("completing demo saga")
+    {
+        eprintln!("error: {:#}", error);
+        eprintln!(
+            "note: `demo-complete` must be run against the same Nexus \
+            instance that is currently running that saga."
+        );
+        eprintln!(
+            "note: Be sure that you're using the demo_saga_id, not the saga_id."
+        );
+        Err(error)
+    } else {
+        Ok(())
+    }
 }
 
 /// Runs `omdb nexus sleds list-uninitialized`

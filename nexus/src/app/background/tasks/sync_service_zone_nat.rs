@@ -239,6 +239,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
                         // well
                         OmicronZoneType::Clickhouse {..} => continue,
                         OmicronZoneType::ClickhouseKeeper {..} => continue,
+                        OmicronZoneType::ClickhouseServer{..} => continue,
                         OmicronZoneType::CockroachDb {..} => continue,
                         OmicronZoneType::Crucible {..} => continue,
                         OmicronZoneType::CruciblePantry {..} => continue,

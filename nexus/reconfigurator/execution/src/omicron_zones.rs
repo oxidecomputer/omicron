@@ -138,6 +138,7 @@ pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
                 BlueprintZoneType::BoundaryNtp(_)
                 | BlueprintZoneType::Clickhouse(_)
                 | BlueprintZoneType::ClickhouseKeeper(_)
+                | BlueprintZoneType::ClickhouseServer(_)
                 | BlueprintZoneType::Crucible(_)
                 | BlueprintZoneType::CruciblePantry(_)
                 | BlueprintZoneType::ExternalDns(_)
