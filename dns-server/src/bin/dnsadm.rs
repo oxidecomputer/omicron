@@ -49,6 +49,8 @@ enum SubCommand {
     AddSRV(AddSRVCommand),
     /// Delete all records for a name (non-transactionally) in the DNS server
     DeleteRecord(DeleteRecordCommand),
+    /// Query the DNS server using `hickory-resolver`
+    Query(QueryCommand),
 }
 
 #[derive(Debug, Args)]
@@ -105,6 +107,16 @@ struct DeleteRecordCommand {
     #[clap(action)]
     zone_name: String,
     /// name whose records should be deleted
+    #[clap(action)]
+    name: String,
+}
+
+#[derive(Debug, Args)]
+struct QueryCommand {
+    /// query type to send: A, AAAA, SRV, etc
+    #[clap(action)]
+    query_type: String,
+    /// fully-qualified name to query (include ".oxide.test")
     #[clap(action)]
     name: String,
 }
@@ -224,6 +236,59 @@ async fn main() -> Result<()> {
                 zones,
             };
             client.dns_config_put(&new_config).await.context("updating DNS")?;
+        }
+
+        SubCommand::Query(cmd) => {
+            let udp_ns_conf = hickory_resolver::config::NameServerConfig::new(
+                addr.parse().expect("valid sockaddr"),
+                hickory_resolver::config::Protocol::Udp,
+            );
+
+            let tcp_ns_conf = hickory_resolver::config::NameServerConfig::new(
+                "[::1]:54".parse().expect("valid sockaddr"),
+                hickory_resolver::config::Protocol::Tcp,
+            );
+
+            let mut resolver_conf =
+                hickory_resolver::config::ResolverConfig::new();
+            resolver_conf.add_name_server(udp_ns_conf);
+            resolver_conf.add_name_server(tcp_ns_conf);
+
+            let mut opts = hickory_resolver::config::ResolverOpts::default();
+            opts.edns0 = false;
+
+            let resolver = hickory_resolver::TokioAsyncResolver::tokio(
+                resolver_conf,
+                opts,
+            );
+
+            let name = cmd.name;
+
+            match cmd.query_type.as_str() {
+                "SRV" => {
+                    let response =
+                        resolver.srv_lookup(&name).await.expect("SRV lookup");
+                    slog::debug!(
+                        log,
+                        "SRV";
+                        "dns_name" => &name,
+                        "response" => ?response
+                    );
+                }
+                "A" => {
+                    let response =
+                        resolver.ipv4_lookup(&name).await.expect("A lookup");
+                    slog::debug!(
+                        log,
+                        "A";
+                        "dns_name" => &name,
+                        "response" => ?response
+                    );
+                }
+                _ => {
+                    slog::warn!(log, "unhandled query type: {qtype}");
+                }
+            }
         }
     }
 

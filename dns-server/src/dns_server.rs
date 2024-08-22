@@ -411,6 +411,7 @@ where
     async move {
         let mut resp_data = Vec::new();
         let mut enc = BinEncoder::new(&mut resp_data);
+        enc.set_max_size(512);
         let _ = mresp
             .destructive_emit(&mut enc)
             .with_context(|| format!("encoding {}", label))?;
