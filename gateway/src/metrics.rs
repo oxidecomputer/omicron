@@ -35,7 +35,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-oximeter::use_timeseries!("sensor-measurement.toml");
+oximeter::use_timeseries!("hardware-component.toml");
 use hardware_component as metric;
 
 /// Handle to the metrics tasks.
