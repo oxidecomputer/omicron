@@ -229,7 +229,13 @@ impl Metrics {
             let registry = ProducerRegistry::with_id(id);
             registry
                 .register_producer(Producer { sample_rx, log: log.clone() })
-                .context("failed to register metrics producer")?;
+                // TODO(ben): when you change `register_producer` to not return
+                // a `Result`, delete this `expect`. thanks in advance! :)
+                .expect(
+                    "`ProducerRegistry::register_producer()` will never \
+                     actually return an `Err`, so this shouldn't ever \
+                     happen...",
+                );
 
             tokio::spawn(
                 ServerManager { log, addrs: addrs_rx, registry }.run(cfg),
@@ -389,7 +395,7 @@ async fn start_pollers(
         },
     )
     .await
-    .expect("we should never return a fatal error here");
+    .context("we should never return a fatal error here")?;
 
     slog::info!(
         &log,
@@ -429,14 +435,28 @@ impl SpPoller {
         let sp = match switch.sp(self.spid) {
             Ok(sp) => sp,
             Err(e) => {
-                unreachable!(
+                // This should never happen, but it's not worth taking down the
+                // entire management network over that...
+                const MSG: &'static str =
                     "the `SpPoller::run` function is only called after \
                      discovery completes successfully, and the `SpIdentifier` \
-                     used was returned by the management switch, so it \
-                     should be valid. however, we saw a {e:?} error when \
-                     looking up {:?}",
-                    self.spid
-                );
+                     used was returned by the management switch, \
+                     so it should be valid.";
+                if cfg!(debug_assertions) {
+                    unreachable!(
+                        "{MSG} nonetheless, we saw a {e:?} error when looking \
+                         up {:?}",
+                        self.spid
+                    );
+                } else {
+                    slog::error!(
+                        &self.log,
+                        "THIS SHOULDN'T HAPPEN: {MSG}";
+                        "error" => e,
+                        "sp" => ?self.spid,
+                    );
+                    return;
+                }
             }
         };
         loop {
@@ -573,7 +593,7 @@ impl SpPoller {
                         None => {
                             // These are supposed to always be strings. But, if we
                             // see one that's not a string, fall back to the hex
-                            // representation rather than  panicking.
+                            // representation rather than panicking.
                             let hex = hex::encode(dev.component.id);
                             slog::warn!(
                                 &self.log,
