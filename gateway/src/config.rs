@@ -27,7 +27,7 @@ pub struct Config {
     /// Server-wide logging configuration.
     pub log: ConfigLogging,
     /// Configuration for SP sensor metrics.
-    pub metrics: MetricsConfig,
+    pub metrics: Option<MetricsConfig>,
 }
 
 impl Config {

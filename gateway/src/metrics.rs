@@ -180,7 +180,7 @@ impl Metrics {
     pub fn new(
         log: &slog::Logger,
         args: &MgsArguments,
-        cfg: MetricsConfig,
+        cfg: Option<MetricsConfig>,
         apictx: Arc<ServerContext>,
     ) -> Self {
         let &MgsArguments { id, rack_id, ref addresses } = args;
@@ -970,9 +970,9 @@ fn stringify_byte_string(bytes: &[u8]) -> String {
 }
 
 impl ServerManager {
-    async fn run(mut self, cfg: MetricsConfig) -> anyhow::Result<()> {
+    async fn run(mut self, cfg: Option<MetricsConfig>) -> anyhow::Result<()> {
         let (registration_address, bind_loopback) =
-            if let Some(ref dev_config) = cfg.dev {
+            if let Some(ref dev_config) = cfg.and_then(|cfg| cfg.dev) {
                 slog::warn!(
                     &self.log,
                     "using development metrics configuration overrides!";
