@@ -681,6 +681,10 @@ async fn test_mgs_metrics(
     let current_metrics =
         get_timeseries(&cptestctx, "hardware_component:current").await;
     check_all_serials_present(current_metrics);
+
+    // Because the `ControlPlaneTestContext` isn't managing the MGS we made for
+    // this test, we are responsible for removing its logs.
+    mgs.logctx.cleanup_successful();
 }
 
 /// Wait until a producer is registered with Oximeter.
