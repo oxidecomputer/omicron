@@ -101,21 +101,37 @@ impl DataStore {
 
                     // Idempotency:
                     // Check to see if an exact match for the config already exists
-                    let matching_config = match dsl::bgp_config
+                    let query = dsl::bgp_config
                         .filter(dsl::name.eq(config.name().to_string()))
                         .filter(dsl::asn.eq(config.asn))
                         .filter(dsl::bgp_announce_set_id.eq(config.bgp_announce_set_id))
-                        .filter(dsl::vrf.eq(config.vrf.clone()))
-                        .filter(dsl::shaper.eq(config.shaper.clone()))
-                        .filter(dsl::checker.eq(config.checker.clone()))
+                        .into_boxed();
+
+                    let query = match config.vrf.clone() {
+                        Some(v) => query.filter(dsl::vrf.eq(v)),
+                        None => query.filter(dsl::vrf.is_null()),
+                    };
+
+                    let query = match config.shaper.clone() {
+                        Some(v) => query.filter(dsl::shaper.eq(v)),
+                        None => query.filter(dsl::shaper.is_null()),
+                    };
+
+                    let query = match config.checker.clone() {
+                        Some(v) => query.filter(dsl::checker.eq(v)),
+                        None => query.filter(dsl::checker.is_null()),
+                    };
+
+                    let matching_config = match query
                         .filter(dsl::time_deleted.is_null())
                         .select(BgpConfig::as_select())
                         .first_async::<BgpConfig>(&conn)
                         .await {
-                           Ok(v)  => Ok(Some(v)),
-                           Err(e) => {
+                            Ok(v)  => Ok(Some(v)),
+                            Err(e) => {
                                 match e {
                                     diesel::result::Error::NotFound => {
+                                        info!(opctx.log, "no matching bgp config found");
                                         Ok(None)
                                     }
                                     _ => {
@@ -143,7 +159,13 @@ impl DataStore {
                         .await?;
 
                     if !configs_with_asn.is_empty() {
-                        error!(opctx.log, "different config for asn already exists"; "asn" => ?config.asn, "configs" => ?configs_with_asn);
+                        error!(
+                            opctx.log,
+                            "different config for asn already exists";
+                            "asn" => ?config.asn,
+                            "requested_config" => ?config,
+                            "conflicting_configs" => ?configs_with_asn
+                        );
                         return Err(err.bail(Error::conflict("cannot have more than one configuration per ASN")));
                     }
 
