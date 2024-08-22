@@ -260,8 +260,11 @@ impl super::Nexus {
                     )?;
                 CockroachDbClusterVersion::NEWLY_INITIALIZED
             } else {
-                // Fill in the blueprint with the current value of the option in
-                // the database.
+                // `cluster.preserve_downgrade_option` is set, so fill in the
+                // blueprint with the current value. This branch should never
+                // be hit during normal rack initialization; it's here for
+                // eventual test cases where `cluster.preserve_downgrade_option`
+                // is set by a test harness prior to rack initialization.
                 CockroachDbClusterVersion::from_str(
                     &cockroachdb_settings.preserve_downgrade,
                 )

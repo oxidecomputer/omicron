@@ -164,8 +164,9 @@ mod test {
             assert_eq!(version, CockroachDbClusterVersion::POLICY);
         } else {
             panic!(
-                "`cluster.preserve_downgrade_option` should not be {:?}",
-                settings.preserve_downgrade
+                "`cluster.preserve_downgrade_option` is {:?},
+                but it should be empty or \"{}\"",
+                settings.preserve_downgrade, version
             );
         }
 
