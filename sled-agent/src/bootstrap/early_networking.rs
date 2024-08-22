@@ -259,18 +259,18 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         info!(self.log, "Resolving switch zone addresses in DNS");
         let switch_zone_addrs = resolver
-            .lookup_all_ipv6(ServiceName::Dendrite)
+            .lookup_all_socket_v6(ServiceName::ManagementGatewayService)
             .await
             .map_err(|err| {
                 BackoffError::transient(format!(
-                    "Error resolving dendrite services in internal DNS: {err}",
+                    "Error resolving MGS services in internal DNS: {err}",
                 ))
             })?;
 
         let mgs_query_futures =
             switch_zone_addrs.iter().copied().map(|addr| async move {
                 let mgs_client = MgsClient::new(
-                    &format!("http://[{}]:{}", addr, MGS_PORT),
+                    &format!("http://{}", addr),
                     self.log.new(o!("component" => "MgsClient")),
                 );
 
@@ -286,8 +286,8 @@ impl<'a> EarlyNetworkSetup<'a> {
                     .slot;
 
                 match switch_slot {
-                    0 => Ok((SwitchLocation::Switch0, addr)),
-                    1 => Ok((SwitchLocation::Switch1, addr)),
+                    0 => Ok((SwitchLocation::Switch0, *addr.ip())),
+                    1 => Ok((SwitchLocation::Switch1, *addr.ip())),
                     _ => Err(anyhow!(
                         "Nonsense switch slot returned by MGS at \
                          {addr}: {switch_slot}"
