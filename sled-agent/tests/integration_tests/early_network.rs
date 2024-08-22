@@ -154,6 +154,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfig) {
                         vlan_id: None,
                     }],
                     autoneg: true,
+                    lldp: None,
                 }],
                 bgp: vec![BgpConfig {
                     asn: 20000,

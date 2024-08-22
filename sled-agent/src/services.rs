@@ -3995,6 +3995,19 @@ impl ServiceManager {
         &self,
         our_ports: Vec<HostPortConfig>,
     ) -> Result<(), Error> {
+        // Helper function to add a property-value pair
+        // if the config actually has a value set.
+        fn apv(
+            smfh: &SmfHelper,
+            prop: &str,
+            val: &Option<String>,
+        ) -> Result<(), Error> {
+            if let Some(v) = val {
+                smfh.addpropvalue_type(prop, v, "astring")?
+            }
+            Ok(())
+        }
+
         // We expect the switch zone to be running, as we're called immediately
         // after `ensure_zone()` above and we just successfully configured
         // uplinks via DPD running in our switch zone. If somehow we're in any
@@ -4017,26 +4030,76 @@ impl ServiceManager {
             }
         };
 
-        info!(self.inner.log, "Setting up uplinkd service");
-        let smfh = SmfHelper::new(&zone, &SwitchService::Uplink);
+        info!(self.inner.log, "ensuring scrimlet uplinks");
+        let usmfh = SmfHelper::new(&zone, &SwitchService::Uplink);
+        let lsmfh = SmfHelper::new(
+            &zone,
+            &SwitchService::Lldpd { baseboard: Baseboard::Unknown },
+        );
 
         // We want to delete all the properties in the `uplinks` group, but we
         // don't know their names, so instead we'll delete and recreate the
         // group, then add all our properties.
-        smfh.delpropgroup("uplinks")?;
-        smfh.addpropgroup("uplinks", "application")?;
+        let _ = usmfh.delpropgroup("uplinks");
+        usmfh.addpropgroup("uplinks", "application")?;
 
         for port_config in &our_ports {
             for addr in &port_config.addrs {
-                info!(self.inner.log, "configuring port: {port_config:?}");
-                smfh.addpropvalue_type(
+                usmfh.addpropvalue_type(
                     &format!("uplinks/{}_0", port_config.port,),
                     &addr.to_string(),
                     "astring",
                 )?;
             }
+
+            if let Some(lldp_config) = &port_config.lldp {
+                let group_name = format!("port_{}", port_config.port);
+                info!(self.inner.log, "setting up {group_name}");
+                let _ = lsmfh.delpropgroup(&group_name);
+                lsmfh.addpropgroup(&group_name, "application")?;
+                apv(
+                    &lsmfh,
+                    &format!("{group_name}/status"),
+                    &Some(lldp_config.status.to_string()),
+                )?;
+                apv(
+                    &lsmfh,
+                    &format!("{group_name}/chassis_id"),
+                    &lldp_config.chassis_id,
+                )?;
+                apv(
+                    &lsmfh,
+                    &format!("{group_name}/system_name"),
+                    &lldp_config.system_name,
+                )?;
+                apv(
+                    &lsmfh,
+                    &format!("{group_name}/system_description"),
+                    &lldp_config.system_description,
+                )?;
+                apv(
+                    &lsmfh,
+                    &format!("{group_name}/port_description"),
+                    &lldp_config.port_description,
+                )?;
+                apv(
+                    &lsmfh,
+                    &format!("{group_name}/port_id"),
+                    &lldp_config.port_id,
+                )?;
+                if let Some(a) = &lldp_config.management_addrs {
+                    for address in a {
+                        apv(
+                            &lsmfh,
+                            &format!("{group_name}/management_addrs"),
+                            &Some(address.to_string()),
+                        )?;
+                    }
+                }
+            }
         }
-        smfh.refresh()?;
+        usmfh.refresh()?;
+        lsmfh.refresh()?;
 
         Ok(())
     }

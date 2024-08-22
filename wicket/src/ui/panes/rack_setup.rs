@@ -21,6 +21,7 @@ use itertools::Itertools;
 use omicron_common::address::IpRange;
 use omicron_common::api::internal::shared::AllowedSourceIps;
 use omicron_common::api::internal::shared::BgpConfig;
+use omicron_common::api::internal::shared::LldpPortConfig;
 use omicron_common::api::internal::shared::RouteConfig;
 use ratatui::layout::Constraint;
 use ratatui::layout::Direction;
@@ -740,6 +741,7 @@ fn rss_config_text<'a>(
                 uplink_port_fec,
                 autoneg,
                 bgp_peers,
+                lldp,
             } = uplink;
 
             let mut items = vec![
@@ -1034,6 +1036,68 @@ fn rss_config_text<'a>(
             items.extend(routes);
             items.extend(addresses);
             items.extend(peers);
+
+            if let Some(lp) = lldp {
+                let LldpPortConfig {
+                    status,
+                    chassis_id,
+                    port_id,
+                    system_name,
+                    system_description,
+                    port_description,
+                    management_addrs,
+                } = lp;
+
+                let mut lldp = vec![
+                    vec![Span::styled("  • LLDP port settings: ", label_style)],
+                    vec![
+                        Span::styled("    • Admin status      : ", label_style),
+                        Span::styled(status.to_string(), ok_style),
+                    ],
+                ];
+
+                if let Some(c) = chassis_id {
+                    lldp.push(vec![
+                        Span::styled("    • Chassis ID        : ", label_style),
+                        Span::styled(c.to_string(), ok_style),
+                    ])
+                }
+                if let Some(s) = system_name {
+                    lldp.push(vec![
+                        Span::styled("    • System name       : ", label_style),
+                        Span::styled(s.to_string(), ok_style),
+                    ])
+                }
+                if let Some(s) = system_description {
+                    lldp.push(vec![
+                        Span::styled("    • System description: ", label_style),
+                        Span::styled(s.to_string(), ok_style),
+                    ])
+                }
+                if let Some(p) = port_id {
+                    lldp.push(vec![
+                        Span::styled("    • Port ID           : ", label_style),
+                        Span::styled(p.to_string(), ok_style),
+                    ])
+                }
+                if let Some(p) = port_description {
+                    lldp.push(vec![
+                        Span::styled("    • Port description  : ", label_style),
+                        Span::styled(p.to_string(), ok_style),
+                    ])
+                }
+                if let Some(addrs) = management_addrs {
+                    let mut label = "    • Management addrs  : ";
+                    for a in addrs {
+                        lldp.push(vec![
+                            Span::styled(label, label_style),
+                            Span::styled(a.to_string(), ok_style),
+                        ]);
+                        label = "                        : ";
+                    }
+                }
+                items.extend(lldp);
+            }
 
             append_list(
                 &mut spans,

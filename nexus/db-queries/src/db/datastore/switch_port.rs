@@ -15,7 +15,7 @@ use crate::db::datastore::UpdatePrecondition;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::{
-    LldpServiceConfig, Name, SwitchInterfaceConfig, SwitchPort,
+    LldpLinkConfig, Name, SwitchInterfaceConfig, SwitchPort,
     SwitchPortAddressConfig, SwitchPortBgpPeerConfig, SwitchPortConfig,
     SwitchPortLinkConfig, SwitchPortRouteConfig, SwitchPortSettings,
     SwitchPortSettingsGroup, SwitchPortSettingsGroups,
@@ -101,7 +101,7 @@ pub struct SwitchPortSettingsCombinedResult {
     pub groups: Vec<SwitchPortSettingsGroups>,
     pub port: SwitchPortConfig,
     pub links: Vec<SwitchPortLinkConfig>,
-    pub link_lldp: Vec<LldpServiceConfig>,
+    pub link_lldp: Vec<LldpLinkConfig>,
     pub interfaces: Vec<SwitchInterfaceConfig>,
     pub vlan_interfaces: Vec<SwitchVlanInterfaceConfig>,
     pub routes: Vec<SwitchPortRouteConfig>,
@@ -451,19 +451,18 @@ impl DataStore {
                     .load_async::<SwitchPortLinkConfig>(&conn)
                     .await?;
 
-                let lldp_svc_ids: Vec<Uuid> = result
+                let lldp_link_ids: Vec<Uuid> = result
                     .links
                     .iter()
-                    .map(|link| link.lldp_service_config_id)
+                    .map(|link| link.lldp_link_config_id)
                     .collect();
 
-                use db::schema::lldp_service_config as lldp_config;
-                use db::schema::lldp_service_config::dsl as lldp_dsl;
-                result.link_lldp = lldp_dsl::lldp_service_config
-                    .filter(lldp_config::id.eq_any(lldp_svc_ids))
-                    .select(LldpServiceConfig::as_select())
+                use db::schema::lldp_link_config;
+                result.link_lldp = lldp_link_config::dsl::lldp_link_config
+                    .filter(lldp_link_config::id.eq_any(lldp_link_ids))
+                    .select(LldpLinkConfig::as_select())
                     .limit(1)
-                    .load_async::<LldpServiceConfig>(&conn)
+                    .load_async::<LldpLinkConfig>(&conn)
                     .await?;
 
                 // get the interface configs
@@ -987,7 +986,7 @@ async fn do_switch_port_settings_create(
 ) -> Result<SwitchPortSettingsCombinedResult, diesel::result::Error> {
     use db::schema::{
         address_lot::dsl as address_lot_dsl, bgp_config::dsl as bgp_config_dsl,
-        lldp_service_config::dsl as lldp_config_dsl,
+        lldp_link_config::dsl as lldp_link_config_dsl,
         switch_port_settings::dsl as port_settings_dsl,
         switch_port_settings_address_config::dsl as address_config_dsl,
         switch_port_settings_bgp_peer_config::dsl as bgp_peer_dsl,
@@ -1047,17 +1046,21 @@ async fn do_switch_port_settings_create(
     let mut link_config = Vec::with_capacity(params.links.len());
 
     for (link_name, c) in &params.links {
-        let lldp_config_id = match c.lldp.lldp_config {
-            Some(_) => todo!(), // TODO actual lldp support
-            None => None,
-        };
-        let lldp_svc_config =
-            LldpServiceConfig::new(c.lldp.enabled, lldp_config_id);
+        let lldp_link_config = LldpLinkConfig::new(
+            c.lldp.enabled,
+            c.lldp.link_name.clone(),
+            c.lldp.link_description.clone(),
+            c.lldp.chassis_id.clone(),
+            c.lldp.system_name.clone(),
+            c.lldp.system_description.clone(),
+            c.lldp.management_ip.map(|a| a.into()),
+        );
+        let lldp_config_id = lldp_link_config.id;
+        lldp_config.push(lldp_link_config);
 
-        lldp_config.push(lldp_svc_config.clone());
         link_config.push(SwitchPortLinkConfig::new(
             psid,
-            lldp_svc_config.id,
+            lldp_config_id,
             link_name.clone(),
             c.mtu,
             c.fec.into(),
@@ -1066,9 +1069,9 @@ async fn do_switch_port_settings_create(
         ));
     }
     result.link_lldp =
-        diesel::insert_into(lldp_config_dsl::lldp_service_config)
+        diesel::insert_into(lldp_link_config_dsl::lldp_link_config)
             .values(lldp_config.clone())
-            .returning(LldpServiceConfig::as_returning())
+            .returning(LldpLinkConfig::as_returning())
             .get_results_async(conn)
             .await?;
 
@@ -1390,13 +1393,12 @@ async fn do_switch_port_settings_delete(
             .returning(SwitchPortLinkConfig::as_returning())
             .get_results_async(conn)
             .await?;
-
     // delete lldp configs
-    use db::schema::lldp_service_config::{self, dsl as lldp_config_dsl};
-    let lldp_svc_ids: Vec<Uuid> =
-        links.iter().map(|link| link.lldp_service_config_id).collect();
-    diesel::delete(lldp_config_dsl::lldp_service_config)
-        .filter(lldp_service_config::id.eq_any(lldp_svc_ids))
+    use db::schema::lldp_link_config;
+    let lldp_link_ids: Vec<Uuid> =
+        links.iter().map(|link| link.lldp_link_config_id).collect();
+    diesel::delete(lldp_link_config::dsl::lldp_link_config)
+        .filter(lldp_link_config::id.eq_any(lldp_link_ids))
         .execute_async(conn)
         .await?;
 
