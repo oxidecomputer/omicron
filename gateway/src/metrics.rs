@@ -332,7 +332,7 @@ impl oximeter::Producer for Producer {
         // the ringbuffer, so it won't see any samples produced *before* now.
         // Which  is the opposite of what we want!
         let mut samples = Vec::with_capacity(self.sample_rx.len());
-        // Because we recieve the individual samples in a `Vec` of all samples
+        // Because we receive the individual samples in a `Vec` of all samples
         // produced by a poller, let's also sum the length of each of those
         // `Vec`s here, so we can log it later.
         let mut total_samples = 0;
