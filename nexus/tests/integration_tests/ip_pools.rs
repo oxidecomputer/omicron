@@ -1344,12 +1344,12 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
     .expect("Failed to stop instance");
 
     // Simulate the transition, wait until it is in fact stopped.
-    let sa = nexus
-        .instance_sled_by_id(&instance_id)
+    let info = nexus
+        .active_instance_info(&instance_id, None)
         .await
         .unwrap()
         .expect("running instance should be on a sled");
-    sa.instance_finish_transition(instance.identity.id).await;
+    info.sled_client.vmm_finish_transition(info.propolis_id).await;
     instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     // Delete the instance

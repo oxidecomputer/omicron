@@ -2156,12 +2156,15 @@ mod test {
             .await
             .unwrap();
 
-        let sled_id = instance_state
-            .sled_id()
-            .expect("starting instance should have a sled");
+        let vmm_state = instance_state
+            .vmm()
+            .as_ref()
+            .expect("starting instance should have a vmm");
+        let propolis_id = PropolisUuid::from_untyped_uuid(vmm_state.id);
+        let sled_id = SledUuid::from_untyped_uuid(vmm_state.sled_id);
         let sa = nexus.sled_client(&sled_id).await.unwrap();
+        sa.vmm_finish_transition(propolis_id).await;
 
-        sa.instance_finish_transition(instance.identity.id).await;
         let instance_state = nexus
             .datastore()
             .instance_fetch_with_vmm(&opctx, &authz_instance)
