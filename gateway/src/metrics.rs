@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use crate::error::CommunicationError;
-use crate::error::SpCommsError;
 use crate::management_switch::SpIdentifier;
 use crate::management_switch::SpType;
 use crate::MgsArguments;
@@ -44,7 +43,6 @@ pub struct Metrics {
     addrs_tx: watch::Sender<Vec<SocketAddrV6>>,
     rack_id_tx: Option<oneshot::Sender<Uuid>>,
     server: JoinHandle<anyhow::Result<()>>,
-    pollers: JoinHandle<anyhow::Result<()>>,
 }
 
 /// Configuration for metrics.
@@ -90,19 +88,6 @@ struct ValidatedMetricsConfig {
     /// producer.
     max_buffered_sample_chunks: usize,
     dev_config: Option<DevConfig>,
-}
-
-/// Manages SP pollers, making sure that every SP has a poller task.
-struct PollerManager {
-    log: slog::Logger,
-    apictx: Arc<ServerContext>,
-    mgs_id: Uuid,
-    /// Poller tasks
-    tasks: tokio::task::JoinSet<Result<(), SpCommsError>>,
-    /// The manager doesn't actually produce samples, but it needs to be able to
-    /// clone a sender for every poller task it spawns.
-    sample_tx: broadcast::Sender<Vec<Sample>>,
-    poll_interval: Duration,
 }
 
 /// Polls sensor readings from an individual SP.
@@ -210,7 +195,8 @@ impl Metrics {
         } else {
             Some(rack_id_tx)
         };
-        let pollers = {
+
+        tokio::spawn({
             let log = log.new(slog::o!("component" => "sensor-poller"));
             slog::info!(
                 &log,
@@ -219,18 +205,15 @@ impl Metrics {
                 "max_buffered_sample_chunks" => cfg.max_buffered_sample_chunks,
             );
 
-            tokio::spawn(
-                PollerManager {
-                    sample_tx,
-                    apictx,
-                    poll_interval: cfg.sp_poll_interval,
-                    tasks: tokio::task::JoinSet::new(),
-                    log,
-                    mgs_id: id,
-                }
-                .run(rack_id_rx),
+            start_pollers(
+                log,
+                apictx.clone(),
+                rack_id_rx,
+                id,
+                sample_tx,
+                cfg.sp_poll_interval,
             )
-        };
+        });
 
         let (addrs_tx, addrs_rx) =
             tokio::sync::watch::channel(addresses.clone());
@@ -245,7 +228,7 @@ impl Metrics {
                 ServerManager { log, addrs: addrs_rx, registry }.run(cfg),
             )
         };
-        Ok(Self { addrs_tx, rack_id_tx, server, pollers })
+        Ok(Self { addrs_tx, rack_id_tx, server })
     }
 
     pub fn set_rack_id(&mut self, rack_id: Uuid) {
@@ -280,7 +263,6 @@ impl Drop for Metrics {
     fn drop(&mut self) {
         // Clean up our children on drop.
         self.server.abort();
-        self.pollers.abort();
     }
 }
 
@@ -402,148 +384,88 @@ impl oximeter::Producer for Producer {
     }
 }
 
-impl PollerManager {
-    async fn run(
-        mut self,
-        rack_id: oneshot::Receiver<Uuid>,
-    ) -> anyhow::Result<()> {
-        let switch = &self.apictx.mgmt_switch;
+async fn start_pollers(
+    log: slog::Logger,
+    apictx: Arc<ServerContext>,
+    rack_id: oneshot::Receiver<Uuid>,
+    mgs_id: Uuid,
+    sample_tx: broadcast::Sender<Vec<Sample>>,
+    poll_interval: Duration,
+) -> anyhow::Result<()> {
+    let switch = &apictx.mgmt_switch;
 
-        // First, wait until we know what the rack ID is...
-        let rack_id = rack_id.await.context(
-            "rack ID sender has gone away...we must be shutting down",
-        )?;
-
-        // Wait for SP discovery to complete, if it hasn't already.
-        // TODO(eliza): presently, we busy-poll here. It would be nicer to
-        // replace the `OnceLock<Result<LocationMap, ...>` in `ManagementSwitch`
-        // with a `tokio::sync::watch`
-        let sps = backoff::retry_notify_ext(
-            backoff::retry_policy_local(),
-            || async {
-                switch.all_sps().map_err(backoff::BackoffError::transient)
-            },
-            |err, _, elapsed| {
-                let secs = elapsed.as_secs();
-                if secs < 30 {
-                    slog::debug!(
-                        &self.log,
-                        "waiting for SP discovery to complete...";
-                        "elapsed" => ?elapsed,
-                        "error" => err,
-                    );
-                } else if secs < 180 {
-                    slog::info!(
-                        &self.log,
-                        "still waiting for SP discovery to complete...";
-                        "elapsed" => ?elapsed,
-
-                        "error" => err,
-                    )
-                } else {
-                    slog::warn!(
-                        &self.log,
-                        "we have been waiting for SP discovery to complete \
-                         for a pretty long time!";
-                        "elapsed" => ?elapsed,
-                        "error" => err,
-                    )
-                }
-            },
-        )
+    // First, wait until we know what the rack ID is known...
+    let rack_id = rack_id
         .await
-        .expect("we should never return a fatal error here");
+        .context("rack ID sender has gone away...we must be shutting down")?;
 
+    // Wait for SP discovery to complete, if it hasn't already.
+    // TODO(eliza): presently, we busy-poll here. It would be nicer to
+    // replace the `OnceLock<Result<LocationMap, ...>` in `ManagementSwitch`
+    // with a `tokio::sync::watch`
+    let sps = backoff::retry_notify_ext(
+        backoff::retry_policy_local(),
+        || async { switch.all_sps().map_err(backoff::BackoffError::transient) },
+        |err, _, elapsed| {
+            let secs = elapsed.as_secs();
+            if secs < 30 {
+                slog::debug!(
+                    &log,
+                    "waiting for SP discovery to complete...";
+                    "elapsed" => ?elapsed,
+                    "error" => err,
+                );
+            } else if secs < 180 {
+                slog::info!(
+                    &log,
+                    "still waiting for SP discovery to complete...";
+                    "elapsed" => ?elapsed,
+
+                    "error" => err,
+                )
+            } else {
+                slog::warn!(
+                    &log,
+                    "we have been waiting for SP discovery to complete \
+                     for a pretty long time!";
+                    "elapsed" => ?elapsed,
+                    "error" => err,
+                )
+            }
+        },
+    )
+    .await
+    .expect("we should never return a fatal error here");
+
+    slog::info!(
+        &log,
+        "starting to polling SP sensor data every {poll_interval:?}";
+    );
+
+    for (spid, _) in sps {
         slog::info!(
-            &self.log,
-            "starting to polling SP sensor data every {:?}", self.poll_interval;
+            &log,
+            "found a new little friend!";
+            "sp_slot" => ?spid.slot,
+            "chassis_type" => ?spid.typ,
         );
 
-        let mut known_sps = HashMap::with_capacity(NORMAL_NUMBER_OF_SPS);
-        for (spid, _) in sps {
-            slog::info!(
-                &self.log,
-                "found a new little friend!";
-                "sp_slot" => ?spid.slot,
-                "chassis_type" => ?spid.typ,
-            );
-            let task = self.tasks.spawn(self.make_poller(spid, rack_id));
-            let _prev = known_sps.insert(spid, task);
-            debug_assert!(
-                _prev.is_none(),
-                "we should not have clobbered an existing SP poller!"
-            );
-        }
-
-        // All pollers started! Now wait to see if any of them have died...
-        loop {
-            let mut joined = self.tasks.join_next().await;
-            while let Some(result) = joined {
-                if let Err(e) = result {
-                    if cfg!(debug_assertions) {
-                        unreachable!(
-                            "we compile with `panic=\"abort\"`, so a spawned task \
-                             panicking should abort the whole process..."
-                        );
-                    } else {
-                        slog::error!(
-                            &self.log,
-                            "a spawned SP poller task panicked! this should \
-                             never happen: we compile with `panic=\"abort\"`, so \
-                             a spawned task panicking should abort the whole \
-                             process...";
-                            "error" => %e,
-                        );
-                    }
-                }
-                // drain any remaining errors
-                joined = self.tasks.try_join_next();
-            }
-
-            for (spid, poller) in &mut known_sps {
-                // There's still someone checking up on this SP, right?
-                if poller.is_finished() {
-                    // Welp.
-                    slog::info!(
-                        &self.log,
-                        "uh-oh! a known SP's poller task has gone AWOL. restarting it...";
-                        "sp_slot" => ?spid.slot,
-                        "chassis_type" => ?spid.typ,
-                    );
-                    *poller =
-                        self.tasks.spawn(self.make_poller(*spid, rack_id));
-                }
-            }
-        }
-    }
-
-    fn make_poller(
-        &self,
-        spid: SpIdentifier,
-        rack_id: Uuid,
-    ) -> impl std::future::Future<Output = Result<(), SpCommsError>> {
         let poller = SpPoller {
             spid,
             rack_id,
-            mgs_id: self.mgs_id,
-            log: self.log.new(slog::o!(
+            mgs_id,
+            log: log.new(slog::o!(
                 "sp_slot" => spid.slot,
                 "chassis_type" => format!("{:?}", spid.typ),
             )),
             components: HashMap::new(),
             known_state: None,
-            sample_tx: self.sample_tx.clone(),
+            sample_tx: sample_tx.clone(),
         };
-        poller.run(self.poll_interval, self.apictx.clone())
+        tokio::spawn(poller.run(poll_interval, apictx.clone()));
     }
-}
 
-impl Drop for PollerManager {
-    fn drop(&mut self) {
-        // This is why the `JoinSet` is a field on the `PollerManager` struct
-        // rather than a local variable in `async fn run()`!
-        self.tasks.abort_all();
-    }
+    Ok(())
 }
 
 impl SpPoller {
@@ -551,10 +473,22 @@ impl SpPoller {
         mut self,
         poll_interval: Duration,
         apictx: Arc<ServerContext>,
-    ) -> Result<(), SpCommsError> {
+    ) {
         let mut interval = tokio::time::interval(poll_interval);
         let switch = &apictx.mgmt_switch;
-        let sp = switch.sp(self.spid)?;
+        let sp = match switch.sp(self.spid) {
+            Ok(sp) => sp,
+            Err(e) => {
+                unreachable!(
+                    "the `SpPoller::run` function is only called after \
+                     discovery completes successfully, and the `SpIdentifier` \
+                     used was returned by the management switch, so it \
+                     should be valid. however, we saw a {e:?} error when \
+                     looking up {:?}",
+                    self.spid
+                );
+            }
+        };
         loop {
             interval.tick().await;
             slog::trace!(&self.log, "interval elapsed, polling SP...");
@@ -581,7 +515,7 @@ impl SpPoller {
                             "all sample receiver handles have been dropped! \
                              presumably we are shutting down...";
                         );
-                        return Ok(());
+                        return;
                     }
                 }
                 // No SP is currently present for this ID. This may change in
@@ -615,7 +549,7 @@ impl SpPoller {
                                 "SP address watch has been closed, presumably \
                                  we are shutting down";
                             );
-                            return Ok(());
+                            return;
                         }
                     }
                 }
