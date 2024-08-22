@@ -1785,8 +1785,7 @@ impl ServiceManager {
                             "Failed to setup clickhouse keeper profile",
                             err,
                         )
-                    },
-                )?;
+                    })?;
                 RunningZone::boot(installed_zone).await?
             }
 
@@ -4000,8 +3999,8 @@ impl ServiceManager {
             Ok(())
         }
 
-       let log = &self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
- 
+        let log = &self.inner.log.new(o!("stage" => SWITCH_ZONE_INIT_STAGE));
+
         // We expect the switch zone to be running, as we're called immediately
         // after `ensure_zone()` above and we just successfully configured
         // uplinks via DPD running in our switch zone. If somehow we're in any
