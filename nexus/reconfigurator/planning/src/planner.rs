@@ -542,6 +542,7 @@ impl<'a> Planner<'a> {
                     self.blueprint.sled_ensure_zone_multiple_clickhouse_keeper(
                         sled_id,
                         new_total_zone_count,
+                        &self.inventory,
                     )?
                 }
             };

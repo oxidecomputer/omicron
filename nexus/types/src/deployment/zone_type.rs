@@ -168,10 +168,14 @@ impl BlueprintZoneType {
                 blueprint_zone_type::Clickhouse { dataset, address },
             ) => (dataset, DatasetKind::Clickhouse, address),
             BlueprintZoneType::ClickhouseKeeper(
-                blueprint_zone_type::ClickhouseKeeper { dataset, address },
+                blueprint_zone_type::ClickhouseKeeper {
+                    dataset, address, ..
+                },
             ) => (dataset, DatasetKind::ClickhouseKeeper, address),
             BlueprintZoneType::ClickhouseServer(
-                blueprint_zone_type::ClickhouseServer { dataset, address },
+                blueprint_zone_type::ClickhouseServer {
+                    dataset, address, ..
+                },
             ) => (dataset, DatasetKind::ClickhouseServer, address),
             BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb { dataset, address },
@@ -337,7 +341,7 @@ pub mod blueprint_zone_type {
         Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
     )]
     pub struct ClickhouseKeeper {
-        pub keeper_id: u64,
+        pub keeper_id: clickward::KeeperId,
         pub address: SocketAddrV6,
         pub dataset: OmicronZoneDataset,
     }
@@ -347,7 +351,7 @@ pub mod blueprint_zone_type {
         Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
     )]
     pub struct ClickhouseServer {
-        pub server_id: u64,
+        pub server_id: clickward::ServerId,
         pub address: SocketAddrV6,
         pub dataset: OmicronZoneDataset,
     }

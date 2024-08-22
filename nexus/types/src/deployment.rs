@@ -49,6 +49,7 @@ mod tri_map;
 mod zone_type;
 
 pub use clickhouse::ClickhouseClusterConfig;
+pub use clickhouse::ClickhouseIdAllocator;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
 pub use network_resources::OmicronZoneExternalFloatingIp;

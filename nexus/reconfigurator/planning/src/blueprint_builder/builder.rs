@@ -24,6 +24,7 @@ use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::ClickhouseClusterConfig;
+use nexus_types::deployment::ClickhouseIdAllocator;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
@@ -35,6 +36,7 @@ use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::external_api::views::SledState;
+use nexus_types::inventory::Collection;
 use omicron_common::address::get_internal_dns_server_addresses;
 use omicron_common::address::get_sled_address;
 use omicron_common::address::get_switch_zone_address;
@@ -206,6 +208,7 @@ pub struct BlueprintBuilder<'a> {
     disks: BlueprintDisksBuilder<'a>,
     sled_state: BTreeMap<SledUuid, SledState>,
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
+    clickhouse_id_allocator: ClickhouseIdAllocator,
 
     creator: String,
     operations: Vec<Operation>,
@@ -263,7 +266,7 @@ impl<'a> BlueprintBuilder<'a> {
             .collect();
         let cluster_name = format!("cluster-{}", Uuid::new_v4());
         let clickhouse_cluster_config =
-            ClickhouseClusterConfig::new(cluster_name, &blueprint_zones);
+            ClickhouseClusterConfig::new(cluster_name);
         Blueprint {
             id: rng.blueprint_rng.next(),
             blueprint_zones,
@@ -334,6 +337,9 @@ impl<'a> BlueprintBuilder<'a> {
             sled_state,
             cockroachdb_setting_preserve_downgrade: parent_blueprint
                 .cockroachdb_setting_preserve_downgrade,
+            clickhouse_id_allocator: ClickhouseIdAllocator::from(
+                &parent_blueprint.clickhouse_cluster_config,
+            ),
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
@@ -367,11 +373,6 @@ impl<'a> BlueprintBuilder<'a> {
             .disks
             .into_disks_map(self.input.all_sled_ids(SledFilter::InService));
 
-        let clickhouse_cluster_config = ClickhouseClusterConfig::new_based_on(
-            &self.log,
-            &self.parent_blueprint.clickhouse_cluster_config,
-            &blueprint_zones,
-        );
         Blueprint {
             id: self.rng.blueprint_rng.next(),
             blueprint_zones,
@@ -387,7 +388,8 @@ impl<'a> BlueprintBuilder<'a> {
                 .clone(),
             cockroachdb_setting_preserve_downgrade: self
                 .cockroachdb_setting_preserve_downgrade,
-            clickhouse_cluster_config,
+            // TODO: This will change when generations and IDs get bumped
+            clickhouse_cluster_config: self.parent.clickhouse_cluster_config,
             time_created: now_db_precision(),
             creator: self.creator,
             comment: self
@@ -971,6 +973,7 @@ impl<'a> BlueprintBuilder<'a> {
             let address = SocketAddrV6::new(underlay_ip, port, 0, 0);
             let zone_type = BlueprintZoneType::ClickhouseServer(
                 blueprint_zone_type::ClickhouseServer {
+                    server_id: self.clickhouse_id_allocator.next_server_id(),
                     address,
                     dataset: OmicronZoneDataset {
                         pool_name: pool_name.clone(),
@@ -999,6 +1002,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
         desired_zone_count: usize,
+        inventory: &Collection,
     ) -> Result<EnsureMultiple, Error> {
         //  How many clickhouse keeper zones do we want to add?
         let clickhouse_keeper_count = self.sled_num_running_zones_of_kind(
@@ -1017,7 +1021,19 @@ impl<'a> BlueprintBuilder<'a> {
                     )));
                 }
             };
-        for _ in 0..num_clickhouse_keepers_to_add {
+
+        // Clickhouse keeper clusters only allow adding or removing one node at
+        // a time. We must make sure that a keeper node is not currently being
+        // added or removed before we add a new one.
+        //
+        // Therefore, we always return only 0 or 1 zones here, even if
+        // `num_clickhouse_keepers_to_add` is greater than 1.
+        if num_clickhouse_keepers_to_add > 0 {
+            if self.is_active_clickhouse_keeper_reconfiguration(inventory) {
+                // We are currently trying to add or remove a node and cannot
+                // perform a concurrent addition
+                return 0;
+            }
             let zone_id = self.rng.zone_rng.next();
             let underlay_ip = self.sled_alloc_ip(sled_id)?;
             let pool_name =
@@ -1026,6 +1042,7 @@ impl<'a> BlueprintBuilder<'a> {
             let address = SocketAddrV6::new(underlay_ip, port, 0, 0);
             let zone_type = BlueprintZoneType::ClickhouseKeeper(
                 blueprint_zone_type::ClickhouseKeeper {
+                    keeper_id: self.clickhouse_id_allocator.next_keeper_id(),
                     address,
                     dataset: OmicronZoneDataset {
                         pool_name: pool_name.clone(),
@@ -1044,10 +1061,7 @@ impl<'a> BlueprintBuilder<'a> {
             self.sled_add_zone(sled_id, zone)?;
         }
 
-        Ok(EnsureMultiple::Changed {
-            added: num_clickhouse_keepers_to_add,
-            removed: 0,
-        })
+        Ok(EnsureMultiple::Changed { added: 1, removed: 0 })
     }
 
     pub fn sled_promote_internal_ntp_to_boundary_ntp(
@@ -1310,6 +1324,78 @@ impl<'a> BlueprintBuilder<'a> {
                 sled_id
             ))
         })
+    }
+
+    /// Is a keeper node being added or removed from the keeper configuration already?
+    fn is_active_clickhouse_keeper_reconfiguration(
+        &self,
+        inventory: &Collection,
+    ) -> bool {
+        /// Has this builder already made a modification?
+        if self
+            .parent_blueprint
+            .clickhouse_cluster_config
+            .has_configuration_changed(&self.clickhouse_id_allocator)
+        {
+            return true;
+        }
+
+        /// Get the latest clickhouse cluster membership
+        let Some((keeper_zone_id, membership)) =
+            inventory.latest_clickhouse_keeper_membership()
+        else {
+            // We can't retrieve the latest membership and so we assume
+            // that a reconfiguration is underway for safety reasons. In
+            // any case, if we can't talk to any `clickhouse-admin` servers
+            // in the `ClickhouseKeeper` zones then we cannot attempt a
+            // reconfiguration.
+            return true;
+        };
+
+        // Ensure all in service keeper zones are part of the raft configuration
+        if !self
+            .parent_blueprint
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .all(|(_, bp_zone_config)| {
+                if let BlueprintZoneType::ClickhouseKeeper(
+                    blueprint_zone_type::ClickhouseKeeper { keeper_id, .. },
+                ) = bp_zone_config.zone_type
+                {
+                    // Check the inventory to see if a keeper that should be
+                    // running is not part of the raft configuration.
+                    membership.raft_config.contains(&keeper_id)
+                }
+            })
+        {
+            // We are still attempting to add this node
+            //
+            // TODO: We need a way to detect if the attempted addition actually
+            // failed here This will involve querying the keeper cluster via
+            // inventory in case the configuration doesn't chnage for a while.
+            // I don't know how to get that information out of the keeper yet,
+            // except for by reading the log files.
+            return true;
+        }
+
+        /// Ensure all expunged zones are no longer part of the configuration
+        if !self
+            .parent_blueprint
+            .all_omicron_zones(BlueprintZoneFilter::Expunged)
+            .all(|(_, bp_zone_config)| {
+                if let BlueprintZoneType::ClickhouseKeeper(
+                    blueprint_zone_type::ClickhouseKeeper { keeper_id, .. },
+                ) = bp_zone_config.zone_type
+                {
+                    !membership.raft_config.contains(&keeper_id)
+                }
+            })
+        {
+            // We are still attempting to remove keepers for expunged zones from the configuration
+            return true;
+        }
+
+        /// There is no ongoing reconfiguration of the keeper raft cluster
+        false
     }
 }
 

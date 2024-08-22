@@ -13,6 +13,7 @@ use crate::external_api::params::PhysicalDiskKind;
 use crate::external_api::params::UninitializedSledId;
 use chrono::DateTime;
 use chrono::Utc;
+use clickward::KeeperId;
 pub use gateway_client::types::PowerState;
 pub use gateway_client::types::RotImageError;
 pub use gateway_client::types::RotSlot;
@@ -23,7 +24,6 @@ use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
 pub use omicron_common::api::internal::shared::NetworkInterface;
 pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
 pub use omicron_common::api::internal::shared::SourceNatConfig;
@@ -118,8 +118,11 @@ pub struct Collection {
     /// Omicron zones found, by *sled* id
     pub omicron_zones: BTreeMap<SledUuid, OmicronZonesFound>,
 
-    /// Clickhouse Keeper state, by *zone* id
-    pub clickhouse_keepers: BTreeMap<OmicronZoneUuid, ClickhouseKeeperState>,
+    /// The raft configuration (cluster membership) of the clickhouse keeper
+    /// cluster as returned from each available keeper via `clickhouse-admin` in
+    /// the `ClickhouseKeeper` zone
+    pub clickhouse_keeper_cluster_membership:
+        BTreeMap<OmicronZoneUuid, ClickhouseKeeperClusterMembership>,
 }
 
 impl Collection {
@@ -156,6 +159,27 @@ impl Collection {
             .iter()
             .filter(|(_, inventory)| inventory.sled_role == SledRole::Scrimlet)
             .map(|(sled_id, _)| *sled_id)
+    }
+
+    /// Return the latest clickhouse keeper configuration in this last collection, if there is one.
+    pub fn latest_clickhouse_keeper_membership(
+        &self,
+    ) -> Option<(OmicronZoneUuid, ClickhouseKeeperClusterMembership)> {
+        let mut latest = None;
+        for (zone_id, membership) in &self.clickhouse_keeper_cluster_membership
+        {
+            match &latest {
+                None => latest = Some((*zone_id, membership.clone())),
+                Some((_, latest_membership)) => {
+                    if membership.leader_committed_log_index
+                        > latest_membership.leader_committed_log_index
+                    {
+                        latest = Some((*zone_id, membership.clone()));
+                    }
+                }
+            }
+        }
+        latest
     }
 }
 
@@ -430,31 +454,16 @@ pub struct OmicronZonesFound {
     pub zones: OmicronZonesConfig,
 }
 
-/// The state of a Clickhouse Keeper node
+/// The configuration of the clickhouse keeper raft cluster returned from a
+/// single keeper node
 ///
-/// This is retrieved from the `clickhouse-admin` dropshot server running
-/// in a `ClickhouseKeeper` zone and is used to manage reconfigurations of a
-/// clickhouse keeper cluster.
+/// Each keeper is asked for its known raft configuration via `clickhouse-admin`
+/// dropshot servers running in `ClickhouseKeeper` zones. state. We include the
+/// leader committed log index known to the current keeper node (whether or not
+/// it is the leader) to determine which configuration is newest.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub enum ClickhouseKeeperState {
-    /// The keeper process is not running because it has not received a
-    /// configuration yet
-    NeedsConfiguration,
-
-    /// The keeper process is running, but is not yet part of a cluster.
-    /// It's generated configuration in the blueprint is `keeper_config_gen`
-    RunningStandalone { keeper_id: u64, keeper_config_gen: Generation },
-
-    /// The keeper process is part of a cluster at the given generation
-    ActiveMember { keeper_id: u64, keeper_config_gen: Generation },
-
-    /// The keeper process has failed to join the cluster.
-    ///
-    /// If this occurs, a new keeper process with a new id and configuration
-    /// should be started in the existing zone or the zone should be expunged.
-    FailedToJoin { keeper_id: u64, keeper_config_gen: Generation },
-
-    /// The keeper has been removed from the cluster. At no point may a keeper
-    /// that has been removed rejoin.
-    Removed { keeper_id: u64, keeper_config_gen: Generation },
+pub struct ClickhouseKeeperClusterMembership {
+    pub queried_keeper: KeeperId,
+    pub leader_committed_log_index: u64,
+    pub raft_config: BTreeSet<KeeperId>,
 }

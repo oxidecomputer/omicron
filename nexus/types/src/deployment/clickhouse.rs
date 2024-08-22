@@ -27,6 +27,52 @@ use uuid::Uuid;
 
 const BASE_DIR: &str = "/opt/oxide/clickhouse";
 
+/// A mechanism used by the `BlueprintBuilder` to update clickhouse server and
+/// keeper ids
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+pub struct ClickhouseIdAllocator {
+    /// Clickhouse Server ids must be unique and are handed out monotonically. Keep track
+    /// of the last used one.
+    max_used_server_id: ServerId,
+    /// CLickhouse Keeper ids must be unique and are handed out monotonically. Keep track
+    /// of the last used one.
+    max_used_keeper_id: KeeperId,
+}
+
+impl ClickhouseIdAllocator {
+    pub fn new(
+        max_used_server_id: ServerId,
+        max_used_keeper_id: KeeperId,
+    ) -> ClickhouseIdAllocator {
+        ClickhouseIdAllocator { max_used_server_id, max_used_keeper_id }
+    }
+
+    pub fn next_server_id(&mut self) -> ServerId {
+        self.max_used_server_id += 1.into();
+        self.max_used_server_id
+    }
+    pub fn next_keeper_id(&mut self) -> KeeperId {
+        self.max_used_keeper_id += 1.into();
+        self.max_used_keeper_id
+    }
+
+    pub fn max_used_server_id(&self) -> ServerId {
+        self.max_used_server_id
+    }
+    pub fn max_used_keeper_id(&self) -> KeeperId {
+        self.max_used_keeper_id
+    }
+}
+
+impl From<&ClickhouseClusterConfig> for ClickhouseIdAllocator {
+    fn from(value: &ClickhouseClusterConfig) -> Self {
+        ClickhouseIdAllocator::new(
+            value.max_used_server_id,
+            value.max_used_keeper_id,
+        )
+    }
+}
+
 /// Global configuration for all clickhouse servers (replicas) and keepers
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub struct ClickhouseClusterConfig {
@@ -35,12 +81,12 @@ pub struct ClickhouseClusterConfig {
     /// This is used by `clickhouse-admin` in the clickhouse server and keeper
     /// zones to discard old configurations.
     pub generation: Generation,
-    /// CLickhouse Server ids must be unique and are handed out monotonically. Keep track
+    /// Clickhouse Server ids must be unique and are handed out monotonically. Keep track
     /// of the last used one.
-    pub max_used_server_id: u64,
+    pub max_used_server_id: ServerId,
     /// CLickhouse Keeper ids must be unique and are handed out monotonically. Keep track
     /// of the last used one.
-    pub max_used_keeper_id: u64,
+    pub max_used_keeper_id: KeeperId,
     /// An arbitrary name for the Clickhouse cluster shared by all nodes
     pub cluster_name: String,
     /// An arbitrary string shared by all nodes used at runtime to determine whether
@@ -49,17 +95,43 @@ pub struct ClickhouseClusterConfig {
 }
 
 impl ClickhouseClusterConfig {
-    pub fn new(
-        cluster_name: String,
-        secret: String,
-    ) -> ClickhouseClusterConfig {
+    pub fn new(cluster_name: String) -> ClickhouseClusterConfig {
         ClickhouseClusterConfig {
             generation: Generation::new(),
-            max_used_server_id: 0,
-            max_used_keeper_id: 0,
+            max_used_server_id: 0.into(),
+            max_used_keeper_id: 0.into(),
             cluster_name,
-            secret,
+            secret: Uuid::new_v4().to_string(),
         }
+    }
+
+    /// If new Ids have been allocated, then update the internal state and
+    /// return true, otherwise return false.
+    pub fn update_configuration(
+        &mut self,
+        allocator: &ClickhouseIdAllocator,
+    ) -> bool {
+        let mut updated = false;
+        if self.max_used_server_id < allocator.max_used_server_id() {
+            self.max_used_server_id = allocator.max_used_server_id();
+            updated = true;
+        }
+        if self.max_used_keeper_id < allocator.max_used_keeper_id() {
+            self.max_used_keeper_id = allocator.max_used_keeper_id();
+            updated = true;
+        }
+        if updated {
+            self.generation = self.generation.next();
+        }
+        updated
+    }
+
+    pub fn has_configuration_changed(
+        &self,
+        allocator: &ClickhouseIdAllocator,
+    ) -> bool {
+        self.max_used_server_id != allocator.max_used_server_id()
+            || self.max_used_keeper_id != allocator.max_used_keeper_id()
     }
 }
 
