@@ -207,3 +207,10 @@ pub struct OximeterInfo {
     /// The address on which this oximeter instance listens for requests
     pub address: SocketAddr,
 }
+
+/// Parameters used when migrating an instance.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceMigrateRequest {
+    /// The ID of the sled to which to migrate the target instance.
+    pub dst_sled_id: Uuid,
+}

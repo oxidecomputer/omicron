@@ -20,6 +20,8 @@ use std::{
 use strum::EnumCount;
 use uuid::Uuid;
 
+use super::nexus::HostIdentifier;
+
 /// The type of network interface
 #[derive(
     Clone,
@@ -304,6 +306,9 @@ pub struct RouteConfig {
     /// The VLAN id associated with this route.
     #[serde(default)]
     pub vlan_id: Option<u16>,
+    /// The local preference associated with this route.
+    #[serde(default)]
+    pub local_pref: Option<u32>,
 }
 
 #[derive(
@@ -375,6 +380,84 @@ impl FromStr for UplinkAddressConfig {
     }
 }
 
+#[derive(
+    Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+/// To what extent should this port participate in LLDP
+pub enum LldpAdminStatus {
+    #[default]
+    Enabled,
+    Disabled,
+    RxOnly,
+    TxOnly,
+}
+
+impl fmt::Display for LldpAdminStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LldpAdminStatus::Enabled => write!(f, "enabled"),
+            LldpAdminStatus::Disabled => write!(f, "disabled"),
+            LldpAdminStatus::RxOnly => write!(f, "rx_only"),
+            LldpAdminStatus::TxOnly => write!(f, "tx_only"),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ParseLldpAdminStatusError(String);
+
+impl std::fmt::Display for ParseLldpAdminStatusError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "LLDP admin status error: {}", self.0)
+    }
+}
+
+impl FromStr for LldpAdminStatus {
+    type Err = ParseLldpAdminStatusError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "enabled" => Ok(Self::Enabled),
+            "disabled" => Ok(Self::Disabled),
+            "rxonly" | "rx_only" => Ok(Self::RxOnly),
+            "txonly" | "tx_only" => Ok(Self::TxOnly),
+            _ => Err(ParseLldpAdminStatusError(format!(
+                "not a valid admin status: {s}"
+            ))),
+        }
+    }
+}
+
+/// Per-port LLDP configuration settings.  Only the "status" setting is
+/// mandatory.  All other fields have natural defaults or may be inherited from
+/// the switch.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+pub struct LldpPortConfig {
+    /// To what extent should this port participate in LLDP
+    pub status: LldpAdminStatus,
+    /// Chassis ID to advertise.  If this is set, it will be advertised as a
+    /// LocallyAssigned ID type.  If this is not set, it will be
+    /// inherited from the switch-level settings.
+    pub chassis_id: Option<String>,
+    /// Port ID to advertise.  If this is set, it will be advertised as a
+    /// LocallyAssigned ID type.  If this is not set, it will be set to
+    /// the port name. e.g., qsfp0/0.
+    pub port_id: Option<String>,
+    /// Port description to advertise.  If this is not set, no
+    /// description will be advertised.
+    pub port_description: Option<String>,
+    /// System name to advertise.  If this is not set, it will be
+    /// inherited from the switch-level settings.
+    pub system_name: Option<String>,
+    /// System description to advertise.  If this is not set, it will be
+    /// inherited from the switch-level settings.
+    pub system_description: Option<String>,
+    /// Management IP addresses to advertise.  If this is not set, it will be
+    /// inherited from the switch-level settings.
+    pub management_addrs: Option<Vec<IpAddr>>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct PortConfigV2 {
     /// The set of routes associated with this port.
@@ -394,6 +477,8 @@ pub struct PortConfigV2 {
     /// Whether or not to set autonegotiation
     #[serde(default)]
     pub autoneg: bool,
+    /// LLDP configuration for this port
+    pub lldp: Option<LldpPortConfig>,
 }
 
 /// A set of switch uplinks.
@@ -410,11 +495,13 @@ pub struct HostPortConfig {
     /// IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport
     /// (must be in infra_ip pool).  May also include an optional VLAN ID.
     pub addrs: Vec<UplinkAddressConfig>,
+
+    pub lldp: Option<LldpPortConfig>,
 }
 
 impl From<PortConfigV2> for HostPortConfig {
     fn from(x: PortConfigV2) -> Self {
-        Self { port: x.port, addrs: x.addresses }
+        Self { port: x.port, addrs: x.addresses, lldp: x.lldp.clone() }
     }
 }
 
@@ -636,6 +723,53 @@ pub struct ResolvedVpcRoute {
     pub target: RouterTarget,
 }
 
+/// VPC firewall rule after object name resolution has been performed by Nexus
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ResolvedVpcFirewallRule {
+    pub status: external::VpcFirewallRuleStatus,
+    pub direction: external::VpcFirewallRuleDirection,
+    pub targets: Vec<NetworkInterface>,
+    pub filter_hosts: Option<Vec<HostIdentifier>>,
+    pub filter_ports: Option<Vec<external::L4PortRange>>,
+    pub filter_protocols: Option<Vec<external::VpcFirewallRuleProtocol>>,
+    pub action: external::VpcFirewallRuleAction,
+    pub priority: external::VpcFirewallRulePriority,
+}
+
+/// A mapping from a virtual NIC to a physical host
+#[derive(
+    Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct VirtualNetworkInterfaceHost {
+    pub virtual_ip: IpAddr,
+    pub virtual_mac: external::MacAddr,
+    pub physical_host_ip: Ipv6Addr,
+    pub vni: external::Vni,
+}
+
+/// DHCP configuration for a port
+///
+/// Not present here: Hostname (DHCPv4 option 12; used in DHCPv6 option 39); we
+/// use `InstanceRuntimeState::hostname` for this value.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DhcpConfig {
+    /// DNS servers to send to the instance
+    ///
+    /// (DHCPv4 option 6; DHCPv6 option 23)
+    pub dns_servers: Vec<IpAddr>,
+
+    /// DNS zone this instance's hostname belongs to (e.g. the `project.example`
+    /// part of `instance1.project.example`)
+    ///
+    /// (DHCPv4 option 15; used in DHCPv6 option 39)
+    pub host_domain: Option<String>,
+
+    /// DNS search domains
+    ///
+    /// (DHCPv4 option 119; DHCPv6 option 24)
+    pub search_domains: Vec<String>,
+}
+
 /// The target for a given router entry.
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
@@ -709,14 +843,20 @@ pub enum DatasetKind {
     // Durable datasets for zones
     Cockroach,
     Crucible,
+    /// Used for single-node clickhouse deployments
     Clickhouse,
+    /// Used for replicated clickhouse deployments
     ClickhouseKeeper,
+    /// Used for replicated clickhouse deployments
+    ClickhouseServer,
     ExternalDns,
     InternalDns,
 
     // Zone filesystems
     ZoneRoot,
-    Zone { name: String },
+    Zone {
+        name: String,
+    },
 
     // Other datasets
     Debug,
@@ -779,7 +919,7 @@ impl DatasetKind {
         use DatasetKind::*;
         match self {
             Cockroach | Crucible | Clickhouse | ClickhouseKeeper
-            | ExternalDns | InternalDns => true,
+            | ClickhouseServer | ExternalDns | InternalDns => true,
             ZoneRoot | Zone { .. } | Debug => false,
         }
     }
@@ -809,6 +949,7 @@ impl fmt::Display for DatasetKind {
             Cockroach => "cockroachdb",
             Clickhouse => "clickhouse",
             ClickhouseKeeper => "clickhouse_keeper",
+            ClickhouseServer => "clickhouse_server",
             ExternalDns => "external_dns",
             InternalDns => "internal_dns",
             ZoneRoot => "zone",

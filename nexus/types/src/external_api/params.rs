@@ -1093,12 +1093,6 @@ impl JsonSchema for UserData {
     }
 }
 
-/// Migration parameters for an `Instance`
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceMigrate {
-    pub dst_sled_id: Uuid,
-}
-
 /// Forwarded to a propolis server to request the contents of an Instance's serial console.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct InstanceSerialConsoleRequest {
@@ -1506,7 +1500,7 @@ pub struct LinkConfigCreate {
     pub mtu: u16,
 
     /// The link-layer discovery protocol (LLDP) configuration for the link.
-    pub lldp: LldpServiceConfigCreate,
+    pub lldp: LldpLinkConfigCreate,
 
     /// The forward error correction mode of the link.
     pub fec: LinkFec,
@@ -1518,16 +1512,29 @@ pub struct LinkConfigCreate {
     pub autoneg: bool,
 }
 
-/// The LLDP configuration associated with a port. LLDP may be either enabled or
-/// disabled, if enabled, an LLDP configuration must be provided by name or id.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct LldpServiceConfigCreate {
+/// The LLDP configuration associated with a port.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct LldpLinkConfigCreate {
     /// Whether or not LLDP is enabled.
     pub enabled: bool,
 
-    /// A reference to the LLDP configuration used. Must not be `None` when
-    /// `enabled` is `true`.
-    pub lldp_config: Option<NameOrId>,
+    /// The LLDP link name TLV.
+    pub link_name: Option<String>,
+
+    /// The LLDP link description TLV.
+    pub link_description: Option<String>,
+
+    /// The LLDP chassis identifier TLV.
+    pub chassis_id: Option<String>,
+
+    /// The LLDP system name TLV.
+    pub system_name: Option<String>,
+
+    /// The LLDP system description TLV.
+    pub system_description: Option<String>,
+
+    /// The LLDP management IP TLV.
+    pub management_ip: Option<IpAddr>,
 }
 
 /// A layer-3 switch interface configuration. When IPv6 is enabled, a link local
@@ -1587,6 +1594,10 @@ pub struct Route {
 
     /// VLAN id the gateway is reachable over.
     pub vid: Option<u16>,
+
+    /// Local preference for route. Higher preference indictes precedence
+    /// within and across protocols.
+    pub local_pref: Option<u32>,
 }
 
 /// Select a BGP config by a name or id.
@@ -1616,6 +1627,13 @@ pub struct BgpAnnounceSetCreate {
 
     /// The announcements in this set.
     pub announcement: Vec<BgpAnnouncementCreate>,
+}
+
+/// Optionally select a BGP announce set by a name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct OptionalBgpAnnounceSetSelector {
+    /// A name or id to use when s electing BGP port settings
+    pub name_or_id: Option<NameOrId>,
 }
 
 /// Select a BGP announce set by a name or id.

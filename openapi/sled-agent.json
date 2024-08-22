@@ -68,7 +68,6 @@
     },
     "/boot-disk/{boot_disk}/os/write/status": {
       "get": {
-        "summary": "Get the status of writing a new host OS",
         "operationId": "host_os_write_status_get",
         "parameters": [
           {
@@ -2927,6 +2926,14 @@
               "$ref": "#/components/schemas/UplinkAddressConfig"
             }
           },
+          "lldp": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpPortConfig"
+              }
+            ]
+          },
           "port": {
             "description": "Switchport to use for external connectivity",
             "type": "string"
@@ -3119,7 +3126,7 @@
           "firewall_rules": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/VpcFirewallRule"
+              "$ref": "#/components/schemas/ResolvedVpcFirewallRule"
             }
           },
           "floating_ips": {
@@ -3579,6 +3586,67 @@
         "minLength": 1,
         "maxLength": 11
       },
+      "LldpAdminStatus": {
+        "description": "To what extent should this port participate in LLDP",
+        "type": "string",
+        "enum": [
+          "enabled",
+          "disabled",
+          "rx_only",
+          "tx_only"
+        ]
+      },
+      "LldpPortConfig": {
+        "description": "Per-port LLDP configuration settings.  Only the \"status\" setting is mandatory.  All other fields have natural defaults or may be inherited from the switch.",
+        "type": "object",
+        "properties": {
+          "chassis_id": {
+            "nullable": true,
+            "description": "Chassis ID to advertise.  If this is set, it will be advertised as a LocallyAssigned ID type.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          },
+          "management_addrs": {
+            "nullable": true,
+            "description": "Management IP addresses to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
+          "port_description": {
+            "nullable": true,
+            "description": "Port description to advertise.  If this is not set, no description will be advertised.",
+            "type": "string"
+          },
+          "port_id": {
+            "nullable": true,
+            "description": "Port ID to advertise.  If this is set, it will be advertised as a LocallyAssigned ID type.  If this is not set, it will be set to the port name. e.g., qsfp0/0.",
+            "type": "string"
+          },
+          "status": {
+            "description": "To what extent should this port participate in LLDP",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpAdminStatus"
+              }
+            ]
+          },
+          "system_description": {
+            "nullable": true,
+            "description": "System description to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          },
+          "system_name": {
+            "nullable": true,
+            "description": "System name to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
       "MacAddr": {
         "example": "ff:ff:ff:ff:ff:ff",
         "title": "A MAC address",
@@ -3921,6 +3989,7 @@
             ]
           },
           {
+            "description": "Type of clickhouse zone used for a single node clickhouse deployment",
             "type": "object",
             "properties": {
               "address": {
@@ -3943,6 +4012,7 @@
             ]
           },
           {
+            "description": "A zone used to run a Clickhouse Keeper node\n\nKeepers are only used in replicated clickhouse setups",
             "type": "object",
             "properties": {
               "address": {
@@ -3955,6 +4025,29 @@
                 "type": "string",
                 "enum": [
                   "clickhouse_keeper"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "description": "A zone used to run a Clickhouse Server in a replicated deployment",
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse_server"
                 ]
               }
             },
@@ -4254,6 +4347,15 @@
               "$ref": "#/components/schemas/BgpPeerConfig"
             }
           },
+          "lldp": {
+            "nullable": true,
+            "description": "LLDP configuration for this port",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpPortConfig"
+              }
+            ]
+          },
           "port": {
             "description": "Nmae of the port this config applies to.",
             "type": "string"
@@ -4400,6 +4502,60 @@
           "rack_subnet"
         ]
       },
+      "ResolvedVpcFirewallRule": {
+        "description": "VPC firewall rule after object name resolution has been performed by Nexus",
+        "type": "object",
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/VpcFirewallRuleAction"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/VpcFirewallRuleDirection"
+          },
+          "filter_hosts": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HostIdentifier"
+            }
+          },
+          "filter_ports": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/L4PortRange"
+            }
+          },
+          "filter_protocols": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRuleProtocol"
+            }
+          },
+          "priority": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "status": {
+            "$ref": "#/components/schemas/VpcFirewallRuleStatus"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkInterface"
+            }
+          }
+        },
+        "required": [
+          "action",
+          "direction",
+          "priority",
+          "status",
+          "targets"
+        ]
+      },
       "ResolvedVpcRoute": {
         "description": "A VPC route resolved into a concrete target.",
         "type": "object",
@@ -4474,6 +4630,14 @@
                 "$ref": "#/components/schemas/IpNet"
               }
             ]
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "The local preference associated with this route.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "nexthop": {
             "description": "The nexthop/gateway address.",
@@ -5254,60 +5418,6 @@
           }
         ]
       },
-      "VpcFirewallRule": {
-        "description": "VPC firewall rule after object name resolution has been performed by Nexus",
-        "type": "object",
-        "properties": {
-          "action": {
-            "$ref": "#/components/schemas/VpcFirewallRuleAction"
-          },
-          "direction": {
-            "$ref": "#/components/schemas/VpcFirewallRuleDirection"
-          },
-          "filter_hosts": {
-            "nullable": true,
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/HostIdentifier"
-            }
-          },
-          "filter_ports": {
-            "nullable": true,
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/L4PortRange"
-            }
-          },
-          "filter_protocols": {
-            "nullable": true,
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/VpcFirewallRuleProtocol"
-            }
-          },
-          "priority": {
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          },
-          "status": {
-            "$ref": "#/components/schemas/VpcFirewallRuleStatus"
-          },
-          "targets": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/NetworkInterface"
-            }
-          }
-        },
-        "required": [
-          "action",
-          "direction",
-          "priority",
-          "status",
-          "targets"
-        ]
-      },
       "VpcFirewallRuleAction": {
         "type": "string",
         "enum": [
@@ -5345,7 +5455,7 @@
           "rules": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/VpcFirewallRule"
+              "$ref": "#/components/schemas/ResolvedVpcFirewallRule"
             }
           },
           "vni": {
@@ -5470,7 +5580,7 @@
         "pattern": "^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
       },
       "M2Slot": {
-        "description": "An M.2 slot that was written.",
+        "description": "Describes an M.2 slot, often in the context of writing a system image to it.",
         "type": "string",
         "enum": [
           "A",

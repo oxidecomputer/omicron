@@ -26,12 +26,13 @@
 //! ```
 //!
 //! The first thing this saga does is set itself as the "operating saga" for the
-//! request, and change the state to "Allocating". Then, it performs the following
-//! steps:
+//! request, and change the state to "Allocating". Then, it performs the
+//! following steps:
 //!
 //! 1. Allocate a new region
 //!
-//! 2. For the affected Volume, swap the region being replaced with the new region.
+//! 2. For the affected Volume, swap the region being replaced with the new
+//!    region.
 //!
 //! 3. Create a fake volume that can be later deleted with the region being
 //!    replaced.
@@ -48,6 +49,7 @@ use super::{
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
     ACTION_GENERATE_ID,
 };
+use crate::app::sagas::common_storage::find_only_new_region;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::RegionAllocationStrategy;
 use crate::app::{authn, db};
@@ -57,7 +59,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::CrucibleOpts;
 use sled_agent_client::types::VolumeConstructionRequest;
-use slog::Logger;
 use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
@@ -283,36 +284,6 @@ async fn srrs_alloc_new_region(
         .map_err(ActionError::action_failed)?;
 
     Ok(datasets_and_regions)
-}
-
-fn find_only_new_region(
-    log: &Logger,
-    existing_datasets_and_regions: Vec<(db::model::Dataset, db::model::Region)>,
-    new_datasets_and_regions: Vec<(db::model::Dataset, db::model::Region)>,
-) -> Option<(db::model::Dataset, db::model::Region)> {
-    // Only filter on whether or not a Region is in the existing list! Datasets
-    // can change values (like size_used) if this saga interleaves with other
-    // saga runs of the same type.
-    let mut dataset_and_region: Vec<(db::model::Dataset, db::model::Region)> =
-        new_datasets_and_regions
-            .into_iter()
-            .filter(|(_, r)| {
-                !existing_datasets_and_regions.iter().any(|(_, er)| er == r)
-            })
-            .collect();
-
-    if dataset_and_region.len() != 1 {
-        error!(
-            log,
-            "find_only_new_region saw dataset_and_region len {}: {:?}",
-            dataset_and_region.len(),
-            dataset_and_region,
-        );
-
-        None
-    } else {
-        dataset_and_region.pop()
-    }
 }
 
 async fn srrs_alloc_new_region_undo(

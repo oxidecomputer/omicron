@@ -1795,16 +1795,16 @@ pub struct VolumeReplacementParams {
 // parameters
 
 #[derive(Debug, Clone, Copy)]
-pub struct VolumeWithTarget(Uuid);
+pub struct VolumeWithTarget(pub Uuid);
 
 #[derive(Debug, Clone, Copy)]
-pub struct ExistingTarget(SocketAddrV6);
+pub struct ExistingTarget(pub SocketAddrV6);
 
 #[derive(Debug, Clone, Copy)]
-pub struct ReplacementTarget(SocketAddrV6);
+pub struct ReplacementTarget(pub SocketAddrV6);
 
 #[derive(Debug, Clone, Copy)]
-pub struct VolumeToDelete(Uuid);
+pub struct VolumeToDelete(pub Uuid);
 
 impl DataStore {
     /// Replace a read-write region in a Volume with a new region.

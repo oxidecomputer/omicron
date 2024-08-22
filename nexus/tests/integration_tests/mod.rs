@@ -11,6 +11,7 @@ mod basic;
 mod certificates;
 mod commands;
 mod console_api;
+mod demo_saga;
 mod device_auth;
 mod disks;
 mod external_ips;

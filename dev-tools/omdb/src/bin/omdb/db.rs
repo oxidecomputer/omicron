@@ -72,6 +72,8 @@ use nexus_db_model::RegionReplacementState;
 use nexus_db_model::RegionReplacementStep;
 use nexus_db_model::RegionReplacementStepType;
 use nexus_db_model::RegionSnapshot;
+use nexus_db_model::RegionSnapshotReplacement;
+use nexus_db_model::RegionSnapshotReplacementState;
 use nexus_db_model::Sled;
 use nexus_db_model::Snapshot;
 use nexus_db_model::SnapshotState;
@@ -302,6 +304,9 @@ enum DbCommands {
     /// Query for information about region replacements, optionally manually
     /// triggering one.
     RegionReplacement(RegionReplacementArgs),
+    /// Query for information about region snapshot replacements, optionally
+    /// manually triggering one.
+    RegionSnapshotReplacement(RegionSnapshotReplacementArgs),
     /// Print information about sleds
     Sleds(SledsArgs),
     /// Print information about customer instances
@@ -660,6 +665,53 @@ struct SnapshotInfoArgs {
 }
 
 #[derive(Debug, Args)]
+struct RegionSnapshotReplacementArgs {
+    #[command(subcommand)]
+    command: RegionSnapshotReplacementCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum RegionSnapshotReplacementCommands {
+    /// List region snapshot replacement requests
+    List(RegionSnapshotReplacementListArgs),
+    /// Show current region snapshot replacements and their status
+    Status,
+    /// Show detailed information for a region snapshot replacement
+    Info(RegionSnapshotReplacementInfoArgs),
+    /// Manually request a region snapshot replacement
+    Request(RegionSnapshotReplacementRequestArgs),
+}
+
+#[derive(Debug, Args)]
+struct RegionSnapshotReplacementListArgs {
+    /// Only show region snapshot replacement requests in this state
+    #[clap(long)]
+    state: Option<RegionSnapshotReplacementState>,
+
+    /// Only show region snapshot replacement requests after a certain date
+    #[clap(long)]
+    after: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Args)]
+struct RegionSnapshotReplacementInfoArgs {
+    /// The UUID of the region snapshot replacement request
+    replacement_id: Uuid,
+}
+
+#[derive(Debug, Args)]
+struct RegionSnapshotReplacementRequestArgs {
+    /// The dataset id for a given region snapshot
+    dataset_id: Uuid,
+
+    /// The region id for a given region snapshot
+    region_id: Uuid,
+
+    /// The snapshot id for a given region snapshot
+    snapshot_id: Uuid,
+}
+
+#[derive(Debug, Args)]
 struct ValidateArgs {
     #[command(subcommand)]
     command: ValidateCommands,
@@ -859,6 +911,51 @@ impl DbArgs {
             DbCommands::Snapshots(SnapshotArgs {
                 command: SnapshotCommands::List,
             }) => cmd_db_snapshot_list(&datastore, &self.fetch_opts).await,
+            DbCommands::RegionSnapshotReplacement(
+                RegionSnapshotReplacementArgs {
+                    command: RegionSnapshotReplacementCommands::List(args),
+                },
+            ) => {
+                cmd_db_region_snapshot_replacement_list(
+                    &datastore,
+                    &self.fetch_opts,
+                    args,
+                )
+                .await
+            }
+            DbCommands::RegionSnapshotReplacement(
+                RegionSnapshotReplacementArgs {
+                    command: RegionSnapshotReplacementCommands::Status,
+                },
+            ) => {
+                cmd_db_region_snapshot_replacement_status(
+                    &opctx,
+                    &datastore,
+                    &self.fetch_opts,
+                )
+                .await
+            }
+            DbCommands::RegionSnapshotReplacement(
+                RegionSnapshotReplacementArgs {
+                    command: RegionSnapshotReplacementCommands::Info(args),
+                },
+            ) => {
+                cmd_db_region_snapshot_replacement_info(
+                    &opctx, &datastore, args,
+                )
+                .await
+            }
+            DbCommands::RegionSnapshotReplacement(
+                RegionSnapshotReplacementArgs {
+                    command: RegionSnapshotReplacementCommands::Request(args),
+                },
+            ) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_db_region_snapshot_replacement_request(
+                    &opctx, &datastore, args, token,
+                )
+                .await
+            }
             DbCommands::Validate(ValidateArgs {
                 command: ValidateCommands::ValidateVolumeReferences,
             }) => cmd_db_validate_volume_references(&datastore).await,
@@ -1009,6 +1106,7 @@ async fn lookup_service_info(
         | BlueprintZoneType::InternalNtp(_) => ServiceKind::Ntp,
         BlueprintZoneType::Clickhouse(_) => ServiceKind::Clickhouse,
         BlueprintZoneType::ClickhouseKeeper(_) => ServiceKind::ClickhouseKeeper,
+        BlueprintZoneType::ClickhouseServer(_) => ServiceKind::ClickhouseServer,
         BlueprintZoneType::CockroachDb(_) => ServiceKind::Cockroach,
         BlueprintZoneType::Crucible(_) => ServiceKind::Crucible,
         BlueprintZoneType::CruciblePantry(_) => ServiceKind::CruciblePantry,
@@ -3389,6 +3487,235 @@ async fn cmd_db_network_list_vnics(
 
     Ok(())
 }
+
+// REGION SNAPSHOT REPLACEMENTS
+
+/// List all region snapshot replacement requests
+async fn cmd_db_region_snapshot_replacement_list(
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &RegionSnapshotReplacementListArgs,
+) -> Result<(), anyhow::Error> {
+    let ctx = || "listing region snapshot replacement requests".to_string();
+    let limit = fetch_opts.fetch_limit;
+
+    let requests: Vec<RegionSnapshotReplacement> = {
+        let conn = datastore.pool_connection_for_tests().await?;
+
+        use db::schema::region_snapshot_replacement::dsl;
+
+        match (args.state, args.after) {
+            (Some(state), Some(after)) => {
+                dsl::region_snapshot_replacement
+                    .filter(dsl::replacement_state.eq(state))
+                    .filter(dsl::request_time.gt(after))
+                    .limit(i64::from(u32::from(limit)))
+                    .select(RegionSnapshotReplacement::as_select())
+                    .get_results_async(&*conn)
+                    .await?
+            }
+
+            (Some(state), None) => {
+                dsl::region_snapshot_replacement
+                    .filter(dsl::replacement_state.eq(state))
+                    .limit(i64::from(u32::from(limit)))
+                    .select(RegionSnapshotReplacement::as_select())
+                    .get_results_async(&*conn)
+                    .await?
+            }
+
+            (None, Some(after)) => {
+                dsl::region_snapshot_replacement
+                    .filter(dsl::request_time.gt(after))
+                    .limit(i64::from(u32::from(limit)))
+                    .select(RegionSnapshotReplacement::as_select())
+                    .get_results_async(&*conn)
+                    .await?
+            }
+
+            (None, None) => {
+                dsl::region_snapshot_replacement
+                    .limit(i64::from(u32::from(limit)))
+                    .select(RegionSnapshotReplacement::as_select())
+                    .get_results_async(&*conn)
+                    .await?
+            }
+        }
+    };
+
+    check_limit(&requests, limit, ctx);
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct Row {
+        pub id: Uuid,
+        pub request_time: DateTime<Utc>,
+        pub replacement_state: String,
+    }
+
+    let mut rows = Vec::with_capacity(requests.len());
+
+    for request in requests {
+        rows.push(Row {
+            id: request.id,
+            request_time: request.request_time,
+            replacement_state: format!("{:?}", request.replacement_state),
+        });
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .with(tabled::settings::Panel::header(
+            "Region snapshot replacement requests",
+        ))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+/// Display all non-complete region snapshot replacements
+async fn cmd_db_region_snapshot_replacement_status(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+) -> Result<(), anyhow::Error> {
+    let ctx = || "listing region snapshot replacement requests".to_string();
+    let limit = fetch_opts.fetch_limit;
+
+    let requests: Vec<RegionSnapshotReplacement> = {
+        let conn = datastore.pool_connection_for_tests().await?;
+
+        use db::schema::region_snapshot_replacement::dsl;
+
+        dsl::region_snapshot_replacement
+            .filter(
+                dsl::replacement_state
+                    .ne(RegionSnapshotReplacementState::Complete),
+            )
+            .limit(i64::from(u32::from(limit)))
+            .select(RegionSnapshotReplacement::as_select())
+            .get_results_async(&*conn)
+            .await?
+    };
+
+    check_limit(&requests, limit, ctx);
+
+    for request in requests {
+        let steps_left = datastore
+            .in_progress_region_snapshot_replacement_steps(opctx, request.id)
+            .await?;
+
+        println!("{}:", request.id);
+        println!();
+
+        println!("                    started: {}", request.request_time);
+        println!(
+            "                      state: {:?}",
+            request.replacement_state
+        );
+        println!(
+            "            region snapshot: {} {} {}",
+            request.old_dataset_id,
+            request.old_region_id,
+            request.old_snapshot_id,
+        );
+        println!("              new region id: {:?}", request.new_region_id);
+        println!("     in-progress steps left: {:?}", steps_left);
+        println!();
+    }
+
+    Ok(())
+}
+
+/// Show details for a single region snapshot replacement
+async fn cmd_db_region_snapshot_replacement_info(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &RegionSnapshotReplacementInfoArgs,
+) -> Result<(), anyhow::Error> {
+    let request = datastore
+        .get_region_snapshot_replacement_request_by_id(
+            opctx,
+            args.replacement_id,
+        )
+        .await?;
+
+    // Show details
+    let steps_left = datastore
+        .in_progress_region_snapshot_replacement_steps(opctx, request.id)
+        .await?;
+
+    println!("{}:", request.id);
+    println!();
+
+    println!("                    started: {}", request.request_time);
+    println!("                      state: {:?}", request.replacement_state);
+    println!(
+        "            region snapshot: {} {} {}",
+        request.old_dataset_id, request.old_region_id, request.old_snapshot_id,
+    );
+    println!("              new region id: {:?}", request.new_region_id);
+    println!("     in-progress steps left: {:?}", steps_left);
+    println!();
+
+    Ok(())
+}
+
+/// Manually request a region snapshot replacement
+async fn cmd_db_region_snapshot_replacement_request(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &RegionSnapshotReplacementRequestArgs,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let Some(region_snapshot) = datastore
+        .region_snapshot_get(args.dataset_id, args.region_id, args.snapshot_id)
+        .await?
+    else {
+        bail!("region snapshot not found!");
+    };
+
+    let request =
+        RegionSnapshotReplacement::for_region_snapshot(&region_snapshot);
+    let request_id = request.id;
+
+    // If this function indirectly uses
+    // `insert_region_snapshot_replacement_request`, there could be an authz
+    // related `ObjectNotFound` due to the opctx being for the privileged test
+    // user. Lookup the snapshot here, and directly use
+    // `insert_snapshot_replacement_request_with_volume_id` instead.
+
+    let db_snapshots = {
+        use db::schema::snapshot::dsl;
+        let conn = datastore.pool_connection_for_tests().await?;
+        dsl::snapshot
+            .filter(dsl::id.eq(args.snapshot_id))
+            .limit(1)
+            .select(Snapshot::as_select())
+            .load_async(&*conn)
+            .await
+            .context("loading requested snapshot")?
+    };
+
+    assert_eq!(db_snapshots.len(), 1);
+
+    datastore
+        .insert_region_snapshot_replacement_request_with_volume_id(
+            opctx,
+            request,
+            db_snapshots[0].volume_id,
+        )
+        .await?;
+
+    println!("region snapshot replacement {request_id} created");
+
+    Ok(())
+}
+
+// VALIDATION
 
 /// Validate the `volume_references` column of the region snapshots table
 async fn cmd_db_validate_volume_references(
