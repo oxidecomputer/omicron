@@ -275,6 +275,9 @@ pub fn blueprint_internal_dns_config(
             BlueprintZoneType::ClickhouseKeeper(
                 blueprint_zone_type::ClickhouseKeeper { address, .. },
             ) => (ServiceName::ClickhouseKeeper, address.port()),
+            BlueprintZoneType::ClickhouseServer(
+                blueprint_zone_type::ClickhouseServer { address, .. },
+            ) => (ServiceName::ClickhouseServer, address.port()),
             BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb { address, .. },
             ) => (ServiceName::Cockroach, address.port()),
@@ -455,8 +458,12 @@ pub fn blueprint_nexus_external_ips(blueprint: &Blueprint) -> Vec<IpAddr> {
 mod test {
     use super::*;
     use crate::overridables::Overridables;
+    use crate::RealizeBlueprintOutput;
     use crate::Sled;
     use dns_service_client::DnsDiff;
+    use internal_dns::config::Host;
+    use internal_dns::config::Zone;
+    use internal_dns::names::BOUNDARY_NTP_DNS_NAME;
     use internal_dns::resolver::Resolver;
     use internal_dns::ServiceName;
     use internal_dns::DNS_ZONE;
@@ -496,12 +503,13 @@ mod test {
     use omicron_common::address::get_switch_zone_address;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
-    use omicron_common::address::COCKROACHDB_REDUNDANCY;
-    use omicron_common::address::NEXUS_REDUNDANCY;
     use omicron_common::address::RACK_PREFIX;
     use omicron_common::address::SLED_PREFIX;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
+    use omicron_common::policy::COCKROACHDB_REDUNDANCY;
+    use omicron_common::policy::NEXUS_REDUNDANCY;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::ExternalIpUuid;
@@ -662,7 +670,7 @@ mod test {
             })
             .collect();
 
-        let blueprint_dns_zone = blueprint_internal_dns_config(
+        let mut blueprint_dns_zone = blueprint_internal_dns_config(
             &blueprint,
             &sleds_by_id,
             &Default::default(),
@@ -685,6 +693,10 @@ mod test {
         //
         // 4. Our out-of-service zone does *not* appear in the DNS config,
         //    neither with an AAAA record nor in an SRV record.
+        //
+        // 5. The boundary NTP zones' IP addresses are mapped to AAAA records in
+        //    the special boundary DNS name (in addition to having their normal
+        //    zone DNS name -> AAAA record from 1).
         //
         // Together, this tells us that we have SRV records for all services,
         // that those SRV records all point to at least one of the Omicron zones
@@ -719,6 +731,33 @@ mod test {
                 }
             })
             .collect();
+
+        // Prune the special boundary NTP DNS name out, collecting their IP
+        // addresses, and build a list of expected SRV targets to ensure these
+        // IPs show up both in the special boundary NTP DNS name and as their
+        // normal SRV records.
+        let boundary_ntp_ips = blueprint_dns_zone
+            .records
+            .remove(BOUNDARY_NTP_DNS_NAME)
+            .expect("missing boundary NTP DNS name")
+            .into_iter()
+            .map(|record| match record {
+                DnsRecord::Aaaa(ip) => ip,
+                _ => panic!("expected AAAA record; got {record:?}"),
+            });
+        let mut expected_boundary_ntp_srv_targets = boundary_ntp_ips
+            .map(|ip| {
+                let Some(zone_id) = omicron_zones_by_ip.get(&ip) else {
+                    panic!("did not find zone ID for boundary NTP IP {ip}");
+                };
+                let name = Host::Zone(Zone::Other(*zone_id)).fqdn();
+                println!(
+                    "Boundary NTP IP {ip} maps to expected \
+                     SRV record target {name}"
+                );
+                name
+            })
+            .collect::<BTreeSet<_>>();
 
         // Now go through all the DNS names that have AAAA records and remove
         // any corresponding Omicron zone.  While doing this, construct a set of
@@ -814,6 +853,16 @@ mod test {
         ]);
 
         for (name, records) in &blueprint_dns_zone.records {
+            let mut this_kind = None;
+            let kinds_left: Vec<_> =
+                srv_kinds_expected.iter().copied().collect();
+            for kind in kinds_left {
+                if kind.dns_name() == *name {
+                    srv_kinds_expected.remove(&kind);
+                    this_kind = Some(kind);
+                }
+            }
+
             let srvs: Vec<_> = records
                 .iter()
                 .filter_map(|dns_record| match dns_record {
@@ -828,19 +877,27 @@ mod test {
                     correspond to a name that points to any Omicron zone",
                     srv.target
                 );
-            }
-
-            let kinds_left: Vec<_> =
-                srv_kinds_expected.iter().copied().collect();
-            for kind in kinds_left {
-                if kind.dns_name() == *name {
-                    srv_kinds_expected.remove(&kind);
+                if this_kind == Some(ServiceName::BoundaryNtp) {
+                    assert!(
+                        expected_boundary_ntp_srv_targets.contains(&srv.target),
+                        "found boundary NTP SRV record with target {:?} \
+                        that does not correspond to an expected boundary \
+                        NTP zone",
+                        srv.target,
+                    );
+                    expected_boundary_ntp_srv_targets.remove(&srv.target);
                 }
             }
         }
 
         println!("SRV kinds with no records found: {:?}", srv_kinds_expected);
         assert!(srv_kinds_expected.is_empty());
+
+        println!(
+            "Boundary NTP SRV targets not found: {:?}",
+            expected_boundary_ntp_srv_targets
+        );
+        assert!(expected_boundary_ntp_srv_targets.is_empty());
     }
 
     #[tokio::test]
@@ -1189,16 +1246,17 @@ mod test {
 
         // Now, execute the initial blueprint.
         let overrides = Overridables::for_test(cptestctx);
-        crate::realize_blueprint_with_overrides(
-            &opctx,
-            datastore,
-            resolver,
-            &blueprint,
-            "test-suite",
-            &overrides,
-        )
-        .await
-        .expect("failed to execute initial blueprint");
+        let _: RealizeBlueprintOutput =
+            crate::realize_blueprint_with_overrides(
+                &opctx,
+                datastore,
+                resolver,
+                &blueprint,
+                Uuid::new_v4(),
+                &overrides,
+            )
+            .await
+            .expect("failed to execute initial blueprint");
 
         // DNS ought not to have changed.
         verify_dns_unchanged(
@@ -1261,6 +1319,7 @@ mod test {
                 cockroachdb_settings: &CockroachDbSettings::empty(),
                 external_ip_rows: &[],
                 service_nic_rows: &[],
+                target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
                 target_nexus_zone_count: NEXUS_REDUNDANCY,
                 target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
                 target_cockroachdb_cluster_version:
@@ -1288,7 +1347,8 @@ mod test {
         .unwrap();
         let sled_id =
             blueprint.sleds().next().expect("expected at least one sled");
-        let nalready = builder.sled_num_zones_of_kind(sled_id, ZoneKind::Nexus);
+        let nalready =
+            builder.sled_num_running_zones_of_kind(sled_id, ZoneKind::Nexus);
         let rv = builder
             .sled_ensure_zone_multiple_nexus(sled_id, nalready + 1)
             .unwrap();
@@ -1327,16 +1387,17 @@ mod test {
             .await
             .expect("failed to set blueprint as target");
 
-        crate::realize_blueprint_with_overrides(
-            &opctx,
-            datastore,
-            resolver,
-            &blueprint2,
-            "test-suite",
-            &overrides,
-        )
-        .await
-        .expect("failed to execute second blueprint");
+        let _: RealizeBlueprintOutput =
+            crate::realize_blueprint_with_overrides(
+                &opctx,
+                datastore,
+                resolver,
+                &blueprint2,
+                Uuid::new_v4(),
+                &overrides,
+            )
+            .await
+            .expect("failed to execute second blueprint");
 
         // Now fetch DNS again.  Both should have changed this time.
         let dns_latest_internal = datastore
@@ -1401,16 +1462,17 @@ mod test {
         }
 
         // If we execute it again, we should see no more changes.
-        crate::realize_blueprint_with_overrides(
-            &opctx,
-            datastore,
-            resolver,
-            &blueprint2,
-            "test-suite",
-            &overrides,
-        )
-        .await
-        .expect("failed to execute second blueprint again");
+        let _: RealizeBlueprintOutput =
+            crate::realize_blueprint_with_overrides(
+                &opctx,
+                datastore,
+                resolver,
+                &blueprint2,
+                Uuid::new_v4(),
+                &overrides,
+            )
+            .await
+            .expect("failed to execute second blueprint again");
         verify_dns_unchanged(
             &opctx,
             datastore,
@@ -1437,16 +1499,17 @@ mod test {
 
         // One more time, make sure that executing the blueprint does not do
         // anything.
-        crate::realize_blueprint_with_overrides(
-            &opctx,
-            datastore,
-            resolver,
-            &blueprint2,
-            "test-suite",
-            &overrides,
-        )
-        .await
-        .expect("failed to execute second blueprint again");
+        let _: RealizeBlueprintOutput =
+            crate::realize_blueprint_with_overrides(
+                &opctx,
+                datastore,
+                resolver,
+                &blueprint2,
+                Uuid::new_v4(),
+                &overrides,
+            )
+            .await
+            .expect("failed to execute second blueprint again");
         verify_dns_unchanged(
             &opctx,
             datastore,
@@ -1531,16 +1594,17 @@ mod test {
         );
 
         // If we execute the blueprint, DNS should not be changed.
-        crate::realize_blueprint_with_overrides(
-            &opctx,
-            datastore,
-            resolver,
-            &blueprint,
-            "test-suite",
-            &overrides,
-        )
-        .await
-        .expect("failed to execute blueprint");
+        let _: RealizeBlueprintOutput =
+            crate::realize_blueprint_with_overrides(
+                &opctx,
+                datastore,
+                resolver,
+                &blueprint,
+                Uuid::new_v4(),
+                &overrides,
+            )
+            .await
+            .expect("failed to execute blueprint");
         let dns_latest_internal = datastore
             .dns_config_read(&opctx, DnsGroup::Internal)
             .await

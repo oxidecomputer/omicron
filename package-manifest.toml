@@ -140,19 +140,24 @@ source.type = "local"
 source.rust.binary_names = ["oximeter", "clickhouse-schema-updater"]
 source.rust.release = true
 source.paths = [
-  { from = "smf/oximeter", to = "/var/svc/manifest/site/oximeter" },
   { from = "oximeter/db/schema", to = "/opt/oxide/oximeter/schema" },
+  { from = "smf/oximeter/{{clickhouse-topology}}/config.toml", to = "/var/svc/manifest/site/oximeter/config.toml" },
+  { from = "smf/oximeter/manifest.xml", to = "/var/svc/manifest/site/oximeter/manifest.xml" },
 ]
 output.type = "zone"
 output.intermediate_only = true
 
 [package.clickhouse]
+# This service runs a single-node ClickHouse server.
 service_name = "clickhouse"
 only_for_targets.image = "standard"
 source.type = "composite"
 source.packages = [
   "clickhouse_svc.tar.gz",
   "internal-dns-cli.tar.gz",
+  # TODO: This package is for solely for testing purposes.
+  # Remove once replicated clickhouse is up and running.
+  "omicron-clickhouse-admin.tar.gz",
   "zone-setup.tar.gz",
   "zone-network-install.tar.gz"
 ]
@@ -166,19 +171,52 @@ source.paths = [
   { from = "out/clickhouse", to = "/opt/oxide/clickhouse" },
   { from = "smf/clickhouse/manifest.xml", to = "/var/svc/manifest/site/clickhouse/manifest.xml" },
   { from = "smf/clickhouse/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse.sh" },
-  { from = "smf/clickhouse/config_replica.xml", to = "/opt/oxide/clickhouse/config.d/config_replica.xml" },
+]
+output.type = "zone"
+output.intermediate_only = true
+setup_hint = "Run `cargo xtask download clickhouse` to download the necessary binaries"
+
+[package.clickhouse_server]
+# This service runs a server for a replicated ClickHouse cluster.
+# It is complimentary to the clickhouse_keeper service.
+# One cannot be run without the other.
+service_name = "clickhouse_server"
+only_for_targets.image = "standard"
+source.type = "composite"
+source.packages = [
+  "clickhouse_server_svc.tar.gz",
+  "internal-dns-cli.tar.gz",
+  "omicron-clickhouse-admin.tar.gz",
+  "zone-setup.tar.gz",
+  "zone-network-install.tar.gz"
+]
+output.type = "zone"
+
+[package.clickhouse_server_svc]
+service_name = "clickhouse_server_svc"
+only_for_targets.image = "standard"
+source.type = "local"
+source.paths = [
+  { from = "out/clickhouse", to = "/opt/oxide/clickhouse_server" },
+  { from = "smf/clickhouse_server/manifest.xml", to = "/var/svc/manifest/site/clickhouse_server/manifest.xml" },
+  { from = "smf/clickhouse_server/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse_server.sh" },
+  { from = "smf/clickhouse_server/config_replica.xml", to = "/opt/oxide/clickhouse_server/config.d/config_replica.xml" },
 ]
 output.type = "zone"
 output.intermediate_only = true
 setup_hint = "Run `cargo xtask download clickhouse` to download the necessary binaries"
 
 [package.clickhouse_keeper]
+# This service runs a keeper for a replicated ClickHouse cluster.
+# It is complimentary to the clickhouse_server service.
+# One cannot be run without the other.
 service_name = "clickhouse_keeper"
 only_for_targets.image = "standard"
 source.type = "composite"
 source.packages = [
   "clickhouse_keeper_svc.tar.gz",
   "internal-dns-cli.tar.gz",
+  "omicron-clickhouse-admin.tar.gz",
   "zone-setup.tar.gz",
   "zone-network-install.tar.gz"
 ]
@@ -197,6 +235,18 @@ source.paths = [
 output.type = "zone"
 output.intermediate_only = true
 setup_hint = "Run `cargo xtask download clickhouse` to download the necessary binaries"
+
+[package.omicron-clickhouse-admin]
+service_name = "clickhouse-admin"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["clickhouse-admin"]
+source.rust.release = true
+source.paths = [
+  { from = "smf/clickhouse-admin", to = "/var/svc/manifest/site/clickhouse-admin" },
+]
+output.type = "zone"
+output.intermediate_only = true
 
 [package.cockroachdb]
 service_name = "cockroachdb"
@@ -578,10 +628,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "220dd026e83142b83bd93123f465a64dd4600201"
+source.commit = "c92d6ff85db8992066f49da176cf686acfd8fe0f"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "58c8fcec6b932f7e602ac82cc28460aa557cabae1b66947ab3cb7334b87c35d4"
+source.sha256 = "c33915998894dd36a2d1078f7e13717aa20760924c30640d7647d4791dd5f2ee"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -594,10 +644,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "220dd026e83142b83bd93123f465a64dd4600201"
+source.commit = "c92d6ff85db8992066f49da176cf686acfd8fe0f"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "69fa43393a77f19713c7d76a320064e3eb58b3ea0b2953d2079a5c3edebc172e"
+source.sha256 = "be9d657ec22a69468b18f2b4d48e55621538eade8b8d3e367a1d8d5cc686cfbe"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -609,10 +659,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "220dd026e83142b83bd93123f465a64dd4600201"
+source.commit = "c92d6ff85db8992066f49da176cf686acfd8fe0f"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
-source.sha256 = "f1103de5dda4830eb653f4d555995d08c31253116448387399a77392c08dfb54"
+source.sha256 = "e000485f7e04ac1cf9b3532b60bcf23598ab980331ba4f1c6788a7e95c1e9ef8"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -620,8 +670,8 @@ output.intermediate_only = true
 service_name = "lldp"
 source.type = "prebuilt"
 source.repo = "lldp"
-source.commit = "30e5d89fae9190c69258ca77d5d5a1acec064742"
-source.sha256 = "f58bfd1b77748544b5b1a99a07e52bab8dc5673b9bd3a745ebbfdd614d492328"
+source.commit = "188f0f6d4c066f1515bd707050407cedd790fcf1"
+source.sha256 = "132d0760be5208f60b58bcaed98fa6384b09f41dd5febf51970f5cbf46138ecf"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -660,8 +710,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "9811438cc91c6ec4e8a8ca12479c920bb25fec81"
-source.sha256 = "4b09ea6d89af353fd4240a3cfde8655c555f6f42e05c6fc4a4e32724f86bb749"
+source.commit = "21b16567f28e103f145cd18d53fac6958429c4ff"
+source.sha256 = "3771671f0069b33143774e560eb258db99253dba9b78fa3ca974f02a8e1145b4"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -687,8 +737,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "9811438cc91c6ec4e8a8ca12479c920bb25fec81"
-source.sha256 = "224ff076a3031d5b913e40084a48fce7bdd08e8ef1abd1ab74df0058963bb3b2"
+source.commit = "21b16567f28e103f145cd18d53fac6958429c4ff"
+source.sha256 = "ad02632713a57fe8c5371316320309e1fad52f0ce2f7e6f768859aa94dfbb1d9"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -707,8 +757,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "9811438cc91c6ec4e8a8ca12479c920bb25fec81"
-source.sha256 = "66b04128c41ad9cd26ca3746d51fff5d295ca65f48e7aabee616026934cc8d5e"
+source.commit = "21b16567f28e103f145cd18d53fac6958429c4ff"
+source.sha256 = "23bca3873cdb0441cd18c0cf071b86d49755be06837479661876ac95d2f10f27"
 output.type = "zone"
 output.intermediate_only = true
 

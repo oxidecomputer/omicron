@@ -4,7 +4,6 @@
 
 //! Plan generation for "where should services be initialized".
 
-use crate::bootstrap::params::StartSledAgentRequest;
 use camino::Utf8PathBuf;
 use dns_service_client::types::DnsConfigParams;
 use illumos_utils::zpool::ZpoolName;
@@ -15,9 +14,8 @@ use nexus_sled_agent_shared::inventory::{
 };
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
-    COCKROACHDB_REDUNDANCY, DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT,
-    DNS_REDUNDANCY, MAX_DNS_REDUNDANCY, MGD_PORT, MGS_PORT, NEXUS_REDUNDANCY,
-    NTP_PORT, NUM_SOURCE_NAT_PORTS, RSS_RESERVED_ADDRESSES, SLED_PREFIX,
+    DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, MGD_PORT, MGS_PORT, NTP_PORT,
+    NUM_SOURCE_NAT_PORTS, RSS_RESERVED_ADDRESSES, SLED_PREFIX,
 };
 use omicron_common::api::external::{Generation, MacAddr, Vni};
 use omicron_common::api::internal::shared::{
@@ -31,6 +29,10 @@ use omicron_common::disk::{
     DiskVariant, OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
+use omicron_common::policy::{
+    BOUNDARY_NTP_REDUNDANCY, COCKROACHDB_REDUNDANCY, DNS_REDUNDANCY,
+    MAX_DNS_REDUNDANCY, NEXUS_REDUNDANCY,
+};
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, SledUuid, ZpoolUuid};
 use rand::prelude::SliceRandom;
 use schemars::JsonSchema;
@@ -39,6 +41,7 @@ use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
 };
 use sled_agent_types::rack_init::RackInitializeRequest as Config;
+use sled_agent_types::sled::StartSledAgentRequest;
 use sled_storage::dataset::{DatasetName, DatasetType, CONFIG_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
@@ -48,20 +51,30 @@ use std::num::Wrapping;
 use thiserror::Error;
 use uuid::Uuid;
 
-// The number of boundary NTP servers to create from RSS.
-const BOUNDARY_NTP_COUNT: usize = 2;
-
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Oximeter.
 const OXIMETER_COUNT: usize = 1;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Clickhouse.
-// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Set to 2 once we enable replicated ClickHouse
+// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Use
+// omicron_common::policy::CLICKHOUSE_SERVER_REDUNDANCY once we enable
+// replicated ClickHouse.
+// Set to 0 when testing replicated ClickHouse.
 const CLICKHOUSE_COUNT: usize = 1;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Clickhouse keeper.
-// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Set to 3 once we enable replicated ClickHouse
+// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Use
+// omicron_common::policy::CLICKHOUSE_KEEPER_REDUNDANCY once we enable
+// replicated ClickHouse
+// Set to 3 when testing replicated ClickHouse.
 const CLICKHOUSE_KEEPER_COUNT: usize = 0;
+// TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
+// when Nexus provisions Clickhouse server.
+// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Use
+// omicron_common::policy::CLICKHOUSE_SERVER_REDUNDANCY once we enable
+// replicated ClickHouse.
+// Set to 2 when testing replicated ClickHouse
+const CLICKHOUSE_SERVER_COUNT: usize = 0;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
 // when Nexus provisions Crucible.
 const MINIMUM_U2_COUNT: usize = 3;
@@ -624,6 +637,47 @@ impl Plan {
             });
         }
 
+        // Provision Clickhouse server zones, continuing to stripe across sleds.
+        // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
+        // Temporary linter rule until replicated Clickhouse is enabled
+        #[allow(clippy::reversed_empty_ranges)]
+        for _ in 0..CLICKHOUSE_SERVER_COUNT {
+            let sled = {
+                let which_sled =
+                    sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
+                &mut sled_info[which_sled]
+            };
+            let id = OmicronZoneUuid::new_v4();
+            let ip = sled.addr_alloc.next().expect("Not enough addrs");
+            // TODO: This may need to be a different port if/when to have single node
+            // and replicated running side by side as per stage 1 of RFD 468.
+            let port = omicron_common::address::CLICKHOUSE_PORT;
+            let address = SocketAddrV6::new(ip, port, 0, 0);
+            dns_builder
+                .host_zone_with_one_backend(
+                    id,
+                    ip,
+                    ServiceName::ClickhouseServer,
+                    port,
+                )
+                .unwrap();
+            let dataset_name =
+                sled.alloc_dataset_from_u2s(DatasetType::ClickhouseServer)?;
+            let filesystem_pool = Some(dataset_name.pool().clone());
+            sled.request.zones.push(OmicronZoneConfig {
+                // TODO-cleanup use TypedUuid everywhere
+                id: id.into_untyped_uuid(),
+                underlay_address: ip,
+                zone_type: OmicronZoneType::ClickhouseServer {
+                    address,
+                    dataset: OmicronZoneDataset {
+                        pool_name: dataset_name.pool().clone(),
+                    },
+                },
+                filesystem_pool,
+            });
+        }
+
         // Provision Clickhouse Keeper zones, continuing to stripe across sleds.
         // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
         // Temporary linter rule until replicated Clickhouse is enabled
@@ -734,7 +788,7 @@ impl Plan {
             let ntp_address = SocketAddrV6::new(address, NTP_PORT, 0, 0);
             let filesystem_pool = Some(sled.alloc_zpool_from_u2s()?);
 
-            let (zone_type, svcname) = if idx < BOUNDARY_NTP_COUNT {
+            let (zone_type, svcname) = if idx < BOUNDARY_NTP_REDUNDANCY {
                 boundary_ntp_servers
                     .push(Host::for_zone(Zone::Other(id)).fqdn());
                 let (nic, snat_cfg) = svc_port_builder.next_snat(id)?;

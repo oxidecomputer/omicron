@@ -8,7 +8,7 @@
 
 extern crate proc_macro;
 
-use oximeter_impl::schema::SCHEMA_DIRECTORY;
+use oximeter_types::schema::SCHEMA_DIRECTORY;
 
 /// Generate code to use the timeseries from one target.
 ///
@@ -45,7 +45,7 @@ pub fn use_timeseries(
                         .into();
                 }
             };
-            match oximeter_impl::schema::codegen::use_timeseries(&contents) {
+            match oximeter_schema::codegen::use_timeseries(&contents) {
                 Ok(toks) => {
                     let path_ = path.display().to_string();
                     return quote::quote! {
@@ -59,9 +59,8 @@ pub fn use_timeseries(
                 Err(e) => {
                     let msg = format!(
                         "Failed to generate timeseries types \
-                        from '{}': {:?}",
+                        from '{}': {e}",
                         path.display(),
-                        e,
                     );
                     return syn::Error::new(token.span(), msg)
                         .into_compile_error()

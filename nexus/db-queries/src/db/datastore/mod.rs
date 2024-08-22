@@ -83,6 +83,7 @@ mod rack;
 mod region;
 mod region_replacement;
 mod region_snapshot;
+mod region_snapshot_replacement;
 mod role;
 mod saga;
 mod silo;
@@ -110,7 +111,7 @@ mod zpool;
 pub use address_lot::AddressLotCreateResult;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
-pub use instance::InstanceAndActiveVmm;
+pub use instance::{InstanceAndActiveVmm, InstanceGestalt};
 pub use inventory::DataStoreInventoryTest;
 use nexus_db_model::AllSchemaVersions;
 pub use rack::RackInit;
@@ -122,11 +123,16 @@ pub use sled::SledTransition;
 pub use sled::TransitionError;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use virtual_provisioning_collection::StorageType;
+pub use vmm::VmmStateUpdateResult;
 pub use volume::read_only_resources_associated_with_volume;
 pub use volume::CrucibleResources;
 pub use volume::CrucibleTargets;
+pub use volume::ExistingTarget;
+pub use volume::ReplacementTarget;
 pub use volume::VolumeCheckoutReason;
 pub use volume::VolumeReplacementParams;
+pub use volume::VolumeToDelete;
+pub use volume::VolumeWithTarget;
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.
@@ -360,6 +366,7 @@ impl DataStore {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
 pub enum UpdatePrecondition<T> {
     DontCare,
     Null,

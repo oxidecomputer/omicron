@@ -52,8 +52,8 @@ You don't need to do this again if you just did it.  But you'll need to do it ea
 
 To **run Omicron** you need to run several programs:
 
-* a CockroachDB cluster.  For development, you can use the `omicron-dev` tool in this repository to start a single-node CockroachDB cluster **that will delete the database when you shut it down.**
-* a ClickHouse server. You should use the `omicron-dev` tool for this as well, see below, and as with CockroachDB,
+* a CockroachDB cluster.  For development, you can use the `db-dev` tool in this repository to start a single-node CockroachDB cluster **that will delete the database when you shut it down.**
+* a ClickHouse server. You should use the `ch-dev` tool for this, see below, and as with CockroachDB,
 the database files will be deleted when you stop the program.
 * `nexus`: the guts of the control plane
 * `sled-agent-sim`: a simulator for the component that manages a single sled
@@ -68,7 +68,7 @@ You can run these by hand, but it's easier to use `omicron-dev run-all`.  See be
 +
 [source,text]
 ----
-$ omicron-dev run-all
+$ cargo xtask omicron-dev run-all
 omicron-dev: setting up all services ...
 log file: /dangerzone/omicron_tmp/omicron-dev-omicron-dev.4647.0.log
 note: configured to log to "/dangerzone/omicron_tmp/omicron-dev-omicron-dev.4647.0.log"
@@ -98,13 +98,13 @@ There are many reasons it's useful to run the pieces of the stack by hand, espec
 
 CAUTION: This process does not currently work.  See https://github.com/oxidecomputer/omicron/issues/4421[omicron#4421] for details.  The pieces here may still be useful for reference.
 
-. Start CockroachDB using `omicron-dev db-run`:
+. Start CockroachDB using `db-dev run`:
 +
 [source,text]
 ----
-$ cargo run --bin=omicron-dev -- db-run
+$ cargo xtask db-dev -- run
     Finished dev [unoptimized + debuginfo] target(s) in 0.15s
-     Running `target/debug/omicron-dev db-run`
+     Running `target/debug/db-dev run`
 omicron-dev: using temporary directory for database store (cleaned up on clean exit)
 omicron-dev: will run this to start CockroachDB:
 cockroach start-single-node --insecure --http-addr=:0 --store /var/tmp/omicron_tmp/.tmpM8KpTf/data --listen-addr 127.0.0.1:32221 --listening-url-file /var/tmp/omicron_tmp/.tmpM8KpTf/listen-url
@@ -157,7 +157,7 @@ Note that as the output indicates, this cluster will be available to anybody tha
 +
 [source,text]
 ----
-$ cargo run --bin omicron-dev -- ch-run
+$ cargo xtask ch-dev run
     Finished dev [unoptimized + debuginfo] target(s) in 0.47s
      Running `target/debug/omicron-dev ch-run`
 omicron-dev: running ClickHouse (PID: 2463), full command is "clickhouse server --log-file /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot/clickhouse-server.log --errorlog-file /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot/clickhouse-server.errlog -- --http_port 8123 --path /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot"
@@ -167,7 +167,7 @@ omicron-dev: using /var/folders/67/2tlym22x1r3d2kwbh84j298w0000gn/T/.tmpJ5nhot f
 If you wish to start a ClickHouse replicated cluster instead of a single node, run the following instead:
 [source,text]
 ---
-$ cargo run --bin omicron-dev -- ch-run --replicated
+$ cargo xtask ch-dev run --replicated
     Finished dev [unoptimized + debuginfo] target(s) in 0.31s
      Running `target/debug/omicron-dev ch-run --replicated`
 omicron-dev: running ClickHouse cluster with configuration files:
@@ -221,7 +221,7 @@ To do this, first run `omicron-dev run-all`:
 
 [source,text]
 ----
-$ cargo run --bin=omicron-dev -- run-all
+$ cargo xtask omicron-dev run-all
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.95s
      Running `target/debug/omicron-dev run-all`
 omicron-dev: setting up all services ... 
@@ -312,16 +312,16 @@ Once everything is up and running, you can use the system in a few ways:
 When you run the above, you will wind up with Nexus listening on HTTP (with no TLS) on its external address.  This is convenient for debugging, but not representative of a real system.  If you want to run it with TLS, you need to tweak the above procedure slightly:
 
 1. You'll need to use the "Running the pieces by hand" section.  `omicron-dev run-all` does not currently provide a way to do this (because it doesn't have a way to specify a certificate to be used during rack initialization).
-2. Acquire a TLS certificate.  The easiest approach is to use `omicron-dev cert-create` to create a self-signed certificate.  However you get one, it should be valid for the domain corresponding to your recovery Silo.  When you run the pieces by hand, this would be `demo-silo.sys.oxide-dev.test`.  If you want a certificate you can use for multiple Silos, make it a wildcard certificate.  Here's an example:
+2. Acquire a TLS certificate.  The easiest approach is to use `cert-dev create` to create a self-signed certificate.  However you get one, it should be valid for the domain corresponding to your recovery Silo.  When you run the pieces by hand, this would be `demo-silo.sys.oxide-dev.test`.  If you want a certificate you can use for multiple Silos, make it a wildcard certificate.  Here's an example:
 +
 [source,text]
 ----
-$ cargo run --bin=omicron-dev -- cert-create demo- '*.sys.oxide-dev.test'
+$ cargo xtask cert-dev create demo- '*.sys.oxide-dev.test'
 wrote certificate to demo-cert.pem
 wrote private key to demo-key.pem
 ----
 3. Modify your Nexus configuration file to include `tls = true`.  See `./nexus/examples/config.toml` for an example.  This property is present but commented-out in that file.  If you're running on standard port 80 (which is not usually the case in development), you may also want to change the `deployment.dropshot_external.bind_address` port to 443.
-4. When you run `sled-agent-sim`, pass the `--rss-tls-cert` and `--rss-tls-key` options as well.  These should refer to the files created by `omicron-dev cert-create` above.  (They can be any PEM-formatted x509 certificate and associated private key.)
+4. When you run `sled-agent-sim`, pass the `--rss-tls-cert` and `--rss-tls-key` options as well.  These should refer to the files created by `cert-dev create` above.  (They can be any PEM-formatted x509 certificate and associated private key.)
 5. Usually at this point you'll be using a self-signed certificate for a domain that's not publicly resolvable with DNS.  This makes it hard to use standard clients.  Fortunately, `curl` does have flags to make this easy.  Continuing with this example, assuming your Nexus HTTPS server is listening on 127.0.0.1:12220 and your Silo's DNS name is `demo-silo.sys.oxide-dev.test`:
 +
 [source,text]

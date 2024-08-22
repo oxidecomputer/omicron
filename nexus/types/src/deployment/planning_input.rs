@@ -87,6 +87,10 @@ impl PlanningInput {
         &self.cockroachdb_settings
     }
 
+    pub fn target_boundary_ntp_zone_count(&self) -> usize {
+        self.policy.target_boundary_ntp_zone_count
+    }
+
     pub fn target_nexus_zone_count(&self) -> usize {
         self.policy.target_nexus_zone_count
     }
@@ -276,6 +280,13 @@ pub enum CockroachDbPreserveDowngrade {
 }
 
 impl CockroachDbPreserveDowngrade {
+    pub fn is_set(self) -> bool {
+        match self {
+            CockroachDbPreserveDowngrade::Set(_) => true,
+            _ => false,
+        }
+    }
+
     pub fn from_optional_string(
         value: &Option<String>,
     ) -> Result<Self, parse_display::ParseError> {
@@ -692,6 +703,9 @@ pub struct Policy {
     /// services (e.g., external DNS, Nexus, boundary NTP)
     pub service_ip_pool_ranges: Vec<IpRange>,
 
+    /// desired total number of deployed Boundary NTP zones
+    pub target_boundary_ntp_zone_count: usize,
+
     /// desired total number of deployed Nexus zones
     pub target_nexus_zone_count: usize,
 
@@ -702,6 +716,23 @@ pub struct Policy {
     /// at present this is hardcoded based on the version of CockroachDB we
     /// presently ship and the tick-tock pattern described in RFD 469.
     pub target_cockroachdb_cluster_version: CockroachDbClusterVersion,
+
+    /// Policy information for a replicated clickhouse setup
+    ///
+    /// If this policy is `None`, then we are using a single node clickhouse
+    /// setup. Eventually we will only allow multi-node setups and this will no
+    /// longer be an option.
+    pub clickhouse_policy: Option<ClickhousePolicy>,
+}
+
+/// Policy for replicated clickhouse setups
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClickhousePolicy {
+    /// Desired number of clickhouse servers
+    pub target_servers: usize,
+
+    /// Desired number of clickhouse keepers
+    pub target_keepers: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -749,10 +780,12 @@ impl PlanningInputBuilder {
         PlanningInput {
             policy: Policy {
                 service_ip_pool_ranges: Vec::new(),
+                target_boundary_ntp_zone_count: 0,
                 target_nexus_zone_count: 0,
                 target_cockroachdb_zone_count: 0,
                 target_cockroachdb_cluster_version:
                     CockroachDbClusterVersion::POLICY,
+                clickhouse_policy: None,
             },
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),

@@ -307,7 +307,10 @@ impl FromSql<diesel::sql_types::Text, diesel::pg::Pg> for ArtifactHash {
     fn from_sql(
         bytes: diesel::pg::PgValue<'_>,
     ) -> diesel::deserialize::Result<Self> {
-        let s = String::from_sql(bytes)?;
+        let s =
+            <String as FromSql<diesel::sql_types::Text, diesel::pg::Pg>>::from_sql(
+                bytes,
+            )?;
         ExternalArtifactHash::from_str(&s)
             .map(ArtifactHash)
             .map_err(|e| e.into())

@@ -288,6 +288,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_switch_by_rack ON omicron.public.switch
 CREATE TYPE IF NOT EXISTS omicron.public.service_kind AS ENUM (
   'clickhouse',
   'clickhouse_keeper',
+  'clickhouse_server',
   'cockroach',
   'crucible',
   'crucible_pantry',
@@ -506,6 +507,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.dataset_kind AS ENUM (
   'cockroach',
   'clickhouse',
   'clickhouse_keeper',
+  'clickhouse_server',
   'external_dns',
   'internal_dns'
 );
@@ -2648,39 +2650,29 @@ CREATE TYPE IF NOT EXISTS omicron.public.switch_link_speed AS ENUM (
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_link_config (
     port_settings_id UUID,
-    lldp_service_config_id UUID NOT NULL,
     link_name TEXT,
     mtu INT4,
     fec omicron.public.switch_link_fec,
     speed omicron.public.switch_link_speed,
     autoneg BOOL NOT NULL DEFAULT false,
+    lldp_link_config_id UUID NOT NULL,
 
     PRIMARY KEY (port_settings_id, link_name)
 );
 
-CREATE TABLE IF NOT EXISTS omicron.public.lldp_service_config (
+CREATE TABLE IF NOT EXISTS omicron.public.lldp_link_config (
     id UUID PRIMARY KEY,
-    lldp_config_id UUID,
-    enabled BOOL NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS omicron.public.lldp_config (
-    id UUID PRIMARY KEY,
-    name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    enabled BOOL NOT NULL,
+    link_name STRING(63),
+    link_description STRING(512),
+    chassis_id STRING(63),
+    system_name STRING(63),
+    system_description STRING(612),
+    management_ip TEXT,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
-    time_deleted TIMESTAMPTZ,
-    chassis_id TEXT,
-    system_name TEXT,
-    system_description TEXT,
-    management_ip TEXT
+    time_deleted TIMESTAMPTZ
 );
-
-CREATE UNIQUE INDEX IF NOT EXISTS lldp_config_by_name ON omicron.public.lldp_config (
-    name
-) WHERE
-    time_deleted IS NULL;
 
 CREATE TYPE IF NOT EXISTS omicron.public.switch_interface_kind AS ENUM (
     'primary',
@@ -2713,6 +2705,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_route_config (
     dst INET,
     gw INET,
     vid INT4,
+    local_pref INT8,
 
     /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
     PRIMARY KEY (port_settings_id, interface_name, dst, gw)
@@ -2787,6 +2780,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_bgp_config_by_name ON omicron.public.bg
     name
 ) WHERE
     time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS lookup_bgp_config_by_asn ON omicron.public.bgp_config (
+    asn
+) WHERE time_deleted IS NULL;
 
 CREATE TABLE IF NOT EXISTS omicron.public.bgp_announce_set (
     id UUID PRIMARY KEY,
@@ -3209,6 +3206,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.zone_type AS ENUM (
   'boundary_ntp',
   'clickhouse',
   'clickhouse_keeper',
+  'clickhouse_server',
   'cockroach_db',
   'crucible',
   'crucible_pantry',
@@ -4019,6 +4017,64 @@ CREATE INDEX IF NOT EXISTS lookup_any_disk_by_volume_id ON omicron.public.disk (
 
 CREATE INDEX IF NOT EXISTS lookup_snapshot_by_destination_volume_id ON omicron.public.snapshot ( destination_volume_id );
 
+CREATE TYPE IF NOT EXISTS omicron.public.region_snapshot_replacement_state AS ENUM (
+  'requested',
+  'allocating',
+  'replacement_done',
+  'deleting_old_volume',
+  'running',
+  'complete'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot_replacement (
+    id UUID PRIMARY KEY,
+
+    request_time TIMESTAMPTZ NOT NULL,
+
+    old_dataset_id UUID NOT NULL,
+    old_region_id UUID NOT NULL,
+    old_snapshot_id UUID NOT NULL,
+
+    old_snapshot_volume_id UUID,
+
+    new_region_id UUID,
+
+    replacement_state omicron.public.region_snapshot_replacement_state NOT NULL,
+
+    operating_saga_id UUID
+);
+
+CREATE INDEX IF NOT EXISTS lookup_region_snapshot_replacement_by_state on omicron.public.region_snapshot_replacement (replacement_state);
+
+CREATE TYPE IF NOT EXISTS omicron.public.region_snapshot_replacement_step_state AS ENUM (
+  'requested',
+  'running',
+  'complete',
+  'volume_deleted'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot_replacement_step (
+    id UUID PRIMARY KEY,
+
+    request_id UUID NOT NULL,
+
+    request_time TIMESTAMPTZ NOT NULL,
+
+    volume_id UUID NOT NULL,
+
+    old_snapshot_volume_id UUID,
+
+    replacement_state omicron.public.region_snapshot_replacement_step_state NOT NULL,
+
+    operating_saga_id UUID
+);
+
+CREATE INDEX IF NOT EXISTS lookup_region_snapshot_replacement_step_by_state
+    on omicron.public.region_snapshot_replacement_step (replacement_state);
+
+CREATE INDEX IF NOT EXISTS lookup_region_snapshot_replacement_step_by_old_volume_id
+    on omicron.public.region_snapshot_replacement_step (old_snapshot_volume_id);
+
 /*
  * Metadata for the schema itself. This version number isn't great, as there's
  * nothing to ensure it gets bumped when it should be, but it's a start.
@@ -4156,7 +4212,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '85.0.0', NULL)
+    (TRUE, NOW(), NOW(), '90.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

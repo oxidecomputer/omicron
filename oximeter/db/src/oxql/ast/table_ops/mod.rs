@@ -20,10 +20,10 @@ use self::join::Join;
 use self::limit::Limit;
 use crate::oxql::ast::Query;
 use crate::oxql::Error;
-use crate::oxql::Table;
 use chrono::DateTime;
 use chrono::Utc;
 use oximeter::TimeseriesName;
+use oxql_types::Table;
 
 /// A basic table operation, the atoms of an OxQL query.
 #[derive(Clone, Debug, PartialEq)]

@@ -185,14 +185,15 @@
 //! `Producer`s may be registered with the same `ProducerServer`, each with potentially different
 //! sampling intervals.
 
-pub use oximeter_impl::*;
+pub use oximeter_macro_impl::{Metric, Target};
 pub use oximeter_timeseries_macro::use_timeseries;
+pub use oximeter_types::*;
 
 #[cfg(test)]
 mod test {
-    use oximeter_impl::schema::ir::load_schema;
-    use oximeter_impl::schema::{FieldSource, SCHEMA_DIRECTORY};
-    use oximeter_impl::TimeseriesSchema;
+    use oximeter_schema::ir::load_schema;
+    use oximeter_types::schema::{FieldSource, SCHEMA_DIRECTORY};
+    use oximeter_types::TimeseriesSchema;
     use std::collections::BTreeMap;
     use std::fs;
 

@@ -51,7 +51,6 @@ instance_ephemeral_ip_attach             POST     /v1/instances/{instance}/exter
 instance_ephemeral_ip_detach             DELETE   /v1/instances/{instance}/external-ips/ephemeral
 instance_external_ip_list                GET      /v1/instances/{instance}/external-ips
 instance_list                            GET      /v1/instances
-instance_migrate                         POST     /v1/instances/{instance}/migrate
 instance_network_interface_create        POST     /v1/network-interfaces
 instance_network_interface_delete        DELETE   /v1/network-interfaces/{interface}
 instance_network_interface_list          GET      /v1/network-interfaces
@@ -179,12 +178,14 @@ networking_allow_list_view               GET      /v1/system/networking/allow-li
 networking_bfd_disable                   POST     /v1/system/networking/bfd-disable
 networking_bfd_enable                    POST     /v1/system/networking/bfd-enable
 networking_bfd_status                    GET      /v1/system/networking/bfd-status
-networking_bgp_announce_set_delete       DELETE   /v1/system/networking/bgp-announce
-networking_bgp_announce_set_list         GET      /v1/system/networking/bgp-announce
-networking_bgp_announce_set_update       PUT      /v1/system/networking/bgp-announce
+networking_bgp_announce_set_delete       DELETE   /v1/system/networking/bgp-announce-set/{name_or_id}
+networking_bgp_announce_set_list         GET      /v1/system/networking/bgp-announce-set
+networking_bgp_announce_set_update       PUT      /v1/system/networking/bgp-announce-set
+networking_bgp_announcement_list         GET      /v1/system/networking/bgp-announce-set/{name_or_id}/announcement
 networking_bgp_config_create             POST     /v1/system/networking/bgp
 networking_bgp_config_delete             DELETE   /v1/system/networking/bgp
 networking_bgp_config_list               GET      /v1/system/networking/bgp
+networking_bgp_exported                  GET      /v1/system/networking/bgp-exported
 networking_bgp_imported_routes_ipv4      GET      /v1/system/networking/bgp-routes-ipv4
 networking_bgp_message_history           GET      /v1/system/networking/bgp-message-history
 networking_bgp_status                    GET      /v1/system/networking/bgp-status

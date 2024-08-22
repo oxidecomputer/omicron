@@ -14,7 +14,7 @@ Omicron is open-source. But we're pretty focused on our own goals for the forese
 
 https://docs.oxide.computer/api[Docs are automatically generated for the public (externally-facing) API] based on the OpenAPI spec that itself is automatically generated from the server implementation.  You can generate your own docs for either the public API or any of the internal APIs by feeding the corresponding OpenAPI specs (in link:./openapi[]) into an OpenAPI doc generator.
 
-There are some internal design docs in the link:./docs[] directory.
+There are some internal design docs in the link:./docs[] directory.  You might start with link:./docs/control-plane-architecture.adoc[].
 
 For more design documentation and internal Rust API docs, see the https://rust.docs.corp.oxide.computer/omicron/[generated Rust documentation].  You can generate this yourself with:
 
@@ -223,7 +223,7 @@ Note that Omicron contains a nominally circular dependency:
 We effectively "break" this circular dependency by virtue of the OpenAPI
 documents being checked in.
 
-==== Updating Managed Services
+==== Updating or Creating New Managed Services
 
 See the documentation in link:./dev-tools/openapi-manager[`dev-tools/openapi-manager`] for more information.
 
@@ -288,7 +288,7 @@ The server also accepts command-line flags for overriding the values of the conf
 parameters.
 
 The packages downloaded by `cargo xtask download clickhouse` include a `config.xml` file with them.
-You should probably run ClickHouse via the `omicron-dev` tool, but if you decide to run it
+You should probably run ClickHouse via the `ch-dev` tool, but if you decide to run it
 manually, you can start the server with:
 
 [source,text]

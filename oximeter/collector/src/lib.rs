@@ -14,7 +14,6 @@ use dropshot::HttpServerStarter;
 use internal_dns::resolver::ResolveError;
 use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
-use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::backoff;
 use omicron_common::FileKv;
@@ -79,12 +78,18 @@ pub struct DbConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub address: Option<SocketAddr>,
 
-    /// Batch size of samples at which to insert
+    /// Batch size of samples at which to insert.
     pub batch_size: usize,
 
     /// Interval on which to insert data into the database, regardless of the number of collected
     /// samples. Value is in seconds.
     pub batch_interval: u64,
+
+    // TODO (https://github.com/oxidecomputer/omicron/issues/4148): This field
+    // should be removed if single node functionality is removed.
+    /// Whether ClickHouse is running as a replicated cluster or
+    /// single-node server.
+    pub replicated: bool,
 }
 
 impl DbConfig {
@@ -96,12 +101,16 @@ impl DbConfig {
     /// ClickHouse.
     pub const DEFAULT_BATCH_INTERVAL: u64 = 5;
 
+    /// Default ClickHouse topology.
+    pub const DEFAULT_REPLICATED: bool = false;
+
     // Construct config with an address, using the defaults for other fields
     fn with_address(address: SocketAddr) -> Self {
         Self {
             address: Some(address),
             batch_size: Self::DEFAULT_BATCH_SIZE,
             batch_interval: Self::DEFAULT_BATCH_INTERVAL,
+            replicated: Self::DEFAULT_REPLICATED,
         }
     }
 }
@@ -208,6 +217,7 @@ impl Oximeter {
                     config.db,
                     &resolver,
                     &log,
+                    config.db.replicated,
                 )
                 .await?,
             ))
@@ -251,14 +261,14 @@ impl Oximeter {
             let nexus_address = if let Some(address) = config.nexus_address {
                 address
             } else {
-                SocketAddr::V6(SocketAddrV6::new(
-                    resolver.lookup_ipv6(ServiceName::Nexus).await.map_err(
-                        |e| backoff::BackoffError::transient(e.to_string()),
-                    )?,
-                    NEXUS_INTERNAL_PORT,
-                    0,
-                    0,
-                ))
+                SocketAddr::V6(
+                    resolver
+                        .lookup_socket_v6(ServiceName::Nexus)
+                        .await
+                        .map_err(|e| {
+                            backoff::BackoffError::transient(e.to_string())
+                        })?,
+                )
             };
             let client = nexus_client::Client::new(
                 &format!("http://{nexus_address}"),

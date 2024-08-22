@@ -100,7 +100,7 @@ bgp = []
 # You can configure multiple uplinks by repeating the following stanza
 [[rack_network_config.ports]]
 # Routes associated with this port.
-routes = [{nexthop = "192.168.1.1", destination = "0.0.0.0/0"}]
+routes = [{nexthop = "192.168.1.199", destination = "0.0.0.0/0"}]
 # Addresses associated with this port.
 addresses = [{address = "192.168.1.30/24"}]
 # Name of the uplink port.  This should always be "qsfp0" when using softnpu.
@@ -117,6 +117,22 @@ autoneg = false
 switch = "switch0"
 # Neighbors we expect to peer with over BGP on this port.
 bgp_peers = []
+
+# LLDP settings for this port
+#[rack_network_config.switch0.qsfp0.lldp]
+#status = "Enabled"
+# Optional Port ID, overriding default of qsfpX/0
+#port_id = ""
+## Optional port description
+#port_description = "uplink 0"
+# Optional chassid ID, overriding the switch-level setting
+#chassis_id = ""
+# Optional system name, overriding the switch-level setting
+#system_name = ""
+# Optional system description, overriding the switch-level setting
+#system_description = ""
+# Optional management addresses to advertise, overriding switch-level setting
+#management_addrs = []
 
 # An allowlist of source IPs that can make requests to user-facing services can
 # be specified here. It can be written as the string "any" ...
