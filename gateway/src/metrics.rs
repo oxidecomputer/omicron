@@ -233,9 +233,11 @@ impl Metrics {
 
     pub fn set_rack_id(&mut self, rack_id: Uuid) {
         if let Some(tx) = self.rack_id_tx.take() {
-            tx.send(rack_id).expect("why has the sensor-poller task gone away?")
+            // If the task that starts sensor pollers has gone away already,
+            // we're probably shutting down, and shouldn't panic.
+            let _ = tx.send(rack_id);
         }
-        // ignoring duplicate attempt to set the rack ID...
+        // Ignoring duplicate attempt to set the rack ID...
     }
 
     pub async fn update_server_addrs(&self, new_addrs: &[SocketAddrV6]) {
