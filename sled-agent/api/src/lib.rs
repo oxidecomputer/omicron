@@ -23,7 +23,7 @@ use omicron_common::{
     },
     disk::{DiskVariant, DisksManagementResult, OmicronPhysicalDisksConfig},
 };
-use omicron_uuid_kinds::{InstanceUuid, ZpoolUuid};
+use omicron_uuid_kinds::{PropolisUuid, ZpoolUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::{
@@ -212,59 +212,59 @@ pub trait SledAgentApi {
 
     #[endpoint {
         method = PUT,
-        path = "/instances/{instance_id}",
+        path = "/vmms/{propolis_id}",
     }]
-    async fn instance_register(
+    async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
+        path_params: Path<VmmPathParam>,
         body: TypedBody<InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledInstanceState>, HttpError>;
 
     #[endpoint {
         method = DELETE,
-        path = "/instances/{instance_id}",
+        path = "/vmms/{propolis_id}",
     }]
-    async fn instance_unregister(
+    async fn vmm_unregister(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
+        path_params: Path<VmmPathParam>,
     ) -> Result<HttpResponseOk<InstanceUnregisterResponse>, HttpError>;
 
     #[endpoint {
         method = PUT,
-        path = "/instances/{instance_id}/state",
+        path = "/vmms/{propolis_id}/state",
     }]
-    async fn instance_put_state(
+    async fn vmm_put_state(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
+        path_params: Path<VmmPathParam>,
         body: TypedBody<InstancePutStateBody>,
     ) -> Result<HttpResponseOk<InstancePutStateResponse>, HttpError>;
 
     #[endpoint {
         method = GET,
-        path = "/instances/{instance_id}/state",
+        path = "/vmms/{propolis_id}/state",
     }]
-    async fn instance_get_state(
+    async fn vmm_get_state(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
+        path_params: Path<VmmPathParam>,
     ) -> Result<HttpResponseOk<SledInstanceState>, HttpError>;
 
     #[endpoint {
         method = PUT,
-        path = "/instances/{instance_id}/external-ip",
+        path = "/vmms/{propolis_id}/external-ip",
     }]
-    async fn instance_put_external_ip(
+    async fn vmm_put_external_ip(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
+        path_params: Path<VmmPathParam>,
         body: TypedBody<InstanceExternalIpBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
         method = DELETE,
-        path = "/instances/{instance_id}/external-ip",
+        path = "/vmms/{propolis_id}/external-ip",
     }]
-    async fn instance_delete_external_ip(
+    async fn vmm_delete_external_ip(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
+        path_params: Path<VmmPathParam>,
         body: TypedBody<InstanceExternalIpBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
@@ -290,14 +290,14 @@ pub trait SledAgentApi {
     /// Take a snapshot of a disk that is attached to an instance
     #[endpoint {
         method = POST,
-        path = "/instances/{instance_id}/disks/{disk_id}/snapshot",
+        path = "/vmms/{propolis_id}/disks/{disk_id}/snapshot",
     }]
-    async fn instance_issue_disk_snapshot_request(
+    async fn vmm_issue_disk_snapshot_request(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstanceIssueDiskSnapshotRequestPathParam>,
-        body: TypedBody<InstanceIssueDiskSnapshotRequestBody>,
+        path_params: Path<VmmIssueDiskSnapshotRequestPathParam>,
+        body: TypedBody<VmmIssueDiskSnapshotRequestBody>,
     ) -> Result<
-        HttpResponseOk<InstanceIssueDiskSnapshotRequestResponse>,
+        HttpResponseOk<VmmIssueDiskSnapshotRequestResponse>,
         HttpError,
     >;
 
@@ -516,8 +516,8 @@ impl From<DiskVariant> for DiskType {
 
 /// Path parameters for Instance requests (sled agent API)
 #[derive(Deserialize, JsonSchema)]
-pub struct InstancePathParam {
-    pub instance_id: InstanceUuid,
+pub struct VmmPathParam {
+    pub propolis_id: PropolisUuid,
 }
 
 /// Path parameters for Disk requests (sled agent API)
@@ -527,18 +527,18 @@ pub struct DiskPathParam {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct InstanceIssueDiskSnapshotRequestPathParam {
-    pub instance_id: Uuid,
+pub struct VmmIssueDiskSnapshotRequestPathParam {
+    pub propolis_id: PropolisUuid,
     pub disk_id: Uuid,
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct InstanceIssueDiskSnapshotRequestBody {
+pub struct VmmIssueDiskSnapshotRequestBody {
     pub snapshot_id: Uuid,
 }
 
 #[derive(Serialize, JsonSchema)]
-pub struct InstanceIssueDiskSnapshotRequestResponse {
+pub struct VmmIssueDiskSnapshotRequestResponse {
     pub snapshot_id: Uuid,
 }
 

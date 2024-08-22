@@ -18,7 +18,7 @@ use omicron_common::api::internal::{
         DhcpConfig, NetworkInterface, ResolvedVpcFirewallRule, SourceNatConfig,
     },
 };
-use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -37,10 +37,8 @@ pub struct InstanceEnsureBody {
     /// The initial VMM runtime state for the VMM being registered.
     pub vmm_runtime: VmmRuntimeState,
 
-    /// The ID of the VMM being registered. This may not be the active VMM ID in
-    /// the instance runtime state (e.g. if the new VMM is going to be a
-    /// migration target).
-    pub propolis_id: PropolisUuid,
+    /// The ID of the instance for which this VMM is being created.
+    pub instance_id: InstanceUuid,
 
     /// The address at which this VMM should serve a Propolis server API.
     pub propolis_addr: SocketAddr,

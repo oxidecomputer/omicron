@@ -364,35 +364,6 @@ impl<S: Simulatable + 'static> SimCollection<S> {
     pub async fn contains_key(self: &Arc<Self>, id: &Uuid) -> bool {
         self.objects.lock().await.contains_key(id)
     }
-
-    /// Iterates over all of the existing objects in the collection and, for any
-    /// that meet `condition`, asks to transition them into the supplied target
-    /// state.
-    ///
-    /// If any such transition fails, this routine short-circuits and does not
-    /// attempt to transition any other objects.
-    //
-    // TODO: It's likely more idiomatic to have an `iter_mut` routine that
-    // returns a struct that impls Iterator and yields &mut S references. The
-    // tricky bit is that the struct must hold the objects lock during the
-    // iteration. Figure out if there's a better way to arrange all this.
-    pub async fn sim_ensure_for_each_where<C>(
-        self: &Arc<Self>,
-        condition: C,
-        target: &S::RequestedState,
-    ) -> Result<(), Error>
-    where
-        C: Fn(&S) -> bool,
-    {
-        let mut objects = self.objects.lock().await;
-        for o in objects.values_mut() {
-            if condition(&o.object) {
-                o.transition(target.clone())?;
-            }
-        }
-
-        Ok(())
-    }
 }
 
 impl<S: Simulatable + Clone + 'static> SimCollection<S> {

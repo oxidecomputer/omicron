@@ -32,7 +32,6 @@ use omicron_common::api::internal::shared::{
 };
 use omicron_common::disk::DisksManagementResult;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use sled_agent_api::*;
 use sled_agent_types::boot_disk::BootDiskOsWriteStatus;
 use sled_agent_types::boot_disk::BootDiskPathParams;
@@ -83,18 +82,18 @@ enum SledAgentSimImpl {}
 impl SledAgentApi for SledAgentSimImpl {
     type Context = Arc<SledAgent>;
 
-    async fn instance_register(
+    async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
+        path_params: Path<VmmPathParam>,
         body: TypedBody<InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
         let sa = rqctx.context();
-        let instance_id = path_params.into_inner().instance_id;
+        let propolis_id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
         Ok(HttpResponseOk(
             sa.instance_register(
-                instance_id,
-                body_args.propolis_id,
+                body_args.instance_id,
+                propolis_id,
                 body_args.hardware,
                 body_args.instance_runtime,
                 body_args.vmm_runtime,
@@ -104,58 +103,56 @@ impl SledAgentApi for SledAgentSimImpl {
         ))
     }
 
-    async fn instance_unregister(
+    async fn vmm_unregister(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
+        path_params: Path<VmmPathParam>,
     ) -> Result<HttpResponseOk<InstanceUnregisterResponse>, HttpError> {
         let sa = rqctx.context();
-        let instance_id = path_params.into_inner().instance_id;
-        Ok(HttpResponseOk(sa.instance_unregister(instance_id).await?))
+        let id = path_params.into_inner().propolis_id;
+        Ok(HttpResponseOk(sa.instance_unregister(id).await?))
     }
 
-    async fn instance_put_state(
+    async fn vmm_put_state(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
+        path_params: Path<VmmPathParam>,
         body: TypedBody<InstancePutStateBody>,
     ) -> Result<HttpResponseOk<InstancePutStateResponse>, HttpError> {
         let sa = rqctx.context();
-        let instance_id = path_params.into_inner().instance_id;
+        let id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
-        Ok(HttpResponseOk(
-            sa.instance_ensure_state(instance_id, body_args.state).await?,
-        ))
+        Ok(HttpResponseOk(sa.instance_ensure_state(id, body_args.state).await?))
     }
 
-    async fn instance_get_state(
+    async fn vmm_get_state(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
+        path_params: Path<VmmPathParam>,
     ) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
         let sa = rqctx.context();
-        let instance_id = path_params.into_inner().instance_id;
-        Ok(HttpResponseOk(sa.instance_get_state(instance_id).await?))
+        let id = path_params.into_inner().propolis_id;
+        Ok(HttpResponseOk(sa.instance_get_state(id).await?))
     }
 
-    async fn instance_put_external_ip(
+    async fn vmm_put_external_ip(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
+        path_params: Path<VmmPathParam>,
         body: TypedBody<InstanceExternalIpBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
-        let instance_id = path_params.into_inner().instance_id;
+        let id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
-        sa.instance_put_external_ip(instance_id, &body_args).await?;
+        sa.instance_put_external_ip(id, &body_args).await?;
         Ok(HttpResponseUpdatedNoContent())
     }
 
-    async fn instance_delete_external_ip(
+    async fn vmm_delete_external_ip(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
+        path_params: Path<VmmPathParam>,
         body: TypedBody<InstanceExternalIpBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
-        let instance_id = path_params.into_inner().instance_id;
+        let id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
-        sa.instance_delete_external_ip(instance_id, &body_args).await?;
+        sa.instance_delete_external_ip(id, &body_args).await?;
         Ok(HttpResponseUpdatedNoContent())
     }
 
@@ -192,27 +189,25 @@ impl SledAgentApi for SledAgentSimImpl {
         Ok(HttpResponseUpdatedNoContent())
     }
 
-    async fn instance_issue_disk_snapshot_request(
+    async fn vmm_issue_disk_snapshot_request(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstanceIssueDiskSnapshotRequestPathParam>,
-        body: TypedBody<InstanceIssueDiskSnapshotRequestBody>,
-    ) -> Result<
-        HttpResponseOk<InstanceIssueDiskSnapshotRequestResponse>,
-        HttpError,
-    > {
+        path_params: Path<VmmIssueDiskSnapshotRequestPathParam>,
+        body: TypedBody<VmmIssueDiskSnapshotRequestBody>,
+    ) -> Result<HttpResponseOk<VmmIssueDiskSnapshotRequestResponse>, HttpError>
+    {
         let sa = rqctx.context();
         let path_params = path_params.into_inner();
         let body = body.into_inner();
 
         sa.instance_issue_disk_snapshot_request(
-            InstanceUuid::from_untyped_uuid(path_params.instance_id),
+            path_params.propolis_id,
             path_params.disk_id,
             body.snapshot_id,
         )
         .await
         .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
-        Ok(HttpResponseOk(InstanceIssueDiskSnapshotRequestResponse {
+        Ok(HttpResponseOk(VmmIssueDiskSnapshotRequestResponse {
             snapshot_id: body.snapshot_id,
         }))
     }
@@ -512,45 +507,44 @@ fn method_unimplemented<T>() -> Result<T, HttpError> {
 
 #[endpoint {
     method = POST,
-    path = "/instances/{instance_id}/poke",
+    path = "/vmms/{propolis_id}/poke",
 }]
 async fn instance_poke_post(
     rqctx: RequestContext<Arc<SledAgent>>,
-    path_params: Path<InstancePathParam>,
+    path_params: Path<VmmPathParam>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
-    let instance_id = path_params.into_inner().instance_id;
-    sa.instance_poke(instance_id, PokeMode::Drain).await;
+    let id = path_params.into_inner().propolis_id;
+    sa.vmm_poke(id, PokeMode::Drain).await;
     Ok(HttpResponseUpdatedNoContent())
 }
 
 #[endpoint {
     method = POST,
-    path = "/instances/{instance_id}/poke-single-step",
+    path = "/vmms/{propolis_id}/poke-single-step",
 }]
 async fn instance_poke_single_step_post(
     rqctx: RequestContext<Arc<SledAgent>>,
-    path_params: Path<InstancePathParam>,
+    path_params: Path<VmmPathParam>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
-    let instance_id = path_params.into_inner().instance_id;
-    sa.instance_poke(instance_id, PokeMode::SingleStep).await;
+    let id = path_params.into_inner().propolis_id;
+    sa.vmm_poke(id, PokeMode::SingleStep).await;
     Ok(HttpResponseUpdatedNoContent())
 }
 
 #[endpoint {
     method = POST,
-    path = "/instances/{instance_id}/sim-migration-source",
+    path = "/vmms/{propolis_id}/sim-migration-source",
 }]
 async fn instance_post_sim_migration_source(
     rqctx: RequestContext<Arc<SledAgent>>,
-    path_params: Path<InstancePathParam>,
+    path_params: Path<VmmPathParam>,
     body: TypedBody<super::instance::SimulateMigrationSource>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
-    let instance_id = path_params.into_inner().instance_id;
-    sa.instance_simulate_migration_source(instance_id, body.into_inner())
-        .await?;
+    let id = path_params.into_inner().propolis_id;
+    sa.instance_simulate_migration_source(id, body.into_inner()).await?;
     Ok(HttpResponseUpdatedNoContent())
 }
 
