@@ -299,7 +299,7 @@ impl MetricsConfig {
             "`metrics.sp_poll_interval_ms` probably shouldn't be 0 ms",
         );
         let sp_poll_interval =
-            Duration::from_secs(self.sp_poll_interval_ms as u64);
+            Duration::from_millis(self.sp_poll_interval_ms as u64);
 
         let max_buffered_sample_chunks = {
             // Roughly how many times will we poll SPs for each metrics collection
