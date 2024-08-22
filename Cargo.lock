@@ -6153,6 +6153,7 @@ dependencies = [
  "gateway-client",
  "gateway-messages",
  "gateway-test-utils",
+ "http 0.2.12",
  "humantime",
  "indicatif",
  "internal-dns",
