@@ -286,15 +286,6 @@ interface = "gimlet31"
 ignition-target = 18
 location = { switch0 = ["sled", 31], switch1 = ["sled", 31] }
 
-#
-# Configuration for SP sensor metrics polling
-#
-[metrics]
-# Bryan wants to try polling SP sensors at 1Hz.
-sp_poll_interval_ms = 1000
-# Tell Oximeter to collect our metrics every 10 seconds.
-oximeter_collection_interval_secs = 10
-
 [log]
 level = "info"
 mode = "file"
