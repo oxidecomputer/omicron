@@ -46,20 +46,14 @@ pub struct Metrics {
 }
 
 /// Configuration for metrics.
+///
+/// In order to reduce the risk of a bad config file taking down the whole
+/// management network, we try to keep the metrics-specific portion of the
+/// config file as minimal as possible. At present, it only includes development
+/// configurations that shouldn't be present in production configs.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct MetricsConfig {
-    /// Collection interval to request from Oximeter, in seconds.
-    ///
-    /// This is the frequency with which Oximeter will collect samples from the
-    /// metrics producer endpoint, *not* the frequency with which sensor
-    /// measurements are polled from service processors.
-    oximeter_collection_interval: Duration,
-
-    /// The interval at which service processors are polled for sensor readings,
-    /// in milliseconds
-    sp_poll_interval: Duration,
-
     /// Configuration settings for testing and development use.
     pub dev: Option<DevConfig>,
 }
@@ -129,6 +123,16 @@ struct Producer {
 /// The maximum Dropshot request size for the metrics server.
 const METRIC_REQUEST_MAX_SIZE: usize = 10 * 1024 * 1024;
 
+/// Poll interval for requesting sensor readings from SPs.
+///
+/// Bryan wants to try polling at 1Hz, so let's do that for now.
+const SP_POLL_INTERVAL: Duration = Duration::from_secs(1);
+
+///The interval at which we will ask Oximeter to collect our metric samples.
+///
+/// Every ten seconds seems good.
+const OXIMETER_COLLECTION_INTERVAL: Duration = Duration::from_secs(10);
+
 /// The expected number of SPs in a fully-loaded rack.
 ///
 /// N.B. that there *might* be more than this; we shouldn't ever panic or
@@ -147,6 +151,31 @@ const NORMAL_NUMBER_OF_SPS: usize =
     + 2 // two power shelves, someday.
     ;
 
+/// What size should we make the
+const MAX_BUFFERED_SAMPLE_CHUNKS: usize = {
+    // Roughly how many times will we poll SPs for each metrics collection
+    // interval?
+    let polls_per_metrics_interval = {
+        let collection_interval_secs: usize =
+            OXIMETER_COLLECTION_INTERVAL.as_secs() as usize;
+        let poll_interval_secs: usize = SP_POLL_INTERVAL.as_secs() as usize;
+
+        collection_interval_secs / poll_interval_secs
+    };
+
+    // How many sample collection intervals do we want to allow to elapse before
+    // we start putting stuff on the floor?
+    //
+    // Let's say 16. Chosen totally arbitrarily but seems reasonable-ish.
+    let sloppiness = 16;
+    let capacity =
+        NORMAL_NUMBER_OF_SPS * polls_per_metrics_interval * sloppiness;
+    // Finally, the buffer capacity will probably be allocated in a power of two
+    // anyway, so let's make sure our thing is a power of two so we don't waste
+    // the allocation we're gonna get anyway.
+    capacity.next_power_of_two()
+};
+
 impl Metrics {
     pub fn new(
         log: &slog::Logger,
@@ -155,46 +184,6 @@ impl Metrics {
         apictx: Arc<ServerContext>,
     ) -> anyhow::Result<Self> {
         let &MgsArguments { id, rack_id, ref addresses } = args;
-
-        anyhow::ensure!(
-            cfg.sp_poll_interval >= Duration::from_millis(50),
-            "configured SP poll interval ({:?}) should probably be at least 50ms",
-            cfg.sp_poll_interval,
-        );
-        anyhow::ensure!(
-            cfg.oximeter_collection_interval >= cfg.sp_poll_interval,
-            "there is no sense in having an Oximeter collection interval that's \
-             shorter than the SP poll interval, because there will be no new \
-             samples ready (the SP poll interval is {:?}, but the Oximeter \
-             collection interval is {:?})",
-            cfg.sp_poll_interval,
-            cfg.oximeter_collection_interval,
-        );
-
-        let max_buffered_sample_chunks = {
-            // Roughly how many times will we poll SPs for each metrics collection
-            // interval?
-            let polls_per_metrics_interval = {
-                let collection_interval_ms =
-                    cfg.oximeter_collection_interval.as_millis();
-                let poll_interval_ms = cfg.sp_poll_interval.as_millis();
-
-                (collection_interval_ms / poll_interval_ms) as usize
-            };
-
-            // How many sample collection intervals do we want to allow to elapse before
-            // we start putting stuff on the floor?
-            //
-            // Let's say 16. Chosen totally arbitrarily but seems reasonable-ish.
-            let sloppiness = 16;
-            let capacity =
-                NORMAL_NUMBER_OF_SPS * polls_per_metrics_interval * sloppiness;
-            // Finally, the buffer capacity will probably be allocated in a power of two
-            // anyway, so let's make sure our thing is a power of two so we don't waste
-            // the allocation we're gonna get anyway.
-            capacity.next_power_of_two()
-        };
-
         // Create a channel for the SP poller tasks to send samples to the
         // Oximeter producer endpoint.
         //
@@ -207,7 +196,7 @@ impl Metrics {
         // clobbering the oldest measurements, rather than leaving the newest
         // ones on the floor.
         let (sample_tx, sample_rx) =
-            broadcast::channel(max_buffered_sample_chunks);
+            broadcast::channel(MAX_BUFFERED_SAMPLE_CHUNKS);
 
         // Using a channel for this is, admittedly, a bit of an end-run around
         // the `OnceLock` on the `ServerContext` that *also* stores the rack ID,
@@ -225,24 +214,13 @@ impl Metrics {
             Some(rack_id_tx)
         };
 
-        tokio::spawn({
-            let log = log.new(slog::o!("component" => "sensor-poller"));
-            slog::info!(
-                &log,
-                "SP sensor metrics configured";
-                "poll_interval" => ?cfg.sp_poll_interval,
-                "max_buffered_sample_chunks" => max_buffered_sample_chunks,
-            );
-
-            start_pollers(
-                log,
-                apictx.clone(),
-                rack_id_rx,
-                id,
-                sample_tx,
-                cfg.sp_poll_interval,
-            )
-        });
+        tokio::spawn(start_pollers(
+            log.new(slog::o!("component" => "sensor-poller")),
+            apictx.clone(),
+            rack_id_rx,
+            id,
+            sample_tx,
+        ));
 
         let (addrs_tx, addrs_rx) =
             tokio::sync::watch::channel(addresses.clone());
@@ -368,7 +346,6 @@ async fn start_pollers(
     rack_id: oneshot::Receiver<Uuid>,
     mgs_id: Uuid,
     sample_tx: broadcast::Sender<Vec<Sample>>,
-    poll_interval: Duration,
 ) -> anyhow::Result<()> {
     let switch = &apictx.mgmt_switch;
 
@@ -416,7 +393,7 @@ async fn start_pollers(
 
     slog::info!(
         &log,
-        "starting to poll SP sensor data every {poll_interval:?}"
+        "starting to poll SP sensor data every {SP_POLL_INTERVAL:?}"
     );
 
     for (spid, _) in sps {
@@ -439,19 +416,15 @@ async fn start_pollers(
             known_state: None,
             sample_tx: sample_tx.clone(),
         };
-        tokio::spawn(poller.run(poll_interval, apictx.clone()));
+        tokio::spawn(poller.run(apictx.clone()));
     }
 
     Ok(())
 }
 
 impl SpPoller {
-    async fn run(
-        mut self,
-        poll_interval: Duration,
-        apictx: Arc<ServerContext>,
-    ) {
-        let mut interval = tokio::time::interval(poll_interval);
+    async fn run(mut self, apictx: Arc<ServerContext>) {
+        let mut interval = tokio::time::interval(SP_POLL_INTERVAL);
         let switch = &apictx.mgmt_switch;
         let sp = match switch.sp(self.spid) {
             Ok(sp) => sp,
@@ -991,7 +964,6 @@ impl ServerManager {
                 (None, false)
             };
         let id = self.registry.producer_id();
-        let interval = cfg.oximeter_collection_interval;
 
         let mut current_server: Option<oximeter_producer::Server> = None;
         loop {
@@ -1019,7 +991,7 @@ impl ServerManager {
                     "rebinding producer server on new IP";
                     "new_ip" => ?ip,
                     "current_ip" => ?current_ip,
-                    "collection_interval" => ?interval,
+                    "collection_interval" => ?OXIMETER_COLLECTION_INTERVAL,
                     "producer_id" => ?id,
                 );
                 let server = {
@@ -1030,7 +1002,7 @@ impl ServerManager {
                         id,
                         kind: ProducerKind::ManagementGateway,
                         address,
-                        interval,
+                        interval: OXIMETER_COLLECTION_INTERVAL,
                     };
                     let config = oximeter_producer::Config {
                         server_info,
@@ -1050,7 +1022,7 @@ impl ServerManager {
                 slog::info!(
                     &self.log,
                     "bound metrics producer server";
-                    "collection_interval" => ?interval,
+                    "collection_interval" => ?OXIMETER_COLLECTION_INTERVAL,
                     "producer_id" => ?id,
                     "address" => %server.address(),
                 );

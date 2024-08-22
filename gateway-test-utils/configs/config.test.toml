@@ -92,10 +92,6 @@ location = { switch0 = ["sled", 1], switch1 = ["sled", 1] }
 # Configuration for SP sensor metrics polling
 #
 [metrics]
-# Bryan wants to try polling SP sensors at 1Hz.
-sp_poll_interval = { secs = 10, nanos = 0 }
-# Tell Oximeter to collect our metrics every 10 seconds.
-oximeter_collection_interval = { secs = 10, nanos = 0 }
 # Allow binding the metrics server on localhost.
 dev = { bind_loopback = true }
 

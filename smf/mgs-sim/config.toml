@@ -71,15 +71,6 @@ addr = "[::1]:33320"
 ignition-target = 3
 location = { switch0 = ["sled", 1], switch1 = ["sled", 1] }
 
-#
-# Configuration for SP sensor metrics polling
-#
-[metrics]
-# Bryan wants to try polling SP sensors at 1Hz.
-sp_poll_interval = { secs = 10, nanos = 0 }
-# Tell Oximeter to collect our metrics every 10 seconds.
-oximeter_collection_interval = { secs = 10, nanos = 0 }
-
 [log]
 # Show log messages of this level and more severe
 level = "debug"
