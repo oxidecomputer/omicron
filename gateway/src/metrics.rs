@@ -755,6 +755,7 @@ impl SpPoller {
                     try_sample!(metrics.poll_error("no_measurement_channels"));
                     continue;
                 }
+
                 let ComponentMetrics { sensor_errors, target, .. } = metrics;
                 for d in details.entries {
                     let ComponentDetails::Measurement(m) = d else {
@@ -762,7 +763,68 @@ impl SpPoller {
                         // than measurement channels, ignore it for now.
                         continue;
                     };
-                    let sensor = Cow::Owned(m.name);
+                    let sensor: Cow<'static, str> = Cow::Owned(m.name);
+
+                    // First, if there's a measurement error, increment the
+                    // error count metric. We will synthesize a missing sample
+                    // for the sensor's metric as well, after we produce the
+                    // measurement error sample.
+                    //
+                    // We do this first so that we only have to clone the
+                    // sensor's name if there's an error, rather than always
+                    // cloning it in *case* there's an error.
+                    if let Err(error) = m.value {
+                        let kind = match m.kind {
+                            MeasurementKind::Temperature => "temperature",
+                            MeasurementKind::Current => "current",
+                            MeasurementKind::Voltage => "voltage",
+                            MeasurementKind::Power => "power",
+                            MeasurementKind::InputCurrent => "input_current",
+                            MeasurementKind::InputVoltage => "input_voltage",
+                            MeasurementKind::Speed => "fan_speed",
+                        };
+                        let error = match error {
+                            MeasurementError::InvalidSensor => "invalid_sensor",
+                            MeasurementError::NoReading => "no_reading",
+                            MeasurementError::NotPresent => "not_present",
+                            MeasurementError::DeviceError => "device_error",
+                            MeasurementError::DeviceUnavailable => {
+                                "device_unavailable"
+                            }
+                            MeasurementError::DeviceTimeout => "device_timeout",
+                            MeasurementError::DeviceOff => "device_off",
+                        };
+                        let datum = sensor_errors
+                            .entry(SensorErrorKey {
+                                name: sensor.clone(),
+                                kind,
+                                error,
+                            })
+                            .or_insert(Cumulative::new(0));
+                        // TODO(eliza): perhaps we should treat this as
+                        // "level-triggered" and only increment the counter
+                        // when the sensor has *changed* to an errored
+                        // state after we have seen at least one good
+                        // measurement from it since the last time the error
+                        // was observed?
+                        datum.increment();
+                        try_sample!(Sample::new(
+                            target,
+                            &metric::SensorErrorCount {
+                                error: Cow::Borrowed(error),
+                                sensor: sensor.clone(),
+                                datum: *datum,
+                                sensor_kind: Cow::Borrowed(kind),
+                            },
+                        ));
+                    }
+
+                    // I don't love this massive `match`, but because the
+                    // `Sample::new_missing` constructor is a different function
+                    // from `Sample::new`, we need separate branches for the
+                    // error and not-error cases, rather than just doing
+                    // something to produce a datum from both the `Ok` and
+                    // `Error` cases...
                     let sample = match (m.value, m.kind) {
                         (Ok(datum), MeasurementKind::Temperature) => {
                             Sample::new(
@@ -770,22 +832,53 @@ impl SpPoller {
                                 &metric::Temperature { sensor, datum },
                             )
                         }
+                        (Err(_), MeasurementKind::Temperature) => {
+                            Sample::new_missing(
+                                target,
+                                &metric::Temperature { sensor, datum: 0.0 },
+                            )
+                        }
                         (Ok(datum), MeasurementKind::Current) => Sample::new(
                             target,
                             &metric::Current { sensor, datum },
                         ),
+                        (Err(_), MeasurementKind::Current) => {
+                            Sample::new_missing(
+                                target,
+                                &metric::Current { sensor, datum: 0.0 },
+                            )
+                        }
                         (Ok(datum), MeasurementKind::Voltage) => Sample::new(
                             target,
                             &metric::Voltage { sensor, datum },
                         ),
+
+                        (Err(_), MeasurementKind::Voltage) => {
+                            Sample::new_missing(
+                                target,
+                                &metric::Voltage { sensor, datum: 0.0 },
+                            )
+                        }
                         (Ok(datum), MeasurementKind::Power) => Sample::new(
                             target,
                             &metric::Power { sensor, datum },
                         ),
+                        (Err(_), MeasurementKind::Power) => {
+                            Sample::new_missing(
+                                target,
+                                &metric::Power { sensor, datum: 0.0 },
+                            )
+                        }
                         (Ok(datum), MeasurementKind::InputCurrent) => {
                             Sample::new(
                                 target,
                                 &metric::InputCurrent { sensor, datum },
+                            )
+                        }
+                        (Err(_), MeasurementKind::InputCurrent) => {
+                            Sample::new_missing(
+                                target,
+                                &metric::InputCurrent { sensor, datum: 0.0 },
                             )
                         }
                         (Ok(datum), MeasurementKind::InputVoltage) => {
@@ -794,61 +887,20 @@ impl SpPoller {
                                 &metric::InputVoltage { sensor, datum },
                             )
                         }
+                        (Err(_), MeasurementKind::InputVoltage) => {
+                            Sample::new_missing(
+                                target,
+                                &metric::InputVoltage { sensor, datum: 0.0 },
+                            )
+                        }
                         (Ok(datum), MeasurementKind::Speed) => Sample::new(
                             target,
                             &metric::FanSpeed { sensor, datum },
                         ),
-                        (Err(e), kind) => {
-                            let kind = match kind {
-                                MeasurementKind::Temperature => "temperature",
-                                MeasurementKind::Current => "current",
-                                MeasurementKind::Voltage => "voltage",
-                                MeasurementKind::Power => "power",
-                                MeasurementKind::InputCurrent => {
-                                    "input_current"
-                                }
-                                MeasurementKind::InputVoltage => {
-                                    "input_voltage"
-                                }
-                                MeasurementKind::Speed => "fan_speed",
-                            };
-                            let error = match e {
-                                MeasurementError::InvalidSensor => {
-                                    "invalid_sensor"
-                                }
-                                MeasurementError::NoReading => "no_reading",
-                                MeasurementError::NotPresent => "not_present",
-                                MeasurementError::DeviceError => "device_error",
-                                MeasurementError::DeviceUnavailable => {
-                                    "device_unavailable"
-                                }
-                                MeasurementError::DeviceTimeout => {
-                                    "device_timeout"
-                                }
-                                MeasurementError::DeviceOff => "device_off",
-                            };
-                            let datum = sensor_errors
-                                .entry(SensorErrorKey {
-                                    name: sensor.clone(),
-                                    kind,
-                                    error,
-                                })
-                                .or_insert(Cumulative::new(0));
-                            // TODO(eliza): perhaps we should treat this as
-                            // "level-triggered" and only increment the counter
-                            // when the sensor has *changed* to an errored
-                            // state after we have seen at least one good
-                            // measurement from it since the last time the error
-                            // was observed?
-                            datum.increment();
-                            Sample::new(
+                        (Err(_), MeasurementKind::Speed) => {
+                            Sample::new_missing(
                                 target,
-                                &metric::SensorErrorCount {
-                                    error: Cow::Borrowed(error),
-                                    sensor,
-                                    datum: *datum,
-                                    sensor_kind: Cow::Borrowed(kind),
-                                },
+                                &metric::FanSpeed { sensor, datum: 0.0 },
                             )
                         }
                     };
