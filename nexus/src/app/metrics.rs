@@ -14,7 +14,7 @@ use nexus_db_queries::{
 };
 use omicron_common::api::external::{Error, InternalContext};
 use oximeter_db::{
-    oxql, Measurement, TimeseriesSchema, TimeseriesSchemaPaginationParams,
+    Measurement, TimeseriesSchema, TimeseriesSchemaPaginationParams,
 };
 use std::num::NonZeroU32;
 
@@ -138,7 +138,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         query: impl AsRef<str>,
-    ) -> Result<Vec<oxql::Table>, Error> {
+    ) -> Result<Vec<oxql_types::Table>, Error> {
         // Must be a fleet user to list timeseries schema.
         //
         // TODO-security: We need to figure out how to implement proper security

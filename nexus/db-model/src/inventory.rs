@@ -1036,6 +1036,7 @@ impl_enum_type!(
     BoundaryNtp => b"boundary_ntp"
     Clickhouse => b"clickhouse"
     ClickhouseKeeper => b"clickhouse_keeper"
+    ClickhouseServer => b"clickhouse_server"
     CockroachDb => b"cockroach_db"
     Crucible => b"crucible"
     CruciblePantry => b"crucible_pantry"
@@ -1052,6 +1053,7 @@ impl From<ZoneType> for ServiceKind {
             ZoneType::BoundaryNtp | ZoneType::InternalNtp => Self::Ntp,
             ZoneType::Clickhouse => Self::Clickhouse,
             ZoneType::ClickhouseKeeper => Self::ClickhouseKeeper,
+            ZoneType::ClickhouseServer => Self::ClickhouseServer,
             ZoneType::CockroachDb => Self::Cockroach,
             ZoneType::Crucible => Self::Crucible,
             ZoneType::CruciblePantry => Self::CruciblePantry,
@@ -1071,6 +1073,7 @@ impl From<ZoneType> for nexus_sled_agent_shared::inventory::ZoneKind {
             ZoneType::BoundaryNtp => BoundaryNtp,
             ZoneType::Clickhouse => Clickhouse,
             ZoneType::ClickhouseKeeper => ClickhouseKeeper,
+            ZoneType::ClickhouseServer => ClickhouseServer,
             ZoneType::CockroachDb => CockroachDb,
             ZoneType::Crucible => Crucible,
             ZoneType::CruciblePantry => CruciblePantry,
@@ -1091,6 +1094,7 @@ impl From<nexus_sled_agent_shared::inventory::ZoneKind> for ZoneType {
             BoundaryNtp => ZoneType::BoundaryNtp,
             Clickhouse => ZoneType::Clickhouse,
             ClickhouseKeeper => ZoneType::ClickhouseKeeper,
+            ClickhouseServer => ZoneType::ClickhouseServer,
             CockroachDb => ZoneType::CockroachDb,
             Crucible => ZoneType::Crucible,
             CruciblePantry => ZoneType::CruciblePantry,

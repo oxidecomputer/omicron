@@ -126,6 +126,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfig) {
                         destination: "10.1.9.32/16".parse().unwrap(),
                         nexthop: "10.1.9.32".parse().unwrap(),
                         vlan_id: None,
+                        local_pref: None,
                     }],
                     addresses: vec!["2001:db8::/96".parse().unwrap()],
                     switch: SwitchLocation::Switch0,
@@ -153,6 +154,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfig) {
                         vlan_id: None,
                     }],
                     autoneg: true,
+                    lldp: None,
                 }],
                 bgp: vec![BgpConfig {
                     asn: 20000,

@@ -280,6 +280,13 @@ pub enum CockroachDbPreserveDowngrade {
 }
 
 impl CockroachDbPreserveDowngrade {
+    pub fn is_set(self) -> bool {
+        match self {
+            CockroachDbPreserveDowngrade::Set(_) => true,
+            _ => false,
+        }
+    }
+
     pub fn from_optional_string(
         value: &Option<String>,
     ) -> Result<Self, parse_display::ParseError> {
@@ -709,6 +716,23 @@ pub struct Policy {
     /// at present this is hardcoded based on the version of CockroachDB we
     /// presently ship and the tick-tock pattern described in RFD 469.
     pub target_cockroachdb_cluster_version: CockroachDbClusterVersion,
+
+    /// Policy information for a replicated clickhouse setup
+    ///
+    /// If this policy is `None`, then we are using a single node clickhouse
+    /// setup. Eventually we will only allow multi-node setups and this will no
+    /// longer be an option.
+    pub clickhouse_policy: Option<ClickhousePolicy>,
+}
+
+/// Policy for replicated clickhouse setups
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClickhousePolicy {
+    /// Desired number of clickhouse servers
+    pub target_servers: usize,
+
+    /// Desired number of clickhouse keepers
+    pub target_keepers: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -761,6 +785,7 @@ impl PlanningInputBuilder {
                 target_cockroachdb_zone_count: 0,
                 target_cockroachdb_cluster_version:
                     CockroachDbClusterVersion::POLICY,
+                clickhouse_policy: None,
             },
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),

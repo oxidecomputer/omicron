@@ -33,7 +33,7 @@ use nexus_types::external_api::params::BgpAnnounceSetCreate;
 use nexus_types::external_api::params::BgpAnnouncementCreate;
 use nexus_types::external_api::params::BgpConfigCreate;
 use nexus_types::external_api::params::LinkConfigCreate;
-use nexus_types::external_api::params::LldpServiceConfigCreate;
+use nexus_types::external_api::params::LldpLinkConfigCreate;
 use nexus_types::external_api::params::RouteConfig;
 use nexus_types::external_api::params::SwitchPortConfigCreate;
 use nexus_types::external_api::params::UninitializedSledId;
@@ -61,6 +61,7 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
+use omicron_common::api::internal::shared::LldpAdminStatus;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
@@ -241,22 +242,44 @@ impl super::Nexus {
             .internal_context(
                 "fetching cockroachdb settings for rack initialization",
             )?;
-        self.datastore()
-            .cockroachdb_setting_set_string(
-                opctx,
-                cockroachdb_settings.state_fingerprint.clone(),
-                "cluster.preserve_downgrade_option",
-                CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string(),
-            )
-            .await
-            .internal_context(
-                "setting `cluster.preserve_downgrade_option` \
-                for rack initialization",
-            )?;
+        blueprint.cockroachdb_setting_preserve_downgrade =
+            if cockroachdb_settings.preserve_downgrade.is_empty() {
+                // Set the option to the current policy in both the database and
+                // the blueprint.
+                self.datastore()
+                    .cockroachdb_setting_set_string(
+                        opctx,
+                        cockroachdb_settings.state_fingerprint.clone(),
+                        "cluster.preserve_downgrade_option",
+                        CockroachDbClusterVersion::NEWLY_INITIALIZED
+                            .to_string(),
+                    )
+                    .await
+                    .internal_context(
+                        "setting `cluster.preserve_downgrade_option` \
+                        for rack initialization",
+                    )?;
+                CockroachDbClusterVersion::NEWLY_INITIALIZED
+            } else {
+                // `cluster.preserve_downgrade_option` is set, so fill in the
+                // blueprint with the current value. This branch should never
+                // be hit during normal rack initialization; it's here for
+                // eventual test cases where `cluster.preserve_downgrade_option`
+                // is set by a test harness prior to rack initialization.
+                CockroachDbClusterVersion::from_str(
+                    &cockroachdb_settings.preserve_downgrade,
+                )
+                .map_err(|_| {
+                    Error::internal_error(&format!(
+                        "database has `cluster.preserve_downgrade_option` \
+                        set to invalid version {}",
+                        cockroachdb_settings.preserve_downgrade
+                    ))
+                })?
+            }
+            .into();
         blueprint.cockroachdb_fingerprint =
             cockroachdb_settings.state_fingerprint;
-        blueprint.cockroachdb_setting_preserve_downgrade =
-            CockroachDbClusterVersion::NEWLY_INITIALIZED.into();
 
         // Administrators of the Recovery Silo are automatically made
         // administrators of the Fleet.
@@ -487,7 +510,7 @@ impl super::Nexus {
 
             match self
                 .db_datastore
-                .bgp_config_set(
+                .bgp_config_create(
                     &opctx,
                     &BgpConfigCreate {
                         identity: IdentityMetadataCreateParams {
@@ -570,6 +593,7 @@ impl super::Nexus {
                     dst: r.destination,
                     gw: r.nexthop,
                     vid: r.vlan_id,
+                    local_pref: r.local_pref,
                 })
                 .collect();
 
@@ -608,15 +632,30 @@ impl super::Nexus {
                 .bgp_peers
                 .insert("phy0".to_string(), BgpPeerConfig { peers });
 
+            let lldp = match &uplink_config.lldp {
+                None => LldpLinkConfigCreate {
+                    enabled: false,
+                    ..Default::default()
+                },
+                Some(l) => LldpLinkConfigCreate {
+                    enabled: l.status == LldpAdminStatus::Enabled,
+                    link_name: l.port_id.clone(),
+                    link_description: l.port_description.clone(),
+                    chassis_id: l.chassis_id.clone(),
+                    system_name: l.system_name.clone(),
+                    system_description: l.system_description.clone(),
+                    management_ip: match &l.management_addrs {
+                        Some(a) if !a.is_empty() => Some(a[0]),
+                        _ => None,
+                    },
+                },
+            };
             let link = LinkConfigCreate {
                 mtu: 1500, //TODO https://github.com/oxidecomputer/omicron/issues/2274
-                lldp: LldpServiceConfigCreate {
-                    enabled: false,
-                    lldp_config: None,
-                },
                 fec: uplink_config.uplink_port_fec.into(),
                 speed: uplink_config.uplink_port_speed.into(),
                 autoneg: uplink_config.autoneg,
+                lldp,
             };
 
             port_settings_params.links.insert("phy".to_string(), link);

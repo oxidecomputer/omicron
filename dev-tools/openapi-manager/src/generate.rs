@@ -5,7 +5,6 @@
 use std::{io::Write, process::ExitCode};
 
 use anyhow::Result;
-use camino::Utf8Path;
 use indent_write::io::IndentWriter;
 use owo_colors::OwoColorize;
 
@@ -14,7 +13,7 @@ use crate::{
         display_api_spec, display_error, display_summary, headers::*, plural,
         OutputOpts, Styles,
     },
-    spec::{all_apis, OverwriteStatus},
+    spec::{all_apis, Environment},
     FAILURE_EXIT_CODE,
 };
 
@@ -34,7 +33,7 @@ impl GenerateResult {
 }
 
 pub(crate) fn generate_impl(
-    dir: &Utf8Path,
+    env: &Environment,
     output: &OutputOpts,
 ) -> Result<GenerateResult> {
     let mut styles = Styles::default();
@@ -62,27 +61,30 @@ pub(crate) fn generate_impl(
     for (ix, spec) in all_apis.iter().enumerate() {
         let count = ix + 1;
 
-        match spec.overwrite(&dir) {
-            Ok((status, summary)) => match status {
-                OverwriteStatus::Updated => {
+        match spec.overwrite(env) {
+            Ok(status) => {
+                let updated_count = status.updated_count();
+
+                if updated_count > 0 {
                     eprintln!(
-                        "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}: {}",
+                        "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}: {} ({} {} updated)",
                         UPDATED.style(styles.success_header),
                         display_api_spec(spec, &styles),
-                        display_summary(&summary, &styles),
+                        display_summary(&status.summary, &styles),
+                        updated_count.style(styles.bold),
+                        plural::files(updated_count),
                     );
                     num_updated += 1;
-                }
-                OverwriteStatus::Unchanged => {
+                } else {
                     eprintln!(
                         "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}: {}",
                         UNCHANGED.style(styles.unchanged_header),
                         display_api_spec(spec, &styles),
-                        display_summary(&summary, &styles),
+                        display_summary(&status.summary, &styles),
                     );
                     num_unchanged += 1;
                 }
-            },
+            }
             Err(err) => {
                 eprintln!(
                     "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}",

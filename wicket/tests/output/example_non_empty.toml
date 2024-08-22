@@ -111,6 +111,14 @@ allowed_export = []
 local_pref = 80
 enforce_first_as = true
 
+[rack_network_config.switch0.port0.lldp]
+status = "enabled"
+chassis_id = "chassid id override"
+port_id = "port id override"
+system_name = "system name override"
+system_description = "system description override"
+port_description = "port description override"
+
 [rack_network_config.switch1.port0]
 routes = [{ nexthop = "172.33.0.10", destination = "0.0.0.0/0", vlan_id = 1 }]
 addresses = [{ address = "172.32.0.1/24" }]
@@ -130,6 +138,15 @@ keepalive = 2
 auth_key_id = "bgp-key-1"
 allowed_import = ["224.0.0.0/4"]
 enforce_first_as = false
+
+[rack_network_config.switch1.port0.lldp]
+status = "enabled"
+chassis_id = "chassid id override"
+port_id = "port id override"
+system_name = "system name override"
+system_description = "system description override"
+port_description = "port description override"
+management_addrs = ["172.32.0.4"]
 
 [[rack_network_config.bgp]]
 asn = 47

@@ -9,6 +9,7 @@ use futures::stream::StreamExt;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::ObjectStream;
 use omicron_common::api::external::Vni;
+use omicron_uuid_kinds::DemoSagaUuid;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::net::Ipv4Addr;
@@ -150,6 +151,13 @@ impl From<steno::SagaStateView> for SagaState {
             },
         }
     }
+}
+
+/// Identifies an instance of the demo saga
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct DemoSaga {
+    pub saga_id: Uuid,
+    pub demo_saga_id: DemoSagaUuid,
 }
 
 /// Background tasks
