@@ -54,11 +54,11 @@ pub struct MetricsConfig {
     /// This is the frequency with which Oximeter will collect samples from the
     /// metrics producer endpoint, *not* the frequency with which sensor
     /// measurements are polled from service processors.
-    oximeter_collection_interval_secs: usize,
+    oximeter_collection_interval: Duration,
 
     /// The interval at which service processors are polled for sensor readings,
     /// in milliseconds
-    sp_poll_interval_ms: usize,
+    sp_poll_interval: Duration,
 
     /// Configuration settings for testing and development use.
     pub dev: Option<DevConfig>,
@@ -79,15 +79,6 @@ pub struct DevConfig {
     /// reach the loopback interface, but is necessary for local development and
     /// test purposes.
     pub bind_loopback: bool,
-}
-
-struct ValidatedMetricsConfig {
-    sp_poll_interval: Duration,
-    oximeter_collection_interval: Duration,
-    /// Capacity for the channel of samples from poller tasks to the Oximeter
-    /// producer.
-    max_buffered_sample_chunks: usize,
-    dev_config: Option<DevConfig>,
 }
 
 /// Polls sensor readings from an individual SP.
@@ -164,7 +155,45 @@ impl Metrics {
         apictx: Arc<ServerContext>,
     ) -> anyhow::Result<Self> {
         let &MgsArguments { id, rack_id, ref addresses } = args;
-        let cfg = cfg.validate()?;
+
+        anyhow::ensure!(
+            cfg.sp_poll_interval >= Duration::from_millis(50),
+            "configured SP poll interval ({:?}) should probably be at least 50ms",
+            cfg.sp_poll_interval,
+        );
+        anyhow::ensure!(
+            cfg.oximeter_collection_interval >= cfg.sp_poll_interval,
+            "there is no sense in having an Oximeter collection interval that's \
+             shorter than the SP poll interval, because there will be no new \
+             samples ready (the SP poll interval is {:?}, but the Oximeter \
+             collection interval is {:?})",
+            cfg.sp_poll_interval,
+            cfg.oximeter_collection_interval,
+        );
+
+        let max_buffered_sample_chunks = {
+            // Roughly how many times will we poll SPs for each metrics collection
+            // interval?
+            let polls_per_metrics_interval = {
+                let collection_interval_ms =
+                    cfg.oximeter_collection_interval.as_millis();
+                let poll_interval_ms = cfg.sp_poll_interval.as_millis();
+
+                (collection_interval_ms / poll_interval_ms) as usize
+            };
+
+            // How many sample collection intervals do we want to allow to elapse before
+            // we start putting stuff on the floor?
+            //
+            // Let's say 16. Chosen totally arbitrarily but seems reasonable-ish.
+            let sloppiness = 16;
+            let capacity =
+                NORMAL_NUMBER_OF_SPS * polls_per_metrics_interval * sloppiness;
+            // Finally, the buffer capacity will probably be allocated in a power of two
+            // anyway, so let's make sure our thing is a power of two so we don't waste
+            // the allocation we're gonna get anyway.
+            capacity.next_power_of_two()
+        };
 
         // Create a channel for the SP poller tasks to send samples to the
         // Oximeter producer endpoint.
@@ -178,7 +207,7 @@ impl Metrics {
         // clobbering the oldest measurements, rather than leaving the newest
         // ones on the floor.
         let (sample_tx, sample_rx) =
-            broadcast::channel(cfg.max_buffered_sample_chunks);
+            broadcast::channel(max_buffered_sample_chunks);
 
         // Using a channel for this is, admittedly, a bit of an end-run around
         // the `OnceLock` on the `ServerContext` that *also* stores the rack ID,
@@ -202,7 +231,7 @@ impl Metrics {
                 &log,
                 "SP sensor metrics configured";
                 "poll_interval" => ?cfg.sp_poll_interval,
-                "max_buffered_sample_chunks" => cfg.max_buffered_sample_chunks,
+                "max_buffered_sample_chunks" => max_buffered_sample_chunks,
             );
 
             start_pollers(
@@ -265,59 +294,6 @@ impl Drop for Metrics {
     fn drop(&mut self) {
         // Clean up our children on drop.
         self.server.abort();
-    }
-}
-
-impl MetricsConfig {
-    fn validate(self) -> anyhow::Result<ValidatedMetricsConfig> {
-        anyhow::ensure!(
-            self.oximeter_collection_interval_secs > 0,
-            "`metrics.oximeter_collection_interval_secs` probably shouldn't \
-             be 0 seconds",
-        );
-        let oximeter_collection_interval =
-            Duration::from_secs(self.oximeter_collection_interval_secs as u64);
-
-        anyhow::ensure!(
-            self.sp_poll_interval_ms > 0,
-            "`metrics.sp_poll_interval_ms` probably shouldn't be 0 ms",
-        );
-        let sp_poll_interval =
-            Duration::from_millis(self.sp_poll_interval_ms as u64);
-
-        let max_buffered_sample_chunks = {
-            // Roughly how many times will we poll SPs for each metrics collection
-            // interval?
-            let polls_per_metrics_interval = {
-                let collection_interval_ms: usize = oximeter_collection_interval
-                    .as_millis()
-                    .try_into()
-                    .with_context(|| format!(
-                        "configured Oximeter collection interval ({:?}) is way too big...",
-                        oximeter_collection_interval,
-                    ))?;
-                collection_interval_ms / self.sp_poll_interval_ms
-            };
-
-            // How many sample collection intervals do we want to allow to elapse before
-            // we start putting stuff on the floor?
-            //
-            // Let's say 16. Chosen totally arbitrarily but seems reasonable-ish.
-            let sloppiness = 16;
-            let capacity =
-                NORMAL_NUMBER_OF_SPS * polls_per_metrics_interval * sloppiness;
-            // Finally, the buffer capacity will probably be allocated in a power of two
-            // anyway, so let's make sure our thing is a power of two so we don't waste
-            // the allocation we're gonna get anyway.
-            capacity.next_power_of_two()
-        };
-
-        Ok(ValidatedMetricsConfig {
-            oximeter_collection_interval,
-            sp_poll_interval,
-            max_buffered_sample_chunks,
-            dev_config: self.dev,
-        })
     }
 }
 
@@ -1001,16 +977,16 @@ fn stringify_byte_string(bytes: &[u8]) -> String {
 }
 
 impl ServerManager {
-    async fn run(mut self, cfg: ValidatedMetricsConfig) -> anyhow::Result<()> {
+    async fn run(mut self, cfg: MetricsConfig) -> anyhow::Result<()> {
         let (registration_address, bind_loopback) =
-            if let Some(ref dev) = cfg.dev_config {
+            if let Some(ref dev_config) = cfg.dev {
                 slog::warn!(
                     &self.log,
                     "using development metrics configuration overrides!";
-                    "nexus_address" => ?dev.nexus_address,
-                    "bind_loopback" => dev.bind_loopback,
+                    "nexus_address" => ?dev_config.nexus_address,
+                    "bind_loopback" => dev_config.bind_loopback,
                 );
-                (dev.nexus_address, dev.bind_loopback)
+                (dev_config.nexus_address, dev_config.bind_loopback)
             } else {
                 (None, false)
             };
