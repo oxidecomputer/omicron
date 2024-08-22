@@ -56,9 +56,10 @@ ID of the Management Gateway Service process which recorded the measurement."""
 [fields.chassis_kind]
 type = "string"
 description = """
-What kind of thing the component resides on. This will be one of 'sled'\
-for components on compute sled; 'switch', for components on rack switches; \
-or 'power', for components on power shelves."""
+What kind of thing the component resides on.
+
+This will be one of 'sled', for components on compute sleds; 'switch', for \
+components on rack switches; or 'power', for components on power shelves."""
 
 [fields.component_id]
 type = "string"
@@ -79,24 +80,24 @@ sensor's location)."""
 
 [fields.sensor]
 type = "string"
-description = """
-A string identifying the name of a sensor that recorded a sensor reading."""
+description = """The name of a sensor that recorded a sensor reading."""
 
 [fields.error]
 type = "string"
-description = "A string identifying the type of sensor error that occurred"
+description = "The kind of sensor error that occurred"
 
 [fields.sensor_kind]
 type = "string"
 description = """
-A string identifying which sensor could not be read. This will be one of \
-'temperature', 'current', 'power', 'voltage', 'input_current', \
-'input_voltage', or 'fan_speed' (the same names as the metrics emitted by \
-these sensors when they are read successfully)."""
+Which kind of sensor could not be read due to a sensor error.
+
+This will be one of 'temperature', 'current', 'power', 'voltage', \
+'input_current', 'input_voltage', or 'fan_speed' (the same names as \
+the metrics emitted by these sensors when they are read successfully)."""
 
 [[metrics]]
 name = "temperature"
-description = "Temperature reading in degrees Celcius"
+description = "A temperature reading from a hardware component."
 units = "degrees_celcius"
 datum_type = "f32"
 versions = [
@@ -170,7 +171,11 @@ versions = [
 [[metrics]]
 name = "poll_error_count"
 description = """
-Cumulative count of errors encountered whilst polling a component's sensors."""
+Cumulative count of errors encountered whilst polling a component's sensors.
+
+Unlike the `sensor_error_count` metric, this counts errors encountered by \
+the management gateway while polling the component, rather than errors \
+reported by the component itself."""
 units = "count"
 datum_type = "cumulative_u64"
 versions = [
