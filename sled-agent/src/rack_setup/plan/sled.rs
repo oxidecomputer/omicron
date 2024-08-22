@@ -172,7 +172,7 @@ impl Plan {
 
         let mut ledger = Ledger::<Self>::new_with(log, paths, plan.clone());
         ledger.commit().await?;
-        info!(log, "Sled plan written to storage");
+        info!(log, "Sled plan written to storage: {plan:#?}");
         Ok(plan)
     }
 }

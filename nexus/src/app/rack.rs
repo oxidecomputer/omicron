@@ -33,7 +33,7 @@ use nexus_types::external_api::params::BgpAnnounceSetCreate;
 use nexus_types::external_api::params::BgpAnnouncementCreate;
 use nexus_types::external_api::params::BgpConfigCreate;
 use nexus_types::external_api::params::LinkConfigCreate;
-use nexus_types::external_api::params::LldpServiceConfigCreate;
+use nexus_types::external_api::params::LldpLinkConfigCreate;
 use nexus_types::external_api::params::RouteConfig;
 use nexus_types::external_api::params::SwitchPortConfigCreate;
 use nexus_types::external_api::params::UninitializedSledId;
@@ -61,6 +61,7 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
+use omicron_common::api::internal::shared::LldpAdminStatus;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
@@ -609,15 +610,30 @@ impl super::Nexus {
                 .bgp_peers
                 .insert("phy0".to_string(), BgpPeerConfig { peers });
 
+            let lldp = match &uplink_config.lldp {
+                None => LldpLinkConfigCreate {
+                    enabled: false,
+                    ..Default::default()
+                },
+                Some(l) => LldpLinkConfigCreate {
+                    enabled: l.status == LldpAdminStatus::Enabled,
+                    link_name: l.port_id.clone(),
+                    link_description: l.port_description.clone(),
+                    chassis_id: l.chassis_id.clone(),
+                    system_name: l.system_name.clone(),
+                    system_description: l.system_description.clone(),
+                    management_ip: match &l.management_addrs {
+                        Some(a) if !a.is_empty() => Some(a[0]),
+                        _ => None,
+                    },
+                },
+            };
             let link = LinkConfigCreate {
                 mtu: 1500, //TODO https://github.com/oxidecomputer/omicron/issues/2274
-                lldp: LldpServiceConfigCreate {
-                    enabled: false,
-                    lldp_config: None,
-                },
                 fec: uplink_config.uplink_port_fec.into(),
                 speed: uplink_config.uplink_port_speed.into(),
                 autoneg: uplink_config.autoneg,
+                lldp,
             };
 
             port_settings_params.links.insert("phy".to_string(), link);

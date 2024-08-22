@@ -379,6 +379,84 @@ impl FromStr for UplinkAddressConfig {
     }
 }
 
+#[derive(
+    Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+/// To what extent should this port participate in LLDP
+pub enum LldpAdminStatus {
+    #[default]
+    Enabled,
+    Disabled,
+    RxOnly,
+    TxOnly,
+}
+
+impl fmt::Display for LldpAdminStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LldpAdminStatus::Enabled => write!(f, "enabled"),
+            LldpAdminStatus::Disabled => write!(f, "disabled"),
+            LldpAdminStatus::RxOnly => write!(f, "rx_only"),
+            LldpAdminStatus::TxOnly => write!(f, "tx_only"),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ParseLldpAdminStatusError(String);
+
+impl std::fmt::Display for ParseLldpAdminStatusError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "LLDP admin status error: {}", self.0)
+    }
+}
+
+impl FromStr for LldpAdminStatus {
+    type Err = ParseLldpAdminStatusError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "enabled" => Ok(Self::Enabled),
+            "disabled" => Ok(Self::Disabled),
+            "rxonly" | "rx_only" => Ok(Self::RxOnly),
+            "txonly" | "tx_only" => Ok(Self::TxOnly),
+            _ => Err(ParseLldpAdminStatusError(format!(
+                "not a valid admin status: {s}"
+            ))),
+        }
+    }
+}
+
+/// Per-port LLDP configuration settings.  Only the "status" setting is
+/// mandatory.  All other fields have natural defaults or may be inherited from
+/// the switch.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+pub struct LldpPortConfig {
+    /// To what extent should this port participate in LLDP
+    pub status: LldpAdminStatus,
+    /// Chassis ID to advertise.  If this is set, it will be advertised as a
+    /// LocallyAssigned ID type.  If this is not set, it will be
+    /// inherited from the switch-level settings.
+    pub chassis_id: Option<String>,
+    /// Port ID to advertise.  If this is set, it will be advertised as a
+    /// LocallyAssigned ID type.  If this is not set, it will be set to
+    /// the port name. e.g., qsfp0/0.
+    pub port_id: Option<String>,
+    /// Port description to advertise.  If this is not set, no
+    /// description will be advertised.
+    pub port_description: Option<String>,
+    /// System name to advertise.  If this is not set, it will be
+    /// inherited from the switch-level settings.
+    pub system_name: Option<String>,
+    /// System description to advertise.  If this is not set, it will be
+    /// inherited from the switch-level settings.
+    pub system_description: Option<String>,
+    /// Management IP addresses to advertise.  If this is not set, it will be
+    /// inherited from the switch-level settings.
+    pub management_addrs: Option<Vec<IpAddr>>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct PortConfigV2 {
     /// The set of routes associated with this port.
@@ -398,6 +476,8 @@ pub struct PortConfigV2 {
     /// Whether or not to set autonegotiation
     #[serde(default)]
     pub autoneg: bool,
+    /// LLDP configuration for this port
+    pub lldp: Option<LldpPortConfig>,
 }
 
 /// A set of switch uplinks.
@@ -414,11 +494,13 @@ pub struct HostPortConfig {
     /// IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport
     /// (must be in infra_ip pool).  May also include an optional VLAN ID.
     pub addrs: Vec<UplinkAddressConfig>,
+
+    pub lldp: Option<LldpPortConfig>,
 }
 
 impl From<PortConfigV2> for HostPortConfig {
     fn from(x: PortConfigV2) -> Self {
-        Self { port: x.port, addrs: x.addresses }
+        Self { port: x.port, addrs: x.addresses, lldp: x.lldp.clone() }
     }
 }
 

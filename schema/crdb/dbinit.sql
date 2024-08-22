@@ -2650,39 +2650,29 @@ CREATE TYPE IF NOT EXISTS omicron.public.switch_link_speed AS ENUM (
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_link_config (
     port_settings_id UUID,
-    lldp_service_config_id UUID NOT NULL,
     link_name TEXT,
     mtu INT4,
     fec omicron.public.switch_link_fec,
     speed omicron.public.switch_link_speed,
     autoneg BOOL NOT NULL DEFAULT false,
+    lldp_link_config_id UUID NOT NULL,
 
     PRIMARY KEY (port_settings_id, link_name)
 );
 
-CREATE TABLE IF NOT EXISTS omicron.public.lldp_service_config (
+CREATE TABLE IF NOT EXISTS omicron.public.lldp_link_config (
     id UUID PRIMARY KEY,
-    lldp_config_id UUID,
-    enabled BOOL NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS omicron.public.lldp_config (
-    id UUID PRIMARY KEY,
-    name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    enabled BOOL NOT NULL,
+    link_name STRING(63),
+    link_description STRING(512),
+    chassis_id STRING(63),
+    system_name STRING(63),
+    system_description STRING(612),
+    management_ip TEXT,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
-    time_deleted TIMESTAMPTZ,
-    chassis_id TEXT,
-    system_name TEXT,
-    system_description TEXT,
-    management_ip TEXT
+    time_deleted TIMESTAMPTZ
 );
-
-CREATE UNIQUE INDEX IF NOT EXISTS lldp_config_by_name ON omicron.public.lldp_config (
-    name
-) WHERE
-    time_deleted IS NULL;
 
 CREATE TYPE IF NOT EXISTS omicron.public.switch_interface_kind AS ENUM (
     'primary',
@@ -4222,7 +4212,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '89.0.0', NULL)
+    (TRUE, NOW(), NOW(), '90.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

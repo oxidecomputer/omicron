@@ -139,35 +139,28 @@ table! {
 table! {
     switch_port_settings_link_config (port_settings_id, link_name) {
         port_settings_id -> Uuid,
-        lldp_service_config_id -> Uuid,
         link_name -> Text,
         mtu -> Int4,
         fec -> crate::SwitchLinkFecEnum,
         speed -> crate::SwitchLinkSpeedEnum,
         autoneg -> Bool,
+        lldp_link_config_id -> Uuid,
     }
 }
 
 table! {
-    lldp_service_config (id) {
+    lldp_link_config (id) {
         id -> Uuid,
         enabled -> Bool,
-        lldp_config_id -> Nullable<Uuid>,
-    }
-}
-
-table! {
-    lldp_config (id) {
-        id -> Uuid,
-        name -> Text,
-        description -> Text,
+        link_name -> Nullable<Text>,
+        link_description -> Nullable<Text>,
+        chassis_id -> Nullable<Text>,
+        system_name -> Nullable<Text>,
+        system_description -> Nullable<Text>,
+        management_ip -> Nullable<Inet>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
-        chassis_id -> Text,
-        system_name -> Text,
-        system_description -> Text,
-        management_ip -> Inet,
     }
 }
 

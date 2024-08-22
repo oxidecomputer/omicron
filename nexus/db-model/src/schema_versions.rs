@@ -29,7 +29,8 @@ static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(89, "lookup-bgp-config-by-asn"),
+        KnownVersion::new(90, "lookup-bgp-config-by-asn"),
+        KnownVersion::new(89, "collapse_lldp_settings"),
         KnownVersion::new(88, "route-local-pref"),
         KnownVersion::new(87, "add-clickhouse-server-enum-variants"),
         KnownVersion::new(86, "snapshot-replacement"),
