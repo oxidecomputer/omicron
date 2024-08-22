@@ -1494,10 +1494,10 @@ mod tests {
     }
 
     #[test]
-    fn test_rss_service_plan_v3_schema() {
+    fn test_rss_service_plan_v4_schema() {
         let schema = schemars::schema_for!(Plan);
         expectorate::assert_contents(
-            "../schema/rss-service-plan-v3.json",
+            "../schema/rss-service-plan-v4.json",
             &serde_json::to_string_pretty(&schema).unwrap(),
         );
     }
