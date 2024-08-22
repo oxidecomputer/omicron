@@ -2,10 +2,10 @@ format_version = 1
 
 [target]
 name = "instance_data_link"
-description = "A network data link related to a guest/instance"
+description = "A network data link attached to a virtual machine instance"
 authz_scope = "fleet"
 versions = [
-    { version = 1, fields = [ "kind", "interface_id", "instance_id", "project_id", "silo_id", "sled_id", "sled_model", "sled_revision", "sled_serial" ] },
+    { version = 1, fields = [ "interface_id", "instance_id", "project_id", "silo_id", "sled_id", "sled_model", "sled_revision", "sled_serial" ] },
 ]
 
 [[metrics]]
@@ -53,38 +53,34 @@ versions = [
     { added_in = 1, fields = [] }
 ]
 
-[fields.kind]
-type = "string"
-description = "The kind or class of the data link"
-
 [fields.interface_id]
 type = "uuid"
-description = "ID of the associated virtual network interface"
+description = "The ID of the data link"
 
 [fields.instance_id]
 type = "uuid"
-description = "ID of the virtual machine instance"
+description = "The ID of the virtual machine instance this link is attached to"
 
 [fields.project_id]
 type = "uuid"
-description = "ID of the virtual machine instance's project"
+description = "The ID of the project containing the virtual machine instance this link is attached to"
 
 [fields.silo_id]
 type = "uuid"
-description = "ID of the virtual machine instance's silo"
+description = "The ID of the silo containing the virtual machine instance this link is attached to"
 
 [fields.sled_id]
 type = "uuid"
-description = "ID of the sled managing the link's switch"
+description = "The ID of the sled managing the virtual machine this link is attached to"
 
 [fields.sled_model]
 type = "string"
-description = "Model number of the sled managing the link's switch"
+description = "The model number of the sled managing the virtual machine the link is attached to"
 
 [fields.sled_revision]
 type = "u32"
-description = "Revision number of the sled managing the link's switch"
+description = "The revision number of the sled managing the virtual machine this link is attached to"
 
 [fields.sled_serial]
 type = "string"
-description = "Serial number of the sled managing the link's switch"
+description = "The serial number of the sled managing the virtual machine this link is attached to"
