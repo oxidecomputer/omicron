@@ -6533,21 +6533,47 @@
         }
       }
     },
-    "/v1/system/networking/bgp-announce": {
+    "/v1/system/networking/bgp-announce-set": {
       "get": {
         "tags": [
           "system/networking"
         ],
-        "summary": "Get originated routes for a BGP configuration",
+        "summary": "List BGP announce sets",
         "operationId": "networking_bgp_announce_set_list",
         "parameters": [
           {
             "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
             "name": "name_or_id",
-            "description": "A name or id to use when selecting BGP port settings",
-            "required": true,
+            "description": "A name or id to use when s electing BGP port settings",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
             }
           }
         ],
@@ -6557,10 +6583,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_BgpAnnouncement",
+                  "title": "Array_of_BgpAnnounceSet",
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/BgpAnnouncement"
+                    "$ref": "#/components/schemas/BgpAnnounceSet"
                   }
                 }
               }
@@ -6572,6 +6598,9 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
+        },
+        "x-dropshot-pagination": {
+          "required": []
         }
       },
       "put": {
@@ -6609,7 +6638,9 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
+      }
+    },
+    "/v1/system/networking/bgp-announce-set/{name_or_id}": {
       "delete": {
         "tags": [
           "system/networking"
@@ -6618,7 +6649,7 @@
         "operationId": "networking_bgp_announce_set_delete",
         "parameters": [
           {
-            "in": "query",
+            "in": "path",
             "name": "name_or_id",
             "description": "A name or id to use when selecting BGP port settings",
             "required": true,
@@ -6630,6 +6661,48 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp-announce-set/{name_or_id}/announcement": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get originated routes for a specified BGP announce set",
+        "operationId": "networking_bgp_announcement_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name_or_id",
+            "description": "A name or id to use when selecting BGP port settings",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_BgpAnnouncement",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BgpAnnouncement"
+                  }
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"

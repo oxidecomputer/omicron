@@ -285,6 +285,8 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_bgp_announce_set_delete)?;
         api.register(networking_bgp_message_history)?;
 
+        api.register(networking_bgp_announcement_list)?;
+
         api.register(networking_bfd_enable)?;
         api.register(networking_bfd_disable)?;
         api.register(networking_bfd_status)?;
@@ -3866,7 +3868,7 @@ async fn networking_bgp_config_create(
         let nexus = &apictx.context.nexus;
         let config = config.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let result = nexus.bgp_config_set(&opctx, &config).await?;
+        let result = nexus.bgp_config_create(&opctx, &config).await?;
         Ok(HttpResponseCreated::<BgpConfig>(result.into()))
     };
     apictx
@@ -4044,7 +4046,7 @@ async fn networking_bgp_config_delete(
 /// set with the one specified.
 #[endpoint {
     method = PUT,
-    path = "/v1/system/networking/bgp-announce",
+    path = "/v1/system/networking/bgp-announce-set",
     tags = ["system/networking"],
 }]
 async fn networking_bgp_announce_set_update(
@@ -4066,24 +4068,28 @@ async fn networking_bgp_announce_set_update(
         .await
 }
 
-//TODO pagination? the normal by-name/by-id stuff does not work here
-/// Get originated routes for a BGP configuration
+/// List BGP announce sets
 #[endpoint {
     method = GET,
-    path = "/v1/system/networking/bgp-announce",
+    path = "/v1/system/networking/bgp-announce-set",
     tags = ["system/networking"],
 }]
 async fn networking_bgp_announce_set_list(
     rqctx: RequestContext<ApiContext>,
-    query_params: Query<params::BgpAnnounceSetSelector>,
-) -> Result<HttpResponseOk<Vec<BgpAnnouncement>>, HttpError> {
+    query_params: Query<
+        PaginatedByNameOrId<params::OptionalBgpAnnounceSetSelector>,
+    >,
+) -> Result<HttpResponseOk<Vec<BgpAnnounceSet>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let sel = query_params.into_inner();
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let result = nexus
-            .bgp_announce_list(&opctx, &sel)
+            .bgp_announce_set_list(&opctx, &paginated_by)
             .await?
             .into_iter()
             .map(|p| p.into())
@@ -4100,20 +4106,54 @@ async fn networking_bgp_announce_set_list(
 /// Delete BGP announce set
 #[endpoint {
     method = DELETE,
-    path = "/v1/system/networking/bgp-announce",
+    path = "/v1/system/networking/bgp-announce-set/{name_or_id}",
     tags = ["system/networking"],
 }]
 async fn networking_bgp_announce_set_delete(
     rqctx: RequestContext<ApiContext>,
-    selector: Query<params::BgpAnnounceSetSelector>,
+    path_params: Path<params::BgpAnnounceSetSelector>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let sel = selector.into_inner();
+        let sel = path_params.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         nexus.bgp_delete_announce_set(&opctx, &sel).await?;
         Ok(HttpResponseUpdatedNoContent {})
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+// TODO: is pagination necessary here? How large do we expect the list of
+// announcements to become in real usage?
+/// Get originated routes for a specified BGP announce set
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/bgp-announce-set/{name_or_id}/announcement",
+    tags = ["system/networking"],
+}]
+async fn networking_bgp_announcement_list(
+    rqctx: RequestContext<ApiContext>,
+    path_params: Path<params::BgpAnnounceSetSelector>,
+) -> Result<HttpResponseOk<Vec<BgpAnnouncement>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let sel = path_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        let result = nexus
+            .bgp_announcement_list(&opctx, &sel)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
+
+        Ok(HttpResponseOk(result))
     };
     apictx
         .context

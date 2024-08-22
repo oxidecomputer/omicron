@@ -366,6 +366,7 @@ impl DataStore {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
 pub enum UpdatePrecondition<T> {
     DontCare,
     Null,

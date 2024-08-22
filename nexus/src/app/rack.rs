@@ -510,7 +510,7 @@ impl super::Nexus {
 
             match self
                 .db_datastore
-                .bgp_config_set(
+                .bgp_config_create(
                     &opctx,
                     &BgpConfigCreate {
                         identity: IdentityMetadataCreateParams {

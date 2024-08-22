@@ -565,7 +565,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         if !bgp_announce_prefixes.contains_key(&bgp_config.bgp_announce_set_id) {
                             let announcements = match self
                                 .datastore
-                                .bgp_announce_list(
+                                .bgp_announcement_list(
                                     opctx,
                                     &params::BgpAnnounceSetSelector {
                                         name_or_id: bgp_config
