@@ -52,13 +52,18 @@ pub fn load_test_config() -> (omicron_gateway::Config, sp_sim::Config) {
     let manifest_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"));
     let server_config_file_path = manifest_dir.join("configs/config.test.toml");
     let server_config =
-        omicron_gateway::Config::from_file(&server_config_file_path)
-            .expect("failed to load config.test.toml");
+        match omicron_gateway::Config::from_file(&server_config_file_path) {
+            Ok(config) => config,
+            Err(e) => panic!("failed to load MGS config: {e}"),
+        };
 
     let sp_sim_config_file_path =
         manifest_dir.join("configs/sp_sim_config.test.toml");
-    let sp_sim_config = sp_sim::Config::from_file(&sp_sim_config_file_path)
-        .expect("failed to load sp_sim_config.test.toml");
+    let sp_sim_config =
+        match sp_sim::Config::from_file(&sp_sim_config_file_path) {
+            Ok(config) => config,
+            Err(e) => panic!("failed to load SP simulator config: {e}"),
+        };
     (server_config, sp_sim_config)
 }
 
