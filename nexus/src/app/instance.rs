@@ -176,7 +176,7 @@ enum InstanceStateChangeRequestAction {
 
     /// Request the appropriate state change from the sled with the specified
     /// UUID.
-    SendToSled(SledUuid),
+    SendToSled { sled_id: SledUuid, propolis_id: PropolisUuid },
 }
 
 /// What is the higher level operation that is calling
@@ -664,21 +664,19 @@ impl super::Nexus {
     /// this sled, this operation rudely terminates it.
     pub(crate) async fn instance_ensure_unregistered(
         &self,
-        opctx: &OpContext,
-        authz_instance: &authz::Instance,
+        propolis_id: &PropolisUuid,
         sled_id: &SledUuid,
     ) -> Result<Option<nexus::SledInstanceState>, InstanceStateChangeError>
     {
-        opctx.authorize(authz::Action::Modify, authz_instance).await?;
         let sa = self.sled_client(&sled_id).await?;
-        sa.instance_unregister(&InstanceUuid::from_untyped_uuid(
-            authz_instance.id(),
-        ))
-        .await
-        .map(|res| res.into_inner().updated_runtime.map(Into::into))
-        .map_err(|e| {
-            InstanceStateChangeError::SledAgent(SledAgentInstancePutError(e))
-        })
+        sa.vmm_unregister(propolis_id)
+            .await
+            .map(|res| res.into_inner().updated_runtime.map(Into::into))
+            .map_err(|e| {
+                InstanceStateChangeError::SledAgent(SledAgentInstancePutError(
+                    e,
+                ))
+            })
     }
 
     /// Determines the action to take on an instance's active VMM given a
@@ -712,8 +710,11 @@ impl super::Nexus {
         // Requests that operate on active instances have to be directed to the
         // instance's current sled agent. If there is none, the request needs to
         // be handled specially based on its type.
-        let sled_id = if let Some(vmm) = vmm_state {
-            SledUuid::from_untyped_uuid(vmm.sled_id)
+        let (sled_id, propolis_id) = if let Some(vmm) = vmm_state {
+            (
+                SledUuid::from_untyped_uuid(vmm.sled_id),
+                PropolisUuid::from_untyped_uuid(vmm.id),
+            )
         } else {
             match effective_state {
                 // If there's no active sled because the instance is stopped,
@@ -814,7 +815,10 @@ impl super::Nexus {
         };
 
         if allowed {
-            Ok(InstanceStateChangeRequestAction::SendToSled(sled_id))
+            Ok(InstanceStateChangeRequestAction::SendToSled {
+                sled_id,
+                propolis_id,
+            })
         } else {
             Err(Error::invalid_request(format!(
                 "instance state cannot be changed from state \"{}\"",
@@ -831,7 +835,6 @@ impl super::Nexus {
         prev_vmm_state: &Option<db::model::Vmm>,
         requested: InstanceStateChangeRequest,
     ) -> Result<(), InstanceStateChangeError> {
-        opctx.authorize(authz::Action::Modify, authz_instance).await?;
         let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
         match self.select_runtime_change_action(
@@ -840,11 +843,14 @@ impl super::Nexus {
             &requested,
         )? {
             InstanceStateChangeRequestAction::AlreadyDone => Ok(()),
-            InstanceStateChangeRequestAction::SendToSled(sled_id) => {
+            InstanceStateChangeRequestAction::SendToSled {
+                sled_id,
+                propolis_id,
+            } => {
                 let sa = self.sled_client(&sled_id).await?;
                 let instance_put_result = sa
-                    .instance_put_state(
-                        &instance_id,
+                    .vmm_put_state(
+                        &propolis_id,
                         &InstancePutStateBody { state: requested.into() },
                     )
                     .await
@@ -1120,13 +1126,13 @@ impl super::Nexus {
             .sled_client(&SledUuid::from_untyped_uuid(initial_vmm.sled_id))
             .await?;
         let instance_register_result = sa
-            .instance_register(
-                &instance_id,
+            .vmm_register(
+                propolis_id,
                 &sled_agent_client::types::InstanceEnsureBody {
                     hardware: instance_hardware,
                     instance_runtime: db_instance.runtime().clone().into(),
                     vmm_runtime: initial_vmm.clone().into(),
-                    propolis_id: *propolis_id,
+                    instance_id,
                     propolis_addr: SocketAddr::new(
                         initial_vmm.propolis_ip.ip(),
                         initial_vmm.propolis_port.into(),

@@ -22,6 +22,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PropolisUuid;
 use oximeter::types::ProducerRegistry;
 use sled_agent_client::Client as SledAgentClient;
 use std::borrow::Cow;
@@ -83,9 +84,7 @@ impl InstanceWatcher {
         async move {
             slog::trace!(opctx.log, "checking on instance...");
             let rsp = client
-                .instance_get_state(&InstanceUuid::from_untyped_uuid(
-                    target.instance_id,
-                ))
+                .vmm_get_state(&PropolisUuid::from_untyped_uuid(target.vmm_id))
                 .await;
             let mut check = Check {
                 target,

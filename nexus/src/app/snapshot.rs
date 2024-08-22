@@ -107,11 +107,8 @@ impl super::Nexus {
                 .instance_fetch_with_vmm(&opctx, &authz_instance)
                 .await?;
 
-            // If a Propolis _may_ exist, send the snapshot request there,
-            // otherwise use the pantry.
-            !instance_state.vmm().is_some()
+            instance_state.vmm().is_none()
         } else {
-            // This disk is not attached to an instance, use the pantry.
             true
         };
 

@@ -5,7 +5,7 @@
 use super::instance_common::{
     instance_ip_add_nat, instance_ip_add_opte, instance_ip_get_instance_state,
     instance_ip_move_state, instance_ip_remove_nat, instance_ip_remove_opte,
-    ModifyStateForExternalIp,
+    ModifyStateForExternalIp, PropolisAndSledId,
 };
 use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
@@ -155,7 +155,7 @@ async fn siid_begin_detach_ip_undo(
 
 async fn siid_get_instance_state(
     sagactx: NexusActionContext,
-) -> Result<Option<SledUuid>, ActionError> {
+) -> Result<Option<PropolisAndSledId>, ActionError> {
     let params = sagactx.saga_params::<Params>()?;
     instance_ip_get_instance_state(
         &sagactx,
@@ -184,7 +184,9 @@ async fn siid_nat_undo(
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
-    let sled_id = sagactx.lookup::<Option<SledUuid>>("instance_state")?;
+    let sled_id = sagactx
+        .lookup::<Option<PropolisAndSledId>>("instance_state")?
+        .map(|ids| ids.sled_id);
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
     if let Err(e) = instance_ip_add_nat(
         &sagactx,
@@ -204,33 +206,18 @@ async fn siid_nat_undo(
 async fn siid_update_opte(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    let params = sagactx.saga_params::<Params>()?;
-    let sled_id = sagactx.lookup::<Option<SledUuid>>("instance_state")?;
+    let ids = sagactx.lookup::<Option<PropolisAndSledId>>("instance_state")?;
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
-    instance_ip_remove_opte(
-        &sagactx,
-        &params.authz_instance,
-        sled_id,
-        target_ip,
-    )
-    .await
+    instance_ip_remove_opte(&sagactx, ids, target_ip).await
 }
 
 async fn siid_update_opte_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
-    let params = sagactx.saga_params::<Params>()?;
-    let sled_id = sagactx.lookup::<Option<SledUuid>>("instance_state")?;
+    let ids = sagactx.lookup::<Option<PropolisAndSledId>>("instance_state")?;
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
-    if let Err(e) = instance_ip_add_opte(
-        &sagactx,
-        &params.authz_instance,
-        sled_id,
-        target_ip,
-    )
-    .await
-    {
+    if let Err(e) = instance_ip_add_opte(&sagactx, ids, target_ip).await {
         error!(log, "siid_update_opte_undo: failed to notify sled-agent: {e}");
     }
     Ok(())

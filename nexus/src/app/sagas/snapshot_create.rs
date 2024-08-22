@@ -106,11 +106,12 @@ use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_common::retry_until_known_result;
+use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid};
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::CrucibleOpts;
-use sled_agent_client::types::InstanceIssueDiskSnapshotRequestBody;
+use sled_agent_client::types::VmmIssueDiskSnapshotRequestBody;
 use sled_agent_client::types::VolumeConstructionRequest;
 use slog::info;
 use std::collections::BTreeMap;
@@ -826,39 +827,43 @@ async fn ssc_send_snapshot_request_to_sled_agent(
         .await
         .map_err(ActionError::action_failed)?;
 
-    let sled_id = osagactx
+    let instance_and_vmm = osagactx
         .datastore()
         .instance_fetch_with_vmm(&opctx, &authz_instance)
         .await
-        .map_err(ActionError::action_failed)?
-        .sled_id();
+        .map_err(ActionError::action_failed)?;
+
+    let vmm = instance_and_vmm.vmm();
 
     // If this instance does not currently have a sled, we can't continue this
     // saga - the user will have to reissue the snapshot request and it will get
     // run on a Pantry.
-    let Some(sled_id) = sled_id else {
+    let Some((propolis_id, sled_id)) =
+        vmm.as_ref().map(|vmm| (vmm.id, vmm.sled_id))
+    else {
         return Err(ActionError::action_failed(Error::unavail(
-            "sled id is None!",
+            "instance no longer has an active VMM!",
         )));
     };
 
     info!(log, "asking for disk snapshot from Propolis via sled agent";
           "disk_id" => %params.disk_id,
           "instance_id" => %attach_instance_id,
+          "propolis_id" => %propolis_id,
           "sled_id" => %sled_id);
 
     let sled_agent_client = osagactx
         .nexus()
-        .sled_client(&sled_id)
+        .sled_client(&SledUuid::from_untyped_uuid(sled_id))
         .await
         .map_err(ActionError::action_failed)?;
 
     retry_until_known_result(log, || async {
         sled_agent_client
-            .instance_issue_disk_snapshot_request(
+            .vmm_issue_disk_snapshot_request(
+                &PropolisUuid::from_untyped_uuid(propolis_id),
                 &attach_instance_id,
-                &params.disk_id,
-                &InstanceIssueDiskSnapshotRequestBody { snapshot_id },
+                &VmmIssueDiskSnapshotRequestBody { snapshot_id },
             )
             .await
     })
