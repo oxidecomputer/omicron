@@ -155,10 +155,7 @@ impl Server {
         let all_servers_shutdown = FuturesUnordered::new();
 
         let metrics =
-            metrics::Metrics::new(&log, &args, config.metrics, apictx.clone())
-                .map_err(|err| {
-                    format!("failed to initialize metrics subsystem: {err}")
-                })?;
+            metrics::Metrics::new(&log, &args, config.metrics, apictx.clone());
 
         for addr in args.addresses {
             start_dropshot_server(

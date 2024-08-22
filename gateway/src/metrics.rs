@@ -182,7 +182,7 @@ impl Metrics {
         args: &MgsArguments,
         cfg: MetricsConfig,
         apictx: Arc<ServerContext>,
-    ) -> anyhow::Result<Self> {
+    ) -> Self {
         let &MgsArguments { id, rack_id, ref addresses } = args;
         // Create a channel for the SP poller tasks to send samples to the
         // Oximeter producer endpoint.
@@ -241,7 +241,7 @@ impl Metrics {
                 ServerManager { log, addrs: addrs_rx, registry }.run(cfg),
             )
         };
-        Ok(Self { addrs_tx, rack_id_tx, server })
+        Self { addrs_tx, rack_id_tx, server }
     }
 
     pub fn set_rack_id(&mut self, rack_id: Uuid) {
