@@ -51,7 +51,7 @@ pub struct Metrics {
 pub struct MetricsConfig {
     /// Collection interval to request from Oximeter, in seconds.
     ///
-    /// This is the frequency with which Oximeter will collect samples the
+    /// This is the frequency with which Oximeter will collect samples from the
     /// metrics producer endpoint, *not* the frequency with which sensor
     /// measurements are polled from service processors.
     oximeter_collection_interval_secs: usize,
@@ -420,7 +420,6 @@ async fn start_pollers(
                     &log,
                     "still waiting for SP discovery to complete...";
                     "elapsed" => ?elapsed,
-
                     "error" => err,
                 )
             } else {
@@ -439,7 +438,7 @@ async fn start_pollers(
 
     slog::info!(
         &log,
-        "starting to polling SP sensor data every {poll_interval:?}";
+        "starting to poll SP sensor data every {poll_interval:?}"
     );
 
     for (spid, _) in sps {
@@ -706,7 +705,7 @@ impl SpPoller {
             samples.reserve(self.components.len());
             for (c, metrics) in &mut self.components {
                 // Metrics samples *should* always be well-formed. If we ever emit a
-                // messed up one, this is a programmer error, and therefore  should
+                // messed up one, this is a programmer error, and therefore should
                 // fail in test, but should probably *not* take down the whole
                 // management gateway in a real-life rack, especially because it's
                 // probably going to happen again if we were to get restarted.
