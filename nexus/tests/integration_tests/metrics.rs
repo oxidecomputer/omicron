@@ -601,7 +601,7 @@ async fn test_mgs_metrics(
     let mgs = {
         // munge the already-parsed MGS config file to point it at the test
         // Nexus' address.
-        mgs_config.metrics = Some(gateway_test_utils::setup::MetricsCOnfig {
+        mgs_config.metrics = Some(gateway_test_utils::setup::MetricsConfig {
             disabled: false,
             dev_bind_loopback: true,
             dev_nexus_address: Some(cptestctx.internal_client.bind_address),
