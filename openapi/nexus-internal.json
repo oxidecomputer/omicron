@@ -5076,14 +5076,6 @@
               }
             ]
           },
-          "propolis_id": {
-            "description": "The ID of the VMM whose state is being reported.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
-              }
-            ]
-          },
           "vmm_state": {
             "description": "The most recent state of the sled's VMM process.",
             "allOf": [
@@ -5094,7 +5086,6 @@
           }
         },
         "required": [
-          "propolis_id",
           "vmm_state"
         ]
       },
@@ -5321,10 +5312,6 @@
         "format": "uuid"
       },
       "TypedUuidForOmicronZoneKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForPropolisKind": {
         "type": "string",
         "format": "uuid"
       },
@@ -5589,6 +5576,10 @@
             ]
           }
         ]
+      },
+      "TypedUuidForPropolisKind": {
+        "type": "string",
+        "format": "uuid"
       }
     },
     "responses": {

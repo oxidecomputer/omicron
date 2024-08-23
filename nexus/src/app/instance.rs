@@ -1863,6 +1863,7 @@ pub(crate) async fn process_vmm_update(
     // prepare and return it.
     if instance_update::update_saga_needed(
         &opctx.log,
+        propolis_id,
         new_runtime_state,
         &result,
     ) {

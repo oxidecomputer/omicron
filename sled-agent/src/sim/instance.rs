@@ -454,7 +454,6 @@ impl Simulatable for SimInstance {
             inner: Arc::new(Mutex::new(SimInstanceInner {
                 state: InstanceStates::new(
                     current.vmm_state,
-                    current.propolis_id,
                     current.migration_in.map(|m| m.migration_id),
                 ),
                 last_response: InstanceStateMonitorResponse {

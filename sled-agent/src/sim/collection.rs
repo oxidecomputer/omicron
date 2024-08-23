@@ -396,14 +396,12 @@ mod test {
     use omicron_common::api::internal::nexus::VmmRuntimeState;
     use omicron_common::api::internal::nexus::VmmState;
     use omicron_test_utils::dev::test_setup_log;
-    use omicron_uuid_kinds::PropolisUuid;
     use sled_agent_types::disk::DiskStateRequested;
     use sled_agent_types::instance::InstanceStateRequested;
 
     fn make_instance(
         logctx: &LogContext,
     ) -> (SimObject<SimInstance>, Receiver<()>) {
-        let propolis_id = PropolisUuid::new_v4();
         let vmm_state = VmmRuntimeState {
             state: VmmState::Starting,
             gen: Generation::new(),
@@ -412,7 +410,6 @@ mod test {
 
         let state = SledInstanceState {
             vmm_state,
-            propolis_id,
             migration_in: None,
             migration_out: None,
         };

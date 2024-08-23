@@ -514,15 +514,12 @@ impl InstanceRunner {
                 let state = self.state.sled_instance_state();
                 info!(self.log, "Publishing instance state update to Nexus";
                     "instance_id" => %self.instance_id(),
-                    "propolis_id" => %self.state.propolis_id(),
+                    "propolis_id" => %self.propolis_id,
                     "state" => ?state,
                 );
 
                 self.nexus_client
-                    .cpapi_instances_put(
-                        &self.state.propolis_id(),
-                        &state.into(),
-                    )
+                    .cpapi_instances_put(&self.propolis_id, &state.into())
                     .await
                     .map_err(|err| -> backoff::BackoffError<Error> {
                         match &err {
@@ -618,7 +615,7 @@ impl InstanceRunner {
         info!(
             self.log,
             "updated state after observing Propolis state change";
-            "propolis_id" => %self.state.propolis_id(),
+            "propolis_id" => %self.propolis_id,
             "new_vmm_state" => ?self.state.vmm()
         );
 
@@ -1089,7 +1086,7 @@ impl Instance {
             dhcp_config,
             requested_disks: hardware.disks,
             cloud_init_bytes: hardware.cloud_init_bytes,
-            state: InstanceStates::new(vmm_runtime, propolis_id, migration_id),
+            state: InstanceStates::new(vmm_runtime, migration_id),
             running_state: None,
             nexus_client,
             storage,

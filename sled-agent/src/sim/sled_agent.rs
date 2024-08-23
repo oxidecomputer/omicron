@@ -381,7 +381,6 @@ impl SledAgent {
                 &propolis_id.into_untyped_uuid(),
                 SledInstanceState {
                     vmm_state: vmm_runtime,
-                    propolis_id,
                     migration_in,
                     migration_out: None,
                 },
