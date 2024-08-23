@@ -40,6 +40,11 @@ use hardware_component as metric;
 
 /// Handle to the metrics tasks.
 pub struct Metrics {
+    /// If the metrics subsystem is disabled, this is `None`.
+    inner: Option<Handles>,
+}
+
+struct Handles {
     addrs_tx: watch::Sender<Vec<SocketAddrV6>>,
     rack_id_tx: Option<oneshot::Sender<Uuid>>,
     server: JoinHandle<anyhow::Result<()>>,
@@ -51,9 +56,18 @@ pub struct Metrics {
 /// management network, we try to keep the metrics-specific portion of the
 /// config file as minimal as possible. At present, it only includes development
 /// configurations that shouldn't be present in production configs.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize,
+)]
 #[serde(deny_unknown_fields)]
 pub struct MetricsConfig {
+    /// Completely disable the metrics subsystem.
+    ///
+    /// If `disabled = true`, sensor data metrics will not be collected, and the
+    /// metrics polling tasks will not be started.
+    #[serde(default)]
+    pub disabled: bool,
+
     /// Configuration settings for testing and development use.
     pub dev: Option<DevConfig>,
 }
@@ -184,6 +198,12 @@ impl Metrics {
         apictx: Arc<ServerContext>,
     ) -> Self {
         let &MgsArguments { id, rack_id, ref addresses } = args;
+
+        if cfg.as_ref().map(|c| c.disabled).unwrap_or(false) {
+            slog::warn!(&log, "metrics subsystem disabled by config");
+            return Self { inner: None };
+        }
+
         // Create a channel for the SP poller tasks to send samples to the
         // Oximeter producer endpoint.
         //
@@ -241,11 +261,12 @@ impl Metrics {
                 ServerManager { log, addrs: addrs_rx, registry }.run(cfg),
             )
         };
-        Self { addrs_tx, rack_id_tx, server }
+        Self { inner: Some(Handles { addrs_tx, rack_id_tx, server }) }
     }
 
     pub fn set_rack_id(&mut self, rack_id: Uuid) {
-        if let Some(tx) = self.rack_id_tx.take() {
+        let tx = self.inner.as_mut().and_then(|i| i.rack_id_tx.take());
+        if let Some(tx) = tx {
             // If the task that starts sensor pollers has gone away already,
             // we're probably shutting down, and shouldn't panic.
             let _ = tx.send(rack_id);
@@ -254,30 +275,34 @@ impl Metrics {
     }
 
     pub async fn update_server_addrs(&self, new_addrs: &[SocketAddrV6]) {
-        self.addrs_tx.send_if_modified(|current_addrs| {
-            if current_addrs.len() == new_addrs.len()
-                // N.B. that we could make this "faster" with a `HashSet`,
-                // but...the size of this Vec of addresses is probably going to
-                // two or three items, max, so the linear scan actually probably
-                // outperforms it...
-                && current_addrs.iter().all(|addr| new_addrs.contains(addr))
-            {
-                return false;
-            }
+        if let Some(ref inner) = self.inner {
+            inner.addrs_tx.send_if_modified(|current_addrs| {
+                if current_addrs.len() == new_addrs.len()
+                    // N.B. that we could make this "faster" with a `HashSet`,
+                    // but...the size of this Vec of addresses is probably going to
+                    // two or three items, max, so the linear scan actually probably
+                    // outperforms it...
+                    && current_addrs.iter().all(|addr| new_addrs.contains(addr))
+                {
+                    return false;
+                }
 
-            // Reuse existing `Vec` capacity if possible.This is almost
-            // certainly not performance-critical, but it makes me feel happy.
-            current_addrs.clear();
-            current_addrs.extend_from_slice(new_addrs);
-            true
-        });
+                // Reuse existing `Vec` capacity if possible.This is almost
+                // certainly not performance-critical, but it makes me feel happy.
+                current_addrs.clear();
+                current_addrs.extend_from_slice(new_addrs);
+                true
+            });
+        }
     }
 }
 
 impl Drop for Metrics {
     fn drop(&mut self) {
         // Clean up our children on drop.
-        self.server.abort();
+        if let Some(ref mut inner) = self.inner {
+            inner.server.abort();
+        }
     }
 }
 

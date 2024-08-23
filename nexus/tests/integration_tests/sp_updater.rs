@@ -434,9 +434,24 @@ async fn test_sp_updater_switches_mgs_instances_on_failure() {
 #[tokio::test]
 async fn test_sp_updater_delivers_progress() {
     // Start MGS + Sim SP.
-    let mgstestctx =
-        mgs_setup::test_setup("test_sp_updater_delivers_progress", SpPort::One)
-            .await;
+    let mgstestctx = {
+        let (mut mgs_config, sp_sim_confg) = mgs_setup::load_test_config();
+        // Enabling SP metrics collection makes this alread-flaky test even
+        // flakier, so let's just turn it off.
+        // TODO(eliza): it would be nice if we didn't have to disable metrics in
+        // this test, so that we can better catch regressions that could be
+        // introduced by the metrics subsystem...
+        mgs_config.metrics.get_or_insert_with(Default::default()).disabled =
+            true;
+        mgs_setup::test_setup_with_config(
+            "test_sp_updater_delivers_progress",
+            SpPort::One,
+            mgs_config,
+            sp_sim_config,
+            None,
+        )
+        .await
+    };
 
     // Configure an MGS client.
     let mut mgs_clients =
