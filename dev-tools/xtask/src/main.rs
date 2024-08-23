@@ -16,6 +16,7 @@ use std::process::Command;
 mod check_features;
 mod check_workspace_deps;
 mod clippy;
+mod common;
 #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
 mod external;
 mod live_test;

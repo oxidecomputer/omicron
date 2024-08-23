@@ -4,6 +4,7 @@
 
 //! Subcommand: cargo xtask live-test
 
+use crate::common::run_subcmd;
 use anyhow::{bail, Context, Result};
 use clap::Parser;
 use std::process::Command;
@@ -150,31 +151,6 @@ pub fn run_cmd(_args: Args) -> Result<()> {
             .subsequent_indent("         "),
     );
     eprintln!("{}\n", text.join("\n"));
-
-    Ok(())
-}
-
-// XXX-dap commonize with clippy
-fn run_subcmd(mut command: Command) -> Result<()> {
-    eprintln!(
-        "running: {} {}",
-        command.get_program().to_str().unwrap(),
-        command
-            .get_args()
-            .map(|arg| format!("{:?}", arg.to_str().unwrap()))
-            .collect::<Vec<_>>()
-            .join(" ")
-    );
-
-    let exit_status = command
-        .spawn()
-        .context("failed to spawn child process")?
-        .wait()
-        .context("failed to wait for child process")?;
-
-    if !exit_status.success() {
-        bail!("failed: {}", exit_status);
-    }
 
     Ok(())
 }
