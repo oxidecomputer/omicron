@@ -27,6 +27,7 @@ use oximeter::types::FieldValue;
 use oximeter::types::Measurement;
 use oximeter::TimeseriesSchema;
 use std::borrow::Borrow;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 pub async fn query_for_metrics(
@@ -595,9 +596,9 @@ async fn test_mgs_metrics(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
 ) {
     // Make a MGS
+    let (mut mgs_config, sp_sim_config) =
+        gateway_test_utils::setup::load_test_config();
     let mgs = {
-        let (mut mgs_config, sp_sim_config) =
-            gateway_test_utils::setup::load_test_config();
         // munge the already-parsed MGS config file to point it at the test
         // Nexus' address.
         mgs_config.metrics.get_or_insert_with(Default::default).dev =
@@ -615,72 +616,152 @@ async fn test_mgs_metrics(
         .await
     };
 
-    // Wait until the MGS registers as a producer with Oximeter.
-    wait_for_producer(&cptestctx.oximeter, &mgs.gateway_id).await;
-    cptestctx.oximeter.force_collect().await;
-
-    async fn get_timeseries(
-        cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
-        name: &str,
-    ) -> oxql_types::Table {
-        let table = timeseries_query(&cptestctx, &format!("get {name}"))
-            .await
-            .into_iter()
-            .find(|t| t.name() == name);
-        match table {
-            Some(table) => table,
-            None => panic!("missing table for {name}"),
+    // Let's look at all the simulated SP components in the config file which
+    // have sensor readings, so we can assert that there are timeseries for all
+    // of them.
+    let all_sp_configs = {
+        let gimlet_configs =
+            sp_sim_config.simulated_sps.gimlet.iter().map(|g| &g.common);
+        let sidecar_configs =
+            sp_sim_config.simulated_sps.sidecar.iter().map(|s| &s.common);
+        gimlet_configs.chain(sidecar_configs)
+    };
+    // XXX(eliza): yes, this code is repetitive. We could probably make it a
+    // little elss ugly with nested hash maps, but like...I already wrote it, so
+    // you don't have to. :)
+    //
+    // TODO(eliza): presently, we just expect that the number of timeseries for
+    // each serial number and sensor type lines up. If we wanted to be *really*
+    // fancy, we could also assert that all the component IDs, component kinds,
+    // and measurement values line up with the config. But, honestly, it's
+    // pretty unlikely that a bug in MGS' sensor metrics subsystem would mess
+    // that up --- the most important thing is just to make sure that the sensor
+    // data is *present*, as that should catch most regressions.
+    let mut temp_sensors = HashMap::new();
+    let mut current_sensors = HashMap::new();
+    let mut voltage_sensors = HashMap::new();
+    let mut power_sensors = HashMap::new();
+    let mut input_voltage_sensors = HashMap::new();
+    let mut input_current_sensors = HashMap::new();
+    let mut fan_speed_sensors = HashMap::new();
+    for sp in all_sp_configs {
+        let mut temp = 0;
+        let mut current = 0;
+        let mut voltage = 0;
+        let mut input_voltage = 0;
+        let mut input_current = 0;
+        let mut power = 0;
+        let mut speed = 0;
+        for component in &sp.components {
+            for sensor in &component.sensors {
+                use gateway_messages::measurement::MeasurementKind as Kind;
+                match sensor.def.kind {
+                    Kind::Temperature => temp += 1,
+                    Kind::Current => current += 1,
+                    Kind::Voltage => voltage += 1,
+                    Kind::InputVoltage => input_voltage += 1,
+                    Kind::InputCurrent => input_current += 1,
+                    Kind::Speed => speed += 1,
+                    Kind::Power => power += 1,
+                }
+            }
         }
+        temp_sensors.insert(sp.serial_number.clone(), temp);
+        current_sensors.insert(sp.serial_number.clone(), current);
+        voltage_sensors.insert(sp.serial_number.clone(), voltage);
+        input_voltage_sensors.insert(sp.serial_number.clone(), input_voltage);
+        input_current_sensors.insert(sp.serial_number.clone(), input_current);
+        fan_speed_sensors.insert(sp.serial_number.clone(), speed);
+        power_sensors.insert(sp.serial_number.clone(), power);
     }
 
-    #[track_caller]
-    fn check_all_serials_present(table: oxql_types::Table) {
-        let mut sim_gimlet_00 = 0;
-        let mut sim_gimlet_01 = 0;
+    async fn check_all_timeseries_present(
+        cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
+        name: &str,
+        expected: HashMap<String, usize>,
+    ) {
+        let metric_name = format!("hardware_component:{name}");
+        eprintln!("\n=== checking timeseries for {metric_name} ===\n");
+
+        if expected.values().all(|&v| v == 0) {
+            eprintln!(
+                "-> SP sim config contains no {name} sensors, skipping it"
+            );
+            return;
+        }
+
+        let table = timeseries_query(&cptestctx, &format!("get {metric_name}"))
+            .await
+            .into_iter()
+            .find(|t| t.name() == metric_name);
+        let table = match table {
+            Some(table) => table,
+            None => panic!("missing table for {metric_name}"),
+        };
+
+        let mut found = expected
+            .keys()
+            .map(|serial| (serial.clone(), 0))
+            .collect::<HashMap<_, usize>>();
         for timeseries in table.timeseries() {
             let fields = &timeseries.fields;
             let n_points = timeseries.points.len();
-            eprintln!("found timeseries: {fields:?} ({n_points} points)");
-            assert!(n_points > 0, "timeseries {fields:?} should have points");
-            let serial_str = match timeseries.fields.get("chassis_serial") {
+            assert!(
+                n_points > 0,
+                "{metric_name} timeseries {fields:?} should have points"
+            );
+            let serial_str: &str = match timeseries.fields.get("chassis_serial")
+            {
                 Some(FieldValue::String(s)) => s.borrow(),
                 Some(x) => panic!(
-                    "`chassis_serial` field should be a string, but got: {x:?}"
+                    "{metric_name} `chassis_serial` field should be a string, but got: {x:?}"
                 ),
                 None => {
-                    panic!("timeseries should have a `chassis_serial` field")
+                    panic!("{metric_name} timeseries should have a `chassis_serial` field")
                 }
             };
-            match serial_str {
-                "SimGimlet00" => sim_gimlet_00 += 1,
-                "SimGimlet01" => sim_gimlet_01 += 1,
-                // if someone adds sensor readings to the fake sidecar later,
-                // that's okay...
-                _ => eprintln!("bonus simulated chassis serial {serial_str:?}"),
+            if let Some(count) = found.get_mut(serial_str) {
+                *count += 1;
+            } else {
+                panic!(
+                    "{metric_name} timeseries had an unexpected chassis serial \
+                     number {serial_str:?} (not in the config file)",
+                );
             }
         }
 
-        assert!(
-            sim_gimlet_00 > 0,
-            "expected at least one timeseries from SimGimlet00 in {table:#?}"
+        eprintln!("-> {metric_name}: found timeseries: {found:#?}");
+        assert_eq!(
+            found, expected,
+            "number of {metric_name} timeseries didn't match expected in {table:#?}",
         );
-        assert!(
-            sim_gimlet_01 > 0,
-            "expected at least one timeseries from SimGimlet01 in {table:#?}"
-        );
+        eprintln!("-> okay, looks good!");
     }
 
-    let temp_metrics =
-        get_timeseries(&cptestctx, "hardware_component:temperature").await;
-    check_all_serials_present(temp_metrics);
+    // Wait until the MGS registers as a producer with Oximeter.
+    wait_for_producer(&cptestctx.oximeter, &mgs.gateway_id).await;
 
-    let voltage_metrics =
-        get_timeseries(&cptestctx, "hardware_component:voltage").await;
-    check_all_serials_present(voltage_metrics);
+    // ...and collect its samples.
+    cptestctx.oximeter.force_collect().await;
 
-    let current_metrics =
-        get_timeseries(&cptestctx, "hardware_component:current").await;
-    check_all_serials_present(current_metrics);
+    check_all_timeseries_present(&cptestctx, "temperature", temp_sensors).await;
+    check_all_timeseries_present(&cptestctx, "voltage", voltage_sensors).await;
+    check_all_timeseries_present(&cptestctx, "current", current_sensors).await;
+    check_all_timeseries_present(&cptestctx, "power", power_sensors).await;
+    check_all_timeseries_present(
+        &cptestctx,
+        "input_voltage",
+        input_voltage_sensors,
+    )
+    .await;
+    check_all_timeseries_present(
+        &cptestctx,
+        "input_current",
+        input_current_sensors,
+    )
+    .await;
+    check_all_timeseries_present(&cptestctx, "fan_speed", fan_speed_sensors)
+        .await;
 
     // Because the `ControlPlaneTestContext` isn't managing the MGS we made for
     // this test, we are responsible for removing its logs.
