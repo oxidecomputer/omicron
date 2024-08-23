@@ -9,6 +9,7 @@ use assert_matches::assert_matches;
 use common::reconfigurator::blueprint_edit_current_target;
 use common::LiveTestContext;
 use futures::TryStreamExt;
+use live_tests_macros::live_test;
 use nexus_client::types::Saga;
 use nexus_client::types::SagaState;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
@@ -19,10 +20,9 @@ use nexus_types::deployment::SledFilter;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
-use slog::{debug, info, o};
+use slog::{debug, info};
 use std::net::SocketAddrV6;
 use std::time::Duration;
-use live_tests_macros::live_test;
 
 // XXX-dap clean up in general
 // XXX-dap clean up logging
@@ -42,14 +42,14 @@ use live_tests_macros::live_test;
 async fn test_nexus_add_remove(lc: &LiveTestContext) {
     // Test setup
     let log = lc.log();
-    let mylog = lc.log().new(o!("top-level" => true));
-    let nexus =
-        lc.any_internal_nexus_client().await.expect("internal Nexus client");
     let opctx = lc.opctx();
     let datastore = lc.datastore();
     let planning_input = PlanningInputFromDb::assemble(&opctx, &datastore)
         .await
         .expect("planning input");
+    let initial_nexus_clients = lc.all_internal_nexus_clients().await.unwrap();
+    let nexus =
+        initial_nexus_clients.iter().next().expect("internal Nexus client");
 
     // First, deploy a new Nexus zone to an arbitrary sled.
     let sled_id = planning_input
@@ -109,7 +109,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     .await
     .expect("new Nexus to be usable");
     assert!(initial_sagas_list.is_empty());
-    info!(mylog, "new Nexus is online");
+    info!(log, "new Nexus is online");
 
     // Create a demo saga from the new Nexus zone.  We'll use this to test that
     // when the zone is expunged, its saga gets moved to a different Nexus.
@@ -122,9 +122,9 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
         list_sagas(&new_zone_client).await.expect("new Nexus sagas_list");
     assert_eq!(sagas_list.len(), 1);
     assert_eq!(sagas_list[0].id, saga_id);
+    info!(log, "created demo saga"; "demo_saga" => ?demo_saga);
 
     // Now expunge the zone we just created.
-    info!(mylog, "ready to expunge");
     let _ = blueprint_edit_current_target(
         log,
         &planning_input,
@@ -138,24 +138,16 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     .await
     .expect("editing blueprint to expunge zone");
 
-    // XXX-dap first, wait for the expunged instance to actually go away.
-    // Otherwise, it's possible we find that one in
-    // `all_internal_nexus_clients()` and complete the saga before the zone gets
-    // expunged!
-    //
-    // XXX-dap can we check the URL on the client to make sure it's a different
-    // one?
-
     // Wait for some other Nexus instance to pick up the saga.
-    let nexus_clients = lc.all_internal_nexus_clients().await.unwrap();
     let nexus_found = wait_for_condition(
         || async {
-            for nexus_client in &nexus_clients {
+            for nexus_client in &initial_nexus_clients {
+                assert!(nexus_client.baseurl() != new_zone_client.baseurl());
                 let Ok(sagas) = list_sagas(&nexus_client).await else {
                     continue;
                 };
 
-                debug!(mylog, "found sagas (last): {:?}", sagas);
+                debug!(log, "found sagas (last): {:?}", sagas);
                 if sagas.into_iter().any(|s| s.id == saga_id) {
                     return Ok(nexus_client);
                 }
@@ -168,7 +160,12 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     )
     .await
     .unwrap();
-    info!(mylog, "found saga in a different Nexus instance");
+
+    info!(log, "found saga in a different Nexus instance";
+        "saga_id" => %saga_id,
+        "found_nexus" => nexus_found.baseurl(),
+    );
+    assert!(nexus_found.baseurl() != new_zone_client.baseurl());
 
     // Now, complete the demo saga on whichever instance is running it now.
     // `saga_demo_complete` is not synchronous.  It just unblocks the saga.
@@ -180,7 +177,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     let found = wait_for_condition(
         || async {
             let sagas = list_sagas(&nexus_found).await.expect("listing sagas");
-            debug!(mylog, "found sagas (last): {:?}", sagas);
+            debug!(log, "found sagas (last): {:?}", sagas);
             let found = sagas.into_iter().find(|s| s.id == saga_id).unwrap();
             if matches!(found.state, SagaState::Succeeded) {
                 Ok(found)

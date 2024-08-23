@@ -68,19 +68,6 @@ impl LiveTestContext {
         &self.datastore
     }
 
-    /// Returns a client for any Nexus's internal API (based on the Nexus
-    /// instances that are in DNS)
-    pub async fn any_internal_nexus_client(
-        &self,
-    ) -> Result<nexus_client::Client, anyhow::Error> {
-        let sockaddr = self
-            .resolver
-            .lookup_socket_v6(ServiceName::Nexus)
-            .await
-            .context("looking up Nexus in internal DNS")?;
-        Ok(self.specific_internal_nexus_client(sockaddr))
-    }
-
     /// Returns a client for a Nexus internal API at the given socket address
     pub fn specific_internal_nexus_client(
         &self,
