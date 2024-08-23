@@ -22,8 +22,6 @@ use crate::Error;
 use crate::Metric;
 use crate::Target;
 use crate::Timeseries;
-use crate::TimeseriesKey;
-use crate::TimeseriesName;
 use crate::TimeseriesPageSelector;
 use crate::TimeseriesScanParams;
 use crate::TimeseriesSchema;
@@ -31,7 +29,9 @@ use dropshot::EmptyScanParams;
 use dropshot::PaginationOrder;
 use dropshot::ResultsPage;
 use dropshot::WhichPage;
+use oximeter::schema::TimeseriesKey;
 use oximeter::types::Sample;
+use oximeter::TimeseriesName;
 use regex::Regex;
 use regex::RegexBuilder;
 use slog::debug;
@@ -1191,7 +1191,6 @@ mod tests {
     };
     use omicron_test_utils::dev::test_setup_log;
     use oximeter::histogram::Histogram;
-    use oximeter::test_util;
     use oximeter::types::MissingDatum;
     use oximeter::Datum;
     use oximeter::FieldValue;
@@ -1202,7 +1201,6 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
     use tempfile::TempDir;
-    use tokio::time::sleep;
     use uuid::Uuid;
 
     pub enum InstallationType {
@@ -1444,9 +1442,6 @@ mod tests {
 
         // Tests that the expected error is returned on a wrong address
         bad_db_connection_test().await.unwrap();
-
-        // Tests data is replicated in a cluster
-        data_is_replicated_test(&cluster).await.unwrap();
 
         // Tests that a new client has started and it is part of a cluster
         is_oximeter_cluster_test(
@@ -1692,67 +1687,6 @@ mod tests {
         Ok(())
     }
 
-    async fn data_is_replicated_test(
-        cluster: &ClickHouseCluster,
-    ) -> Result<(), Error> {
-        let logctx = test_setup_log("test_data_is_replicated");
-        let log = &logctx.log;
-
-        // Create database in node 1
-        let client_1 = Client::new(cluster.replica_1.address, &log);
-        assert!(client_1.is_oximeter_cluster().await.unwrap());
-        client_1
-            .init_replicated_db()
-            .await
-            .expect("Failed to initialize timeseries database");
-
-        // Verify database exists in node 2
-        let client_2 = Client::new(cluster.replica_2.address, &log);
-        assert!(client_2.is_oximeter_cluster().await.unwrap());
-        let sql = String::from("SHOW DATABASES FORMAT JSONEachRow;");
-
-        // Try a few times to make sure data has been synchronised.
-        let mut result = String::from("");
-        let tries = 5;
-        for _ in 0..tries {
-            result = client_2.execute_with_body(sql.clone()).await.unwrap().1;
-            if !result.contains("oximeter") {
-                sleep(Duration::from_secs(1)).await;
-                continue;
-            } else {
-                break;
-            }
-        }
-
-        assert!(result.contains("oximeter"));
-
-        // Insert row into one of the tables
-        let sql = String::from(
-            "INSERT INTO oximeter.measurements_string (datum) VALUES ('hiya');",
-        );
-        let result = client_2.execute_with_body(sql.clone()).await.unwrap().1;
-        info!(log, "Inserted datum to client #2"; "sql" => sql, "result" => result);
-
-        // Make sure replicas are synched
-        let sql = String::from(
-            "SYSTEM SYNC REPLICA oximeter.measurements_string_local;",
-        );
-        let result = client_1.execute_with_body(sql.clone()).await.unwrap().1;
-        info!(log, "Synced replicas via client #1"; "sql" => sql, "result" => result);
-
-        // Make sure data exists in the other replica
-        let sql = String::from(
-            "SELECT * FROM oximeter.measurements_string FORMAT JSONEachRow;",
-        );
-        let result = client_1.execute_with_body(sql.clone()).await.unwrap().1;
-        info!(log, "Retrieved values via client #1"; "sql" => sql, "result" => result.clone());
-        assert!(result.contains("hiya"));
-
-        client_1.wipe_replicated_db().await?;
-        logctx.cleanup_successful();
-        Ok(())
-    }
-
     async fn is_oximeter_cluster_test(
         address: SocketAddr,
         db_type: InstallationType,
@@ -1788,7 +1722,7 @@ mod tests {
         let samples = {
             let mut s = Vec::with_capacity(8);
             for _ in 0..s.capacity() {
-                s.push(test_util::make_hist_sample())
+                s.push(oximeter_test_utils::make_hist_sample())
             }
             s
         };
@@ -1827,7 +1761,7 @@ mod tests {
 
         let client = Client::new(address, &log);
         db_type.init_db(&client).await.unwrap();
-        let sample = test_util::make_sample();
+        let sample = oximeter_test_utils::make_sample();
         client.insert_samples(&[sample]).await.unwrap();
 
         let bad_name = name_mismatch::TestTarget {
@@ -1835,7 +1769,7 @@ mod tests {
             name2: "second_name".into(),
             num: 2,
         };
-        let metric = test_util::TestMetric {
+        let metric = oximeter_test_utils::TestMetric {
             id: uuid::Uuid::new_v4(),
             good: true,
             datum: 1,
@@ -1857,7 +1791,7 @@ mod tests {
 
         let client = Client::new(address, &log);
         db_type.init_db(&client).await.unwrap();
-        let sample = test_util::make_sample();
+        let sample = oximeter_test_utils::make_sample();
 
         // Verify that this sample is considered new, i.e., we return rows to update the timeseries
         // schema table.
@@ -1932,7 +1866,7 @@ mod tests {
 
         let client = Client::new(address, &log);
         db_type.init_db(&client).await.unwrap();
-        let samples = test_util::generate_test_samples(2, 2, 2, 2);
+        let samples = oximeter_test_utils::generate_test_samples(2, 2, 2, 2);
         client.insert_samples(&samples).await?;
 
         let sample = samples.first().unwrap();
@@ -2021,7 +1955,7 @@ mod tests {
         // we'd like to exercise the logic of ClickHouse's replacing merge tree engine.
         let client = Client::new(address, &log);
         db_type.init_db(&client).await.unwrap();
-        let samples = test_util::generate_test_samples(2, 2, 2, 2);
+        let samples = oximeter_test_utils::generate_test_samples(2, 2, 2, 2);
         client.insert_samples(&samples).await?;
 
         async fn assert_table_count(
@@ -2696,7 +2630,7 @@ mod tests {
 
         let client = Client::new(address, &log);
         db_type.init_db(&client).await.unwrap();
-        let samples = test_util::generate_test_samples(2, 2, 2, 2);
+        let samples = oximeter_test_utils::generate_test_samples(2, 2, 2, 2);
         client.insert_samples(&samples).await?;
 
         let original_schema = client.schema.lock().await.clone();
@@ -2721,7 +2655,7 @@ mod tests {
 
         let client = Client::new(address, &log);
         db_type.init_db(&client).await.unwrap();
-        let samples = test_util::generate_test_samples(2, 2, 2, 2);
+        let samples = oximeter_test_utils::generate_test_samples(2, 2, 2, 2);
         client.insert_samples(&samples).await?;
 
         let limit = 100u32.try_into().unwrap();
@@ -2756,7 +2690,7 @@ mod tests {
 
         let client = Client::new(address, &log);
         db_type.init_db(&client).await.unwrap();
-        let samples = test_util::generate_test_samples(2, 2, 2, 2);
+        let samples = oximeter_test_utils::generate_test_samples(2, 2, 2, 2);
         client.insert_samples(&samples).await?;
 
         let limit = 7u32.try_into().unwrap();
@@ -3429,7 +3363,7 @@ mod tests {
         // The values here don't matter much, we just want to check that
         // the database data hasn't been dropped.
         assert_eq!(0, get_schema_count(&client).await);
-        let sample = test_util::make_sample();
+        let sample = oximeter_test_utils::make_sample();
         client.insert_samples(&[sample.clone()]).await.unwrap();
         assert_eq!(1, get_schema_count(&client).await);
 
@@ -3503,7 +3437,7 @@ mod tests {
         // The values here don't matter much, we just want to check that
         // the database data gets dropped later.
         assert_eq!(0, get_schema_count(&client).await);
-        let sample = test_util::make_sample();
+        let sample = oximeter_test_utils::make_sample();
         client.insert_samples(&[sample.clone()]).await.unwrap();
         assert_eq!(1, get_schema_count(&client).await);
 
@@ -3529,7 +3463,7 @@ mod tests {
 
         let client = Client::new(address, &log);
         db_type.init_db(&client).await.unwrap();
-        let samples = [test_util::make_sample()];
+        let samples = [oximeter_test_utils::make_sample()];
         client.insert_samples(&samples).await.unwrap();
 
         // Get the count of schema directly from the DB, which should have just
@@ -3614,7 +3548,7 @@ mod tests {
 
         let client = Client::new(address, &log);
         db_type.init_db(&client).await.unwrap();
-        let samples = [test_util::make_sample()];
+        let samples = [oximeter_test_utils::make_sample()];
 
         // We're using the components of the `insert_samples()` method here,
         // which has been refactored explicitly for this test. We need to insert

@@ -4,12 +4,12 @@
 
 //! Describes the states of network-attached storage.
 
-use crate::params::DiskStateRequested;
 use chrono::Utc;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use propolis_client::types::DiskAttachmentState as PropolisDiskState;
+use sled_agent_types::disk::DiskStateRequested;
 use uuid::Uuid;
 
 /// Action to be taken on behalf of state transition.

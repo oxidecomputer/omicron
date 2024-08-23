@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 installinator-common.workspace = true
+omicron-common.workspace = true
 progenitor.workspace = true
 regress.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }

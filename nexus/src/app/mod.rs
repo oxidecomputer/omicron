@@ -7,6 +7,7 @@
 use self::external_endpoints::NexusCertResolver;
 use self::saga::SagaExecutor;
 use crate::app::background::BackgroundTasksData;
+use crate::app::background::SagaRecoveryHelpers;
 use crate::app::oximeter::LazyTimeseriesClient;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
@@ -19,6 +20,7 @@ use nexus_config::NexusConfig;
 use nexus_config::RegionAllocationStrategy;
 use nexus_config::Tunables;
 use nexus_config::UpdatesConfig;
+use nexus_db_model::AllSchemaVersions;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -35,6 +37,7 @@ use std::net::SocketAddrV6;
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 use std::sync::OnceLock;
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
@@ -89,12 +92,9 @@ pub(crate) mod sagas;
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.
 
-pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
-
-use crate::app::background::SagaRecoveryHelpers;
-use nexus_db_model::AllSchemaVersions;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
-use tokio::sync::mpsc;
+pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
+use sagas::demo::CompletingDemoSagas;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
 //      ephemeral (so bounded in saga by design).
@@ -204,6 +204,9 @@ pub struct Nexus {
 
     /// Default Crucible region allocation strategy
     default_region_allocation_strategy: RegionAllocationStrategy,
+
+    /// List of demo sagas awaiting a request to complete them
+    demo_sagas: Arc<std::sync::Mutex<sagas::demo::CompletingDemoSagas>>,
 }
 
 impl Nexus {
@@ -480,6 +483,9 @@ impl Nexus {
                 .pkg
                 .default_region_allocation_strategy
                 .clone(),
+            demo_sagas: Arc::new(std::sync::Mutex::new(
+                CompletingDemoSagas::new(),
+            )),
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -954,6 +960,17 @@ impl Nexus {
             clients.push((*location, client));
         }
         Ok(clients.into_iter().collect::<HashMap<_, _>>())
+    }
+
+    pub(crate) fn demo_sagas(
+        &self,
+    ) -> Result<std::sync::MutexGuard<CompletingDemoSagas>, Error> {
+        self.demo_sagas.lock().map_err(|error| {
+            Error::internal_error(&format!(
+                "failed to acquire demo_sagas lock: {:#}",
+                error
+            ))
+        })
     }
 }
 

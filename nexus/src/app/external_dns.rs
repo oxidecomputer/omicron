@@ -5,15 +5,15 @@
 use std::net::IpAddr;
 use std::net::SocketAddr;
 
+use hickory_resolver::config::NameServerConfig;
+use hickory_resolver::config::Protocol;
+use hickory_resolver::config::ResolverConfig;
+use hickory_resolver::config::ResolverOpts;
+use hickory_resolver::TokioAsyncResolver;
 use hyper::client::connect::dns::Name;
 use omicron_common::address::DNS_PORT;
-use trust_dns_resolver::config::NameServerConfig;
-use trust_dns_resolver::config::Protocol;
-use trust_dns_resolver::config::ResolverConfig;
-use trust_dns_resolver::config::ResolverOpts;
-use trust_dns_resolver::TokioAsyncResolver;
 
-/// Wrapper around trust-dns-resolver to provide name resolution
+/// Wrapper around hickory-resolver to provide name resolution
 /// using a given set of DNS servers for use with reqwest.
 pub struct Resolver(TokioAsyncResolver);
 
@@ -26,18 +26,17 @@ impl Resolver {
                 socket_addr: SocketAddr::new(*addr, DNS_PORT),
                 protocol: Protocol::Udp,
                 tls_dns_name: None,
-                trust_nx_responses: false,
+                trust_negative_responses: false,
                 bind_addr: None,
             });
         }
         let mut opts = ResolverOpts::default();
+        // Enable edns for potentially larger records
+        opts.edns0 = true;
         opts.use_hosts_file = false;
         // Do as many requests in parallel as we have configured servers
         opts.num_concurrent_reqs = dns_servers.len();
-        Resolver(
-            TokioAsyncResolver::tokio(rc, opts)
-                .expect("creating resovler shouldn't fail"),
-        )
+        Resolver(TokioAsyncResolver::tokio(rc, opts))
     }
 }
 
@@ -48,7 +47,7 @@ impl reqwest::dns::Resolve for Resolver {
             let ips = resolver.lookup_ip(name.as_str()).await?;
             let addrs = ips
                 .into_iter()
-                // trust-dns-resolver returns `IpAddr`s but reqwest wants
+                // hickory-resolver returns `IpAddr`s but reqwest wants
                 // `SocketAddr`s (useful if you have a custom resolver that
                 // returns a scoped IPv6 address). The port provided here
                 // is ignored in favour of the scheme default (http/80,

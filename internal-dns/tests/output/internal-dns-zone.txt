@@ -68,6 +68,17 @@ builder: "non_trivial"
       "data": "::1:4"
     }
   ],
+  "_boundary-ntp._tcp": [
+    {
+      "type": "SRV",
+      "data": {
+        "port": 127,
+        "prio": 0,
+        "target": "001de000-c04e-4000-8000-000000000002.host.control-plane.oxide.internal",
+        "weight": 0
+      }
+    }
+  ],
   "_nexus._tcp": [
     {
       "type": "SRV",
@@ -117,6 +128,12 @@ builder: "non_trivial"
         "target": "001de000-51ed-4000-8000-000000000001.sled.control-plane.oxide.internal",
         "weight": 0
       }
+    }
+  ],
+  "boundary-ntp": [
+    {
+      "type": "AAAA",
+      "data": "::1:2"
     }
   ]
 }

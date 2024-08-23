@@ -20,9 +20,7 @@ use sled_agent_types::{
 };
 use sled_hardware_types::Baseboard;
 
-#[dropshot::api_description {
-    module = "bootstrap_agent_api_mod",
-}]
+#[dropshot::api_description]
 pub trait BootstrapAgentApi {
     type Context;
 

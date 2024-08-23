@@ -4,16 +4,18 @@
 
 //! Background task for realizing a plan blueprint
 
-use crate::app::background::BackgroundTask;
+use crate::app::background::{Activator, BackgroundTask};
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use internal_dns::resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_reconfigurator_execution::RealizeBlueprintOutput;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
+use uuid::Uuid;
 
 /// Background task that takes a [`Blueprint`] and realizes the change to
 /// the state of the system based on the `Blueprint`.
@@ -21,8 +23,9 @@ pub struct BlueprintExecutor {
     datastore: Arc<DataStore>,
     resolver: Resolver,
     rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
-    nexus_label: String,
+    nexus_id: Uuid,
     tx: watch::Sender<usize>,
+    saga_recovery: Activator,
 }
 
 impl BlueprintExecutor {
@@ -32,10 +35,18 @@ impl BlueprintExecutor {
         rx_blueprint: watch::Receiver<
             Option<Arc<(BlueprintTarget, Blueprint)>>,
         >,
-        nexus_label: String,
+        nexus_id: Uuid,
+        saga_recovery: Activator,
     ) -> BlueprintExecutor {
         let (tx, _) = watch::channel(0);
-        BlueprintExecutor { datastore, resolver, rx_blueprint, nexus_label, tx }
+        BlueprintExecutor {
+            datastore,
+            resolver,
+            rx_blueprint,
+            nexus_id,
+            tx,
+            saga_recovery,
+        }
     }
 
     pub fn watcher(&self) -> watch::Receiver<usize> {
@@ -81,7 +92,7 @@ impl BlueprintExecutor {
             &self.datastore,
             &self.resolver,
             blueprint,
-            &self.nexus_label,
+            self.nexus_id,
         )
         .await;
 
@@ -90,7 +101,19 @@ impl BlueprintExecutor {
 
         // Return the result as a `serde_json::Value`
         match result {
-            Ok(()) => json!({}),
+            Ok(RealizeBlueprintOutput { needs_saga_recovery }) => {
+                // If executing the blueprint requires activating the saga
+                // recovery background task, do that now.
+                if needs_saga_recovery {
+                    info!(&opctx.log, "activating saga recovery task");
+                    self.saga_recovery.activate();
+                }
+
+                json!({
+                    "target_id": blueprint.id.to_string(),
+                    "needs_saga_recovery": needs_saga_recovery,
+                })
+            }
             Err(errors) => {
                 let errors: Vec<_> =
                     errors.into_iter().map(|e| format!("{:#}", e)).collect();
@@ -115,7 +138,7 @@ impl BackgroundTask for BlueprintExecutor {
 #[cfg(test)]
 mod test {
     use super::BlueprintExecutor;
-    use crate::app::background::BackgroundTask;
+    use crate::app::background::{Activator, BackgroundTask};
     use httptest::matchers::{all_of, request};
     use httptest::responders::status_code;
     use httptest::Expectation;
@@ -124,6 +147,7 @@ mod test {
     };
     use nexus_db_queries::authn;
     use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::db::DataStore;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintZoneFilter;
@@ -150,7 +174,9 @@ mod test {
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
-    fn create_blueprint(
+    async fn create_blueprint(
+        datastore: &DataStore,
+        opctx: &OpContext,
         blueprint_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
         blueprint_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
         dns_version: Generation,
@@ -162,28 +188,46 @@ mod test {
             .copied()
             .map(|sled_id| (sled_id, SledState::Active))
             .collect::<BTreeMap<_, _>>();
-        (
-            BlueprintTarget {
-                target_id: id,
-                enabled: true,
-                time_made_target: chrono::Utc::now(),
-            },
-            Blueprint {
-                id,
-                blueprint_zones,
-                blueprint_disks,
-                sled_state,
-                cockroachdb_setting_preserve_downgrade:
-                    CockroachDbPreserveDowngrade::DoNotModify,
-                parent_blueprint_id: None,
-                internal_dns_version: dns_version,
-                external_dns_version: dns_version,
-                cockroachdb_fingerprint: String::new(),
-                time_created: chrono::Utc::now(),
-                creator: "test".to_string(),
-                comment: "test blueprint".to_string(),
-            },
-        )
+
+        // Ensure the blueprint we're creating is the current target (required
+        // for successful blueprint realization). This requires its parent to be
+        // the existing target, so fetch that first.
+        let current_target = datastore
+            .blueprint_target_get_current(opctx)
+            .await
+            .expect("fetched current target blueprint");
+
+        let target = BlueprintTarget {
+            target_id: id,
+            enabled: true,
+            time_made_target: chrono::Utc::now(),
+        };
+        let blueprint = Blueprint {
+            id,
+            blueprint_zones,
+            blueprint_disks,
+            sled_state,
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::DoNotModify,
+            parent_blueprint_id: Some(current_target.target_id),
+            internal_dns_version: dns_version,
+            external_dns_version: dns_version,
+            cockroachdb_fingerprint: String::new(),
+            time_created: chrono::Utc::now(),
+            creator: "test".to_string(),
+            comment: "test blueprint".to_string(),
+        };
+
+        datastore
+            .blueprint_insert(opctx, &blueprint)
+            .await
+            .expect("inserted new blueprint");
+        datastore
+            .blueprint_target_set_current(opctx, target)
+            .await
+            .expect("set new blueprint as current target");
+
+        (target, blueprint)
     }
 
     #[nexus_test(server = crate::Server)]
@@ -240,7 +284,8 @@ mod test {
             datastore.clone(),
             resolver.clone(),
             blueprint_rx,
-            String::from("test-suite"),
+            Uuid::new_v4(),
+            Activator::new(),
         );
 
         // Now we're ready.
@@ -253,15 +298,27 @@ mod test {
         // With a target blueprint having no zones, the task should trivially
         // complete and report a successful (empty) summary.
         let generation = Generation::new();
-        let blueprint = Arc::new(create_blueprint(
-            BTreeMap::new(),
-            BTreeMap::new(),
-            generation,
-        ));
+        let blueprint = Arc::new(
+            create_blueprint(
+                &datastore,
+                &opctx,
+                BTreeMap::new(),
+                BTreeMap::new(),
+                generation,
+            )
+            .await,
+        );
+        let blueprint_id = blueprint.1.id;
         blueprint_tx.send(Some(blueprint)).unwrap();
         let value = task.activate(&opctx).await;
         println!("activating with no zones: {:?}", value);
-        assert_eq!(value, json!({}));
+        assert_eq!(
+            value,
+            json!({
+                "target_id": blueprint_id,
+                "needs_saga_recovery": false,
+            })
+        );
 
         // Create a non-empty blueprint describing two servers and verify that
         // the task correctly winds up making requests to both of them and
@@ -300,13 +357,16 @@ mod test {
         //
         // TODO: add expunged zones to the test (should not be deployed).
         let mut blueprint = create_blueprint(
+            &datastore,
+            &opctx,
             BTreeMap::from([
                 (sled_id1, make_zones(BlueprintZoneDisposition::InService)),
                 (sled_id2, make_zones(BlueprintZoneDisposition::Quiesced)),
             ]),
             BTreeMap::new(),
             generation,
-        );
+        )
+        .await;
 
         // Insert records for the zpools backing the datasets in these zones.
         for (sled_id, config) in
@@ -346,7 +406,13 @@ mod test {
         // Activate the task to trigger zone configuration on the sled-agents
         let value = task.activate(&opctx).await;
         println!("activating two sled agents: {:?}", value);
-        assert_eq!(value, json!({}));
+        assert_eq!(
+            value,
+            json!({
+                "target_id": blueprint.1.id.to_string(),
+                "needs_saga_recovery": false,
+            })
+        );
         s1.verify_and_clear();
         s2.verify_and_clear();
 

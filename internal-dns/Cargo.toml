@@ -18,7 +18,7 @@ omicron-uuid-kinds.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 slog.workspace = true
 thiserror.workspace = true
-trust-dns-resolver.workspace = true
+hickory-resolver.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 

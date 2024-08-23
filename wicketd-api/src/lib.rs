@@ -39,9 +39,7 @@ use wicket_common::rack_update::ClearUpdateStateResponse;
 use wicket_common::rack_update::StartUpdateOptions;
 use wicket_common::update_events::EventReport;
 
-#[dropshot::api_description {
-    module = "wicketd_api_mod",
-}]
+#[dropshot::api_description]
 pub trait WicketdApi {
     type Context;
 

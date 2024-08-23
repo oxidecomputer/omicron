@@ -33,13 +33,13 @@ use nexus_types::inventory::SpType;
 use omicron_common::address::get_sled_address;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
+use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -79,6 +79,7 @@ pub struct SystemDescription {
     sled_subnets: Box<dyn SubnetIterator>,
     available_non_scrimlet_slots: BTreeSet<u16>,
     available_scrimlet_slots: BTreeSet<u16>,
+    target_boundary_ntp_zone_count: usize,
     target_nexus_zone_count: usize,
     target_cockroachdb_zone_count: usize,
     target_cockroachdb_cluster_version: CockroachDbClusterVersion,
@@ -130,9 +131,11 @@ impl SystemDescription {
         // Policy defaults
         let target_nexus_zone_count = NEXUS_REDUNDANCY;
 
-        // TODO-cleanup This is wrong, but we don't currently set up any CRDB
-        // nodes in our fake system, so this prevents downstream test issues
-        // with the planner thinking our system is out of date from the gate.
+        // TODO-cleanup These are wrong, but we don't currently set up any
+        // boundary NTP or CRDB nodes in our fake system, so this prevents
+        // downstream test issues with the planner thinking our system is out of
+        // date from the gate.
+        let target_boundary_ntp_zone_count = 0;
         let target_cockroachdb_zone_count = 0;
 
         let target_cockroachdb_cluster_version =
@@ -151,6 +154,7 @@ impl SystemDescription {
             sled_subnets,
             available_non_scrimlet_slots,
             available_scrimlet_slots,
+            target_boundary_ntp_zone_count,
             target_nexus_zone_count,
             target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version,
@@ -319,10 +323,12 @@ impl SystemDescription {
     ) -> anyhow::Result<PlanningInputBuilder> {
         let policy = Policy {
             service_ip_pool_ranges: self.service_ip_pool_ranges.clone(),
+            target_boundary_ntp_zone_count: self.target_boundary_ntp_zone_count,
             target_nexus_zone_count: self.target_nexus_zone_count,
             target_cockroachdb_zone_count: self.target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version: self
                 .target_cockroachdb_cluster_version,
+            clickhouse_policy: None,
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
