@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Subcommand: cargo xtask live-test
+//! Subcommand: cargo xtask live-tests
 
 use crate::common::run_subcmd;
 use anyhow::{bail, Context, Result};
@@ -13,7 +13,7 @@ use std::process::Command;
 pub struct Args {}
 
 pub fn run_cmd(_args: Args) -> Result<()> {
-    const NAME: &str = "live-test-archive";
+    const NAME: &str = "live-tests-archive";
 
     // The live tests operate in deployed environments, which always run
     // illumos.  Bail out quickly if someone tries to run this on a system whose
@@ -22,7 +22,7 @@ pub fn run_cmd(_args: Args) -> Result<()> {
     // silently missing something you might expect to be there.  Plus, you can
     // still check and even build *this* code on non-illumos systems.)
     if cfg!(not(target_os = "illumos")) {
-        bail!("live-test archive can only be built on illumos systems");
+        bail!("live-tests archive can only be built on illumos systems");
     }
 
     let tmpdir_root =
@@ -71,8 +71,8 @@ pub fn run_cmd(_args: Args) -> Result<()> {
     // plus the nextext archive file.
     //
     // To avoid creating a tarbomb, we want all the files prefixed with
-    // "live-test-archive/".  There's no great way to do this with the illumos
-    // tar(1) except to create a temporary directory called "live-test-archive"
+    // "live-tests-archive/".  There's no great way to do this with the illumos
+    // tar(1) except to create a temporary directory called "live-tests-archive"
     // that contains the files and then tar'ing up that.
     //
     // Ironically, an easy way to construct that directory is with tar(1).

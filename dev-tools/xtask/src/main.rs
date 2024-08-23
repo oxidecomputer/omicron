@@ -19,7 +19,7 @@ mod clippy;
 mod common;
 #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
 mod external;
-mod live_test;
+mod live_tests;
 mod usdt;
 
 #[cfg(target_os = "illumos")]
@@ -62,7 +62,7 @@ enum Cmds {
     Download(external::External),
 
     /// Create a bundle of live tests
-    LiveTest(live_test::Args),
+    LiveTests(live_tests::Args),
 
     /// Utilities for working with MGS.
     MgsDev(external::External),
@@ -132,7 +132,7 @@ fn main() -> Result<()> {
                 external.exec_bin("xtask-downloader")
             }
         }
-        Cmds::LiveTest(args) => live_test::run_cmd(args),
+        Cmds::LiveTests(args) => live_tests::run_cmd(args),
         Cmds::MgsDev(external) => external.exec_bin("mgs-dev"),
         Cmds::OmicronDev(external) => external.exec_bin("omicron-dev"),
         Cmds::Openapi(external) => external.exec_bin("openapi-manager"),

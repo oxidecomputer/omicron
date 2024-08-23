@@ -23,5 +23,5 @@ source ./env.sh
 banner prerequisites
 ptime -m bash ./tools/install_builder_prerequisites.sh -y
 
-banner live-test
-ptime -m cargo xtask live-test
+banner live-tests
+ptime -m cargo xtask live-tests
