@@ -17,6 +17,7 @@ assert_matches.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 internal-dns.workspace = true
+live-tests-macros.workspace = true
 nexus-client.workspace = true
 nexus-config.workspace = true
 nexus-db-model.workspace = true

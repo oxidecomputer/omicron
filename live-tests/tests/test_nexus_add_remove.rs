@@ -22,10 +22,10 @@ use omicron_test_utils::dev::poll::CondCheckError;
 use slog::{debug, info, o};
 use std::net::SocketAddrV6;
 use std::time::Duration;
+use live_tests_macros::live_test;
 
 // XXX-dap clean up in general
 // XXX-dap clean up logging
-// XXX-dap make a macro for LiveTestContext
 // TODO-coverage This test could check other stuff:
 //
 // - that after adding:
@@ -38,10 +38,9 @@ use std::time::Duration;
 //   - we can't reach it any more on the underlay
 //   - it doesn't appear in external DNS any more
 //
-#[tokio::test]
-async fn test_nexus_add_remove() {
+#[live_test]
+async fn test_nexus_add_remove(lc: &LiveTestContext) {
     // Test setup
-    let lc = LiveTestContext::new("test_nexus_add_remove").await.unwrap();
     let log = lc.log();
     let mylog = lc.log().new(o!("top-level" => true));
     let nexus =
@@ -197,8 +196,6 @@ async fn test_nexus_add_remove() {
 
     assert_eq!(found.id, saga_id);
     assert!(matches!(found.state, SagaState::Succeeded));
-
-    lc.cleanup_successful();
 }
 
 async fn list_sagas(
