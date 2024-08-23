@@ -8,9 +8,7 @@ use camino::Utf8Path;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use gateway_messages::SpPort;
-pub use omicron_gateway::metrics::{
-    DevConfig as MetricsDevConfig, MetricsConfig,
-};
+pub use omicron_gateway::metrics::MetricsConfig;
 use omicron_gateway::MgsArguments;
 use omicron_gateway::SpType;
 use omicron_gateway::SwitchPortConfig;

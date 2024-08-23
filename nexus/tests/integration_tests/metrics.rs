@@ -601,11 +601,11 @@ async fn test_mgs_metrics(
     let mgs = {
         // munge the already-parsed MGS config file to point it at the test
         // Nexus' address.
-        mgs_config.metrics.get_or_insert_with(Default::default).dev =
-            Some(gateway_test_utils::setup::MetricsDevConfig {
-                bind_loopback: true,
-                nexus_address: Some(cptestctx.internal_client.bind_address),
-            });
+        mgs_config.metrics = Some(gateway_test_utils::setup::MetricsCOnfig {
+            disabled: false,
+            dev_bind_loopback: true,
+            dev_nexus_address: Some(cptestctx.internal_client.bind_address),
+        });
         gateway_test_utils::setup::test_setup_with_config(
             "test_mgs_metrics",
             gateway_messages::SpPort::One,

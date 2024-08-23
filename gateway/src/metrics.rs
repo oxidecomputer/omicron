@@ -68,25 +68,20 @@ pub struct MetricsConfig {
     #[serde(default)]
     pub disabled: bool,
 
-    /// Configuration settings for testing and development use.
-    pub dev: Option<DevConfig>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct DevConfig {
     /// Override the Nexus address used to register the SP metrics Oximeter
     /// producer. This is intended for use in development and testing.
     ///
     /// If this argument is not present, Nexus is discovered through DNS.
-    pub nexus_address: Option<SocketAddr>,
+    #[serde(default)]
+    pub dev_nexus_address: Option<SocketAddr>,
 
     /// Allow the metrics producer endpoint to bind on loopback.
     ///
     /// This should be disabled in production, as Nexus will not be able to
     /// reach the loopback interface, but is necessary for local development and
     /// test purposes.
-    pub bind_loopback: bool,
+    #[serde(default)]
+    pub dev_bind_loopback: bool,
 }
 
 /// Polls sensor readings from an individual SP.
@@ -997,14 +992,21 @@ fn stringify_byte_string(bytes: &[u8]) -> String {
 impl ServerManager {
     async fn run(mut self, cfg: Option<MetricsConfig>) -> anyhow::Result<()> {
         let (registration_address, bind_loopback) =
-            if let Some(ref dev_config) = cfg.and_then(|cfg| cfg.dev) {
-                slog::warn!(
-                    &self.log,
-                    "using development metrics configuration overrides!";
-                    "nexus_address" => ?dev_config.nexus_address,
-                    "bind_loopback" => dev_config.bind_loopback,
-                );
-                (dev_config.nexus_address, dev_config.bind_loopback)
+            if let Some(MetricsConfig {
+                dev_bind_loopback,
+                dev_nexus_address,
+                ..
+            }) = cfg
+            {
+                if dev_bind_loopback || dev_nexus_address.is_some() {
+                    slog::warn!(
+                        &self.log,
+                        "using development metrics configuration overrides!";
+                        "nexus_address" => ?dev_nexus_address,
+                        "bind_loopback" => dev_bind_loopback,
+                    );
+                }
+                (dev_nexus_address, dev_bind_loopback)
             } else {
                 (None, false)
             };
