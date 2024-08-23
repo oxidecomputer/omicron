@@ -24,8 +24,6 @@ use slog::{debug, info};
 use std::net::SocketAddrV6;
 use std::time::Duration;
 
-// XXX-dap clean up in general
-// XXX-dap clean up logging
 // TODO-coverage This test could check other stuff:
 //
 // - that after adding:
@@ -34,9 +32,7 @@ use std::time::Duration;
 //     (e.g., using an `oxide_client` using a custom reqwest resolver that
 //     points only at that one IP so that we can make sure we're always getting
 //     that one)
-// - that after expungement:
-//   - we can't reach it any more on the underlay
-//   - it doesn't appear in external DNS any more
+// - that after expungement, it doesn't appear in external DNS any more
 //
 #[live_test]
 async fn test_nexus_add_remove(lc: &LiveTestContext) {
@@ -137,6 +133,34 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     )
     .await
     .expect("editing blueprint to expunge zone");
+
+    // At some point, we should be unable to reach this Nexus any more.
+    wait_for_condition(
+        || async {
+            match new_zone_client.saga_list(None, None, None).await {
+                Err(nexus_client::Error::CommunicationError(error)) => {
+                    info!(log, "expunged Nexus no longer reachable";
+                        "error" => slog_error_chain::InlineErrorChain::new(&error),
+                    );
+                    Ok(())
+                }
+                Ok(_) => {
+                    debug!(log, "expunged Nexus is still reachable");
+                    Err(CondCheckError::<()>::NotYet)
+                }
+                Err(error) => {
+                    debug!(log, "expunged Nexus is still reachable";
+                        "error" => slog_error_chain::InlineErrorChain::new(&error),
+                    );
+                    Err(CondCheckError::NotYet)
+                }
+            }
+        },
+        &Duration::from_millis(50),
+        &Duration::from_secs(60),
+    )
+    .await
+    .unwrap();
 
     // Wait for some other Nexus instance to pick up the saga.
     let nexus_found = wait_for_condition(
