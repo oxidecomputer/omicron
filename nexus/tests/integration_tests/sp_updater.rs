@@ -447,7 +447,7 @@ async fn test_sp_updater_delivers_progress() {
             "test_sp_updater_delivers_progress",
             SpPort::One,
             mgs_config,
-            sp_sim_config,
+            &sp_sim_config,
             None,
         )
         .await
