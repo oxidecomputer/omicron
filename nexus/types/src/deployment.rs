@@ -606,8 +606,6 @@ pub struct BlueprintZoneConfig {
     pub zone_type: BlueprintZoneType,
 }
 
-impl BlueprintZoneConfig {}
-
 impl From<BlueprintZoneConfig> for OmicronZoneConfig {
     fn from(z: BlueprintZoneConfig) -> Self {
         Self {

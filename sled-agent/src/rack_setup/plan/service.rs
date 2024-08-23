@@ -543,7 +543,6 @@ impl Plan {
             let filesystem_pool = Some(dataset_name.pool().clone());
             sled.request.zones.push(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
-                // TODO-cleanup use TypedUuid everywhere
                 id,
                 underlay_address: ip,
                 zone_type: BlueprintZoneType::CockroachDb(
