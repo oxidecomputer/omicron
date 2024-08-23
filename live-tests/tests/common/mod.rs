@@ -4,7 +4,7 @@
 
 pub mod reconfigurator;
 
-use anyhow::{anyhow, bail, ensure, Context};
+use anyhow::{anyhow, ensure, Context};
 use dropshot::test_util::LogContext;
 use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
@@ -131,36 +131,10 @@ async fn create_datastore(
 
     let db_config = nexus_db_queries::db::Config { url };
     let pool = Arc::new(nexus_db_queries::db::Pool::new(log, &db_config));
-    let datastore = DataStore::new_unchecked(log.clone(), pool)
-        .map_err(|s| anyhow!("creating DataStore: {s}"))?;
-
-    // XXX-dap TODO-cleanup put all this into a Datastore::new_nowait() or
-    // something
-    let expected_version = nexus_db_model::SCHEMA_VERSION;
-    let (found_version, found_target) = datastore
-        .database_schema_version()
+    DataStore::new_failfast(log, pool)
         .await
-        .context("loading database schema version")?;
-    eprintln!(
-        "create_datastore(): found_version {found_version}, \
-        found_target {found_target:?}"
-    );
-
-    if let Some(found_target) = found_target {
-        bail!(
-            "database schema check failed: apparently mid-upgrade \
-            (found_target = {found_target})"
-        );
-    }
-
-    if found_version != expected_version {
-        bail!(
-            "database schema check failed: \
-            expected {expected_version}, found {found_version}",
-        );
-    }
-
-    Ok(Arc::new(datastore))
+        .context("creating DataStore")
+        .map(Arc::new)
 }
 
 async fn check_execution_environment(

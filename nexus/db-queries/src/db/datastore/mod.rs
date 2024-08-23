@@ -27,6 +27,7 @@ use crate::db::{
     error::{public_error_from_diesel, ErrorHandler},
 };
 use ::oximeter::types::ProducerRegistry;
+use anyhow::{anyhow, bail, Context};
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -207,7 +208,7 @@ impl DataStore {
 
     /// Constructs a new Datastore object.
     ///
-    /// Only returns if the database schema is compatible with Nexus's known
+    /// Only returns when the database schema is compatible with Nexus's known
     /// schema version.
     pub async fn new(
         log: &Logger,
@@ -237,6 +238,38 @@ impl DataStore {
         )
         .await
         .map_err(|_| "Failed to read valid DB schema".to_string())?;
+
+        Ok(datastore)
+    }
+
+    /// Constructs a new Datastore, failing if the schema version does not match
+    /// this program's expected version
+    pub async fn new_failfast(
+        log: &Logger,
+        pool: Arc<Pool>,
+    ) -> Result<Self, anyhow::Error> {
+        let datastore =
+            Self::new_unchecked(log.new(o!("component" => "datastore")), pool)
+                .map_err(|e| anyhow!("{}", e))?;
+        const EXPECTED_VERSION: SemverVersion = nexus_db_model::SCHEMA_VERSION;
+        let (found_version, found_target) = datastore
+            .database_schema_version()
+            .await
+            .context("loading database schema version")?;
+
+        if let Some(found_target) = found_target {
+            bail!(
+                "database schema check failed: apparently mid-upgrade \
+                 (found_target = {found_target})"
+            );
+        }
+
+        if found_version != EXPECTED_VERSION {
+            bail!(
+                "database schema check failed: \
+                 expected {EXPECTED_VERSION}, found {found_version}",
+            );
+        }
 
         Ok(datastore)
     }

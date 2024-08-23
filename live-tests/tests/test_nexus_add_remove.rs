@@ -198,8 +198,7 @@ async fn test_nexus_add_remove() {
     assert_eq!(found.id, saga_id);
     assert!(matches!(found.state, SagaState::Succeeded));
 
-    // XXX-dap
-    // lc.cleanup_successful();
+    lc.cleanup_successful();
 }
 
 async fn list_sagas(
