@@ -220,7 +220,7 @@ pub async fn instance_fetch(
     db_state
 }
 
-async fn instance_fetch_vmm_and_sled_ids(
+pub(super) async fn instance_fetch_vmm_and_sled_ids(
     cptestctx: &ControlPlaneTestContext,
     instance_id: &InstanceUuid,
 ) -> (PropolisUuid, SledUuid) {

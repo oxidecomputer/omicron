@@ -84,7 +84,8 @@ pub struct SledAgent {
     mock_propolis:
         Mutex<Option<(HttpServer<Arc<PropolisContext>>, PropolisClient)>>,
     /// lists of external IPs assigned to instances
-    pub external_ips: Mutex<HashMap<Uuid, HashSet<InstanceExternalIpBody>>>,
+    pub external_ips:
+        Mutex<HashMap<PropolisUuid, HashSet<InstanceExternalIpBody>>>,
     pub vpc_routes: Mutex<HashMap<RouterId, RouteSet>>,
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
@@ -740,7 +741,7 @@ impl SledAgent {
         }
 
         let mut eips = self.external_ips.lock().await;
-        let my_eips = eips.entry(propolis_id.into_untyped_uuid()).or_default();
+        let my_eips = eips.entry(propolis_id).or_default();
 
         // High-level behaviour: this should always succeed UNLESS
         // trying to add a double ephemeral.
@@ -773,7 +774,7 @@ impl SledAgent {
         }
 
         let mut eips = self.external_ips.lock().await;
-        let my_eips = eips.entry(propolis_id.into_untyped_uuid()).or_default();
+        let my_eips = eips.entry(propolis_id).or_default();
 
         my_eips.remove(&body_args);
 

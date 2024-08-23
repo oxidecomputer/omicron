@@ -15,7 +15,7 @@ use nexus_db_model::IpAttachState;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::views;
 use omicron_common::api::external::NameOrId;
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid, SledUuid};
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use ref_cast::RefCast;
 use serde::Deserialize;
 use serde::Serialize;
@@ -168,7 +168,9 @@ async fn siid_get_instance_state(
 
 async fn siid_nat(sagactx: NexusActionContext) -> Result<(), ActionError> {
     let params = sagactx.saga_params::<Params>()?;
-    let sled_id = sagactx.lookup::<Option<SledUuid>>("instance_state")?;
+    let sled_id = sagactx
+        .lookup::<Option<PropolisAndSledId>>("instance_state")?
+        .map(|ids| ids.sled_id);
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
     instance_ip_remove_nat(
         &sagactx,
@@ -397,8 +399,14 @@ pub(crate) mod test {
         }
 
         // Sled agent has removed its records of the external IPs.
+        let (propolis_id, _) =
+            crate::app::sagas::test_helpers::instance_fetch_vmm_and_sled_ids(
+                cptestctx,
+                &instance_id,
+            )
+            .await;
         let mut eips = sled_agent.external_ips.lock().await;
-        let my_eips = eips.entry(instance_id.into_untyped_uuid()).or_default();
+        let my_eips = eips.entry(propolis_id).or_default();
         assert!(my_eips.is_empty());
 
         // DB only has record for SNAT.

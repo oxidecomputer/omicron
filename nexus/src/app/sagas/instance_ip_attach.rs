@@ -429,8 +429,14 @@ pub(crate) mod test {
         }
 
         // Sled agent has a record of the new external IPs.
+        let (propolis_id, _) =
+            crate::app::sagas::test_helpers::instance_fetch_vmm_and_sled_ids(
+                cptestctx,
+                &instance_id,
+            )
+            .await;
         let mut eips = sled_agent.external_ips.lock().await;
-        let my_eips = eips.entry(instance_id.into_untyped_uuid()).or_default();
+        let my_eips = eips.entry(propolis_id).or_default();
         assert!(my_eips
             .iter()
             .any(|v| matches!(v, InstanceExternalIpBody::Floating(_))));
@@ -451,7 +457,7 @@ pub(crate) mod test {
 
     pub(crate) async fn verify_clean_slate(
         cptestctx: &ControlPlaneTestContext,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
     ) {
         use nexus_db_queries::db::schema::external_ip::dsl;
 
@@ -464,7 +470,7 @@ pub(crate) mod test {
         assert!(dsl::external_ip
             .filter(dsl::kind.eq(IpKind::Floating))
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::parent_id.eq(instance_id))
+            .filter(dsl::parent_id.eq(instance_id.into_untyped_uuid()))
             .filter(dsl::state.ne(IpAttachState::Detached))
             .select(ExternalIp::as_select())
             .first_async::<ExternalIp>(&*conn)
@@ -485,8 +491,14 @@ pub(crate) mod test {
             .is_none());
 
         // No IP bindings remain on sled-agent.
+        let (propolis_id, _) =
+            crate::app::sagas::test_helpers::instance_fetch_vmm_and_sled_ids(
+                cptestctx,
+                &instance_id,
+            )
+            .await;
         let mut eips = sled_agent.external_ips.lock().await;
-        let my_eips = eips.entry(instance_id).or_default();
+        let my_eips = eips.entry(propolis_id).or_default();
         assert!(my_eips.is_empty());
     }
 
@@ -505,9 +517,10 @@ pub(crate) mod test {
         let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
         crate::app::sagas::test_helpers::instance_simulate(
             cptestctx,
-            &InstanceUuid::from_untyped_uuid(instance.identity.id),
+            &instance_id,
         )
         .await;
 
@@ -515,7 +528,7 @@ pub(crate) mod test {
             test_helpers::action_failure_can_unwind::<SagaInstanceIpAttach, _, _>(
                 nexus,
                 || Box::pin(new_test_params(&opctx, datastore, use_float) ),
-                || Box::pin(verify_clean_slate(&cptestctx, instance.id())),
+                || Box::pin(verify_clean_slate(&cptestctx, instance_id)),
                 log,
             )
             .await;
@@ -537,9 +550,10 @@ pub(crate) mod test {
         let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
         crate::app::sagas::test_helpers::instance_simulate(
             cptestctx,
-            &InstanceUuid::from_untyped_uuid(instance.identity.id),
+            &instance_id,
         )
         .await;
 
@@ -551,7 +565,7 @@ pub(crate) mod test {
             >(
                 nexus,
                 || Box::pin(new_test_params(&opctx, datastore, use_float)),
-                || Box::pin(verify_clean_slate(&cptestctx, instance.id())),
+                || Box::pin(verify_clean_slate(&cptestctx, instance_id)),
                 log,
             )
             .await;
