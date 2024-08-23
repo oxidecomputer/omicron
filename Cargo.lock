@@ -6027,6 +6027,7 @@ dependencies = [
  "omicron-common",
  "omicron-rpaths",
  "omicron-test-utils",
+ "omicron-workspace-hack",
  "pq-sys",
  "reqwest",
  "serde",

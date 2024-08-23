@@ -10,6 +10,7 @@ omicron-rpaths.workspace = true
 [dependencies]
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true
