@@ -1861,6 +1861,13 @@ pub(crate) async fn process_vmm_update(
 
     // If an instance-update saga must be executed as a result of this update,
     // prepare and return it.
+    //
+    // It's safe to refetch the VMM record to get the instance ID at this point
+    // even though the VMM may now be Destroyed, because the record itself won't
+    // be deleted until the instance update saga retires it. If this update
+    // marked the VMM as Destroyed and then the fetch failed, then another
+    // update saga has already observed what this routine published, so there's
+    // no need to schedule another saga.
     if instance_update::update_saga_needed(
         &opctx.log,
         propolis_id,
