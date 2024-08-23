@@ -541,6 +541,7 @@ mod test {
     use omicron_common::policy::COCKROACHDB_REDUNDANCY;
     use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
     use omicron_common::policy::NEXUS_REDUNDANCY;
+    use omicron_common::policy::OXIMETER_REDUNDANCY;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::ExternalIpUuid;
@@ -1548,6 +1549,7 @@ mod test {
                 target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
                 target_nexus_zone_count: NEXUS_REDUNDANCY,
                 target_internal_dns_zone_count: INTERNAL_DNS_REDUNDANCY,
+                target_oximeter_zone_count: OXIMETER_REDUNDANCY,
                 target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
                 target_cockroachdb_cluster_version:
                     CockroachDbClusterVersion::POLICY,

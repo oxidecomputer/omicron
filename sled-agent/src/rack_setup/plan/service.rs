@@ -38,7 +38,7 @@ use omicron_common::disk::{
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_common::policy::{
     BOUNDARY_NTP_REDUNDANCY, COCKROACHDB_REDUNDANCY, INTERNAL_DNS_REDUNDANCY,
-    NEXUS_REDUNDANCY, RESERVED_INTERNAL_DNS_REDUNDANCY,
+    NEXUS_REDUNDANCY, OXIMETER_REDUNDANCY, RESERVED_INTERNAL_DNS_REDUNDANCY,
 };
 use omicron_uuid_kinds::{
     ExternalIpUuid, GenericUuid, OmicronZoneUuid, SledUuid, ZpoolUuid,
@@ -60,9 +60,6 @@ use std::num::Wrapping;
 use thiserror::Error;
 use uuid::Uuid;
 
-// TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-// when Nexus provisions Oximeter.
-const OXIMETER_COUNT: usize = 1;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Clickhouse.
 // TODO(https://github.com/oxidecomputer/omicron/issues/4000): Use
@@ -658,7 +655,7 @@ impl Plan {
 
         // Provision Oximeter zones, continuing to stripe across sleds.
         // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-        for _ in 0..OXIMETER_COUNT {
+        for _ in 0..OXIMETER_REDUNDANCY {
             let sled = {
                 let which_sled =
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
