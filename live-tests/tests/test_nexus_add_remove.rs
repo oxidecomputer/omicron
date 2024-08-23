@@ -44,8 +44,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
         .await
         .expect("planning input");
     let initial_nexus_clients = lc.all_internal_nexus_clients().await.unwrap();
-    let nexus =
-        initial_nexus_clients.iter().next().expect("internal Nexus client");
+    let nexus = initial_nexus_clients.first().expect("internal Nexus client");
 
     // First, deploy a new Nexus zone to an arbitrary sled.
     let sled_id = planning_input
