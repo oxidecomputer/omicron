@@ -55,12 +55,10 @@ impl MgsRunArgs {
         let (mut mgs_config, sp_sim_config) =
             gateway_test_utils::setup::load_test_config();
         if let Some(addr) = self.nexus_address {
-            mgs_config.metrics =
-                Some(omicron_gateway::metrics::MetricsConfig {
-                    dev: Some(omicron_gateway::metrics::DevConfig {
-                        bind_loopback: true,
-                        nexus_address: Some(addr),
-                    }),
+            mgs_config.metrics.get_or_insert_with(Default::default).dev =
+                Some(gateway_test_utils::setup::MetricsDevConfig {
+                    nexus_address: Some(addr),
+                    bind_loopback: true,
                 });
         }
 

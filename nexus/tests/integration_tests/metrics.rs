@@ -600,12 +600,11 @@ async fn test_mgs_metrics(
             gateway_test_utils::setup::load_test_config();
         // munge the already-parsed MGS config file to point it at the test
         // Nexus' address.
-        mgs_config.metrics = Some(gateway_test_utils::setup::MetricsConfig {
-            dev: Some(gateway_test_utils::setup::MetricsDevConfig {
+        mgs_config.metrics.get_or_insert_with(Default::default).dev =
+            Some(gateway_test_utils::setup::MetricsDevConfig {
                 bind_loopback: true,
                 nexus_address: Some(cptestctx.internal_client.bind_address),
-            }),
-        });
+            });
         gateway_test_utils::setup::test_setup_with_config(
             "test_mgs_metrics",
             gateway_messages::SpPort::One,
