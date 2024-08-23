@@ -862,7 +862,7 @@ async fn ssc_send_snapshot_request_to_sled_agent(
         sled_agent_client
             .vmm_issue_disk_snapshot_request(
                 &PropolisUuid::from_untyped_uuid(propolis_id),
-                &attach_instance_id,
+                &params.disk_id,
                 &VmmIssueDiskSnapshotRequestBody { snapshot_id },
             )
             .await
