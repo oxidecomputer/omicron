@@ -646,7 +646,6 @@ async fn sis_ensure_running(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let datastore = osagactx.datastore();
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &params.serialized_authn,
@@ -661,17 +660,10 @@ async fn sis_ensure_running(
           "instance_id" => %instance_id,
           "sled_id" => %sled_id);
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(instance_id.into_untyped_uuid())
-        .lookup_for(authz::Action::Modify)
-        .await
-        .map_err(ActionError::action_failed)?;
-
     match osagactx
         .nexus()
         .instance_request_state(
             &opctx,
-            &authz_instance,
             &db_instance,
             &Some(db_vmm),
             crate::app::instance::InstanceStateChangeRequest::Run,

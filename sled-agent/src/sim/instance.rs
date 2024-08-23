@@ -15,6 +15,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::nexus::{SledInstanceState, VmmState};
+use omicron_uuid_kinds::{GenericUuid, PropolisUuid};
 use propolis_client::types::{
     InstanceMigrateStatusResponse as PropolisMigrateResponse,
     InstanceMigrationStatus as PropolisMigrationStatus,
@@ -512,7 +513,7 @@ impl Simulatable for SimInstance {
     ) -> Result<(), Error> {
         nexus_client
             .cpapi_instances_put(
-                id,
+                &PropolisUuid::from_untyped_uuid(*id),
                 &nexus_client::types::SledInstanceState::from(current),
             )
             .await

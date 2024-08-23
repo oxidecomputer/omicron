@@ -168,7 +168,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
 
     async fn cpapi_instances_put(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
+        path_params: Path<VmmPathParam>,
         new_runtime_state: TypedBody<SledInstanceState>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = &rqctx.context().context;
@@ -178,11 +178,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let handler = async {
             nexus
-                .notify_instance_updated(
-                    &opctx,
-                    InstanceUuid::from_untyped_uuid(path.instance_id),
-                    &new_state,
-                )
+                .notify_vmm_updated(&opctx, path.propolis_id, &new_state)
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
         };

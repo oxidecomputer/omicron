@@ -5,7 +5,6 @@
 //! [`DataStore`] helpers for working with VMM records.
 
 use super::DataStore;
-use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
@@ -108,14 +107,10 @@ impl DataStore {
     pub async fn vmm_fetch(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
         vmm_id: &PropolisUuid,
     ) -> LookupResult<Vmm> {
-        opctx.authorize(authz::Action::Read, authz_instance).await?;
-
         let vmm = dsl::vmm
             .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
-            .filter(dsl::instance_id.eq(authz_instance.id()))
             .filter(dsl::time_deleted.is_null())
             .select(Vmm::as_select())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)

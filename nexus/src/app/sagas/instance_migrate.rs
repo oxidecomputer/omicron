@@ -490,12 +490,6 @@ async fn sim_instance_migrate(
 
     let src_propolis_id = db_instance.runtime().propolis_id.unwrap();
     let dst_vmm = sagactx.lookup::<db::model::Vmm>("dst_vmm_record")?;
-    let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())
-        .instance_id(db_instance.id())
-        .lookup_for(authz::Action::Modify)
-        .await
-        .map_err(ActionError::action_failed)?;
-
     info!(osagactx.log(), "initiating migration from destination sled";
           "instance_id" => %db_instance.id(),
           "dst_vmm_record" => ?dst_vmm,
@@ -519,7 +513,6 @@ async fn sim_instance_migrate(
         .nexus()
         .instance_request_state(
             &opctx,
-            &authz_instance,
             &db_instance,
             &Some(dst_vmm),
             InstanceStateChangeRequest::Migrate(

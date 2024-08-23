@@ -117,6 +117,7 @@ pub struct VmmRuntimeState {
 /// specific VMM and the instance it incarnates.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SledInstanceState {
+    // TODO(gjc) this is probably redundant now
     /// The ID of the VMM whose state is being reported.
     pub propolis_id: PropolisUuid,
 

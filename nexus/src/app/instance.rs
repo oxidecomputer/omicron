@@ -553,7 +553,6 @@ impl super::Nexus {
         if let Err(e) = self
             .instance_request_state(
                 opctx,
-                &authz_instance,
                 state.instance(),
                 state.vmm(),
                 InstanceStateChangeRequest::Reboot,
@@ -632,7 +631,6 @@ impl super::Nexus {
         if let Err(e) = self
             .instance_request_state(
                 opctx,
-                &authz_instance,
                 state.instance(),
                 state.vmm(),
                 InstanceStateChangeRequest::Stop,
@@ -830,13 +828,10 @@ impl super::Nexus {
     pub(crate) async fn instance_request_state(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
         prev_instance_state: &db::model::Instance,
         prev_vmm_state: &Option<db::model::Vmm>,
         requested: InstanceStateChangeRequest,
     ) -> Result<(), InstanceStateChangeError> {
-        let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
-
         match self.select_runtime_change_action(
             prev_instance_state,
             prev_vmm_state,
@@ -868,7 +863,7 @@ impl super::Nexus {
                 // Ok(None) here, in which case, there's nothing to write back.
                 match instance_put_result {
                     Ok(Some(ref state)) => self
-                        .notify_instance_updated(opctx, instance_id, state)
+                        .notify_vmm_updated(opctx, propolis_id, state)
                         .await
                         .map_err(Into::into),
                     Ok(None) => Ok(()),
@@ -1147,8 +1142,7 @@ impl super::Nexus {
 
         match instance_register_result {
             Ok(state) => {
-                self.notify_instance_updated(opctx, instance_id, &state)
-                    .await?;
+                self.notify_vmm_updated(opctx, *propolis_id, &state).await?;
             }
             Err(e) => {
                 if e.instance_unhealthy() {
@@ -1327,19 +1321,22 @@ impl super::Nexus {
 
     /// Invoked by a sled agent to publish an updated runtime state for an
     /// Instance.
-    pub(crate) async fn notify_instance_updated(
+    pub(crate) async fn notify_vmm_updated(
         &self,
         opctx: &OpContext,
-        instance_id: InstanceUuid,
+        propolis_id: PropolisUuid,
         new_runtime_state: &nexus::SledInstanceState,
     ) -> Result<(), Error> {
-        let saga = notify_instance_updated(
+        let Some((instance_id, saga)) = process_vmm_update(
             &self.db_datastore,
             opctx,
-            instance_id,
+            propolis_id,
             new_runtime_state,
         )
-        .await?;
+        .await?
+        else {
+            return Ok(());
+        };
 
         // We don't need to wait for the instance update saga to run to
         // completion to return OK to the sled-agent --- all it needs to care
@@ -1350,53 +1347,51 @@ impl super::Nexus {
         // one is eventually executed.
         //
         // Therefore, just spawn the update saga in a new task, and return.
-        if let Some(saga) = saga {
-            info!(opctx.log, "starting update saga for {instance_id}";
-                "instance_id" => %instance_id,
-                "vmm_state" => ?new_runtime_state.vmm_state,
-                "migration_state" => ?new_runtime_state.migrations(),
-            );
-            let sagas = self.sagas.clone();
-            let task_instance_updater =
-                self.background_tasks.task_instance_updater.clone();
-            let log = opctx.log.clone();
-            tokio::spawn(async move {
-                // TODO(eliza): maybe we should use the lower level saga API so
-                // we can see if the saga failed due to the lock being held and
-                // retry it immediately?
-                let running_saga = async move {
-                    let runnable_saga = sagas.saga_prepare(saga).await?;
-                    runnable_saga.start().await
-                }
-                .await;
-                let result = match running_saga {
-                    Err(error) => {
-                        error!(&log, "failed to start update saga for {instance_id}";
-                            "instance_id" => %instance_id,
-                            "error" => %error,
-                        );
-                        // If we couldn't start the update saga for this
-                        // instance, kick the instance-updater background task
-                        // to try and start it again in a timely manner.
-                        task_instance_updater.activate();
-                        return;
-                    }
-                    Ok(saga) => {
-                        saga.wait_until_stopped().await.into_omicron_result()
-                    }
-                };
-                if let Err(error) = result {
-                    error!(&log, "update saga for {instance_id} failed";
+        info!(opctx.log, "starting update saga for {instance_id}";
+            "instance_id" => %instance_id,
+            "vmm_state" => ?new_runtime_state.vmm_state,
+            "migration_state" => ?new_runtime_state.migrations(),
+        );
+        let sagas = self.sagas.clone();
+        let task_instance_updater =
+            self.background_tasks.task_instance_updater.clone();
+        let log = opctx.log.clone();
+        tokio::spawn(async move {
+            // TODO(eliza): maybe we should use the lower level saga API so
+            // we can see if the saga failed due to the lock being held and
+            // retry it immediately?
+            let running_saga = async move {
+                let runnable_saga = sagas.saga_prepare(saga).await?;
+                runnable_saga.start().await
+            }
+            .await;
+            let result = match running_saga {
+                Err(error) => {
+                    error!(&log, "failed to start update saga for {instance_id}";
                         "instance_id" => %instance_id,
                         "error" => %error,
                     );
-                    // If we couldn't complete the update saga for this
+                    // If we couldn't start the update saga for this
                     // instance, kick the instance-updater background task
                     // to try and start it again in a timely manner.
                     task_instance_updater.activate();
+                    return;
                 }
-            });
-        }
+                Ok(saga) => {
+                    saga.wait_until_stopped().await.into_omicron_result()
+                }
+            };
+            if let Err(error) = result {
+                error!(&log, "update saga for {instance_id} failed";
+                    "instance_id" => %instance_id,
+                    "error" => %error,
+                );
+                // If we couldn't complete the update saga for this
+                // instance, kick the instance-updater background task
+                // to try and start it again in a timely manner.
+                task_instance_updater.activate();
+            }
+        });
 
         Ok(())
     }
@@ -1839,18 +1834,16 @@ impl super::Nexus {
 /// Invoked by a sled agent to publish an updated runtime state for an
 /// Instance, returning an update saga for that instance (if one must be
 /// executed).
-pub(crate) async fn notify_instance_updated(
+pub(crate) async fn process_vmm_update(
     datastore: &DataStore,
     opctx: &OpContext,
-    instance_id: InstanceUuid,
+    propolis_id: PropolisUuid,
     new_runtime_state: &nexus::SledInstanceState,
-) -> Result<Option<steno::SagaDag>, Error> {
+) -> Result<Option<(InstanceUuid, steno::SagaDag)>, Error> {
     use sagas::instance_update;
 
     let migrations = new_runtime_state.migrations();
-    let propolis_id = new_runtime_state.propolis_id;
     info!(opctx.log, "received new VMM runtime state from sled agent";
-        "instance_id" => %instance_id,
         "propolis_id" => %propolis_id,
         "vmm_state" => ?new_runtime_state.vmm_state,
         "migration_state" => ?migrations,
@@ -1870,10 +1863,18 @@ pub(crate) async fn notify_instance_updated(
     // prepare and return it.
     if instance_update::update_saga_needed(
         &opctx.log,
-        instance_id,
         new_runtime_state,
         &result,
     ) {
+        let instance_id = InstanceUuid::from_untyped_uuid(
+            datastore.vmm_fetch(&opctx, &propolis_id).await?.instance_id,
+        );
+
+        info!(opctx.log, "scheduling update saga in response to vmm update";
+            "instance_id" => %instance_id,
+            "propolis_id" => %propolis_id,
+        );
+
         let (.., authz_instance) = LookupPath::new(&opctx, datastore)
             .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
@@ -1884,7 +1885,7 @@ pub(crate) async fn notify_instance_updated(
                 authz_instance,
             },
         )?;
-        Ok(Some(saga))
+        Ok(Some((instance_id, saga)))
     } else {
         Ok(None)
     }

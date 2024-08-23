@@ -514,12 +514,13 @@ impl InstanceRunner {
                 let state = self.state.sled_instance_state();
                 info!(self.log, "Publishing instance state update to Nexus";
                     "instance_id" => %self.instance_id(),
+                    "propolis_id" => %self.state.propolis_id(),
                     "state" => ?state,
                 );
 
                 self.nexus_client
                     .cpapi_instances_put(
-                        &self.instance_id().into_untyped_uuid(),
+                        &self.state.propolis_id(),
                         &state.into(),
                     )
                     .await
@@ -1613,7 +1614,7 @@ mod tests {
     impl FakeNexusServer for NexusServer {
         fn cpapi_instances_put(
             &self,
-            _instance_id: Uuid,
+            _propolis_id: PropolisUuid,
             new_runtime_state: SledInstanceState,
         ) -> Result<(), omicron_common::api::external::Error> {
             self.observed_runtime_state

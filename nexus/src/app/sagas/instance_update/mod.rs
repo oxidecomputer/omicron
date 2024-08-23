@@ -407,7 +407,6 @@ mod destroyed;
 /// VMM/migration states.
 pub fn update_saga_needed(
     log: &slog::Logger,
-    instance_id: InstanceUuid,
     state: &SledInstanceState,
     result: &VmmStateUpdateResult,
 ) -> bool {
@@ -443,7 +442,6 @@ pub fn update_saga_needed(
         debug!(log,
             "new VMM runtime state from sled agent requires an \
              instance-update saga";
-            "instance_id" => %instance_id,
             "propolis_id" => %state.propolis_id,
             "vmm_needs_update" => vmm_needs_update,
             "migration_in_needs_update" => migration_in_needs_update,
