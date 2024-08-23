@@ -27,6 +27,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
+use omicron_common::policy::DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
@@ -178,6 +179,7 @@ impl super::Nexus {
             service_nic_rows: &service_nic_rows,
             target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
             target_nexus_zone_count: NEXUS_REDUNDANCY,
+            target_internal_dns_zone_count: DNS_REDUNDANCY,
             target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
             target_cockroachdb_cluster_version:
                 CockroachDbClusterVersion::POLICY,

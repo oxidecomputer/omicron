@@ -172,7 +172,18 @@ pub const CP_SERVICES_RESERVED_ADDRESSES: u16 = 0xFFFF;
 pub const SLED_RESERVED_ADDRESSES: u16 = 32;
 
 /// Wraps an [`Ipv6Net`] with a compile-time prefix length.
-#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Hash, PartialEq, Eq)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    JsonSchema,
+    Serialize,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+)]
 #[schemars(rename = "Ipv6Subnet")]
 pub struct Ipv6Subnet<const N: u8> {
     net: Ipv6Net,
@@ -226,12 +237,23 @@ impl<'de, const N: u8> Deserialize<'de> for Ipv6Subnet<N> {
 }
 
 /// Represents a subnet which may be used for contacting DNS services.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord,
+)]
 pub struct DnsSubnet {
     subnet: Ipv6Subnet<SLED_PREFIX>,
 }
 
 impl DnsSubnet {
+    pub fn new(subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
+        Self { subnet }
+    }
+
+    /// Returns the DNS subnet.
+    pub fn subnet(&self) -> Ipv6Subnet<SLED_PREFIX> {
+        self.subnet
+    }
+
     /// Returns the DNS server address within the subnet.
     ///
     /// This is the first address within the subnet.
@@ -248,6 +270,12 @@ impl DnsSubnet {
     }
 }
 
+impl From<Ipv6Addr> for DnsSubnet {
+    fn from(addr: Ipv6Addr) -> Self {
+        Self::new(Ipv6Subnet::new(addr))
+    }
+}
+
 /// A wrapper around an IPv6 network, indicating it is a "reserved" rack
 /// subnet which can be used for AZ-wide services.
 #[derive(Debug, Clone)]
@@ -259,18 +287,26 @@ impl ReservedRackSubnet {
         ReservedRackSubnet(Ipv6Subnet::<RACK_PREFIX>::new(subnet.net().addr()))
     }
 
+    /// Returns the `index`th DNS subnet from this reserved rack subnet.
+    pub fn get_dns_subnet(&self, index: u8) -> DnsSubnet {
+        DnsSubnet::new(get_64_subnet(self.0, index))
+    }
+
     /// Returns the DNS addresses from this reserved rack subnet.
     ///
     /// These addresses will come from the first [`MAX_DNS_REDUNDANCY`] `/64s` of the
     /// [`RACK_PREFIX`] subnet.
     pub fn get_dns_subnets(&self) -> Vec<DnsSubnet> {
         (0..MAX_DNS_REDUNDANCY)
-            .map(|idx| {
-                let subnet =
-                    get_64_subnet(self.0, u8::try_from(idx + 1).unwrap());
-                DnsSubnet { subnet }
-            })
+            .map(|idx| self.get_dns_subnet(u8::try_from(idx + 1).unwrap()))
             .collect()
+    }
+}
+
+/// Infer the reserved rack subnet from a sled's subnet.
+impl From<Ipv6Subnet<SLED_PREFIX>> for ReservedRackSubnet {
+    fn from(sled_subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
+        Self::new(Ipv6Subnet::<AZ_PREFIX>::new(sled_subnet.net().addr()))
     }
 }
 
