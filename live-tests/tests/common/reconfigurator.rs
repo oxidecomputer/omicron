@@ -10,6 +10,28 @@ use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_types::deployment::{Blueprint, PlanningInput};
 use slog::{debug, info};
 
+/// Modify the system by editing the current target blueprint
+///
+/// More precisely, this function:
+///
+/// - fetches the current target blueprint
+/// - creates a new BlueprintBuilder based on it
+/// - invokes the caller's `edit_fn`, which may modify the builder however it
+///   likes
+/// - generates a new blueprint (thus based on the current target)
+/// - uploads the new blueprint
+/// - sets the new blueprint as the current target
+/// - enables the new blueprint
+///
+/// ## Errors
+///
+/// This function fails if the current target blueprint is not already enabled.
+/// That's because a disabled target blueprint means somebody doesn't want
+/// Reconfigurator running or doesn't want it using that blueprint.  We don't
+/// want the test to inadvertently override that behavior.  In a typical use
+/// case, a developer enables the initial target blueprint before running these
+/// tests and then doesn't need to think about it again for the lifetime of
+/// their test environment.
 pub async fn blueprint_edit_current_target(
     log: &slog::Logger,
     planning_input: &PlanningInput,

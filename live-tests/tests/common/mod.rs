@@ -20,6 +20,8 @@ use std::net::SocketAddrV6;
 use std::path::Component;
 use std::sync::Arc;
 
+/// Contains data and interfaces useful for running tests against an existing
+/// deployed control plane
 pub struct LiveTestContext {
     logctx: LogContext,
     opctx: OpContext,
@@ -28,6 +30,7 @@ pub struct LiveTestContext {
 }
 
 impl LiveTestContext {
+    /// Make a new `LiveTestContext` for a test called `test_name`.
     pub async fn new(
         test_name: &'static str,
     ) -> Result<LiveTestContext, anyhow::Error> {
@@ -41,14 +44,32 @@ impl LiveTestContext {
         Ok(LiveTestContext { logctx, opctx, resolver, datastore })
     }
 
+    /// Clean up this `LiveTestContext`
+    ///
+    /// This mainly removes log files created by the test.  We do this in this
+    /// explicit cleanup function rather than on `Drop` because we want the log
+    /// files preserved on test failure.
     pub fn cleanup_successful(self) {
         self.logctx.cleanup_successful();
     }
 
+    /// Returns a logger suitable for use in the test
     pub fn log(&self) -> &slog::Logger {
         &self.logctx.log
     }
 
+    /// Returns an `OpContext` suitable for use in tests
+    pub fn opctx(&self) -> &OpContext {
+        &self.opctx
+    }
+
+    /// Returns a `DataStore` pointing at this deployed system's database
+    pub fn datastore(&self) -> &DataStore {
+        &self.datastore
+    }
+
+    /// Returns a client for any Nexus's internal API (based on the Nexus
+    /// instances that are in DNS)
     pub async fn any_internal_nexus_client(
         &self,
     ) -> Result<nexus_client::Client, anyhow::Error> {
@@ -60,6 +81,7 @@ impl LiveTestContext {
         Ok(self.specific_internal_nexus_client(sockaddr))
     }
 
+    /// Returns a client for a Nexus internal API at the given socket address
     pub fn specific_internal_nexus_client(
         &self,
         sockaddr: SocketAddrV6,
@@ -69,6 +91,8 @@ impl LiveTestContext {
         nexus_client::Client::new(&url, log)
     }
 
+    /// Returns a list of clients for the internal APIs for all Nexus instances
+    /// found in DNS
     pub async fn all_internal_nexus_clients(
         &self,
     ) -> Result<Vec<nexus_client::Client>, anyhow::Error> {
@@ -81,26 +105,17 @@ impl LiveTestContext {
             .map(|s| self.specific_internal_nexus_client(s))
             .collect())
     }
-
-    pub fn opctx(&self) -> &OpContext {
-        &self.opctx
-    }
-
-    pub fn datastore(&self) -> &DataStore {
-        &self.datastore
-    }
 }
 
 fn create_resolver(log: &slog::Logger) -> Result<Resolver, anyhow::Error> {
-    // In principle, we should look at /etc/resolv.conf to find the
-    // DNS servers.  In practice, this usually isn't populated
-    // today.  See oxidecomputer/omicron#2122.
+    // In principle, we should look at /etc/resolv.conf to find the DNS servers.
+    // In practice, this usually isn't populated today.  See
+    // oxidecomputer/omicron#2122.
     //
-    // However, the address selected below should work for most
-    // existing Omicron deployments today.  That's because while the
-    // base subnet is in principle configurable in config-rss.toml,
-    // it's very uncommon to change it from the default value used
-    // here.
+    // However, the address selected below should work for most existing Omicron
+    // deployments today.  That's because while the base subnet is in principle
+    // configurable in config-rss.toml, it's very uncommon to change it from the
+    // default value used here.
     let subnet = Ipv6Subnet::new("fd00:1122:3344:0100::".parse().unwrap());
     eprintln!("note: using DNS server for subnet {}", subnet.net());
     internal_dns::resolver::Resolver::new_from_subnet(log.clone(), subnet)
@@ -109,6 +124,7 @@ fn create_resolver(log: &slog::Logger) -> Result<Resolver, anyhow::Error> {
         })
 }
 
+/// Creates a DataStore pointing at the CockroachDB cluster that's in DNS
 async fn create_datastore(
     log: &slog::Logger,
     resolver: &Resolver,
@@ -137,6 +153,11 @@ async fn create_datastore(
         .map(Arc::new)
 }
 
+/// Performs quick checks to determine if the user is running these tests in the
+/// wrong place and bails out if so
+///
+/// This isn't perfect but seeks to fail fast in obviously bogus environments
+/// that someone might accidentally try to run this in.
 async fn check_execution_environment(
     resolver: &Resolver,
 ) -> Result<(), anyhow::Error> {
@@ -145,6 +166,9 @@ async fn check_execution_environment(
         "live tests can only be run on deployed systems, which run illumos"
     );
 
+    // The only real requirement for these tests is that they're run from a
+    // place with connectivity to the underlay network of a deployed control
+    // plane.  The easiest way to tell is to look up something in internal DNS.
     resolver.lookup_ip(ServiceName::InternalDns).await.map_err(|e| {
         let text = format!(
             "check_execution_environment(): failed to look up internal DNS \
@@ -185,6 +209,15 @@ async fn check_execution_environment(
     Ok(())
 }
 
+/// Performs additional checks to determine if we're running in an environment
+/// that we believe is safe to run tests
+///
+/// These tests may make arbitrary modifications to the system.  We don't want
+/// to run this in dogfood or other pre-production or production environments.
+/// This function uses an allowlist of Oxide serials corresponding to test
+/// environments so that it never accidentally runs on a production system.
+///
+/// Non-Oxide hardware (e.g., PCs, a4x2, etc.) are always allowed.
 async fn check_hardware_environment(
     opctx: &OpContext,
     datastore: &DataStore,
