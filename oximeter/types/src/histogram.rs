@@ -1032,7 +1032,10 @@ where
         // The highest power must be representable in the target type. Note that
         // we have to convert to that target type _before_ doing this check.
         let base = <u64 as From<Self>>::from(*self);
-        if base.checked_pow(hi.into()).is_none() {
+        let Some(highest) = base.checked_pow(hi.into()) else {
+            return Err(QuantizationError::Overflow);
+        };
+        if <T as NumCast>::from(highest).is_none() {
             return Err(QuantizationError::Overflow);
         }
 
@@ -1058,7 +1061,6 @@ where
                 let lo = base.pow(lo as _);
                 let hi = base.pow(hi as _);
                 let distance = hi - lo;
-                dbg!(distance, count);
                 distance.is_multiple_of(&count)
             })
         }
@@ -1770,7 +1772,7 @@ mod tests {
     }
 
     #[test]
-    fn test_log_linear_bins_greater_than_power_width() {
+    fn test_log_linear_bins_does_not_overflow_wide_bin_type() {
         let start: u16 = 3;
         // 10u16 ** 10u16 overflows, but what we should be computing is 10u64 **
         // 10u16, which would not overflow. We need to compute whether it
@@ -1778,6 +1780,21 @@ mod tests {
         let stop = 10;
         Histogram::<u64>::span_decades(start, stop).expect(
             "expected not to overflow, since support type is wide enough",
+        );
+    }
+
+    #[test]
+    fn test_log_linear_bins_does_overflow_narrow_bin_type() {
+        // In this case, the start / stop powers _and_ their resulting bins are
+        // both representable as u16s and also u64s. But we're generating bins
+        // that are u8s, which _the powers do_ overflow.
+        let start: u16 = 1;
+        let stop: u16 = 4;
+        Histogram::<u32>::span_decades(start, stop).expect(
+            "expected not to overflow a u32, since support type is wide enough",
+        );
+        Histogram::<u8>::span_decades(start, stop).expect_err(
+            "expected to overflow a u8, since support type is not wide enough",
         );
     }
 }
