@@ -6,6 +6,7 @@ use crate::config::GimletConfig;
 use crate::config::SpComponentConfig;
 use crate::helpers::rot_slot_id_from_u16;
 use crate::helpers::rot_slot_id_to_u16;
+use crate::sensors::Sensors;
 use crate::serial_number_padded;
 use crate::server;
 use crate::server::SimSpHandler;
@@ -630,6 +631,7 @@ struct Handler {
     startup_options: StartupOptions,
     update_state: SimSpUpdate,
     reset_pending: Option<SpComponent>,
+    sensors: Sensors,
 
     last_request_handled: Option<SimSpHandledRequest>,
 
@@ -665,9 +667,12 @@ impl Handler {
                 .push(&*Box::leak(c.description.clone().into_boxed_str()));
         }
 
+        let sensors = Sensors::from_component_configs(&components);
+
         Self {
             log,
             components,
+            sensors,
             leaked_component_device_strings,
             leaked_component_description_strings,
             serial_number,
@@ -1206,13 +1211,16 @@ impl SpHandler for Handler {
         port: SpPort,
         component: SpComponent,
     ) -> Result<u32, SpError> {
+        let num_details =
+            self.sensors.num_component_details(&component).unwrap_or(0);
         debug!(
-            &self.log, "asked for component details (returning 0 details)";
+            &self.log, "asked for number of component details";
             "sender" => %sender,
             "port" => ?port,
             "component" => ?component,
+            "num_details" => num_details
         );
-        Ok(0)
+        Ok(num_details)
     }
 
     fn component_details(
@@ -1220,9 +1228,20 @@ impl SpHandler for Handler {
         component: SpComponent,
         index: BoundsChecked,
     ) -> ComponentDetails {
-        // We return 0 for all components, so we should never be called (`index`
-        // would have to have been bounds checked to live in 0..0).
-        unreachable!("asked for {component:?} details index {index:?}")
+        let Some(sensor_details) =
+            self.sensors.component_details(&component, index)
+        else {
+            unreachable!(
+                "this is a gimlet, so it should have no port status details"
+            );
+        };
+        debug!(
+            &self.log, "asked for component details for a sensor";
+            "component" => ?component,
+            "index" => index.0,
+            "details" => ?sensor_details
+        );
+        sensor_details
     }
 
     fn component_clear_status(
@@ -1445,9 +1464,9 @@ impl SpHandler for Handler {
 
     fn read_sensor(
         &mut self,
-        _request: gateway_messages::SensorRequest,
+        request: gateway_messages::SensorRequest,
     ) -> std::result::Result<gateway_messages::SensorResponse, SpError> {
-        Err(SpError::RequestUnsupportedForSp)
+        self.sensors.read_sensor(request).map_err(SpError::Sensor)
     }
 
     fn current_time(&mut self) -> std::result::Result<u64, SpError> {

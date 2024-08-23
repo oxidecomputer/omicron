@@ -118,6 +118,22 @@ switch = "switch0"
 # Neighbors we expect to peer with over BGP on this port.
 bgp_peers = []
 
+# LLDP settings for this port
+#[rack_network_config.switch0.qsfp0.lldp]
+#status = "Enabled"
+# Optional Port ID, overriding default of qsfpX/0
+#port_id = ""
+## Optional port description
+#port_description = "uplink 0"
+# Optional chassid ID, overriding the switch-level setting
+#chassis_id = ""
+# Optional system name, overriding the switch-level setting
+#system_name = ""
+# Optional system description, overriding the switch-level setting
+#system_description = ""
+# Optional management addresses to advertise, overriding switch-level setting
+#management_addrs = []
+
 # An allowlist of source IPs that can make requests to user-facing services can
 # be specified here. It can be written as the string "any" ...
 [allowed_source_ips]
