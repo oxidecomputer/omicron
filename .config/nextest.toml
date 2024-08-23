@@ -21,17 +21,25 @@ fail-fast = false
 # invocations of nextest happen.
 command = 'cargo run -p crdb-seed --profile test'
 
+[test-groups]
 # The ClickHouse cluster tests currently rely on a hard-coded set of ports for
 # the nodes in the cluster. We would like to relax this in the future, at which
 # point this test-group configuration can be removed or at least loosened to
 # support testing in parallel. For now, enforce strict serialization for all
 # tests with `replicated` in the name.
-[test-groups]
 clickhouse-cluster = { max-threads = 1 }
+# While most Omicron tests operate with their own simulated control plane, the
+# live-tests operate on a more realistic, shared control plane and test
+# behaviors that conflict with each other.  They need to be run serially.
+live-tests = { max-threads = 1 }
 
 [[profile.default.overrides]]
 filter = 'package(oximeter-db) and test(replicated)'
 test-group = 'clickhouse-cluster'
+
+[[profile.default.overrides]]
+filter = 'package(omicron-live-tests)'
+test-group = 'live-tests'
 
 [[profile.default.overrides]]
 # These tests can time out under heavy contention.
