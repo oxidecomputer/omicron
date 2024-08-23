@@ -6,9 +6,9 @@ mod common;
 
 use anyhow::Context;
 use assert_matches::assert_matches;
+use common::reconfigurator::blueprint_edit_current_target;
 use common::LiveTestContext;
 use futures::TryStreamExt;
-use nexus_client::types::BlueprintTargetSet;
 use nexus_client::types::Saga;
 use nexus_client::types::SagaState;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
@@ -25,77 +25,57 @@ use std::time::Duration;
 
 // XXX-dap clean up in general
 // XXX-dap clean up logging
+// XXX-dap make a macro for LiveTestContext
+// TODO-coverage This test could check other stuff:
+//
+// - that after adding:
+//   - the new Nexus appears in external DNS
+//   - we can _use_ the new Nexus from the outside
+//     (e.g., using an `oxide_client` using a custom reqwest resolver that
+//     points only at that one IP so that we can make sure we're always getting
+//     that one)
+// - that after expungement:
+//   - we can't reach it any more on the underlay
+//   - it doesn't appear in external DNS any more
+//
 #[tokio::test]
 async fn test_nexus_add_remove() {
+    // Test setup
     let lc = LiveTestContext::new("test_nexus_add_remove").await.unwrap();
     let log = lc.log();
     let mylog = lc.log().new(o!("top-level" => true));
-
     let nexus =
         lc.any_internal_nexus_client().await.expect("internal Nexus client");
-    info!(mylog, "have Nexus client");
-
-    // Fetch the current target blueprint.
-    let target_blueprint = nexus
-        .blueprint_target_view()
-        .await
-        .expect("fetch target config")
-        .into_inner();
-    if !target_blueprint.enabled {
-        panic!("refusing to modify a system with target blueprint disabled");
-    }
-
-    let blueprint1 = nexus
-        .blueprint_view(&target_blueprint.target_id)
-        .await
-        .expect("fetch target blueprint")
-        .into_inner();
-    info!(mylog, "have current blueprint");
-
-    // Assemble a new blueprint based on the current target that adds a Nexus
-    // zone on some sled.
     let opctx = lc.opctx();
     let datastore = lc.datastore();
     let planning_input = PlanningInputFromDb::assemble(&opctx, &datastore)
         .await
         .expect("planning input");
-    info!(mylog, "have PlanningInput");
 
-    let mut builder = BlueprintBuilder::new_based_on(
-        log,
-        &blueprint1,
-        &planning_input,
-        "test-suite",
-    )
-    .expect("BlueprintBuilder");
-
+    // First, deploy a new Nexus zone to an arbitrary sled.
     let sled_id = planning_input
         .all_sled_ids(SledFilter::Commissioned)
         .next()
         .expect("any sled id");
-
-    let nnexus =
-        builder.sled_num_running_zones_of_kind(sled_id, ZoneKind::Nexus);
-    let count = builder
-        .sled_ensure_zone_multiple_nexus(sled_id, nnexus + 1)
-        .expect("adding Nexus");
-    assert_matches!(count, EnsureMultiple::Changed { added: 1, removed: 0 });
-    let blueprint2 = builder.build();
-    info!(mylog, "built new blueprint";
-        "blueprint1_id" => %blueprint1.id,
-        "blueprint2_id" => %blueprint2.id
-    );
-
-    // Make this the new target.
-    nexus.blueprint_import(&blueprint2).await.expect("importing new blueprint");
-    nexus
-        .blueprint_target_set(&BlueprintTargetSet {
-            enabled: true,
-            target_id: blueprint2.id,
-        })
-        .await
-        .expect("setting new target");
-    info!(mylog, "imported blueprint"; "blueprint_id" => %blueprint2.id);
+    let (blueprint1, blueprint2) = blueprint_edit_current_target(
+        log,
+        &planning_input,
+        &nexus,
+        &|builder: &mut BlueprintBuilder| {
+            let nnexus = builder
+                .sled_num_running_zones_of_kind(sled_id, ZoneKind::Nexus);
+            let count = builder
+                .sled_ensure_zone_multiple_nexus(sled_id, nnexus + 1)
+                .context("adding Nexus zone")?;
+            assert_matches!(
+                count,
+                EnsureMultiple::Changed { added: 1, removed: 0 }
+            );
+            Ok(())
+        },
+    )
+    .await
+    .expect("editing blueprint to add zone");
 
     // Figure out which zone is new and make a new client for it.
     let diff = blueprint2.diff_since_blueprint(&blueprint1);
@@ -132,39 +112,40 @@ async fn test_nexus_add_remove() {
     assert!(initial_sagas_list.is_empty());
     info!(mylog, "new Nexus is online");
 
-    // Create a demo saga.
+    // Create a demo saga from the new Nexus zone.  We'll use this to test that
+    // when the zone is expunged, its saga gets moved to a different Nexus.
     let demo_saga = new_zone_client
         .saga_demo_create()
         .await
         .expect("new Nexus saga demo create");
     let saga_id = demo_saga.saga_id;
-
     let sagas_list =
         list_sagas(&new_zone_client).await.expect("new Nexus sagas_list");
     assert_eq!(sagas_list.len(), 1);
     assert_eq!(sagas_list[0].id, saga_id);
-    info!(mylog, "ready to expunge");
 
-    let mut builder = BlueprintBuilder::new_based_on(
+    // Now expunge the zone we just created.
+    info!(mylog, "ready to expunge");
+    let _ = blueprint_edit_current_target(
         log,
-        &blueprint2,
         &planning_input,
-        "test-suite",
+        &nexus,
+        &|builder: &mut BlueprintBuilder| {
+            builder
+                .sled_expunge_zone(sled_id, new_zone.id())
+                .context("expunging zone")
+        },
     )
-    .expect("BlueprintBuilder");
-    builder.sled_expunge_zone(sled_id, new_zone.id()).expect("expunge zone");
-    let blueprint3 = builder.build();
-    nexus.blueprint_import(&blueprint3).await.expect("importing new blueprint");
-    nexus
-        .blueprint_target_set(&BlueprintTargetSet {
-            enabled: true,
-            target_id: blueprint3.id,
-        })
-        .await
-        .expect("setting new target");
-    info!(mylog, "imported blueprint with Nexus expunged and set target";
-        "blueprint_id" => %blueprint3.id
-    );
+    .await
+    .expect("editing blueprint to expunge zone");
+
+    // XXX-dap first, wait for the expunged instance to actually go away.
+    // Otherwise, it's possible we find that one in
+    // `all_internal_nexus_clients()` and complete the saga before the zone gets
+    // expunged!
+    //
+    // XXX-dap can we check the URL on the client to make sure it's a different
+    // one?
 
     // Wait for some other Nexus instance to pick up the saga.
     let nexus_clients = lc.all_internal_nexus_clients().await.unwrap();
@@ -188,16 +169,15 @@ async fn test_nexus_add_remove() {
     )
     .await
     .unwrap();
+    info!(mylog, "found saga in a different Nexus instance");
 
-    info!(mylog, "found saga in previous Nexus instance");
-    // Now, complete it on this instance.
+    // Now, complete the demo saga on whichever instance is running it now.
+    // `saga_demo_complete` is not synchronous.  It just unblocks the saga.
+    // We'll need to poll a bit to wait for it to finish.
     nexus_found
         .saga_demo_complete(&demo_saga.demo_saga_id)
         .await
         .expect("complete demo saga");
-
-    // Completion is not synchronous -- that just unblocked the saga.  So we
-    // need to poll a bit to wait for it to actually finish.
     let found = wait_for_condition(
         || async {
             let sagas = list_sagas(&nexus_found).await.expect("listing sagas");
@@ -218,7 +198,8 @@ async fn test_nexus_add_remove() {
     assert_eq!(found.id, saga_id);
     assert!(matches!(found.state, SagaState::Succeeded));
 
-    lc.cleanup_successful();
+    // XXX-dap
+    // lc.cleanup_successful();
 }
 
 async fn list_sagas(
