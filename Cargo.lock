@@ -5245,6 +5245,7 @@ dependencies = [
  "httptest",
  "internal-dns",
  "ipnet",
+ "newtype-uuid",
  "nexus-config",
  "nexus-db-model",
  "nexus-db-queries",
