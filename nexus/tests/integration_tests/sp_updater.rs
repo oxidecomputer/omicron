@@ -441,8 +441,7 @@ async fn test_sp_updater_delivers_progress() {
         // TODO(eliza): it would be nice if we didn't have to disable metrics in
         // this test, so that we can better catch regressions that could be
         // introduced by the metrics subsystem...
-        mgs_config.metrics.get_or_insert_with(Default::default()).disabled =
-            true;
+        mgs_config.metrics.get_or_insert_with(Default::default).disabled = true;
         mgs_setup::test_setup_with_config(
             "test_sp_updater_delivers_progress",
             SpPort::One,
