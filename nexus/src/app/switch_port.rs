@@ -30,6 +30,7 @@ impl super::Nexus {
         params: params::SwitchPortSettingsCreate,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        Self::switch_port_settings_validate(&params)?;
 
         //TODO race conditions on exists check versus update/create.
         //     Normally I would use a DB lock here, but not sure what
@@ -52,6 +53,25 @@ impl super::Nexus {
                 self.switch_port_settings_create(opctx, params, None).await
             }
         }
+    }
+
+    // TODO: more validation wanted
+    fn switch_port_settings_validate(
+        params: &params::SwitchPortSettingsCreate,
+    ) -> CreateResult<()> {
+        for x in params.bgp_peers.values() {
+            for p in x.peers.iter() {
+                if let Some(ref key) = p.md5_auth_key {
+                    if key.len() > 80 {
+                        return Err(Error::invalid_value(
+                            "md5_auth_key",
+                            format!("md5 auth key for {} is longer than 80 characters", p.addr)
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     pub async fn switch_port_settings_create(
