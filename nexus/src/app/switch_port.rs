@@ -68,6 +68,17 @@ impl super::Nexus {
                             format!("md5 auth key for {} is longer than 80 characters", p.addr)
                         ));
                     }
+                    for c in key.chars() {
+                        if !c.is_ascii() || c.is_ascii_control() {
+                            return Err(Error::invalid_value(
+                                "md5_auth_key",
+                                format!(
+                                    "md5 auth key for {} must be printable ascii",
+                                    p.addr
+                                ),
+                            ));
+                        }
+                    }
                 }
             }
         }
