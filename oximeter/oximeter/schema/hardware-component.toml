@@ -98,7 +98,7 @@ the metrics emitted by these sensors when they are read successfully)."""
 [[metrics]]
 name = "temperature"
 description = "A temperature reading from a hardware component."
-units = "degrees_celcius"
+units = "degrees_celsius"
 datum_type = "f32"
 versions = [
     { added_in = 1, fields = ["sensor"]}
