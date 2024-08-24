@@ -28,7 +28,7 @@
 //! remains alive and continues to own its virtual provisioning resources.
 //!
 //! Cleanup of instance resources when an instance's *active* VMM is destroyed
-//! is handled elsewhere, by `notify_instance_updated` and (eventually) the
+//! is handled elsewhere, by `notify_vmm_updated` and (eventually) the
 //! `instance-update` saga.
 
 use crate::app::background::BackgroundTask;

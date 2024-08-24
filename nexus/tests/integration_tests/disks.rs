@@ -188,7 +188,8 @@ async fn set_instance_state(
 }
 
 async fn instance_simulate(nexus: &Arc<Nexus>, id: &InstanceUuid) {
-    let info = nexus.active_instance_info(id, None)
+    let info = nexus
+        .active_instance_info(id, None)
         .await
         .unwrap()
         .expect("instance must be on a sled to simulate a state change");

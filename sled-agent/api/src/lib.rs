@@ -296,10 +296,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmIssueDiskSnapshotRequestPathParam>,
         body: TypedBody<VmmIssueDiskSnapshotRequestBody>,
-    ) -> Result<
-        HttpResponseOk<VmmIssueDiskSnapshotRequestResponse>,
-        HttpError,
-    >;
+    ) -> Result<HttpResponseOk<VmmIssueDiskSnapshotRequestResponse>, HttpError>;
 
     #[endpoint {
         method = PUT,

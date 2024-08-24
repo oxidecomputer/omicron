@@ -236,7 +236,7 @@
 //! updates is perhaps the simplest one: _avoiding unnecessary update sagas_.
 //! The `cpapi_instances_put` API endpoint and instance-watcher background tasks
 //! handle changes to VMM and migration states by calling the
-//! [`notify_instance_updated`] method, which writes the new states to the
+//! [`notify_vmm_updated`] method, which writes the new states to the
 //! database and (potentially) starts an update saga. Naively, this method would
 //! *always* start an update saga, but remember that --- as we discussed
 //! [above](#background) --- many VMM/migration state changes don't actually
@@ -271,7 +271,7 @@
 //! delayed. To improve the timeliness of update sagas, we will also explicitly
 //! activate the background task at any point where we know that an update saga
 //! *should* run but we were not able to run it. If an update saga cannot be
-//! started, whether by [`notify_instance_updated`], a `start-instance-update`
+//! started, whether by [`notify_vmm_updated`], a `start-instance-update`
 //! saga attempting to start its real saga, or an `instance-update` saga
 //! chaining into a new one as its last action, the `instance-watcher`
 //! background task is activated. Similarly, when a `start-instance-update` saga
@@ -326,7 +326,7 @@
 //!     crate::app::db::datastore::DataStore::instance_updater_inherit_lock
 //! [instance_updater_unlock]:
 //!     crate::app::db::datastore::DataStore::instance_updater_unlock
-//! [`notify_instance_updated`]: crate::app::Nexus::notify_instance_updated
+//! [`notify_vmm_updated`]: crate::app::Nexus::notify_vmm_updated
 //!
 //! [dist-locking]:
 //!     https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html
