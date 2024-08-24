@@ -190,7 +190,7 @@ pub enum Units {
     Volts,
     Amps,
     Watts,
-    DegreesCelcius,
+    DegreesCelsius,
     /// Rotations per minute.
     Rpm,
 }
