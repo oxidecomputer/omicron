@@ -143,6 +143,7 @@ impl Server {
                 config.host_phase2_recovery_image_cache_max_images,
             ));
         let apictx = ServerContext::new(
+            args.id,
             host_phase2_provider,
             config.switch,
             args.rack_id,

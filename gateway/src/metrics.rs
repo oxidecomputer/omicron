@@ -242,6 +242,7 @@ impl Metrics {
         let server = {
             let log = log.new(slog::o!("component" => "producer-server"));
             let registry = ProducerRegistry::with_id(id);
+            // Register the producer for SP sensor metrics.
             registry
                 .register_producer(Producer { sample_rx, log: log.clone() })
                 // TODO(ben): when you change `register_producer` to not return
@@ -250,6 +251,15 @@ impl Metrics {
                     "`ProducerRegistry::register_producer()` will never \
                      actually return an `Err`, so this shouldn't ever \
                      happen...",
+                );
+            // Also, register the producer for the HTTP API metrics.
+            registry
+                .register_producer(apictx.latencies.clone())
+                // TODO(ben): do this one too pls
+                .expect(
+                    "`ProducerRegistry::register_producer()` will never \
+                    actually return an `Err`, so this shouldn't ever \
+                    happen...",
                 );
 
             tokio::spawn(
