@@ -189,6 +189,7 @@ pub enum Units {
     Nanoseconds,
     Volts,
     Amps,
+    Watts,
     DegreesCelsius,
     /// Rotations per minute.
     Rpm,

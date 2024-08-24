@@ -213,6 +213,7 @@ impl From<omicron_common::api::internal::nexus::ProducerKind>
     fn from(kind: omicron_common::api::internal::nexus::ProducerKind) -> Self {
         use omicron_common::api::internal::nexus::ProducerKind;
         match kind {
+            ProducerKind::ManagementGateway => Self::ManagementGateway,
             ProducerKind::SledAgent => Self::SledAgent,
             ProducerKind::Service => Self::Service,
             ProducerKind::Instance => Self::Instance,
@@ -390,6 +391,9 @@ impl From<types::ProducerKind>
     fn from(kind: types::ProducerKind) -> Self {
         use omicron_common::api::internal::nexus::ProducerKind;
         match kind {
+            types::ProducerKind::ManagementGateway => {
+                ProducerKind::ManagementGateway
+            }
             types::ProducerKind::SledAgent => ProducerKind::SledAgent,
             types::ProducerKind::Instance => ProducerKind::Instance,
             types::ProducerKind::Service => ProducerKind::Service,
