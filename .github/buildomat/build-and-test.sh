@@ -89,8 +89,11 @@ ptime -m timeout 2h cargo nextest run --profile ci --locked --verbose
 banner doctest
 ptime -m timeout 1h cargo test --doc --locked --verbose --no-fail-fast
 
-# Build the live-tests.  (We can't actually run them here.  See the README.)
-ptime -m cargo xtask live-tests
+# Build the live-tests.  This is only supported on illumos.
+# We also can't actually run them here.  See the README for more details.
+if [[ $target_os == "illumos" ]]; then
+    ptime -m cargo xtask live-tests
+fi
 
 # We expect the seed CRDB to be placed here, so we explicitly remove it so the
 # rmdir check below doesn't get triggered. Nextest doesn't have support for
