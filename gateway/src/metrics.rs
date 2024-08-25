@@ -20,10 +20,11 @@ use omicron_common::backoff;
 use oximeter::types::Cumulative;
 use oximeter::types::ProducerRegistry;
 use oximeter::types::Sample;
+use oximeter::types::StrValue;
 use oximeter::MetricsError;
-use std::borrow::Cow;
 use std::collections::hash_map;
 use std::collections::hash_map::HashMap;
+use std::collections::HashSet;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -106,7 +107,7 @@ struct ComponentMetrics {
 
 #[derive(Eq, PartialEq, Hash)]
 struct SensorErrorKey {
-    name: Cow<'static, str>,
+    name: StrValue,
     kind: &'static str,
     error: &'static str,
 }
@@ -562,6 +563,14 @@ impl SpPoller {
     ) -> Result<Vec<Sample>, CommunicationError> {
         let mut current_state = SpUnderstanding::from(sp.state().await?);
         let mut samples = Vec::new();
+        // Rudimentary interning of string values so that we can re-use the same
+        // reference counted string rather than re-creating it for e.g. every
+        // sensor with the same measurement names.
+        //
+        // It would be nicer if this could be shared across all pollers, but
+        // then we'd need to share mutable access to it, which feels unfortunate
+        // given that the poller tasks share basically no other state.
+        let mut str_values = HashSet::<StrValue>::new();
         // If the SP's state changes dramatically *during* a poll, it may be
         // necessary to re-do the metrics scrape, thus the loop. Normally, we
         // will only loop a single time, but may retry if necessary.
@@ -569,19 +578,24 @@ impl SpPoller {
             // Check if the SP's state has changed. If it has, we need to make sure
             // we still know what all of its sensors are.
             if Some(&current_state) != self.known_state.as_ref() {
+                let prev_interned_strings = str_values.len();
                 // The SP's state appears to have changed. Time to make sure our
                 // understanding of its devices and identity is up to date!
 
-                let chassis_kind = match self.spid.typ {
+                let chassis_kind = StrValue::from(match self.spid.typ {
                     SpType::Sled => "sled",
                     SpType::Switch => "switch",
                     SpType::Power => "power",
-                };
-                let model = stringify_byte_string(&current_state.model[..]);
-                let serial =
-                    stringify_byte_string(&current_state.serial_number[..]);
-                let hubris_archive_id =
-                    hex::encode(&current_state.hubris_archive_id);
+                });
+                let model = StrValue::from(stringify_byte_string(
+                    &current_state.model[..],
+                ));
+                let serial = StrValue::from(stringify_byte_string(
+                    &current_state.serial_number[..],
+                ));
+                let hubris_archive_id = StrValue::from(hex::encode(
+                    &current_state.hubris_archive_id,
+                ));
 
                 slog::debug!(
                     &self.log,
@@ -609,7 +623,7 @@ impl SpPoller {
                         continue;
                     }
                     let component_id = match dev.component.as_str() {
-                        Some(c) => Cow::Owned(c.to_string()),
+                        Some(c) => StrValue::from(c.to_string()),
                         None => {
                             // These are supposed to always be strings. But, if we
                             // see one that's not a string, fall back to the hex
@@ -622,27 +636,31 @@ impl SpPoller {
                                 "component" => %hex,
                                 "device" => ?dev,
                             );
-                            Cow::Owned(hex)
+                            StrValue::from(hex)
                         }
                     };
 
-                    // TODO(eliza): i hate having to clone all these strings for
-                    // every device on the SP...it would be cool if Oximeter let us
-                    // reference count them...
+                    let component_kind = str_values
+                        .get(dev.device.as_str())
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            let v = StrValue::from(dev.device);
+                            str_values.insert(v.clone());
+                            v
+                        });
+
                     let target = metric::HardwareComponent {
                         rack_id: self.rack_id,
                         gateway_id: self.mgs_id,
-                        chassis_model: Cow::Owned(model.clone()),
+                        chassis_model: model.clone(),
                         chassis_revision: current_state.revision,
-                        chassis_kind: Cow::Borrowed(chassis_kind),
-                        chassis_serial: Cow::Owned(serial.clone()),
-                        hubris_archive_id: Cow::Owned(
-                            hubris_archive_id.clone(),
-                        ),
+                        chassis_kind: chassis_kind.clone(),
+                        chassis_serial: serial.clone(),
+                        hubris_archive_id: hubris_archive_id.clone(),
                         slot: self.spid.slot as u32,
-                        component_kind: Cow::Owned(dev.device),
+                        component_kind,
                         component_id,
-                        description: Cow::Owned(dev.description),
+                        description: dev.description.into(),
                     };
                     match self.components.entry(dev.component) {
                         // Found a new device!
@@ -685,6 +703,18 @@ impl SpPoller {
                 }
 
                 self.known_state = Some(current_state);
+                str_values.retain(|s| match s {
+                    StrValue::Owned(arc) => Arc::strong_count(arc) > 1,
+                    _ => true,
+                });
+                str_values.shrink_to_fit();
+
+                slog::debug!(
+                    &self.log,
+                    "re-constructed SP understanding";
+                    "interned_strings" => str_values.len(),
+                    "prev_interned_strings" => prev_interned_strings,
+                );
             }
 
             // We will need capacity for *at least* the number of components on the
@@ -754,7 +784,10 @@ impl SpPoller {
                         // than measurement channels, ignore it for now.
                         continue;
                     };
-                    let sensor: Cow<'static, str> = Cow::Owned(m.name);
+                    // I believe sensor names are all unique per-board, so no
+                    // sense interning them. If we were to share interned
+                    // strings across all pollers, this might be nice to do...
+                    let sensor = StrValue::from(m.name);
 
                     // First, if there's a measurement error, increment the
                     // error count metric. We will synthesize a missing sample
@@ -802,10 +835,10 @@ impl SpPoller {
                         try_sample!(Sample::new(
                             target,
                             &metric::SensorErrorCount {
-                                error: Cow::Borrowed(error),
+                                error: error.into(),
                                 sensor: sensor.clone(),
                                 datum: *datum,
-                                sensor_kind: Cow::Borrowed(kind),
+                                sensor_kind: kind.into(),
                             },
                         ));
                     }
@@ -1111,10 +1144,7 @@ impl ComponentMetrics {
         datum.increment();
         Sample::new(
             &self.target,
-            &metric::PollErrorCount {
-                error: Cow::Borrowed(error_str),
-                datum: *datum,
-            },
+            &metric::PollErrorCount { error: error_str.into(), datum: *datum },
         )
     }
 }

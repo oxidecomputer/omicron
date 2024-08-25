@@ -23,8 +23,8 @@ use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use oximeter::types::ProducerRegistry;
+use oximeter::types::StrValue;
 use sled_agent_client::Client as SledAgentClient;
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::num::NonZeroU32;
@@ -261,7 +261,7 @@ enum CheckOutcome {
 }
 
 impl Check {
-    fn state_str(&self) -> Cow<'static, str> {
+    fn state_str(&self) -> StrValue {
         match self.outcome {
             CheckOutcome::Success(state) => state.label().into(),
             CheckOutcome::Failure(_) => InstanceState::Failed.label().into(),
@@ -269,7 +269,7 @@ impl Check {
         }
     }
 
-    fn reason_str(&self) -> Cow<'static, str> {
+    fn reason_str(&self) -> StrValue {
         match self.outcome {
             CheckOutcome::Success(_) => "success".into(),
             CheckOutcome::Failure(reason) => reason.as_str(),
@@ -300,7 +300,7 @@ enum Failure {
 }
 
 impl Failure {
-    fn as_str(&self) -> Cow<'static, str> {
+    fn as_str(&self) -> StrValue {
         match self {
             Self::SledAgentUnreachable => "unreachable".into(),
             Self::SledAgentResponse(status) => status.to_string().into(),
@@ -332,7 +332,7 @@ enum Incomplete {
 }
 
 impl Incomplete {
-    fn as_str(&self) -> Cow<'static, str> {
+    fn as_str(&self) -> StrValue {
         match self {
             Self::ClientHttpError(status) => status.to_string().into(),
             Self::ClientError => "client_error".into(),
@@ -431,12 +431,12 @@ impl BackgroundTask for InstanceWatcher {
                             .or_default() += 1;
                     }
                     CheckOutcome::Failure(reason) => {
-                        *check_failures.entry(reason.as_str().into_owned()).or_default() += 1;
+                        *check_failures.entry(reason.as_str().to_string()).or_default() += 1;
                     }
                     CheckOutcome::Unknown => {}
                 }
                 if let Err(ref reason) = check.result {
-                    *check_errors.entry(reason.as_str().into_owned()).or_default() += 1;
+                    *check_errors.entry(reason.as_str().to_string()).or_default() += 1;
                 }
                 if check.update_saga_queued {
                     update_sagas_queued += 1;

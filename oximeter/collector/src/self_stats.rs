@@ -9,10 +9,10 @@
 use crate::ProducerEndpoint;
 use oximeter::types::Cumulative;
 use oximeter::types::ProducerResultsItem;
+use oximeter::types::StrValue;
 use oximeter::MetricsError;
 use oximeter::Sample;
 use reqwest::StatusCode;
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
@@ -51,11 +51,11 @@ impl FailureReason {
     const UNREACHABLE: &'static str = "unreachable";
     const DESERIALIZATION: &'static str = "deserialization";
 
-    fn as_string(&self) -> Cow<'static, str> {
+    fn as_string(&self) -> StrValue {
         match self {
-            Self::Unreachable => Cow::Borrowed(Self::UNREACHABLE),
-            Self::Deserialization => Cow::Borrowed(Self::DESERIALIZATION),
-            Self::Other(c) => Cow::Owned(c.as_u16().to_string()),
+            Self::Unreachable => Self::UNREACHABLE.into(),
+            Self::Deserialization => Self::DESERIALIZATION.into(),
+            Self::Other(c) => c.as_u16().to_string().into(),
         }
     }
 }

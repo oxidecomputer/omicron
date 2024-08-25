@@ -105,6 +105,8 @@ macro_rules! impl_field_type_from {
 impl_field_type_from! { String, FieldType::String }
 impl_field_type_from! { &'static str, FieldType::String }
 impl_field_type_from! { Cow<'static, str>, FieldType::String }
+impl_field_type_from! { StrValue, FieldType::String }
+impl_field_type_from! { Arc<str>, FieldType::String }
 impl_field_type_from! { i8, FieldType::I8 }
 impl_field_type_from! { u8, FieldType::U8 }
 impl_field_type_from! { i16, FieldType::I16 }
@@ -131,7 +133,7 @@ impl_field_type_from! { bool, FieldType::Bool }
 )]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum FieldValue {
-    String(Cow<'static, str>),
+    String(StrValue),
     I8(i8),
     U8(u8),
     I16(i16),
@@ -175,9 +177,7 @@ impl FieldValue {
             typ: field_type.to_string(),
         };
         match field_type {
-            FieldType::String => {
-                Ok(FieldValue::String(Cow::Owned(s.to_string())))
-            }
+            FieldType::String => Ok(FieldValue::String(s.to_string().into())),
             FieldType::I8 => {
                 Ok(FieldValue::I8(s.parse().map_err(|_| make_err())?))
             }
@@ -252,20 +252,32 @@ impl_field_value_from! { i32, FieldValue::I32 }
 impl_field_value_from! { u32, FieldValue::U32 }
 impl_field_value_from! { i64, FieldValue::I64 }
 impl_field_value_from! { u64, FieldValue::U64 }
-impl_field_value_from! { Cow<'static, str>, FieldValue::String }
+impl_field_value_from! { StrValue, FieldValue::String }
 impl_field_value_from! { IpAddr, FieldValue::IpAddr }
 impl_field_value_from! { Uuid, FieldValue::Uuid }
 impl_field_value_from! { bool, FieldValue::Bool }
 
-impl From<&str> for FieldValue {
-    fn from(value: &str) -> Self {
-        FieldValue::String(Cow::Owned(String::from(value)))
+impl From<String> for FieldValue {
+    fn from(s: String) -> Self {
+        Self::String(StrValue::from(s))
     }
 }
 
-impl From<String> for FieldValue {
-    fn from(value: String) -> Self {
-        FieldValue::String(Cow::Owned(value))
+impl From<Arc<str>> for FieldValue {
+    fn from(s: Arc<str>) -> Self {
+        Self::String(StrValue::from(s))
+    }
+}
+
+impl From<&'static str> for FieldValue {
+    fn from(s: &'static str) -> Self {
+        Self::String(StrValue::from(s))
+    }
+}
+
+impl From<Cow<'static, str>> for FieldValue {
+    fn from(cow: Cow<'static, str>) -> Self {
+        Self::String(StrValue::from(cow))
     }
 }
 
@@ -287,6 +299,161 @@ where
 {
     fn from(value: &T) -> Self {
         value.clone().into()
+    }
+}
+
+/// A string field value, which may either be a `&'static str` literal, or an
+/// [atomically reference counted](Arc) string.
+#[derive(Clone)]
+pub enum StrValue {
+    Static(&'static str),
+    Owned(Arc<str>),
+}
+
+impl StrValue {
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Static(s) => s,
+            Self::Owned(s) => s,
+        }
+    }
+}
+
+impl From<String> for StrValue {
+    fn from(s: String) -> Self {
+        Self::Owned(Arc::from(s))
+    }
+}
+
+impl From<Arc<str>> for StrValue {
+    fn from(s: Arc<str>) -> Self {
+        Self::Owned(s)
+    }
+}
+
+impl From<&'static str> for StrValue {
+    fn from(s: &'static str) -> Self {
+        Self::Static(s)
+    }
+}
+
+impl From<Cow<'static, str>> for StrValue {
+    fn from(cow: Cow<'static, str>) -> Self {
+        match cow {
+            Cow::Borrowed(s) => Self::Static(s),
+            Cow::Owned(s) => Self::Owned(Arc::from(s)),
+        }
+    }
+}
+
+impl PartialEq for StrValue {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl<S> PartialEq<S> for StrValue
+where
+    str: PartialEq<S>,
+{
+    #[inline]
+    fn eq(&self, other: &S) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl Eq for StrValue {}
+
+impl PartialOrd for StrValue {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for StrValue {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_str().cmp(other.as_str())
+    }
+}
+
+impl<S> PartialOrd<S> for StrValue
+where
+    str: PartialOrd<S>,
+{
+    fn partial_cmp(&self, other: &S) -> Option<std::cmp::Ordering> {
+        self.as_str().partial_cmp(other)
+    }
+}
+
+impl std::hash::Hash for StrValue {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_str().hash(state)
+    }
+}
+
+impl AsRef<str> for StrValue {
+    #[inline]
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl std::borrow::Borrow<str> for StrValue {
+    #[inline]
+    fn borrow(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl fmt::Display for StrValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self.as_str(), f)
+    }
+}
+
+impl fmt::Debug for StrValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.as_str(), f)
+    }
+}
+
+impl Serialize for StrValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for StrValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::de::Deserializer<'de>,
+    {
+        String::deserialize(deserializer).map(Self::from)
+    }
+}
+
+impl JsonSchema for StrValue {
+    fn schema_name() -> String {
+        String::schema_name()
+    }
+
+    fn json_schema(
+        generator: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        String::json_schema(generator)
+    }
+
+    fn is_referenceable() -> bool {
+        String::is_referenceable()
+    }
+
+    fn schema_id() -> Cow<'static, str> {
+        String::schema_id()
     }
 }
 

@@ -8,6 +8,7 @@ use illumos_utils::running_zone::RunningZone;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::SledIdentifiers;
+use oximeter::types::StrValue;
 use oximeter_instruments::kstat::link::sled_data_link::SledDataLink;
 use oximeter_instruments::kstat::CollectionDetails;
 use oximeter_instruments::kstat::Error as KstatError;
@@ -108,7 +109,9 @@ async fn metrics_task(
     log: Logger,
     mut rx: mpsc::Receiver<Message>,
 ) {
-    let mut tracked_links: HashMap<String, TargetId> = HashMap::new();
+    let mut tracked_links: HashMap<StrValue, TargetId> = HashMap::new();
+    let sled_model = StrValue::from(sled_identifiers.model);
+    let sled_serial = StrValue::from(sled_identifiers.serial);
 
     // Main polling loop, waiting for messages from other pieces of the code to
     // track various statistics.
@@ -125,9 +128,9 @@ async fn metrics_task(
                     link_name: name.into(),
                     rack_id: sled_identifiers.rack_id,
                     sled_id: sled_identifiers.sled_id,
-                    sled_model: sled_identifiers.model.clone().into(),
+                    sled_model: sled_model.clone(),
                     sled_revision: sled_identifiers.revision,
-                    sled_serial: sled_identifiers.serial.clone().into(),
+                    sled_serial: sled_serial.clone(),
                     zone_name: zone_name.into(),
                 };
                 add_datalink(&log, &mut tracked_links, &kstat_sampler, link)
@@ -139,9 +142,9 @@ async fn metrics_task(
                     link_name: name.into(),
                     rack_id: sled_identifiers.rack_id,
                     sled_id: sled_identifiers.sled_id,
-                    sled_model: sled_identifiers.model.clone().into(),
+                    sled_model: sled_model.clone(),
                     sled_revision: sled_identifiers.revision,
-                    sled_serial: sled_identifiers.serial.clone().into(),
+                    sled_serial: sled_serial.clone(),
                     zone_name: zone_name.into(),
                 };
                 add_datalink(&log, &mut tracked_links, &kstat_sampler, link)
@@ -157,9 +160,9 @@ async fn metrics_task(
                     link_name: name.into(),
                     rack_id: sled_identifiers.rack_id,
                     sled_id: sled_identifiers.sled_id,
-                    sled_model: sled_identifiers.model.clone().into(),
+                    sled_model: sled_model.clone(),
                     sled_revision: sled_identifiers.revision,
-                    sled_serial: sled_identifiers.serial.clone().into(),
+                    sled_serial: sled_serial.clone(),
                     zone_name: zone_name.into(),
                 };
                 add_datalink(&log, &mut tracked_links, &kstat_sampler, link)
@@ -176,11 +179,11 @@ async fn metrics_task(
 /// Stop tracking a link by name.
 async fn remove_datalink(
     log: &Logger,
-    tracked_links: &mut HashMap<String, TargetId>,
+    tracked_links: &mut HashMap<StrValue, TargetId>,
     kstat_sampler: &KstatSampler,
     name: String,
 ) {
-    match tracked_links.remove(&name) {
+    match tracked_links.remove(name.as_str()) {
         Some(id) => match kstat_sampler.remove_target(id).await {
             Ok(_) => {
                 debug!(
@@ -213,11 +216,11 @@ async fn remove_datalink(
 /// Start tracking a new link of the specified kind.
 async fn add_datalink(
     log: &Logger,
-    tracked_links: &mut HashMap<String, TargetId>,
+    tracked_links: &mut HashMap<StrValue, TargetId>,
     kstat_sampler: &KstatSampler,
     link: SledDataLink,
 ) {
-    match tracked_links.entry(link.link_name.to_string()) {
+    match tracked_links.entry(link.link_name.clone()) {
         Entry::Vacant(entry) => {
             let details = if is_transient_link(&link.kind) {
                 CollectionDetails::duration(
@@ -234,7 +237,7 @@ async fn add_datalink(
                     debug!(
                         log,
                         "Added new link to kstat sampler";
-                        "link_name" => entry.key(),
+                        "link_name" => %entry.key(),
                         "link_kind" => %kind,
                         "zone_name" => %zone_name,
                     );
@@ -245,7 +248,7 @@ async fn add_datalink(
                         log,
                         "Failed to add VNIC to kstat sampler, \
                         no metrics will be collected for it";
-                        "link_name" => entry.key(),
+                        "link_name" => %entry.key(),
                         "link_kind" => %kind,
                         "zone_name" => %zone_name,
                         "error" => ?err,
@@ -258,7 +261,7 @@ async fn add_datalink(
                 log,
                 "received message to track VNIC, \
                 but it is already being tracked";
-                "link_name" => entry.key(),
+                "link_name" => %entry.key(),
             );
         }
     }
@@ -266,7 +269,8 @@ async fn add_datalink(
 
 /// Return true if this is considered a transient link, from the perspective of
 /// its expiration behavior.
-fn is_transient_link(kind: &str) -> bool {
+fn is_transient_link(kind: impl AsRef<str>) -> bool {
+    let kind = kind.as_ref();
     kind == LinkKind::VNIC || kind == LinkKind::OPTE
 }
 

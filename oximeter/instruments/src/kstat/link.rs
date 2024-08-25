@@ -90,7 +90,7 @@ trait LinkKstatTarget: KstatTarget {
 
 impl LinkKstatTarget for sled_data_link::SledDataLink {
     fn link_name(&self) -> &str {
-        &self.link_name
+        self.link_name.as_str()
     }
 }
 

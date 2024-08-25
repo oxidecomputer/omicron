@@ -435,7 +435,7 @@ fn emit_rust_type_for_datum_type(datum_type: DatumType) -> TokenStream {
 // Generate the quoted path to the Rust type matching the given field type.
 fn emit_rust_type_for_field(field_type: FieldType) -> TokenStream {
     match field_type {
-        FieldType::String => quote! { ::std::borrow::Cow<'static, str> },
+        FieldType::String => quote! { ::oximeter::types::StrValue },
         FieldType::I8 => quote! { i8 },
         FieldType::U8 => quote! { u8 },
         FieldType::I16 => quote! { i16 },

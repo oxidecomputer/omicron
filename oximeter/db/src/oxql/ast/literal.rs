@@ -382,8 +382,7 @@ mod tests {
 
     #[test]
     fn test_literal_compare_field_wrong_type() {
-        let value =
-            FieldValue::String(std::borrow::Cow::Owned(String::from("foo")));
+        let value = FieldValue::String("foo".into());
         let lit = Literal::Integer(4);
         assert!(lit.compare_field(&value, Comparison::Eq).is_err());
     }

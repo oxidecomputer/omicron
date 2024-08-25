@@ -28,6 +28,7 @@ use oximeter::types::FieldValue;
 use oximeter::types::Measurement;
 use oximeter::types::MissingDatum;
 use oximeter::types::Sample;
+use oximeter::types::StrValue;
 use oximeter::Quantile;
 use serde::Deserialize;
 use serde::Serialize;
@@ -401,7 +402,7 @@ declare_field_row! {I32FieldRow, i32, "i32"}
 declare_field_row! {U32FieldRow, u32, "u32"}
 declare_field_row! {I64FieldRow, i64, "i64"}
 declare_field_row! {U64FieldRow, u64, "u64"}
-declare_field_row! {StringFieldRow, std::borrow::Cow<'static, str>, "string"}
+declare_field_row! {StringFieldRow, StrValue, "string"}
 declare_field_row! {IpAddrFieldRow, Ipv6Addr, "ipaddr"}
 declare_field_row! {UuidFieldRow, Uuid, "uuid"}
 
