@@ -30,10 +30,9 @@
 //! Nexus' `cpapi_instances_put` internal API endpoint, when a Nexus'
 //! `instance-watcher` background task *pulls* instance states from sled-agents
 //! periodically, or as the return value of an API call from Nexus to a
-//! sled-agent. When a Nexus receives a new [`SledInstanceState`] from a
-//! sled-agent through any of these mechanisms, the Nexus will write any changed
-//! state to the `vmm` and/or `migration` tables directly on behalf of the
-//! sled-agent.
+//! sled-agent. When a Nexus receives a new [`SledVmmState`] from a sled-agent
+//! through any of these mechanisms, the Nexus will write any changed state to
+//! the `vmm` and/or `migration` tables directly on behalf of the sled-agent.
 //!
 //! Although Nexus is technically the party responsible for the database query
 //! that writes VMM and migration state updates received from sled-agent, it is
@@ -326,6 +325,7 @@
 //!     crate::app::db::datastore::DataStore::instance_updater_inherit_lock
 //! [instance_updater_unlock]:
 //!     crate::app::db::datastore::DataStore::instance_updater_unlock
+//! [`notify_vmm_updated`]: crate::app::Nexus::notify_vmm_updated
 //! [`process_vmm_update`]: crate::app::instance::process_vmm_update
 //!
 //! [dist-locking]:
@@ -388,8 +388,8 @@ pub(crate) use self::start::{Params, SagaInstanceUpdate};
 mod destroyed;
 
 /// Returns `true` if an `instance-update` saga should be executed as a result
-/// of writing the provided [`SledInstanceState`] to the database with the
-/// provided [`VmmStateUpdateResult`].
+/// of writing the provided [`SledVmmState`] to the database with the provided
+/// [`VmmStateUpdateResult`].
 ///
 /// We determine this only after actually updating the database records,
 /// because we don't know whether a particular VMM or migration state is
