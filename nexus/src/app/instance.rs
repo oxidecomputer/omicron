@@ -22,6 +22,7 @@ use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_model::Vmm as DbVmm;
+use nexus_db_model::VmmRuntimeState;
 use nexus_db_model::VmmState as DbVmmState;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
@@ -58,6 +59,7 @@ use propolis_client::support::InstanceSerialConsoleHelper;
 use propolis_client::support::WSClientOffset;
 use propolis_client::support::WebSocketStream;
 use sagas::instance_common::ExternalIpAttach;
+use sagas::instance_update;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::InstanceProperties;
 use sled_agent_client::types::VmmPutStateBody;
@@ -92,28 +94,53 @@ impl From<SledAgentInstancePutError> for omicron_common::api::external::Error {
     }
 }
 
-impl SledAgentInstancePutError {
-    /// Returns `true` if this error is of a class that indicates that Nexus
-    /// cannot assume anything about the health of the instance or its sled.
-    pub fn instance_unhealthy(&self) -> bool {
-        // TODO(#3238) TODO(#4226) For compatibility, this logic is lifted from
-        // the From impl that converts Progenitor client errors to
-        // `omicron_common::api::external::Error`s and from previous logic in
-        // this module that inferred instance health from those converted
-        // errors. In particular, some of the outer Progenitor client error
-        // variants (e.g. CommunicationError) can indicate transient conditions
-        // that aren't really fatal to an instance and don't otherwise indicate
-        // that it's unhealthy.
-        //
-        // To match old behavior until this is revisited, however, treat all
-        // Progenitor errors except for explicit error responses as signs of an
-        // unhealthy instance, and then only treat an instance as healthy if its
-        // sled returned a 400-level status code.
-        match &self.0 {
-            progenitor_client::Error::ErrorResponse(rv) => {
-                !rv.status().is_client_error()
+impl From<SledAgentInstancePutError> for dropshot::HttpError {
+    fn from(value: SledAgentInstancePutError) -> Self {
+        use dropshot::HttpError;
+        // See RFD 486 §6.3:
+        // https://rfd.shared.oxide.computer/rfd/486#_stopping_or_rebooting_a_running_instance
+        match value.0 {
+            // Errors communicating with the sled-agent should return 502 Bad
+            // Gateway to the caller.
+            progenitor_client::Error::CommunicationError(e) => {
+                // N.B.: it sure *seems* like we should be using the
+                // `HttpError::for_status` constructor here, but that
+                // constructor secretly calls the `for_client_error`
+                // constructor, which panics if we pass a status code that isn't
+                // a 4xx error. So, instead, we construct an internal error and
+                // then munge its status code.
+                let mut error = HttpError::for_internal_error(e.to_string());
+                error.status_code = http::StatusCode::BAD_GATEWAY;
+                error
             }
-            _ => true,
+            progenitor_client::Error::InvalidRequest(s) => {
+                HttpError::for_internal_error(s)
+            }
+            e => HttpError::for_internal_error(e.to_string()),
+        }
+    }
+}
+
+impl SledAgentInstancePutError {
+    /// Returns `true` if this error is of a class that indicates that the
+    /// instance is known to have failed.
+    pub fn instance_unhealthy(&self) -> bool {
+        match &self.0 {
+            // See RFD 486 §6.3:
+            // https://rfd.shared.oxide.computer/rfd/486#_stopping_or_rebooting_a_running_instance
+            //
+            // > If a sled agent call returns 404 Not Found with a
+            // > NO_SUCH_INSTANCE error string, the VMM of interest is missing.
+            // > In this case, sled agent has disowned the VMM, so Nexus can
+            // > take control of its state machine and drive the VMM to the
+            // > Failed state and trigger an instance update saga that will
+            // > remove the dangling VMM ID from the instance and clean up the
+            // > VMM’s resources.
+            progenitor_client::Error::ErrorResponse(rv) => {
+                rv.status() == http::StatusCode::NOT_FOUND
+                    && rv.error_code.as_deref() == Some("NO_SUCH_INSTANCE")
+            }
+            _ => false,
         }
     }
 }
@@ -140,6 +167,15 @@ impl From<InstanceStateChangeError> for omicron_common::api::external::Error {
         match value {
             InstanceStateChangeError::SledAgent(e) => e.into(),
             InstanceStateChangeError::Other(e) => e,
+        }
+    }
+}
+
+impl From<InstanceStateChangeError> for dropshot::HttpError {
+    fn from(value: InstanceStateChangeError) -> Self {
+        match value {
+            InstanceStateChangeError::SledAgent(e) => e.into(),
+            InstanceStateChangeError::Other(e) => e.into(),
         }
     }
 }
@@ -559,16 +595,12 @@ impl super::Nexus {
             )
             .await
         {
-            if let InstanceStateChangeError::SledAgent(inner) = &e {
+            if let (InstanceStateChangeError::SledAgent(inner), Some(vmm)) =
+                (&e, state.vmm())
+            {
                 if inner.instance_unhealthy() {
                     let _ = self
-                        .mark_instance_failed(
-                            &InstanceUuid::from_untyped_uuid(
-                                authz_instance.id(),
-                            ),
-                            state.instance().runtime(),
-                            inner,
-                        )
+                        .mark_vmm_failed(opctx, authz_instance, vmm, inner)
                         .await;
                 }
             }
@@ -637,16 +669,12 @@ impl super::Nexus {
             )
             .await
         {
-            if let InstanceStateChangeError::SledAgent(inner) = &e {
+            if let (InstanceStateChangeError::SledAgent(inner), Some(vmm)) =
+                (&e, state.vmm())
+            {
                 if inner.instance_unhealthy() {
                     let _ = self
-                        .mark_instance_failed(
-                            &InstanceUuid::from_untyped_uuid(
-                                authz_instance.id(),
-                            ),
-                            state.instance().runtime(),
-                            inner,
-                        )
+                        .mark_vmm_failed(opctx, authz_instance, vmm, inner)
                         .await;
                 }
             }
@@ -1146,9 +1174,10 @@ impl super::Nexus {
             Err(e) => {
                 if e.instance_unhealthy() {
                     let _ = self
-                        .mark_instance_failed(
-                            &instance_id,
-                            db_instance.runtime(),
+                        .mark_vmm_failed(
+                            &opctx,
+                            authz_instance.clone(),
+                            &initial_vmm,
                             &e,
                         )
                         .await;
@@ -1163,39 +1192,50 @@ impl super::Nexus {
     /// Attempts to move an instance from `prev_instance_runtime` to the
     /// `Failed` state in response to an error returned from a call to a sled
     /// agent instance API, supplied in `reason`.
-    pub(crate) async fn mark_instance_failed(
+    pub(crate) async fn mark_vmm_failed(
         &self,
-        instance_id: &InstanceUuid,
-        prev_instance_runtime: &db::model::InstanceRuntimeState,
+        opctx: &OpContext,
+        authz_instance: authz::Instance,
+        vmm: &db::model::Vmm,
         reason: &SledAgentInstancePutError,
     ) -> Result<(), Error> {
-        error!(self.log, "marking instance failed due to sled agent API error";
+        let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
+        let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
+        error!(self.log, "marking VMM failed due to sled agent API error";
                "instance_id" => %instance_id,
+               "vmm_id" => %vmm_id,
                "error" => ?reason);
 
-        let new_runtime = db::model::InstanceRuntimeState {
-            nexus_state: db::model::InstanceState::Failed,
-
-            // TODO(#4226): Clearing the Propolis ID is required to allow the
-            // instance to be deleted, but this doesn't actually terminate the
-            // VMM.
-            propolis_id: None,
-            gen: prev_instance_runtime.gen.next().into(),
-            ..prev_instance_runtime.clone()
+        let new_runtime = VmmRuntimeState {
+            state: db::model::VmmState::Failed,
+            time_state_updated: chrono::Utc::now(),
+            r#gen: db::model::Generation(vmm.runtime.r#gen.next()),
         };
 
-        match self
-            .db_datastore
-            .instance_update_runtime(&instance_id, &new_runtime)
-            .await
+        match self.db_datastore.vmm_update_runtime(&vmm_id, &new_runtime).await
         {
-            Ok(_) => info!(self.log, "marked instance as Failed";
-                           "instance_id" => %instance_id),
+            Ok(_) => {
+                info!(self.log, "marked VMM as Failed, preparing update saga";
+                    "instance_id" => %instance_id,
+                    "vmm_id" => %vmm_id,
+                    "reason" => ?reason,
+                );
+                let saga = instance_update::SagaInstanceUpdate::prepare(
+                    &instance_update::Params {
+                        serialized_authn: authn::saga::Serialized::for_opctx(
+                            opctx,
+                        ),
+                        authz_instance,
+                    },
+                )?;
+                self.start_instance_update(&opctx.log, saga, instance_id)
+            }
             // XXX: It's not clear what to do with this error; should it be
             // bubbled back up to the caller?
             Err(e) => error!(self.log,
                             "failed to write Failed instance state to DB";
                             "instance_id" => %instance_id,
+                            "vmm_id" => %vmm_id,
                             "error" => ?e),
         }
 
@@ -1326,71 +1366,30 @@ impl super::Nexus {
         propolis_id: PropolisUuid,
         new_runtime_state: &nexus::SledVmmState,
     ) -> Result<(), Error> {
-        let Some((instance_id, saga)) = process_vmm_update(
+        if let Some((instance_id, saga)) = process_vmm_update(
             &self.db_datastore,
             opctx,
             propolis_id,
             new_runtime_state,
         )
         .await?
-        else {
-            return Ok(());
-        };
-
-        // We don't need to wait for the instance update saga to run to
-        // completion to return OK to the sled-agent --- all it needs to care
-        // about is that the VMM/migration state in the database was updated.
-        // Even if we fail to successfully start an update saga, the
-        // instance-updater background task will eventually see that the
-        // instance is in a state which requires an update saga, and ensure that
-        // one is eventually executed.
-        //
-        // Therefore, just spawn the update saga in a new task, and return.
-        info!(opctx.log, "starting update saga for {instance_id}";
-            "instance_id" => %instance_id,
-            "vmm_state" => ?new_runtime_state.vmm_state,
-            "migration_state" => ?new_runtime_state.migrations(),
-        );
-        let sagas = self.sagas.clone();
-        let task_instance_updater =
-            self.background_tasks.task_instance_updater.clone();
-        let log = opctx.log.clone();
-        tokio::spawn(async move {
-            // TODO(eliza): maybe we should use the lower level saga API so
-            // we can see if the saga failed due to the lock being held and
-            // retry it immediately?
-            let running_saga = async move {
-                let runnable_saga = sagas.saga_prepare(saga).await?;
-                runnable_saga.start().await
-            }
-            .await;
-            let result = match running_saga {
-                Err(error) => {
-                    error!(&log, "failed to start update saga for {instance_id}";
-                        "instance_id" => %instance_id,
-                        "error" => %error,
-                    );
-                    // If we couldn't start the update saga for this
-                    // instance, kick the instance-updater background task
-                    // to try and start it again in a timely manner.
-                    task_instance_updater.activate();
-                    return;
-                }
-                Ok(saga) => {
-                    saga.wait_until_stopped().await.into_omicron_result()
-                }
-            };
-            if let Err(error) = result {
-                error!(&log, "update saga for {instance_id} failed";
-                    "instance_id" => %instance_id,
-                    "error" => %error,
-                );
-                // If we couldn't complete the update saga for this
-                // instance, kick the instance-updater background task
-                // to try and start it again in a timely manner.
-                task_instance_updater.activate();
-            }
-        });
+        {
+            // We don't need to wait for the instance update saga to run to
+            // completion to return OK to the sled-agent --- all it needs to care
+            // about is that the VMM/migration state in the database was updated.
+            // Even if we fail to successfully start an update saga, the
+            // instance-updater background task will eventually see that the
+            // instance is in a state which requires an update saga, and ensure that
+            // one is eventually executed.
+            //
+            // Therefore, just spawn the update saga in a new task, and return.
+            info!(opctx.log, "starting update saga for {instance_id}";
+                "instance_id" => %instance_id,
+                "vmm_state" => ?new_runtime_state.vmm_state,
+                "migration_state" => ?new_runtime_state.migrations(),
+            );
+            self.start_instance_update(&opctx.log, saga, instance_id);
+        }
 
         Ok(())
     }
@@ -1828,6 +1827,59 @@ impl super::Nexus {
                 })
             })
     }
+
+    fn start_instance_update(
+        &self,
+        log: &slog::Logger,
+        saga: steno::SagaDag,
+        instance_id: InstanceUuid,
+    ) {
+        let sagas = self.sagas.clone();
+        let task_instance_updater =
+            self.background_tasks.task_instance_updater.clone();
+        let log = log.clone();
+        tokio::spawn(async move {
+            debug!(
+                &log,
+                "preparing instance-update saga for {instance_id}...";
+                "instance_id" => %instance_id,
+            );
+            // TODO(eliza): maybe we should use the lower level saga API so
+            // we can see if the saga failed due to the lock being held and
+            // retry it immediately?
+            let running_saga = async move {
+                let runnable_saga = sagas.saga_prepare(saga).await?;
+                runnable_saga.start().await
+            }
+            .await;
+            let result = match running_saga {
+                Err(error) => {
+                    error!(&log, "failed to start update saga for {instance_id}";
+                        "instance_id" => %instance_id,
+                        "error" => %error,
+                    );
+                    // If we couldn't start the update saga for this
+                    // instance, kick the instance-updater background task
+                    // to try and start it again in a timely manner.
+                    task_instance_updater.activate();
+                    return;
+                }
+                Ok(saga) => {
+                    saga.wait_until_stopped().await.into_omicron_result()
+                }
+            };
+            if let Err(error) = result {
+                error!(&log, "update saga for {instance_id} failed";
+                    "instance_id" => %instance_id,
+                    "error" => %error,
+                );
+                // If we couldn't complete the update saga for this
+                // instance, kick the instance-updater background task
+                // to try and start it again in a timely manner.
+                task_instance_updater.activate();
+            }
+        });
+    }
 }
 
 /// Writes the VMM and migration state supplied in `new_runtime_state` to the
@@ -1847,8 +1899,6 @@ pub(crate) async fn process_vmm_update(
     propolis_id: PropolisUuid,
     new_runtime_state: &nexus::SledVmmState,
 ) -> Result<Option<(InstanceUuid, steno::SagaDag)>, Error> {
-    use sagas::instance_update;
-
     let migrations = new_runtime_state.migrations();
     info!(opctx.log, "received new VMM runtime state from sled agent";
         "propolis_id" => %propolis_id,

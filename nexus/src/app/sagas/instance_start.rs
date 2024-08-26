@@ -540,6 +540,7 @@ async fn sis_ensure_registered_undo(
     let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
     let propolis_id = sagactx.lookup::<PropolisUuid>("propolis_id")?;
     let sled_id = sagactx.lookup::<SledUuid>("sled_id")?;
+    let db_vmm = sagactx.lookup::<db::model::Vmm>("vmm_record")?;
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &params.serialized_authn,
@@ -552,7 +553,7 @@ async fn sis_ensure_registered_undo(
 
     // Fetch the latest record so that this callee can drive the instance into
     // a Failed state if the unregister call fails.
-    let (.., db_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance, _) = LookupPath::new(&opctx, &datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .fetch()
         .await
@@ -603,11 +604,7 @@ async fn sis_ensure_registered_undo(
 
                 if let Err(set_failed_error) = osagactx
                     .nexus()
-                    .mark_instance_failed(
-                        &instance_id,
-                        db_instance.runtime(),
-                        &inner,
-                    )
+                    .mark_vmm_failed(&opctx, authz_instance, &db_vmm, &inner)
                     .await
                 {
                     error!(osagactx.log(),
