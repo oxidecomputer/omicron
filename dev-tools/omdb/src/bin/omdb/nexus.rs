@@ -1726,6 +1726,40 @@ async fn cmd_nexus_blueprints_target_set(
     args: &BlueprintTargetSetArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
+    let found_enabled = if args.diff
+        || matches!(args.enabled, BlueprintTargetSetEnabled::Inherit)
+    {
+        let current_target = client
+            .blueprint_target_view()
+            .await
+            .context("failed to fetch current target blueprint")?
+            .into_inner();
+
+        if args.diff {
+            let blueprint1 = client
+                .blueprint_view(&current_target.target_id)
+                .await
+                .context("failed to fetch target blueprint")?
+                .into_inner();
+            let blueprint2 =
+                client.blueprint_view(&args.blueprint_id).await.with_context(
+                    || format!("fetching blueprint {}", args.blueprint_id),
+                )?;
+            let diff = blueprint2.diff_since_blueprint(&blueprint1);
+            println!("{}", diff.display());
+            println!(
+                "\nDo you want to make {} the target blueprint?",
+                args.blueprint_id
+            );
+            let mut prompt = ConfirmationPrompt::new();
+            prompt.read_and_validate("y/N", "y")?;
+        }
+
+        Some(current_target.enabled)
+    } else {
+        None
+    };
+
     let enabled = match args.enabled {
         BlueprintTargetSetEnabled::Enabled => true,
         BlueprintTargetSetEnabled::Disabled => false,
@@ -1738,42 +1772,10 @@ async fn cmd_nexus_blueprints_target_set(
         // operator. (In the case of the current target blueprint being changed
         // entirely, that will result in a failure to set the current target
         // below, because its parent will no longer be the current target.)
-        BlueprintTargetSetEnabled::Inherit => {
-            client
-                .blueprint_target_view()
-                .await
-                .context("failed to fetch current target blueprint")?
-                .into_inner()
-                .enabled
-        }
+        //
+        // unwrap(): this is always `Some` due to the branch above.
+        BlueprintTargetSetEnabled::Inherit => found_enabled.unwrap(),
     };
-
-    if args.diff {
-        let blueprint1 = client
-            .blueprint_view(
-                &client
-                    .blueprint_target_view()
-                    .await
-                    .context("failed to fetch current target blueprint")?
-                    .into_inner()
-                    .target_id,
-            )
-            .await
-            .context("failed to fetch target blueprint")?
-            .into_inner();
-        let blueprint2 =
-            client.blueprint_view(&args.blueprint_id).await.with_context(
-                || format!("fetching blueprint {}", args.blueprint_id),
-            )?;
-        let diff = blueprint2.diff_since_blueprint(&blueprint1);
-        println!("{}", diff.display());
-        println!(
-            "\nDo you want to make {} the target blueprint?",
-            args.blueprint_id
-        );
-        let mut prompt = ConfirmationPrompt::new();
-        prompt.read_and_validate("y/N", "y")?;
-    }
 
     client
         .blueprint_target_set(&nexus_client::types::BlueprintTargetSet {
