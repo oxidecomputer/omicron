@@ -101,7 +101,7 @@ impl ReplicaConfig {
     <user_files_path>{user_files_path}</user_files_path>
     <default_profile>default</default_profile>
     <format_schema_path>{format_schema_path}</format_schema_path>
-    <display_name>{cluster}-{id}</display_name>
+    <display_name>{cluster}_{id}</display_name>
     <listen_host>{listen_host}</listen_host>
     <http_port>{http_port}</http_port>
     <tcp_port>{tcp_port}</tcp_port>
@@ -158,6 +158,8 @@ pub struct RemoteServers {
 }
 
 impl RemoteServers {
+    // TODO: pub fn new()
+
     pub fn to_xml(&self) -> String {
         let RemoteServers { cluster, secret, replicas } = self;
 
@@ -165,6 +167,7 @@ impl RemoteServers {
             "
     <remote_servers replace=\"true\">
         <{cluster}>
+            <!-- TODO(https://github.com/oxidecomputer/omicron/issues/3823): secret handling TBD -->
             <secret>{secret}</secret>
             <shard>
                 <internal_replication>true</internal_replication>"

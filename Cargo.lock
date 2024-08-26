@@ -1132,6 +1132,7 @@ dependencies = [
  "anyhow",
  "camino",
  "derive_more",
+ "omicron-common",
  "omicron-workspace-hack",
  "schemars",
  "serde",
