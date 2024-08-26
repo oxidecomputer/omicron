@@ -118,3 +118,22 @@ where
 async fn never_bail() -> Result<bool, Error> {
     Ok(false)
 }
+
+/// A wrapper struct that does nothing other than elide the inner value from
+/// [`std::debug::Debug`] output.
+///
+/// If you want to use this for secrets, consider that it might not do
+/// everything you expect (it does not zeroize memory on drop, nor get in the
+/// way of you removing the inner value from this wrapper struct).
+#[derive(
+    Clone, Copy, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct NoDebug<T>(pub T);
+
+impl<T> std::fmt::Debug for NoDebug<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "..")
+    }
+}

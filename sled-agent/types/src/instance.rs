@@ -18,6 +18,7 @@ use omicron_common::api::internal::{
         DhcpConfig, NetworkInterface, ResolvedVpcFirewallRule, SourceNatConfig,
     },
 };
+use omicron_common::NoDebug;
 use omicron_uuid_kinds::PropolisUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -63,7 +64,7 @@ pub struct InstanceHardware {
     pub dhcp_config: DhcpConfig,
     // TODO: replace `propolis_client::*` with locally-modeled request type
     pub disks: Vec<propolis_client::types::DiskRequest>,
-    pub cloud_init_bytes: Option<String>,
+    pub cloud_init_bytes: Option<NoDebug<String>>,
 }
 
 /// Metadata used to track statistics about an instance.
