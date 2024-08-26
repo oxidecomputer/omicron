@@ -69,6 +69,7 @@ impl KeeperNode {
 #[derive(Debug, Clone)]
 pub struct ClickhouseServerConfig {
     pub cluster_name: String,
+    pub config_dir: Utf8PathBuf,
     pub id: ServerId,
     pub tcp_port: u16,
     pub http_port: u16,
@@ -80,8 +81,10 @@ pub struct ClickhouseServerConfig {
 }
 
 impl ClickhouseServerConfig {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         cluster_name: String,
+        config_dir: Utf8PathBuf,
         id: ServerId,
         tcp_port: u16,
         http_port: u16,
@@ -93,6 +96,7 @@ impl ClickhouseServerConfig {
     ) -> Self {
         Self {
             cluster_name,
+            config_dir,
             id,
             tcp_port,
             http_port,
@@ -112,10 +116,7 @@ impl ClickhouseServerConfig {
             replicas: self.servers.clone(),
         };
 
-        let keepers = KeeperConfigsForReplica {
-            nodes: self
-                .keepers.clone(),
-        };
+        let keepers = KeeperConfigsForReplica { nodes: self.keepers.clone() };
 
         let logs: Utf8PathBuf = self.path.join("logs");
         let log = logs.join("clickhouse.log");
@@ -142,7 +143,8 @@ impl ClickhouseServerConfig {
             keepers: keepers.clone(),
             data_path,
         };
-        let mut f = File::create(self.path.join("replica-server-config.xml"))?;
+        let mut f =
+            File::create(self.config_dir.join("replica-server-config.xml"))?;
         f.write_all(config.to_xml().as_bytes())?;
         f.flush()?;
         Ok(())
@@ -151,6 +153,7 @@ impl ClickhouseServerConfig {
 
 #[derive(Debug, Clone)]
 pub struct ClickhouseKeeperConfig {
+    pub config_dir: Utf8PathBuf,
     pub keepers: Vec<KeeperNode>,
     pub path: Utf8PathBuf,
     pub listen_addr: Ipv6Addr,
@@ -159,25 +162,28 @@ pub struct ClickhouseKeeperConfig {
 
 impl ClickhouseKeeperConfig {
     pub fn new(
+        config_dir: Utf8PathBuf,
         keepers: Vec<KeeperNode>,
         path: Utf8PathBuf,
         listen_addr: Ipv6Addr,
         tcp_port: u16,
     ) -> Self {
-        ClickhouseKeeperConfig { keepers, path, listen_addr, tcp_port }
+        ClickhouseKeeperConfig {
+            config_dir,
+            keepers,
+            path,
+            listen_addr,
+            tcp_port,
+        }
     }
     /// Generate a config for `this_keeper` consisting of the keepers in `keeper_ids`
-    pub fn generate_xml_file(
-        &self,
-        this_keeper: KeeperId,
-    ) -> Result<()> {
+    pub fn generate_xml_file(&self, this_keeper: KeeperId) -> Result<()> {
         let raft_servers: Vec<RaftServerConfig> = self
             .keepers
             .iter()
             .map(|&k| RaftServerConfig {
                 // TODO: Implemement a "new()" method for RaftServerConfig
-                id: k
-                    .id,
+                id: k.id,
                 hostname: k.host.to_string(),
                 port: k.raft_port,
             })
@@ -208,7 +214,7 @@ impl ClickhouseKeeperConfig {
             },
             raft_config: RaftServers { servers: raft_servers.clone() },
         };
-        let mut f = File::create(self.path.join("keeper-config.xml"))?;
+        let mut f = File::create(self.config_dir.join("keeper-config.xml"))?;
         f.write_all(config.to_xml().as_bytes())?;
         f.flush()?;
 
@@ -221,6 +227,7 @@ mod tests {
     use std::{net::Ipv6Addr, str::FromStr};
 
     use camino::Utf8PathBuf;
+    use camino_tempfile::Builder;
     use omicron_common::address::{
         CLICKHOUSE_HTTP_PORT, CLICKHOUSE_INTERSERVER_PORT,
         CLICKHOUSE_KEEPER_RAFT_PORT, CLICKHOUSE_KEEPER_TCP_PORT,
@@ -228,11 +235,18 @@ mod tests {
     };
 
     use crate::{
-        ClickhouseKeeperConfig, ClickhouseServerConfig, KeeperId, KeeperNode, NodeConfig, ServerId
+        ClickhouseKeeperConfig, ClickhouseServerConfig, KeeperId, KeeperNode,
+        NodeConfig, ServerId,
     };
 
     #[test]
     fn test_generate_keeper_config() {
+        let config_dir = Builder::new()
+            .tempdir_in(
+                Utf8PathBuf::try_from(std::env::temp_dir()).unwrap())
+                .expect("Could not create directory for ClickHouse configuration generation test"
+            );
+
         let keepers = vec![
             KeeperNode::new(
                 KeeperId(1),
@@ -240,42 +254,52 @@ mod tests {
                 CLICKHOUSE_KEEPER_RAFT_PORT,
             ),
             KeeperNode::new(
-KeeperId(2),
+                KeeperId(2),
                 Ipv6Addr::from_str("ff::02").unwrap(),
                 CLICKHOUSE_KEEPER_RAFT_PORT,
             ),
             KeeperNode::new(
-KeeperId(3),
+                KeeperId(3),
                 Ipv6Addr::from_str("ff::03").unwrap(),
                 CLICKHOUSE_KEEPER_RAFT_PORT,
-            )
+            ),
         ];
 
         let config = ClickhouseKeeperConfig::new(
+            Utf8PathBuf::from(config_dir.path()),
             keepers,
-            Utf8PathBuf::from_str("./testutils").unwrap(),
+            Utf8PathBuf::from_str("./").unwrap(),
             Ipv6Addr::from_str("ff::08").unwrap(),
             CLICKHOUSE_KEEPER_TCP_PORT,
         );
 
         config.generate_xml_file(KeeperId(1)).unwrap();
+
+        let expected_file = Utf8PathBuf::from_str("./testutils")
+            .unwrap()
+            .join("keeper-config.xml");
+        let expected_content = std::fs::read_to_string(expected_file)
+            .expect("Failed to read from expected ClickHouse keeper file");
+        let generated_file =
+            Utf8PathBuf::from(config_dir.path()).join("keeper-config.xml");
+        let generated_content = std::fs::read_to_string(generated_file)
+            .expect("Failed to read from generated ClickHouse keeper file");
+
+        assert_eq!(expected_content, generated_content);
     }
 
     #[test]
     fn test_generate_replica_config() {
+        let config_dir = Builder::new()
+        .tempdir_in(
+            Utf8PathBuf::try_from(std::env::temp_dir()).unwrap())
+            .expect("Could not create directory for ClickHouse configuration generation test"
+        );
+
         let keepers = vec![
-            NodeConfig::new(
-                "ff::01".to_string(),
-                CLICKHOUSE_KEEPER_TCP_PORT,
-            ),
-            NodeConfig::new(
-                "ff::02".to_string(),
-                CLICKHOUSE_KEEPER_TCP_PORT,
-            ),
-            NodeConfig::new(
-                "ff::03".to_string(),
-                CLICKHOUSE_KEEPER_TCP_PORT,
-            )
+            NodeConfig::new("ff::01".to_string(), CLICKHOUSE_KEEPER_TCP_PORT),
+            NodeConfig::new("ff::02".to_string(), CLICKHOUSE_KEEPER_TCP_PORT),
+            NodeConfig::new("ff::03".to_string(), CLICKHOUSE_KEEPER_TCP_PORT),
         ];
 
         let servers = vec![
@@ -285,16 +309,31 @@ KeeperId(3),
 
         let config = ClickhouseServerConfig::new(
             "oximeter_cluster".to_string(),
+            Utf8PathBuf::from(config_dir.path()),
             ServerId(1),
             CLICKHOUSE_TCP_PORT,
             CLICKHOUSE_HTTP_PORT,
             CLICKHOUSE_INTERSERVER_PORT,
-            Utf8PathBuf::from_str("./testutils").unwrap(),
+            Utf8PathBuf::from_str("./").unwrap(),
             Ipv6Addr::from_str("ff::08").unwrap(),
             keepers,
             servers,
         );
 
         config.generate_xml_file().unwrap();
+
+        let expected_file = Utf8PathBuf::from_str("./testutils")
+            .unwrap()
+            .join("replica-server-config.xml");
+        let expected_content = std::fs::read_to_string(expected_file).expect(
+            "Failed to read from expected ClickHouse replica server file",
+        );
+        let generated_file = Utf8PathBuf::from(config_dir.path())
+            .join("replica-server-config.xml");
+        let generated_content = std::fs::read_to_string(generated_file).expect(
+            "Failed to read from generated ClickHouse replica server file",
+        );
+
+        assert_eq!(expected_content, generated_content);
     }
 }

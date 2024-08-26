@@ -10,6 +10,7 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 camino.workspace = true
+camino-tempfile.workspace = true
 derive_more.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
