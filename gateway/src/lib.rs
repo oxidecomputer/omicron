@@ -6,6 +6,7 @@ mod config;
 mod context;
 mod error;
 mod management_switch;
+pub mod metrics;
 mod serial_console;
 
 pub mod http_entrypoints; // TODO pub only for testing - is this right?
@@ -62,6 +63,8 @@ pub struct Server {
     /// `http_servers`
     all_servers_shutdown: FuturesUnordered<ShutdownWaitFuture>,
     request_body_max_bytes: usize,
+    /// handle to the SP sensor metrics subsystem
+    metrics: metrics::Metrics,
     log: Logger,
 }
 
@@ -151,6 +154,9 @@ impl Server {
         let mut http_servers = HashMap::with_capacity(args.addresses.len());
         let all_servers_shutdown = FuturesUnordered::new();
 
+        let metrics =
+            metrics::Metrics::new(&log, &args, config.metrics, apictx.clone());
+
         for addr in args.addresses {
             start_dropshot_server(
                 &apictx,
@@ -167,6 +173,7 @@ impl Server {
             http_servers,
             all_servers_shutdown,
             request_body_max_bytes: config.dropshot.request_body_max_bytes,
+            metrics,
             log,
         })
     }
@@ -275,12 +282,14 @@ impl Server {
             server.close().await?;
         }
 
+        self.metrics.update_server_addrs(addresses).await;
+
         Ok(())
     }
 
     /// The rack_id will be set on a refresh of the SMF property when the sled
     /// agent starts.
-    pub fn set_rack_id(&self, rack_id: Option<Uuid>) {
+    pub fn set_rack_id(&mut self, rack_id: Option<Uuid>) {
         if let Some(rack_id) = rack_id {
             let val = self.apictx.rack_id.get_or_init(|| rack_id);
             if *val != rack_id {
@@ -291,6 +300,7 @@ impl Server {
                     "ignored_new_rack_id" => %rack_id);
             } else {
                 info!(self.apictx.log, "Set rack_id"; "rack_id" => %rack_id);
+                self.metrics.set_rack_id(rack_id);
             }
         } else {
             warn!(self.apictx.log, "SMF refresh called without a rack id");

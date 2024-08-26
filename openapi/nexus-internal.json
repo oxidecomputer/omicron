@@ -4412,6 +4412,13 @@
             "enum": [
               "instance"
             ]
+          },
+          {
+            "description": "The producer is a management gateway service.",
+            "type": "string",
+            "enum": [
+              "management_gateway"
+            ]
           }
         ]
       },

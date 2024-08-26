@@ -1,0 +1,183 @@
+format_version = 1
+
+[target]
+name = "hardware_component"
+description = "A hardware component on a compute sled, switch, or power shelf"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [
+        "rack_id",
+        "slot",
+        "chassis_kind",
+        "chassis_serial",
+        "chassis_model",
+        "chassis_revision",
+        "hubris_archive_id",
+        "gateway_id",
+        "component_kind",
+        "component_id",
+        "description",
+    ]}
+]
+
+[fields.rack_id]
+type = "uuid"
+description = "ID of the rack on which this measurement was recorded."
+
+[fields.slot]
+type = "u32"
+description = """
+The cubby number or switch slot of the service processor reporting the \
+measurement"""
+
+[fields.chassis_model]
+type = "string"
+description = "Model number of the sled, switch, or power shelf"
+
+[fields.chassis_revision]
+type = "u32"
+description = "Revision number of the sled, switch, or power shelf"
+
+[fields.chassis_serial]
+type = "string"
+description = "Serial number of the sled, switch, or power shelf"
+
+[fields.hubris_archive_id]
+type = "string"
+description = """
+Hubris firmware archive ID of the service processor when the measurement \
+was recorded."""
+
+[fields.gateway_id]
+type = "uuid"
+description = """
+ID of the Management Gateway Service process which recorded the measurement."""
+
+[fields.chassis_kind]
+type = "string"
+description = """
+What kind of thing the component resides on.
+
+This will be one of 'sled', for components on compute sleds; 'switch', for \
+components on rack switches; or 'power', for components on power shelves."""
+
+[fields.component_id]
+type = "string"
+description = """
+The service processor component ID uniquely identifying the hardware \
+component on the sled, switch, or power shelf."""
+
+[fields.component_kind]
+type = "string"
+description = "What type of hardware component this thing is."
+
+[fields.description]
+type = "string"
+description = """
+A human-readable description of the hardware component. This may include \
+its location or role in the system (e.g. a DIMM's number, or a temperature \
+sensor's location)."""
+
+[fields.sensor]
+type = "string"
+description = """The name of a sensor that recorded a sensor reading."""
+
+[fields.error]
+type = "string"
+description = "The kind of sensor error that occurred"
+
+[fields.sensor_kind]
+type = "string"
+description = """
+Which kind of sensor could not be read due to a sensor error.
+
+This will be one of 'temperature', 'current', 'power', 'voltage', \
+'input_current', 'input_voltage', or 'fan_speed' (the same names as \
+the metrics emitted by these sensors when they are read successfully)."""
+
+[[metrics]]
+name = "temperature"
+description = "A temperature reading from a hardware component."
+units = "degrees_celsius"
+datum_type = "f32"
+versions = [
+    { added_in = 1, fields = ["sensor"]}
+]
+
+[[metrics]]
+name = "current"
+description = "Output current reading in amperes"
+units = "amps"
+datum_type = "f32"
+versions = [
+    { added_in = 1, fields = ["sensor"]}
+]
+
+[[metrics]]
+name = "power"
+description = "Power reading, in watts"
+units = "watts"
+datum_type = "f32"
+versions = [
+    { added_in = 1, fields = ["sensor"]}
+]
+
+[[metrics]]
+name = "voltage"
+description = "Output voltage reading, in volts"
+units = "volts"
+datum_type = "f32"
+versions = [
+    { added_in = 1, fields = ["sensor"]}
+]
+
+[[metrics]]
+name = "input_current"
+description = "Input electric current reading in amperes"
+units = "amps"
+datum_type = "f32"
+versions = [
+    { added_in = 1, fields = ["sensor"]}
+]
+
+[[metrics]]
+name = "input_voltage"
+description = "Input electric voltage reading, in volts"
+units = "volts"
+datum_type = "f32"
+versions = [
+    { added_in = 1, fields = ["sensor"]}
+]
+
+
+[[metrics]]
+name = "fan_speed"
+description = "A fan speed measurement, in rotations per minute"
+units = "rpm"
+datum_type = "f32"
+versions = [
+    { added_in = 1, fields = ["sensor"]}
+]
+
+[[metrics]]
+name = "sensor_error_count"
+description = "Cumulative count of errors reported by a sensor"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = ["sensor", "error", "sensor_kind"]}
+]
+
+[[metrics]]
+name = "poll_error_count"
+description = """
+Cumulative count of errors encountered whilst polling a component's sensors.
+
+Unlike the `sensor_error_count` metric, this counts errors encountered by \
+the management gateway while polling the component, rather than errors \
+reported by the component itself."""
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = ["error"] }
+]
