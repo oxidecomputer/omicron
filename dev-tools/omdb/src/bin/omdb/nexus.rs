@@ -244,6 +244,10 @@ struct BlueprintTargetSetArgs {
     blueprint_id: Uuid,
     /// whether this blueprint should be enabled
     enabled: BlueprintTargetSetEnabled,
+    /// if specified, diff against the current target and wait for confirmation
+    /// before proceeding
+    #[clap(long)]
+    diff: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -1734,12 +1738,43 @@ async fn cmd_nexus_blueprints_target_set(
         // operator. (In the case of the current target blueprint being changed
         // entirely, that will result in a failure to set the current target
         // below, because its parent will no longer be the current target.)
-        BlueprintTargetSetEnabled::Inherit => client
-            .blueprint_target_view()
-            .await
-            .map(|current| current.into_inner().enabled)
-            .context("failed to fetch current target blueprint")?,
+        BlueprintTargetSetEnabled::Inherit => {
+            client
+                .blueprint_target_view()
+                .await
+                .context("failed to fetch current target blueprint")?
+                .into_inner()
+                .enabled
+        }
     };
+
+    if args.diff {
+        let blueprint1 = client
+            .blueprint_view(
+                &client
+                    .blueprint_target_view()
+                    .await
+                    .context("failed to fetch current target blueprint")?
+                    .into_inner()
+                    .target_id,
+            )
+            .await
+            .context("failed to fetch target blueprint")?
+            .into_inner();
+        let blueprint2 =
+            client.blueprint_view(&args.blueprint_id).await.with_context(
+                || format!("fetching blueprint {}", args.blueprint_id),
+            )?;
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        println!("{}", diff.display());
+        println!(
+            "\nDo you want to make {} the target blueprint?",
+            args.blueprint_id
+        );
+        let mut prompt = ConfirmationPrompt::new();
+        prompt.read_and_validate("y/N", "y")?;
+    }
+
     client
         .blueprint_target_set(&nexus_client::types::BlueprintTargetSet {
             target_id: args.blueprint_id,
@@ -1966,7 +2001,7 @@ impl ConfirmationPrompt {
         {
             Ok(input)
         } else {
-            bail!("expungement aborted")
+            bail!("operation aborted")
         }
     }
 
