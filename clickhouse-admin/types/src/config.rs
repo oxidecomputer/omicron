@@ -154,7 +154,7 @@ impl Macros {
 pub struct RemoteServers {
     pub cluster: String,
     pub secret: String,
-    pub replicas: Vec<ServerConfig>,
+    pub replicas: Vec<NodeConfig>,
 }
 
 impl RemoteServers {
@@ -174,7 +174,7 @@ impl RemoteServers {
         );
 
         for r in replicas {
-            let ServerConfig { host, port } = r;
+            let NodeConfig { host, port } = r;
             s.push_str(&format!(
                 "
                 <replica>
@@ -198,14 +198,14 @@ impl RemoteServers {
 
 #[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
 pub struct KeeperConfigsForReplica {
-    pub nodes: Vec<ServerConfig>,
+    pub nodes: Vec<NodeConfig>,
 }
 
 impl KeeperConfigsForReplica {
     pub fn to_xml(&self) -> String {
         let mut s = String::from("    <zookeeper>");
         for node in &self.nodes {
-            let ServerConfig { host, port } = node;
+            let NodeConfig { host, port } = node;
             s.push_str(&format!(
                 "
         <node>
@@ -220,9 +220,15 @@ impl KeeperConfigsForReplica {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
-pub struct ServerConfig {
+pub struct NodeConfig {
     pub host: String,
     pub port: u16,
+}
+
+impl NodeConfig {
+    pub fn new(host: String, port: u16) -> Self {
+        NodeConfig { host, port }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]

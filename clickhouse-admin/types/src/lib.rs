@@ -10,20 +10,9 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Write;
 use std::net::Ipv6Addr;
-use thiserror::Error;
 
 pub mod config;
 use config::*;
-
-// TODO: remove this error?
-#[derive(Error, Debug)]
-pub enum ClickhouseConfigError {
-    #[error("no keeper ID has been provided")]
-    NoKeeperId,
-
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
-}
 
 /// A unique ID for a clickhouse keeper
 #[derive(
@@ -65,34 +54,15 @@ pub struct ServerId(pub u64);
 
 #[derive(Debug, Clone, Copy)]
 pub struct KeeperNode {
-    pub id: Option<KeeperId>,
+    pub id: KeeperId,
     // TODO: We're writing DNS records here perhaps?
     pub host: Ipv6Addr,
-    // TODO: Do I really need this port?
     pub raft_port: u16,
 }
 
 impl KeeperNode {
-    pub fn new(host: Ipv6Addr, raft_port: u16) -> Self {
-        KeeperNode { id: None, host, raft_port }
-    }
-
-    pub fn with_id(mut self, id: KeeperId) -> Self {
-        self.id = Some(id);
-        self
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct ServerNode {
-    pub id: ServerId,
-    pub host: Ipv6Addr,
-    pub tcp_port: u16,
-}
-
-impl ServerNode {
-    pub fn new(id: ServerId, host: Ipv6Addr, tcp_port: u16) -> Self {
-        ServerNode { id, host, tcp_port }
+    pub fn new(id: KeeperId, host: Ipv6Addr, raft_port: u16) -> Self {
+        KeeperNode { id, host, raft_port }
     }
 }
 
@@ -105,8 +75,8 @@ pub struct ClickhouseServerConfig {
     pub interserver_http_port: u16,
     pub path: Utf8PathBuf,
     pub listen_addr: Ipv6Addr,
-    pub keepers: Vec<KeeperNode>,
-    pub servers: Vec<ServerNode>,
+    pub keepers: Vec<NodeConfig>,
+    pub servers: Vec<NodeConfig>,
 }
 
 impl ClickhouseServerConfig {
@@ -118,8 +88,8 @@ impl ClickhouseServerConfig {
         interserver_http_port: u16,
         path: Utf8PathBuf,
         listen_addr: Ipv6Addr,
-        keepers: Vec<KeeperNode>,
-        servers: Vec<ServerNode>,
+        keepers: Vec<NodeConfig>,
+        servers: Vec<NodeConfig>,
     ) -> Self {
         Self {
             cluster_name,
@@ -135,34 +105,18 @@ impl ClickhouseServerConfig {
     }
 
     pub fn generate_xml_file(&self) -> Result<()> {
-        let servers = self
-            .servers
-            .iter()
-            .map(|&s| ServerConfig {
-                host: s.host.to_string(),
-                port: s.tcp_port,
-            })
-            .collect();
-
         let remote_servers = RemoteServers {
             cluster: self.cluster_name.clone(),
             // TODO(https://github.com/oxidecomputer/omicron/issues/3823): secret handling TBD
             secret: "some-unique-value".to_string(),
-            replicas: servers,
+            replicas: self.servers.clone(),
         };
 
         let keepers = KeeperConfigsForReplica {
             nodes: self
-                .keepers
-                .iter()
-                .map(|&k| ServerConfig {
-                    host: k.host.to_string(),
-                    port: k.raft_port,
-                })
-                .collect(),
+                .keepers.clone(),
         };
 
-        // TODO: See which is the best approach for log directory
         let logs: Utf8PathBuf = self.path.join("logs");
         let log = logs.join("clickhouse.log");
         let errorlog = logs.join("clickhouse.err.log");
@@ -223,9 +177,7 @@ impl ClickhouseKeeperConfig {
             .map(|&k| RaftServerConfig {
                 // TODO: Implemement a "new()" method for RaftServerConfig
                 id: k
-                    .id
-                    .ok_or(ClickhouseConfigError::NoKeeperId)
-                    .expect("no keeper ID has been provided"),
+                    .id,
                 hostname: k.host.to_string(),
                 port: k.raft_port,
             })
@@ -276,28 +228,27 @@ mod tests {
     };
 
     use crate::{
-        ClickhouseKeeperConfig, ClickhouseServerConfig, KeeperId, KeeperNode,
-        ServerId, ServerNode,
+        ClickhouseKeeperConfig, ClickhouseServerConfig, KeeperId, KeeperNode, NodeConfig, ServerId
     };
 
     #[test]
     fn test_generate_keeper_config() {
         let keepers = vec![
             KeeperNode::new(
+                KeeperId(1),
                 Ipv6Addr::from_str("ff::01").unwrap(),
                 CLICKHOUSE_KEEPER_RAFT_PORT,
-            )
-            .with_id(KeeperId(1)),
+            ),
             KeeperNode::new(
+KeeperId(2),
                 Ipv6Addr::from_str("ff::02").unwrap(),
                 CLICKHOUSE_KEEPER_RAFT_PORT,
-            )
-            .with_id(KeeperId(2)),
+            ),
             KeeperNode::new(
+KeeperId(3),
                 Ipv6Addr::from_str("ff::03").unwrap(),
                 CLICKHOUSE_KEEPER_RAFT_PORT,
             )
-            .with_id(KeeperId(3)),
         ];
 
         let config = ClickhouseKeeperConfig::new(
@@ -313,26 +264,23 @@ mod tests {
     #[test]
     fn test_generate_replica_config() {
         let keepers = vec![
-            KeeperNode::new(
-                Ipv6Addr::from_str("ff::01").unwrap(),
-                CLICKHOUSE_KEEPER_RAFT_PORT,
+            NodeConfig::new(
+                "ff::01".to_string(),
+                CLICKHOUSE_KEEPER_TCP_PORT,
+            ),
+            NodeConfig::new(
+                "ff::02".to_string(),
+                CLICKHOUSE_KEEPER_TCP_PORT,
+            ),
+            NodeConfig::new(
+                "ff::03".to_string(),
+                CLICKHOUSE_KEEPER_TCP_PORT,
             )
-            .with_id(KeeperId(1)),
-            KeeperNode::new(
-                Ipv6Addr::from_str("ff::02").unwrap(),
-                CLICKHOUSE_KEEPER_RAFT_PORT,
-            )
-            .with_id(KeeperId(2)),
-            KeeperNode::new(
-                Ipv6Addr::from_str("ff::03").unwrap(),
-                CLICKHOUSE_KEEPER_RAFT_PORT,
-            )
-            .with_id(KeeperId(3)),
         ];
 
         let servers = vec![
-            ServerNode::new(ServerId(1), Ipv6Addr::from_str("ff::08").unwrap(), CLICKHOUSE_TCP_PORT),
-            ServerNode::new(ServerId(2), Ipv6Addr::from_str("ff::09").unwrap(), CLICKHOUSE_TCP_PORT),
+            NodeConfig::new("ff::08".to_string(), CLICKHOUSE_TCP_PORT),
+            NodeConfig::new("ff::09".to_string(), CLICKHOUSE_TCP_PORT),
         ];
 
         let config = ClickhouseServerConfig::new(

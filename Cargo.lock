@@ -1137,7 +1137,6 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "thiserror",
 ]
 
 [[package]]
