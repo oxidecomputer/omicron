@@ -14,7 +14,7 @@ use std::fmt;
 use uuid::Uuid;
 
 use crate::{
-    api::external::Generation,
+    api::external::{ByteCount, Generation},
     ledger::Ledgerable,
     zpool_name::{ZpoolKind, ZpoolName},
 };
@@ -159,10 +159,10 @@ pub struct DatasetConfig {
     pub compression: Option<String>,
 
     /// The upper bound on the amount of storage used by this dataset
-    pub quota: Option<usize>,
+    pub quota: Option<ByteCount>,
 
     /// The lower bound on the amount of storage usable by this dataset
-    pub reservation: Option<usize>,
+    pub reservation: Option<ByteCount>,
 }
 
 #[derive(
