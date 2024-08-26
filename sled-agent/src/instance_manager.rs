@@ -733,11 +733,9 @@ impl InstanceManagerRunner {
         // name to capture into a bundle, so return a `NoSuchZone` error.
         let vmm_id: PropolisUuid = name
             .strip_prefix(PROPOLIS_ZONE_PREFIX)
-            .ok_or_else(|| BundleError::NoSuchZone { name: name.to_string() })
-            .and_then(|uuid_str| {
-                uuid_str.parse::<PropolisUuid>().map_err(|_| {
-                    BundleError::NoSuchZone { name: name.to_string() }
-                })
+            .and_then(|uuid_str| uuid_str.parse::<PropolisUuid>().ok())
+            .ok_or_else(|| BundleError::NoSuchZone {
+                name: name.to_string(),
             })?;
 
         let Some(instance) = self.jobs.get(&vmm_id) else {

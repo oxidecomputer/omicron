@@ -1830,8 +1830,8 @@ impl super::Nexus {
     }
 }
 
-/// Publishes the VMM and migration state supplied in `new_runtime_state` to the
-/// database.
+/// Writes the VMM and migration state supplied in `new_runtime_state` to the
+/// database (provided that it's newer than what's already there).
 ///
 /// # Return value
 ///
