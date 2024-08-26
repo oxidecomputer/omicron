@@ -1564,8 +1564,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     "    execution:        {}",
                     if status.enabled { "enabled" } else { "disabled" }
                 );
-                let errors =
-                    status.errors.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
+                let errors = status.errors.as_deref().unwrap_or(&[]);
                 println!("    errors:           {}", errors.len());
                 for (i, e) in errors.iter().enumerate() {
                     println!("        error {}: {}", i, e);
