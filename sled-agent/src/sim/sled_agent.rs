@@ -453,9 +453,7 @@ impl SledAgent {
             Ok(i) => i.current().clone(),
             Err(_) => match state {
                 VmmStateRequested::Stopped => {
-                    return Ok(VmmPutStateResponse {
-                        updated_runtime: None,
-                    });
+                    return Ok(VmmPutStateResponse { updated_runtime: None });
                 }
                 _ => {
                     return Err(Error::invalid_request(&format!(
@@ -498,9 +496,7 @@ impl SledAgent {
                             }
                         }
                     });
-                    return Ok(VmmPutStateResponse {
-                        updated_runtime: None,
-                    });
+                    return Ok(VmmPutStateResponse { updated_runtime: None });
                 }
                 VmmStateRequested::Stopped => {
                     propolis_client::types::InstanceStateRequested::Stop
