@@ -26,6 +26,7 @@ impl From<omicron_common::api::internal::nexus::ProducerKind>
     fn from(kind: omicron_common::api::internal::nexus::ProducerKind) -> Self {
         use omicron_common::api::internal::nexus;
         match kind {
+            nexus::ProducerKind::ManagementGateway => Self::ManagementGateway,
             nexus::ProducerKind::Service => Self::Service,
             nexus::ProducerKind::SledAgent => Self::SledAgent,
             nexus::ProducerKind::Instance => Self::Instance,

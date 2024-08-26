@@ -450,7 +450,7 @@ omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.11.0"
 oxide-client = { path = "clients/oxide-client" }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "3dc9a3dd8d3c623f0cf2c659c7119ce0c026a96d", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "76878de67229ea113d70503c441eab47ac5dc653", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = { git = "https://github.com/oxidecomputer/oxnet" }
 once_cell = "1.19.0"
@@ -460,7 +460,7 @@ openapiv3 = "2.0.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "3dc9a3dd8d3c623f0cf2c659c7119ce0c026a96d" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "76878de67229ea113d70503c441eab47ac5dc653" }
 oso = "0.27"
 owo-colors = "4.0.0"
 oximeter = { path = "oximeter/oximeter" }

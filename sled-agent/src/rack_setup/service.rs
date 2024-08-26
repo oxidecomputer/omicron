@@ -71,7 +71,6 @@ use crate::bootstrap::early_networking::{
 };
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::nexus::d2n_params;
-use crate::params::OmicronZoneTypeExt;
 use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
 };
@@ -91,10 +90,9 @@ use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
 use nexus_types::deployment::{
-    Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
-    BlueprintDatasetsConfig, BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
-    BlueprintZoneDisposition, BlueprintZonesConfig,
-    CockroachDbPreserveDowngrade, InvalidOmicronZoneType,
+    blueprint_zone_type, Blueprint, BlueprintDatasetConfig,
+    BlueprintDatasetDisposition, BlueprintDatasetsConfig, BlueprintZoneType,
+    BlueprintZonesConfig, CockroachDbPreserveDowngrade,
 };
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_sled_address;
@@ -110,8 +108,8 @@ use omicron_common::disk::{
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
-use omicron_uuid_kinds::{ExternalIpUuid, GenericUuid};
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
@@ -535,7 +533,7 @@ impl ServiceInner {
                         .iter()
                         .filter_map(|zone_config| {
                             match &zone_config.zone_type {
-                                OmicronZoneType::InternalDns { http_address, .. }
+                                BlueprintZoneType::InternalDns(blueprint_zone_type::InternalDns{ http_address, .. })
                                 => {
                                     Some(*http_address)
                                 },
@@ -721,15 +719,17 @@ impl ServiceInner {
         let mut datasets: Vec<NexusTypes::DatasetCreateRequest> = vec![];
         for sled_config in service_plan.services.values() {
             for zone in &sled_config.zones {
-                if let Some((dataset_name, dataset_address)) =
-                    zone.dataset_name_and_address()
-                {
+                if let Some(dataset) = zone.zone_type.durable_dataset() {
                     datasets.push(NexusTypes::DatasetCreateRequest {
-                        zpool_id: dataset_name.pool().id().into_untyped_uuid(),
-                        dataset_id: zone.id,
+                        zpool_id: dataset
+                            .dataset
+                            .pool_name
+                            .id()
+                            .into_untyped_uuid(),
+                        dataset_id: zone.id.into_untyped_uuid(),
                         request: NexusTypes::DatasetPutRequest {
-                            address: dataset_address.to_string(),
-                            kind: dataset_name.dataset().clone(),
+                            address: dataset.address.to_string(),
+                            kind: dataset.kind,
                         },
                     })
                 }
@@ -983,7 +983,7 @@ impl ServiceInner {
                 if sled_config.zones.iter().any(|zone_config| {
                     matches!(
                         &zone_config.zone_type,
-                        OmicronZoneType::CockroachDb { .. }
+                        BlueprintZoneType::CockroachDb(_)
                     )
                 }) {
                     Some(sled_address)
@@ -1400,7 +1400,7 @@ fn build_initial_blueprint_from_plan(
     let blueprint = build_initial_blueprint_from_sled_configs(
         sled_configs_by_id,
         internal_dns_version,
-    )?;
+    );
 
     Ok(blueprint)
 }
@@ -1408,47 +1408,11 @@ fn build_initial_blueprint_from_plan(
 pub(crate) fn build_initial_blueprint_from_sled_configs(
     sled_configs_by_id: &BTreeMap<SledUuid, SledConfig>,
     internal_dns_version: Generation,
-) -> Result<Blueprint, InvalidOmicronZoneType> {
-    // Helper to convert an `OmicronZoneConfig` into a `BlueprintZoneConfig`.
-    // This is separate primarily so rustfmt doesn't lose its mind.
-    let to_bp_zone_config = |z: &OmicronZoneConfig| {
-        // All initial zones are in-service.
-        let disposition = BlueprintZoneDisposition::InService;
-        BlueprintZoneConfig::from_omicron_zone_config(
-            z.clone(),
-            disposition,
-            // This is pretty weird: IP IDs don't exist yet, so it's fine for us
-            // to make them up (Nexus will record them as a part of the
-            // handoff). We could pass `None` here for some zone types, but it's
-            // a little simpler to just always pass a new ID, which will only be
-            // used if the zone type has an external IP.
-            //
-            // This should all go away once RSS starts using blueprints more
-            // directly (instead of this conversion after the fact):
-            // https://github.com/oxidecomputer/omicron/issues/5272
-            Some(ExternalIpUuid::new_v4()),
-        )
-    };
-
-    let mut blueprint_disks = BTreeMap::new();
-    for (sled_id, sled_config) in sled_configs_by_id {
-        blueprint_disks.insert(
-            *sled_id,
-            BlueprintPhysicalDisksConfig {
-                generation: sled_config.disks.generation,
-                disks: sled_config
-                    .disks
-                    .disks
-                    .iter()
-                    .map(|d| OmicronPhysicalDiskConfig {
-                        identity: d.identity.clone(),
-                        id: d.id,
-                        pool_id: d.pool_id,
-                    })
-                    .collect(),
-            },
-        );
-    }
+) -> Blueprint {
+    let blueprint_disks: BTreeMap<_, _> = sled_configs_by_id
+        .iter()
+        .map(|(sled_id, sled_config)| (*sled_id, sled_config.disks.clone()))
+        .collect();
 
     let mut blueprint_datasets = BTreeMap::new();
     for (sled_id, sled_config) in sled_configs_by_id {
@@ -1456,8 +1420,9 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         for d in sled_config.datasets.datasets.values() {
             // Only the "Crucible" dataset needs to know the address
             let address = sled_config.zones.iter().find_map(|z| {
-                if let OmicronZoneType::Crucible { address, dataset } =
-                    &z.zone_type
+                if let BlueprintZoneType::Crucible(
+                    blueprint_zone_type::Crucible { address, dataset },
+                ) = &z.zone_type
                 {
                     if &dataset.pool_name == d.name.pool() {
                         return Some(*address);
@@ -1507,18 +1472,14 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
             // value, we will need to revisit storing this in the serialized
             // RSS plan.
             generation: DeployStepVersion::V5_EVERYTHING,
-            zones: sled_config
-                .zones
-                .iter()
-                .map(to_bp_zone_config)
-                .collect::<Result<_, _>>()?,
+            zones: sled_config.zones.clone(),
         };
 
         blueprint_zones.insert(*sled_id, zones_config);
         sled_state.insert(*sled_id, SledState::Active);
     }
 
-    Ok(Blueprint {
+    Blueprint {
         id: Uuid::new_v4(),
         blueprint_zones,
         blueprint_disks,
@@ -1537,7 +1498,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         time_created: Utc::now(),
         creator: "RSS".to_string(),
         comment: "initial blueprint from rack setup".to_string(),
-    })
+    }
 }
 
 /// Facilitates creating a sequence of OmicronZonesConfig objects for each sled
@@ -1615,11 +1576,14 @@ impl<'a> OmicronZonesConfigGenerator<'a> {
                     sled_config
                         .zones
                         .iter()
+                        .cloned()
+                        .map(|bp_zone_config| {
+                            OmicronZoneConfig::from(bp_zone_config)
+                        })
                         .filter(|z| {
                             !zones_already.contains(&z.id)
                                 && zone_filter(&z.zone_type)
-                        })
-                        .cloned(),
+                        }),
                 );
 
                 let config = OmicronZonesConfig { generation: version, zones };

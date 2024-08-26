@@ -1349,7 +1349,9 @@ CREATE TYPE IF NOT EXISTS omicron.public.producer_kind AS ENUM (
     -- removed).
     'service',
     -- A Propolis VMM for an instance in the omicron.public.instance table
-    'instance'
+    'instance',
+    -- A management gateway service on a scrimlet.
+    'management_gateway'
 );
 
 /*
