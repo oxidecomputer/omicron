@@ -47,7 +47,7 @@ versions = [
 
 [[metrics]]
 name = "reads"
-description = "Total number of reads from the disk"
+description = "Total number of read operations from the disk"
 units = "count"
 datum_type = "cumulative_u64"
 versions = [
@@ -56,7 +56,7 @@ versions = [
 
 [[metrics]]
 name = "failed_reads"
-description = "Total number of failed reads from the disk"
+description = "Total number of failed read operations from the disk"
 units = "count"
 datum_type = "cumulative_u64"
 versions = [
@@ -74,7 +74,7 @@ versions = [
 
 [[metrics]]
 name = "writes"
-description = "Total of writes to the disk"
+description = "Total number of write operations to the disk"
 units = "count"
 datum_type = "cumulative_u64"
 versions = [
@@ -83,7 +83,7 @@ versions = [
 
 [[metrics]]
 name = "failed_writes"
-description = "Total number of failed writes to the disk"
+description = "Total number of failed write operations to the disk"
 units = "count"
 datum_type = "cumulative_u64"
 versions = [
@@ -92,7 +92,7 @@ versions = [
 
 [[metrics]]
 name = "flushes"
-description = "Total of flushes to the disk"
+description = "Total number of flush operations on the disk"
 units = "count"
 datum_type = "cumulative_u64"
 versions = [
@@ -101,7 +101,7 @@ versions = [
 
 [[metrics]]
 name = "failed_flushes"
-description = "Total number of failed flushes to the disk"
+description = "Total number of failed flush operations on the disk"
 units = "count"
 datum_type = "cumulative_u64"
 versions = [
