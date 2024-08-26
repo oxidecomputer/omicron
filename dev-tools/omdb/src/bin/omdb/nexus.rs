@@ -51,6 +51,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
 use tabled::Tabled;
+use tokio::sync::OnceCell;
 use uuid::Uuid;
 
 /// Arguments to the "omdb nexus" subcommand
@@ -1726,39 +1727,37 @@ async fn cmd_nexus_blueprints_target_set(
     args: &BlueprintTargetSetArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
-    let found_enabled = if args.diff
-        || matches!(args.enabled, BlueprintTargetSetEnabled::Inherit)
-    {
-        let current_target = client
-            .blueprint_target_view()
+    // Helper to only fetch the current target once. We may need it immediately
+    // if `args.diff` is true, or later if `args.enabled` is "inherit" (or
+    // both).
+    let current_target = OnceCell::new();
+    let get_current_target = || async {
+        current_target
+            .get_or_try_init(|| client.blueprint_target_view())
             .await
-            .context("failed to fetch current target blueprint")?
-            .into_inner();
-
-        if args.diff {
-            let blueprint1 = client
-                .blueprint_view(&current_target.target_id)
-                .await
-                .context("failed to fetch target blueprint")?
-                .into_inner();
-            let blueprint2 =
-                client.blueprint_view(&args.blueprint_id).await.with_context(
-                    || format!("fetching blueprint {}", args.blueprint_id),
-                )?;
-            let diff = blueprint2.diff_since_blueprint(&blueprint1);
-            println!("{}", diff.display());
-            println!(
-                "\nDo you want to make {} the target blueprint?",
-                args.blueprint_id
-            );
-            let mut prompt = ConfirmationPrompt::new();
-            prompt.read_and_validate("y/N", "y")?;
-        }
-
-        Some(current_target.enabled)
-    } else {
-        None
+            .context("failed to fetch current target blueprint")
     };
+
+    if args.diff {
+        let current_target = get_current_target().await?;
+        let blueprint1 = client
+            .blueprint_view(&current_target.target_id)
+            .await
+            .context("failed to fetch target blueprint")?
+            .into_inner();
+        let blueprint2 =
+            client.blueprint_view(&args.blueprint_id).await.with_context(
+                || format!("fetching blueprint {}", args.blueprint_id),
+            )?;
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        println!("{}", diff.display());
+        println!(
+            "\nDo you want to make {} the target blueprint?",
+            args.blueprint_id
+        );
+        let mut prompt = ConfirmationPrompt::new();
+        prompt.read_and_validate("y/N", "y")?;
+    }
 
     let enabled = match args.enabled {
         BlueprintTargetSetEnabled::Enabled => true,
@@ -1774,7 +1773,9 @@ async fn cmd_nexus_blueprints_target_set(
         // below, because its parent will no longer be the current target.)
         //
         // unwrap(): this is always `Some` due to the branch above.
-        BlueprintTargetSetEnabled::Inherit => found_enabled.unwrap(),
+        BlueprintTargetSetEnabled::Inherit => {
+            get_current_target().await?.enabled
+        }
     };
 
     client
