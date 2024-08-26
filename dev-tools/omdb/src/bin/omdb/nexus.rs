@@ -1771,8 +1771,6 @@ async fn cmd_nexus_blueprints_target_set(
         // operator. (In the case of the current target blueprint being changed
         // entirely, that will result in a failure to set the current target
         // below, because its parent will no longer be the current target.)
-        //
-        // unwrap(): this is always `Some` due to the branch above.
         BlueprintTargetSetEnabled::Inherit => {
             get_current_target().await?.enabled
         }
