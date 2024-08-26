@@ -1881,9 +1881,8 @@ pub(crate) async fn process_vmm_update(
         new_runtime_state,
         &result,
     ) {
-        let instance_id = InstanceUuid::from_untyped_uuid(
-            datastore.vmm_fetch(&opctx, &propolis_id).await?.instance_id,
-        );
+        let instance_id =
+            InstanceUuid::from_untyped_uuid(result.found_vmm.instance_id);
 
         let (.., authz_instance) = LookupPath::new(&opctx, datastore)
             .instance_id(instance_id.into_untyped_uuid())
