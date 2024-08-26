@@ -413,12 +413,12 @@ pub fn update_saga_needed(
 ) -> bool {
     // Currently, an instance-update saga is required if (and only if):
     //
-    // - The instance's active VMM has transitioned to `Destroyed`. We don't
+    // - The instance's active VMM has transitioned to `Destroyed` or `Failed`. We don't
     //   actually know whether the VMM whose state was updated here was the
     //   active VMM or not, so we will always attempt to run an instance-update
-    //   saga if the VMM was `Destroyed`.
-    let vmm_needs_update = result.vmm_updated
-        && state.vmm_state.state == nexus::VmmState::Destroyed;
+    //   saga if the VMM was `Destroyed` (or `Failed`).
+    let vmm_needs_update =
+        result.vmm_updated && state.vmm_state.state.is_terminal();
     // - A migration in to this VMM has transitioned to a terminal state
     //   (`Failed` or `Completed`).
     let migrations = state.migrations();
@@ -514,12 +514,13 @@ impl UpdatesRequired {
         let instance_id = snapshot.instance.id();
 
         let mut update_required = false;
+        let mut active_vmm_failed = false;
         let mut network_config = None;
 
         // Has the active VMM been destroyed?
         let destroy_active_vmm =
             snapshot.active_vmm.as_ref().and_then(|active_vmm| {
-                if active_vmm.runtime.state == VmmState::Destroyed {
+                if active_vmm.runtime.state.is_terminal() {
                     let id = PropolisUuid::from_untyped_uuid(active_vmm.id);
                     // Unlink the active VMM ID. If the active VMM was destroyed
                     // because a migration out completed, the next block, which
@@ -527,7 +528,13 @@ impl UpdatesRequired {
                     // instead.
                     new_runtime.propolis_id = None;
                     update_required = true;
-                    Some(id)
+
+                    // If the active VMM's state is `Failed`, move the
+                    // instance's new state to `Failed` rather than to `NoVmm`.
+                    if active_vmm.runtime.state == VmmState::Failed {
+                        active_vmm_failed = true;
+                    }
+                    Some((id, active_vmm.runtime.state))
                 } else {
                     None
                 }
@@ -536,7 +543,9 @@ impl UpdatesRequired {
         // Okay, what about the target?
         let destroy_target_vmm =
             snapshot.target_vmm.as_ref().and_then(|target_vmm| {
-                if target_vmm.runtime.state == VmmState::Destroyed {
+                // XXX(eliza): AFAIK, target VMMs don't go to `Failed` until
+                // they become active, but...IDK. double-check that.
+                if target_vmm.runtime.state.is_terminal() {
                     // Unlink the target VMM ID.
                     new_runtime.dst_propolis_id = None;
                     update_required = true;
@@ -672,7 +681,11 @@ impl UpdatesRequired {
             // was any actual state change.
 
             // We no longer have a VMM.
-            new_runtime.nexus_state = InstanceState::NoVmm;
+            new_runtime.nexus_state = if active_vmm_failed {
+                InstanceState::Failed
+            } else {
+                InstanceState::NoVmm
+            };
             // If the active VMM was destroyed and the instance has not migrated
             // out of it, we must delete the instance's network configuration.
             //

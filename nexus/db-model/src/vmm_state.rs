@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
+use omicron_common::api::internal::nexus::VmmState as ApiState;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
@@ -46,6 +47,13 @@ impl VmmState {
     /// it as deleted.
     pub const DESTROYABLE_STATES: &'static [Self] =
         &[Self::Destroyed, Self::SagaUnwound];
+
+    pub const TERMINAL_STATES: &'static [Self] =
+        &[Self::Destroyed, Self::Failed];
+
+    pub fn is_terminal(&self) -> bool {
+        Self::TERMINAL_STATES.contains(self)
+    }
 }
 
 impl fmt::Display for VmmState {
@@ -86,9 +94,8 @@ impl From<VmmState> for sled_agent_client::types::VmmState {
     }
 }
 
-impl From<omicron_common::api::internal::nexus::VmmState> for VmmState {
-    fn from(value: omicron_common::api::internal::nexus::VmmState) -> Self {
-        use omicron_common::api::internal::nexus::VmmState as ApiState;
+impl From<ApiState> for VmmState {
+    fn from(value: ApiState) -> Self {
         use VmmState as Output;
         match value {
             ApiState::Starting => Output::Starting,
@@ -128,4 +135,21 @@ impl From<VmmState> for omicron_common::api::external::InstanceState {
 impl diesel::query_builder::QueryId for VmmStateEnum {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_all_terminal_api_states_are_terminal_db_states() {
+        for &api_state in ApiState::TERMINAL_STATES {
+            let db_state = VmmState::from(api_state);
+            assert!(
+                db_state.is_terminal(),
+                "API VmmState::{api_state:?} is considered terminal, but its \
+                 corresponding DB state ({db_state:?}) is not!"
+            );
+        }
+    }
 }
