@@ -318,6 +318,7 @@ mod test {
             value,
             json!({
                 "target_id": blueprint_id,
+                "enabled": true,
                 "needs_saga_recovery": false,
             })
         );
@@ -412,6 +413,7 @@ mod test {
             value,
             json!({
                 "target_id": blueprint.1.id.to_string(),
+                "enabled": true,
                 "needs_saga_recovery": false,
             })
         );
@@ -429,7 +431,7 @@ mod test {
         assert_eq!(
             value,
             json!({
-                "error": "blueprint disabled",
+                "enabled": false,
                 "target_id": blueprint.1.id.to_string()
             })
         );
