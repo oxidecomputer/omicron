@@ -19934,7 +19934,8 @@
               "nanoseconds",
               "volts",
               "amps",
-              "degrees_celcius"
+              "watts",
+              "degrees_celsius"
             ]
           },
           {
