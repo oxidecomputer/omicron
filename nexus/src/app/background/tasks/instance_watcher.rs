@@ -5,9 +5,9 @@
 //! Background task for pulling instance state from sled-agents.
 
 use crate::app::background::BackgroundTask;
+use crate::app::instance::SledAgentInstancePutError;
 use crate::app::saga::StartSaga;
 use futures::{future::BoxFuture, FutureExt};
-use http::StatusCode;
 use nexus_db_model::Instance;
 use nexus_db_model::Project;
 use nexus_db_model::Sled;
@@ -19,6 +19,7 @@ use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceState;
+use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -67,47 +68,75 @@ impl InstanceWatcher {
         opctx: &OpContext,
         client: &SledAgentClient,
         target: VirtualMachine,
+        vmm: Vmm,
     ) -> impl Future<Output = Check> + Send + 'static {
         let datastore = self.datastore.clone();
         let sagas = self.sagas.clone();
 
-        let opctx = opctx.child(
-            std::iter::once((
+        let vmm_id = PropolisUuid::from_untyped_uuid(target.vmm_id);
+        let opctx = {
+            let mut meta = std::collections::BTreeMap::new();
+            meta.insert(
                 "instance_id".to_string(),
                 target.instance_id.to_string(),
-            ))
-            .collect(),
-        );
+            );
+            meta.insert("vmm_id".to_string(), vmm_id.to_string());
+            opctx.child(meta)
+        };
         let client = client.clone();
 
         async move {
-            let vmm_id = PropolisUuid::from_untyped_uuid(target.vmm_id);
             slog::trace!(
                 opctx.log, "checking on VMM"; "propolis_id" => %vmm_id
             );
 
-            let rsp = client.vmm_get_state(&vmm_id).await;
+            slog::trace!(opctx.log, "checking on instance...");
+            let rsp = client
+                .vmm_get_state(&vmm_id)
+                .await
+                // TODO(eliza): since we now also wrap errors returned by
+                // `vmm_get_state` in this, perhaps it ought not be called
+                // `SledAgentInstancePutError` any longer...
+                .map_err(SledAgentInstancePutError);
             let mut check = Check {
                 target,
                 outcome: Default::default(),
                 result: Ok(()),
                 update_saga_queued: false,
             };
-            let state = match rsp {
-                Ok(rsp) => rsp.into_inner(),
-                Err(ClientError::ErrorResponse(rsp)) => {
-                    let status = rsp.status();
-                    if status == StatusCode::NOT_FOUND
-                        && rsp.as_ref().error_code.as_deref()
-                            == Some("NO_SUCH_INSTANCE")
-                    {
-                        slog::info!(opctx.log, "instance is wayyyyy gone");
-                        // TODO(eliza): eventually, we should attempt to put the
-                        // instance in the `Failed` state here.
-                        check.outcome =
-                            CheckOutcome::Failure(Failure::NoSuchInstance);
-                        return check;
+            let state: SledVmmState = match rsp {
+                Ok(rsp) => rsp.into_inner().into(),
+                // Oh, this error indicates that the VMM should transition to
+                // `Failed`. Let's synthesize a `SledInstanceState` that does
+                // that.
+                Err(e) if e.instance_unhealthy() => {
+                    slog::info!(
+                        opctx.log,
+                        "sled-agent error indicates that this instance's \
+                         VMM has failed!";
+                        "error" => %e,
+                    );
+                    check.outcome =
+                        CheckOutcome::Failure(Failure::NoSuchInstance);
+                    // TODO(eliza): it would be nicer if this used the same
+                    // code path as `mark_instance_failed`...
+                    SledVmmState {
+                        vmm_state: nexus::VmmRuntimeState {
+                            r#gen: vmm.runtime.r#gen.0.next(),
+                            state: nexus::VmmState::Failed,
+                            time_updated: chrono::Utc::now(),
+                        },
+                        // It's fine to synthesize `None`s here because a `None`
+                        // just means "don't update the migration state", not
+                        // "there is no migration".
+                        migration_in: None,
+                        migration_out: None,
                     }
+                }
+                Err(SledAgentInstancePutError(ClientError::ErrorResponse(
+                    rsp,
+                ))) => {
+                    let status = rsp.status();
                     if status.is_client_error() {
                         slog::warn!(opctx.log, "check failed due to client error";
                             "status" => ?status, "error" => ?rsp.into_inner());
@@ -123,7 +152,9 @@ impl InstanceWatcher {
                     );
                     return check;
                 }
-                Err(ClientError::CommunicationError(e)) => {
+                Err(SledAgentInstancePutError(
+                    ClientError::CommunicationError(e),
+                )) => {
                     // TODO(eliza): eventually, we may want to transition the
                     // instance to the `Failed` state if the sled-agent has been
                     // unreachable for a while. We may also want to take other
@@ -139,7 +170,7 @@ impl InstanceWatcher {
                         CheckOutcome::Failure(Failure::SledAgentUnreachable);
                     return check;
                 }
-                Err(e) => {
+                Err(SledAgentInstancePutError(e)) => {
                     slog::warn!(
                         opctx.log,
                         "error checking up on instance";
@@ -151,19 +182,17 @@ impl InstanceWatcher {
                 }
             };
 
-            let new_runtime_state: SledVmmState = state.into();
-            check.outcome =
-                CheckOutcome::Success(new_runtime_state.vmm_state.state.into());
+            check.outcome = CheckOutcome::Success(state.vmm_state.state.into());
             debug!(
                 opctx.log,
                 "updating instance state";
-                "state" => ?new_runtime_state.vmm_state.state,
+                "state" => ?state,
             );
             match crate::app::instance::process_vmm_update(
                 &datastore,
                 &opctx,
                 PropolisUuid::from_untyped_uuid(target.vmm_id),
-                &new_runtime_state,
+                &state,
             )
             .await
             {
@@ -392,7 +421,7 @@ impl BackgroundTask for InstanceWatcher {
                 if let Some((mut curr_sled, instance, vmm, project)) = batch.next() {
                     let mut client = mk_client(&curr_sled);
                     let target = VirtualMachine::new(self.id, &curr_sled, &instance, &vmm, &project);
-                    tasks.spawn(self.check_instance(opctx, &client, target));
+                    tasks.spawn(self.check_instance(opctx, &client, target, vmm));
 
                     for (sled, instance, vmm, project) in batch {
                         // We're now talking to a new sled agent; update the client.
@@ -402,7 +431,7 @@ impl BackgroundTask for InstanceWatcher {
                         }
 
                         let target = VirtualMachine::new(self.id, &curr_sled, &instance, &vmm, &project);
-                        tasks.spawn(self.check_instance(opctx, &client, target));
+                        tasks.spawn(self.check_instance(opctx, &client, target, vmm));
                     }
                 }
             }

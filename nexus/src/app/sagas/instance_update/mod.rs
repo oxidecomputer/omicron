@@ -361,7 +361,6 @@ use chrono::Utc;
 use nexus_db_queries::{authn, authz};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -534,7 +533,7 @@ impl UpdatesRequired {
                     if active_vmm.runtime.state == VmmState::Failed {
                         active_vmm_failed = true;
                     }
-                    Some((id, active_vmm.runtime.state))
+                    Some(id)
                 } else {
                     None
                 }
