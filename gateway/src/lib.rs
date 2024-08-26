@@ -307,15 +307,6 @@ impl Server {
             warn!(self.apictx.log, "SMF refresh called without a rack id");
         }
     }
-
-    // TODO does MGS register itself with oximeter?
-    // Register the Nexus server as a metric producer with `oximeter.
-    // pub async fn register_as_producer(&self) {
-    // self.apictx
-    // .nexus
-    // .register_as_producer(self.http_server_internal.local_addr())
-    // .await;
-    // }
 }
 
 /// Start an instance of the [Server].
@@ -338,6 +329,5 @@ pub async fn start_server(
         debug!(log, "registered DTrace probes");
     }
     let server = Server::start(config, args, log).await?;
-    // server.register_as_producer().await;
     Ok(server)
 }
