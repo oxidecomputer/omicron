@@ -75,4 +75,117 @@ impl DnsSubnetAllocator {
         self.in_use.insert(new.clone());
         Ok(new)
     }
+
+    #[cfg(test)]
+    fn first(&self) -> Option<DnsSubnet> {
+        self.in_use.first().cloned()
+    }
+
+    #[cfg(test)]
+    fn last(&self) -> Option<DnsSubnet> {
+        self.in_use.last().cloned()
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.in_use.len()
+    }
+
+    #[cfg(test)]
+    fn clear(&mut self) {
+        self.in_use.clear()
+    }
+}
+
+#[cfg(test)]
+pub mod test {
+    use super::*;
+    use crate::blueprint_builder::test::verify_blueprint;
+    use crate::example::ExampleSystem;
+    use omicron_common::policy::{DNS_REDUNDANCY, MAX_DNS_REDUNDANCY};
+    use omicron_test_utils::dev::test_setup_log;
+
+    #[test]
+    fn test_dns_subnet_allocator() {
+        static TEST_NAME: &str = "test_dns_subnet_allocator";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Use our example system to create a blueprint and input.
+        let example =
+            ExampleSystem::new(&logctx.log, TEST_NAME, DNS_REDUNDANCY);
+        let blueprint1 = &example.blueprint;
+        verify_blueprint(blueprint1);
+
+        // Create an allocator.
+        let mut allocator = DnsSubnetAllocator::new(blueprint1, &example.input)
+            .expect("can't create allocator");
+
+        // Save the first & last allocated subnets.
+        let first = allocator.first().expect("should be a first subnet");
+        let last = allocator.last().expect("should be a last subnet");
+        assert!(last > first, "first should come before last");
+
+        // Allocate two new subnets.
+        assert_eq!(MAX_DNS_REDUNDANCY - DNS_REDUNDANCY, 2);
+        assert_eq!(
+            allocator.len(),
+            DNS_REDUNDANCY,
+            "should be {DNS_REDUNDANCY} subnets allocated"
+        );
+        let new1 = allocator
+            .alloc_or_else(|| panic!("shouldn't need a default"))
+            .expect("failed to allocate a subnet");
+        let new2 = allocator
+            .alloc_or_else(|| panic!("shouldn't need a default"))
+            .expect("failed to allocate a subnet");
+        assert!(
+            new1 > last,
+            "newly allocated subnets should be after initial ones"
+        );
+        assert!(new2 > new1, "allocated subnets out of order");
+        assert_ne!(new1, new2, "allocated duplicate subnets");
+        assert_eq!(
+            allocator.len(),
+            MAX_DNS_REDUNDANCY,
+            "should be {DNS_REDUNDANCY} subnets allocated"
+        );
+        allocator
+            .alloc_or_else(|| panic!("shouldn't need a default"))
+            .expect_err("no subnets available");
+
+        // Clear and test default.
+        allocator.clear();
+        let default = allocator
+            .alloc_or_else(|| new1.clone())
+            .expect("failed to alloc default");
+        assert_eq!(default, new1, "should default");
+
+        // Test packing.
+        allocator.clear();
+        assert!(first < new2);
+        assert_eq!(
+            allocator
+                .alloc_or_else(|| new2.clone())
+                .expect("failed to alloc default"),
+            new2,
+            "should default"
+        );
+        assert_eq!(
+            allocator
+                .alloc_or_else(|| panic!("shouldn't need a default"))
+                .expect("allocation failed"),
+            first,
+            "should be first subnet"
+        );
+        assert!(
+            allocator
+                .alloc_or_else(|| panic!("shouldn't need a default"))
+                .expect("allocation failed")
+                > first,
+            "should be after first subnet"
+        );
+
+        // Done!
+        logctx.cleanup_successful();
+    }
 }
