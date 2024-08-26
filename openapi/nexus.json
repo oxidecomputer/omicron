@@ -19335,6 +19335,7 @@
             "type": "string"
           },
           "lldp_link_config_id": {
+            "nullable": true,
             "description": "The link-layer discovery protocol service configuration id for this link.",
             "type": "string",
             "format": "uuid"
@@ -19363,7 +19364,6 @@
           "autoneg",
           "fec",
           "link_name",
-          "lldp_link_config_id",
           "mtu",
           "port_settings_id",
           "speed"
