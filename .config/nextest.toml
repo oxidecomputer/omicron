@@ -10,6 +10,8 @@ experimental = ["setup-scripts"]
 [[profile.default.scripts]]
 # Exclude omicron-dev tests from crdb-seed as we explicitly want to simulate an
 # environment where the seed file doesn't exist.
+# Exclude omicron-live-tests because those don't need this and also don't have
+# it available in the environment in which they run.
 filter = 'rdeps(nexus-test-utils) - package(omicron-dev) - package(omicron-live-tests)'
 setup = 'crdb-seed'
 

@@ -9,15 +9,21 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, ItemFn};
 
-/// Attribute for wrapping a test function to handle automatically creating and
-/// destroying a LiveTestContext. If the wrapped test fails, the context will
-/// intentionally not be cleaned up to support debugging.
+/// Define a test function that uses `LiveTestContext`
+///
+/// This is usable only within the `omicron-live-tests` crate.
+///
+/// Similar to `nexus_test`, this macro lets you define a test function that
+/// behaves like `tokio::test` except that it accepts an argument of type
+/// `&LiveTestContext`.  The `LiveTestContext` is cleaned up on _successful_
+/// return of the test function.  On failure, debugging information is
+/// deliberately left around.
 ///
 /// Example usage:
 ///
 /// ```ignore
 /// #[live_test]
-/// async fn test_my_test_case(lc: &mut LiveTestContext) {
+/// async fn test_my_test_case(lc: &LiveTestContext) {
 ///   assert!(true);
 /// }
 /// ```
