@@ -61,7 +61,6 @@ impl BackgroundTask for RegionReplacementDetector {
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
             let log = &opctx.log;
-            warn!(&log, "region replacement task started");
 
             let mut ok = 0;
             let mut err = 0;
@@ -181,8 +180,6 @@ impl BackgroundTask for RegionReplacementDetector {
                     );
                 }
             }
-
-            warn!(&log, "region replacement task done");
 
             json!({
                 "region_replacement_started_ok": ok,

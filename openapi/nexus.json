@@ -6533,21 +6533,47 @@
         }
       }
     },
-    "/v1/system/networking/bgp-announce": {
+    "/v1/system/networking/bgp-announce-set": {
       "get": {
         "tags": [
           "system/networking"
         ],
-        "summary": "Get originated routes for a BGP configuration",
+        "summary": "List BGP announce sets",
         "operationId": "networking_bgp_announce_set_list",
         "parameters": [
           {
             "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
             "name": "name_or_id",
-            "description": "A name or id to use when selecting BGP port settings",
-            "required": true,
+            "description": "A name or id to use when s electing BGP port settings",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
             }
           }
         ],
@@ -6557,10 +6583,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_BgpAnnouncement",
+                  "title": "Array_of_BgpAnnounceSet",
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/BgpAnnouncement"
+                    "$ref": "#/components/schemas/BgpAnnounceSet"
                   }
                 }
               }
@@ -6572,6 +6598,9 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
+        },
+        "x-dropshot-pagination": {
+          "required": []
         }
       },
       "put": {
@@ -6609,7 +6638,9 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
+      }
+    },
+    "/v1/system/networking/bgp-announce-set/{name_or_id}": {
       "delete": {
         "tags": [
           "system/networking"
@@ -6618,7 +6649,7 @@
         "operationId": "networking_bgp_announce_set_delete",
         "parameters": [
           {
-            "in": "query",
+            "in": "path",
             "name": "name_or_id",
             "description": "A name or id to use when selecting BGP port settings",
             "required": true,
@@ -6630,6 +6661,75 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp-announce-set/{name_or_id}/announcement": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get originated routes for a specified BGP announce set",
+        "operationId": "networking_bgp_announcement_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name_or_id",
+            "description": "A name or id to use when selecting BGP port settings",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_BgpAnnouncement",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BgpAnnouncement"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp-exported": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get BGP exported routes",
+        "operationId": "networking_bgp_exported",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BgpExported"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -8026,11 +8126,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_Table",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Table"
-                  }
+                  "$ref": "#/components/schemas/OxqlQueryResult"
                 }
               }
             }
@@ -10353,6 +10449,25 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "BgpExported": {
+        "description": "The current status of a BGP peer.",
+        "type": "object",
+        "properties": {
+          "exports": {
+            "description": "Exported routes indexed by peer address.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Ipv4Net"
+              }
+            }
+          }
+        },
+        "required": [
+          "exports"
         ]
       },
       "BgpImportedRouteIpv4": {
@@ -15984,7 +16099,7 @@
             "description": "The link-layer discovery protocol (LLDP) configuration for the link.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/LldpServiceConfigCreate"
+                "$ref": "#/components/schemas/LldpLinkConfigCreate"
               }
             ]
           },
@@ -16105,10 +16220,15 @@
           }
         ]
       },
-      "LldpServiceConfig": {
+      "LldpLinkConfig": {
         "description": "A link layer discovery protocol (LLDP) service configuration.",
         "type": "object",
         "properties": {
+          "chassis_id": {
+            "nullable": true,
+            "description": "The LLDP chassis identifier TLV.",
+            "type": "string"
+          },
           "enabled": {
             "description": "Whether or not the LLDP service is enabled.",
             "type": "boolean"
@@ -16118,11 +16238,34 @@
             "type": "string",
             "format": "uuid"
           },
-          "lldp_config_id": {
+          "link_description": {
             "nullable": true,
-            "description": "The link-layer discovery protocol configuration for this service.",
-            "type": "string",
-            "format": "uuid"
+            "description": "The LLDP link description TLV.",
+            "type": "string"
+          },
+          "link_name": {
+            "nullable": true,
+            "description": "The LLDP link name TLV.",
+            "type": "string"
+          },
+          "management_ip": {
+            "nullable": true,
+            "description": "The LLDP management IP TLV.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "system_description": {
+            "nullable": true,
+            "description": "The LLDP system description TLV.",
+            "type": "string"
+          },
+          "system_name": {
+            "nullable": true,
+            "description": "The LLDP system name TLV.",
+            "type": "string"
           }
         },
         "required": [
@@ -16130,22 +16273,44 @@
           "id"
         ]
       },
-      "LldpServiceConfigCreate": {
-        "description": "The LLDP configuration associated with a port. LLDP may be either enabled or disabled, if enabled, an LLDP configuration must be provided by name or id.",
+      "LldpLinkConfigCreate": {
+        "description": "The LLDP configuration associated with a port.",
         "type": "object",
         "properties": {
+          "chassis_id": {
+            "nullable": true,
+            "description": "The LLDP chassis identifier TLV.",
+            "type": "string"
+          },
           "enabled": {
             "description": "Whether or not LLDP is enabled.",
             "type": "boolean"
           },
-          "lldp_config": {
+          "link_description": {
             "nullable": true,
-            "description": "A reference to the LLDP configuration used. Must not be `None` when `enabled` is `true`.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/NameOrId"
-              }
-            ]
+            "description": "The LLDP link description TLV.",
+            "type": "string"
+          },
+          "link_name": {
+            "nullable": true,
+            "description": "The LLDP link name TLV.",
+            "type": "string"
+          },
+          "management_ip": {
+            "nullable": true,
+            "description": "The LLDP management IP TLV.",
+            "type": "string",
+            "format": "ip"
+          },
+          "system_description": {
+            "nullable": true,
+            "description": "The LLDP system description TLV.",
+            "type": "string"
+          },
+          "system_name": {
+            "nullable": true,
+            "description": "The LLDP system name TLV.",
+            "type": "string"
           }
         },
         "required": [
@@ -16499,6 +16664,22 @@
               "type"
             ]
           }
+        ]
+      },
+      "OxqlQueryResult": {
+        "description": "The result of a successful OxQL query.",
+        "type": "object",
+        "properties": {
+          "tables": {
+            "description": "Tables resulting from the query, each containing timeseries.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Table"
+            }
+          }
+        },
+        "required": [
+          "tables"
         ]
       },
       "Password": {
@@ -17167,6 +17348,13 @@
             "description": "The route gateway.",
             "type": "string",
             "format": "ip"
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "Local preference for route. Higher preference indictes precedence within and across protocols.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "vid": {
             "nullable": true,
@@ -19146,7 +19334,7 @@
             "description": "The name of this link.",
             "type": "string"
           },
-          "lldp_service_config_id": {
+          "lldp_link_config_id": {
             "description": "The link-layer discovery protocol service configuration id for this link.",
             "type": "string",
             "format": "uuid"
@@ -19175,7 +19363,7 @@
           "autoneg",
           "fec",
           "link_name",
-          "lldp_service_config_id",
+          "lldp_link_config_id",
           "mtu",
           "port_settings_id",
           "speed"
@@ -19225,6 +19413,13 @@
           "interface_name": {
             "description": "The interface name this route configuration is assigned to.",
             "type": "string"
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "Local preference indicating priority within and across protocols.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "port_settings_id": {
             "description": "The port settings object this route configuration belongs to.",
@@ -19430,7 +19625,7 @@
             "description": "Link-layer discovery protocol (LLDP) settings.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/LldpServiceConfig"
+              "$ref": "#/components/schemas/LldpLinkConfig"
             }
           },
           "links": {
@@ -19739,7 +19934,8 @@
               "nanoseconds",
               "volts",
               "amps",
-              "degrees_celcius"
+              "watts",
+              "degrees_celsius"
             ]
           },
           {
@@ -20131,10 +20327,20 @@
         "type": "object",
         "properties": {
           "metric_type": {
-            "$ref": "#/components/schemas/MetricType"
+            "description": "The type of this metric.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MetricType"
+              }
+            ]
           },
           "values": {
-            "$ref": "#/components/schemas/ValueArray"
+            "description": "The data values.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ValueArray"
+              }
+            ]
           }
         },
         "required": [

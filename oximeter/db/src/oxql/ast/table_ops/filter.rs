@@ -12,18 +12,18 @@ use crate::oxql::ast::literal::Literal;
 use crate::oxql::ast::logical_op::LogicalOp;
 use crate::oxql::ast::table_ops::limit::Limit;
 use crate::oxql::ast::table_ops::limit::LimitKind;
-use crate::oxql::point::DataType;
-use crate::oxql::point::MetricType;
-use crate::oxql::point::Points;
-use crate::oxql::point::ValueArray;
 use crate::oxql::Error;
-use crate::oxql::Table;
-use crate::oxql::Timeseries;
 use crate::shells::special_idents;
 use chrono::DateTime;
 use chrono::Utc;
 use oximeter::FieldType;
 use oximeter::FieldValue;
+use oxql_types::point::DataType;
+use oxql_types::point::MetricType;
+use oxql_types::point::Points;
+use oxql_types::point::ValueArray;
+use oxql_types::Table;
+use oxql_types::Timeseries;
 use regex::Regex;
 use std::collections::BTreeSet;
 use std::fmt;
@@ -340,16 +340,13 @@ impl Filter {
                 // Apply the filter to the data points as well.
                 let points = self.filter_points(&input.points)?;
 
-                // Similar to above, if the filter removes all data points in
-                // the timeseries, let's remove the timeseries altogether.
-                if points.is_empty() {
-                    continue;
+                if let Some(new_timeseries) = input.copy_with_points(points) {
+                    timeseries.push(new_timeseries);
+                } else {
+                    // None means that the filter removed all data points in
+                    // the timeseries. In that case, we remove the timeseries
+                    // altogether.
                 }
-                timeseries.push(Timeseries {
-                    fields: input.fields.clone(),
-                    points,
-                    alignment: input.alignment,
-                })
             }
             output_tables.push(Table::from_timeseries(
                 table.name(),
@@ -823,7 +820,7 @@ impl SimpleFilter {
     ) -> Result<Vec<bool>, Error> {
         let ident = self.ident.as_str();
         if ident == "timestamp" {
-            self.filter_points_by_timestamp(negated, &points.timestamps)
+            self.filter_points_by_timestamp(negated, points.timestamps())
         } else if ident == "datum" {
             anyhow::ensure!(
                 points.dimensionality() == 1,
@@ -1151,15 +1148,15 @@ impl SimpleFilter {
 mod tests {
     use crate::oxql::ast::grammar::query_parser;
     use crate::oxql::ast::logical_op::LogicalOp;
-    use crate::oxql::point::DataType;
-    use crate::oxql::point::MetricType;
-    use crate::oxql::point::Points;
-    use crate::oxql::point::ValueArray;
-    use crate::oxql::point::Values;
-    use crate::oxql::Table;
-    use crate::oxql::Timeseries;
     use chrono::Utc;
     use oximeter::FieldValue;
+    use oxql_types::point::DataType;
+    use oxql_types::point::MetricType;
+    use oxql_types::point::Points;
+    use oxql_types::point::ValueArray;
+    use oxql_types::point::Values;
+    use oxql_types::Table;
+    use oxql_types::Timeseries;
     use std::time::Duration;
     use uuid::Uuid;
 
@@ -1172,7 +1169,7 @@ mod tests {
             values: ValueArray::Double(vec![Some(0.0), Some(2.0)]),
             metric_type: MetricType::Gauge,
         }];
-        let points = Points { start_times, timestamps, values };
+        let points = Points::new(start_times, timestamps, values);
 
         // This filter should remove the first point based on its timestamp.
         let t = Utc::now() + Duration::from_secs(10);
@@ -1205,7 +1202,7 @@ mod tests {
             values: ValueArray::Double(vec![Some(0.0), Some(2.0)]),
             metric_type: MetricType::Gauge,
         }];
-        let points = Points { start_times, timestamps, values };
+        let points = Points::new(start_times, timestamps, values);
 
         let filter =
             query_parser::filter("filter datum < \"something\"").unwrap();

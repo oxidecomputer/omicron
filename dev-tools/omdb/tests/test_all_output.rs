@@ -7,9 +7,12 @@
 //! Feel free to change the tool's output.  This test just makes it easy to make
 //! sure you're only breaking what you intend.
 
+use dropshot::Method;
 use expectorate::assert_contents;
+use http::StatusCode;
 use nexus_test_utils::{OXIMETER_UUID, PRODUCER_UUID};
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
@@ -56,6 +59,7 @@ fn assert_oximeter_list_producers_output(
 
 #[tokio::test]
 async fn test_omdb_usage_errors() {
+    clear_omdb_env();
     let cmd_path = path_to_executable(CMD_OMDB);
     let mut output = String::new();
     let invocations: &[&[&'static str]] = &[
@@ -111,6 +115,8 @@ async fn test_omdb_usage_errors() {
 
 #[nexus_test]
 async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
+    clear_omdb_env();
+
     let gwtestctx = gateway_test_utils::setup::test_setup(
         "test_omdb_success_case",
         gateway_messages::SpPort::One,
@@ -130,6 +136,20 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to create temporary directory");
     let tmppath = tmpdir.path().join("reconfigurator-save.out");
     let initial_blueprint_id = cptestctx.initial_blueprint_id.to_string();
+
+    // Get the CockroachDB metadata from the blueprint so we can redact it
+    let initial_blueprint: Blueprint = dropshot::test_util::read_json(
+        &mut cptestctx
+            .internal_client
+            .make_request_no_body(
+                Method::GET,
+                &format!("/deployment/blueprints/all/{initial_blueprint_id}"),
+                StatusCode::OK,
+            )
+            .await
+            .unwrap(),
+    )
+    .await;
 
     let mut output = String::new();
 
@@ -183,6 +203,19 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         // ControlPlaneTestContext.
     ];
 
+    let mut redactions = ExtraRedactions::new();
+    redactions
+        .variable_length("tmp_path", tmppath.as_str())
+        .fixed_length("blueprint_id", &initial_blueprint_id)
+        .variable_length(
+            "cockroachdb_fingerprint",
+            &initial_blueprint.cockroachdb_fingerprint,
+        );
+    let crdb_version =
+        initial_blueprint.cockroachdb_setting_preserve_downgrade.to_string();
+    if initial_blueprint.cockroachdb_setting_preserve_downgrade.is_set() {
+        redactions.variable_length("cockroachdb_version", &crdb_version);
+    }
     for args in invocations {
         println!("running commands with args: {:?}", args);
         let p = postgres_url.to_string();
@@ -201,11 +234,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
             },
             &cmd_path,
             args,
-            Some(
-                ExtraRedactions::new()
-                    .variable_length("tmp_path", tmppath.as_str())
-                    .fixed_length("blueprint_id", &initial_blueprint_id),
-            ),
+            Some(&redactions),
         )
         .await;
     }
@@ -271,6 +300,8 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
 /// that's covered by the success tests above.
 #[nexus_test]
 async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
+    clear_omdb_env();
+
     let cmd_path = path_to_executable(CMD_OMDB);
     let postgres_url = cptestctx.database.listen_url().to_string();
     let nexus_internal_url =
@@ -503,4 +534,23 @@ async fn do_run_extra<F>(
     }
 
     write!(output, "=============================================\n").unwrap();
+}
+
+// We're testing behavior that can be affected by OMDB-related environment
+// variables.  Clear all of them from the current process so that all child
+// processes don't have them.  OMDB environment variables can affect even the
+// help output provided by clap.  See clap-rs/clap#5673 for an example.
+fn clear_omdb_env() {
+    // Rust documents that it's not safe to manipulate the environment in a
+    // multi-threaded process outside of Windows because it's possible that
+    // other threads are reading or writing the environment and most systems do
+    // not support this.  On illumos, the underlying interfaces are broadly
+    // thread-safe.  Further, Omicron only supports running tests under `cargo
+    // nextest`, in which case there are no threads running concurrently here
+    // that may be reading or modifying the environment.
+    for (env_var, _) in std::env::vars().filter(|(k, _)| k.starts_with("OMDB_"))
+    {
+        eprintln!("removing {:?} from environment", env_var);
+        std::env::remove_var(env_var);
+    }
 }
