@@ -106,7 +106,7 @@ impl ReplicaConfig {
     <http_port>{http_port}</http_port>
     <tcp_port>{tcp_port}</tcp_port>
     <interserver_http_port>{interserver_http_port}</interserver_http_port>
-    <interserver_http_host>::1</interserver_http_host>
+    <interserver_http_host>{listen_host}</interserver_http_host>
     <distributed_ddl>
         <!-- Cleanup settings (active tasks will not be removed) -->
 
