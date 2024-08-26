@@ -7,7 +7,7 @@
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::{
-    MigrationRuntimeState, MigrationState, SledInstanceState, VmmRuntimeState,
+    MigrationRuntimeState, MigrationState, SledVmmState, VmmRuntimeState,
     VmmState,
 };
 use propolis_client::types::{
@@ -199,8 +199,8 @@ impl InstanceStates {
     /// Creates a `SledInstanceState` structure containing the entirety of this
     /// structure's runtime state. This requires cloning; for simple read access
     /// use the `instance` or `vmm` accessors instead.
-    pub fn sled_instance_state(&self) -> SledInstanceState {
-        SledInstanceState {
+    pub fn sled_instance_state(&self) -> SledVmmState {
+        SledVmmState {
             vmm_state: self.vmm.clone(),
             migration_in: self.migration_in.clone(),
             migration_out: self.migration_out.clone(),

@@ -24,7 +24,7 @@ use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
 };
 use omicron_common::api::internal::nexus::{
-    DiskRuntimeState, MigrationRuntimeState, MigrationState, SledInstanceState,
+    DiskRuntimeState, MigrationRuntimeState, MigrationState, SledVmmState,
 };
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, VmmRuntimeState,
@@ -50,8 +50,7 @@ use sled_agent_types::early_networking::{
 };
 use sled_agent_types::instance::{
     InstanceExternalIpBody, InstanceHardware, InstanceMetadata,
-    InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse,
+    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
 use slog::Logger;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -270,7 +269,7 @@ impl SledAgent {
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         metadata: InstanceMetadata,
-    ) -> Result<SledInstanceState, Error> {
+    ) -> Result<SledVmmState, Error> {
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
         let ncpus: i64 = (&hardware.properties.ncpus).into();
@@ -379,7 +378,7 @@ impl SledAgent {
             .vmms
             .sim_ensure(
                 &propolis_id.into_untyped_uuid(),
-                SledInstanceState {
+                SledVmmState {
                     vmm_state: vmm_runtime,
                     migration_in,
                     migration_out: None,
@@ -414,7 +413,7 @@ impl SledAgent {
     pub async fn instance_unregister(
         self: &Arc<Self>,
         propolis_id: PropolisUuid,
-    ) -> Result<InstanceUnregisterResponse, Error> {
+    ) -> Result<VmmUnregisterResponse, Error> {
         let instance = match self
             .vmms
             .sim_get_cloned_object(&propolis_id.into_untyped_uuid())
@@ -422,12 +421,12 @@ impl SledAgent {
         {
             Ok(instance) => instance,
             Err(Error::ObjectNotFound { .. }) => {
-                return Ok(InstanceUnregisterResponse { updated_runtime: None })
+                return Ok(VmmUnregisterResponse { updated_runtime: None })
             }
             Err(e) => return Err(e),
         };
 
-        let response = InstanceUnregisterResponse {
+        let response = VmmUnregisterResponse {
             updated_runtime: Some(instance.terminate()),
         };
 
@@ -439,8 +438,8 @@ impl SledAgent {
     pub async fn instance_ensure_state(
         self: &Arc<Self>,
         propolis_id: PropolisUuid,
-        state: InstanceStateRequested,
-    ) -> Result<InstancePutStateResponse, Error> {
+        state: VmmStateRequested,
+    ) -> Result<VmmPutStateResponse, Error> {
         if let Some(e) = self.instance_ensure_state_error.lock().await.as_ref()
         {
             return Err(e.clone());
@@ -453,8 +452,8 @@ impl SledAgent {
         {
             Ok(i) => i.current().clone(),
             Err(_) => match state {
-                InstanceStateRequested::Stopped => {
-                    return Ok(InstancePutStateResponse {
+                VmmStateRequested::Stopped => {
+                    return Ok(VmmPutStateResponse {
                         updated_runtime: None,
                     });
                 }
@@ -470,12 +469,12 @@ impl SledAgent {
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
             let body = match state {
-                InstanceStateRequested::MigrationTarget(_) => {
+                VmmStateRequested::MigrationTarget(_) => {
                     return Err(Error::internal_error(
                         "migration not implemented for mock Propolis",
                     ));
                 }
-                InstanceStateRequested::Running => {
+                VmmStateRequested::Running => {
                     let vmms = self.vmms.clone();
                     let log = self.log.new(
                         o!("component" => "SledAgent-insure_instance_state"),
@@ -491,22 +490,22 @@ impl SledAgent {
                             .await
                         {
                             Ok(state) => {
-                                let instance_state: nexus_client::types::SledInstanceState = state.into();
-                                info!(log, "sim_ensure success"; "instance_state" => #?instance_state);
+                                let vmm_state: nexus_client::types::SledVmmState = state.into();
+                                info!(log, "sim_ensure success"; "vmm_state" => #?vmm_state);
                             }
                             Err(instance_put_error) => {
                                 error!(log, "sim_ensure failure"; "error" => #?instance_put_error);
                             }
                         }
                     });
-                    return Ok(InstancePutStateResponse {
+                    return Ok(VmmPutStateResponse {
                         updated_runtime: None,
                     });
                 }
-                InstanceStateRequested::Stopped => {
+                VmmStateRequested::Stopped => {
                     propolis_client::types::InstanceStateRequested::Stop
                 }
-                InstanceStateRequested::Reboot => {
+                VmmStateRequested::Reboot => {
                     propolis_client::types::InstanceStateRequested::Reboot
                 }
             };
@@ -520,20 +519,20 @@ impl SledAgent {
             .sim_ensure(&propolis_id.into_untyped_uuid(), current, Some(state))
             .await?;
 
-        Ok(InstancePutStateResponse { updated_runtime: Some(new_state) })
+        Ok(VmmPutStateResponse { updated_runtime: Some(new_state) })
     }
 
     pub async fn instance_get_state(
         &self,
         propolis_id: PropolisUuid,
-    ) -> Result<SledInstanceState, HttpError> {
+    ) -> Result<SledVmmState, HttpError> {
         let instance = self
             .vmms
             .sim_get_cloned_object(&propolis_id.into_untyped_uuid())
             .await
             .map_err(|_| {
                 crate::sled_agent::Error::Instance(
-                    crate::instance_manager::Error::NoSuchInstance(propolis_id),
+                    crate::instance_manager::Error::NoSuchVmm(propolis_id),
                 )
             })?;
         Ok(instance.current())
@@ -550,7 +549,7 @@ impl SledAgent {
             .await
             .map_err(|_| {
                 crate::sled_agent::Error::Instance(
-                    crate::instance_manager::Error::NoSuchInstance(propolis_id),
+                    crate::instance_manager::Error::NoSuchVmm(propolis_id),
                 )
             })?;
         instance.set_simulated_migration_source(migration);

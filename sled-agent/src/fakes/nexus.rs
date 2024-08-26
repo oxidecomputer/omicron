@@ -15,9 +15,7 @@ use hyper::Body;
 use internal_dns::ServiceName;
 use nexus_client::types::SledAgentInfo;
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::nexus::{
-    SledInstanceState, UpdateArtifactId,
-};
+use omicron_common::api::internal::nexus::{SledVmmState, UpdateArtifactId};
 use omicron_uuid_kinds::{OmicronZoneUuid, PropolisUuid};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -52,7 +50,7 @@ pub trait FakeNexusServer: Send + Sync {
     fn cpapi_instances_put(
         &self,
         _propolis_id: PropolisUuid,
-        _new_runtime_state: SledInstanceState,
+        _new_runtime_state: SledVmmState,
     ) -> Result<(), Error> {
         Err(Error::internal_error("Not implemented"))
     }
@@ -126,7 +124,7 @@ async fn sled_agent_put(
 async fn cpapi_instances_put(
     request_context: RequestContext<ServerContext>,
     path_params: Path<VmmPathParam>,
-    new_runtime_state: TypedBody<SledInstanceState>,
+    new_runtime_state: TypedBody<SledVmmState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let context = request_context.context();
     context.cpapi_instances_put(

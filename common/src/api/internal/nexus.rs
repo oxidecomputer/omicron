@@ -113,10 +113,9 @@ pub struct VmmRuntimeState {
     pub time_updated: DateTime<Utc>,
 }
 
-/// A wrapper type containing a sled's total knowledge of the state of a
-/// specific VMM and the instance it incarnates.
+/// A wrapper type containing a sled's total knowledge of the state of a VMM.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SledInstanceState {
+pub struct SledVmmState {
     /// The most recent state of the sled's VMM process.
     pub vmm_state: VmmRuntimeState,
 
@@ -139,7 +138,7 @@ impl Migrations<'_> {
     }
 }
 
-impl SledInstanceState {
+impl SledVmmState {
     pub fn migrations(&self) -> Migrations<'_> {
         Migrations {
             migration_in: self.migration_in.as_ref(),

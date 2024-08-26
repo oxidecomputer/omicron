@@ -162,10 +162,10 @@ impl From<types::VmmRuntimeState>
     }
 }
 
-impl From<types::SledInstanceState>
-    for omicron_common::api::internal::nexus::SledInstanceState
+impl From<types::SledVmmState>
+    for omicron_common::api::internal::nexus::SledVmmState
 {
-    fn from(s: types::SledInstanceState) -> Self {
+    fn from(s: types::SledVmmState) -> Self {
         Self {
             vmm_state: s.vmm_state.into(),
             migration_in: s.migration_in.map(Into::into),

@@ -33,7 +33,7 @@ use omicron_common::{
             DiskRuntimeState, DownstairsClientStopRequest,
             DownstairsClientStopped, ProducerEndpoint,
             ProducerRegistrationResponse, RepairFinishInfo, RepairProgress,
-            RepairStartInfo, SledInstanceState,
+            RepairStartInfo, SledVmmState,
         },
     },
     update::ArtifactId,
@@ -116,7 +116,7 @@ pub trait NexusInternalApi {
     async fn cpapi_instances_put(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        new_runtime_state: TypedBody<SledInstanceState>,
+        new_runtime_state: TypedBody<SledVmmState>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {

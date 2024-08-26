@@ -26,8 +26,8 @@ use super::NexusActionContext;
 const DEFAULT_PROPOLIS_PORT: u16 = 12400;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(super) struct PropolisAndSledId {
-    pub(super) propolis_id: PropolisUuid,
+pub(super) struct VmmAndSledIds {
+    pub(super) vmm_id: PropolisUuid,
     pub(super) sled_id: SledUuid,
 }
 
@@ -224,7 +224,7 @@ pub(super) async fn instance_ip_get_instance_state(
     serialized_authn: &authn::saga::Serialized,
     authz_instance: &authz::Instance,
     verb: &str,
-) -> Result<Option<PropolisAndSledId>, ActionError> {
+) -> Result<Option<VmmAndSledIds>, ActionError> {
     // XXX: we can get instance state (but not sled ID) in same transaction
     //      as attach (but not detach) wth current design. We need to re-query
     //      for sled ID anyhow, so keep consistent between attach/detach.
@@ -243,8 +243,8 @@ pub(super) async fn instance_ip_get_instance_state(
     let found_instance_state =
         inst_and_vmm.instance().runtime_state.nexus_state;
     let mut propolis_and_sled_id =
-        inst_and_vmm.vmm().as_ref().map(|vmm| PropolisAndSledId {
-            propolis_id: PropolisUuid::from_untyped_uuid(vmm.id),
+        inst_and_vmm.vmm().as_ref().map(|vmm| VmmAndSledIds {
+            vmm_id: PropolisUuid::from_untyped_uuid(vmm.id),
             sled_id: SledUuid::from_untyped_uuid(vmm.sled_id),
         });
 
@@ -456,13 +456,13 @@ pub async fn instance_ip_remove_nat(
 /// a double attach/detach (`!target_ip.do_saga`).
 pub(super) async fn instance_ip_add_opte(
     sagactx: &NexusActionContext,
-    propolis_and_sled: Option<PropolisAndSledId>,
+    vmm_and_sled: Option<VmmAndSledIds>,
     target_ip: ModifyStateForExternalIp,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
 
     // No physical sled? Don't inform OPTE.
-    let Some(PropolisAndSledId { propolis_id, sled_id }) = propolis_and_sled
+    let Some(VmmAndSledIds { vmm_id: propolis_id, sled_id }) = vmm_and_sled
     else {
         return Ok(());
     };
@@ -512,13 +512,14 @@ pub(super) async fn instance_ip_add_opte(
 /// a double attach/detach (`!target_ip.do_saga`).
 pub(super) async fn instance_ip_remove_opte(
     sagactx: &NexusActionContext,
-    propolis_and_sled: Option<PropolisAndSledId>,
+    propolis_and_sled: Option<VmmAndSledIds>,
     target_ip: ModifyStateForExternalIp,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
 
     // No physical sled? Don't inform OPTE.
-    let Some(PropolisAndSledId { propolis_id, sled_id }) = propolis_and_sled
+    let Some(VmmAndSledIds { vmm_id: propolis_id, sled_id }) =
+        propolis_and_sled
     else {
         return Ok(());
     };

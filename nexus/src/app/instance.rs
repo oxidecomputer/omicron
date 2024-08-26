@@ -60,7 +60,7 @@ use propolis_client::support::WebSocketStream;
 use sagas::instance_common::ExternalIpAttach;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::InstanceProperties;
-use sled_agent_client::types::InstancePutStateBody;
+use sled_agent_client::types::VmmPutStateBody;
 use std::matches;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -154,7 +154,7 @@ pub(crate) enum InstanceStateChangeRequest {
 }
 
 impl From<InstanceStateChangeRequest>
-    for sled_agent_client::types::InstanceStateRequested
+    for sled_agent_client::types::VmmStateRequested
 {
     fn from(value: InstanceStateChangeRequest) -> Self {
         match value {
@@ -664,8 +664,7 @@ impl super::Nexus {
         &self,
         propolis_id: &PropolisUuid,
         sled_id: &SledUuid,
-    ) -> Result<Option<nexus::SledInstanceState>, InstanceStateChangeError>
-    {
+    ) -> Result<Option<nexus::SledVmmState>, InstanceStateChangeError> {
         let sa = self.sled_client(&sled_id).await?;
         sa.vmm_unregister(propolis_id)
             .await
@@ -846,7 +845,7 @@ impl super::Nexus {
                 let instance_put_result = sa
                     .vmm_put_state(
                         &propolis_id,
-                        &InstancePutStateBody { state: requested.into() },
+                        &VmmPutStateBody { state: requested.into() },
                     )
                     .await
                     .map(|res| res.into_inner().updated_runtime.map(Into::into))
@@ -1325,7 +1324,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         propolis_id: PropolisUuid,
-        new_runtime_state: &nexus::SledInstanceState,
+        new_runtime_state: &nexus::SledVmmState,
     ) -> Result<(), Error> {
         let Some((instance_id, saga)) = process_vmm_update(
             &self.db_datastore,
@@ -1831,14 +1830,22 @@ impl super::Nexus {
     }
 }
 
-/// Invoked by a sled agent to publish an updated runtime state for an
-/// Instance, returning an update saga for that instance (if one must be
-/// executed).
+/// Publishes the VMM and migration state supplied in `new_runtime_state` to the
+/// database.
+///
+/// # Return value
+///
+/// - `Ok(Some(instance_id, saga))` if the new VMM state obsoletes the current
+///   instance state. The caller should execute the returned instance update
+///   saga to reconcile the instance to the new VMM state.
+/// - `Ok(None)` if the new state was successfully published but does not
+///   require an instance update.
+/// - `Err` if an error occurred.
 pub(crate) async fn process_vmm_update(
     datastore: &DataStore,
     opctx: &OpContext,
     propolis_id: PropolisUuid,
-    new_runtime_state: &nexus::SledInstanceState,
+    new_runtime_state: &nexus::SledVmmState,
 ) -> Result<Option<(InstanceUuid, steno::SagaDag)>, Error> {
     use sagas::instance_update;
 
@@ -1862,7 +1869,7 @@ pub(crate) async fn process_vmm_update(
     // If an instance-update saga must be executed as a result of this update,
     // prepare and return it.
     //
-    // It's safe to refetch the VMM record to get the instance ID at this point
+    // It's safe to fetch the VMM record to get the instance ID at this point
     // even though the VMM may now be Destroyed, because the record itself won't
     // be deleted until the instance update saga retires it. If this update
     // marked the VMM as Destroyed and then the fetch failed, then another
@@ -1878,22 +1885,27 @@ pub(crate) async fn process_vmm_update(
             datastore.vmm_fetch(&opctx, &propolis_id).await?.instance_id,
         );
 
-        info!(opctx.log, "scheduling update saga in response to vmm update";
-            "instance_id" => %instance_id,
-            "propolis_id" => %propolis_id,
-        );
-
         let (.., authz_instance) = LookupPath::new(&opctx, datastore)
             .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await?;
-        let saga = instance_update::SagaInstanceUpdate::prepare(
+
+        match instance_update::SagaInstanceUpdate::prepare(
             &instance_update::Params {
                 serialized_authn: authn::saga::Serialized::for_opctx(opctx),
                 authz_instance,
             },
-        )?;
-        Ok(Some((instance_id, saga)))
+        ) {
+            Ok(saga) => Ok(Some((instance_id, saga))),
+            Err(e) => {
+                error!(opctx.log, "failed to prepare instance update saga";
+                       "error" => ?e,
+                       "instance_id" => %instance_id,
+                       "propolis_id" => %propolis_id);
+
+                Err(e)
+            }
+        }
     } else {
         Ok(None)
     }

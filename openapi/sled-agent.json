@@ -650,7 +650,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SledInstanceState"
+                  "$ref": "#/components/schemas/SledVmmState"
                 }
               }
             }
@@ -681,7 +681,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceUnregisterResponse"
+                  "$ref": "#/components/schemas/VmmUnregisterResponse"
                 }
               }
             }
@@ -837,7 +837,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SledInstanceState"
+                  "$ref": "#/components/schemas/SledVmmState"
                 }
               }
             }
@@ -866,7 +866,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/InstancePutStateBody"
+                "$ref": "#/components/schemas/VmmPutStateBody"
               }
             }
           },
@@ -878,7 +878,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstancePutStateResponse"
+                  "$ref": "#/components/schemas/VmmPutStateResponse"
                 }
               }
             }
@@ -3046,38 +3046,6 @@
           "ncpus"
         ]
       },
-      "InstancePutStateBody": {
-        "description": "The body of a request to move a previously-ensured instance into a specific runtime state.",
-        "type": "object",
-        "properties": {
-          "state": {
-            "description": "The state into which the instance should be driven.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceStateRequested"
-              }
-            ]
-          }
-        },
-        "required": [
-          "state"
-        ]
-      },
-      "InstancePutStateResponse": {
-        "description": "The response sent from a request to move an instance into a specific runtime state.",
-        "type": "object",
-        "properties": {
-          "updated_runtime": {
-            "nullable": true,
-            "description": "The current runtime state of the instance after handling the request to change its state. If the instance's state did not change, this field is `None`.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SledInstanceState"
-              }
-            ]
-          }
-        }
-      },
       "InstanceRuntimeState": {
         "description": "The dynamic runtime properties of an instance: its current VMM ID (if any), migration information (if any), and the instance state to report if there is no active VMM.",
         "type": "object",
@@ -3124,90 +3092,6 @@
           "gen",
           "time_updated"
         ]
-      },
-      "InstanceStateRequested": {
-        "description": "Requestable running state of an Instance.\n\nA subset of [`omicron_common::api::external::InstanceState`].",
-        "oneOf": [
-          {
-            "description": "Run this instance by migrating in from a previous running incarnation of the instance.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "migration_target"
-                ]
-              },
-              "value": {
-                "$ref": "#/components/schemas/InstanceMigrationTargetParams"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "description": "Start the instance if it is not already running.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "running"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "description": "Stop the instance.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "stopped"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "description": "Immediately reset the instance, as though it had stopped and immediately began to run again.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "reboot"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          }
-        ]
-      },
-      "InstanceUnregisterResponse": {
-        "description": "The response sent from a request to unregister an instance.",
-        "type": "object",
-        "properties": {
-          "updated_runtime": {
-            "nullable": true,
-            "description": "The current state of the instance after handling the request to unregister it. If the instance's state did not change, this field is `None`.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SledInstanceState"
-              }
-            ]
-          }
-        }
       },
       "Inventory": {
         "description": "Identity and basic status information about this sled agent",
@@ -4642,8 +4526,27 @@
           "sled_id"
         ]
       },
-      "SledInstanceState": {
-        "description": "A wrapper type containing a sled's total knowledge of the state of a specific VMM and the instance it incarnates.",
+      "SledRole": {
+        "description": "Describes the role of the sled within the rack.\n\nNote that this may change if the sled is physically moved within the rack.",
+        "oneOf": [
+          {
+            "description": "The sled is a general compute sled.",
+            "type": "string",
+            "enum": [
+              "gimlet"
+            ]
+          },
+          {
+            "description": "The sled is attached to the network switch, and has additional responsibilities.",
+            "type": "string",
+            "enum": [
+              "scrimlet"
+            ]
+          }
+        ]
+      },
+      "SledVmmState": {
+        "description": "A wrapper type containing a sled's total knowledge of the state of a VMM.",
         "type": "object",
         "properties": {
           "migration_in": {
@@ -4675,25 +4578,6 @@
         },
         "required": [
           "vmm_state"
-        ]
-      },
-      "SledRole": {
-        "description": "Describes the role of the sled within the rack.\n\nNote that this may change if the sled is physically moved within the rack.",
-        "oneOf": [
-          {
-            "description": "The sled is a general compute sled.",
-            "type": "string",
-            "enum": [
-              "gimlet"
-            ]
-          },
-          {
-            "description": "The sled is attached to the network switch, and has additional responsibilities.",
-            "type": "string",
-            "enum": [
-              "scrimlet"
-            ]
-          }
         ]
       },
       "Slot": {
@@ -4990,6 +4874,38 @@
           "snapshot_id"
         ]
       },
+      "VmmPutStateBody": {
+        "description": "The body of a request to move a previously-ensured instance into a specific runtime state.",
+        "type": "object",
+        "properties": {
+          "state": {
+            "description": "The state into which the instance should be driven.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VmmStateRequested"
+              }
+            ]
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "VmmPutStateResponse": {
+        "description": "The response sent from a request to move an instance into a specific runtime state.",
+        "type": "object",
+        "properties": {
+          "updated_runtime": {
+            "nullable": true,
+            "description": "The current runtime state of the instance after handling the request to change its state. If the instance's state did not change, this field is `None`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledVmmState"
+              }
+            ]
+          }
+        }
+      },
       "VmmRuntimeState": {
         "description": "The dynamic runtime properties of an individual VMM process.",
         "type": "object",
@@ -5082,6 +4998,90 @@
             ]
           }
         ]
+      },
+      "VmmStateRequested": {
+        "description": "Requestable running state of an Instance.\n\nA subset of [`omicron_common::api::external::InstanceState`].",
+        "oneOf": [
+          {
+            "description": "Run this instance by migrating in from a previous running incarnation of the instance.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "migration_target"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/InstanceMigrationTargetParams"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Start the instance if it is not already running.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Stop the instance.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "stopped"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Immediately reset the instance, as though it had stopped and immediately began to run again.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "reboot"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "VmmUnregisterResponse": {
+        "description": "The response sent from a request to unregister an instance.",
+        "type": "object",
+        "properties": {
+          "updated_runtime": {
+            "nullable": true,
+            "description": "The current state of the instance after handling the request to unregister it. If the instance's state did not change, this field is `None`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledVmmState"
+              }
+            ]
+          }
+        }
       },
       "Vni": {
         "description": "A Geneve Virtual Network Identifier",

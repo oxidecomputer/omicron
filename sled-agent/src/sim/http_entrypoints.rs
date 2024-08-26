@@ -23,7 +23,7 @@ use dropshot::TypedBody;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::{Inventory, OmicronZonesConfig};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
-use omicron_common::api::internal::nexus::SledInstanceState;
+use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
@@ -43,9 +43,9 @@ use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::InstanceEnsureBody;
 use sled_agent_types::instance::InstanceExternalIpBody;
-use sled_agent_types::instance::InstancePutStateBody;
-use sled_agent_types::instance::InstancePutStateResponse;
-use sled_agent_types::instance::InstanceUnregisterResponse;
+use sled_agent_types::instance::VmmPutStateBody;
+use sled_agent_types::instance::VmmPutStateResponse;
+use sled_agent_types::instance::VmmUnregisterResponse;
 use sled_agent_types::sled::AddSledRequest;
 use sled_agent_types::time_sync::TimeSync;
 use sled_agent_types::zone_bundle::BundleUtilization;
@@ -86,7 +86,7 @@ impl SledAgentApi for SledAgentSimImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
         body: TypedBody<InstanceEnsureBody>,
-    ) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
+    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         let sa = rqctx.context();
         let propolis_id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
@@ -106,7 +106,7 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn vmm_unregister(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-    ) -> Result<HttpResponseOk<InstanceUnregisterResponse>, HttpError> {
+    ) -> Result<HttpResponseOk<VmmUnregisterResponse>, HttpError> {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
         Ok(HttpResponseOk(sa.instance_unregister(id).await?))
@@ -115,8 +115,8 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn vmm_put_state(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<InstancePutStateBody>,
-    ) -> Result<HttpResponseOk<InstancePutStateResponse>, HttpError> {
+        body: TypedBody<VmmPutStateBody>,
+    ) -> Result<HttpResponseOk<VmmPutStateResponse>, HttpError> {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
@@ -126,7 +126,7 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn vmm_get_state(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-    ) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
+    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
         Ok(HttpResponseOk(sa.instance_get_state(id).await?))

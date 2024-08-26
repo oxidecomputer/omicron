@@ -38,9 +38,7 @@ use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
-use omicron_common::api::internal::nexus::{
-    SledInstanceState, VmmRuntimeState,
-};
+use omicron_common::api::internal::nexus::{SledVmmState, VmmRuntimeState};
 use omicron_common::api::internal::shared::{
     HostPortConfig, RackNetworkConfig, ResolvedVpcFirewallRule,
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SledIdentifiers,
@@ -61,8 +59,7 @@ use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::instance::{
     InstanceExternalIpBody, InstanceHardware, InstanceMetadata,
-    InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse,
+    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
 use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
 use sled_agent_types::time_sync::TimeSync;
@@ -227,7 +224,7 @@ impl From<Error> for dropshot::HttpError {
                 }
             }
             Error::Instance(
-                e @ crate::instance_manager::Error::NoSuchInstance(_),
+                e @ crate::instance_manager::Error::NoSuchVmm(_),
             ) => HttpError::for_not_found(
                 Some(NO_SUCH_INSTANCE.to_string()),
                 e.to_string(),
@@ -966,7 +963,7 @@ impl SledAgent {
         vmm_runtime: VmmRuntimeState,
         propolis_addr: SocketAddr,
         metadata: InstanceMetadata,
-    ) -> Result<SledInstanceState, Error> {
+    ) -> Result<SledVmmState, Error> {
         self.inner
             .instances
             .ensure_registered(
@@ -991,7 +988,7 @@ impl SledAgent {
     pub async fn instance_ensure_unregistered(
         &self,
         propolis_id: PropolisUuid,
-    ) -> Result<InstanceUnregisterResponse, Error> {
+    ) -> Result<VmmUnregisterResponse, Error> {
         self.inner
             .instances
             .ensure_unregistered(propolis_id)
@@ -1004,8 +1001,8 @@ impl SledAgent {
     pub async fn instance_ensure_state(
         &self,
         propolis_id: PropolisUuid,
-        target: InstanceStateRequested,
-    ) -> Result<InstancePutStateResponse, Error> {
+        target: VmmStateRequested,
+    ) -> Result<VmmPutStateResponse, Error> {
         self.inner
             .instances
             .ensure_state(propolis_id, target)
@@ -1048,7 +1045,7 @@ impl SledAgent {
     pub async fn instance_get_state(
         &self,
         propolis_id: PropolisUuid,
-    ) -> Result<SledInstanceState, Error> {
+    ) -> Result<SledVmmState, Error> {
         self.inner
             .instances
             .get_instance_state(propolis_id)

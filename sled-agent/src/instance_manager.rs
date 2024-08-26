@@ -4,13 +4,13 @@
 
 //! API for controlling multiple instances on a sled.
 
-use crate::instance::propolis_zone_name;
 use crate::instance::Instance;
 use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClient;
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
+use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use omicron_common::api::external::ByteCount;
 
 use anyhow::anyhow;
@@ -20,7 +20,7 @@ use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::ZoneBuilderFactory;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use omicron_common::api::internal::nexus::SledInstanceState;
+use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_uuid_kinds::InstanceUuid;
@@ -44,8 +44,8 @@ pub enum Error {
     #[error("Instance error: {0}")]
     Instance(#[from] crate::instance::Error),
 
-    #[error("Instance with ID {0} not found")]
-    NoSuchInstance(PropolisUuid),
+    #[error("VMM with ID {0} not found")]
+    NoSuchVmm(PropolisUuid),
 
     #[error("OPTE port management error: {0}")]
     Opte(#[from] illumos_utils::opte::Error),
@@ -150,7 +150,7 @@ impl InstanceManager {
         propolis_addr: SocketAddr,
         sled_identifiers: SledIdentifiers,
         metadata: InstanceMetadata,
-    ) -> Result<SledInstanceState, Error> {
+    ) -> Result<SledVmmState, Error> {
         let (tx, rx) = oneshot::channel();
         self.inner
             .tx
@@ -173,7 +173,7 @@ impl InstanceManager {
     pub async fn ensure_unregistered(
         &self,
         propolis_id: PropolisUuid,
-    ) -> Result<InstanceUnregisterResponse, Error> {
+    ) -> Result<VmmUnregisterResponse, Error> {
         let (tx, rx) = oneshot::channel();
         self.inner
             .tx
@@ -189,8 +189,8 @@ impl InstanceManager {
     pub async fn ensure_state(
         &self,
         propolis_id: PropolisUuid,
-        target: InstanceStateRequested,
-    ) -> Result<InstancePutStateResponse, Error> {
+        target: VmmStateRequested,
+    ) -> Result<VmmPutStateResponse, Error> {
         let (tx, rx) = oneshot::channel();
         self.inner
             .tx
@@ -206,17 +206,18 @@ impl InstanceManager {
             // these may involve a long-running zone creation, so avoid HTTP
             // request timeouts by decoupling the response
             // (see InstanceRunner::put_state)
-            InstanceStateRequested::MigrationTarget(_)
-            | InstanceStateRequested::Running => {
+            VmmStateRequested::MigrationTarget(_)
+            | VmmStateRequested::Running => {
                 // We don't want the sending side of the channel to see an
                 // error if we drop rx without awaiting it.
                 // Since we don't care about the response here, we spawn rx
                 // into a task which will await it for us in the background.
                 tokio::spawn(rx);
-                Ok(InstancePutStateResponse { updated_runtime: None })
+                Ok(VmmPutStateResponse { updated_runtime: None })
             }
-            InstanceStateRequested::Stopped
-            | InstanceStateRequested::Reboot => rx.await?,
+            VmmStateRequested::Stopped | VmmStateRequested::Reboot => {
+                rx.await?
+            }
         }
     }
 
@@ -301,7 +302,7 @@ impl InstanceManager {
     pub async fn get_instance_state(
         &self,
         propolis_id: PropolisUuid,
-    ) -> Result<SledInstanceState, Error> {
+    ) -> Result<SledVmmState, Error> {
         let (tx, rx) = oneshot::channel();
         self.inner
             .tx
@@ -351,16 +352,16 @@ enum InstanceManagerRequest {
         // reasonable choice...
         sled_identifiers: Box<SledIdentifiers>,
         metadata: InstanceMetadata,
-        tx: oneshot::Sender<Result<SledInstanceState, Error>>,
+        tx: oneshot::Sender<Result<SledVmmState, Error>>,
     },
     EnsureUnregistered {
         propolis_id: PropolisUuid,
-        tx: oneshot::Sender<Result<InstanceUnregisterResponse, Error>>,
+        tx: oneshot::Sender<Result<VmmUnregisterResponse, Error>>,
     },
     EnsureState {
         propolis_id: PropolisUuid,
-        target: InstanceStateRequested,
-        tx: oneshot::Sender<Result<InstancePutStateResponse, Error>>,
+        target: VmmStateRequested,
+        tx: oneshot::Sender<Result<VmmPutStateResponse, Error>>,
     },
 
     IssueDiskSnapshot {
@@ -385,7 +386,7 @@ enum InstanceManagerRequest {
     },
     GetState {
         propolis_id: PropolisUuid,
-        tx: oneshot::Sender<Result<SledInstanceState, Error>>,
+        tx: oneshot::Sender<Result<SledVmmState, Error>>,
     },
     OnlyUseDisks {
         disks: AllDisks,
@@ -565,7 +566,7 @@ impl InstanceManagerRunner {
         propolis_addr: SocketAddr,
         sled_identifiers: SledIdentifiers,
         metadata: InstanceMetadata,
-    ) -> Result<SledInstanceState, Error> {
+    ) -> Result<SledVmmState, Error> {
         info!(
             &self.log,
             "ensuring instance is registered";
@@ -603,10 +604,12 @@ impl InstanceManagerRunner {
                       "registering new instance";
                       "instance_id" => %instance_id,
                       "propolis_id" => %propolis_id);
+
                 let instance_log = self.log.new(o!(
-                        "instance_id" => format!("{instance_id}"),
-                        "propolis_id" => format!("{propolis_id}")
+                    "instance_id" => instance_id.to_string(),
+                    "propolis_id" => propolis_id.to_string(),
                 ));
+
                 let ticket =
                     InstanceTicket::new(propolis_id, self.terminate_tx.clone());
 
@@ -651,12 +654,12 @@ impl InstanceManagerRunner {
     /// zone is rudely terminated.
     async fn ensure_unregistered(
         &mut self,
-        tx: oneshot::Sender<Result<InstanceUnregisterResponse, Error>>,
+        tx: oneshot::Sender<Result<VmmUnregisterResponse, Error>>,
         propolis_id: PropolisUuid,
     ) -> Result<(), Error> {
         // If the instance does not exist, we response immediately.
         let Some(instance) = self.get_propolis(propolis_id) else {
-            tx.send(Ok(InstanceUnregisterResponse { updated_runtime: None }))
+            tx.send(Ok(VmmUnregisterResponse { updated_runtime: None }))
                 .map_err(|_| Error::FailedSendClientClosed)?;
             return Ok(());
         };
@@ -672,9 +675,9 @@ impl InstanceManagerRunner {
     /// runtime state.
     async fn ensure_state(
         &mut self,
-        tx: oneshot::Sender<Result<InstancePutStateResponse, Error>>,
+        tx: oneshot::Sender<Result<VmmPutStateResponse, Error>>,
         propolis_id: PropolisUuid,
-        target: InstanceStateRequested,
+        target: VmmStateRequested,
     ) -> Result<(), Error> {
         let Some(instance) = self.get_propolis(propolis_id) else {
             match target {
@@ -686,14 +689,12 @@ impl InstanceManagerRunner {
                 // Propolis handled it, sled agent unregistered the
                 // instance, and only then did a second stop request
                 // arrive.
-                InstanceStateRequested::Stopped => {
-                    tx.send(Ok(InstancePutStateResponse {
-                        updated_runtime: None,
-                    }))
-                    .map_err(|_| Error::FailedSendClientClosed)?;
+                VmmStateRequested::Stopped => {
+                    tx.send(Ok(VmmPutStateResponse { updated_runtime: None }))
+                        .map_err(|_| Error::FailedSendClientClosed)?;
                 }
                 _ => {
-                    tx.send(Err(Error::NoSuchInstance(propolis_id)))
+                    tx.send(Err(Error::NoSuchVmm(propolis_id)))
                         .map_err(|_| Error::FailedSendClientClosed)?;
                 }
             }
@@ -710,10 +711,8 @@ impl InstanceManagerRunner {
         disk_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
-        let instance = self
-            .jobs
-            .get(&propolis_id)
-            .ok_or(Error::NoSuchInstance(propolis_id))?;
+        let instance =
+            self.jobs.get(&propolis_id).ok_or(Error::NoSuchVmm(propolis_id))?;
 
         instance
             .issue_snapshot_request(tx, disk_id, snapshot_id)
@@ -727,12 +726,21 @@ impl InstanceManagerRunner {
         tx: oneshot::Sender<Result<ZoneBundleMetadata, BundleError>>,
         name: &str,
     ) -> Result<(), BundleError> {
-        let Some(instance) = self
-            .jobs
-            .iter()
-            .find(|(propolis_id, _)| name == propolis_zone_name(propolis_id))
-            .map(|entry| entry.1)
-        else {
+        // A well-formed Propolis zone name must consist of
+        // `PROPOLIS_ZONE_PREFIX` and the Propolis ID. If the prefix is not
+        // present or the Propolis ID portion of the supplied zone name isn't
+        // parseable as a UUID, there is no Propolis zone with the specified
+        // name to capture into a bundle, so return a `NoSuchZone` error.
+        let vmm_id: PropolisUuid = name
+            .strip_prefix(PROPOLIS_ZONE_PREFIX)
+            .ok_or_else(|| BundleError::NoSuchZone { name: name.to_string() })
+            .and_then(|uuid_str| {
+                uuid_str.parse::<PropolisUuid>().map_err(|_| {
+                    BundleError::NoSuchZone { name: name.to_string() }
+                })
+            })?;
+
+        let Some(instance) = self.jobs.get(&vmm_id) else {
             return Err(BundleError::NoSuchZone { name: name.to_string() });
         };
         instance.request_zone_bundle(tx).await
@@ -745,7 +753,7 @@ impl InstanceManagerRunner {
         ip: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
         let Some(instance) = self.get_propolis(propolis_id) else {
-            return Err(Error::NoSuchInstance(propolis_id));
+            return Err(Error::NoSuchVmm(propolis_id));
         };
         instance.add_external_ip(tx, ip).await?;
         Ok(())
@@ -758,7 +766,7 @@ impl InstanceManagerRunner {
         ip: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
         let Some(instance) = self.get_propolis(propolis_id) else {
-            return Err(Error::NoSuchInstance(propolis_id));
+            return Err(Error::NoSuchVmm(propolis_id));
         };
 
         instance.delete_external_ip(tx, ip).await?;
@@ -767,12 +775,12 @@ impl InstanceManagerRunner {
 
     async fn get_instance_state(
         &self,
-        tx: oneshot::Sender<Result<SledInstanceState, Error>>,
+        tx: oneshot::Sender<Result<SledVmmState, Error>>,
         propolis_id: PropolisUuid,
     ) -> Result<(), Error> {
         let Some(instance) = self.get_propolis(propolis_id) else {
             return tx
-                .send(Err(Error::NoSuchInstance(propolis_id)))
+                .send(Err(Error::NoSuchVmm(propolis_id)))
                 .map_err(|_| Error::FailedSendClientClosed);
         };
 

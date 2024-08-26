@@ -236,9 +236,9 @@
 //! updates is perhaps the simplest one: _avoiding unnecessary update sagas_.
 //! The `cpapi_instances_put` API endpoint and instance-watcher background tasks
 //! handle changes to VMM and migration states by calling the
-//! [`notify_vmm_updated`] method, which writes the new states to the
-//! database and (potentially) starts an update saga. Naively, this method would
-//! *always* start an update saga, but remember that --- as we discussed
+//! [`process_vmm_update`] method, which writes the new states to the database
+//! and (potentially) starts an update saga. Naively, this method would *always*
+//! start an update saga, but remember that --- as we discussed
 //! [above](#background) --- many VMM/migration state changes don't actually
 //! require modifying the instance record. For example, if an instance's VMM
 //! transitions from [`VmmState::Starting`] to [`VmmState::Running`], that
@@ -326,7 +326,7 @@
 //!     crate::app::db::datastore::DataStore::instance_updater_inherit_lock
 //! [instance_updater_unlock]:
 //!     crate::app::db::datastore::DataStore::instance_updater_unlock
-//! [`notify_vmm_updated`]: crate::app::Nexus::notify_vmm_updated
+//! [`process_vmm_update`]: crate::app::instance::process_vmm_update
 //!
 //! [dist-locking]:
 //!     https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html
@@ -362,7 +362,7 @@ use nexus_db_queries::{authn, authz};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus;
-use omicron_common::api::internal::nexus::SledInstanceState;
+use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -408,7 +408,7 @@ mod destroyed;
 pub fn update_saga_needed(
     log: &slog::Logger,
     propolis_id: PropolisUuid,
-    state: &SledInstanceState,
+    state: &SledVmmState,
     result: &VmmStateUpdateResult,
 ) -> bool {
     // Currently, an instance-update saga is required if (and only if):

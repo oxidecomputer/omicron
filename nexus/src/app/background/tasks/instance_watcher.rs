@@ -19,7 +19,7 @@ use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceState;
-use omicron_common::api::internal::nexus::SledInstanceState;
+use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use oximeter::types::ProducerRegistry;
@@ -81,10 +81,12 @@ impl InstanceWatcher {
         let client = client.clone();
 
         async move {
-            slog::trace!(opctx.log, "checking on instance...");
-            let rsp = client
-                .vmm_get_state(&PropolisUuid::from_untyped_uuid(target.vmm_id))
-                .await;
+            let vmm_id = PropolisUuid::from_untyped_uuid(target.vmm_id);
+            slog::trace!(
+                opctx.log, "checking on VMM"; "propolis_id" => %vmm_id
+            );
+
+            let rsp = client.vmm_get_state(&vmm_id).await;
             let mut check = Check {
                 target,
                 outcome: Default::default(),
@@ -149,7 +151,7 @@ impl InstanceWatcher {
                 }
             };
 
-            let new_runtime_state: SledInstanceState = state.into();
+            let new_runtime_state: SledVmmState = state.into();
             check.outcome =
                 CheckOutcome::Success(new_runtime_state.vmm_state.state.into());
             debug!(

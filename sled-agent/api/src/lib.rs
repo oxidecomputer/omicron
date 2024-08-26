@@ -15,7 +15,7 @@ use nexus_sled_agent_shared::inventory::{
 };
 use omicron_common::{
     api::internal::{
-        nexus::{DiskRuntimeState, SledInstanceState, UpdateArtifactId},
+        nexus::{DiskRuntimeState, SledVmmState, UpdateArtifactId},
         shared::{
             ResolvedVpcRouteSet, ResolvedVpcRouteState, SledIdentifiers,
             SwitchPorts, VirtualNetworkInterfaceHost,
@@ -36,8 +36,8 @@ use sled_agent_types::{
     early_networking::EarlyNetworkConfig,
     firewall_rules::VpcFirewallRulesEnsureBody,
     instance::{
-        InstanceEnsureBody, InstanceExternalIpBody, InstancePutStateBody,
-        InstancePutStateResponse, InstanceUnregisterResponse,
+        InstanceEnsureBody, InstanceExternalIpBody, VmmPutStateBody,
+        VmmPutStateResponse, VmmUnregisterResponse,
     },
     sled::AddSledRequest,
     time_sync::TimeSync,
@@ -218,7 +218,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
         body: TypedBody<InstanceEnsureBody>,
-    ) -> Result<HttpResponseOk<SledInstanceState>, HttpError>;
+    ) -> Result<HttpResponseOk<SledVmmState>, HttpError>;
 
     #[endpoint {
         method = DELETE,
@@ -227,7 +227,7 @@ pub trait SledAgentApi {
     async fn vmm_unregister(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-    ) -> Result<HttpResponseOk<InstanceUnregisterResponse>, HttpError>;
+    ) -> Result<HttpResponseOk<VmmUnregisterResponse>, HttpError>;
 
     #[endpoint {
         method = PUT,
@@ -236,8 +236,8 @@ pub trait SledAgentApi {
     async fn vmm_put_state(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<InstancePutStateBody>,
-    ) -> Result<HttpResponseOk<InstancePutStateResponse>, HttpError>;
+        body: TypedBody<VmmPutStateBody>,
+    ) -> Result<HttpResponseOk<VmmPutStateResponse>, HttpError>;
 
     #[endpoint {
         method = GET,
@@ -246,7 +246,7 @@ pub trait SledAgentApi {
     async fn vmm_get_state(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-    ) -> Result<HttpResponseOk<SledInstanceState>, HttpError>;
+    ) -> Result<HttpResponseOk<SledVmmState>, HttpError>;
 
     #[endpoint {
         method = PUT,

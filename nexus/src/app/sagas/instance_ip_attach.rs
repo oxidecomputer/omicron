@@ -5,7 +5,7 @@
 use super::instance_common::{
     instance_ip_add_nat, instance_ip_add_opte, instance_ip_get_instance_state,
     instance_ip_move_state, instance_ip_remove_opte, ExternalIpAttach,
-    ModifyStateForExternalIp, PropolisAndSledId,
+    ModifyStateForExternalIp, VmmAndSledIds,
 };
 use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
@@ -161,7 +161,7 @@ async fn siia_begin_attach_ip_undo(
 
 async fn siia_get_instance_state(
     sagactx: NexusActionContext,
-) -> Result<Option<PropolisAndSledId>, ActionError> {
+) -> Result<Option<VmmAndSledIds>, ActionError> {
     let params = sagactx.saga_params::<Params>()?;
     instance_ip_get_instance_state(
         &sagactx,
@@ -178,7 +178,7 @@ async fn siia_nat(
 ) -> Result<Option<Ipv4NatEntry>, ActionError> {
     let params = sagactx.saga_params::<Params>()?;
     let sled_id = sagactx
-        .lookup::<Option<PropolisAndSledId>>("instance_state")?
+        .lookup::<Option<VmmAndSledIds>>("instance_state")?
         .map(|ids| ids.sled_id);
 
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
@@ -248,7 +248,7 @@ async fn siia_nat_undo(
 async fn siia_update_opte(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    let ids = sagactx.lookup::<Option<PropolisAndSledId>>("instance_state")?;
+    let ids = sagactx.lookup::<Option<VmmAndSledIds>>("instance_state")?;
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
     instance_ip_add_opte(&sagactx, ids, target_ip).await
 }
@@ -257,7 +257,7 @@ async fn siia_update_opte_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
-    let ids = sagactx.lookup::<Option<PropolisAndSledId>>("instance_state")?;
+    let ids = sagactx.lookup::<Option<VmmAndSledIds>>("instance_state")?;
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
     if let Err(e) = instance_ip_remove_opte(&sagactx, ids, target_ip).await {
         error!(log, "siia_update_opte_undo: failed to notify sled-agent: {e}");
@@ -429,14 +429,14 @@ pub(crate) mod test {
         }
 
         // Sled agent has a record of the new external IPs.
-        let (propolis_id, _) =
+        let VmmAndSledIds { vmm_id, .. } =
             crate::app::sagas::test_helpers::instance_fetch_vmm_and_sled_ids(
                 cptestctx,
                 &instance_id,
             )
             .await;
         let mut eips = sled_agent.external_ips.lock().await;
-        let my_eips = eips.entry(propolis_id).or_default();
+        let my_eips = eips.entry(vmm_id).or_default();
         assert!(my_eips
             .iter()
             .any(|v| matches!(v, InstanceExternalIpBody::Floating(_))));
@@ -491,14 +491,14 @@ pub(crate) mod test {
             .is_none());
 
         // No IP bindings remain on sled-agent.
-        let (propolis_id, _) =
+        let VmmAndSledIds { vmm_id, .. } =
             crate::app::sagas::test_helpers::instance_fetch_vmm_and_sled_ids(
                 cptestctx,
                 &instance_id,
             )
             .await;
         let mut eips = sled_agent.external_ips.lock().await;
-        let my_eips = eips.entry(propolis_id).or_default();
+        let my_eips = eips.entry(vmm_id).or_default();
         assert!(my_eips.is_empty());
     }
 

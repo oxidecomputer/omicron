@@ -392,12 +392,12 @@ mod test {
     use omicron_common::api::external::Error;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::nexus::DiskRuntimeState;
-    use omicron_common::api::internal::nexus::SledInstanceState;
+    use omicron_common::api::internal::nexus::SledVmmState;
     use omicron_common::api::internal::nexus::VmmRuntimeState;
     use omicron_common::api::internal::nexus::VmmState;
     use omicron_test_utils::dev::test_setup_log;
     use sled_agent_types::disk::DiskStateRequested;
-    use sled_agent_types::instance::InstanceStateRequested;
+    use sled_agent_types::instance::VmmStateRequested;
 
     fn make_instance(
         logctx: &LogContext,
@@ -408,11 +408,8 @@ mod test {
             time_updated: Utc::now(),
         };
 
-        let state = SledInstanceState {
-            vmm_state,
-            migration_in: None,
-            migration_out: None,
-        };
+        let state =
+            SledVmmState { vmm_state, migration_in: None, migration_out: None };
 
         SimObject::new_simulated_auto(&state, logctx.log.new(o!()))
     }
@@ -456,8 +453,7 @@ mod test {
         // Stopping an instance that was never started synchronously destroys
         // its VMM.
         let rprev = r1;
-        let dropped =
-            instance.transition(InstanceStateRequested::Stopped).unwrap();
+        let dropped = instance.transition(VmmStateRequested::Stopped).unwrap();
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_none());
         let rnext = instance.object.current();
@@ -497,8 +493,7 @@ mod test {
         // simulated instance's state, but it does queue up a transition.
         let mut rprev = r1;
         assert!(rx.try_next().is_err());
-        let dropped =
-            instance.transition(InstanceStateRequested::Running).unwrap();
+        let dropped = instance.transition(VmmStateRequested::Running).unwrap();
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_some());
         assert!(rx.try_next().is_err());
@@ -530,8 +525,7 @@ mod test {
 
         // If we transition again to "Running", the process should complete
         // immediately.
-        let dropped =
-            instance.transition(InstanceStateRequested::Running).unwrap();
+        let dropped = instance.transition(VmmStateRequested::Running).unwrap();
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_none());
         assert!(rx.try_next().is_err());
@@ -544,8 +538,7 @@ mod test {
         // If we go back to any stopped state, we go through the async process
         // again.
         assert!(rx.try_next().is_err());
-        let dropped =
-            instance.transition(InstanceStateRequested::Stopped).unwrap();
+        let dropped = instance.transition(VmmStateRequested::Stopped).unwrap();
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_some());
         let rnext = instance.object.current();
@@ -602,7 +595,7 @@ mod test {
         assert_eq!(r1.vmm_state.state, VmmState::Starting);
         assert_eq!(r1.vmm_state.gen, Generation::new());
         assert!(instance
-            .transition(InstanceStateRequested::Running)
+            .transition(VmmStateRequested::Running)
             .unwrap()
             .is_none());
         instance.transition_finish();
@@ -618,7 +611,7 @@ mod test {
         // Now reboot the instance. This is dispatched to Propolis, which will
         // move to the Rebooting state and then back to Running.
         assert!(instance
-            .transition(InstanceStateRequested::Reboot)
+            .transition(VmmStateRequested::Reboot)
             .unwrap()
             .is_none());
         let (rprev, rnext) = (rnext, instance.object.current());
