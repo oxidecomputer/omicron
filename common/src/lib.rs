@@ -120,7 +120,7 @@ async fn never_bail() -> Result<bool, Error> {
 }
 
 /// A wrapper struct that does nothing other than elide the inner value from
-/// [`std::debug::Debug`] output.
+/// [`std::fmt::Debug`] output.
 ///
 /// If you want to use this for secrets, consider that it might not do
 /// everything you expect (it does not zeroize memory on drop, nor get in the
