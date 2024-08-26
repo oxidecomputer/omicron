@@ -979,6 +979,7 @@ impl FromStr for DatasetKind {
             "crucible" => Crucible,
             "clickhouse" => Clickhouse,
             "clickhouse_keeper" => ClickhouseKeeper,
+            "clickhouse_server" => ClickhouseServer,
             "external_dns" => ExternalDns,
             "internal_dns" => InternalDns,
             "zone" => ZoneRoot,
@@ -1068,10 +1069,11 @@ mod tests {
     #[test]
     fn test_dataset_kind_serialization() {
         let kinds = [
-            DatasetKind::Crucible,
             DatasetKind::Cockroach,
+            DatasetKind::Crucible,
             DatasetKind::Clickhouse,
             DatasetKind::ClickhouseKeeper,
+            DatasetKind::ClickhouseServer,
             DatasetKind::ExternalDns,
             DatasetKind::InternalDns,
             DatasetKind::ZoneRoot,
