@@ -8,6 +8,7 @@ use db::datastore::SwitchPortSettingsCombinedResult;
 use dpd_client::types::LinkId;
 use dpd_client::types::PortId;
 use http::StatusCode;
+use nexus_db_model::SwitchPortAddressConfig;
 use nexus_db_model::SwitchPortConfig;
 use nexus_db_model::SwitchPortGeometry;
 use nexus_db_model::SwitchPortLinkConfig;
@@ -204,6 +205,22 @@ impl super::Nexus {
                 opctx,
                 name_or_id,
                 link.into(),
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_interface_address_list(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        interface: Name,
+    ) -> ListResultVec<SwitchPortAddressConfig> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_interface_address_list(
+                opctx,
+                configuration,
+                interface.into(),
             )
             .await
     }

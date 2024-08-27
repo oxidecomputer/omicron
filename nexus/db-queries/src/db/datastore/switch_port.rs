@@ -32,11 +32,12 @@ use diesel::{
 use diesel_dtrace::DTraceConnection;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
-    BgpConfig, SqlU16, SqlU32, SqlU8, SwitchPortBgpPeerConfigAllowExport,
-    SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
-    SwitchPortGeometry,
+    AddressLot, BgpConfig, SqlU16, SqlU32, SqlU8,
+    SwitchPortBgpPeerConfigAllowExport, SwitchPortBgpPeerConfigAllowImport,
+    SwitchPortBgpPeerConfigCommunity, SwitchPortGeometry,
 };
 use nexus_types::external_api::params;
+use nexus_types::identity::Asset;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error,
@@ -892,6 +893,440 @@ impl DataStore {
                         .await?;
 
                     Ok(())
+                }
+            })
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(())
+    }
+
+    pub async fn switch_port_configuration_interface_address_list(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        interface: Name,
+    ) -> ListResultVec<SwitchPortAddressConfig> {
+        use db::schema::switch_port_settings as port_settings;
+        use db::schema::switch_port_settings_address_config as address_config;
+
+        let dataset =
+            port_settings::table
+                .inner_join(address_config::table.on(
+                    address_config::port_settings_id.eq(port_settings::id),
+                ));
+
+        let query = match configuration {
+            NameOrId::Id(id) => {
+                // find port config using port settings id
+                dataset.filter(port_settings::id.eq(id)).into_boxed()
+            }
+            NameOrId::Name(name) => {
+                // find port config using port settings name
+                dataset
+                    .filter(port_settings::name.eq(name.to_string()))
+                    .into_boxed()
+            }
+        };
+
+        let configs: Vec<SwitchPortAddressConfig> = query
+            .select(SwitchPortAddressConfig::as_select())
+            .filter(address_config::interface_name.eq(interface))
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e: diesel::result::Error| {
+                let msg =
+                    "error while looking up interface address configuration";
+                match e {
+                    diesel::result::Error::NotFound => {
+                        Error::non_resourcetype_not_found(
+                            "could not find address configuration for switch port configuration: {configuration}, interface: {interface}"
+                        )},
+                    _ => Error::internal_error(msg),
+                }
+            })?;
+
+        Ok(configs)
+    }
+
+    // TODO: if this isn't too annoying we can fill this out
+    // pub async fn switch_port_configuration_interface_address_set(
+    //     &self,
+    //     opctx: &OpContext,
+    //     configuration: NameOrId,
+    //     interface: Name,
+    //     new_config: params::AddressConfig,
+    // ) -> ListResultVec<SwitchPortAddressConfig> {
+    //     let conn = self.pool_connection_authorized(opctx).await?;
+    //     let err = OptionalError::new();
+
+    //     let config = self
+    //         .transaction_retry_wrapper(
+    //             "switch_port_configuration_interface_address_add",
+    //         )
+    //         .transaction(&conn, |conn| {
+    //             let err = err.clone();
+
+    //             async move {
+
+    //                 let mut address_config = Vec::new();
+    //                 use db::schema::address_lot;
+    //                 for address in &new_config.addresses {
+    //                     let address_lot_id = match &address.address_lot {
+    //                         NameOrId::Id(id) => *id,
+    //                         NameOrId::Name(name) => {
+    //                             let name = name.to_string();
+    //                             address_lot_dsl::address_lot
+    //                                 .filter(address_lot::time_deleted.is_null())
+    //                                 .filter(address_lot::name.eq(name))
+    //                                 .select(address_lot::id)
+    //                                 .limit(1)
+    //                                 .first_async::<Uuid>(conn)
+    //                                 .await
+    //                                 .map_err(|diesel_error| {
+    //                                     err.bail_retryable_or(
+    //                                         diesel_error,
+    //                                         SwitchPortSettingsCreateError::AddressLotNotFound
+    //                                     )
+    //                                 })?
+    //                         }
+    //                     };
+    //                     // TODO: Reduce DB round trips needed for reserving ip blocks
+    //                     // https://github.com/oxidecomputer/omicron/issues/3060
+    //                     let (block, rsvd_block) =
+    //                         crate::db::datastore::address_lot::try_reserve_block(
+    //                             address_lot_id,
+    //                             address.address.addr().into(),
+    //                             // TODO: Should we allow anycast addresses for switch_ports?
+    //                             // anycast
+    //                             false,
+    //                             &conn,
+    //                         )
+    //                         .await
+    //                         .map_err(|e| match e {
+    //                             ReserveBlockTxnError::CustomError(e) => {
+    //                                 err.bail(SwitchPortSettingsCreateError::ReserveBlock(e))
+    //                             }
+    //                             ReserveBlockTxnError::Database(e) => e,
+    //                         })?;
+
+    //                     address_config.push(SwitchPortAddressConfig::new(
+    //                         psid,
+    //                         block.id,
+    //                         rsvd_block.id,
+    //                         address.address.into(),
+    //                         interface_name.clone(),
+    //                         address.vlan_id,
+    //                     ));
+    //                 }
+    //                 result.addresses = diesel::insert_into(
+    //                     address_config_dsl::switch_port_settings_address_config,
+    //                 )
+    //                 .values(address_config)
+    //                 .returning(SwitchPortAddressConfig::as_returning())
+    //                 .get_results_async(conn)
+    //                 .await?;
+
+    //             }
+
+    //         })
+    //         .await
+    //         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+    //     Ok(config)
+    // }
+
+    pub async fn switch_port_configuration_interface_address_add(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        interface: Name,
+        address: params::Address,
+    ) -> CreateResult<SwitchPortAddressConfig> {
+        use db::schema::address_lot;
+        use db::schema::switch_port_settings_address_config as address_config;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper(
+                "switch_port_configuration_interface_address_add",
+            )
+            .transaction(&conn, |conn| {
+                let parent_configuration = configuration.clone();
+                let interface = interface.clone();
+                let new_settings = address.clone();
+                let err = err.clone();
+
+                async move {
+
+                    // resolve id of port_settings record
+                    let port_settings_id = switch_port_configuration_id(&conn, parent_configuration.clone())
+                        .await
+                        .map_err(|e: diesel::result::Error| {
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    err.bail(
+                                        Error::non_resourcetype_not_found(
+                                            format!("unable to lookup configuration with identifier {parent_configuration}")
+                                        )
+                                    )
+                                },
+                                _ => {
+                                    err.bail(Error::internal_error(
+                                        "error while looking up address lot for interface address"
+                                    ))
+                                },
+                            }
+                        })?;
+
+                    // resolve id of referenced address lot
+                    let address_lot_id = match new_settings.address_lot {
+
+                        NameOrId::Id(id) => {
+                            // verify id is valid
+                            address_lot::table
+                                .filter(address_lot::time_deleted.is_null())
+                                .filter(address_lot::id.eq(id))
+                                .select(address_lot::id)
+                                .limit(1)
+                                .first_async::<Uuid>(&conn)
+                                .await
+                                .map_err(|e: diesel::result::Error| {
+                                    match e {
+                                        diesel::result::Error::NotFound => {
+                                            err.bail(Error::not_found_by_id(ResourceType::AddressLot, &id))
+                                        },
+                                        _ => {
+                                            let message = "error while looking up address lot for interface address";
+                                            error!(opctx.log, "{message}"; "error" => ?e);
+                                            err.bail(Error::internal_error(message))
+                                        },
+                                    }
+                                })
+                        },
+
+                        NameOrId::Name(name) => {
+                            address_lot::table
+                                .filter(address_lot::time_deleted.is_null())
+                                .filter(address_lot::name.eq(name.to_string()))
+                                .select(address_lot::id)
+                                .limit(1)
+                                .first_async::<Uuid>(&conn)
+                                .await
+                                .map_err(|e: diesel::result::Error| {
+                                    match e {
+                                        diesel::result::Error::NotFound => {
+                                            err.bail(Error::not_found_by_name(ResourceType::AddressLot, &name))
+                                        },
+                                        _ => {
+                                            let message = "error while looking up address lot for interface address";
+                                            error!(opctx.log, "{message}"; "error" => ?e);
+                                            err.bail(Error::internal_error(message))
+                                        },
+                                    }
+                                })
+                        }
+                    }?;
+
+                    // create a reservation
+                    let (block, rsvd_block) =
+                        crate::db::datastore::address_lot::try_reserve_block(
+                            address_lot_id,
+                            new_settings.address.addr().into(),
+                            // TODO: Should we allow anycast addresses for switch_ports?
+                            // anycast
+                            false,
+                            &conn,
+                        )
+                        .await
+                        .map_err(|e| match e {
+                            ReserveBlockTxnError::CustomError(e) => {
+                                let message = match e {
+                                    ReserveBlockError::AddressUnavailable => "address is unavailable",
+                                    ReserveBlockError::AddressNotInLot => "address is not in lot",
+                                };
+                                err.bail(Error::conflict(message))
+                            }
+                            ReserveBlockTxnError::Database(e) => {
+                                let message = "error while reserving address";
+                                error!(opctx.log, "{message}"; "error" => ?e);
+                                err.bail(Error::internal_error(message))
+                            },
+                        })?;
+
+                    let address_config = SwitchPortAddressConfig {
+                        port_settings_id,
+                        address_lot_block_id: block.id,
+                        rsvd_address_lot_block_id: rsvd_block.id,
+                        address: new_settings.address.into(),
+                        interface_name: interface.to_string(),
+                        vlan_id: new_settings.vlan_id.map(|i| i.into()),
+                    };
+
+                    let address = diesel::insert_into(
+                        address_config::table,
+                    )
+                    .values(address_config)
+                    .returning(SwitchPortAddressConfig::as_returning())
+                    .get_result_async(&conn)
+                    .await?;
+
+                    Ok(address)
+                }
+            })
+            .await
+            .map_err(|e| {
+                let message = "switch_port_configuration_interface_address_add failed";
+                match err.take() {
+                    Some(external_error) => {
+                        error!(opctx.log, "{message}"; "error" => ?external_error);
+                        external_error
+                    },
+                    None => {
+                        error!(opctx.log, "{message}"; "error" => ?e);
+                        Error::internal_error("error while adding address to interface")
+                    },
+                }
+            })
+    }
+
+    pub async fn switch_port_configuration_interface_address_remove(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        interface: Name,
+        address: params::Address,
+    ) -> DeleteResult {
+        use db::schema::address_lot;
+        use db::schema::switch_port_settings_address_config as address_config;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper(
+                "switch_port_configuration_interface_address_remove",
+            )
+            .transaction(&conn, |conn| {
+                let parent_configuration = configuration.clone();
+                let interface = interface.clone();
+                let new_settings = address.clone();
+                let err = err.clone();
+
+                async move {
+
+                    // resolve id of port_settings record
+                    let port_settings_id = switch_port_configuration_id(&conn, parent_configuration.clone())
+                        .await
+                        .map_err(|e: diesel::result::Error| {
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    err.bail(
+                                        Error::non_resourcetype_not_found(
+                                            format!("unable to lookup configuration with identifier {parent_configuration}")
+                                        )
+                                    )
+                                },
+                                _ => {
+                                    err.bail(Error::internal_error(
+                                        "error while looking up address lot for interface address"
+                                    ))
+                                },
+                            }
+                        })?;
+
+                    // resolve id of referenced address lot
+                    let address_lot_id = match new_settings.address_lot {
+
+                        NameOrId::Id(id) => {
+                            // verify id is valid
+                            address_lot::table
+                                .filter(address_lot::time_deleted.is_null())
+                                .filter(address_lot::id.eq(id))
+                                .select(address_lot::id)
+                                .limit(1)
+                                .first_async::<Uuid>(&conn)
+                                .await
+                                .map_err(|e: diesel::result::Error| {
+                                    match e {
+                                        diesel::result::Error::NotFound => {
+                                            err.bail(Error::not_found_by_id(ResourceType::AddressLot, &id))
+                                        },
+                                        _ => {
+                                            let message = "error while looking up address lot for interface address";
+                                            error!(opctx.log, "{message}"; "error" => ?e);
+                                            err.bail(Error::internal_error(message))
+                                        },
+                                    }
+                                })
+                        },
+
+                        NameOrId::Name(name) => {
+                            address_lot::table
+                                .filter(address_lot::time_deleted.is_null())
+                                .filter(address_lot::name.eq(name.to_string()))
+                                .select(address_lot::id)
+                                .limit(1)
+                                .first_async::<Uuid>(&conn)
+                                .await
+                                .map_err(|e: diesel::result::Error| {
+                                    match e {
+                                        diesel::result::Error::NotFound => {
+                                            err.bail(Error::not_found_by_name(ResourceType::AddressLot, &name))
+                                        },
+                                        _ => {
+                                            let message = "error while looking up address lot for interface address";
+                                            error!(opctx.log, "{message}"; "error" => ?e);
+                                            err.bail(Error::internal_error(message))
+                                        },
+                                    }
+                                })
+                        }
+                    }?;
+
+                    // delete reservation
+                    let (block, rsvd_block) =
+                        crate::db::datastore::address_lot::try_reserve_block(
+                            address_lot_id,
+                            new_settings.address.addr().into(),
+                            // TODO: Should we allow anycast addresses for switch_ports?
+                            // anycast
+                            false,
+                            &conn,
+                        )
+                        .await
+                        .map_err(|e| match e {
+                            ReserveBlockTxnError::CustomError(e) => {
+                                let message = match e {
+                                    ReserveBlockError::AddressUnavailable => "address is unavailable",
+                                    ReserveBlockError::AddressNotInLot => "address is not in lot",
+                                };
+                                err.bail(Error::conflict(message))
+                            }
+                            ReserveBlockTxnError::Database(e) => {
+                                let message = "error while reserving address";
+                                error!(opctx.log, "{message}"; "error" => ?e);
+                                err.bail(Error::internal_error(message))
+                            },
+                        })?;
+
+                    let address_config = SwitchPortAddressConfig {
+                        port_settings_id,
+                        address_lot_block_id: block.id,
+                        rsvd_address_lot_block_id: rsvd_block.id,
+                        address: new_settings.address.into(),
+                        interface_name: interface.to_string(),
+                        vlan_id: new_settings.vlan_id.map(|i| i.into()),
+                    };
+
+                    let address = diesel::insert_into(
+                        address_config::table,
+                    )
+                    .values(address_config)
+                    .returning(SwitchPortAddressConfig::as_returning())
+                    .get_result_async(&conn)
+                    .await?;
+
+                    Ok(address)
                 }
             })
             .await
@@ -1889,6 +2324,7 @@ async fn do_switch_port_settings_delete(
     Ok(())
 }
 
+// TODO: refactor to emit more detailed errors
 async fn switch_port_configuration_id(
     conn: &async_bb8_diesel::Connection<DTraceConnection<diesel::PgConnection>>,
     name_or_id: NameOrId,

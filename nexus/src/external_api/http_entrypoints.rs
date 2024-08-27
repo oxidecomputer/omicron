@@ -267,11 +267,6 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_loopback_address_delete)?;
         api.register(networking_loopback_address_list)?;
 
-        api.register(networking_switch_port_configuration_create)?;
-        api.register(networking_switch_port_configuration_delete)?;
-        api.register(networking_switch_port_configuration_view)?;
-        api.register(networking_switch_port_configuration_list)?;
-
         // TODO: Levon - Group composition (omicron#4405)?
         // /v1/system/networking/switch-port-configuration-group/{name_or_id}/..
 
@@ -291,60 +286,44 @@ pub(crate) fn external_api() -> NexusApiDescription {
         // TODO: Levon - test
         api.register(networking_switch_port_configuration_link_list)?;
 
-        // /v1/system/networking/switch-port-configuration/{name_or_id}/link/{link}/interface
+        // /v1/system/networking/switch-port-configuration/{name_or_id}/interface/{interface}/address
         // TODO: Levon - test
         api.register(
-            networking_switch_port_configuration_link_interface_create,
+            networking_switch_port_configuration_interface_address_add,
         )?;
         // TODO: Levon - test
         api.register(
-            networking_switch_port_configuration_link_interface_delete,
-        )?;
-        // TODO: Levon - test
-        api.register(networking_switch_port_configuration_link_interface_view)?;
-        // TODO: Levon - test
-        api.register(networking_switch_port_configuration_link_interface_list)?;
-
-        // /v1/system/networking/switch-port-configuration/{name_or_id}/link/{link}/interface/{interface}/address
-        // TODO: Levon - test
-        api.register(
-            networking_switch_port_configuration_link_interface_address_add,
+            networking_switch_port_configuration_interface_address_remove,
         )?;
         // TODO: Levon - test
         api.register(
-            networking_switch_port_configuration_link_interface_address_remove,
-        )?;
-        // TODO: Levon - test
-        api.register(
-            networking_switch_port_configuration_link_interface_address_list,
+            networking_switch_port_configuration_interface_address_list,
         )?;
 
-        // /v1/system/networking/switch-port-configuration/{name_or_id}/link/{link}/interface/{interface}/route
+        // /v1/system/networking/switch-port-configuration/{name_or_id}/interface/{interface}/route
+        // TODO: Levon - test
+        api.register(networking_switch_port_configuration_interface_route_add)?;
         // TODO: Levon - test
         api.register(
-            networking_switch_port_configuration_link_interface_route_add,
+            networking_switch_port_configuration_interface_route_remove,
         )?;
         // TODO: Levon - test
         api.register(
-            networking_switch_port_configuration_link_interface_route_remove,
-        )?;
-        // TODO: Levon - test
-        api.register(
-            networking_switch_port_configuration_link_interface_route_list,
+            networking_switch_port_configuration_interface_route_list,
         )?;
 
-        // /v1/system/networking/switch-port-configuration/{name_or_id}/link/{link}/interface/{interface}/bgp-peer
+        // /v1/system/networking/switch-port-configuration/{name_or_id}/interface/{interface}/bgp-peer
         // TODO: Levon - test
         api.register(
-            networking_switch_port_configuration_link_interface_bgp_peer_add,
+            networking_switch_port_configuration_interface_bgp_peer_add,
         )?;
         // TODO: Levon - test
         api.register(
-            networking_switch_port_configuration_link_interface_bgp_peer_remove,
+            networking_switch_port_configuration_interface_bgp_peer_remove,
         )?;
         // TODO: Levon - test
         api.register(
-            networking_switch_port_configuration_link_interface_bgp_peer_list,
+            networking_switch_port_configuration_interface_bgp_peer_list,
         )?;
 
         api.register(networking_switch_port_list)?;
@@ -4065,131 +4044,32 @@ async fn networking_switch_port_configuration_link_delete(
         .await
 }
 
-/// List interfaces for a provided switch port link configuration
-#[endpoint {
-    method = GET,
-    path = "/v1/system/networking/switch-port-configuration/{configuration}/link/{link}/interface",
-    tags = ["system/networking"],
-}]
-async fn networking_switch_port_configuration_link_interface_list(
-    rqctx: RequestContext<ApiContext>,
-    path_params: Path<params::SwitchPortSettingsLinkInfoSelector>,
-    query_params: Query<
-        PaginatedById<params::SwitchPortInterfaceConfigPageSelector>,
-    >,
-) -> Result<HttpResponseOk<ResultsPage<SwitchInterfaceConfig>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.context.nexus;
-        let query = path_params.into_inner().configuration;
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-
-        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
-        todo!("list interfaces")
-    };
-    apictx
-        .context
-        .external_latencies
-        .instrument_dropshot_handler(&rqctx, handler)
-        .await
-}
-
-/// Create interface configuration for a provided switch port link configuration
-#[endpoint {
-    method = POST,
-    path = "/v1/system/networking/switch-port-configuration/{configuration}/link/{link}/interface",
-    tags = ["system/networking"],
-}]
-async fn networking_switch_port_configuration_link_interface_create(
-    rqctx: RequestContext<ApiContext>,
-    path_params: Path<params::SwitchPortSettingsLinkInfoSelector>,
-    new_settings: TypedBody<params::SwitchInterfaceConfigCreate>,
-) -> Result<HttpResponseCreated<SwitchInterfaceConfig>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.context.nexus;
-        let query = path_params.into_inner().configuration;
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-
-        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
-        todo!("create interface")
-    };
-    apictx
-        .context
-        .external_latencies
-        .instrument_dropshot_handler(&rqctx, handler)
-        .await
-}
-
-/// View interface configuration for a provided switch port link configuration
-#[endpoint {
-    method = GET,
-    path = "/v1/system/networking/switch-port-configuration/{configuration}/link/{link}/interface/{interface}",
-    tags = ["system/networking"],
-}]
-async fn networking_switch_port_configuration_link_interface_view(
-    rqctx: RequestContext<ApiContext>,
-    path_params: Path<params::SwitchPortSettingsLinkInterfaceInfoSelector>,
-) -> Result<HttpResponseOk<SwitchInterfaceConfig>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.context.nexus;
-        let query = path_params.into_inner().configuration;
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-
-        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
-        todo!("delete interface")
-    };
-    apictx
-        .context
-        .external_latencies
-        .instrument_dropshot_handler(&rqctx, handler)
-        .await
-}
-
-/// Delete interface configuration for a provided switch port link configuration
-#[endpoint {
-    method = DELETE,
-    path = "/v1/system/networking/switch-port-configuration/{configuration}/link/{link}/interface/{interface}",
-    tags = ["system/networking"],
-}]
-async fn networking_switch_port_configuration_link_interface_delete(
-    rqctx: RequestContext<ApiContext>,
-    path_params: Path<params::SwitchPortSettingsLinkInterfaceInfoSelector>,
-) -> Result<HttpResponseCreated<SwitchInterfaceConfig>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.context.nexus;
-        let query = path_params.into_inner().configuration;
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-
-        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
-        todo!("delete interface")
-    };
-    apictx
-        .context
-        .external_latencies
-        .instrument_dropshot_handler(&rqctx, handler)
-        .await
-}
-
 /// List addresses assigned to a provided interface configuration
 #[endpoint {
     method = GET,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/link/{link}/interface/{interface}/address",
+    path ="/v1/system/networking/switch-port-configuration/{configuration}/interface/{interface}/address",
     tags = ["system/networking"],
 }]
-async fn networking_switch_port_configuration_link_interface_address_list(
+async fn networking_switch_port_configuration_interface_address_list(
     rqctx: RequestContext<ApiContext>,
-    path_params: Path<params::SwitchPortSettingsLinkInterfaceInfoSelector>,
+    path_params: Path<params::SwitchPortSettingsInterfaceInfoSelector>,
 ) -> Result<HttpResponseOk<Vec<SwitchInterfaceConfig>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let query = path_params.into_inner().configuration;
+        let params::SwitchPortSettingsInterfaceInfoSelector {
+            configuration,
+            interface,
+        } = path_params.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
-        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
+        let settings = nexus
+            .switch_port_configuration_interface_address_list(
+                &opctx,
+                configuration,
+                interface,
+            )
+            .await?;
         todo!("list interface addresses")
     };
     apictx
@@ -4202,12 +4082,12 @@ async fn networking_switch_port_configuration_link_interface_address_list(
 /// Add address to an interface configuration
 #[endpoint {
     method = POST,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/link/{link}/interface/{interface}/address/add",
+    path ="/v1/system/networking/switch-port-configuration/{configuration}/interface/{interface}/address/add",
     tags = ["system/networking"],
 }]
-async fn networking_switch_port_configuration_link_interface_address_add(
+async fn networking_switch_port_configuration_interface_address_add(
     rqctx: RequestContext<ApiContext>,
-    path_params: Path<params::SwitchPortSettingsLinkInterfaceInfoSelector>,
+    path_params: Path<params::SwitchPortSettingsInterfaceInfoSelector>,
     address: TypedBody<params::AddressConfig>,
 ) -> Result<HttpResponseOk<ResultsPage<SwitchInterfaceConfig>>, HttpError> {
     let apictx = rqctx.context();
@@ -4229,12 +4109,12 @@ async fn networking_switch_port_configuration_link_interface_address_add(
 /// Remove address from an interface configuration
 #[endpoint {
     method = POST,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/link/{link}/interface/{interface}/address/remove",
+    path ="/v1/system/networking/switch-port-configuration/{configuration}/interface/{interface}/address/remove",
     tags = ["system/networking"],
 }]
-async fn networking_switch_port_configuration_link_interface_address_remove(
+async fn networking_switch_port_configuration_interface_address_remove(
     rqctx: RequestContext<ApiContext>,
-    path_params: Path<params::SwitchPortSettingsLinkInterfaceInfoSelector>,
+    path_params: Path<params::SwitchPortSettingsInterfaceInfoSelector>,
     address: TypedBody<params::AddressConfig>,
 ) -> Result<HttpResponseOk<ResultsPage<SwitchInterfaceConfig>>, HttpError> {
     let apictx = rqctx.context();
@@ -4256,12 +4136,12 @@ async fn networking_switch_port_configuration_link_interface_address_remove(
 /// List routes assigned to a provided interface configuration
 #[endpoint {
     method = GET,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/link/{link}/interface/{interface}/route",
+    path ="/v1/system/networking/switch-port-configuration/{configuration}/interface/{interface}/route",
     tags = ["system/networking"],
 }]
-async fn networking_switch_port_configuration_link_interface_route_list(
+async fn networking_switch_port_configuration_interface_route_list(
     rqctx: RequestContext<ApiContext>,
-    path_params: Path<params::SwitchPortSettingsLinkInterfaceInfoSelector>,
+    path_params: Path<params::SwitchPortSettingsInterfaceInfoSelector>,
 ) -> Result<HttpResponseOk<RouteConfig>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -4282,12 +4162,12 @@ async fn networking_switch_port_configuration_link_interface_route_list(
 /// Add route to an interface configuration
 #[endpoint {
     method = POST,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/link/{link}/interface/{interface}/route/add",
+    path ="/v1/system/networking/switch-port-configuration/{configuration}/interface/{interface}/route/add",
     tags = ["system/networking"],
 }]
-async fn networking_switch_port_configuration_link_interface_route_add(
+async fn networking_switch_port_configuration_interface_route_add(
     rqctx: RequestContext<ApiContext>,
-    path_params: Path<params::SwitchPortSettingsLinkInterfaceInfoSelector>,
+    path_params: Path<params::SwitchPortSettingsInterfaceInfoSelector>,
     route: TypedBody<params::Route>,
 ) -> Result<HttpResponseCreated<params::Route>, HttpError> {
     let apictx = rqctx.context();
@@ -4309,12 +4189,12 @@ async fn networking_switch_port_configuration_link_interface_route_add(
 /// Remove address from an interface configuration
 #[endpoint {
     method = POST,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/link/{link}/interface/{interface}/route/remove",
+    path ="/v1/system/networking/switch-port-configuration/{configuration}/interface/{interface}/route/remove",
     tags = ["system/networking"],
 }]
-async fn networking_switch_port_configuration_link_interface_route_remove(
+async fn networking_switch_port_configuration_interface_route_remove(
     rqctx: RequestContext<ApiContext>,
-    path_params: Path<params::SwitchPortSettingsLinkInterfaceInfoSelector>,
+    path_params: Path<params::SwitchPortSettingsInterfaceInfoSelector>,
     route: TypedBody<params::Route>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
@@ -4336,12 +4216,12 @@ async fn networking_switch_port_configuration_link_interface_route_remove(
 /// List bgp peers assigned to a provided interface configuration
 #[endpoint {
     method = GET,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/link/{link}/interface/{interface}/bgp-peer",
+    path ="/v1/system/networking/switch-port-configuration/{configuration}/interface/{interface}/bgp-peer",
     tags = ["system/networking"],
 }]
-async fn networking_switch_port_configuration_link_interface_bgp_peer_list(
+async fn networking_switch_port_configuration_interface_bgp_peer_list(
     rqctx: RequestContext<ApiContext>,
-    path_params: Path<params::SwitchPortSettingsLinkInterfaceInfoSelector>,
+    path_params: Path<params::SwitchPortSettingsInterfaceInfoSelector>,
 ) -> Result<HttpResponseOk<BgpPeerConfig>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -4362,12 +4242,12 @@ async fn networking_switch_port_configuration_link_interface_bgp_peer_list(
 /// Add bgp peer to an interface configuration
 #[endpoint {
     method = POST,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/link/{link}/interface/{interface}/bgp-peer/add",
+    path ="/v1/system/networking/switch-port-configuration/{configuration}/interface/{interface}/bgp-peer/add",
     tags = ["system/networking"],
 }]
-async fn networking_switch_port_configuration_link_interface_bgp_peer_add(
+async fn networking_switch_port_configuration_interface_bgp_peer_add(
     rqctx: RequestContext<ApiContext>,
-    path_params: Path<params::SwitchPortSettingsLinkInterfaceInfoSelector>,
+    path_params: Path<params::SwitchPortSettingsInterfaceInfoSelector>,
     bgp_peer: TypedBody<BgpPeer>,
 ) -> Result<HttpResponseCreated<BgpPeer>, HttpError> {
     let apictx = rqctx.context();
@@ -4389,12 +4269,12 @@ async fn networking_switch_port_configuration_link_interface_bgp_peer_add(
 /// Remove bgp peer from an interface configuration
 #[endpoint {
     method = POST,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/link/{link}/interface/{interface}/bgp-peer/remove",
+    path ="/v1/system/networking/switch-port-configuration/{configuration}/interface/{interface}/bgp-peer/remove",
     tags = ["system/networking"],
 }]
-async fn networking_switch_port_configuration_link_interface_bgp_peer_remove(
+async fn networking_switch_port_configuration_interface_bgp_peer_remove(
     rqctx: RequestContext<ApiContext>,
-    path_params: Path<params::SwitchPortSettingsLinkInterfaceInfoSelector>,
+    path_params: Path<params::SwitchPortSettingsInterfaceInfoSelector>,
     bgp_peer: TypedBody<BgpPeer>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();

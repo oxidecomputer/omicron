@@ -1799,14 +1799,11 @@ pub struct SwitchPortSettingsLinkInfoSelector {
     pub link: Name,
 }
 
-/// Select an interface settings info object by port settings name, link name, and interface name.
+/// Select an interface settings info object by port settings name / id and interface name.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct SwitchPortSettingsLinkInterfaceInfoSelector {
+pub struct SwitchPortSettingsInterfaceInfoSelector {
     /// A name or id to use when selecting a switch port configuration.
     pub configuration: NameOrId,
-
-    /// Link name
-    pub link: Name,
 
     /// Interface name
     pub interface: Name,
