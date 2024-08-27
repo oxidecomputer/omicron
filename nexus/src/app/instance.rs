@@ -60,7 +60,7 @@ use propolis_client::support::WebSocketStream;
 use sagas::instance_common::ExternalIpAttach;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::InstanceProperties;
-use sled_agent_client::types::InstancePutStateBody;
+use sled_agent_client::types::VmmPutStateBody;
 use std::matches;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -154,7 +154,7 @@ pub(crate) enum InstanceStateChangeRequest {
 }
 
 impl From<InstanceStateChangeRequest>
-    for sled_agent_client::types::InstanceStateRequested
+    for sled_agent_client::types::VmmStateRequested
 {
     fn from(value: InstanceStateChangeRequest) -> Self {
         match value {
@@ -176,7 +176,7 @@ enum InstanceStateChangeRequestAction {
 
     /// Request the appropriate state change from the sled with the specified
     /// UUID.
-    SendToSled(SledUuid),
+    SendToSled { sled_id: SledUuid, propolis_id: PropolisUuid },
 }
 
 /// What is the higher level operation that is calling
@@ -553,7 +553,6 @@ impl super::Nexus {
         if let Err(e) = self
             .instance_request_state(
                 opctx,
-                &authz_instance,
                 state.instance(),
                 state.vmm(),
                 InstanceStateChangeRequest::Reboot,
@@ -632,7 +631,6 @@ impl super::Nexus {
         if let Err(e) = self
             .instance_request_state(
                 opctx,
-                &authz_instance,
                 state.instance(),
                 state.vmm(),
                 InstanceStateChangeRequest::Stop,
@@ -664,21 +662,18 @@ impl super::Nexus {
     /// this sled, this operation rudely terminates it.
     pub(crate) async fn instance_ensure_unregistered(
         &self,
-        opctx: &OpContext,
-        authz_instance: &authz::Instance,
+        propolis_id: &PropolisUuid,
         sled_id: &SledUuid,
-    ) -> Result<Option<nexus::SledInstanceState>, InstanceStateChangeError>
-    {
-        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+    ) -> Result<Option<nexus::SledVmmState>, InstanceStateChangeError> {
         let sa = self.sled_client(&sled_id).await?;
-        sa.instance_unregister(&InstanceUuid::from_untyped_uuid(
-            authz_instance.id(),
-        ))
-        .await
-        .map(|res| res.into_inner().updated_runtime.map(Into::into))
-        .map_err(|e| {
-            InstanceStateChangeError::SledAgent(SledAgentInstancePutError(e))
-        })
+        sa.vmm_unregister(propolis_id)
+            .await
+            .map(|res| res.into_inner().updated_runtime.map(Into::into))
+            .map_err(|e| {
+                InstanceStateChangeError::SledAgent(SledAgentInstancePutError(
+                    e,
+                ))
+            })
     }
 
     /// Determines the action to take on an instance's active VMM given a
@@ -712,8 +707,11 @@ impl super::Nexus {
         // Requests that operate on active instances have to be directed to the
         // instance's current sled agent. If there is none, the request needs to
         // be handled specially based on its type.
-        let sled_id = if let Some(vmm) = vmm_state {
-            SledUuid::from_untyped_uuid(vmm.sled_id)
+        let (sled_id, propolis_id) = if let Some(vmm) = vmm_state {
+            (
+                SledUuid::from_untyped_uuid(vmm.sled_id),
+                PropolisUuid::from_untyped_uuid(vmm.id),
+            )
         } else {
             match effective_state {
                 // If there's no active sled because the instance is stopped,
@@ -814,7 +812,10 @@ impl super::Nexus {
         };
 
         if allowed {
-            Ok(InstanceStateChangeRequestAction::SendToSled(sled_id))
+            Ok(InstanceStateChangeRequestAction::SendToSled {
+                sled_id,
+                propolis_id,
+            })
         } else {
             Err(Error::invalid_request(format!(
                 "instance state cannot be changed from state \"{}\"",
@@ -826,26 +827,25 @@ impl super::Nexus {
     pub(crate) async fn instance_request_state(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
         prev_instance_state: &db::model::Instance,
         prev_vmm_state: &Option<db::model::Vmm>,
         requested: InstanceStateChangeRequest,
     ) -> Result<(), InstanceStateChangeError> {
-        opctx.authorize(authz::Action::Modify, authz_instance).await?;
-        let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
-
         match self.select_runtime_change_action(
             prev_instance_state,
             prev_vmm_state,
             &requested,
         )? {
             InstanceStateChangeRequestAction::AlreadyDone => Ok(()),
-            InstanceStateChangeRequestAction::SendToSled(sled_id) => {
+            InstanceStateChangeRequestAction::SendToSled {
+                sled_id,
+                propolis_id,
+            } => {
                 let sa = self.sled_client(&sled_id).await?;
                 let instance_put_result = sa
-                    .instance_put_state(
-                        &instance_id,
-                        &InstancePutStateBody { state: requested.into() },
+                    .vmm_put_state(
+                        &propolis_id,
+                        &VmmPutStateBody { state: requested.into() },
                     )
                     .await
                     .map(|res| res.into_inner().updated_runtime.map(Into::into))
@@ -862,7 +862,7 @@ impl super::Nexus {
                 // Ok(None) here, in which case, there's nothing to write back.
                 match instance_put_result {
                     Ok(Some(ref state)) => self
-                        .notify_instance_updated(opctx, instance_id, state)
+                        .notify_vmm_updated(opctx, propolis_id, state)
                         .await
                         .map_err(Into::into),
                     Ok(None) => Ok(()),
@@ -1120,13 +1120,13 @@ impl super::Nexus {
             .sled_client(&SledUuid::from_untyped_uuid(initial_vmm.sled_id))
             .await?;
         let instance_register_result = sa
-            .instance_register(
-                &instance_id,
+            .vmm_register(
+                propolis_id,
                 &sled_agent_client::types::InstanceEnsureBody {
                     hardware: instance_hardware,
                     instance_runtime: db_instance.runtime().clone().into(),
                     vmm_runtime: initial_vmm.clone().into(),
-                    propolis_id: *propolis_id,
+                    instance_id,
                     propolis_addr: SocketAddr::new(
                         initial_vmm.propolis_ip.ip(),
                         initial_vmm.propolis_port.into(),
@@ -1141,8 +1141,7 @@ impl super::Nexus {
 
         match instance_register_result {
             Ok(state) => {
-                self.notify_instance_updated(opctx, instance_id, &state)
-                    .await?;
+                self.notify_vmm_updated(opctx, *propolis_id, &state).await?;
             }
             Err(e) => {
                 if e.instance_unhealthy() {
@@ -1321,19 +1320,22 @@ impl super::Nexus {
 
     /// Invoked by a sled agent to publish an updated runtime state for an
     /// Instance.
-    pub(crate) async fn notify_instance_updated(
+    pub(crate) async fn notify_vmm_updated(
         &self,
         opctx: &OpContext,
-        instance_id: InstanceUuid,
-        new_runtime_state: &nexus::SledInstanceState,
+        propolis_id: PropolisUuid,
+        new_runtime_state: &nexus::SledVmmState,
     ) -> Result<(), Error> {
-        let saga = notify_instance_updated(
+        let Some((instance_id, saga)) = process_vmm_update(
             &self.db_datastore,
             opctx,
-            instance_id,
+            propolis_id,
             new_runtime_state,
         )
-        .await?;
+        .await?
+        else {
+            return Ok(());
+        };
 
         // We don't need to wait for the instance update saga to run to
         // completion to return OK to the sled-agent --- all it needs to care
@@ -1344,53 +1346,51 @@ impl super::Nexus {
         // one is eventually executed.
         //
         // Therefore, just spawn the update saga in a new task, and return.
-        if let Some(saga) = saga {
-            info!(opctx.log, "starting update saga for {instance_id}";
-                "instance_id" => %instance_id,
-                "vmm_state" => ?new_runtime_state.vmm_state,
-                "migration_state" => ?new_runtime_state.migrations(),
-            );
-            let sagas = self.sagas.clone();
-            let task_instance_updater =
-                self.background_tasks.task_instance_updater.clone();
-            let log = opctx.log.clone();
-            tokio::spawn(async move {
-                // TODO(eliza): maybe we should use the lower level saga API so
-                // we can see if the saga failed due to the lock being held and
-                // retry it immediately?
-                let running_saga = async move {
-                    let runnable_saga = sagas.saga_prepare(saga).await?;
-                    runnable_saga.start().await
-                }
-                .await;
-                let result = match running_saga {
-                    Err(error) => {
-                        error!(&log, "failed to start update saga for {instance_id}";
-                            "instance_id" => %instance_id,
-                            "error" => %error,
-                        );
-                        // If we couldn't start the update saga for this
-                        // instance, kick the instance-updater background task
-                        // to try and start it again in a timely manner.
-                        task_instance_updater.activate();
-                        return;
-                    }
-                    Ok(saga) => {
-                        saga.wait_until_stopped().await.into_omicron_result()
-                    }
-                };
-                if let Err(error) = result {
-                    error!(&log, "update saga for {instance_id} failed";
+        info!(opctx.log, "starting update saga for {instance_id}";
+            "instance_id" => %instance_id,
+            "vmm_state" => ?new_runtime_state.vmm_state,
+            "migration_state" => ?new_runtime_state.migrations(),
+        );
+        let sagas = self.sagas.clone();
+        let task_instance_updater =
+            self.background_tasks.task_instance_updater.clone();
+        let log = opctx.log.clone();
+        tokio::spawn(async move {
+            // TODO(eliza): maybe we should use the lower level saga API so
+            // we can see if the saga failed due to the lock being held and
+            // retry it immediately?
+            let running_saga = async move {
+                let runnable_saga = sagas.saga_prepare(saga).await?;
+                runnable_saga.start().await
+            }
+            .await;
+            let result = match running_saga {
+                Err(error) => {
+                    error!(&log, "failed to start update saga for {instance_id}";
                         "instance_id" => %instance_id,
                         "error" => %error,
                     );
-                    // If we couldn't complete the update saga for this
+                    // If we couldn't start the update saga for this
                     // instance, kick the instance-updater background task
                     // to try and start it again in a timely manner.
                     task_instance_updater.activate();
+                    return;
                 }
-            });
-        }
+                Ok(saga) => {
+                    saga.wait_until_stopped().await.into_omicron_result()
+                }
+            };
+            if let Err(error) = result {
+                error!(&log, "update saga for {instance_id} failed";
+                    "instance_id" => %instance_id,
+                    "error" => %error,
+                );
+                // If we couldn't complete the update saga for this
+                // instance, kick the instance-updater background task
+                // to try and start it again in a timely manner.
+                task_instance_updater.activate();
+            }
+        });
 
         Ok(())
     }
@@ -1830,21 +1830,27 @@ impl super::Nexus {
     }
 }
 
-/// Invoked by a sled agent to publish an updated runtime state for an
-/// Instance, returning an update saga for that instance (if one must be
-/// executed).
-pub(crate) async fn notify_instance_updated(
+/// Writes the VMM and migration state supplied in `new_runtime_state` to the
+/// database (provided that it's newer than what's already there).
+///
+/// # Return value
+///
+/// - `Ok(Some(instance_id, saga))` if the new VMM state obsoletes the current
+///   instance state. The caller should execute the returned instance update
+///   saga to reconcile the instance to the new VMM state.
+/// - `Ok(None)` if the new state was successfully published but does not
+///   require an instance update.
+/// - `Err` if an error occurred.
+pub(crate) async fn process_vmm_update(
     datastore: &DataStore,
     opctx: &OpContext,
-    instance_id: InstanceUuid,
-    new_runtime_state: &nexus::SledInstanceState,
-) -> Result<Option<steno::SagaDag>, Error> {
+    propolis_id: PropolisUuid,
+    new_runtime_state: &nexus::SledVmmState,
+) -> Result<Option<(InstanceUuid, steno::SagaDag)>, Error> {
     use sagas::instance_update;
 
     let migrations = new_runtime_state.migrations();
-    let propolis_id = new_runtime_state.propolis_id;
     info!(opctx.log, "received new VMM runtime state from sled agent";
-        "instance_id" => %instance_id,
         "propolis_id" => %propolis_id,
         "vmm_state" => ?new_runtime_state.vmm_state,
         "migration_state" => ?migrations,
@@ -1864,21 +1870,34 @@ pub(crate) async fn notify_instance_updated(
     // prepare and return it.
     if instance_update::update_saga_needed(
         &opctx.log,
-        instance_id,
+        propolis_id,
         new_runtime_state,
         &result,
     ) {
+        let instance_id =
+            InstanceUuid::from_untyped_uuid(result.found_vmm.instance_id);
+
         let (.., authz_instance) = LookupPath::new(&opctx, datastore)
             .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await?;
-        let saga = instance_update::SagaInstanceUpdate::prepare(
+
+        match instance_update::SagaInstanceUpdate::prepare(
             &instance_update::Params {
                 serialized_authn: authn::saga::Serialized::for_opctx(opctx),
                 authz_instance,
             },
-        )?;
-        Ok(Some(saga))
+        ) {
+            Ok(saga) => Ok(Some((instance_id, saga))),
+            Err(e) => {
+                error!(opctx.log, "failed to prepare instance update saga";
+                       "error" => ?e,
+                       "instance_id" => %instance_id,
+                       "propolis_id" => %propolis_id);
+
+                Err(e)
+            }
+        }
     } else {
         Ok(None)
     }

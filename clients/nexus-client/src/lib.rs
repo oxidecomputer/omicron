@@ -131,14 +131,11 @@ impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
     }
 }
 
-impl From<omicron_common::api::internal::nexus::SledInstanceState>
-    for types::SledInstanceState
+impl From<omicron_common::api::internal::nexus::SledVmmState>
+    for types::SledVmmState
 {
-    fn from(
-        s: omicron_common::api::internal::nexus::SledInstanceState,
-    ) -> Self {
+    fn from(s: omicron_common::api::internal::nexus::SledVmmState) -> Self {
         Self {
-            propolis_id: s.propolis_id,
             vmm_state: s.vmm_state.into(),
             migration_in: s.migration_in.map(Into::into),
             migration_out: s.migration_out.map(Into::into),

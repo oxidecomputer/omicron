@@ -455,7 +455,7 @@ impl DataStore {
                 let lldp_link_ids: Vec<Uuid> = result
                     .links
                     .iter()
-                    .map(|link| link.lldp_link_config_id)
+                    .filter_map(|link| link.lldp_link_config_id)
                     .collect();
 
                 use db::schema::lldp_link_config;
@@ -1511,7 +1511,7 @@ async fn do_switch_port_settings_delete(
     // delete lldp configs
     use db::schema::lldp_link_config;
     let lldp_link_ids: Vec<Uuid> =
-        links.iter().map(|link| link.lldp_link_config_id).collect();
+        links.iter().filter_map(|link| link.lldp_link_config_id).collect();
     diesel::delete(lldp_link_config::dsl::lldp_link_config)
         .filter(lldp_link_config::id.eq_any(lldp_link_ids))
         .execute_async(conn)
