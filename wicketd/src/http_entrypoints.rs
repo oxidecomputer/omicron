@@ -82,6 +82,7 @@ impl WicketdApi for WicketdApiImpl {
         config.update_with_inventory_and_bootstrap_peers(
             &inventory,
             &ctx.bootstrap_peers,
+            &ctx.log,
         );
 
         Ok(HttpResponseOk((&*config).into()))
@@ -101,6 +102,7 @@ impl WicketdApi for WicketdApiImpl {
         config.update_with_inventory_and_bootstrap_peers(
             &inventory,
             &ctx.bootstrap_peers,
+            &ctx.log,
         );
         config
             .update(body.into_inner(), ctx.baseboard.as_ref())
