@@ -5,7 +5,6 @@
 //! [`DataStore`] helpers for working with VMM records.
 
 use super::DataStore;
-use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
@@ -40,8 +39,13 @@ use uuid::Uuid;
 
 /// The result of an [`DataStore::vmm_and_migration_update_runtime`] call,
 /// indicating which records were updated.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct VmmStateUpdateResult {
+    /// The VMM record that the update query found and possibly updated.
+    ///
+    /// NOTE: This is the record prior to the update!
+    pub found_vmm: Vmm,
+
     /// `true` if the VMM record was updated, `false` otherwise.
     pub vmm_updated: bool,
 
@@ -108,14 +112,10 @@ impl DataStore {
     pub async fn vmm_fetch(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
         vmm_id: &PropolisUuid,
     ) -> LookupResult<Vmm> {
-        opctx.authorize(authz::Action::Read, authz_instance).await?;
-
         let vmm = dsl::vmm
             .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
-            .filter(dsl::instance_id.eq(authz_instance.id()))
             .filter(dsl::time_deleted.is_null())
             .select(Vmm::as_select())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
@@ -233,13 +233,21 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                let vmm_updated = self
+                let vmm_update_result = self
                     .vmm_update_runtime_on_connection(
                         &conn,
                         &vmm_id,
                         new_runtime,
                     )
-                    .await.map(|r| match r.status { UpdateStatus::Updated => true, UpdateStatus::NotUpdatedButExists => false })?;
+                    .await?;
+
+
+                let found_vmm = vmm_update_result.found;
+                let vmm_updated = match vmm_update_result.status {
+                     UpdateStatus::Updated => true,
+                     UpdateStatus::NotUpdatedButExists => false
+                };
+
                 let migration_out_updated = match migration_out {
                     Some(migration) => {
                         let r = self.migration_update_source_on_connection(
@@ -287,6 +295,7 @@ impl DataStore {
                     None => false,
                 };
                 Ok(VmmStateUpdateResult {
+                    found_vmm,
                     vmm_updated,
                     migration_in_updated,
                     migration_out_updated,
