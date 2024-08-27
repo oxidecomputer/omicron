@@ -8,6 +8,7 @@
 use omicron_common::address::IpRange;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::internal::shared::BgpConfig;
+use omicron_common::api::internal::shared::LldpPortConfig;
 use omicron_common::api::internal::shared::RouteConfig;
 use omicron_common::api::internal::shared::UplinkAddressConfig;
 use serde::Serialize;
@@ -320,6 +321,7 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         uplink_port_fec,
         autoneg,
         bgp_peers,
+        lldp,
     } = cfg;
 
     let mut uplink = Table::new();
@@ -327,12 +329,15 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
     // routes = []
     let mut routes_out = Array::new();
     for r in routes {
-        let RouteConfig { destination, nexthop, vlan_id } = r;
+        let RouteConfig { destination, nexthop, vlan_id, local_pref } = r;
         let mut route = InlineTable::new();
         route.insert("nexthop", string_value(nexthop));
         route.insert("destination", string_value(destination));
         if let Some(vlan_id) = vlan_id {
             route.insert("vlan_id", i64_value(i64::from(*vlan_id)));
+        }
+        if let Some(local_pref) = local_pref {
+            route.insert("local_pref", i64_value(i64::from(*local_pref)));
         }
         routes_out.push(Value::InlineTable(route));
     }
@@ -487,6 +492,46 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
     }
 
     uplink.insert("bgp_peers", Item::ArrayOfTables(peers));
+
+    if let Some(l) = lldp {
+        let LldpPortConfig {
+            status,
+            chassis_id,
+            port_id,
+            system_name,
+            system_description,
+            port_description,
+            management_addrs,
+        } = l;
+        let mut lldp = Table::new();
+        lldp.insert("status", string_item(status));
+        if let Some(x) = chassis_id {
+            lldp.insert("chassis_id", string_item(x));
+        }
+        if let Some(x) = port_id {
+            lldp.insert("port_id", string_item(x));
+        }
+        if let Some(x) = system_name {
+            lldp.insert("system_name", string_item(x));
+        }
+        if let Some(x) = system_description {
+            lldp.insert("system_description", string_item(x));
+        }
+        if let Some(x) = port_description {
+            lldp.insert("port_description", string_item(x));
+        }
+        if let Some(addrs) = management_addrs {
+            let mut addresses_out = Array::new();
+            for a in addrs {
+                addresses_out.push(string_value(a));
+            }
+            lldp.insert(
+                "management_addrs",
+                Item::Value(Value::Array(addresses_out)),
+            );
+        }
+        uplink.insert("lldp", Item::Table(lldp));
+    }
 
     uplink
 }

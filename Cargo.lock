@@ -1786,7 +1786,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=220dd026e83142b83bd93123f465a64dd4600201#220dd026e83142b83bd93123f465a64dd4600201"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42#9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42"
 dependencies = [
  "oxnet",
  "percent-encoding",
@@ -3616,7 +3616,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.4.10",
+ "socket2 0.5.7",
  "tokio",
  "tower-service",
  "tracing",
@@ -3810,7 +3810,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=3dc9a3dd8d3c623f0cf2c659c7119ce0c026a96d#3dc9a3dd8d3c623f0cf2c659c7119ce0c026a96d"
+source = "git+https://github.com/oxidecomputer/opte?rev=76878de67229ea113d70503c441eab47ac5dc653#76878de67229ea113d70503c441eab47ac5dc653"
 
 [[package]]
 name = "illumos-utils"
@@ -4246,7 +4246,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=3dc9a3dd8d3c623f0cf2c659c7119ce0c026a96d#3dc9a3dd8d3c623f0cf2c659c7119ce0c026a96d"
+source = "git+https://github.com/oxidecomputer/opte?rev=76878de67229ea113d70503c441eab47ac5dc653#76878de67229ea113d70503c441eab47ac5dc653"
 dependencies = [
  "quote",
  "syn 2.0.74",
@@ -4697,7 +4697,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=220dd026e83142b83bd93123f465a64dd4600201#220dd026e83142b83bd93123f465a64dd4600201"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42#9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4720,6 +4720,7 @@ dependencies = [
  "gateway-messages",
  "gateway-test-utils",
  "libc",
+ "omicron-gateway",
  "omicron-workspace-hack",
  "signal-hook-tokio",
  "tokio",
@@ -5245,6 +5246,7 @@ dependencies = [
  "httptest",
  "internal-dns",
  "ipnet",
+ "newtype-uuid",
  "nexus-config",
  "nexus-db-model",
  "nexus-db-queries",
@@ -5961,6 +5963,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "camino",
+ "chrono",
  "clap",
  "dropshot",
  "expectorate",
@@ -5979,6 +5982,9 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "once_cell",
+ "oximeter",
+ "oximeter-instruments",
+ "oximeter-producer",
  "schemars",
  "serde",
  "serde_json",
@@ -6153,6 +6159,7 @@ dependencies = [
  "gateway-client",
  "gateway-messages",
  "gateway-test-utils",
+ "http 0.2.12",
  "humantime",
  "indicatif",
  "internal-dns",
@@ -6510,6 +6517,7 @@ dependencies = [
  "postgres-types",
  "predicates",
  "proc-macro2",
+ "quote",
  "regex",
  "regex-automata 0.4.6",
  "regex-syntax 0.8.4",
@@ -6528,7 +6536,6 @@ dependencies = [
  "similar",
  "slog",
  "smallvec 1.13.2",
- "socket2 0.5.7",
  "spin 0.9.8",
  "string_cache",
  "subtle",
@@ -6637,6 +6644,7 @@ dependencies = [
  "nexus-internal-api",
  "omicron-workspace-hack",
  "openapi-lint",
+ "openapi-manager-types",
  "openapiv3",
  "owo-colors",
  "oximeter-api",
@@ -6645,6 +6653,15 @@ dependencies = [
  "sled-agent-api",
  "supports-color",
  "wicketd-api",
+]
+
+[[package]]
+name = "openapi-manager-types"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "omicron-workspace-hack",
 ]
 
 [[package]]
@@ -6705,7 +6722,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=3dc9a3dd8d3c623f0cf2c659c7119ce0c026a96d#3dc9a3dd8d3c623f0cf2c659c7119ce0c026a96d"
+source = "git+https://github.com/oxidecomputer/opte?rev=76878de67229ea113d70503c441eab47ac5dc653#76878de67229ea113d70503c441eab47ac5dc653"
 dependencies = [
  "cfg-if",
  "dyn-clone",
@@ -6722,7 +6739,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=3dc9a3dd8d3c623f0cf2c659c7119ce0c026a96d#3dc9a3dd8d3c623f0cf2c659c7119ce0c026a96d"
+source = "git+https://github.com/oxidecomputer/opte?rev=76878de67229ea113d70503c441eab47ac5dc653#76878de67229ea113d70503c441eab47ac5dc653"
 dependencies = [
  "illumos-sys-hdrs",
  "ipnetwork",
@@ -6734,7 +6751,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=3dc9a3dd8d3c623f0cf2c659c7119ce0c026a96d#3dc9a3dd8d3c623f0cf2c659c7119ce0c026a96d"
+source = "git+https://github.com/oxidecomputer/opte?rev=76878de67229ea113d70503c441eab47ac5dc653#76878de67229ea113d70503c441eab47ac5dc653"
 dependencies = [
  "libc",
  "libnet 0.1.0 (git+https://github.com/oxidecomputer/netadm-sys)",
@@ -6808,7 +6825,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=3dc9a3dd8d3c623f0cf2c659c7119ce0c026a96d#3dc9a3dd8d3c623f0cf2c659c7119ce0c026a96d"
+source = "git+https://github.com/oxidecomputer/opte?rev=76878de67229ea113d70503c441eab47ac5dc653#76878de67229ea113d70503c441eab47ac5dc653"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",

@@ -15,7 +15,7 @@ use crate::db::datastore::UpdatePrecondition;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::{
-    LldpServiceConfig, Name, SwitchInterfaceConfig, SwitchPort,
+    LldpLinkConfig, Name, SwitchInterfaceConfig, SwitchPort,
     SwitchPortAddressConfig, SwitchPortBgpPeerConfig, SwitchPortConfig,
     SwitchPortLinkConfig, SwitchPortRouteConfig, SwitchPortSettings,
     SwitchPortSettingsGroup, SwitchPortSettingsGroups,
@@ -31,7 +31,7 @@ use diesel::{
 use diesel_dtrace::DTraceConnection;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
-    SqlU16, SqlU32, SqlU8, SwitchPortBgpPeerConfigAllowExport,
+    BgpConfig, SqlU16, SqlU32, SqlU8, SwitchPortBgpPeerConfigAllowExport,
     SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
 };
 use nexus_types::external_api::params;
@@ -101,7 +101,7 @@ pub struct SwitchPortSettingsCombinedResult {
     pub groups: Vec<SwitchPortSettingsGroups>,
     pub port: SwitchPortConfig,
     pub links: Vec<SwitchPortLinkConfig>,
-    pub link_lldp: Vec<LldpServiceConfig>,
+    pub link_lldp: Vec<LldpLinkConfig>,
     pub interfaces: Vec<SwitchInterfaceConfig>,
     pub vlan_interfaces: Vec<SwitchVlanInterfaceConfig>,
     pub routes: Vec<SwitchPortRouteConfig>,
@@ -333,6 +333,7 @@ impl DataStore {
                         SwitchPortSettingsCreateError::ReserveBlock(
                             ReserveBlockError::AddressNotInLot,
                         ) => Error::invalid_request("address not in lot"),
+
                     }
                 }
                 else {
@@ -451,19 +452,18 @@ impl DataStore {
                     .load_async::<SwitchPortLinkConfig>(&conn)
                     .await?;
 
-                let lldp_svc_ids: Vec<Uuid> = result
+                let lldp_link_ids: Vec<Uuid> = result
                     .links
                     .iter()
-                    .map(|link| link.lldp_service_config_id)
+                    .filter_map(|link| link.lldp_link_config_id)
                     .collect();
 
-                use db::schema::lldp_service_config as lldp_config;
-                use db::schema::lldp_service_config::dsl as lldp_dsl;
-                result.link_lldp = lldp_dsl::lldp_service_config
-                    .filter(lldp_config::id.eq_any(lldp_svc_ids))
-                    .select(LldpServiceConfig::as_select())
+                use db::schema::lldp_link_config;
+                result.link_lldp = lldp_link_config::dsl::lldp_link_config
+                    .filter(lldp_link_config::id.eq_any(lldp_link_ids))
+                    .select(LldpLinkConfig::as_select())
                     .limit(1)
-                    .load_async::<LldpServiceConfig>(&conn)
+                    .load_async::<LldpLinkConfig>(&conn)
                     .await?;
 
                 // get the interface configs
@@ -829,45 +829,158 @@ impl DataStore {
         port_settings_id: Option<Uuid>,
         current: UpdatePrecondition<Uuid>,
     ) -> UpdateResult<()> {
+        use db::schema::bgp_config::dsl as bgp_config_dsl;
         use db::schema::switch_port;
         use db::schema::switch_port::dsl as switch_port_dsl;
+        use db::schema::switch_port_settings_bgp_peer_config::dsl as bgp_peer_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        match current {
-            UpdatePrecondition::DontCare => {
-                diesel::update(switch_port_dsl::switch_port)
-                    .filter(switch_port::id.eq(switch_port_id))
-                    .set(switch_port::port_settings_id.eq(port_settings_id))
-                    .execute_async(&*conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel(e, ErrorHandler::Server)
-                    })?;
-            }
-            UpdatePrecondition::Null => {
-                diesel::update(switch_port_dsl::switch_port)
-                    .filter(switch_port::id.eq(switch_port_id))
-                    .filter(switch_port::port_settings_id.is_null())
-                    .set(switch_port::port_settings_id.eq(port_settings_id))
-                    .execute_async(&*conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel(e, ErrorHandler::Server)
-                    })?;
-            }
-            UpdatePrecondition::Value(current_id) => {
-                diesel::update(switch_port_dsl::switch_port)
-                    .filter(switch_port::id.eq(switch_port_id))
-                    .filter(switch_port::port_settings_id.eq(current_id))
-                    .set(switch_port::port_settings_id.eq(port_settings_id))
-                    .execute_async(&*conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel(e, ErrorHandler::Server)
-                    })?;
-            }
-        }
+        let err = OptionalError::new();
+        self.transaction_retry_wrapper("switch_port_set_settings_id")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    // TODO: remove once per-switch-multi-asn support is added
+                    // Bail if user attempts to assign multiple ASNs to a switch via switch port settings
+                    // This is a temporary measure until multi-asn-per-switch is supported.
+
+                    // what switch are we adding a configuration to?
+                    let switch = switch_port_dsl::switch_port
+                        .filter(switch_port_dsl::id.eq(switch_port_id))
+                        .select(switch_port_dsl::switch_location)
+                        .limit(1)
+                        .first_async::<String>(&conn)
+                        .await
+                        .map_err(|e: diesel::result::Error| {
+                            let msg = "failed to look up switch port by id";
+                            error!(opctx.log, "{msg}"; "error" => ?e);
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    err.bail(Error::not_found_by_id(
+                                        ResourceType::SwitchPort,
+                                        &switch_port_id,
+                                    ))
+                                }
+                                _ => err.bail(Error::internal_error(msg)),
+                            }
+                        })?;
+
+                    // if we're setting a port settings id (and therefore activating a configuration
+                    // on a port) we need to make sure there aren't any conflicting bgp configurations
+                    if let Some(psid) = port_settings_id {
+                        let bgp_config: Option<BgpConfig> =
+                            match bgp_peer_dsl::switch_port_settings_bgp_peer_config
+                            .inner_join(
+                                bgp_config_dsl::bgp_config
+                                    .on(bgp_peer_dsl::bgp_config_id
+                                        .eq(bgp_config_dsl::id)),
+                            )
+                            .filter(
+                                bgp_peer_dsl::port_settings_id
+                                    .eq(psid),
+                            )
+                            .select(BgpConfig::as_select())
+                            .limit(1)
+                            .first_async::<BgpConfig>(&conn)
+                            .await {
+                                Ok(v) => Ok(Some(v)),
+                                Err(e) => {
+                                    let msg = "failed to check if bgp peer exists in switch port settings";
+                                    error!(opctx.log, "{msg}"; "error" => ?e);
+                                    match e {
+                                        diesel::result::Error::NotFound => {
+                                            Ok(None)
+                                        }
+                                        _ => Err(err.bail(Error::internal_error(msg))),
+                                    }
+                                }
+                            }?;
+
+                        // find all port settings for the targeted switch
+                        // switch port
+                        // inner join bgp peer on port settings id
+                        // inner join bgp config on bgp config id
+                        // filter switch location eq switch
+                        // filter port settings id not null
+                        // filter asn doesn't equal our asn
+
+                        if let Some(config) = bgp_config {
+                            let conflicting_bgp_configs: Vec<BgpConfig> = switch_port_dsl::switch_port
+                                .inner_join(
+                                    bgp_peer_dsl::switch_port_settings_bgp_peer_config
+                                        .on(bgp_peer_dsl::port_settings_id
+                                            .nullable()
+                                            .eq(switch_port_dsl::port_settings_id)),
+                                )
+                                .inner_join(bgp_config_dsl::bgp_config.on(
+                                    bgp_peer_dsl::bgp_config_id.eq(bgp_config_dsl::id),
+                                ))
+                                .filter(switch_port_dsl::switch_location.eq(switch))
+                                .filter(switch_port_dsl::port_settings_id.is_not_null())
+                                .filter(bgp_config_dsl::asn.ne(config.asn))
+                                .select(BgpConfig::as_select())
+                                .load_async(&conn)
+                                .await?;
+
+                            if !conflicting_bgp_configs.is_empty() {
+                                return Err(err.bail(Error::conflict("a different asn is already configured on this switch")));
+                            }
+                        }
+
+                    }
+
+                    // perform the requested update
+                    match current {
+                        UpdatePrecondition::DontCare => {
+                            diesel::update(switch_port_dsl::switch_port)
+                                .filter(switch_port::id.eq(switch_port_id))
+                                .set(
+                                    switch_port::port_settings_id
+                                        .eq(port_settings_id),
+                                )
+                                .execute_async(&conn)
+                                .await
+                        }
+                        UpdatePrecondition::Null => {
+                            diesel::update(switch_port_dsl::switch_port)
+                                .filter(switch_port::id.eq(switch_port_id))
+                                .filter(switch_port::port_settings_id.is_null())
+                                .set(
+                                    switch_port::port_settings_id
+                                        .eq(port_settings_id),
+                                )
+                                .execute_async(&conn)
+                                .await
+                        }
+                        UpdatePrecondition::Value(current_id) => {
+                            diesel::update(switch_port_dsl::switch_port)
+                                .filter(switch_port::id.eq(switch_port_id))
+                                .filter(
+                                    switch_port::port_settings_id
+                                        .eq(current_id),
+                                )
+                                .set(
+                                    switch_port::port_settings_id
+                                        .eq(port_settings_id),
+                                )
+                                .execute_async(&conn)
+                                .await
+                        }
+                    }
+                }
+            })
+            .await
+            .map_err(|e| {
+                let msg = "switch_port_set_settings_id failed";
+                if let Some(err) = err.take() {
+                    error!(opctx.log, "{msg}"; "error" => ?err);
+                    err
+                } else {
+                    error!(opctx.log, "{msg}"; "error" => ?e);
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })?;
 
         Ok(())
     }
@@ -946,10 +1059,10 @@ impl DataStore {
                         .eq(route_config_dsl::port_settings_id.nullable())),
             )
             .select(SwitchPort::as_select())
-            // TODO: #3592 Correctness
-            // In single rack deployments there are only 64 ports. We'll need
-            // pagination in the future, or maybe a way to constrain the query to
-            // a rack?
+        // TODO: #3592 Correctness
+        // In single rack deployments there are only 64 ports. We'll need
+        // pagination in the future, or maybe a way to constrain the query to
+        // a rack?
             .limit(64)
             .union(
                 switch_port_dsl::switch_port
@@ -958,7 +1071,7 @@ impl DataStore {
                         bgp_peer_config_dsl::switch_port_settings_bgp_peer_config
                             .on(switch_port_dsl::port_settings_id
                                 .eq(bgp_peer_config_dsl::port_settings_id.nullable()),
-                        ),
+                            ),
                     )
                     .select(SwitchPort::as_select())
                     .limit(64),
@@ -987,7 +1100,7 @@ async fn do_switch_port_settings_create(
 ) -> Result<SwitchPortSettingsCombinedResult, diesel::result::Error> {
     use db::schema::{
         address_lot::dsl as address_lot_dsl, bgp_config::dsl as bgp_config_dsl,
-        lldp_service_config::dsl as lldp_config_dsl,
+        lldp_link_config::dsl as lldp_link_config_dsl,
         switch_port_settings::dsl as port_settings_dsl,
         switch_port_settings_address_config::dsl as address_config_dsl,
         switch_port_settings_bgp_peer_config::dsl as bgp_peer_dsl,
@@ -1047,17 +1160,21 @@ async fn do_switch_port_settings_create(
     let mut link_config = Vec::with_capacity(params.links.len());
 
     for (link_name, c) in &params.links {
-        let lldp_config_id = match c.lldp.lldp_config {
-            Some(_) => todo!(), // TODO actual lldp support
-            None => None,
-        };
-        let lldp_svc_config =
-            LldpServiceConfig::new(c.lldp.enabled, lldp_config_id);
+        let lldp_link_config = LldpLinkConfig::new(
+            c.lldp.enabled,
+            c.lldp.link_name.clone(),
+            c.lldp.link_description.clone(),
+            c.lldp.chassis_id.clone(),
+            c.lldp.system_name.clone(),
+            c.lldp.system_description.clone(),
+            c.lldp.management_ip.map(|a| a.into()),
+        );
+        let lldp_config_id = lldp_link_config.id;
+        lldp_config.push(lldp_link_config);
 
-        lldp_config.push(lldp_svc_config.clone());
         link_config.push(SwitchPortLinkConfig::new(
             psid,
-            lldp_svc_config.id,
+            lldp_config_id,
             link_name.clone(),
             c.mtu,
             c.fec.into(),
@@ -1066,9 +1183,9 @@ async fn do_switch_port_settings_create(
         ));
     }
     result.link_lldp =
-        diesel::insert_into(lldp_config_dsl::lldp_service_config)
+        diesel::insert_into(lldp_link_config_dsl::lldp_link_config)
             .values(lldp_config.clone())
-            .returning(LldpServiceConfig::as_returning())
+            .returning(LldpLinkConfig::as_returning())
             .get_results_async(conn)
             .await?;
 
@@ -1120,6 +1237,7 @@ async fn do_switch_port_settings_create(
                 route.dst.into(),
                 route.gw.into(),
                 route.vid.map(Into::into),
+                route.local_pref.map(Into::into),
             ));
         }
     }
@@ -1144,18 +1262,18 @@ async fn do_switch_port_settings_create(
                 NameOrId::Name(name) => {
                     let name = name.to_string();
                     bgp_config_dsl::bgp_config
-                                        .filter(bgp_config::time_deleted.is_null())
-                                        .filter(bgp_config::name.eq(name))
-                                        .select(bgp_config::id)
-                                        .limit(1)
-                                        .first_async::<Uuid>(conn)
-                                        .await
-                                        .map_err(|diesel_error| {
-                                            err.bail_retryable_or(
-                                                diesel_error,
-                                                SwitchPortSettingsCreateError::BgpConfigNotFound
-                                            )
-                                        })?
+                        .filter(bgp_config::time_deleted.is_null())
+                        .filter(bgp_config::name.eq(name))
+                        .select(bgp_config::id)
+                        .limit(1)
+                        .first_async::<Uuid>(conn)
+                        .await
+                        .map_err(|diesel_error| {
+                            err.bail_retryable_or(
+                                diesel_error,
+                                SwitchPortSettingsCreateError::BgpConfigNotFound
+                            )
+                        })?
                 }
             };
 
@@ -1173,9 +1291,9 @@ async fn do_switch_port_settings_create(
                     .collect();
 
                 diesel::insert_into(allow_import_dsl::switch_port_settings_bgp_peer_config_allow_import)
-                                    .values(to_insert)
-                                    .execute_async(conn)
-                                    .await?;
+                    .values(to_insert)
+                    .execute_async(conn)
+                    .await?;
             }
 
             if let ImportExportPolicy::Allow(list) = &p.allowed_export {
@@ -1192,9 +1310,9 @@ async fn do_switch_port_settings_create(
                     .collect();
 
                 diesel::insert_into(allow_export_dsl::switch_port_settings_bgp_peer_config_allow_export)
-                                    .values(to_insert)
-                                    .execute_async(conn)
-                                    .await?;
+                    .values(to_insert)
+                    .execute_async(conn)
+                    .await?;
             }
 
             if !p.communities.is_empty() {
@@ -1212,9 +1330,9 @@ async fn do_switch_port_settings_create(
                     .collect();
 
                 diesel::insert_into(bgp_communities_dsl::switch_port_settings_bgp_peer_config_communities)
-                                    .values(to_insert)
-                                    .execute_async(conn)
-                                    .await?;
+                    .values(to_insert)
+                    .execute_async(conn)
+                    .await?;
             }
 
             bgp_peer_config.push(SwitchPortBgpPeerConfig::new(
@@ -1225,6 +1343,7 @@ async fn do_switch_port_settings_create(
             ));
         }
     }
+
     let db_bgp_peers: Vec<SwitchPortBgpPeerConfig> =
         diesel::insert_into(bgp_peer_dsl::switch_port_settings_bgp_peer_config)
             .values(bgp_peer_config)
@@ -1278,18 +1397,18 @@ async fn do_switch_port_settings_create(
                 NameOrId::Name(name) => {
                     let name = name.to_string();
                     address_lot_dsl::address_lot
-                                    .filter(address_lot::time_deleted.is_null())
-                                    .filter(address_lot::name.eq(name))
-                                    .select(address_lot::id)
-                                    .limit(1)
-                                    .first_async::<Uuid>(conn)
-                                    .await
-                                    .map_err(|diesel_error| {
-                                        err.bail_retryable_or(
-                                            diesel_error,
-                                            SwitchPortSettingsCreateError::AddressLotNotFound
-                                        )
-                                    })?
+                        .filter(address_lot::time_deleted.is_null())
+                        .filter(address_lot::name.eq(name))
+                        .select(address_lot::id)
+                        .limit(1)
+                        .first_async::<Uuid>(conn)
+                        .await
+                        .map_err(|diesel_error| {
+                            err.bail_retryable_or(
+                                diesel_error,
+                                SwitchPortSettingsCreateError::AddressLotNotFound
+                            )
+                        })?
                 }
             };
             // TODO: Reduce DB round trips needed for reserving ip blocks
@@ -1349,18 +1468,18 @@ async fn do_switch_port_settings_delete(
         NameOrId::Name(name) => {
             let name = name.to_string();
             port_settings_dsl::switch_port_settings
-                            .filter(switch_port_settings::time_deleted.is_null())
-                            .filter(switch_port_settings::name.eq(name))
-                            .select(switch_port_settings::id)
-                            .limit(1)
-                            .first_async::<Uuid>(conn)
-                            .await
-                            .map_err(|diesel_error| {
-                                err.bail_retryable_or(
-                                    diesel_error,
-                                    SwitchPortSettingsDeleteError::SwitchPortSettingsNotFound
-                                )
-                            })?
+                .filter(switch_port_settings::time_deleted.is_null())
+                .filter(switch_port_settings::name.eq(name))
+                .select(switch_port_settings::id)
+                .limit(1)
+                .first_async::<Uuid>(conn)
+                .await
+                .map_err(|diesel_error| {
+                    err.bail_retryable_or(
+                        diesel_error,
+                        SwitchPortSettingsDeleteError::SwitchPortSettingsNotFound
+                    )
+                })?
         }
     };
 
@@ -1389,13 +1508,12 @@ async fn do_switch_port_settings_delete(
             .returning(SwitchPortLinkConfig::as_returning())
             .get_results_async(conn)
             .await?;
-
     // delete lldp configs
-    use db::schema::lldp_service_config::{self, dsl as lldp_config_dsl};
-    let lldp_svc_ids: Vec<Uuid> =
-        links.iter().map(|link| link.lldp_service_config_id).collect();
-    diesel::delete(lldp_config_dsl::lldp_service_config)
-        .filter(lldp_service_config::id.eq_any(lldp_svc_ids))
+    use db::schema::lldp_link_config;
+    let lldp_link_ids: Vec<Uuid> =
+        links.iter().filter_map(|link| link.lldp_link_config_id).collect();
+    diesel::delete(lldp_link_config::dsl::lldp_link_config)
+        .filter(lldp_link_config::id.eq_any(lldp_link_ids))
         .execute_async(conn)
         .await?;
 
@@ -1556,7 +1674,7 @@ mod test {
             shaper: None,
         };
 
-        datastore.bgp_config_set(&opctx, &bgp_config).await.unwrap();
+        datastore.bgp_config_create(&opctx, &bgp_config).await.unwrap();
 
         let settings = SwitchPortSettingsCreate {
             identity: IdentityMetadataCreateParams {

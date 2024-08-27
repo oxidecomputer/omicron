@@ -85,6 +85,7 @@ pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption"
 postgres-types = { version = "0.2.7", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 predicates = { version = "3.1.2" }
 proc-macro2 = { version = "1.0.86" }
+quote = { version = "1.0.36" }
 regex = { version = "1.10.6" }
 regex-automata = { version = "0.4.6", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.4" }
@@ -101,7 +102,6 @@ sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.6.0", features = ["bytes", "inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
 smallvec = { version = "1.13.2", default-features = false, features = ["const_new"] }
-socket2 = { version = "0.5.7", default-features = false, features = ["all"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
@@ -193,6 +193,7 @@ pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption"
 postgres-types = { version = "0.2.7", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 predicates = { version = "3.1.2" }
 proc-macro2 = { version = "1.0.86" }
+quote = { version = "1.0.36" }
 regex = { version = "1.10.6" }
 regex-automata = { version = "0.4.6", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.4" }
@@ -209,7 +210,6 @@ sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.6.0", features = ["bytes", "inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
 smallvec = { version = "1.13.2", default-features = false, features = ["const_new"] }
-socket2 = { version = "0.5.7", default-features = false, features = ["all"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }

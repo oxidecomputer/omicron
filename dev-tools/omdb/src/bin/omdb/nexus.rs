@@ -36,6 +36,7 @@ use nexus_types::internal_api::background::LookupRegionPortStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
+use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
 use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DemoSagaUuid;
@@ -51,6 +52,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
 use tabled::Tabled;
+use tokio::sync::OnceCell;
 use uuid::Uuid;
 
 /// Arguments to the "omdb nexus" subcommand
@@ -244,6 +246,10 @@ struct BlueprintTargetSetArgs {
     blueprint_id: Uuid,
     /// whether this blueprint should be enabled
     enabled: BlueprintTargetSetEnabled,
+    /// if specified, diff against the current target and wait for confirmation
+    /// before proceeding
+    #[clap(long)]
+    diff: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -1510,6 +1516,46 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 }
             }
         }
+    } else if name == "region_snapshot_replacement_step" {
+        match serde_json::from_value::<RegionSnapshotReplacementStepStatus>(
+            details.clone(),
+        ) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+
+            Ok(status) => {
+                println!(
+                    "    total step records created ok: {}",
+                    status.step_records_created_ok.len(),
+                );
+                for line in &status.step_records_created_ok {
+                    println!("    > {line}");
+                }
+
+                println!(
+                    "    total step garbage collect saga invoked ok: {}",
+                    status.step_garbage_collect_invoked_ok.len(),
+                );
+                for line in &status.step_garbage_collect_invoked_ok {
+                    println!("    > {line}");
+                }
+
+                println!(
+                    "    total step saga invoked ok: {}",
+                    status.step_invoked_ok.len(),
+                );
+                for line in &status.step_invoked_ok {
+                    println!("    > {line}");
+                }
+
+                println!("    errors: {}", status.errors.len());
+                for line in &status.errors {
+                    println!("    > {line}");
+                }
+            }
+        }
     } else {
         println!(
             "warning: unknown background task: {:?} \
@@ -1722,6 +1768,38 @@ async fn cmd_nexus_blueprints_target_set(
     args: &BlueprintTargetSetArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
+    // Helper to only fetch the current target once. We may need it immediately
+    // if `args.diff` is true, or later if `args.enabled` is "inherit" (or
+    // both).
+    let current_target = OnceCell::new();
+    let get_current_target = || async {
+        current_target
+            .get_or_try_init(|| client.blueprint_target_view())
+            .await
+            .context("failed to fetch current target blueprint")
+    };
+
+    if args.diff {
+        let current_target = get_current_target().await?;
+        let blueprint1 = client
+            .blueprint_view(&current_target.target_id)
+            .await
+            .context("failed to fetch target blueprint")?
+            .into_inner();
+        let blueprint2 =
+            client.blueprint_view(&args.blueprint_id).await.with_context(
+                || format!("fetching blueprint {}", args.blueprint_id),
+            )?;
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        println!("{}", diff.display());
+        println!(
+            "\nDo you want to make {} the target blueprint?",
+            args.blueprint_id
+        );
+        let mut prompt = ConfirmationPrompt::new();
+        prompt.read_and_validate("y/N", "y")?;
+    }
+
     let enabled = match args.enabled {
         BlueprintTargetSetEnabled::Enabled => true,
         BlueprintTargetSetEnabled::Disabled => false,
@@ -1734,12 +1812,11 @@ async fn cmd_nexus_blueprints_target_set(
         // operator. (In the case of the current target blueprint being changed
         // entirely, that will result in a failure to set the current target
         // below, because its parent will no longer be the current target.)
-        BlueprintTargetSetEnabled::Inherit => client
-            .blueprint_target_view()
-            .await
-            .map(|current| current.into_inner().enabled)
-            .context("failed to fetch current target blueprint")?,
+        BlueprintTargetSetEnabled::Inherit => {
+            get_current_target().await?.enabled
+        }
     };
+
     client
         .blueprint_target_set(&nexus_client::types::BlueprintTargetSet {
             target_id: args.blueprint_id,
@@ -1966,7 +2043,7 @@ impl ConfirmationPrompt {
         {
             Ok(input)
         } else {
-            bail!("expungement aborted")
+            bail!("operation aborted")
         }
     }
 

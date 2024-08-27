@@ -34,13 +34,12 @@ pub(crate) async fn ensure_settings(
 mod test {
     use super::*;
     use crate::overridables::Overridables;
-    use crate::RealizeBlueprintOutput;
+    use crate::test_utils::realize_blueprint_and_expect;
     use nexus_db_queries::authn;
     use nexus_db_queries::authz;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::deployment::CockroachDbClusterVersion;
+    use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use std::sync::Arc;
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -71,24 +70,26 @@ mod test {
             .await
             .expect("failed to get blueprint from datastore");
         eprintln!("blueprint: {}", blueprint.display());
-        // The initial blueprint should already have these filled in.
+        // The initial blueprint should already have the state fingerprint
+        // filled in.
         assert_eq!(
             blueprint.cockroachdb_fingerprint,
             settings.state_fingerprint
         );
-        assert_eq!(
-            blueprint.cockroachdb_setting_preserve_downgrade,
-            CockroachDbClusterVersion::NEWLY_INITIALIZED.into()
-        );
-        // The cluster version, preserve downgrade setting, and
-        // `NEWLY_INITIALIZED` should all match.
-        assert_eq!(
-            settings.version,
-            CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string()
-        );
+        // The initial blueprint should already have the preserve downgrade
+        // setting filled in. (It might be the current or previous version, but
+        // it should be `Set` regardless.)
+        let CockroachDbPreserveDowngrade::Set(bp_preserve_downgrade) =
+            blueprint.cockroachdb_setting_preserve_downgrade
+        else {
+            panic!("blueprint does not set preserve downgrade option");
+        };
+        // The cluster version, preserve downgrade setting, and the value in the
+        // blueprint should all match.
+        assert_eq!(settings.version, bp_preserve_downgrade.to_string());
         assert_eq!(
             settings.preserve_downgrade,
-            CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string()
+            bp_preserve_downgrade.to_string()
         );
         // Record the zpools so we don't fail to ensure datasets (unrelated to
         // crdb settings) during blueprint execution.
@@ -98,17 +99,10 @@ mod test {
         .await;
         // Execute the initial blueprint.
         let overrides = Overridables::for_test(cptestctx);
-        let _: RealizeBlueprintOutput =
-            crate::realize_blueprint_with_overrides(
-                &opctx,
-                datastore,
-                resolver,
-                &blueprint,
-                Uuid::new_v4(),
-                &overrides,
-            )
-            .await
-            .expect("failed to execute initial blueprint");
+        _ = realize_blueprint_and_expect(
+            &opctx, datastore, resolver, &blueprint, &overrides,
+        )
+        .await;
         // The CockroachDB settings should not have changed.
         assert_eq!(
             settings,
