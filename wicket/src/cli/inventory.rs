@@ -76,7 +76,6 @@ impl InventoryArgs {
                     .context("failed to get rss config")?;
 
                 let bootstrap_sleds = &conf.insensitive.bootstrap_sleds;
-                println!("wicket bootstrap sleds: {:?}", bootstrap_sleds);
                 match format {
                     OutputFormat::Json => {
                         let json_str =

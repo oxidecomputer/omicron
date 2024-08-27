@@ -26,6 +26,7 @@ use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::SwitchLocation;
 use once_cell::sync::Lazy;
 use sled_hardware_types::Baseboard;
+use slog::debug;
 use slog::warn;
 use std::collections::btree_map;
 use std::collections::BTreeMap;
@@ -115,6 +116,7 @@ impl CurrentRssConfig {
         &mut self,
         inventory: &RackV1Inventory,
         bootstrap_peers: &BootstrapPeers,
+        log: &slog::Logger,
     ) {
         let bootstrap_sleds = bootstrap_peers.sleds();
 
@@ -126,7 +128,15 @@ impl CurrentRssConfig {
                     return None;
                 }
 
-                let state = sp.state.as_ref()?;
+                let Some(state) = sp.state.as_ref() else {
+                    debug!(
+                        log,
+                        "in update_with_inventory_and_bootstrap_peers, \
+                         filtering out SP with no state";
+                        "sp" => ?sp,
+                    );
+                    return None;
+                };
                 let baseboard = Baseboard::new_gimlet(
                     state.serial_number.clone(),
                     state.model.clone(),
@@ -140,12 +150,10 @@ impl CurrentRssConfig {
                 })
             })
             .collect();
-        println!("inventory: {:?}", self.inventory);
 
         // If the user has already uploaded a config specifying bootstrap_sleds,
         // also update our knowledge of those sleds' bootstrap addresses.
         let our_bootstrap_sleds = mem::take(&mut self.bootstrap_sleds);
-        println!("our_bootstrap_sleds: {:?}", our_bootstrap_sleds);
         self.bootstrap_sleds = our_bootstrap_sleds
             .into_iter()
             .map(|mut sled_desc| {
@@ -154,7 +162,6 @@ impl CurrentRssConfig {
                 sled_desc
             })
             .collect();
-        println!("self.bootstrap_sleds: {:?}", self.bootstrap_sleds);
     }
 
     pub(crate) fn start_rss_request(
