@@ -126,19 +126,31 @@ same `NEW_VERSION`:**, then your `OLD_VERSION` has changed and so _your_
    new version that came in from "main").
 * Update the version in `dbinit.sql` to match the new `NEW_VERSION`.
 
-=== General notes
+=== Constraints on Schema Updates
 
-CockroachDB's representation of the schema includes some opaque
-internally-generated fields that are order dependent, like the names of
-anonymous CHECK constraints.  Our schema comparison tools intentionally ignore
-these values. As a result, when performing schema changes, the order of new
-tables and constraints should generally not be important.
+==== Adding a new column without a default value [[add_column_constraint]]
 
-As convention, however, we recommend keeping the `db_metadata` file at the end
-of `dbinit.sql`, so that the database does not contain a version until it is
-fully populated.
+When adding a new column to an existing table, that column must
+contain a default to help back-fill existing rows in that table which may
+exist. Without this default value, the schema upgrade might fail with
+an error like `null value in column "..." violates not-null constraint`.
+Unfortnately, it's possible that the schema upgrade might NOT fail with that
+error, if no rows are present in the table when the schema is updated. This
+results in an inconsistent state, where the schema upgrade might succeed on
+some deployments but fail on others.
 
-=== Scenario-specific gotchas
+If you'd like to add a column without a default value, we recommend
+doing the following, if a `DEFAULT` value makes sense for a one-time update:
+
+1. Adding the column with a `DEFAULT` value.
+2. Dropping the `DEFAULT` constraint.
+
+If a `DEFAULT` value does not make sense, the following may be necessary
+instead:
+
+1. Add a column without a `NOT NULL` constraint.
+2. Ensure that all data has migrated to a non-nullable value, eventually.
+3. Once all data has been migrated to a non-nullable value, add a `NOT NULL` constraint.
 
 ==== Renaming columns
 
@@ -151,3 +163,61 @@ functions as a workaround.)
 An (imperfect) workaround is to use the `#[diesel(column_name = foo)]` attribute
 in Rust code to preserve the existing name of a column in the database while
 giving its corresponding struct field a different, more meaningful name.
+
+Note that this constraint does not apply to renaming tables: the statement
+`ALTER TABLE IF EXISTS ... RENAME TO ...` is valid and idempotent.
+
+=== Fixing broken Schema Updates
+
+WARNING: This section is somewhat speculative - what "broken" means may differ
+significantly from one schema update to the next. Take this as as a recommendation
+based on experience, but not as a hard truth that will apply to all broken schema
+updates.
+
+In cases where a schema update cannot complete successfully, additional steps
+may be necessary to enable schema updates to proceed (for example, if a schema
+update tried <<add_column_constraint>>). In these situations, the goal should be
+the following:
+
+. Fix the schema update such that deployments which have not applied it yet
+do not fail.
+.. It is important to update the *exact* "upN.sql" file which failed, rather than
+re-numbering or otherwise changing the order of schema updates. Internally, Nexus
+tracks which individual step of a schema update has been applied, to avoid applying
+older schema upgrades which may no longer be relevant.
+. Add a follow-up named schema update to ensure that deployments which have
+*already* applied it arrive at the same state. This is only necessary if it is
+possible for the schema update to apply successfully in any possible
+deployment. This schema update should be added like any other "new" schema update,
+appended to the list of all updates, rather than re-ordering history.
+
+We can use the following terminology here:
+
+* `S(bad)`: The particular `upN.sql` schema update which is "broken".
+* `S(fixed)`: That same `upN.sql` file after being updated to a non-broken version.
+* `S(converge)`: Some later schema update that converges the deployment to a known-good
+state.
+
+**This process is risky**. By changing the contents of the old schema update `S(bad)`
+to `S(fixed)`, we create two divergent histories on our deployments: one where `S(bad)`
+may have been applied, and one where only `S(fixed)` was applied.
+
+Although the goal of `S(converge)` is to make sure that these deployments end
+up looking the same, there are no guarantees that other schema updates between
+`S(bad)` and `S(converge)` will be identical between these two variant update
+timelines. When fixing broken schema updates, do so with caution, and consider
+all schema updates between `S(bad)` and `S(converge)` - these updates must be
+able to complete successfully regardless of which one of `S(bad)` or `S(fixed)`
+was applied.
+
+=== General notes
+
+CockroachDB's representation of the schema includes some opaque
+internally-generated fields that are order dependent, like the names of
+anonymous CHECK constraints.  Our schema comparison tools intentionally ignore
+these values. As a result, when performing schema changes, the order of new
+tables and constraints should generally not be important.
+
+As convention, however, we recommend keeping the `db_metadata` row insertion at
+the end of `dbinit.sql`, so that the database does not contain a version until
+it is fully populated.
