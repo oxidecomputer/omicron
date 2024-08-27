@@ -22,6 +22,8 @@ use std::fmt;
 /// let display = StepIndexDisplay::new(0, 8);
 /// assert_eq!(display.to_string(), "1/8");
 /// let display = StepIndexDisplay::new(82, 230);
+/// assert_eq!(display.to_string(), "83/230");
+/// let display = display.padded(true);
 /// assert_eq!(display.to_string(), " 83/230");
 /// ```
 #[derive(Debug)]
