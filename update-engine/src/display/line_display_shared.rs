@@ -16,6 +16,7 @@ use owo_colors::OwoColorize;
 use swrite::{swrite, SWrite as _};
 
 use crate::{
+    display::StepIndexDisplay,
     events::{
         ProgressCounter, ProgressEvent, ProgressEventKind, StepEvent,
         StepEventKind, StepInfo, StepOutcome,
@@ -716,17 +717,16 @@ impl LineDisplayFormatter {
     ) {
         ld_step_info.nest_data.add_prefix(line);
 
-        // Print out "<step index>/<total steps>)". Leave space such that we
-        // print out e.g. "1/8)" and " 3/14)".
-        // Add 1 to the index to make it 1-based.
-        let step_index = ld_step_info.step_info.index + 1;
-        let step_index_width = ld_step_info.total_steps.to_string().len();
+        // Print out "(<current>/<total>)" in a padded way, so that successive
+        // steps are vertically aligned.
         swrite!(
             line,
-            "{:width$}/{:width$}) ",
-            step_index,
-            ld_step_info.total_steps,
-            width = step_index_width
+            "({}) ",
+            StepIndexDisplay::new(
+                ld_step_info.step_info.index,
+                ld_step_info.total_steps
+            )
+            .padded(true),
         );
 
         swrite!(
