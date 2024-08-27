@@ -23,6 +23,12 @@
     }
   },
   "definitions": {
+    "ByteCount": {
+      "description": "Byte count to express memory or storage capacity.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
     "DatasetConfig": {
       "description": "Configuration information necessary to request a single dataset",
       "type": "object",
@@ -56,21 +62,25 @@
         },
         "quota": {
           "description": "The upper bound on the amount of storage used by this dataset",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint",
-          "minimum": 0.0
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ByteCount"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "reservation": {
           "description": "The lower bound on the amount of storage usable by this dataset",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint",
-          "minimum": 0.0
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ByteCount"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
