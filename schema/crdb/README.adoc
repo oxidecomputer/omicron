@@ -134,7 +134,7 @@ When adding a new non-nullable column to an existing table, that column must
 contain a default to help back-fill existing rows in that table which may
 exist. Without this default value, the schema upgrade might fail with
 an error like `null value in column "..." violates not-null constraint`.
-Unfortnately, it's possible that the schema upgrade might NOT fail with that
+Unfortunately, it's possible that the schema upgrade might NOT fail with that
 error, if no rows are present in the table when the schema is updated. This
 results in an inconsistent state, where the schema upgrade might succeed on
 some deployments but fail on others.
@@ -145,12 +145,28 @@ doing the following, if a `DEFAULT` value makes sense for a one-time update:
 1. Adding the column with a `DEFAULT` value.
 2. Dropping the `DEFAULT` constraint.
 
-If a `DEFAULT` value does not make sense, the following may be necessary
-instead:
+If a `DEFAULT` value does not make sense, then you need to implement a
+multi-step process.
 
-1. Add a column without a `NOT NULL` constraint.
-2. Ensure that all data has migrated to a non-nullable value, eventually.
-3. Once all data has been migrated to a non-nullable value, add a `NOT NULL` constraint.
+. Add the column without a `NOT NULL` constraint.
+. Migrate existing data to a non-null value.
+. Once all data has been migrated to a non-null value, alter the table again to
+add the `NOT NULL` constraint.
+
+For the time being, if you can write the data migration in SQL (e.g., using a
+SQL `UPDATE`), then you can do this with a single new schema version where the
+second step is an `UPDATE`. See schema version 54 (`blueprint-add-external-ip-id`)
+for an example of this (though that one did not make the new column `NOT NULL` --
+you'd want to do that in another step). Update the `validate_data_migration()`
+test in `nexus/tests/integration_tests/schema.rs` to add a test for this.
+
+In the future when schema updates happen while the control plane is online,
+this may not be a tenable path because the operation may take a very long time
+on large tables.
+
+If you cannot write the data migration in SQL, you would need to figure out a
+different way to backfill the data before you can apply the step that adds the
+`NOT NULL` constraint. This is likely a substantial project
 
 ==== Renaming columns
 
@@ -189,7 +205,12 @@ older schema upgrades which may no longer be relevant.
 *already* applied it arrive at the same state. This is only necessary if it is
 possible for the schema update to apply successfully in any possible
 deployment. This schema update should be added like any other "new" schema update,
-appended to the list of all updates, rather than re-ordering history.
+appended to the list of all updates, rather than re-ordering history. This
+schema update will run on systems that deployed both versions of the earlier
+schema update.
+. Determine whether any of the schema versions after the broken one need to
+change because they depended on the specific behavior that you changed to _fix_
+that version.
 
 We can use the following terminology here:
 
