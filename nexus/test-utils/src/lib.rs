@@ -84,6 +84,7 @@ use uuid::Uuid;
 pub use sim::TEST_HARDWARE_THREADS;
 pub use sim::TEST_RESERVOIR_RAM;
 
+pub mod background;
 pub mod db;
 pub mod http_testing;
 pub mod resource_helpers;

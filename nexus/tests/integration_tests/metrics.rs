@@ -359,75 +359,12 @@ async fn test_instance_watcher_metrics(
     let nexus = &cptestctx.server.server_context().nexus;
     let oximeter = &cptestctx.oximeter;
 
-    // TODO(eliza): consider factoring this out to a generic
-    // `activate_background_task` function in `nexus-test-utils` eventually?
     let activate_instance_watcher = || async {
-        use nexus_client::types::BackgroundTask;
-        use nexus_client::types::CurrentStatus;
-        use nexus_client::types::CurrentStatusRunning;
-        use nexus_client::types::LastResult;
-        use nexus_client::types::LastResultCompleted;
+        use nexus_test_utils::background::activate_background_task;
 
-        fn most_recent_start_time(
-            task: &BackgroundTask,
-        ) -> Option<chrono::DateTime<chrono::Utc>> {
-            match task.current {
-                CurrentStatus::Idle => match task.last {
-                    LastResult::Completed(LastResultCompleted {
-                        start_time,
-                        ..
-                    }) => Some(start_time),
-                    LastResult::NeverCompleted => None,
-                },
-                CurrentStatus::Running(CurrentStatusRunning {
-                    start_time,
-                    ..
-                }) => Some(start_time),
-            }
-        }
+        let _ = activate_background_task(&internal_client, "instance_watcher")
+            .await;
 
-        eprintln!("\n --- activating instance watcher ---\n");
-        let task = NexusRequest::object_get(
-            internal_client,
-            "/bgtasks/view/instance_watcher",
-        )
-        .execute_and_parse_unwrap::<BackgroundTask>()
-        .await;
-        let last_start = most_recent_start_time(&task);
-
-        internal_client
-            .make_request(
-                http::Method::POST,
-                "/bgtasks/activate",
-                Some(serde_json::json!({
-                    "bgtask_names": vec![String::from("instance_watcher")]
-                })),
-                http::StatusCode::NO_CONTENT,
-            )
-            .await
-            .unwrap();
-        // Wait for the instance watcher task to finish
-        wait_for_condition(
-            || async {
-                let task = NexusRequest::object_get(
-                    internal_client,
-                    "/bgtasks/view/instance_watcher",
-                )
-                .execute_and_parse_unwrap::<BackgroundTask>()
-                .await;
-                if matches!(&task.current, CurrentStatus::Idle)
-                    && most_recent_start_time(&task) > last_start
-                {
-                    Ok(())
-                } else {
-                    Err(CondCheckError::<()>::NotYet)
-                }
-            },
-            &Duration::from_millis(500),
-            &Duration::from_secs(60),
-        )
-        .await
-        .unwrap();
         // Make sure that the latest metrics have been collected.
         oximeter.force_collect().await;
     };
