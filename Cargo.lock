@@ -5405,6 +5405,7 @@ dependencies = [
  "hyper 0.14.30",
  "illumos-utils",
  "internal-dns",
+ "nexus-client",
  "nexus-config",
  "nexus-db-queries",
  "nexus-sled-agent-shared",
