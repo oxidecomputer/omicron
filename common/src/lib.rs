@@ -122,6 +122,11 @@ async fn never_bail() -> Result<bool, Error> {
 /// A wrapper struct that does nothing other than elide the inner value from
 /// [`std::fmt::Debug`] output.
 ///
+/// We define this within Omicron instead of using one of the many available
+/// crates that do the same thing because it's trivial to do so, and we want the
+/// flexibility to add traits to this type without needing to wait on upstream
+/// to add an optional dependency.
+///
 /// If you want to use this for secrets, consider that it might not do
 /// everything you expect (it does not zeroize memory on drop, nor get in the
 /// way of you removing the inner value from this wrapper struct).
