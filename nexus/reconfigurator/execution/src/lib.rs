@@ -34,8 +34,6 @@ mod omicron_zones;
 mod overridables;
 mod sagas;
 mod sled_state;
-#[cfg(test)]
-mod test_utils;
 
 pub use dns::blueprint_external_dns_config;
 pub use dns::blueprint_internal_dns_config;

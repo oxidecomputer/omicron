@@ -458,7 +458,7 @@ pub fn blueprint_nexus_external_ips(blueprint: &Blueprint) -> Vec<IpAddr> {
 mod test {
     use super::*;
     use crate::overridables::Overridables;
-    use crate::test_utils::realize_blueprint_and_expect;
+    use crate::RealizeBlueprintOutput;
     use crate::Sled;
     use dns_service_client::DnsDiff;
     use internal_dns::config::Host;
@@ -1458,10 +1458,17 @@ mod test {
 
         // Now, execute the initial blueprint.
         let overrides = Overridables::for_test(cptestctx);
-        _ = realize_blueprint_and_expect(
-            &opctx, datastore, resolver, &blueprint, &overrides,
-        )
-        .await;
+        let _: RealizeBlueprintOutput =
+            crate::realize_blueprint_with_overrides(
+                &opctx,
+                datastore,
+                resolver,
+                &blueprint,
+                Uuid::new_v4(),
+                &overrides,
+            )
+            .await
+            .expect("failed to execute initial blueprint");
 
         // DNS ought not to have changed.
         verify_dns_unchanged(
@@ -1592,14 +1599,17 @@ mod test {
             .await
             .expect("failed to set blueprint as target");
 
-        _ = realize_blueprint_and_expect(
-            &opctx,
-            datastore,
-            resolver,
-            &blueprint2,
-            &overrides,
-        )
-        .await;
+        let _: RealizeBlueprintOutput =
+            crate::realize_blueprint_with_overrides(
+                &opctx,
+                datastore,
+                resolver,
+                &blueprint2,
+                Uuid::new_v4(),
+                &overrides,
+            )
+            .await
+            .expect("failed to execute second blueprint");
 
         // Now fetch DNS again.  Both should have changed this time.
         let dns_latest_internal = datastore
@@ -1664,14 +1674,17 @@ mod test {
         }
 
         // If we execute it again, we should see no more changes.
-        _ = realize_blueprint_and_expect(
-            &opctx,
-            datastore,
-            resolver,
-            &blueprint2,
-            &overrides,
-        )
-        .await;
+        let _: RealizeBlueprintOutput =
+            crate::realize_blueprint_with_overrides(
+                &opctx,
+                datastore,
+                resolver,
+                &blueprint2,
+                Uuid::new_v4(),
+                &overrides,
+            )
+            .await
+            .expect("failed to execute second blueprint again");
         verify_dns_unchanged(
             &opctx,
             datastore,
@@ -1698,14 +1711,17 @@ mod test {
 
         // One more time, make sure that executing the blueprint does not do
         // anything.
-        _ = realize_blueprint_and_expect(
-            &opctx,
-            datastore,
-            resolver,
-            &blueprint2,
-            &overrides,
-        )
-        .await;
+        let _: RealizeBlueprintOutput =
+            crate::realize_blueprint_with_overrides(
+                &opctx,
+                datastore,
+                resolver,
+                &blueprint2,
+                Uuid::new_v4(),
+                &overrides,
+            )
+            .await
+            .expect("failed to execute second blueprint again");
         verify_dns_unchanged(
             &opctx,
             datastore,
@@ -1790,10 +1806,17 @@ mod test {
         );
 
         // If we execute the blueprint, DNS should not be changed.
-        _ = realize_blueprint_and_expect(
-            &opctx, datastore, resolver, &blueprint, &overrides,
-        )
-        .await;
+        let _: RealizeBlueprintOutput =
+            crate::realize_blueprint_with_overrides(
+                &opctx,
+                datastore,
+                resolver,
+                &blueprint,
+                Uuid::new_v4(),
+                &overrides,
+            )
+            .await
+            .expect("failed to execute blueprint");
         let dns_latest_internal = datastore
             .dns_config_read(&opctx, DnsGroup::Internal)
             .await
