@@ -130,7 +130,7 @@ same `NEW_VERSION`:**, then your `OLD_VERSION` has changed and so _your_
 
 ==== Adding a new column without a default value [[add_column_constraint]]
 
-When adding a new column to an existing table, that column must
+When adding a new non-nullable column to an existing table, that column must
 contain a default to help back-fill existing rows in that table which may
 exist. Without this default value, the schema upgrade might fail with
 an error like `null value in column "..." violates not-null constraint`.
