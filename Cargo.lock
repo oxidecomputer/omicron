@@ -5992,6 +5992,7 @@ dependencies = [
  "omicron-workspace-hack",
  "once_cell",
  "oximeter",
+ "oximeter-instruments",
  "oximeter-producer",
  "schemars",
  "serde",

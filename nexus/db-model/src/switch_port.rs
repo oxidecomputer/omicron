@@ -381,7 +381,7 @@ impl Into<external::SwitchPortConfig> for SwitchPortConfig {
 #[diesel(table_name = switch_port_settings_link_config)]
 pub struct SwitchPortLinkConfig {
     pub port_settings_id: Uuid,
-    pub lldp_link_config_id: Uuid,
+    pub lldp_link_config_id: Option<Uuid>,
     pub link_name: String,
     pub mtu: SqlU16,
     pub fec: SwitchLinkFec,
@@ -401,7 +401,7 @@ impl SwitchPortLinkConfig {
     ) -> Self {
         Self {
             port_settings_id,
-            lldp_link_config_id,
+            lldp_link_config_id: Some(lldp_link_config_id),
             link_name,
             fec,
             speed,
