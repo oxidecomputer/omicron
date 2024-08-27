@@ -60,8 +60,8 @@ pub struct ClickhouseServerConfig {
     pub id: ServerId,
     pub datastore_path: Utf8PathBuf,
     pub listen_addr: Ipv6Addr,
-    pub keepers: Vec<NodeConfig>,
-    pub servers: Vec<NodeConfig>,
+    pub keepers: Vec<KeeperNodeConfig>,
+    pub servers: Vec<ServerNodeConfig>,
 }
 
 impl ClickhouseServerConfig {
@@ -71,8 +71,8 @@ impl ClickhouseServerConfig {
         id: ServerId,
         datastore_path: Utf8PathBuf,
         listen_addr: Ipv6Addr,
-        keepers: Vec<NodeConfig>,
-        servers: Vec<NodeConfig>,
+        keepers: Vec<KeeperNodeConfig>,
+        servers: Vec<ServerNodeConfig>,
     ) -> Self {
         Self { config_dir, id, datastore_path, listen_addr, keepers, servers }
     }
@@ -142,13 +142,10 @@ mod tests {
 
     use camino::Utf8PathBuf;
     use camino_tempfile::Builder;
-    use omicron_common::address::{
-        CLICKHOUSE_KEEPER_TCP_PORT, CLICKHOUSE_TCP_PORT,
-    };
 
     use crate::{
-        ClickhouseKeeperConfig, ClickhouseServerConfig, KeeperId, NodeConfig,
-        RaftServerConfig, ServerId,
+        ClickhouseKeeperConfig, ClickhouseServerConfig, KeeperId,
+        KeeperNodeConfig, RaftServerConfig, ServerId, ServerNodeConfig,
     };
 
     #[test]
@@ -196,14 +193,14 @@ mod tests {
         );
 
         let keepers = vec![
-            NodeConfig::new("ff::01".to_string(), CLICKHOUSE_KEEPER_TCP_PORT),
-            NodeConfig::new("ff::02".to_string(), CLICKHOUSE_KEEPER_TCP_PORT),
-            NodeConfig::new("ff::03".to_string(), CLICKHOUSE_KEEPER_TCP_PORT),
+            KeeperNodeConfig::new("ff::01".to_string()),
+            KeeperNodeConfig::new("ff::02".to_string()),
+            KeeperNodeConfig::new("ff::03".to_string()),
         ];
 
         let servers = vec![
-            NodeConfig::new("ff::08".to_string(), CLICKHOUSE_TCP_PORT),
-            NodeConfig::new("ff::09".to_string(), CLICKHOUSE_TCP_PORT),
+            ServerNodeConfig::new("ff::08".to_string()),
+            ServerNodeConfig::new("ff::09".to_string()),
         ];
 
         let config = ClickhouseServerConfig::new(

@@ -49,8 +49,8 @@ impl ReplicaConfig {
         logger: LogConfig,
         macros: Macros,
         listen_host: Ipv6Addr,
-        remote_servers: Vec<NodeConfig>,
-        keepers: Vec<NodeConfig>,
+        remote_servers: Vec<ServerNodeConfig>,
+        keepers: Vec<KeeperNodeConfig>,
         path: Utf8PathBuf,
     ) -> Self {
         let data_path = path.join("data");
@@ -187,11 +187,11 @@ impl Macros {
 pub struct RemoteServers {
     pub cluster: String,
     pub secret: String,
-    pub replicas: Vec<NodeConfig>,
+    pub replicas: Vec<ServerNodeConfig>,
 }
 
 impl RemoteServers {
-    pub fn new(replicas: Vec<NodeConfig>) -> Self {
+    pub fn new(replicas: Vec<ServerNodeConfig>) -> Self {
         Self {
             cluster: OXIMETER_CLUSTER.to_string(),
             // TODO(https://github.com/oxidecomputer/omicron/issues/3823): secret handling TBD
@@ -214,7 +214,7 @@ impl RemoteServers {
         );
 
         for r in replicas {
-            let NodeConfig { host, port } = r;
+            let ServerNodeConfig { host, port } = r;
             s.push_str(&format!(
                 "
                 <replica>
@@ -238,18 +238,18 @@ impl RemoteServers {
 
 #[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
 pub struct KeeperConfigsForReplica {
-    pub nodes: Vec<NodeConfig>,
+    pub nodes: Vec<KeeperNodeConfig>,
 }
 
 impl KeeperConfigsForReplica {
-    pub fn new(nodes: Vec<NodeConfig>) -> Self {
+    pub fn new(nodes: Vec<KeeperNodeConfig>) -> Self {
         Self { nodes }
     }
 
     pub fn to_xml(&self) -> String {
         let mut s = String::from("    <zookeeper>");
         for node in &self.nodes {
-            let NodeConfig { host, port } = node;
+            let KeeperNodeConfig { host, port } = node;
             s.push_str(&format!(
                 "
         <node>
@@ -264,14 +264,28 @@ impl KeeperConfigsForReplica {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
-pub struct NodeConfig {
+pub struct KeeperNodeConfig {
     pub host: String,
     pub port: u16,
 }
 
-impl NodeConfig {
-    pub fn new(host: String, port: u16) -> Self {
-        NodeConfig { host, port }
+impl KeeperNodeConfig {
+    pub fn new(host: String) -> Self {
+        let port = CLICKHOUSE_KEEPER_TCP_PORT;
+        KeeperNodeConfig { host, port }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
+pub struct ServerNodeConfig {
+    pub host: String,
+    pub port: u16,
+}
+
+impl ServerNodeConfig {
+    pub fn new(host: String) -> Self {
+        let port = CLICKHOUSE_TCP_PORT;
+        ServerNodeConfig { host, port }
     }
 }
 
