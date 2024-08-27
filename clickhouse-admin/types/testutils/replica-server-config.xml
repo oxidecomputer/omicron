@@ -3,8 +3,8 @@
 
     <logger>
         <level>trace</level>
-        <log>./logs/clickhouse.log</log>
-        <errorlog>./logs/clickhouse.err.log</errorlog>
+        <log>./log/clickhouse.log</log>
+        <errorlog>./log/clickhouse.err.log</errorlog>
         <size>100M</size>
         <count>1</count>
     </logger>

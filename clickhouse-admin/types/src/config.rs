@@ -8,13 +8,19 @@
 
 use crate::{KeeperId, ServerId, OXIMETER_CLUSTER};
 use camino::Utf8PathBuf;
+use omicron_common::address::{
+    CLICKHOUSE_HTTP_PORT,
+    CLICKHOUSE_INTERSERVER_PORT,
+    //   CLICKHOUSE_KEEPER_RAFT_PORT, CLICKHOUSE_KEEPER_TCP_PORT,
+    CLICKHOUSE_TCP_PORT,
+};
 use schemars::{
     gen::SchemaGenerator,
     schema::{Schema, SchemaObject},
     JsonSchema,
 };
 use serde::{Deserialize, Serialize};
-use std::fmt::Display;
+use std::{fmt::Display, net::Ipv6Addr};
 
 // Used for schemars to be able to be used with camino:
 // See https://github.com/camino-rs/camino/issues/91#issuecomment-2027908513
@@ -29,7 +35,7 @@ fn path_schema(gen: &mut SchemaGenerator) -> Schema {
 pub struct ReplicaConfig {
     pub logger: LogConfig,
     pub macros: Macros,
-    pub listen_host: String,
+    pub listen_host: Ipv6Addr,
     pub http_port: u16,
     pub tcp_port: u16,
     pub interserver_http_port: u16,
@@ -40,6 +46,31 @@ pub struct ReplicaConfig {
 }
 
 impl ReplicaConfig {
+    pub fn new(
+        logger: LogConfig,
+        macros: Macros,
+        listen_host: Ipv6Addr,
+        remote_servers: Vec<NodeConfig>,
+        keepers: Vec<NodeConfig>,
+        path: Utf8PathBuf,
+    ) -> Self {
+        let data_path = path.join("data");
+        let remote_servers = RemoteServers::new(remote_servers);
+        let keepers = KeeperConfigsForReplica::new(keepers);
+
+        Self {
+            logger,
+            macros,
+            listen_host,
+            http_port: CLICKHOUSE_HTTP_PORT,
+            tcp_port: CLICKHOUSE_TCP_PORT,
+            interserver_http_port: CLICKHOUSE_INTERSERVER_PORT,
+            remote_servers,
+            keepers,
+            data_path,
+        }
+    }
+
     pub fn to_xml(&self) -> String {
         let ReplicaConfig {
             logger,
@@ -245,6 +276,11 @@ impl NodeConfig {
     }
 }
 
+pub enum NodeType {
+    Server,
+    Keeper,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
 pub struct LogConfig {
     pub level: LogLevel,
@@ -257,7 +293,16 @@ pub struct LogConfig {
 }
 
 impl LogConfig {
-    pub fn new(log: Utf8PathBuf, errorlog: Utf8PathBuf) -> Self {
+    pub fn new(path: Utf8PathBuf, node_type: NodeType) -> Self {
+        let prefix = match node_type {
+            NodeType::Server => "clickhouse",
+            NodeType::Keeper => "clickhouse-keeper",
+        };
+
+        let logs: Utf8PathBuf = path.join("log");
+        let log = logs.join(format!("{prefix}.log"));
+        let errorlog = logs.join(format!("{prefix}.err.log"));
+
         LogConfig {
             level: LogLevel::default(),
             log,
@@ -389,7 +434,6 @@ impl KeeperConfig {
     }
 }
 
-#[allow(unused)]
 #[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
 pub enum LogLevel {
     Trace,

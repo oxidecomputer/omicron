@@ -58,10 +58,7 @@ pub struct ServerId(pub u64);
 pub struct ClickhouseServerConfig {
     pub config_dir: Utf8PathBuf,
     pub id: ServerId,
-    pub tcp_port: u16,
-    pub http_port: u16,
-    pub interserver_http_port: u16,
-    pub path: Utf8PathBuf,
+    pub datastore_path: Utf8PathBuf,
     pub listen_addr: Ipv6Addr,
     pub keepers: Vec<NodeConfig>,
     pub servers: Vec<NodeConfig>,
@@ -72,44 +69,27 @@ impl ClickhouseServerConfig {
     pub fn new(
         config_dir: Utf8PathBuf,
         id: ServerId,
-        tcp_port: u16,
-        http_port: u16,
-        interserver_http_port: u16,
-        path: Utf8PathBuf,
+        datastore_path: Utf8PathBuf,
         listen_addr: Ipv6Addr,
         keepers: Vec<NodeConfig>,
         servers: Vec<NodeConfig>,
     ) -> Self {
-        Self {
-            config_dir,
-            id,
-            tcp_port,
-            http_port,
-            interserver_http_port,
-            path,
-            listen_addr,
-            keepers,
-            servers,
-        }
+        Self { config_dir, id, datastore_path, listen_addr, keepers, servers }
     }
 
     pub fn generate_xml_file(&self) -> Result<()> {
-        let logs: Utf8PathBuf = self.path.join("logs");
-        let log = logs.join("clickhouse.log");
-        let errorlog = logs.join("clickhouse.err.log");
-        let data_path = self.path.join("data");
+        let logger =
+            LogConfig::new(self.datastore_path.clone(), NodeType::Server);
+        let macros = Macros::new(self.id);
 
-        let config = ReplicaConfig {
-            logger: LogConfig::new(log, errorlog),
-            macros: Macros::new(self.id),
-            listen_host: self.listen_addr.to_string(),
-            http_port: self.http_port,
-            tcp_port: self.tcp_port,
-            interserver_http_port: self.interserver_http_port,
-            remote_servers: RemoteServers::new(self.servers.clone()),
-            keepers: KeeperConfigsForReplica::new(self.keepers.clone()),
-            data_path,
-        };
+        let config = ReplicaConfig::new(
+            logger,
+            macros,
+            self.listen_addr,
+            self.servers.clone(),
+            self.keepers.clone(),
+            self.datastore_path.clone(),
+        );
         let mut f =
             File::create(self.config_dir.join("replica-server-config.xml"))?;
         f.write_all(config.to_xml().as_bytes())?;
@@ -145,10 +125,8 @@ impl ClickhouseKeeperConfig {
     }
     /// Generate a config for `this_keeper` consisting of the keepers in `keeper_ids`
     pub fn generate_xml_file(&self, this_keeper: KeeperId) -> Result<()> {
-        let log = self.path.join("clickhouse-keeper.log");
-        let errorlog = self.path.join("clickhouse-keeper.err.log");
         let config = KeeperConfig {
-            logger: LogConfig::new(log, errorlog),
+            logger: LogConfig::new(self.path.clone(), NodeType::Keeper),
             listen_host: self.listen_addr.to_string(),
             tcp_port: self.tcp_port,
             server_id: this_keeper,
@@ -164,6 +142,7 @@ impl ClickhouseKeeperConfig {
             },
             raft_config: RaftServers { servers: self.raft_servers.clone() },
         };
+
         let mut f = File::create(self.config_dir.join("keeper-config.xml"))?;
         f.write_all(config.to_xml().as_bytes())?;
         f.flush()?;
@@ -179,7 +158,6 @@ mod tests {
     use camino::Utf8PathBuf;
     use camino_tempfile::Builder;
     use omicron_common::address::{
-        CLICKHOUSE_HTTP_PORT, CLICKHOUSE_INTERSERVER_PORT,
         CLICKHOUSE_KEEPER_RAFT_PORT, CLICKHOUSE_KEEPER_TCP_PORT,
         CLICKHOUSE_TCP_PORT,
     };
@@ -260,9 +238,6 @@ mod tests {
         let config = ClickhouseServerConfig::new(
             Utf8PathBuf::from(config_dir.path()),
             ServerId(1),
-            CLICKHOUSE_TCP_PORT,
-            CLICKHOUSE_HTTP_PORT,
-            CLICKHOUSE_INTERSERVER_PORT,
             Utf8PathBuf::from_str("./").unwrap(),
             Ipv6Addr::from_str("ff::08").unwrap(),
             keepers,
