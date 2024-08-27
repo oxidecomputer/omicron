@@ -26,12 +26,8 @@ pub enum StartupError {
 
 #[derive(Debug, Error, SlogInlineError)]
 pub enum SpCommsError {
-    #[error("discovery process not yet complete")]
-    DiscoveryNotYetComplete,
-    #[error("location discovery failed: {reason}")]
-    DiscoveryFailed { reason: String },
-    #[error("nonexistent SP {0:?}")]
-    SpDoesNotExist(SpIdentifier),
+    #[error(transparent)]
+    Discovery(#[from] SpLookupError),
     #[error("unknown socket address for SP {0:?}")]
     SpAddressUnknown(SpIdentifier),
     #[error(
@@ -52,13 +48,22 @@ pub enum SpCommsError {
     },
 }
 
+/// Errors returned by attempts to look up a SP in the management switch's
+/// discovery map.
+#[derive(Debug, Error, SlogInlineError)]
+pub enum SpLookupError {
+    #[error("discovery process not yet complete")]
+    DiscoveryNotYetComplete,
+    #[error("location discovery failed: {reason}")]
+    DiscoveryFailed { reason: String },
+    #[error("nonexistent SP {0:?}")]
+    SpDoesNotExist(SpIdentifier),
+}
+
 impl From<SpCommsError> for HttpError {
     fn from(error: SpCommsError) -> Self {
         match error {
-            SpCommsError::SpDoesNotExist(_) => HttpError::for_bad_request(
-                Some("InvalidSp".to_string()),
-                InlineErrorChain::new(&error).to_string(),
-            ),
+            SpCommsError::Discovery(err) => HttpError::from(err),
             SpCommsError::SpCommunicationFailed {
                 err:
                     CommunicationError::SpError(
@@ -124,19 +129,9 @@ impl From<SpCommsError> for HttpError {
                 "UpdateInProgress",
                 InlineErrorChain::new(&error).to_string(),
             ),
-            SpCommsError::DiscoveryNotYetComplete => http_err_with_message(
-                http::StatusCode::SERVICE_UNAVAILABLE,
-                "DiscoveryNotYetComplete",
-                InlineErrorChain::new(&error).to_string(),
-            ),
             SpCommsError::SpAddressUnknown(_) => http_err_with_message(
                 http::StatusCode::SERVICE_UNAVAILABLE,
                 "SpAddressUnknown",
-                InlineErrorChain::new(&error).to_string(),
-            ),
-            SpCommsError::DiscoveryFailed { .. } => http_err_with_message(
-                http::StatusCode::SERVICE_UNAVAILABLE,
-                "DiscoveryFailed ",
                 InlineErrorChain::new(&error).to_string(),
             ),
             SpCommsError::Timeout { .. } => http_err_with_message(
@@ -154,6 +149,27 @@ impl From<SpCommsError> for HttpError {
             SpCommsError::UpdateFailed { .. } => http_err_with_message(
                 http::StatusCode::SERVICE_UNAVAILABLE,
                 "UpdateFailed",
+                InlineErrorChain::new(&error).to_string(),
+            ),
+        }
+    }
+}
+
+impl From<SpLookupError> for HttpError {
+    fn from(error: SpLookupError) -> Self {
+        match error {
+            SpLookupError::SpDoesNotExist(_) => HttpError::for_bad_request(
+                Some("InvalidSp".to_string()),
+                InlineErrorChain::new(&error).to_string(),
+            ),
+            SpLookupError::DiscoveryNotYetComplete => http_err_with_message(
+                http::StatusCode::SERVICE_UNAVAILABLE,
+                "DiscoveryNotYetComplete",
+                InlineErrorChain::new(&error).to_string(),
+            ),
+            SpLookupError::DiscoveryFailed { .. } => http_err_with_message(
+                http::StatusCode::SERVICE_UNAVAILABLE,
+                "DiscoveryFailed ",
                 InlineErrorChain::new(&error).to_string(),
             ),
         }

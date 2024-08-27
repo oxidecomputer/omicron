@@ -28,7 +28,7 @@ use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use update_engine::error_list_to_anyhow;
+use update_engine::merge_anyhow_list;
 use uuid::Uuid;
 
 mod cockroachdb;
@@ -39,6 +39,8 @@ mod omicron_zones;
 mod overridables;
 mod sagas;
 mod sled_state;
+#[cfg(test)]
+mod test_utils;
 
 pub use dns::blueprint_external_dns_config;
 pub use dns::blueprint_internal_dns_config;
@@ -154,7 +156,7 @@ pub async fn realize_blueprint_with_overrides(
     );
 
     register_deploy_zones_step(
-        &engine.for_component(ExecutionComponent::Zones),
+        &engine.for_component(ExecutionComponent::OmicronZones),
         &opctx,
         blueprint,
         sled_list.clone(),
@@ -184,7 +186,7 @@ pub async fn realize_blueprint_with_overrides(
     );
 
     register_cleanup_expunged_zones_step(
-        &engine.for_component(ExecutionComponent::Zones),
+        &engine.for_component(ExecutionComponent::OmicronZones),
         &opctx,
         datastore,
         resolver,
@@ -192,7 +194,7 @@ pub async fn realize_blueprint_with_overrides(
     );
 
     register_decommission_sleds_step(
-        &engine.for_component(ExecutionComponent::Zones),
+        &engine.for_component(ExecutionComponent::OmicronZones),
         &opctx,
         datastore,
         blueprint,
@@ -206,7 +208,7 @@ pub async fn realize_blueprint_with_overrides(
     );
 
     let reassign_saga_output = register_reassign_sagas_step(
-        &engine.for_component(ExecutionComponent::Zones),
+        &engine.for_component(ExecutionComponent::OmicronZones),
         &opctx,
         datastore,
         blueprint,
@@ -313,7 +315,7 @@ fn register_deploy_disks_step<'a>(
                     &blueprint.blueprint_disks,
                 )
                 .await
-                .map_err(error_list_to_anyhow)?;
+                .map_err(merge_anyhow_list)?;
 
                 StepSuccess::new(done).into()
             },
@@ -330,7 +332,7 @@ fn register_deploy_zones_step<'a>(
     registrar
         .new_step(
             ExecutionStepId::Ensure,
-            "Ensure zones",
+            "Deploy Omicron zones",
             move |cx| async move {
                 let sleds_by_id = sleds.into_value(cx.token()).await;
                 omicron_zones::deploy_zones(
@@ -339,7 +341,7 @@ fn register_deploy_zones_step<'a>(
                     &blueprint.blueprint_zones,
                 )
                 .await
-                .map_err(error_list_to_anyhow)?;
+                .map_err(merge_anyhow_list)?;
 
                 StepSuccess::new(()).into()
             },
@@ -459,7 +461,7 @@ fn register_cleanup_expunged_zones_step<'a>(
                     blueprint.all_omicron_zones(BlueprintZoneFilter::Expunged),
                 )
                 .await
-                .map_err(error_list_to_anyhow)?;
+                .map_err(merge_anyhow_list)?;
 
                 StepSuccess::new(()).into()
             },
@@ -490,7 +492,7 @@ fn register_decommission_sleds_step<'a>(
                         .map(|(&sled_id, _)| sled_id),
                 )
                 .await
-                .map_err(error_list_to_anyhow)?;
+                .map_err(merge_anyhow_list)?;
 
                 StepSuccess::new(()).into()
             },
@@ -517,7 +519,7 @@ fn register_decommission_expunged_disks_step<'a>(
                     &opctx, datastore, done,
                 )
                 .await
-                .map_err(error_list_to_anyhow)?;
+                .map_err(merge_anyhow_list)?;
 
                 StepSuccess::new(()).into()
             },
@@ -541,7 +543,6 @@ fn register_reassign_sagas_step<'a>(
     // For this and subsequent steps, we'll assume that any errors that we
     // encounter do *not* require stopping execution.  We'll just accumulate
     // them and return them all at the end.
-
     //
     // TODO We should probably do this with more of the errors above, too.
     registrar
@@ -637,7 +638,7 @@ fn register_finalize_step<'a>(
                     })
                     .into()
                 } else {
-                    Err(error_list_to_anyhow(errors))
+                    Err(merge_anyhow_list(errors))
                 }
             },
         )

@@ -110,6 +110,7 @@ oximeter-producer.workspace = true
 rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
 update-common.workspace = true
+update-engine.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true
 

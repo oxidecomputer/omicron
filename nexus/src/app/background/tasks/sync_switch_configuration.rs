@@ -51,8 +51,9 @@ use omicron_common::{
 use serde_json::json;
 use sled_agent_client::types::{
     BgpConfig as SledBgpConfig, BgpPeerConfig as SledBgpPeerConfig,
-    EarlyNetworkConfig, EarlyNetworkConfigBody, HostPortConfig, PortConfigV2,
-    RackNetworkConfigV2, RouteConfig as SledRouteConfig, UplinkAddressConfig,
+    EarlyNetworkConfig, EarlyNetworkConfigBody, HostPortConfig,
+    LldpAdminStatus, LldpPortConfig, PortConfigV2, RackNetworkConfigV2,
+    RouteConfig as SledRouteConfig, UplinkAddressConfig,
 };
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
@@ -564,7 +565,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         if !bgp_announce_prefixes.contains_key(&bgp_config.bgp_announce_set_id) {
                             let announcements = match self
                                 .datastore
-                                .bgp_announce_list(
+                                .bgp_announcement_list(
                                     opctx,
                                     &params::BgpAnnounceSetSelector {
                                         name_or_id: bgp_config
@@ -977,6 +978,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 destination: r.dst.into(),
                                 nexthop: r.gw.ip(),
                                 vlan_id: r.vid.map(|x| x.0),
+                                local_pref: r.local_pref.map(|x| x.0),
                             })
                             .collect(),
                         switch: *location,
@@ -992,7 +994,23 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             .map(|l| l.speed)
                             .unwrap_or(SwitchLinkSpeed::Speed100G)
                             .into(),
-                    };
+			lldp: info
+			    .link_lldp
+			    .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
+			    .map(|c|  LldpPortConfig {
+				status: match c.enabled {
+				    true => LldpAdminStatus::Enabled,
+				    false=> LldpAdminStatus::Disabled,
+				},
+				port_id: c.link_name.clone(),
+				port_description: c.link_description.clone(),
+				chassis_id: c.chassis_id.clone(),
+				system_name: c.system_name.clone(),
+				system_description: c.system_description.clone(),
+				management_addrs:c.management_ip.map(|a| vec![a.ip()]),
+			    })
+		    }
+                    ;
 
                     for peer in port_config.bgp_peers.iter_mut() {
                         peer.communities = match self
@@ -1411,6 +1429,29 @@ fn uplinks(
         let PortSettingsChange::Apply(config) = change else {
             continue;
         };
+
+        let lldp = if config.link_lldp.is_empty() {
+            None
+        } else {
+            let x = &config.link_lldp[0];
+            Some(LldpPortConfig {
+                status: if x.enabled {
+                    LldpAdminStatus::Enabled
+                } else {
+                    LldpAdminStatus::Disabled
+                },
+                port_id: x.link_name.clone(),
+                port_description: x.link_description.clone(),
+                chassis_id: x.chassis_id.clone(),
+                system_name: x.system_name.clone(),
+                system_description: x.system_description.clone(),
+                management_addrs: x.management_ip.map(|a| {
+                    let ip: oxnet::IpNet = a.into();
+                    vec![ip.addr()]
+                }),
+            })
+        };
+
         let config = HostPortConfig {
             port: port.port_name.clone(),
             addrs: config
@@ -1421,6 +1462,7 @@ fn uplinks(
                     vlan_id: a.vlan_id.map(|v| v.into()),
                 })
                 .collect(),
+            lldp,
         };
 
         match uplinks.entry(*location) {
@@ -1455,7 +1497,8 @@ fn build_sled_agent_clients(
     sled_agent_clients
 }
 
-type SwitchStaticRoutes = HashSet<(Ipv4Addr, Prefix4, Option<u16>)>;
+type SwitchStaticRoutes =
+    HashSet<(Ipv4Addr, Prefix4, Option<u16>, Option<u32>)>;
 
 fn static_routes_to_del(
     current_static_routes: HashMap<SwitchLocation, SwitchStaticRoutes>,
@@ -1471,10 +1514,11 @@ fn static_routes_to_del(
             // if it's on the switch but not desired (in our db), it should be removed
             let stale_routes = routes_on_switch
                 .difference(routes_wanted)
-                .map(|(nexthop, prefix, vlan_id)| StaticRoute4 {
+                .map(|(nexthop, prefix, vlan_id, local_pref)| StaticRoute4 {
                     nexthop: *nexthop,
                     prefix: *prefix,
                     vlan_id: *vlan_id,
+                    local_pref: *local_pref,
                 })
                 .collect::<Vec<StaticRoute4>>();
 
@@ -1488,10 +1532,11 @@ fn static_routes_to_del(
             // if no desired routes are present, all routes on this switch should be deleted
             let stale_routes = routes_on_switch
                 .iter()
-                .map(|(nexthop, prefix, vlan_id)| StaticRoute4 {
+                .map(|(nexthop, prefix, vlan_id, local_pref)| StaticRoute4 {
                     nexthop: *nexthop,
                     prefix: *prefix,
                     vlan_id: *vlan_id,
+                    local_pref: *local_pref,
                 })
                 .collect::<Vec<StaticRoute4>>();
 
@@ -1538,10 +1583,11 @@ fn static_routes_to_add(
         };
         let missing_routes = routes_wanted
             .difference(routes_on_switch)
-            .map(|(nexthop, prefix, vlan_id)| StaticRoute4 {
+            .map(|(nexthop, prefix, vlan_id, local_pref)| StaticRoute4 {
                 nexthop: *nexthop,
                 prefix: *prefix,
                 vlan_id: *vlan_id,
+                local_pref: *local_pref,
             })
             .collect::<Vec<StaticRoute4>>();
 
@@ -1590,7 +1636,12 @@ fn static_routes_in_db(
                 }
                 IpAddr::V6(_) => continue,
             };
-            routes.insert((nexthop, prefix, route.vid.map(|x| x.0)));
+            routes.insert((
+                nexthop,
+                prefix,
+                route.vid.map(|x| x.0),
+                route.local_pref.map(|x| x.0),
+            ));
         }
 
         match routes_from_db.entry(*location) {
@@ -1768,44 +1819,46 @@ async fn static_routes_on_switch<'a>(
     let mut routes_on_switch = HashMap::new();
 
     for (location, client) in mgd_clients {
-        let static_routes: SwitchStaticRoutes =
-            match client.static_list_v4_routes().await {
-                Ok(routes) => {
-                    let mut flattened = HashSet::new();
-                    for (destination, paths) in routes.iter() {
-                        let Ok(dst) = destination.parse() else {
-                            error!(
-                                log,
-                                "failed to parse static route destination: \
+        let static_routes: SwitchStaticRoutes = match client
+            .static_list_v4_routes()
+            .await
+        {
+            Ok(routes) => {
+                let mut flattened = HashSet::new();
+                for (destination, paths) in routes.iter() {
+                    let Ok(dst) = destination.parse() else {
+                        error!(
+                            log,
+                            "failed to parse static route destination: \
                                  {destination}"
-                            );
-                            continue;
+                        );
+                        continue;
+                    };
+                    for p in paths.iter() {
+                        let nh = match p.nexthop {
+                            IpAddr::V4(addr) => addr,
+                            IpAddr::V6(addr) => {
+                                error!(
+                                    log,
+                                    "ipv6 nexthops not supported: {addr}"
+                                );
+                                continue;
+                            }
                         };
-                        for p in paths.iter() {
-                            let nh = match p.nexthop {
-                                IpAddr::V4(addr) => addr,
-                                IpAddr::V6(addr) => {
-                                    error!(
-                                        log,
-                                        "ipv6 nexthops not supported: {addr}"
-                                    );
-                                    continue;
-                                }
-                            };
-                            flattened.insert((nh, dst, p.vlan_id));
-                        }
+                        flattened.insert((nh, dst, p.vlan_id, p.local_pref));
                     }
-                    flattened
                 }
-                Err(_) => {
-                    error!(
-                        &log,
-                        "unable to retrieve routes from switch";
-                        "switch_location" => ?location,
-                    );
-                    continue;
-                }
-            };
+                flattened
+            }
+            Err(_) => {
+                error!(
+                    &log,
+                    "unable to retrieve routes from switch";
+                    "switch_location" => ?location,
+                );
+                continue;
+            }
+        };
         routes_on_switch.insert(*location, static_routes);
     }
     routes_on_switch

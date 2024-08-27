@@ -27,20 +27,17 @@ use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_uuid_kinds::CollectionUuid;
-use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use slog_error_chain::SlogInlineError;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::net::Ipv6Addr;
 use strum::EnumIter;
 use strum::IntoEnumIterator;
-use thiserror::Error;
 use uuid::Uuid;
 
 mod blueprint_diff;
@@ -596,13 +593,6 @@ fn zone_sort_key<T: ZoneSortKey>(z: &T) -> impl Ord {
     (z.kind(), z.id())
 }
 
-/// Errors from converting an [`OmicronZoneType`] into a [`BlueprintZoneType`].
-#[derive(Debug, Clone, Error, SlogInlineError)]
-pub enum InvalidOmicronZoneType {
-    #[error("Omicron zone {} requires an external IP ID", kind.report_str())]
-    ExternalIpIdRequired { kind: ZoneKind },
-}
-
 /// Describes one Omicron-managed zone in a blueprint.
 ///
 /// Part of [`BlueprintZonesConfig`].
@@ -615,168 +605,6 @@ pub struct BlueprintZoneConfig {
     pub underlay_address: Ipv6Addr,
     pub filesystem_pool: Option<ZpoolName>,
     pub zone_type: BlueprintZoneType,
-}
-
-impl BlueprintZoneConfig {
-    /// Convert from an [`OmicronZoneConfig`].
-    ///
-    /// This method is annoying to call correctly and will become more so over
-    /// time. Ideally we'd remove all callers and then remove this method, but
-    /// for now we keep it.
-    ///
-    /// # Errors
-    ///
-    /// If `config.zone_type` is a zone that has an external IP address (Nexus,
-    /// boundary NTP, external DNS), `external_ip_id` must be `Some(_)` or this
-    /// method will return an error.
-    pub fn from_omicron_zone_config(
-        config: OmicronZoneConfig,
-        disposition: BlueprintZoneDisposition,
-        external_ip_id: Option<ExternalIpUuid>,
-    ) -> Result<Self, InvalidOmicronZoneType> {
-        let kind = config.zone_type.kind();
-        let zone_type = match config.zone_type {
-            OmicronZoneType::BoundaryNtp {
-                address,
-                dns_servers,
-                domain,
-                nic,
-                ntp_servers,
-                snat_cfg,
-            } => {
-                let external_ip_id = external_ip_id.ok_or(
-                    InvalidOmicronZoneType::ExternalIpIdRequired { kind },
-                )?;
-                BlueprintZoneType::BoundaryNtp(
-                    blueprint_zone_type::BoundaryNtp {
-                        address,
-                        ntp_servers,
-                        dns_servers,
-                        domain,
-                        nic,
-                        external_ip: OmicronZoneExternalSnatIp {
-                            id: external_ip_id,
-                            snat_cfg,
-                        },
-                    },
-                )
-            }
-            OmicronZoneType::Clickhouse { address, dataset } => {
-                BlueprintZoneType::Clickhouse(blueprint_zone_type::Clickhouse {
-                    address,
-                    dataset,
-                })
-            }
-            OmicronZoneType::ClickhouseKeeper { address, dataset } => {
-                BlueprintZoneType::ClickhouseKeeper(
-                    blueprint_zone_type::ClickhouseKeeper { address, dataset },
-                )
-            }
-            OmicronZoneType::ClickhouseServer { address, dataset } => {
-                BlueprintZoneType::ClickhouseServer(
-                    blueprint_zone_type::ClickhouseServer { address, dataset },
-                )
-            }
-            OmicronZoneType::CockroachDb { address, dataset } => {
-                BlueprintZoneType::CockroachDb(
-                    blueprint_zone_type::CockroachDb { address, dataset },
-                )
-            }
-            OmicronZoneType::Crucible { address, dataset } => {
-                BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
-                    address,
-                    dataset,
-                })
-            }
-            OmicronZoneType::CruciblePantry { address } => {
-                BlueprintZoneType::CruciblePantry(
-                    blueprint_zone_type::CruciblePantry { address },
-                )
-            }
-            OmicronZoneType::ExternalDns {
-                dataset,
-                dns_address,
-                http_address,
-                nic,
-            } => {
-                let external_ip_id = external_ip_id.ok_or(
-                    InvalidOmicronZoneType::ExternalIpIdRequired { kind },
-                )?;
-                BlueprintZoneType::ExternalDns(
-                    blueprint_zone_type::ExternalDns {
-                        dataset,
-                        http_address,
-                        dns_address: OmicronZoneExternalFloatingAddr {
-                            id: external_ip_id,
-                            addr: dns_address,
-                        },
-                        nic,
-                    },
-                )
-            }
-            OmicronZoneType::InternalDns {
-                dataset,
-                dns_address,
-                gz_address,
-                gz_address_index,
-                http_address,
-            } => BlueprintZoneType::InternalDns(
-                blueprint_zone_type::InternalDns {
-                    dataset,
-                    http_address,
-                    dns_address,
-                    gz_address,
-                    gz_address_index,
-                },
-            ),
-            OmicronZoneType::InternalNtp {
-                address,
-                dns_servers,
-                domain,
-                ntp_servers,
-            } => BlueprintZoneType::InternalNtp(
-                blueprint_zone_type::InternalNtp {
-                    address,
-                    ntp_servers,
-                    dns_servers,
-                    domain,
-                },
-            ),
-            OmicronZoneType::Nexus {
-                external_dns_servers,
-                external_ip,
-                external_tls,
-                internal_address,
-                nic,
-            } => {
-                let external_ip_id = external_ip_id.ok_or(
-                    InvalidOmicronZoneType::ExternalIpIdRequired { kind },
-                )?;
-                BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                    internal_address,
-                    external_ip: OmicronZoneExternalFloatingIp {
-                        id: external_ip_id,
-                        ip: external_ip,
-                    },
-                    nic,
-                    external_tls,
-                    external_dns_servers,
-                })
-            }
-            OmicronZoneType::Oximeter { address } => {
-                BlueprintZoneType::Oximeter(blueprint_zone_type::Oximeter {
-                    address,
-                })
-            }
-        };
-        Ok(Self {
-            disposition,
-            id: OmicronZoneUuid::from_untyped_uuid(config.id),
-            underlay_address: config.underlay_address,
-            filesystem_pool: config.filesystem_pool,
-            zone_type,
-        })
-    }
 }
 
 impl From<BlueprintZoneConfig> for OmicronZoneConfig {

@@ -10,12 +10,14 @@ use futures::FutureExt;
 use internal_dns::resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_reconfigurator_execution::RealizeBlueprintOutput;
 use nexus_types::deployment::{
     execution::EventBuffer, Blueprint, BlueprintTarget,
 };
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
+use update_engine::NestedError;
 use uuid::Uuid;
 
 /// Background task that takes a [`Blueprint`] and realizes the change to
@@ -90,11 +92,11 @@ impl BlueprintExecutor {
 
         // Pick a large-ish buffer for reconfigurator execution to avoid
         // blocking it.
-        let (sender, receiver) = mpsc::channel(256);
+        let (sender, mut receiver) = mpsc::channel(256);
 
         let receiver_task = tokio::spawn(async move {
-            // TODO: report progress.
-            let event_buffer = EventBuffer::default();
+            // TODO: report progress
+            let mut event_buffer = EventBuffer::default();
             while let Some(event) = receiver.recv().await {
                 event_buffer.add_event(event);
             }
@@ -113,28 +115,33 @@ impl BlueprintExecutor {
         .await;
 
         // Get the report for the receiver task.
-        let event_report = receiver_task.await;
+        let event_report =
+            receiver_task.await.map_err(|error| NestedError::new(&error));
 
         // Trigger anybody waiting for this to finish.
         self.tx.send_modify(|count| *count = *count + 1);
 
-        // If executing the blueprint requires activating the saga recovery
-        // background task, do that now.
-        info!(&opctx.log, "activating saga recovery task");
-        if let Ok(output) = &result {
-            if output.needs_saga_recovery {
-                self.saga_recovery.activate();
-            }
-        }
-
         // Return the result as a `serde_json::Value`
         match result {
-            // TODO: should we serialize the output above as a JSON object?
-            Ok(_) => json!({}),
+            Ok(RealizeBlueprintOutput { needs_saga_recovery }) => {
+                // If executing the blueprint requires activating the saga
+                // recovery background task, do that now.
+                if needs_saga_recovery {
+                    info!(&opctx.log, "activating saga recovery task");
+                    self.saga_recovery.activate();
+                }
+
+                json!({
+                    "target_id": blueprint.id.to_string(),
+                    "needs_saga_recovery": needs_saga_recovery,
+                    "event_report": event_report,
+                })
+            }
             Err(error) => {
                 json!({
                     "target_id": blueprint.id.to_string(),
-                    "error": NestedError::new(error),
+                    "error": NestedError::new(error.as_ref()),
+                    "event_report": event_report,
                 })
             }
         }
@@ -165,6 +172,10 @@ mod test {
     use nexus_db_queries::db::DataStore;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::execution::{
+        EventBuffer, EventReport, ExecutionComponent, ExecutionStepId,
+        ReconfiguratorExecutionSpec, StepInfo,
+    };
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::{
         blueprint_zone_type, Blueprint, BlueprintPhysicalDisksConfig,
@@ -184,6 +195,7 @@ mod test {
     use std::net::SocketAddr;
     use std::sync::Arc;
     use tokio::sync::watch;
+    use update_engine::{NestedError, TerminalKind};
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -323,10 +335,22 @@ mod test {
             )
             .await,
         );
+        let blueprint_id = blueprint.1.id;
         blueprint_tx.send(Some(blueprint)).unwrap();
-        let value = task.activate(&opctx).await;
+        let mut value = task.activate(&opctx).await;
+
+        let event_buffer = extract_event_buffer(&mut value);
+
         println!("activating with no zones: {:?}", value);
-        assert_eq!(value, json!({}));
+        assert_eq!(
+            value,
+            json!({
+                "target_id": blueprint_id,
+                "needs_saga_recovery": false,
+            })
+        );
+
+        assert_event_buffer_completed(&event_buffer);
 
         // Create a non-empty blueprint describing two servers and verify that
         // the task correctly winds up making requests to both of them and
@@ -412,9 +436,19 @@ mod test {
         }
 
         // Activate the task to trigger zone configuration on the sled-agents
-        let value = task.activate(&opctx).await;
+        let mut value = task.activate(&opctx).await;
+        let event_buffer = extract_event_buffer(&mut value);
+
         println!("activating two sled agents: {:?}", value);
-        assert_eq!(value, json!({}));
+        assert_eq!(
+            value,
+            json!({
+                "target_id": blueprint.1.id.to_string(),
+                "needs_saga_recovery": false,
+            })
+        );
+        assert_event_buffer_completed(&event_buffer);
+
         s1.verify_and_clear();
         s2.verify_and_clear();
 
@@ -457,17 +491,92 @@ mod test {
 
         #[derive(Deserialize)]
         struct ErrorResult {
-            errors: Vec<String>,
+            error: NestedError,
         }
 
-        let value = task.activate(&opctx).await;
+        let mut value = task.activate(&opctx).await;
+        let event_buffer = extract_event_buffer(&mut value);
+
         println!("after failure: {:?}", value);
         let result: ErrorResult = serde_json::from_value(value).unwrap();
-        assert_eq!(result.errors.len(), 1);
-        assert!(
-            result.errors[0].starts_with("Failed to put OmicronZonesConfig")
+        assert_eq!(result.error.message(), "step failed: Deploy Omicron zones");
+
+        assert_event_buffer_failed_at(
+            &event_buffer,
+            ExecutionComponent::OmicronZones,
+            ExecutionStepId::Ensure,
         );
+
         s1.verify_and_clear();
         s2.verify_and_clear();
+    }
+
+    fn extract_event_buffer(value: &mut serde_json::Value) -> EventBuffer {
+        let event_report = value
+            .as_object_mut()
+            .expect("value is an object")
+            .remove("event_report")
+            .expect("event_report exists");
+        let event_report: Result<EventReport, NestedError> =
+            serde_json::from_value(event_report)
+                .expect("event_report is valid");
+        let event_report = event_report.expect("event_report is Ok");
+
+        let mut event_buffer = EventBuffer::default();
+        event_buffer.add_event_report(event_report);
+        event_buffer
+    }
+
+    fn assert_event_buffer_completed(event_buffer: &EventBuffer) {
+        let execution_status = event_buffer
+            .root_execution_summary()
+            .expect("event buffer has root execution summary")
+            .execution_status;
+        let terminal_info =
+            execution_status.terminal_info().unwrap_or_else(|| {
+                panic!(
+                    "execution status has terminal info: {:?}",
+                    execution_status
+                );
+            });
+        assert_eq!(
+            terminal_info.kind,
+            TerminalKind::Completed,
+            "execution should have completed successfully"
+        );
+    }
+
+    fn assert_event_buffer_failed_at(
+        event_buffer: &EventBuffer,
+        component: ExecutionComponent,
+        step_id: ExecutionStepId,
+    ) {
+        let execution_status = event_buffer
+            .root_execution_summary()
+            .expect("event buffer has root execution summary")
+            .execution_status;
+        let terminal_info =
+            execution_status.terminal_info().unwrap_or_else(|| {
+                panic!(
+                    "execution status has terminal info: {:?}",
+                    execution_status
+                );
+            });
+        assert_eq!(
+            terminal_info.kind,
+            TerminalKind::Failed,
+            "execution should have failed"
+        );
+        let step =
+            event_buffer.get(&terminal_info.step_key).expect("step exists");
+        let step_info = StepInfo::<ReconfiguratorExecutionSpec>::from_generic(
+            step.step_info().clone(),
+        )
+        .expect("step info follows ReconfiguratorExecutionSpec");
+        assert_eq!(
+            (step_info.component, step_info.id),
+            (component, step_id),
+            "component and step id matches expected"
+        );
     }
 }

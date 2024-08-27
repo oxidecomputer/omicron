@@ -22,14 +22,6 @@ impl StepSpec for ReconfiguratorExecutionSpec {
     type Error = anyhow::Error;
 }
 
-#[derive(Debug)]
-pub struct ReconfiguratorExecutionErrors {
-    // This is a linked list of errors because that's the only format really
-    // supported by the Rust std::error::Error API (which follows a chain of
-    // borrowed errors to their borrowed sources).
-    errors: Vec<anyhow::Error>,
-}
-
 /// Components for reconfigurator execution.
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema,
@@ -38,7 +30,7 @@ pub enum ExecutionComponent {
     ExternalNetworking,
     SledList,
     PhysicalDisks,
-    Zones,
+    OmicronZones,
     FirewallRules,
     DatasetRecords,
     Dns,
@@ -54,8 +46,8 @@ pub enum ExecutionStepId {
     Fetch,
     Add,
     Remove,
-    /// Idempotent ensure step that delegates removes and adds to other parts
-    /// of the system.
+    /// Idempotent "ensure" or "deploy" step that delegates removes and adds to
+    /// other parts of the system.
     Ensure,
     /// Finalize the blueprint and check for errors at the end of execution.
     Finalize,

@@ -686,11 +686,14 @@ fn build_port_config(
     bgp_auth_keys: &BTreeMap<BgpAuthKeyId, Option<BgpAuthKey>>,
 ) -> BaPortConfigV2 {
     use bootstrap_agent_client::types::BgpPeerConfig as BaBgpPeerConfig;
+    use bootstrap_agent_client::types::LldpAdminStatus as BaLldpAdminStatus;
+    use bootstrap_agent_client::types::LldpPortConfig as BaLldpPortConfig;
     use bootstrap_agent_client::types::PortFec as BaPortFec;
     use bootstrap_agent_client::types::PortSpeed as BaPortSpeed;
     use bootstrap_agent_client::types::RouteConfig as BaRouteConfig;
     use bootstrap_agent_client::types::SwitchLocation as BaSwitchLocation;
     use bootstrap_agent_client::types::UplinkAddressConfig as BaUplinkAddressConfig;
+    use omicron_common::api::internal::shared::LldpAdminStatus;
     use omicron_common::api::internal::shared::PortFec;
     use omicron_common::api::internal::shared::PortSpeed;
 
@@ -703,6 +706,7 @@ fn build_port_config(
                 destination: r.destination,
                 nexthop: r.nexthop,
                 vlan_id: r.vlan_id,
+                local_pref: r.local_pref,
             })
             .collect(),
         addresses: config
@@ -779,6 +783,20 @@ fn build_port_config(
             PortFec::Rs => BaPortFec::Rs,
         },
         autoneg: config.autoneg,
+        lldp: config.lldp.as_ref().map(|c| BaLldpPortConfig {
+            status: match c.status {
+                LldpAdminStatus::Enabled => BaLldpAdminStatus::Enabled,
+                LldpAdminStatus::Disabled => BaLldpAdminStatus::Disabled,
+                LldpAdminStatus::TxOnly => BaLldpAdminStatus::TxOnly,
+                LldpAdminStatus::RxOnly => BaLldpAdminStatus::RxOnly,
+            },
+            chassis_id: c.chassis_id.clone(),
+            port_id: c.port_id.clone(),
+            system_name: c.system_name.clone(),
+            system_description: c.system_description.clone(),
+            port_description: c.port_description.clone(),
+            management_addrs: c.management_addrs.clone(),
+        }),
     }
 }
 
