@@ -1980,7 +1980,7 @@ fn instance_start_allowed(
 
             Ok(InstanceStartDisposition::AlreadyStarted)
         }
-        InstanceState::Stopped => {
+        s @ InstanceState::Stopped | s @ InstanceState::Failed => {
             match vmm.as_ref() {
                 // If a previous start saga failed and left behind a VMM in the
                 // SagaUnwound state, allow a new start saga to try to overwrite
@@ -1995,18 +1995,20 @@ fn instance_start_allowed(
                     Ok(InstanceStartDisposition::Start)
                 }
                 // This shouldn't happen: `InstanceAndVmm::effective_state` should
-                // only return `Stopped` if there is no active VMM or if the VMM is
-                // `SagaUnwound`.
+                // only return `Stopped` or `Failed` if there is no active VMM
+                // or if the VMM is `SagaUnwound`.
                 Some(vmm) => {
                     error!(log,
-                            "instance is stopped but still has an active VMM";
+                            "instance is {s:?} but still has an active VMM";
                             "instance_id" => %instance.id(),
                             "propolis_id" => %vmm.id,
                             "propolis_state" => ?vmm.runtime.state);
 
-                    Err(Error::internal_error(
-                        "instance is stopped but still has an active VMM",
-                    ))
+                    Err(Error::InternalError {
+                        internal_message: format!(
+                            "instance is {s:?} but still has an active VMM"
+                        ),
+                    })
                 }
                 // Ah, it's actually stopped. We can restart it.
                 None => Ok(InstanceStartDisposition::Start),

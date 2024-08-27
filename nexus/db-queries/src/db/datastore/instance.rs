@@ -156,6 +156,13 @@ impl InstanceAndActiveVmm {
             (InstanceState::Vmm, Some(VmmState::SagaUnwound)) => {
                 external::InstanceState::Stopped
             }
+            // - An instance with a "failed" VMM should *not* be counted as
+            //   failed until the VMM is unlinked, because a start saga must be
+            //   able to run "failed" instance. Until then, it will continue to
+            //   appear "stopping".
+            (InstanceState::Vmm, Some(VmmState::Failed)) => {
+                external::InstanceState::Stopping
+            }
             // - An instance with no VMM is always "stopped" (as long as it's
             //   not "starting" etc.)
             (InstanceState::NoVmm, _vmm_state) => {
