@@ -538,6 +538,7 @@ async fn sis_ensure_registered_undo(
     let params = sagactx.saga_params::<Params>()?;
     let datastore = osagactx.datastore();
     let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
+    let propolis_id = sagactx.lookup::<PropolisUuid>("propolis_id")?;
     let sled_id = sagactx.lookup::<SledUuid>("sled_id")?;
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
@@ -546,11 +547,12 @@ async fn sis_ensure_registered_undo(
 
     info!(osagactx.log(), "start saga: unregistering instance from sled";
           "instance_id" => %instance_id,
+          "propolis_id" => %propolis_id,
           "sled_id" => %sled_id);
 
     // Fetch the latest record so that this callee can drive the instance into
     // a Failed state if the unregister call fails.
-    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., db_instance) = LookupPath::new(&opctx, &datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .fetch()
         .await
@@ -563,7 +565,7 @@ async fn sis_ensure_registered_undo(
     // returned.
     if let Err(e) = osagactx
         .nexus()
-        .instance_ensure_unregistered(&opctx, &authz_instance, &sled_id)
+        .instance_ensure_unregistered(&propolis_id, &sled_id)
         .await
     {
         error!(osagactx.log(),
@@ -644,7 +646,6 @@ async fn sis_ensure_running(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let datastore = osagactx.datastore();
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &params.serialized_authn,
@@ -659,17 +660,10 @@ async fn sis_ensure_running(
           "instance_id" => %instance_id,
           "sled_id" => %sled_id);
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(instance_id.into_untyped_uuid())
-        .lookup_for(authz::Action::Modify)
-        .await
-        .map_err(ActionError::action_failed)?;
-
     match osagactx
         .nexus()
         .instance_request_state(
             &opctx,
-            &authz_instance,
             &db_instance,
             &Some(db_vmm),
             crate::app::instance::InstanceStateChangeRequest::Run,

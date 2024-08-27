@@ -27,7 +27,7 @@ use crate::db::{
     error::{public_error_from_diesel, ErrorHandler},
 };
 use ::oximeter::types::ProducerRegistry;
-use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
+use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::{QueryFragment, QueryId};
@@ -174,8 +174,8 @@ impl<U, T> RunnableQuery<U> for T where
 {
 }
 
-pub type DataStoreConnection<'a> =
-    bb8::PooledConnection<'a, ConnectionManager<DbConnection>>;
+pub type DataStoreConnection =
+    qorb::claim::Handle<async_bb8_diesel::Connection<DbConnection>>;
 
 pub struct DataStore {
     log: Logger,
@@ -279,8 +279,7 @@ impl DataStore {
         opctx: &OpContext,
     ) -> Result<DataStoreConnection, Error> {
         opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
-        let pool = self.pool.pool();
-        let connection = pool.get().await.map_err(|err| {
+        let connection = self.pool.claim().await.map_err(|err| {
             Error::unavail(&format!("Failed to access DB connection: {err}"))
         })?;
         Ok(connection)
@@ -294,7 +293,7 @@ impl DataStore {
     pub(super) async fn pool_connection_unauthorized(
         &self,
     ) -> Result<DataStoreConnection, Error> {
-        let connection = self.pool.pool().get().await.map_err(|err| {
+        let connection = self.pool.claim().await.map_err(|err| {
             Error::unavail(&format!("Failed to access DB connection: {err}"))
         })?;
         Ok(connection)
@@ -366,6 +365,7 @@ impl DataStore {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
 pub enum UpdatePrecondition<T> {
     DontCare,
     Null,
@@ -1586,7 +1586,7 @@ mod test {
             dev::test_setup_log("test_queries_do_not_require_full_table_scan");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
         let datastore =
             DataStore::new(&logctx.log, Arc::new(pool), None).await.unwrap();
         let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -1631,7 +1631,7 @@ mod test {
         let logctx = dev::test_setup_log("test_sled_ipv6_address_allocation");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
+        let pool = Arc::new(db::Pool::new_single_host(&logctx.log, &cfg));
         let datastore =
             Arc::new(DataStore::new(&logctx.log, pool, None).await.unwrap());
         let opctx = OpContext::for_tests(

@@ -9,19 +9,20 @@ use nexus_db_model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig};
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
-    self, BgpImportedRouteIpv4, BgpMessageHistory, BgpPeerStatus, CreateResult,
-    DeleteResult, ListResultVec, LookupResult, NameOrId, SwitchBgpHistory,
+    self, BgpExported, BgpImportedRouteIpv4, BgpMessageHistory, BgpPeerStatus,
+    CreateResult, DeleteResult, ListResultVec, LookupResult, NameOrId,
+    SwitchBgpHistory,
 };
 use std::net::IpAddr;
 
 impl super::Nexus {
-    pub async fn bgp_config_set(
+    pub async fn bgp_config_create(
         &self,
         opctx: &OpContext,
         config: &params::BgpConfigCreate,
     ) -> CreateResult<BgpConfig> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        let result = self.db_datastore.bgp_config_set(opctx, config).await?;
+        let result = self.db_datastore.bgp_config_create(opctx, config).await?;
         Ok(result)
     }
 
@@ -68,13 +69,13 @@ impl super::Nexus {
         Ok(result)
     }
 
-    pub async fn bgp_announce_list(
+    pub async fn bgp_announce_set_list(
         &self,
         opctx: &OpContext,
-        sel: &params::BgpAnnounceSetSelector,
-    ) -> ListResultVec<BgpAnnouncement> {
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<BgpAnnounceSet> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        self.db_datastore.bgp_announce_list(opctx, sel).await
+        self.db_datastore.bgp_announce_set_list(opctx, pagparams).await
     }
 
     pub async fn bgp_delete_announce_set(
@@ -86,6 +87,15 @@ impl super::Nexus {
         let result =
             self.db_datastore.bgp_delete_announce_set(opctx, sel).await?;
         Ok(result)
+    }
+
+    pub async fn bgp_announcement_list(
+        &self,
+        opctx: &OpContext,
+        sel: &params::BgpAnnounceSetSelector,
+    ) -> ListResultVec<BgpAnnouncement> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore.bgp_announcement_list(opctx, sel).await
     }
 
     pub async fn bgp_peer_status(
@@ -139,6 +149,74 @@ impl super::Nexus {
                         state: info.state.into(),
                         state_duration_millis: info.duration_millis,
                     });
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    pub async fn bgp_exported(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<BgpExported> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let mut result = BgpExported::default();
+        for (switch, client) in &self.mg_clients().await.map_err(|e| {
+            external::Error::internal_error(&format!(
+                "failed to get mg clients: {e}"
+            ))
+        })? {
+            let router_info = match client.read_routers().await {
+                Ok(result) => result.into_inner(),
+                Err(e) => {
+                    error!(
+                        self.log,
+                        "failed to get routers from {switch}: {e}"
+                    );
+                    continue;
+                }
+            };
+            for r in &router_info {
+                let asn = r.asn;
+
+                let exported = match client
+                    .get_exported(&mg_admin_client::types::AsnSelector { asn })
+                    .await
+                {
+                    Ok(result) => result.into_inner(),
+                    Err(e) => {
+                        error!(
+                        self.log,
+                        "failed to get exports for asn {asn} from {switch}: {e}"
+                    );
+                        continue;
+                    }
+                };
+                for (addr, exports) in exported {
+                    let mut xps = Vec::new();
+                    for ex in exports.iter() {
+                        let net = match ex {
+                            mg_admin_client::types::Prefix::V4(v4) => {
+                                oxnet::Ipv4Net::new_unchecked(
+                                    v4.value, v4.length,
+                                )
+                            }
+                            mg_admin_client::types::Prefix::V6(v6) => {
+                                let v6 = oxnet::IpNet::V6(
+                                    oxnet::Ipv6Net::new_unchecked(
+                                        v6.value, v6.length,
+                                    ),
+                                );
+                                warn!(
+                                    self.log,
+                                    "{v6}: ipv6 exports not supported yet"
+                                );
+                                continue;
+                            }
+                        };
+                        xps.push(net);
+                    }
+                    result.exports.insert(addr.to_string(), xps);
                 }
             }
         }

@@ -507,8 +507,8 @@ mod test {
         let log = logctx.log.new(o!());
         let mut db = test_setup_database(&log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = crate::db::Pool::new(&logctx.log, &cfg);
-        let conn = pool.pool().get().await.unwrap();
+        let pool = crate::db::Pool::new_single_host(&logctx.log, &cfg);
+        let conn = pool.claim().await.unwrap();
 
         let volume_id = Uuid::new_v4();
         let params = RegionParameters {

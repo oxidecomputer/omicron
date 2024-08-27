@@ -12,7 +12,8 @@ use omicron_common::{
     api::{
         external::AllowedSourceIps,
         internal::shared::{
-            BgpConfig, BgpPeerConfig, PortFec, PortSpeed, RouteConfig,
+            BgpConfig, BgpPeerConfig, LldpAdminStatus, LldpPortConfig, PortFec,
+            PortSpeed, RouteConfig,
         },
     },
 };
@@ -166,23 +167,45 @@ impl ExampleRackSetupData {
             vlan_id: None,
         }];
 
+        let switch0_port0_lldp = Some(LldpPortConfig {
+            status: LldpAdminStatus::Enabled,
+            chassis_id: Some("chassid id override".to_string()),
+            port_id: Some("port id override".to_string()),
+            system_name: Some("system name override".to_string()),
+            system_description: Some("system description override".to_string()),
+            port_description: Some("port description override".to_string()),
+            management_addrs: None,
+        });
+
+        let switch1_port0_lldp = Some(LldpPortConfig {
+            status: LldpAdminStatus::Enabled,
+            chassis_id: Some("chassid id override".to_string()),
+            port_id: Some("port id override".to_string()),
+            system_name: Some("system name override".to_string()),
+            system_description: Some("system description override".to_string()),
+            port_description: Some("port description override".to_string()),
+            management_addrs: Some(vec!["172.32.0.4".parse().unwrap()]),
+        });
+
         let rack_network_config = UserSpecifiedRackNetworkConfig {
             infra_ip_first: "172.30.0.1".parse().unwrap(),
             infra_ip_last: "172.30.0.10".parse().unwrap(),
             switch0: btreemap! {
                 "port0".to_owned() => UserSpecifiedPortConfig {
-                    addresses: vec!["172.30.0.1/24".parse().unwrap()],
-                    routes: vec![RouteConfig {
+                addresses: vec!["172.30.0.1/24".parse().unwrap()],
+            routes: vec![RouteConfig {
                         destination: "0.0.0.0/0".parse().unwrap(),
                         nexthop: "172.30.0.10".parse().unwrap(),
                         vlan_id: Some(1),
+                        local_pref: None,
                     }],
                     bgp_peers: switch0_port0_bgp_peers,
                     uplink_port_speed: PortSpeed::Speed400G,
                     uplink_port_fec: PortFec::Firecode,
+            lldp: switch0_port0_lldp,
                     autoneg: true,
                 },
-            },
+             },
             switch1: btreemap! {
                 // Use the same port name as in switch0 to test that it doesn't
                 // collide.
@@ -192,10 +215,12 @@ impl ExampleRackSetupData {
                         destination: "0.0.0.0/0".parse().unwrap(),
                         nexthop: "172.33.0.10".parse().unwrap(),
                         vlan_id: Some(1),
+                        local_pref: None,
                     }],
                     bgp_peers: switch1_port0_bgp_peers,
                     uplink_port_speed: PortSpeed::Speed400G,
                     uplink_port_fec: PortFec::Firecode,
+                    lldp: switch1_port0_lldp,
                     autoneg: true,
                 },
             },

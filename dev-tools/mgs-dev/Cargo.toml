@@ -14,6 +14,7 @@ futures.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true
 libc.workspace = true
+omicron-gateway.workspace = true
 omicron-workspace-hack.workspace = true
 signal-hook-tokio.workspace = true
 tokio.workspace = true

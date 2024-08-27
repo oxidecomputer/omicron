@@ -38,9 +38,7 @@ use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
-use omicron_common::api::internal::nexus::{
-    SledInstanceState, VmmRuntimeState,
-};
+use omicron_common::api::internal::nexus::{SledVmmState, VmmRuntimeState};
 use omicron_common::api::internal::shared::{
     HostPortConfig, RackNetworkConfig, ResolvedVpcFirewallRule,
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SledIdentifiers,
@@ -61,8 +59,7 @@ use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::instance::{
     InstanceExternalIpBody, InstanceHardware, InstanceMetadata,
-    InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse,
+    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
 use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
 use sled_agent_types::time_sync::TimeSync;
@@ -227,7 +224,7 @@ impl From<Error> for dropshot::HttpError {
                 }
             }
             Error::Instance(
-                e @ crate::instance_manager::Error::NoSuchInstance(_),
+                e @ crate::instance_manager::Error::NoSuchVmm(_),
             ) => HttpError::for_not_found(
                 Some(NO_SUCH_INSTANCE.to_string()),
                 e.to_string(),
@@ -966,7 +963,7 @@ impl SledAgent {
         vmm_runtime: VmmRuntimeState,
         propolis_addr: SocketAddr,
         metadata: InstanceMetadata,
-    ) -> Result<SledInstanceState, Error> {
+    ) -> Result<SledVmmState, Error> {
         self.inner
             .instances
             .ensure_registered(
@@ -990,11 +987,11 @@ impl SledAgent {
     /// rudely terminates the instance.
     pub async fn instance_ensure_unregistered(
         &self,
-        instance_id: InstanceUuid,
-    ) -> Result<InstanceUnregisterResponse, Error> {
+        propolis_id: PropolisUuid,
+    ) -> Result<VmmUnregisterResponse, Error> {
         self.inner
             .instances
-            .ensure_unregistered(instance_id)
+            .ensure_unregistered(propolis_id)
             .await
             .map_err(|e| Error::Instance(e))
     }
@@ -1003,12 +1000,12 @@ impl SledAgent {
     /// state.
     pub async fn instance_ensure_state(
         &self,
-        instance_id: InstanceUuid,
-        target: InstanceStateRequested,
-    ) -> Result<InstancePutStateResponse, Error> {
+        propolis_id: PropolisUuid,
+        target: VmmStateRequested,
+    ) -> Result<VmmPutStateResponse, Error> {
         self.inner
             .instances
-            .ensure_state(instance_id, target)
+            .ensure_state(propolis_id, target)
             .await
             .map_err(|e| Error::Instance(e))
     }
@@ -1020,12 +1017,12 @@ impl SledAgent {
     /// does not match the current ephemeral IP.
     pub async fn instance_put_external_ip(
         &self,
-        instance_id: InstanceUuid,
+        propolis_id: PropolisUuid,
         external_ip: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
         self.inner
             .instances
-            .add_external_ip(instance_id, external_ip)
+            .add_external_ip(propolis_id, external_ip)
             .await
             .map_err(|e| Error::Instance(e))
     }
@@ -1034,12 +1031,12 @@ impl SledAgent {
     /// specified external IP address in either its ephemeral or floating IP set.
     pub async fn instance_delete_external_ip(
         &self,
-        instance_id: InstanceUuid,
+        propolis_id: PropolisUuid,
         external_ip: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
         self.inner
             .instances
-            .delete_external_ip(instance_id, external_ip)
+            .delete_external_ip(propolis_id, external_ip)
             .await
             .map_err(|e| Error::Instance(e))
     }
@@ -1047,11 +1044,11 @@ impl SledAgent {
     /// Returns the state of the instance with the provided ID.
     pub async fn instance_get_state(
         &self,
-        instance_id: InstanceUuid,
-    ) -> Result<SledInstanceState, Error> {
+        propolis_id: PropolisUuid,
+    ) -> Result<SledVmmState, Error> {
         self.inner
             .instances
-            .get_instance_state(instance_id)
+            .get_instance_state(propolis_id)
             .await
             .map_err(|e| Error::Instance(e))
     }
@@ -1082,19 +1079,15 @@ impl SledAgent {
     }
 
     /// Issue a snapshot request for a Crucible disk attached to an instance
-    pub async fn instance_issue_disk_snapshot_request(
+    pub async fn vmm_issue_disk_snapshot_request(
         &self,
-        instance_id: InstanceUuid,
+        propolis_id: PropolisUuid,
         disk_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
         self.inner
             .instances
-            .instance_issue_disk_snapshot_request(
-                instance_id,
-                disk_id,
-                snapshot_id,
-            )
+            .issue_disk_snapshot_request(propolis_id, disk_id, snapshot_id)
             .await
             .map_err(Error::from)
     }
