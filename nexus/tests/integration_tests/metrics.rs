@@ -696,6 +696,13 @@ async fn test_mgs_metrics(
         // we triggered Oximeter to collect samples from MGS, it may not have
         // run a poll yet, so retry this a few times to avoid a flaky failure if
         // no simulated SPs have been polled yet.
+        //
+        // We really don't need to wait that long to know that the sensor
+        // metrics will never be present. This could probably be shorter
+        // than 30 seconds, but I want to be fairly generous to make sure
+        // there are no flaky failures even when things take way longer than
+        // expected...
+        const MAX_RETRY_DURATION: Duration = Duration::from_secs(30);
         let result = wait_for_condition(
             || async {
                 match check_inner(cptestctx, &metric_name, &query, &expected).await {
@@ -707,16 +714,14 @@ async fn test_mgs_metrics(
                 }
             },
             &Duration::from_secs(1),
-            // We really don't need to wait that long to know that the sensor
-            // metrics will never be present. This could probably be shorter
-            // than 30 seconds, but I want to be fairly generous to make sure
-            // there are no flaky failures even when things take way longer than
-            // expected...
-            &Duration::from_secs(30),
+            &MAX_RETRY_DURATION,
         )
         .await;
         if result.is_err() {
-            panic!("failed to find timeseries for {query} within 60s")
+            panic!(
+                "failed to find expected timeseries when running OxQL query \
+                 {query:?} within {MAX_RETRY_DURATION:?}"
+            )
         };
 
         // Note that *some* of these checks panic if they fail, but others call
