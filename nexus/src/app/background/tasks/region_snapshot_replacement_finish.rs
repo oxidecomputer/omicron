@@ -151,14 +151,9 @@ impl BackgroundTask for RegionSnapshotReplacementFinishDetector {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         async move {
-            let log = &opctx.log;
-            info!(&log, "region snapshot replacement finish task started",);
-
             let mut status = RegionSnapshotReplacementFinishStatus::default();
 
             self.transition_requests_to_done(opctx, &mut status).await;
-
-            info!(&log, "region snapshot replacement finish task done");
 
             json!(status)
         }
