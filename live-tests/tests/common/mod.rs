@@ -19,6 +19,7 @@ use std::ffi::OsStr;
 use std::net::SocketAddrV6;
 use std::path::Component;
 use std::sync::Arc;
+use futures::future::BoxFuture;
 
 /// Contains data and interfaces useful for running tests against an existing
 /// deployed control plane
@@ -30,7 +31,26 @@ pub struct LiveTestContext {
 }
 
 impl LiveTestContext {
+    /// Run a test called `test_name` in the context of a `LiveTestContext`
+    ///
+    /// The `LiveTestContext` will be cleaned up on _successful_ completion of
+    /// the test function.  On failure, debugging information is deliberately
+    /// left around.
+    pub async fn run_test(
+        test_name: &'static str,
+        doit: &dyn Fn(
+            &LiveTestContext,
+        ) -> BoxFuture<'static, Result<(), anyhow::Error>>,
+    ) -> Result<(), anyhow::Error> {
+        let lc = LiveTestContext::new(test_name).await?;
+        doit(&lc).await?;
+        lc.cleanup_successful();
+        Ok(())
+    }
+
     /// Make a new `LiveTestContext` for a test called `test_name`.
+    ///
+    /// See `LiveTestContext::run_test()` instead.
     pub async fn new(
         test_name: &'static str,
     ) -> Result<LiveTestContext, anyhow::Error> {

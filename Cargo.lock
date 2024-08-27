@@ -4597,15 +4597,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "01cda141df6706de531b6c46c3a33ecca755538219bd484262fa09410c13539c"
 
 [[package]]
-name = "live-tests-macros"
-version = "0.1.0"
-dependencies = [
- "omicron-workspace-hack",
- "quote",
- "syn 2.0.74",
-]
-
-[[package]]
 name = "lock_api"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6083,7 +6074,6 @@ dependencies = [
  "dropshot 0.10.2-dev",
  "futures",
  "internal-dns",
- "live-tests-macros",
  "nexus-client",
  "nexus-config",
  "nexus-db-model",
