@@ -140,10 +140,12 @@ impl CurrentRssConfig {
                 })
             })
             .collect();
+        println!("inventory: {:?}", self.inventory);
 
         // If the user has already uploaded a config specifying bootstrap_sleds,
         // also update our knowledge of those sleds' bootstrap addresses.
         let our_bootstrap_sleds = mem::take(&mut self.bootstrap_sleds);
+        println!("our_bootstrap_sleds: {:?}", our_bootstrap_sleds);
         self.bootstrap_sleds = our_bootstrap_sleds
             .into_iter()
             .map(|mut sled_desc| {
@@ -152,6 +154,7 @@ impl CurrentRssConfig {
                 sled_desc
             })
             .collect();
+        println!("self.bootstrap_sleds: {:?}", self.bootstrap_sleds);
     }
 
     pub(crate) fn start_rss_request(
