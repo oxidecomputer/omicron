@@ -1698,6 +1698,8 @@ mod illumos_tests {
     use chrono::TimeZone;
     use chrono::Timelike;
     use chrono::Utc;
+    use omicron_common::api::external::ByteCount;
+    use once_cell::sync::Lazy;
     use rand::RngCore;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use slog::Drain;
@@ -1884,7 +1886,9 @@ mod illumos_tests {
     // i.e., the "ashift" value.  An empty dataset is unlikely to contain more
     // than one megabyte of overhead, so use that as a conservative test size to
     // avoid issues.
-    const TEST_QUOTA: usize = sled_storage::dataset::DEBUG_DATASET_QUOTA;
+    static TEST_QUOTA: Lazy<ByteCount> = Lazy::new(|| {
+        sled_storage::dataset::DEBUG_DATASET_QUOTA.try_into().unwrap()
+    });
 
     async fn run_test_with_zfs_dataset<T, Fut>(test: T)
     where
@@ -1932,18 +1936,17 @@ mod illumos_tests {
         // If this needs to change, go modify the "add_vdevs" call in
         // "setup_storage".
         assert!(
-            TEST_QUOTA
+            *TEST_QUOTA
                 < StorageManagerTestHarness::DEFAULT_VDEV_SIZE
                     .try_into()
                     .unwrap(),
-            "Quota larger than underlying device (quota: {}, device size: {})",
+            "Quota larger than underlying device (quota: {:?}, device size: {})",
             TEST_QUOTA,
             StorageManagerTestHarness::DEFAULT_VDEV_SIZE,
         );
 
         anyhow::ensure!(
-            bundle_utilization.dataset_quota
-                == u64::try_from(TEST_QUOTA).unwrap(),
+            bundle_utilization.dataset_quota == TEST_QUOTA.to_bytes(),
             "computed incorrect dataset quota"
         );
 
