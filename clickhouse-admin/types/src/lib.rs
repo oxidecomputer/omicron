@@ -16,7 +16,7 @@ use config::*;
 
 pub const OXIMETER_CLUSTER: &str = "oximeter_cluster";
 
-/// A unique ID for a clickhouse keeper
+/// A unique ID for a ClickHouse Keeper
 #[derive(
     Debug,
     Clone,
@@ -35,7 +35,7 @@ pub const OXIMETER_CLUSTER: &str = "oximeter_cluster";
 )]
 pub struct KeeperId(pub u64);
 
-/// A unique ID for a clickhouse server
+/// A unique ID for a Clickhouse Server
 #[derive(
     Debug,
     Clone,
@@ -65,7 +65,6 @@ pub struct ClickhouseServerConfig {
 }
 
 impl ClickhouseServerConfig {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config_dir: Utf8PathBuf,
         id: ServerId,
@@ -77,6 +76,7 @@ impl ClickhouseServerConfig {
         Self { config_dir, id, datastore_path, listen_addr, keepers, servers }
     }
 
+    /// Generate a configuration file for a replica server node
     pub fn generate_xml_file(&self) -> Result<()> {
         let logger =
             LogConfig::new(self.datastore_path.clone(), NodeType::Server);
@@ -101,30 +101,39 @@ impl ClickhouseServerConfig {
 #[derive(Debug, Clone)]
 pub struct ClickhouseKeeperConfig {
     pub config_dir: Utf8PathBuf,
+    pub id: KeeperId,
     pub raft_servers: Vec<RaftServerConfig>,
-    pub path: Utf8PathBuf,
+    pub datastore_path: Utf8PathBuf,
     pub listen_addr: Ipv6Addr,
 }
 
 impl ClickhouseKeeperConfig {
     pub fn new(
         config_dir: Utf8PathBuf,
+        id: KeeperId,
         raft_servers: Vec<RaftServerConfig>,
-        path: Utf8PathBuf,
+        datastore_path: Utf8PathBuf,
         listen_addr: Ipv6Addr,
     ) -> Self {
-        ClickhouseKeeperConfig { config_dir, raft_servers, path, listen_addr }
+        ClickhouseKeeperConfig {
+            config_dir,
+            id,
+            raft_servers,
+            datastore_path,
+            listen_addr,
+        }
     }
 
-    /// Generate a configuration file for `this_keeper` consisting of the keepers in `raft_servers`
-    pub fn generate_xml_file(&self, this_keeper: KeeperId) -> Result<()> {
-        let logger = LogConfig::new(self.path.clone(), NodeType::Keeper);
+    /// Generate a configuration file for a keeper node
+    pub fn generate_xml_file(&self) -> Result<()> {
+        let logger =
+            LogConfig::new(self.datastore_path.clone(), NodeType::Keeper);
         let raft_config = RaftServers::new(self.raft_servers.clone());
         let config = KeeperConfig::new(
             logger,
             self.listen_addr,
-            this_keeper,
-            self.path.clone(),
+            self.id,
+            self.datastore_path.clone(),
             raft_config,
         );
 
@@ -164,12 +173,13 @@ mod tests {
 
         let config = ClickhouseKeeperConfig::new(
             Utf8PathBuf::from(config_dir.path()),
+            KeeperId(1),
             keepers,
             Utf8PathBuf::from_str("./").unwrap(),
             Ipv6Addr::from_str("ff::08").unwrap(),
         );
 
-        config.generate_xml_file(KeeperId(1)).unwrap();
+        config.generate_xml_file().unwrap();
 
         let expected_file = Utf8PathBuf::from_str("./testutils")
             .unwrap()

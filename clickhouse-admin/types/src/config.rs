@@ -29,7 +29,7 @@ fn path_schema(gen: &mut SchemaGenerator) -> Schema {
     schema.into()
 }
 
-/// Config for an individual Clickhouse Replica
+/// Configuration for a ClickHouse replica server
 #[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
 pub struct ReplicaConfig {
     pub logger: LogConfig,
@@ -45,6 +45,7 @@ pub struct ReplicaConfig {
 }
 
 impl ReplicaConfig {
+    /// A new ClickHouse replica server configuration with default ports and directories
     pub fn new(
         logger: LogConfig,
         macros: Macros,
@@ -166,6 +167,7 @@ pub struct Macros {
 }
 
 impl Macros {
+    /// A new macros configuration block with default cluster
     pub fn new(replica: ServerId) -> Self {
         Self { shard: 1, replica, cluster: OXIMETER_CLUSTER.to_string() }
     }
@@ -191,6 +193,7 @@ pub struct RemoteServers {
 }
 
 impl RemoteServers {
+    /// A new remote_servers configuration block with default cluster
     pub fn new(replicas: Vec<ServerNodeConfig>) -> Self {
         Self {
             cluster: OXIMETER_CLUSTER.to_string(),
@@ -270,9 +273,10 @@ pub struct KeeperNodeConfig {
 }
 
 impl KeeperNodeConfig {
+    /// A new ClickHouse keeper node configuration with default port
     pub fn new(host: String) -> Self {
         let port = CLICKHOUSE_KEEPER_TCP_PORT;
-        KeeperNodeConfig { host, port }
+        Self { host, port }
     }
 }
 
@@ -283,9 +287,10 @@ pub struct ServerNodeConfig {
 }
 
 impl ServerNodeConfig {
+    /// A new ClickHouse replica node configuration with default port
     pub fn new(host: String) -> Self {
         let port = CLICKHOUSE_TCP_PORT;
-        ServerNodeConfig { host, port }
+        Self { host, port }
     }
 }
 
@@ -306,6 +311,7 @@ pub struct LogConfig {
 }
 
 impl LogConfig {
+    /// A new logger configuration with default directories
     pub fn new(path: Utf8PathBuf, node_type: NodeType) -> Self {
         let prefix = match node_type {
             NodeType::Server => "clickhouse",
@@ -316,13 +322,7 @@ impl LogConfig {
         let log = logs.join(format!("{prefix}.log"));
         let errorlog = logs.join(format!("{prefix}.err.log"));
 
-        LogConfig {
-            level: LogLevel::default(),
-            log,
-            errorlog,
-            size: 100,
-            count: 1,
-        }
+        Self { level: LogLevel::default(), log, errorlog, size: 100, count: 1 }
     }
 
     pub fn to_xml(&self) -> String {
@@ -395,11 +395,11 @@ pub struct RaftServerConfig {
 
 impl RaftServerConfig {
     pub fn new(id: KeeperId, hostname: String) -> Self {
-        RaftServerConfig { id, hostname, port: CLICKHOUSE_KEEPER_RAFT_PORT }
+        Self { id, hostname, port: CLICKHOUSE_KEEPER_RAFT_PORT }
     }
 }
 
-/// Config for an individual Clickhouse Keeper
+/// Configuration for a ClickHouse keeper
 #[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
 pub struct KeeperConfig {
     pub logger: LogConfig,
@@ -415,6 +415,7 @@ pub struct KeeperConfig {
 }
 
 impl KeeperConfig {
+    /// A new ClickHouse keeper node configuration with default ports and directories
     pub fn new(
         logger: LogConfig,
         listen_host: Ipv6Addr,
