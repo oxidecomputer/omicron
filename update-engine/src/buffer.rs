@@ -17,6 +17,7 @@ use indexmap::IndexMap;
 use petgraph::{prelude::*, visit::Walker};
 
 use crate::{
+    display::AbortMessageDisplay,
     events::{
         Event, EventReport, ProgressEvent, ProgressEventKind, StepEvent,
         StepEventKind, StepEventPriority, StepInfo, StepOutcome,
@@ -1271,6 +1272,32 @@ impl<S: StepSpec> StepStatus<S> {
         matches!(self, Self::Running { .. })
     }
 
+    /// For failed steps, return the failure reason, otherwise None.
+    pub fn failure_reason(&self) -> Option<&FailureReason> {
+        match self {
+            Self::Failed { reason, .. } => Some(reason),
+            _ => None,
+        }
+    }
+
+    /// For aborted steps, return the abort reason, otherwise None.
+    pub fn abort_reason(&self) -> Option<&AbortReason> {
+        // TODO: probably want to move last_progress into the `AbortReason`
+        // enum so that we can return it in a reasonable manner here.
+        match self {
+            Self::Aborted { reason, .. } => Some(reason),
+            _ => None,
+        }
+    }
+
+    /// For will-not-be-run steps, return the reason, otherwise None.
+    pub fn will_not_be_run_reason(&self) -> Option<&WillNotBeRunReason> {
+        match self {
+            Self::WillNotBeRun { reason } => Some(reason),
+            _ => None,
+        }
+    }
+
     /// Returns low-priority events for this step, if any.
     ///
     /// Events are sorted by event index.
@@ -1405,6 +1432,16 @@ impl AbortReason {
             Self::StepAborted(info) => Some(info),
             Self::ParentAborted { .. } => None,
         }
+    }
+
+    /// Returns a displayer for the message.
+    ///
+    /// The buffer is used to resolve step keys to step names.
+    pub fn message_display<'a, S: StepSpec>(
+        &'a self,
+        buffer: &'a EventBuffer<S>,
+    ) -> AbortMessageDisplay<'a, S> {
+        AbortMessageDisplay::new(self, buffer)
     }
 }
 

@@ -6206,6 +6206,7 @@ dependencies = [
  "textwrap",
  "tokio",
  "unicode-width",
+ "update-engine",
  "url",
  "uuid",
 ]

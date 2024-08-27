@@ -146,6 +146,8 @@ pub type NestedSpec = GenericSpec<NestedError>;
 /// set of nested errors.
 #[derive(Clone, Debug)]
 pub struct NestedError {
+    // TODO: in reality is this used more as a "serializable error" -- we
+    // should rename this.
     message: String,
     source: Option<Box<NestedError>>,
 }
@@ -178,6 +180,11 @@ impl NestedError {
     pub fn message(&self) -> &str {
         &self.message
     }
+
+    /// Returns the causes of this error as an iterator.
+    pub fn sources(&self) -> NestedErrorSources<'_> {
+        NestedErrorSources { current: self.source.as_deref() }
+    }
 }
 
 impl fmt::Display for NestedError {
@@ -189,6 +196,22 @@ impl fmt::Display for NestedError {
 impl std::error::Error for NestedError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         self.source.as_ref().map(|s| s as &(dyn std::error::Error + 'static))
+    }
+}
+
+/// The sources of a nested error as an iterator.
+#[derive(Debug)]
+pub struct NestedErrorSources<'a> {
+    current: Option<&'a NestedError>,
+}
+
+impl<'a> Iterator for NestedErrorSources<'a> {
+    type Item = &'a NestedError;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let current = self.current?;
+        self.current = current.source.as_deref();
+        Some(current)
     }
 }
 

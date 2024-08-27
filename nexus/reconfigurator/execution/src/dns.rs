@@ -1665,7 +1665,11 @@ mod test {
 
         // If we execute it again, we should see no more changes.
         _ = realize_blueprint_and_expect(
-            &opctx, datastore, resolver, &blueprint, &overrides,
+            &opctx,
+            datastore,
+            resolver,
+            &blueprint2,
+            &overrides,
         )
         .await;
         verify_dns_unchanged(

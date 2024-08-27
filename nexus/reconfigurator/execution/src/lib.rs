@@ -255,12 +255,7 @@ fn register_zone_external_networking_step<'a>(
                         &opctx, blueprint,
                     )
                     .await
-                    .map_err(|err| {
-                        // TODO: this is really a list of errors, and the
-                        // update-engine should grow the ability to represent
-                        // that.
-                        anyhow!(err)
-                    })?;
+                    .map_err(|err| anyhow!(err))?;
 
                 StepSuccess::new(()).into()
             },
@@ -608,8 +603,8 @@ fn register_cockroachdb_settings_step<'a>(
         .register()
 }
 
-fn register_finalize_step<'a>(
-    registrar: &ComponentRegistrar<'_, 'a>,
+fn register_finalize_step(
+    registrar: &ComponentRegistrar<'_, '_>,
     reassign_saga_output: StepHandle<ReassignSagaOutput>,
     register_cockroach_output: StepHandle<Option<anyhow::Error>>,
 ) -> StepHandle<RealizeBlueprintOutput> {
