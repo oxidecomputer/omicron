@@ -1106,9 +1106,10 @@ async fn test_instance_migrate_v2p_and_routes(
 }
 
 // Verifies that if a request to reboot or stop an instance fails because of a
-// 500-level error from sled agent, then the instance moves to the Failed state.
+// 404 error from sled agent, then the instance moves to the Failed state, and
+// can be restarted once it has transitioned to that state..
 #[nexus_test]
-async fn test_instance_failed_after_sled_agent_error(
+async fn test_instance_fails_after_sled_agent_forgets_vmm_and_can_be_restarted(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -1125,67 +1126,104 @@ async fn test_instance_failed_after_sled_agent_error(
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
+    // Forcibly unregister the instance from the sled-agent without tellingthe
+    // Nexus. It will now behave as though it has forgotten the instance and
+    // return a 404 error with the "NO_SUCH_INSTANCE" error code
+    let vmm_id = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance must be on a sled")
+        .propolis_id;
     let sled_agent = &cptestctx.sled_agent.sled_agent;
     sled_agent
-        .set_instance_ensure_state_error(Some(
-            omicron_common::api::external::Error::internal_error(
-                "injected by test_instance_failed_after_sled_agent_error",
-            ),
-        ))
-        .await;
+        .instance_unregister(vmm_id)
+        .await
+        .expect("instance_unregister must succeed");
 
     let url = get_instance_url(format!("{}/reboot", instance_name).as_str());
-    NexusRequest::new(
+    let err = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
             .body(None as Option<&serde_json::Value>),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .unwrap()
-    .parsed_body::<Instance>()
-    .expect_err("expected injected failure");
+    .unwrap();
+    eprintln!("error = {err:#?}");
 
-    let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, InstanceState::Failed);
+    // Wait for the instance to transition to Failed.
+    instance_wait_for_state(client, instance_id, InstanceState::Failed).await;
 
-    NexusRequest::object_delete(client, &get_instance_url(instance_name))
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap();
+    // Now, the instance should be restartable.
+    expect_instance_start_ok(client, instance_name).await;
+}
 
-    sled_agent.set_instance_ensure_state_error(None).await;
+// Verifies that if a request to reboot or stop an instance fails because of a
+// 404 error from sled agent, then the instance moves to the Failed state, and
+// can be deleted once it has transitioned to that state..
+#[nexus_test]
+async fn test_instance_fails_after_sled_agent_forgets_vmm_and_can_be_deleted(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let instance_name = "losing-is-fun";
 
+    // Create and start the test instance.
+    create_project_and_pool(&client).await;
+    let instance_url = get_instance_url(instance_name);
     let instance = create_instance(client, PROJECT_NAME, instance_name).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     instance_simulate(nexus, &instance_id).await;
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
+    // Forcibly unregister the instance from the sled-agent without tellingthe
+    // Nexus. It will now behave as though it has forgotten the instance and
+    // return a 404 error with the "NO_SUCH_INSTANCE" error code
+    let vmm_id = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance must be on a sled")
+        .propolis_id;
+    let sled_agent = &cptestctx.sled_agent.sled_agent;
     sled_agent
-        .set_instance_ensure_state_error(Some(
-            omicron_common::api::external::Error::internal_error(
-                "injected by test_instance_failed_after_sled_agent_error",
-            ),
-        ))
-        .await;
+        .instance_unregister(vmm_id)
+        .await
+        .expect("instance_unregister must succeed");
 
-    let url = get_instance_url(format!("{}/stop", instance_name).as_str());
-    NexusRequest::new(
+    let url = get_instance_url(format!("{}/reboot", instance_name).as_str());
+    let err = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
             .body(None as Option<&serde_json::Value>),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .unwrap()
-    .parsed_body::<Instance>()
-    .expect_err("expected injected failure");
+    .unwrap();
+    eprintln!("error = {err:#?}");
 
-    let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, InstanceState::Failed);
+    // Wait for the instance to transition to Failed.
+    instance_wait_for_state(client, instance_id, InstanceState::Failed).await;
+
+    // Now, the instance should be deleteable.
+    NexusRequest::object_delete(&client, &instance_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
 }
+
+// TODO(eliza): add tests for failed instances in the following situations:
+// - Failed instance detected by instance-watcher task, can be restarted
+// - Failed instance detected by instance-watcher task, can be deleted
+// - Sled-agent errors that are not "no such instance" do NOT go to failed on
+//   API calls
+// - Sled-agent errors that are not "no such instance" do NOT go to failed when
+//   observed by the instance-watcher task.
 
 /// Assert values for fleet, silo, and project using both system and silo
 /// metrics endpoints
