@@ -7,7 +7,6 @@ use db::model::{AddressLot, AddressLotBlock};
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::datastore::AddressLotCreateResult;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -45,9 +44,8 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         params: params::AddressLotCreate,
-    ) -> CreateResult<AddressLotCreateResult> {
+    ) -> CreateResult<AddressLot> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
-        validate_blocks(&params)?;
         self.db_datastore.address_lot_create(opctx, &params).await
     }
 
@@ -70,6 +68,32 @@ impl super::Nexus {
         self.db_datastore.address_lot_list(opctx, pagparams).await
     }
 
+    pub(crate) async fn address_lot_block_create(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        address_lot_id: Uuid,
+        block: params::AddressLotBlockAddRemove,
+    ) -> CreateResult<AddressLotBlock> {
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        validate_block(&block)?;
+        self.db_datastore
+            .address_lot_block_create(opctx, address_lot_id, block)
+            .await
+    }
+
+    pub(crate) async fn address_lot_block_delete(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        address_lot_id: Uuid,
+        block: params::AddressLotBlockAddRemove,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
+        validate_block(&block)?;
+        self.db_datastore
+            .address_lot_block_delete(opctx, address_lot_id, block)
+            .await
+    }
+
     pub(crate) async fn address_lot_block_list(
         self: &Arc<Self>,
         opctx: &OpContext,
@@ -84,20 +108,20 @@ impl super::Nexus {
     }
 }
 
-fn validate_blocks(lot: &params::AddressLotCreate) -> Result<(), Error> {
-    for b in &lot.blocks {
-        match (&b.first_address, &b.last_address) {
-            (IpAddr::V4(first), IpAddr::V4(last)) => {
-                validate_v4_block(first, last)?
-            }
-            (IpAddr::V6(first), IpAddr::V6(last)) => {
-                validate_v6_block(first, last)?
-            }
-            _ => {
-                return Err(Error::invalid_request(
-                    "Block bounds must be in same address family",
-                ));
-            }
+fn validate_block(
+    block: &params::AddressLotBlockAddRemove,
+) -> Result<(), Error> {
+    match (&block.first_address, &block.last_address) {
+        (IpAddr::V4(first), IpAddr::V4(last)) => {
+            validate_v4_block(first, last)?
+        }
+        (IpAddr::V6(first), IpAddr::V6(last)) => {
+            validate_v6_block(first, last)?
+        }
+        _ => {
+            return Err(Error::invalid_request(
+                "Block bounds must be in same address family",
+            ));
         }
     }
     Ok(())

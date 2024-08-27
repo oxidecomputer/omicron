@@ -1381,14 +1381,12 @@ pub struct AddressLotCreate {
     pub identity: IdentityMetadataCreateParams,
     /// The kind of address lot to create.
     pub kind: AddressLotKind,
-    /// The blocks to add along with the new address lot.
-    pub blocks: Vec<AddressLotBlockCreate>,
 }
 
-/// Parameters for creating an address lot block. Fist and last addresses are
-/// inclusive.
+/// Parameters for adding or removing an address lot block.
+/// First and last addresses are inclusive.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct AddressLotBlockCreate {
+pub struct AddressLotBlockAddRemove {
     /// The first address in the lot (inclusive).
     pub first_address: IpAddr,
     /// The last address in the lot (inclusive).

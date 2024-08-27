@@ -108,7 +108,6 @@ mod volume_repair;
 mod vpc;
 mod zpool;
 
-pub use address_lot::AddressLotCreateResult;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
 pub use instance::{InstanceAndActiveVmm, InstanceGestalt};

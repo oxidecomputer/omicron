@@ -258,7 +258,10 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_address_lot_list)?;
         api.register(networking_address_lot_create)?;
         api.register(networking_address_lot_delete)?;
+
         api.register(networking_address_lot_block_list)?;
+        api.register(networking_address_lot_block_add)?;
+        api.register(networking_address_lot_block_remove)?;
 
         api.register(networking_loopback_address_create)?;
         api.register(networking_loopback_address_delete)?;
@@ -3374,11 +3377,9 @@ async fn networking_address_lot_create(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let result = nexus.address_lot_create(&opctx, params).await?;
 
-        let lot: AddressLot = result.lot.into();
-        let blocks: Vec<AddressLotBlock> =
-            result.blocks.iter().map(|b| b.clone().into()).collect();
+        let lot: AddressLot = result.into();
 
-        Ok(HttpResponseCreated(AddressLotCreateResponse { lot, blocks }))
+        Ok(HttpResponseCreated(AddressLotCreateResponse { lot }))
     };
     apictx
         .context
@@ -3444,6 +3445,84 @@ async fn networking_address_lot_list(
             lots,
             &marker_for_name_or_id,
         )?))
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+/// Add block to address lot
+#[endpoint {
+    method = POST,
+    path = "/v1/system/networking/address-lot/{address_lot}/blocks/add",
+    tags = ["system/networking"],
+}]
+async fn networking_address_lot_block_add(
+    rqctx: RequestContext<ApiContext>,
+    path_params: Path<params::AddressLotPath>,
+    block: TypedBody<params::AddressLotBlockAddRemove>,
+) -> Result<HttpResponseCreated<AddressLotBlock>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let path = path_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let address_lot_lookup =
+            nexus.address_lot_lookup(&opctx, path.address_lot)?;
+
+        let (.., authz_address_lot) =
+            address_lot_lookup.lookup_for(authz::Action::CreateChild).await?;
+
+        let result = nexus
+            .address_lot_block_create(
+                &opctx,
+                authz_address_lot.id(),
+                block.into_inner(),
+            )
+            .await?;
+
+        Ok(HttpResponseCreated(result.into()))
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+/// Remove block from address lot
+#[endpoint {
+    method = POST,
+    path = "/v1/system/networking/address-lot/{address_lot}/blocks/remove",
+    tags = ["system/networking"],
+}]
+async fn networking_address_lot_block_remove(
+    rqctx: RequestContext<ApiContext>,
+    path_params: Path<params::AddressLotPath>,
+    block: TypedBody<params::AddressLotBlockAddRemove>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let path = path_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let address_lot_lookup =
+            nexus.address_lot_lookup(&opctx, path.address_lot)?;
+
+        let (.., authz_address_lot) =
+            address_lot_lookup.lookup_for(authz::Action::CreateChild).await?;
+
+        nexus
+            .address_lot_block_delete(
+                &opctx,
+                authz_address_lot.id(),
+                block.into_inner(),
+            )
+            .await?;
+
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx
         .context
