@@ -90,13 +90,16 @@ pub struct Args {
     #[clap(long, default_value = "/var/tmp")]
     vdev_dir: Utf8PathBuf,
 
+    /// Allow customization of the vdev size
+    #[clap(long, default_value_t = 20 * GB)]
+    vdev_size: u64,
+
     #[command(subcommand)]
     command: Commands,
 }
 
 static NO_INSTALL_MARKER: &'static str = "/etc/opt/oxide/NO_INSTALL";
 const GB: u64 = 1 << 30;
-const VDEV_SIZE: u64 = 20 * GB;
 
 const ARP: &'static str = "/usr/sbin/arp";
 const DLADM: &'static str = "/usr/sbin/dladm";
@@ -172,7 +175,7 @@ pub fn run_cmd(args: Args) -> Result<()> {
 
             println!("creating virtual hardware");
             if matches!(args.scope, Scope::All | Scope::Disks) {
-                ensure_vdevs(&sled_agent_config, &args.vdev_dir)?;
+                ensure_vdevs(&sled_agent_config, &args.vdev_dir, args.vdev_size)?;
             }
             if matches!(args.scope, Scope::All | Scope::Network)
                 && softnpu_mode == "zone"
@@ -503,6 +506,7 @@ impl SledAgentConfig {
 fn ensure_vdevs(
     sled_agent_config: &Utf8Path,
     vdev_dir: &Utf8Path,
+    vdev_size: u64,
 ) -> Result<()> {
     let config = SledAgentConfig::read(sled_agent_config)?;
 
@@ -522,7 +526,7 @@ fn ensure_vdevs(
         } else {
             println!("creating {vdev_path}");
             let file = std::fs::File::create(&vdev_path)?;
-            file.set_len(VDEV_SIZE)?;
+            file.set_len(vdev_size)?;
         }
     }
     Ok(())
